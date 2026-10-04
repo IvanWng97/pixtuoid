@@ -628,7 +628,7 @@ fn entry_walk_does_not_carry_coffee() {
 }
 
 /// `derive_state_only` must NOT emit the door→desk entry Walking pose `derive`
-/// would return here — that would double-walk an agent whose routed motion
+/// would return here — that would double-walk an agent whose routed walk
 /// layer is already driving its own entry walk.
 #[test]
 fn derive_state_only_skips_entry_override() {

@@ -337,8 +337,8 @@ const MEETING_WARMUP_LEAD_MS: u64 = 1_500;
 
 /// Build a scene where `n` agents (desks 0..n) are staged to converge on ONE
 /// meeting room: each `state_started_at` is back-dated by
-/// `cycle_n * est_wander_cycle_ms + ε` so motion's bootstrap fast-forward
-/// selects a cycle landing on a DISTINCT slot of the same room. Motion restarts
+/// `cycle_n * est_wander_cycle_ms + ε` so `advance_wander`'s bootstrap fast-forward
+/// selects a cycle landing on a DISTINCT slot of the same room. It restarts
 /// the phase clock on first observation (anti-teleport), so every staged agent
 /// still sits out its full `seated_dwell_ms`; the returned warmup pre-rolls the
 /// capture to just before the first rise.
@@ -367,7 +367,7 @@ pub(crate) fn meeting_scene(
     // Candidate sweep over deterministic synthetic ids: the LOWEST cycle ≥1 whose
     // trip lands on a meeting slot. Cycle 0's 400ms back-date sits inside
     // ENTRY_ANIMATION_MS, where the door entry-walk override would hijack the
-    // staging. Reachability rides motion's approach_point fallback — a boxed-in
+    // staging. Reachability rides approach_point's fallback — a boxed-in
     // seat degrades to an aimless amble, caught by the visual check at `just gen`.
     let south_y_of_room = |room: usize| -> Option<u16> {
         l.waypoints
@@ -835,7 +835,7 @@ mod tests {
                 .duration_since(slot.state_started_at)
                 .unwrap()
                 .as_millis() as u64;
-            // Mirror motion's bootstrap fast-forward exactly.
+            // Mirror `advance_wander`'s bootstrap fast-forward exactly.
             let cycle_n = elapsed_ms / est_wander_cycle_ms(id);
             assert!(cycle_n >= 1, "cycle 0 back-dates under the thinking window");
             assert!(takes_trip(id, cycle_n), "staged cycle must be a trip");

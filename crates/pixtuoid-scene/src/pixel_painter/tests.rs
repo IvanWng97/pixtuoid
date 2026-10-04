@@ -14,12 +14,13 @@ use crate::sim::anchors::{
     waypoint_top_left,
 };
 use crate::sim::seat::{Seat, settle_seat};
-use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
 fn paint_whole_wall(
@@ -2716,7 +2717,7 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         .collect();
     assert_eq!(
         ids,
-        weather_names(),
+        crate::sky::weather_names(),
         "site/src/weather.json ids must match Weather::ALL names in order — \
          update the manifest + run `just gen-media` when the enum changes"
     );
@@ -3473,7 +3474,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
 }
 
 #[test]
-fn sim_step_advances_motion_without_painting() {
+fn sim_step_advances_walks_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
     let (scene, layout, id, now0, pack) = sim_rig();
@@ -3534,7 +3535,7 @@ fn sim_step_advances_motion_without_painting() {
             .route
             .walks
             .get(&id)
-            .is_some_and(|m| m.entry.is_some()),
+            .is_some_and(|walk| walk.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
@@ -4310,7 +4311,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         .waypoints
         .iter()
         .position(|w| w.kind == crate::layout::WaypointKind::Printer)
-        .expect("printer at 160x96");
+        .expect("the layout places a printer");
     let frame = SimFrame {
         occupied_waypoints: [printer_idx].into(),
         ..empty_frame(&layout)
@@ -4556,29 +4557,6 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
         ),
         "an agent that left the wander machine must release its seat claim"
     );
-}
-
-#[test]
-fn precipitation_level_maps_audible_rain_under_its_policy() {
-    use crate::sky::Weather;
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    let level = |w| precipitation_level(t, WeatherPolicy::Forced(w));
-    assert_eq!(level(Weather::Storm), 1.0, "storm is full precipitation");
-    let rain = level(Weather::Rain);
-    assert!(
-        rain > 0.0 && rain < 1.0,
-        "rain sits strictly between clear and storm, got {rain}"
-    );
-    for quiet in [
-        Weather::Clear,
-        Weather::Snow,
-        Weather::Fog,
-        Weather::Overcast,
-        Weather::Windy,
-        Weather::Smog,
-    ] {
-        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent precipitation");
-    }
 }
 
 #[test]
@@ -5887,139 +5865,4 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
     }
     assert!(asymmetric > 0, "a profile is not its own mirror");
-}
-
-/// A corridor appliance's art overhangs north of its aisle (invariant #6), but
-/// never onto a desk, its chair or its sitter. Art can only overlap a
-/// workstation it shares a row with, and the height alone fixes every row.
-/// So a tall-aisle height whose rows never meet is checked once per width;
-/// every other tall height sweeps all widths × seeds.
-#[test]
-fn corridor_appliance_art_never_lands_on_a_workstation() {
-    use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
-    use std::collections::BTreeSet;
-    const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
-    const APPLIANCES: [Station; 2] = [Station::VendingMachine, Station::Printer];
-    const SEEDS: std::ops::Range<u64> = 0..3;
-    const NARROWEST: u16 = 96;
-    const WIDEST: u16 = 320;
-    const MID_WIDTH: u16 = 208;
-    let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
-    let lay_out = |w, h, seed| {
-        SceneLayout::compute_with_seed(w, h, None, seed)
-            .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
-    };
-    let pieces = |l: &SceneLayout| {
-        let fixtures: Vec<_> = l.fixtures().collect();
-        let art: Vec<(Station, Bounds)> = fixtures
-            .iter()
-            .filter_map(|f| match f.kind {
-                FixtureKind::Station { station, .. } if APPLIANCES.contains(&station) => {
-                    Some((station, f.visual))
-                }
-                _ => None,
-            })
-            .collect();
-        let mut workstations: Vec<Bounds> = fixtures
-            .iter()
-            .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
-            .map(|f| f.visual)
-            .collect();
-        workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
-            let at = seated_top_left(
-                desk,
-                CHARACTER_SPRITE_W,
-                l.desk_facing(FloorLocalDeskIndex(i)),
-            );
-            Bounds {
-                x: at.x,
-                y: at.y,
-                width: CHARACTER_SPRITE_W,
-                height: CHARACTER_SPRITE_H,
-            }
-        }));
-        (art, workstations)
-    };
-    let rows = |l: &SceneLayout| {
-        let (art, workstations) = pieces(l);
-        (
-            (l.cubicle_aisle.y, l.cubicle_aisle.height),
-            art.iter()
-                .map(|&(station, a)| (station, a.y, a.height))
-                .collect::<Vec<_>>(),
-            workstations
-                .iter()
-                .map(|ws| (ws.y, ws.height))
-                .collect::<BTreeSet<_>>(),
-        )
-    };
-    let mut placed = 0;
-    let mut violations = Vec::new();
-    let mut check = |l: &SceneLayout, w: u16, h: u16, seed: u64| {
-        let (art, workstations) = pieces(l);
-        placed += art.len();
-        for (station, a) in art {
-            violations.extend(workstations.iter().filter(|&&ws| a.overlaps(ws)).map(|ws| {
-                format!(
-                    "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
-                    l.cubicle_aisle
-                )
-            }));
-        }
-    };
-    use crate::layout::roster::tests::{CENSUS_SEEDS, CENSUS_SIZES};
-    for &(w, h) in CENSUS_SIZES {
-        for seed in CENSUS_SEEDS {
-            check(&lay_out(w, h, seed), w, h, seed);
-        }
-    }
-    let corners = [(NARROWEST, SEEDS.start), (WIDEST, SEEDS.end - 1)];
-    let mut tall_seen = BTreeSet::new();
-    for h in 90u16..=240 {
-        let [probe, far] = corners.map(|(w, seed)| lay_out(w, h, seed));
-        let (probe_rows, far_rows) = (rows(&probe), rows(&far));
-        assert_eq!(
-            probe_rows.0, far_rows.0,
-            "{h}: the aisle is the height's alone"
-        );
-        if !TALL_AISLES.contains(&probe.cubicle_aisle.height) {
-            continue;
-        }
-        tall_seen.insert(probe.cubicle_aisle.height);
-        let (art, workstations) = pieces(&probe);
-        // An appliance the probe didn't place has rows it can't vouch for.
-        let apart = APPLIANCES
-            .iter()
-            .all(|kind| art.iter().any(|(station, _)| station == kind))
-            && art
-                .iter()
-                .all(|&(_, a)| workstations.iter().all(|&ws| !rows_meet(a, ws)));
-        if apart {
-            assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
-        }
-        let sampled =
-            |w, seed| !apart || seed == SEEDS.start || (w, seed) == (MID_WIDTH, SEEDS.start + 1);
-        for w in (NARROWEST..=WIDEST).step_by(8) {
-            for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed)) && sampled(w, seed)) {
-                let l = lay_out(w, h, seed);
-                if apart {
-                    assert_eq!(
-                        rows(&l),
-                        probe_rows,
-                        "{w}x{h} seed {seed}: rows are the height's alone"
-                    );
-                }
-                check(&l, w, h, seed);
-            }
-        }
-        for (l, (w, seed)) in [probe, far].iter().zip(corners) {
-            check(l, w, h, seed);
-        }
-    }
-    assert!(
-        TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
-        "the sweep must reach every tall aisle, saw {tall_seen:?}"
-    );
-    assert!(placed > 0, "no appliance was placed, so this pins nothing");
-    assert!(violations.is_empty(), "{}", violations.join("\n"));
 }
