@@ -301,17 +301,17 @@ pub fn pixtuoid_core::source::daemon::sweep_presence_ttl(&mut pixtuoid_core::sta
 pub type pixtuoid_core::source::daemon::PresenceSender = tokio::sync::mpsc::unbounded::UnboundedSender<pixtuoid_core::source::daemon::PresenceMsg>
 pub mod pixtuoid_core::source::decoder
 #[non_exhaustive] pub enum pixtuoid_core::source::decoder::DecodeError
-pub pixtuoid_core::source::decoder::DecodeError::Invalid
+#[non_exhaustive] pub pixtuoid_core::source::decoder::DecodeError::Invalid
 pub pixtuoid_core::source::decoder::DecodeError::Invalid::cli: alloc::string::String
 pub pixtuoid_core::source::decoder::DecodeError::Invalid::field: &'static str
 pub pixtuoid_core::source::decoder::DecodeError::Invalid::reason: alloc::string::String
-pub pixtuoid_core::source::decoder::DecodeError::Missing
+#[non_exhaustive] pub pixtuoid_core::source::decoder::DecodeError::Missing
 pub pixtuoid_core::source::decoder::DecodeError::Missing::cli: alloc::string::String
 pub pixtuoid_core::source::decoder::DecodeError::Missing::event: core::option::Option<alloc::string::String>
 pub pixtuoid_core::source::decoder::DecodeError::Missing::field: &'static str
-pub pixtuoid_core::source::decoder::DecodeError::NotAnObject
+#[non_exhaustive] pub pixtuoid_core::source::decoder::DecodeError::NotAnObject
 pub pixtuoid_core::source::decoder::DecodeError::NotAnObject::cli: alloc::string::String
-pub pixtuoid_core::source::decoder::DecodeError::Unsupported
+#[non_exhaustive] pub pixtuoid_core::source::decoder::DecodeError::Unsupported
 pub pixtuoid_core::source::decoder::DecodeError::Unsupported::cli: alloc::string::String
 pub pixtuoid_core::source::decoder::DecodeError::Unsupported::event: alloc::string::String
 impl core::error::Error for pixtuoid_core::source::decoder::DecodeError

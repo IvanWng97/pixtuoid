@@ -89,7 +89,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .ok_or_else(|| {
             crate::source::decoder::DecodeError::missing(
                 SOURCE_NAME,
-                "session_id/cwd/workspace_roots",
+                "session_id|cwd|workspace_roots",
             )
         })?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);

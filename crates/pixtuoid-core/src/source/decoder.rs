@@ -26,22 +26,25 @@ pub type DecodeResult<T> = std::result::Result<T, DecodeError>;
 #[non_exhaustive]
 pub enum DecodeError {
     /// The payload isn't a JSON object.
+    #[non_exhaustive]
     #[error("{cli} payload must be an object")]
     NotAnObject {
         /// The wire's source name.
         cli: String,
     },
     /// A field the input needs is absent or empty.
-    #[error("{cli} {} missing/empty {field}", .event.as_deref().unwrap_or("payload"))]
+    #[non_exhaustive]
+    #[error("{cli} {} has no {field}", .event.as_deref().unwrap_or("payload"))]
     Missing {
         /// The wire's source name.
         cli: String,
-        /// The event the field belongs to, when the wire named one.
+        /// The event or part of the payload the field belongs to.
         event: Option<String>,
-        /// The field, or `/`-joined fields any one of which would do.
+        /// The field, or `|`-joined fields any one of which would do.
         field: &'static str,
     },
     /// An event name the decoder has no arm for.
+    #[non_exhaustive]
     #[error("unsupported {cli} event: {event}")]
     Unsupported {
         /// The wire's source name.
@@ -50,6 +53,7 @@ pub enum DecodeError {
         event: String,
     },
     /// A field present but outside what the wire allows.
+    #[non_exhaustive]
     #[error("{cli} {field}: {reason}")]
     Invalid {
         /// The wire's source name.
@@ -698,6 +702,30 @@ pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every wire string a `DecodeError` carries is [`display_safe`]d, so a
+    /// raw-stderr log of one can't carry a terminal escape.
+    #[test]
+    fn a_decode_error_carries_no_wire_escape() {
+        let hostile = "x\u{1b}]0;pwned\u{7}\u{202e}y";
+        for e in [
+            DecodeError::not_an_object(hostile),
+            DecodeError::missing(hostile, "cwd"),
+            DecodeError::missing_in(hostile, hostile, "cwd"),
+            DecodeError::unsupported(hostile, hostile),
+            DecodeError::invalid(hostile, "port", hostile),
+        ] {
+            let shown = e.to_string();
+            assert!(
+                !shown.chars().any(|c| c.is_control() || c == '\u{202e}'),
+                "{shown:?}"
+            );
+        }
+        assert_eq!(
+            DecodeError::missing("cursor", "cwd").to_string(),
+            "cursor payload has no cwd"
+        );
+    }
 
     #[test]
     fn rfc3339_parses_chrono_utc_shapes_and_rejects_garbage() {

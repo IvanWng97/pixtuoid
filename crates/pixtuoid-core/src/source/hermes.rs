@@ -122,7 +122,7 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .filter(|s| !s.is_empty())
         .or(cwd)
         .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing(SOURCE_NAME, "session_id/cwd")
+            crate::source::decoder::DecodeError::missing(SOURCE_NAME, "session_id|cwd")
         })?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd = cwd.unwrap_or("");
