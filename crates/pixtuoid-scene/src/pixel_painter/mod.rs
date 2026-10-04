@@ -21,7 +21,7 @@ use crate::walk::WalkState;
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Default)]
 pub(crate) struct Drawn {
-    /// Each drawn agent's badge, in paint order.
+    /// Each drawn agent's badge, in paint order, then each chitchat bubble.
     pub(crate) texts: Vec<TextRun>,
     pub(crate) hovers: Hovers,
 }
@@ -275,6 +275,12 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
         }
         drawn.hovers.push(hover);
     }
+    let bubbles: Vec<_> = frame
+        .chitchat_bubbles
+        .iter()
+        .filter_map(|bubble| TextRun::bubble(bubble, &drawn.texts, ctx.theme))
+        .collect();
+    drawn.texts.extend(bubbles);
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
     wash_since(ctx.buf, &pre_foreground, look.object_wash);

@@ -3829,6 +3829,49 @@ fn both_looks_hang_a_badge_from_the_one_anchor() {
     }
 }
 
+/// A chitchat bubble hangs over its speaker's badge, and both looks draw the
+/// same one.
+#[test]
+fn a_bubble_hangs_over_its_speakers_badge_in_both_looks() {
+    use crate::display::{TextRole, TextRun};
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let speaker = frame.agents[0].agent_id;
+    frame.chitchat_bubbles = vec![crate::chitchat::ChitchatBubble {
+        text: "LGTM!",
+        speaker,
+    }];
+    let mut scene = SceneState::uniform(16);
+    for agent in &frame.agents {
+        scene.agents.insert(agent.agent_id, agent.clone());
+    }
+    let now = SystemTime::UNIX_EPOCH;
+    let classic = paint_drawn(&OwnedSimStores::new(), &scene, &layout, &pack, now, &frame).texts;
+    let find = |texts: &[TextRun], role| texts.iter().find(|run| run.role == role).cloned();
+    let badge = find(&classic, TextRole::Badge(speaker)).expect("the speaker's badge");
+    let bubble = find(&classic, TextRole::Bubble(speaker)).expect("the classic's bubble");
+    assert_eq!(bubble.text(), "LGTM!");
+    assert_eq!(bubble.at.x, badge.at.x, "centred over the badge");
+    assert!(bubble.at.y < badge.at.y, "above it");
+    let office = crate::display::Office {
+        layout: &layout,
+        pack: &pack,
+        theme,
+        scale: crate::render_scale::RenderScale::ONE,
+    };
+    let cutaway: Vec<_> = crate::display::compose::tests::list_at(&frame, office, 12)
+        .texts()
+        .cloned()
+        .collect();
+    assert_eq!(
+        find(&cutaway, TextRole::Bubble(speaker)),
+        Some(bubble),
+        "the same bubble"
+    );
+}
+
 /// Two gateways of one source are two hovers, each naming its own instance,
 /// in paint order.
 #[test]

@@ -215,14 +215,9 @@ fn a_refused_classic_frame_names_no_one() {
         ..inputs(&scene, &pack, t0)
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
-    assert!(floor.raster.classic_texts().is_empty());
     assert!(
-        floor
-            .raster
-            .classic_drawn()
-            .expect("shown")
-            .bubbles
-            .is_empty()
+        floor.raster.classic_texts().is_empty(),
+        "no badge, bubble or sign"
     );
 }
 

@@ -23,9 +23,9 @@ use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
-    paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
-    paint_footer, paint_furniture_tooltip, paint_help_overlay, paint_mascot_tooltip,
-    paint_pet_tooltip, paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
+    paint_coffee_tooltip, paint_connection_panel, paint_dashboard, paint_footer,
+    paint_furniture_tooltip, paint_help_overlay, paint_mascot_tooltip, paint_pet_tooltip,
+    paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
 };
 
 pub use pixtuoid_scene::pet::PetState;
@@ -388,7 +388,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         pixels,
         texts,
         hovers,
-        bubbles: chitchat_bubbles,
     }) = ctx.floor.raster.classic_drawn()
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
@@ -412,12 +411,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(pixels, ctx.onboarding.dim);
 
-    // Badges first, then the signs; a bubble lands between, as it always has.
-    let signs = texts
-        .iter()
-        .position(|run| !matches!(run.role, TextRole::Badge(_)))
-        .unwrap_or(texts.len());
-    let (badges, signs) = texts.split_at(signs);
     let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -426,9 +419,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_text_runs(f, badges, actual_scene, hovered);
-        paint_chitchat_bubbles(f, chitchat_bubbles, badges, actual_scene, theme);
-        paint_text_runs(f, signs, actual_scene, None);
+        paint_text_runs(f, texts, actual_scene, hovered);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,

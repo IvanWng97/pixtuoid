@@ -45,9 +45,9 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
 /// Paint `runs` as terminal text, each where its align puts it: a badge in the
 /// cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP) logical rows
 /// over its anchor, any other run in the cell its anchor lies in. The board's
-/// brand and star and the floor indicator are bold, the indicator padded a
-/// cell each side on its plate, and `hovered`'s badge reads `▸name` in bold
-/// white.
+/// brand and star and the floor indicator are bold, the indicator and a
+/// chitchat bubble padded a cell each side on their plates, and `hovered`'s
+/// badge reads `▸name` in bold white.
 pub(crate) fn paint_text_runs(
     f: &mut ratatui::Frame<'_>,
     runs: &[TextRun],
@@ -76,7 +76,7 @@ pub(crate) fn paint_text_runs(
                     .add_modifier(Modifier::BOLD);
                 vec![Span::styled(format!("\u{25b8}{name}"), style)]
             }
-            (TextRole::Indicator, Some(plate)) => run
+            (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => run
                 .spans
                 .iter()
                 .map(|s| Span::styled(format!(" {} ", s.text), style(s.ink).bg(to_color(plate))))
@@ -94,7 +94,10 @@ pub(crate) fn paint_text_runs(
             Align::Over => (
                 run.at.x.saturating_sub(w / 2),
                 run.at.y.saturating_sub(gap) / 2,
-                pixtuoid_scene::overlay::BADGE_CELLS,
+                match run.role {
+                    TextRole::Badge(_) => pixtuoid_scene::overlay::BADGE_CELLS,
+                    _ => w,
+                },
             ),
             Align::Centre => (run.at.x.saturating_sub(w / 2), run.at.y / 2, w),
             Align::Left => (run.at.x, run.at.y / 2, w),
@@ -431,52 +434,6 @@ fn mascot_tooltip_text(card: &GatewayCard) -> String {
     }
 }
 
-pub fn paint_chitchat_bubbles(
-    f: &mut ratatui::Frame<'_>,
-    bubbles: &[pixtuoid_scene::chitchat::ChitchatBubble],
-    badges: &[TextRun],
-    scene_rect: Rect,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    for bubble in bubbles {
-        // The speaker's badge anchor, so bubble and badge share one centre.
-        let Some(at) = badges
-            .iter()
-            .find(|run| run.role == TextRole::Badge(bubble.speaker))
-            .map(|run| run.at)
-        else {
-            continue;
-        };
-        let text = format!(" {} ", bubble.text);
-        // Size by DISPLAY width, not byte length: a wide-glyph quip would otherwise
-        // over-size and mis-center the bubble.
-        let line = Line::from(text.clone());
-        let tip_w = line.width() as u16;
-        let tip_h = 1u16;
-
-        let cell_x = scene_rect.x + at.x;
-        let cell_y = scene_rect.y + at.y / 2;
-
-        let bx = cell_x.saturating_sub(tip_w / 2);
-        let by = cell_y.saturating_sub(3);
-
-        if let Some(r) = clip_widget_rect(
-            Rect {
-                x: bx,
-                y: by,
-                width: tip_w,
-                height: tip_h,
-            },
-            scene_rect,
-        ) {
-            let style = Style::default()
-                .bg(to_color(theme.ui.tooltip_bg))
-                .fg(Color::White);
-            f.render_widget(Paragraph::new(Span::styled(text, style)), r);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{GatewayCard, TooltipAt, mascot_tooltip_text};
@@ -739,21 +696,17 @@ mod tests {
         let super::TextRole::Badge(id) = speaker.role else {
             unreachable!("built a badge");
         };
-        term.draw(|f| {
-            let speakers = std::slice::from_ref(&speaker);
-            super::paint_text_runs(f, speakers, scene_rect, None);
-            super::paint_chitchat_bubbles(
-                f,
-                &[ChitchatBubble {
-                    text: quip,
-                    speaker: id,
-                }],
-                speakers,
-                scene_rect,
-                &theme::NORMAL,
-            );
-        })
-        .unwrap();
+        let bubble = super::TextRun::bubble(
+            &ChitchatBubble {
+                text: quip,
+                speaker: id,
+            },
+            std::slice::from_ref(&speaker),
+            &theme::NORMAL,
+        )
+        .expect("its speaker wears a badge");
+        term.draw(|f| super::paint_text_runs(f, &[speaker.clone(), bubble], scene_rect, None))
+            .unwrap();
         let buf = term.backend().buffer();
         let centre = |needle: &str| {
             let row = row_of(&term, needle).expect("painted");

@@ -195,6 +195,31 @@ pub(crate) fn compose_at<'a>(
     }
 }
 
+/// Each chitchat bubble over its speaker's badge, among the badges `order`
+/// already holds.
+fn push_bubbles(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let pen = Pen::for_pack(office.scale, office.pack);
+    let badges: Vec<TextRun> = order
+        .iter()
+        .filter_map(|(_, kind)| match kind {
+            PieceKind::Text { run } => Some(run.clone()),
+            _ => None,
+        })
+        .collect();
+    let bubbles: Vec<_> = frame
+        .chitchat_bubbles
+        .iter()
+        .filter_map(|bubble| TextRun::bubble(bubble, &badges, office.theme))
+        .map(|run| {
+            (
+                topmost_span(run_rect(&run, pen), pen),
+                PieceKind::Text { run },
+            )
+        })
+        .collect();
+    order.extend(bubbles);
+}
+
 /// The pet and the gateway mascots, each a figure sorted on its feet's row
 /// as the classic sorts it, with what rides on it straight after.
 fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
@@ -472,6 +497,7 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &GlassWeather::of(moment), &mut order);
     let carried = push_characters(frame, office, moment.timing.now, &mut order);
+    push_bubbles(frame, office, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
