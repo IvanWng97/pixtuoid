@@ -134,6 +134,7 @@ jobs:
       - run: just tuidrive-selftest
       - run: just e2e-scrub-selftest
       - run: just star-history-selftest
+      - run: just test-list-diff-selftest
       # The capture-tree provenance rules are NOT here: they are Rust tests
       # (`tests/sources/captures.rs`, #929) riding `just coverage` in ci-tests.yml's
       # three-platform matrix instead of this job's one, and no toolchain in a

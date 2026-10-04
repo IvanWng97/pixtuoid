@@ -295,6 +295,7 @@ lint:
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run e2escrub just e2e-scrub-selftest  & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
+    run testlist just test-list-diff-selftest & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     run piiself just fixture-pii-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
@@ -1162,6 +1163,13 @@ e2e-scrub-selftest:
 [group('meta')]
 star-history-selftest:
     python3 scripts/star-history.py --selftest
+
+# A diff that drops a removed test reads as "removed (0)", the answer a refactor
+# row's lens wants to see.
+[doc("Self-test the review lens's test-list diff")]
+[group('meta')]
+test-list-diff-selftest:
+    python3 scripts/test-list-diff.py --selftest
 
 # The recorder refuses a capture carrying its own identity, but that check runs
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
