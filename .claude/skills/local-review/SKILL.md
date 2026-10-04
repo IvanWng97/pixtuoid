@@ -25,7 +25,17 @@ paraphrase here.
 2. **Dispatch** one lens per matching local row, in parallel, in the
    background: `model: sonnet` for a lens that reads evidence or runs a
    mechanical check (test lists, mutations, renders, a walk), `opus` only for
-   a design gate. Each briefed:
+   a design gate. CI already built the evidence; a lens builds only what it
+   can't show (a render, a WALK, a domain probe):
+   - the test list: `scripts/test-list-diff.py <pr>`;
+   - mutants: the `review-evidence` artifact of
+     [`review-evidence.yml`](../../../.github/workflows/review-evidence.yml)'s
+     run at the head (`gh run download <run> -n review-evidence`). Its
+     `manifest.json` `head_sha` must be the head, and `partial`/`sampled` are
+     read before the counts. Each `missed.txt` line is a lead to verify, never
+     a finding.
+
+   Each briefed:
 
    ```
    You are the <row> lens for <PR/branch> on pixtuoid.
@@ -35,6 +45,7 @@ paraphrase here.
    Do not flag.
    <change-specific claims (from the PR body's impl-plan answers) or design
    questions, one per line>
+   Evidence: <the test-list diff; the review-evidence run id and missed.txt>
    Run the applicable gates; report each exit code as observed, never through
    a pipe. Each finding carries an integer confidence 0–100. Your final
    message is the report, ending in one verdict: APPROVE or
