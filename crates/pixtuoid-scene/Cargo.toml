@@ -22,15 +22,15 @@ categories.workspace   = true
 workspace = true
 
 [features]
-default     = ["native", "density-art"]
+default        = ["native", "cutaway-assets"]
 # Without it the render engine builds for wasm32 (no tokio/notify, no pack
 # read from disk): the WebAssembly office hero.
-native      = ["pixtuoid-core/native"]
-# The cutaway's assets: the bundled `@Nx` art and hair dressing, which only a
-# render scale above `RenderScale::ONE` reaches (`densest_frame`, `dress_for`),
-# and the text's fallback font. The wasm hero draws only the classic, so
-# building without this keeps those bytes out of the page.
-density-art = []
+native         = ["pixtuoid-core/native"]
+# The bundled `@Nx` art and hair dressing, which only a render scale above
+# `RenderScale::ONE` reaches (`densest_frame`, `dress_for`), and the text's
+# fallback font. The wasm hero draws only the classic, so building without
+# this keeps those bytes out of the page.
+cutaway-assets = []
 
 [dependencies]
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-features = false }

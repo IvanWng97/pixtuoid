@@ -78,6 +78,11 @@ impl Pen {
         a.0 / self.d.get()
     }
 
+    /// The art pixel buffer pixel `b` lies in.
+    pub(crate) fn art_of_buffer(self, b: u16) -> ArtPx {
+        ArtPx(b / self.k.get())
+    }
+
     /// `a` art pixels, as buffer pixels.
     pub(crate) fn buffer(self, a: ArtPx) -> u16 {
         a.0.saturating_mul(self.k.get())
@@ -89,7 +94,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
         let pack = crate::pack::test_default_pack();
         assert_eq!(

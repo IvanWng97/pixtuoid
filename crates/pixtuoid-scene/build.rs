@@ -1,6 +1,6 @@
 //! Bundle the default pack: the sprite list is generated from `sprites/default/`
 //! itself, so a sprite committed there is bundled by construction, less,
-//! without the `density-art` feature, what
+//! without the `cutaway-assets` feature, what
 //! [`density_art::bundled_without_density_art`] drops from both the manifest
 //! and the list. Every bundled file goes in without its comments
 //! ([`comments::strip_comments`]).
@@ -29,7 +29,7 @@ fn main() {
     // Core's `PACK_MANIFEST`, which a build script cannot import: a rename fails
     // this read, and so the build.
     let pack_toml = std::fs::read_to_string(asset_dir.join("pack.toml")).expect("read pack.toml");
-    let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_DENSITY_ART").is_some() {
+    let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_CUTAWAY_ASSETS").is_some() {
         (comments::strip_comments(&pack_toml), BTreeSet::new())
     } else {
         density_art::bundled_without_density_art(&pack_toml)
