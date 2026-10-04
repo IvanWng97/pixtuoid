@@ -172,9 +172,10 @@ impl PartialOrd for Node {
     }
 }
 
-/// Octile-distance step costs (integer, so the heuristic stays admissible) — the
-/// classic 14/10 ≈ √2 : 1 ratio. Shared with `pose::octile_distance` so the
-/// heuristic and the path metric can't drift.
+/// Octile-distance step costs, integer so A* needs no floats — the classic
+/// 14/10 ≈ √2 : 1 ratio. Shared with `pose::octile_distance` so the heuristic
+/// and the path metric can't drift; [`heuristic`] ignores the preferred-zone
+/// discount, so a zone-biased route is not guaranteed shortest.
 pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
 pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
 

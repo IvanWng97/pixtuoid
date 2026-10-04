@@ -16,7 +16,10 @@ pub(crate) enum SceneGeometry {
     /// [`crate::graphics::Plan::Cutaway`]'s image, its top-left at cell `origin`.
     #[cfg_attr(
         all(not(feature = "graphics"), not(test)),
-        expect(dead_code, reason = "only the kitty compositor paints the cutaway")
+        expect(
+            dead_code,
+            reason = "only the `graphics` image protocols paint the cutaway"
+        )
     )]
     Cutaway {
         origin: Position,
