@@ -90,7 +90,7 @@ pub(crate) struct DisplayList<'a> {
     /// change repaints the whole frame.
     pub(super) ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
-    pub(super) ground: Carpet,
+    pub(super) carpet: Carpet,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::cutaway::light::Flash,
     // What it was built with, so painting it cannot use anything else: a
@@ -168,8 +168,8 @@ impl<'a> DisplayList<'a> {
         self.ambient
     }
 
-    pub(crate) fn ground(&self) -> Carpet {
-        self.ground
+    pub(crate) fn carpet(&self) -> Carpet {
+        self.carpet
     }
 
     pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {

@@ -239,7 +239,7 @@ pub(crate) fn compose_at<'a>(
         pieces,
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
-        ground: moment.look.carpet(theme),
+        carpet: moment.look.carpet(theme),
         flash: crate::cutaway::light::Flash::of(&moment.sky),
         pack,
         theme,

@@ -55,7 +55,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    ground: crate::atmosphere::Carpet,
+    carpet: crate::atmosphere::Carpet,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -65,7 +65,7 @@ impl PartialEq for Epoch {
             && std::ptr::eq(self.theme, other.theme)
             && self.scale == other.scale
             && self.ambient == other.ambient
-            && self.ground == other.ground
+            && self.carpet == other.carpet
             && self.flash == other.flash
     }
 }
@@ -111,7 +111,7 @@ impl CutawayCanvas {
             theme,
             scale,
             ambient: list.ambient(),
-            ground: list.ground(),
+            carpet: list.carpet(),
             flash: list.flash(),
         };
         let footprints: Vec<(Span, u64)> = list
