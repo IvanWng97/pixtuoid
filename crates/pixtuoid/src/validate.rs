@@ -63,6 +63,13 @@ fn partial_set_line(set: &PartialSet) -> String {
     )
 }
 
+fn walk_without_stride_line(name: &str) -> String {
+    format!(
+        "WARN:  \"{}\" has no stride: it steps on its clock, so its feet slide as its pace changes",
+        strip_control_chars(name)
+    )
+}
+
 fn orphan_derived_line(o: &OrphanDerived) -> String {
     format!(
         "WARN:  ships \"{}\" without \"{}\": the default pack draws \"{}\", in its own style",
@@ -175,6 +182,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         missing_hair_views,
         overhanging_hair,
         orphan_hairstyles,
+        walks_without_stride,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it.
@@ -208,6 +216,9 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     }
     for o in orphan_derived {
         writeln!(out, "{}", orphan_derived_line(o))?;
+    }
+    for name in walks_without_stride {
+        writeln!(out, "{}", walk_without_stride_line(name))?;
     }
     for u in unmarked_heads {
         writeln!(out, "{}", unmarked_head_line(u))?;
