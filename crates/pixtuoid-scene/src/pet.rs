@@ -146,6 +146,10 @@ impl Pet {
 
 /// Picks the one pet for a floor from the office's pets (`floor_seed`-indexed);
 /// `None` when none are configured.
+#[deny(
+    clippy::cast_possible_truncation,
+    reason = "a hash picks through `crate::spread`, alike on every target"
+)]
 pub fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
     pets.get(crate::spread(floor_seed, pets.len()))
 }

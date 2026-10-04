@@ -1105,7 +1105,8 @@ mod listen_gate {
 
     /// The stems sum with no soft clip (`BUS_TRIM`'s doc), so the loudest
     /// office there is stays under full scale: every agent active, a storm's
-    /// rain, and the appliances firing together over and over.
+    /// rain, and the appliances firing together over and over, through a whole
+    /// loop of epoch 0's day and night tracks once the gains have ramped.
     #[test]
     fn the_loudest_mix_stays_under_full_scale() {
         let mut rng = dsp::NoiseStream::new(BUILD_SEED);
@@ -1134,7 +1135,9 @@ mod listen_gate {
             })
             .collect();
         for (beds, track) in [(&day, TrackId::GenDay(0)), (&night, TrackId::GenNight(0))] {
-            let buf = render_tier(&bank, beds, &rain, track, stems, &volley, 15.0);
+            let secs = pixtuoid_scene::audio::compose_track(track).loop_secs()
+                + 1.0 / pixtuoid_scene::audio::mixer::RAMP_PER_S;
+            let buf = render_tier(&bank, beds, &rain, track, stems, &volley, secs);
             let peak = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
             assert!(peak < 1.0, "{track:?} peaks at {peak}");
         }

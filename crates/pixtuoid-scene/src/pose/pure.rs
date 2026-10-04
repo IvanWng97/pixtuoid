@@ -159,6 +159,10 @@ pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
 
 /// Per-(agent, cycle) waypoint index. Only meaningful when `takes_trip` is
 /// true AND `is_aimless_cycle` is false.
+#[deny(
+    clippy::cast_possible_truncation,
+    reason = "a hash picks through `crate::spread`, alike on every target"
+)]
 pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: usize) -> usize {
     crate::spread(agent_id.raw() ^ cycle_n, num_waypoints)
 }

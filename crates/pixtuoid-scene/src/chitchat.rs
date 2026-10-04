@@ -147,6 +147,10 @@ impl ActiveChitchat {
 
     /// The agent speaking this turn and their line, or `None` once expired / if
     /// nobody is present. The speaker rotates round-robin through `participants`.
+    #[deny(
+        clippy::cast_possible_truncation,
+        reason = "a hash picks through `crate::spread`, alike on every target"
+    )]
     pub fn current_bubble(&self, now: SystemTime) -> Option<(AgentId, &'static str)> {
         let elapsed = self.elapsed_ms(now);
         if elapsed >= CHITCHAT_TOTAL_MS {

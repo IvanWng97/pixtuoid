@@ -323,6 +323,10 @@ pub(crate) const PANTS_KEY: char = 'P';
 /// One agent's colors, as the palette overrides a character frame is
 /// recolored with. `Some(glow_tint)` blends the skin toward the monitor glow so
 /// a seated agent reads as lit by their screen.
+#[deny(
+    clippy::cast_possible_truncation,
+    reason = "a hash picks through `crate::spread`, alike on every target"
+)]
 pub(crate) fn agent_overrides(
     agent: &AgentSlot,
     glow_tint: Option<Rgb>,

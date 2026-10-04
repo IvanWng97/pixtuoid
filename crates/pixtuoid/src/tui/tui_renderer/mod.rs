@@ -586,6 +586,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 to_floor,
                 "a slide between floors it cannot borrow"
             );
+            self.cancel_transition();
             return Ok(());
         };
 
@@ -866,6 +867,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 to_floor,
                 "a slide between floors it cannot borrow"
             );
+            self.cancel_transition();
             return Ok(());
         };
         let mut transition_chitchat = std::collections::HashMap::new();
