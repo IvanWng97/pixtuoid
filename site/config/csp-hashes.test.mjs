@@ -68,6 +68,13 @@ test('style text inside a script or style body, or a data-style attribute, is no
   assert.deepEqual([...hashes], [sha('q{}')]);
 });
 
+test("a style= inside another attribute's quoted value is not the style attribute", () => {
+  const { hashes } = inlineStyleHashes(`<a title="x style=y" style="color:red">`);
+  assert.deepEqual([...hashes], [sha('color:red')]);
+  const quoted = inlineStyleHashes(`<a data-x='q style="z"' href="/">`);
+  assert.equal(quoted.attributes, false);
+});
+
 test('a page with no style attribute asks no unsafe-hashes', () => {
   const html =
     '<head><meta http-equiv="content-security-policy" content="style-src \'self\'"><style>a{}</style></head>';

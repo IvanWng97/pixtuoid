@@ -559,6 +559,48 @@ test('a remembered ♩ choice never inverts a direct first click on the button',
   expect(errors()).toEqual([]);
 });
 
+test('a remembered ♩ choice waits for a gesture that grants activation, not an Escape', async ({
+  page,
+}) => {
+  // HTML's activation-triggering events exclude an Escape keydown (and a touch's
+  // pointerdown): restoring on one would "resume" audio that stays suspended.
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  await page.evaluate(() => localStorage.setItem('pix:audio', '1'));
+  await page.reload();
+  await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await expect(btn, 'an Escape restored the remembered ♩').toHaveAttribute('aria-pressed', 'false');
+  await page.mouse.click(5, 5);
+  await expect
+    .poll(async () => {
+      const pressed = await btn.getAttribute('aria-pressed');
+      const hidden = await btn.evaluate((el) => (el as HTMLElement).hidden);
+      return pressed === 'true' || hidden;
+    })
+    .toBe(true);
+  expect(errors()).toEqual([]);
+});
+
+test('the dracula sequence honours the keyboard-shortcut off-switch (WCAG 2.1.4)', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.addInitScript(() => localStorage.setItem('pix-keys', 'off'));
+  await page.goto('./');
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.type('dracula');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dracula');
+  await page.evaluate(() => localStorage.setItem('pix-keys', 'on'));
+  await page.reload();
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.type('dracula');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dracula');
+});
+
 test('crisp AA captions overlay the live office (name badges + neon board)', async ({ page }) => {
   const errors = watchErrors(page);
   await gotoLive(page);

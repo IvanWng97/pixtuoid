@@ -39,8 +39,17 @@ const STYLE_EL_RE = /<style\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/style[^>
 // An opening tag's attributes, quote-aware, scanned once the script and style
 // bodies are blanked so their text can't pose as markup.
 const TAG_RE = /<[a-zA-Z][^\s/>]*((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
-// A `style` ATTRIBUTE (the boundary keeps `data-style=` out), quoted or not.
-const STYLE_ATTR_RE = /(?:^|\s)style\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i;
+// One attribute, walked in order: a name, then an optional value, quoted or
+// not, so a `style=` inside another attribute's quoted value is never a name.
+const ATTR_RE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+
+// The first attribute named `style`, as a browser takes a duplicate's first.
+function styleAttr(attrs) {
+  for (const a of attrs.matchAll(ATTR_RE)) {
+    if (a[1].toLowerCase() === 'style') return a[2] ?? a[3] ?? a[4] ?? '';
+  }
+  return null;
+}
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
@@ -68,9 +77,9 @@ export function inlineStyleHashes(html) {
   const markup = html.replace(SCRIPT_RE, '<script>').replace(STYLE_EL_RE, '<style>');
   let attributes = false;
   for (const tag of markup.matchAll(TAG_RE)) {
-    const m = (tag[1] ?? '').match(STYLE_ATTR_RE);
-    if (!m) continue;
-    hashes.add(sha256(decodeAttr(m[1] ?? m[2] ?? m[3])));
+    const style = styleAttr(tag[1] ?? '');
+    if (style === null) continue;
+    hashes.add(sha256(decodeAttr(style)));
     attributes = true;
   }
   return { hashes, attributes };
