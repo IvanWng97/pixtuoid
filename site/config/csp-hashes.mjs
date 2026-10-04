@@ -55,11 +55,18 @@ const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
 // A CSP hash covers an attribute's VALUE as parsed, so its character
 // references are decoded first.
+// A reference it can't decode fails the build: a hash of its raw text would
+// silently block the style.
 function decodeAttr(value) {
   return value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z]+));/gi, (ref, hex, dec, name) => {
-    if (hex) return String.fromCodePoint(parseInt(hex, 16));
-    if (dec) return String.fromCodePoint(parseInt(dec, 10));
-    return ENTITIES[name.toLowerCase()] ?? ref;
+    if (hex || dec) {
+      const cp = hex ? parseInt(hex, 16) : parseInt(dec, 10);
+      if (cp > 0x10ffff) throw new Error(`csp-hashes: ${ref} names no code point`);
+      return String.fromCodePoint(cp);
+    }
+    const ch = ENTITIES[name.toLowerCase()];
+    if (ch === undefined) throw new Error(`csp-hashes: ${ref} is not in ENTITIES; add it`);
+    return ch;
   });
 }
 

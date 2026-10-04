@@ -75,6 +75,11 @@ test("a style= inside another attribute's quoted value is not the style attribut
   assert.equal(quoted.attributes, false);
 });
 
+test('a reference the decoder cannot hash as the browser would fails the build', () => {
+  assert.throws(() => inlineStyleHashes('<i style="font: a&nbsp;b">'), /&nbsp;.*ENTITIES/);
+  assert.throws(() => inlineStyleHashes('<i style="x: &#x110000;">'), /names no code point/);
+});
+
 test('a page with no style attribute asks no unsafe-hashes', () => {
   const html =
     '<head><meta http-equiv="content-security-policy" content="style-src \'self\'"><style>a{}</style></head>';
