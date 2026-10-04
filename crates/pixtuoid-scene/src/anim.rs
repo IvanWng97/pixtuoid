@@ -73,23 +73,42 @@ pub enum Motion {
 pub const FULL_TICK_MS: u64 = 125;
 /// How often a [`Motion::Calm`] loop steps.
 pub const CALM_TICK_MS: u64 = 500;
+/// The rate the TUI and the floating window repaint an office with agents in
+/// it, on every tier: the sampling rate the walks' strides are sized for
+/// (`a_walking_person_never_slides`).
+pub const PAINT_FPS: u32 = 30;
+
+/// The least any phase of a flash — a strike's level, a starved neon's catch,
+/// the dark between — lasts in loop time: the project's own floor, beside
+/// [WCAG 2.3.1]'s three flashes in any one second.
+///
+/// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
+pub const PHOTOSENSITIVE_PHASE_MIN_MS: u64 = 100;
 
 impl Motion {
+    /// Every tier.
+    pub(crate) const ALL: [Motion; 3] = [Motion::Full, Motion::Calm, Motion::Still];
+
+    /// Wall-clock ms per ms of loop time; `None` at rest.
+    pub(crate) const fn pace(self) -> Option<u64> {
+        match self {
+            Self::Full => Some(1),
+            Self::Calm => Some(CALM_TICK_MS / FULL_TICK_MS),
+            Self::Still => None,
+        }
+    }
+
     /// The ambient clock at `now`, a function of `now` alone so a frame is
     /// too: Full's is the instant floored to its tick, Calm's that many
     /// repaints of Full ticks.
     pub(crate) fn beat(self, now: SystemTime) -> Beat {
-        let pace = match self {
-            Self::Full => 1,
-            Self::Calm => CALM_TICK_MS / FULL_TICK_MS,
-            Self::Still => {
-                return Beat {
-                    loop_ms: None,
-                    pace: 1,
-                };
-            }
-        };
-        Beat::looping(loop_time(now, pace), pace)
+        match self.pace() {
+            Some(pace) => Beat::looping(loop_time(now, pace), pace),
+            None => Beat {
+                loop_ms: None,
+                pace: 1,
+            },
+        }
     }
 
     /// `now` and its [`beat`](Self::beat).

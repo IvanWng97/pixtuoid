@@ -35,15 +35,24 @@ pub fn anchored_top_left(pivot: Pivot, pos: Point, w: u16, h: u16) -> Point {
     }
 }
 
+/// The `size` box whose top-left is `tl`.
+pub(super) fn boxed(tl: Point, size: Size) -> Bounds {
+    Bounds {
+        x: tl.x,
+        y: tl.y,
+        width: size.w,
+        height: size.h,
+    }
+}
+
+/// A centre-pinned `size` box at `pos`.
+pub(super) fn centred(pos: Point, size: Size) -> Bounds {
+    boxed(anchored_top_left(Pivot::Center, pos, size.w, size.h), size)
+}
+
 /// [`Bounds::overlaps`] for two `(top_left, size)` rects.
-pub(super) fn rects_overlap(a: (Point, Size), b: (Point, Size)) -> bool {
-    let bounds = |(at, sz): (Point, Size)| Bounds {
-        x: at.x,
-        y: at.y,
-        width: sz.w,
-        height: sz.h,
-    };
-    bounds(a).overlaps(bounds(b))
+pub(super) fn rects_overlap((a, a_size): (Point, Size), (b, b_size): (Point, Size)) -> bool {
+    boxed(a, a_size).overlaps(boxed(b, b_size))
 }
 
 /// Does `probe` overlap `obstacle` grown by `clearance` px on every side? Callers

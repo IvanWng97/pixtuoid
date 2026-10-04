@@ -235,30 +235,29 @@ fn the_floor_lamp_base_is_its_sprite_south_row() {
     assert_eq!((base.x, base.y), (lamp.x, lamp.y - h / 2 + h - 1));
 }
 
-/// The large columns' last one is the falsifier for the large/small split:
-/// outside the small machine but inside the large one.
 #[test]
 fn the_coffee_machine_follows_the_counter_size() {
     let mut l = SceneLayout::compute(160, 200, Some(4)).expect("fits");
-    let wp = *l
-        .waypoints
-        .iter()
-        .find(|w| w.kind == WaypointKind::Pantry)
-        .expect("a pantry");
     for w in [super::super::PANTRY_COUNTER_LARGE_W, 20] {
-        let h = l.pantry_counter_size().h;
-        l.pantry.as_mut().expect("a pantry").counter_size = Size { w, h };
+        let p = l.pantry.as_mut().expect("a pantry");
+        p.counter_size.w = w;
+        let counter = p.counter_rect().expect("a counter");
         let (lo, hi) = coffee_machine_cols(w);
-        let b = l.coffee_machine().expect("a coffee machine");
-        assert_eq!(b.x, wp.pos.x - w / 2 + lo, "{w}");
-        assert_eq!(b.width, hi - lo, "{w}");
-        assert_eq!((b.y, b.height), (wp.pos.y - h / 2, h), "{w}");
+        assert_eq!(
+            l.coffee_machine(),
+            Some(Bounds {
+                x: counter.x + lo,
+                width: hi - lo,
+                ..counter
+            }),
+            "{w}"
+        );
     }
     assert_ne!(
         coffee_machine_cols(super::super::PANTRY_COUNTER_LARGE_W),
         coffee_machine_cols(20)
     );
-    l.waypoints.retain(|w| w.kind != WaypointKind::Pantry);
+    l.pantry = None;
     assert_eq!(l.coffee_machine(), None);
 }
 
