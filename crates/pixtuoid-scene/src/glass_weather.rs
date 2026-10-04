@@ -713,4 +713,50 @@ mod tests {
             assert!(tones.contains(&c), "{c:?} vs {tones:?}");
         }
     }
+
+    /// The veil keys its dither on the painter's grid, as the room's other
+    /// dithers do, never on the glass's corner: keyed there, its pattern would
+    /// shift with each window's place on the grid.
+    #[test]
+    fn the_veil_dithers_on_the_painters_grid() {
+        use crate::layout::{WINDOW_W, WindowBay, window_rows};
+        use crate::outside::WindowView;
+        const BARE: Rgb = Rgb { r: 0, g: 0, b: 0 };
+        const VEIL: Rgb = Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        // A share whose dither, unlike half's checkerboard, moves with any
+        // shift of its key.
+        let veil = Dithered::new(None, Some((VEIL, 1.0)), 0.4);
+        let weather = GlassWeather {
+            veil,
+            ..glass_weather(Motion::Full, Weather::Clear, 0)
+        };
+        let rows = window_rows(32);
+        let bay = WindowBay {
+            x: 2,
+            w: WINDOW_W,
+            idx: 0,
+        };
+        let corner = bay.glass_box(rows.clone());
+        assert!(
+            ![corner.x, corner.y]
+                .iter()
+                .any(|c| c.is_multiple_of(crate::dither::PERIOD)),
+            "the glass on the dither's phase at d=1: a key from its corner would pass"
+        );
+        for d in [1, 4] {
+            let mut view = WindowView::new(bay, rows.clone(), d, |_| BARE);
+            weather.paint(&mut view);
+            let mut took = [0; 2];
+            for (at, c) in view.cells() {
+                let takes = veil.takes_to(at.0, at.1);
+                assert_eq!(c, if takes { VEIL } else { BARE }, "d={d} at {at:?}");
+                took[usize::from(takes)] += 1;
+            }
+            assert!(took[0] > 0 && took[1] > 0, "d={d}: {took:?}");
+        }
+    }
 }
