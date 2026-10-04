@@ -363,6 +363,44 @@ fn census() -> impl Iterator<Item = SceneLayout> {
     })
 }
 
+/// Width and height step of [`census_grid`]: off every room and pod
+/// module, so the grid crosses each size band at shifting offsets.
+const CENSUS_GRID_STEP: usize = 11;
+
+/// Every [`CENSUS_GRID_STEP`]th size from the floors up to the census's
+/// largest, at [`CENSUS_SEEDS`] and every production floor's seed, with each
+/// layout's seed. [`CENSUS_SIZES`] proves only its own sizes; a narrow pantry
+/// or a short floor meets what they never do.
+fn census_grid() -> impl Iterator<Item = (u64, SceneLayout)> {
+    let widest = CENSUS_SIZES
+        .iter()
+        .map(|&(w, _)| w)
+        .max()
+        .unwrap_or_default();
+    let tallest = CENSUS_SIZES
+        .iter()
+        .map(|&(_, h)| h)
+        .max()
+        .unwrap_or_default();
+    let seeds: Vec<u64> = CENSUS_SEEDS
+        .chain((0..crate::floor::MAX_FLOORS).map(crate::floor::floor_seed))
+        .collect();
+    (super::super::compute::MIN_LAYOUT_W..=widest)
+        .step_by(CENSUS_GRID_STEP)
+        .flat_map(move |w| {
+            (super::super::compute::MIN_LAYOUT_H..=tallest)
+                .step_by(CENSUS_GRID_STEP)
+                .map(move |h| (w, h))
+        })
+        .flat_map(move |(w, h)| {
+            seeds.clone().into_iter().map(move |seed| {
+                let l = SceneLayout::compute_with_seed(w, h, None, seed)
+                    .unwrap_or_else(|| panic!("{w}x{h} seed {seed}: refused above the floors"));
+                (seed, l)
+            })
+        })
+}
+
 fn is_exit_sign(k: &FixtureKind) -> bool {
     matches!(
         k,
@@ -499,9 +537,15 @@ const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
     ("Desk", "DeskChair"),
     // `SceneLayout::island_bar_mat` shows only a sliver past the island.
     ("IslandMat", "KitchenIsland"),
-    // A short floor's first desk row hides the foot of the lamp behind it,
-    // whose ground already starts at the band's top.
+    // A short floor's first desk row (a desk and its filing cabinet) or its
+    // phone booth hides the foot of the lamp behind it, whose ground already
+    // starts at the band's top.
     ("Desk", "FloorLamp"),
+    ("FilingCabinet", "FloorLamp"),
+    ("FloorLamp", "Pod"),
+    // On a short floor the phone booth's top hides the far corner of the
+    // lounge rug behind it.
+    ("LoungeRug", "Pod"),
     // A rug under what stands on it.
     ("LoungeCouch", "LoungeRug"),
     ("MeetingChair", "MeetingRug"),
@@ -530,7 +574,10 @@ fn no_two_fixtures_overlap_but_by_design() {
     let on_runner =
         |f: &Fixture, g: &Fixture| f.kind == FixtureKind::Runner && g.contact().is_some();
     let (mut met, mut stray) = (BTreeSet::new(), Vec::new());
-    for l in census().chain(offices()) {
+    for l in census()
+        .chain(offices())
+        .chain(census_grid().map(|(_, l)| l))
+    {
         let fixtures: Vec<Fixture> = l.fixtures().collect();
         for (i, a) in fixtures.iter().enumerate() {
             for b in fixtures[i + 1..]
@@ -606,4 +653,189 @@ fn no_meeting_furniture_or_plant_blocks_a_doorway() {
         }
     }
     assert!(met > 0, "the sweep met a doorway");
+}
+
+/// A corridor appliance's art overhangs north of its aisle (invariant #6), but
+/// never onto a workstation: a desk, its filing cabinet, its chair or its
+/// sitter. Art can only overlap a
+/// workstation it shares a row with, and the height alone fixes every row.
+/// So a tall-aisle height whose rows never meet is checked once per width;
+/// every other tall height sweeps all widths × seeds.
+#[test]
+fn corridor_appliance_art_never_lands_on_a_workstation() {
+    use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W};
+    use crate::sim::anchors::seated_top_left;
+    const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
+    const APPLIANCES: [Station; 2] = [Station::VendingMachine, Station::Printer];
+    const SEEDS: std::ops::Range<u64> = 0..3;
+    const NARROWEST: u16 = 96;
+    const WIDEST: u16 = 320;
+    const MID_WIDTH: u16 = 208;
+    let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
+    let lay_out = |w, h, seed| {
+        SceneLayout::compute_with_seed(w, h, None, seed)
+            .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
+    };
+    let pieces = |l: &SceneLayout| {
+        let fixtures: Vec<_> = l.fixtures().collect();
+        let art: Vec<(Station, Bounds)> = fixtures
+            .iter()
+            .filter_map(|f| match f.kind {
+                FixtureKind::Station { station, .. } if APPLIANCES.contains(&station) => {
+                    Some((station, f.visual))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut workstations: Vec<Bounds> = fixtures
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    FixtureKind::Desk(_)
+                        | FixtureKind::FilingCabinet(_)
+                        | FixtureKind::DeskChair(_)
+                )
+            })
+            .map(|f| f.visual)
+            .collect();
+        workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
+            let at = seated_top_left(
+                desk,
+                CHARACTER_SPRITE_W,
+                l.desk_facing(FloorLocalDeskIndex(i)),
+            );
+            Bounds {
+                x: at.x,
+                y: at.y,
+                width: CHARACTER_SPRITE_W,
+                height: CHARACTER_SPRITE_H,
+            }
+        }));
+        (art, workstations)
+    };
+    let rows = |l: &SceneLayout| {
+        let (art, workstations) = pieces(l);
+        (
+            (l.cubicle_aisle.y, l.cubicle_aisle.height),
+            art.iter()
+                .map(|&(station, a)| (station, a.y, a.height))
+                .collect::<Vec<_>>(),
+            workstations
+                .iter()
+                .map(|ws| (ws.y, ws.height))
+                .collect::<BTreeSet<_>>(),
+        )
+    };
+    let mut placed = 0;
+    let mut violations = Vec::new();
+    let mut check = |l: &SceneLayout, w: u16, h: u16, seed: u64| {
+        let (art, workstations) = pieces(l);
+        placed += art.len();
+        for (station, a) in art {
+            violations.extend(workstations.iter().filter(|&&ws| a.overlaps(ws)).map(|ws| {
+                format!(
+                    "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
+                    l.cubicle_aisle
+                )
+            }));
+        }
+    };
+    for &(w, h) in CENSUS_SIZES {
+        for seed in CENSUS_SEEDS {
+            check(&lay_out(w, h, seed), w, h, seed);
+        }
+    }
+    for (seed, l) in census_grid() {
+        check(&l, l.buf_w, l.buf_h, seed);
+    }
+    let corners = [(NARROWEST, SEEDS.start), (WIDEST, SEEDS.end - 1)];
+    let mut tall_seen = BTreeSet::new();
+    for h in 90u16..=240 {
+        let [probe, far] = corners.map(|(w, seed)| lay_out(w, h, seed));
+        let (probe_rows, far_rows) = (rows(&probe), rows(&far));
+        assert_eq!(
+            probe_rows.0, far_rows.0,
+            "{h}: the aisle is the height's alone"
+        );
+        if !TALL_AISLES.contains(&probe.cubicle_aisle.height) {
+            continue;
+        }
+        tall_seen.insert(probe.cubicle_aisle.height);
+        let (art, workstations) = pieces(&probe);
+        // An appliance the probe didn't place has rows it can't vouch for.
+        let apart = APPLIANCES
+            .iter()
+            .all(|kind| art.iter().any(|(station, _)| station == kind))
+            && art
+                .iter()
+                .all(|&(_, a)| workstations.iter().all(|&ws| !rows_meet(a, ws)));
+        if apart {
+            assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
+        }
+        let sampled =
+            |w, seed| !apart || seed == SEEDS.start || (w, seed) == (MID_WIDTH, SEEDS.start + 1);
+        for w in (NARROWEST..=WIDEST).step_by(8) {
+            for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed)) && sampled(w, seed)) {
+                let l = lay_out(w, h, seed);
+                if apart {
+                    assert_eq!(
+                        rows(&l),
+                        probe_rows,
+                        "{w}x{h} seed {seed}: rows are the height's alone"
+                    );
+                }
+                check(&l, w, h, seed);
+            }
+        }
+        for (l, (w, seed)) in [probe, far].iter().zip(corners) {
+            check(l, w, h, seed);
+        }
+    }
+    assert!(
+        TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
+        "the sweep must reach every tall aisle, saw {tall_seen:?}"
+    );
+    assert!(placed > 0, "no appliance was placed, so this pins nothing");
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+/// The pantry's entry mat lies inside the pantry's columns: a mat past them
+/// lies under the room's wall. The pantry is narrowest on the narrowest
+/// floors, so one [`CENSUS_GRID_STEP`] of widths from the floor, at every
+/// height.
+#[test]
+fn the_pantry_mat_keeps_to_the_pantrys_columns() {
+    let mut met = 0;
+    let mut stray = Vec::new();
+    let tallest = CENSUS_SIZES
+        .iter()
+        .map(|&(_, h)| h)
+        .max()
+        .unwrap_or_default();
+    let narrowest = super::super::compute::MIN_LAYOUT_W;
+    let narrow = (narrowest..narrowest + CENSUS_GRID_STEP as u16).flat_map(|w| {
+        (super::super::compute::MIN_LAYOUT_H..=tallest).flat_map(move |h| {
+            CENSUS_SEEDS.map(move |seed| {
+                let l = SceneLayout::compute_with_seed(w, h, None, seed)
+                    .unwrap_or_else(|| panic!("{w}x{h} seed {seed}: refused above the floors"));
+                (seed, l)
+            })
+        })
+    });
+    for (seed, l) in narrow {
+        let (Some(mat), Some(p)) = (l.pantry_entry_mat(), l.pantry) else {
+            continue;
+        };
+        met += 1;
+        let b = p.bounds;
+        if mat.x < b.x || mat.x + mat.width > b.x + b.width {
+            stray.push(format!(
+                "{}x{} seed {seed}: {mat:?} in {b:?}",
+                l.buf_w, l.buf_h
+            ));
+        }
+    }
+    assert!(met > 0, "the census met a pantry mat");
+    assert_eq!(stray, Vec::<String>::new());
 }

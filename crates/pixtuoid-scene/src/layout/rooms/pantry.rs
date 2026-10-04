@@ -151,6 +151,7 @@ impl PantryRoom {
             width: WATER_COOLER.w,
             height: WATER_COOLER.h,
         })
+        .filter(|&r| clear_of(r, [self.snack_shelf_rect()]))
     }
 
     /// The trash bin's sprite box near the pantry's west counter, clear of it,
@@ -168,7 +169,42 @@ impl PantryRoom {
             width: 4,
             height: 5,
         })
+        .filter(|&r| clear_of(r, [self.snack_shelf_rect(), self.water_cooler_rect()]))
     }
+
+    /// The snack shelf's centre in a room of `bounds`: against the WEST wall,
+    /// since the pantry's only wall-free side is the EAST bridge, which must
+    /// stay open; `None` for a room too narrow for the shelf plus an east-side
+    /// stander cell, or one with no rows clear of the counter's padded north.
+    pub(crate) fn snack_shelf_center(bounds: Bounds, counter: Size) -> Option<Point> {
+        let vis = furniture_def(Furniture::SnackShelf).visual;
+        let (half_w, half_h) = (vis.w / 2, vis.h / 2);
+        let clr = WALL_THICK_H + OBSTACLE_PAD_PX;
+        let counter_north = Self::counter_north(bounds, counter);
+        // Width gate: 1px west margin + the shelf + 3px so the east-side stander has
+        // an in-room walkable cell.
+        let width_fits = bounds.width >= vis.w + 4;
+        let min_y = bounds.y + clr + half_h;
+        let max_y = counter_north.saturating_sub(half_h + 1);
+        let target = bounds.y + pct(bounds.height, 30);
+        (width_fits && min_y <= max_y).then(|| Point {
+            x: bounds.x + 1 + half_w,
+            y: target.clamp(min_y, max_y),
+        })
+    }
+
+    /// The snack shelf's sprite box, where [`Self::snack_shelf_center`]
+    /// stands it.
+    pub(crate) fn snack_shelf_rect(&self) -> Option<Bounds> {
+        Self::snack_shelf_center(self.bounds, self.counter_size)
+            .map(|c| centred(c, furniture_def(Furniture::SnackShelf).visual))
+    }
+}
+
+/// Whether `r` overlaps none of `others` that exist: the pantry's small
+/// pieces give way to what is placed before them, refuse-don't-force.
+fn clear_of<const N: usize>(r: Bounds, others: [Option<Bounds>; N]) -> bool {
+    others.into_iter().flatten().all(|o| !o.overlaps(r))
 }
 
 /// Place the kitchen island in room `pr`: refuse-don't-force with BOTH-axis
@@ -227,27 +263,12 @@ pub(crate) fn place_kitchen_island(
     Some(Point { x: ix, y: iy })
 }
 
-/// Place the snack shelf in room `pr`, pushing its single `WaypointKind::SnackShelf`
-/// slot. It hugs the WEST wall — the pantry's only wall-free side is the EAST
-/// bridge, which must stay open — and refuses rooms too narrow for a shelf plus an
-/// east-side stander cell, with the same both-axis clamp / counter-north clearance
-/// as [`place_kitchen_island`].
+/// Place the snack shelf in room `pr` where [`PantryRoom::snack_shelf_center`]
+/// stands it, pushing its single `WaypointKind::SnackShelf` slot.
 pub(crate) fn place_snack_shelf(pr: Bounds, counter: Size, waypoints: &mut Vec<Waypoint>) {
-    let vis = furniture_def(Furniture::SnackShelf).visual;
-    let (half_w, half_h) = (vis.w / 2, vis.h / 2);
-    let clr = WALL_THICK_H + OBSTACLE_PAD_PX;
-    let counter_north = PantryRoom::counter_north(pr, counter);
-    let sx = pr.x + 1 + half_w;
-    // Width gate: 1px west margin + the shelf + 3px so the east-side stander has
-    // an in-room walkable cell. Narrower rooms refuse.
-    let width_fits = pr.width >= vis.w + 4;
-    let min_y = pr.y + clr + half_h;
-    let max_y = counter_north.saturating_sub(half_h + 1);
-    let target = pr.y + pct(pr.height, 30);
-    let candidate = (width_fits && min_y <= max_y).then(|| target.clamp(min_y, max_y));
-    if let Some(sy) = candidate {
+    if let Some(pos) = PantryRoom::snack_shelf_center(pr, counter) {
         waypoints.push(Waypoint {
-            pos: Point { x: sx, y: sy },
+            pos,
             kind: WaypointKind::SnackShelf,
             facing: Facing::West,
             room_id: None,

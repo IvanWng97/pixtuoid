@@ -1583,25 +1583,33 @@ pub(super) fn compute_pod_decor(
 }
 
 /// Whether a corridor appliance centred at `pos` keeps its art off every home
-/// desk's sitter: a south-row sitter hangs into the aisle, over the art's top.
-/// Both facings, since a narrow band demotes a back-turned desk after this runs.
-fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
+/// desk's workstation — the desk and its filing cabinet, and its sitter, since
+/// a south-row sitter hangs into the aisle, over the art's top. Both facings,
+/// since a narrow band demotes a back-turned desk after this runs.
+fn clears_the_workstations(kind: Furniture, pos: Point, home_desks: &[Point], buf_h: u16) -> bool {
     let art = furniture_def(kind).visual;
     let art = (anchored_top_left(Pivot::Center, pos, art.w, art.h), art);
     let sitter = Size {
         w: CHARACTER_SPRITE_W,
         h: CHARACTER_SPRITE_H,
     };
-    home_desks.iter().all(|&desk| {
-        [Facing::North, Facing::South].into_iter().all(|facing| {
-            let foot = desk_walk_anchor_facing(desk, facing);
-            let top_left = Point {
-                x: foot.x.saturating_sub(sitter.w / 2),
-                y: foot.y.saturating_sub(WALKING_Y_OFF),
-            };
-            !super::placement::rects_overlap(art, (top_left, sitter))
+    let art_box = Bounds {
+        x: art.0.x,
+        y: art.0.y,
+        width: art.1.w,
+        height: art.1.h,
+    };
+    super::roster::desk_fixtures(home_desks, buf_h).all(|f| !f.visual.overlaps(art_box))
+        && home_desks.iter().all(|&desk| {
+            [Facing::North, Facing::South].into_iter().all(|facing| {
+                let foot = desk_walk_anchor_facing(desk, facing);
+                let top_left = Point {
+                    x: foot.x.saturating_sub(sitter.w / 2),
+                    y: foot.y.saturating_sub(WALKING_Y_OFF),
+                };
+                !super::placement::rects_overlap(art, (top_left, sitter))
+            })
         })
-    })
 }
 
 pub(super) const VENDING_MIN_AISLE_H: u16 = 10;
@@ -1627,6 +1635,7 @@ fn compute_waypoints(
     home_desks: &[Point],
 ) -> Vec<Waypoint> {
     let FloorPlan {
+        buf_h,
         pantry: pantry_room,
         pantry_counter_size,
         ref pod_grid,
@@ -1673,16 +1682,23 @@ fn compute_waypoints(
         }
     }
 
-    let vending = Point {
-        x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
-        y: corridor_centre_y(
-            cubicle_aisle,
-            furniture_def(Furniture::VendingMachine).visual.h,
-        ),
-    };
-    if cubicle_aisle.height >= VENDING_MIN_AISLE_H
+    // Slid east from its corner, a pod's stride at most, off a workstation
+    // standing over it.
+    let vending = (0..=pod_grid.stride_x)
+        .map(|dx| Point {
+            x: right_x
+                + VENDING_WEST_GAP
+                + furniture_def(Furniture::VendingMachine).visual.w / 2
+                + dx,
+            y: corridor_centre_y(
+                cubicle_aisle,
+                furniture_def(Furniture::VendingMachine).visual.h,
+            ),
+        })
+        .find(|&p| clears_the_workstations(Furniture::VendingMachine, p, home_desks, buf_h));
+    if let Some(vending) = vending
+        && cubicle_aisle.height >= VENDING_MIN_AISLE_H
         && cubicle_aisle.width > VENDING_MIN_AISLE_W
-        && clears_the_seats(Furniture::VendingMachine, vending, home_desks)
     {
         waypoints.push(Waypoint {
             pos: vending,
@@ -1692,13 +1708,28 @@ fn compute_waypoints(
         });
     }
     // Slid west from its corner, a pod's stride at most, into the gap between
-    // two pods' seats when a south-row sitter stands over it.
+    // two pods' seats when a south-row sitter stands over it, and off the
+    // vending machine's columns.
     let printer = (0..=pod_grid.stride_x)
         .map(|dx| Point {
             x: (right_x + right_w).saturating_sub(10 + dx),
             y: corridor_centre_y(cubicle_aisle, furniture_def(Furniture::Printer).visual.h),
         })
-        .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
+        .find(|&p| {
+            clears_the_workstations(Furniture::Printer, p, home_desks, buf_h)
+                && vending.is_none_or(|v| {
+                    let columns = |kind, at: Point| {
+                        let w = furniture_def(kind).visual.w;
+                        let x = at.x - w / 2;
+                        x..x + w
+                    };
+                    let (a, b) = (
+                        columns(Furniture::Printer, p),
+                        columns(Furniture::VendingMachine, v),
+                    );
+                    a.end <= b.start || b.end <= a.start
+                })
+        });
     if let Some(printer) = printer
         && cubicle_aisle.height >= PRINTER_MIN_AISLE_H
         && cubicle_aisle.width > PRINTER_MIN_AISLE_W
