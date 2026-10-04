@@ -259,7 +259,10 @@ Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.ym
 entry is a command because no queue condition can confirm a finding or match a
 local row. The queue merges `main` into a PR that is behind and waits for CI and
 the bots at that head, so nobody merges `main` in by hand; branch protection
-still holds the merge until a re-review's new threads are resolved.
+still holds the merge until a re-review's new threads are resolved. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
+bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
+generated-art record: it renders main's merged code, which each look PR's lens
+already read as evidence.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can

@@ -1,0 +1,81 @@
+name: media regen
+
+# The README's docs/images are rendered from main here and nowhere else: a
+# look-changing PR merges without its media, and this keeps one bot PR that
+# brings them up to date. The write token lives only in `publish`, which
+# builds and runs nothing from the tree.
+on:
+  push:
+    branches: [main]
+    paths: ["crates/**", "Cargo.lock", "scripts/gen-media.py", "scripts/media.json"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: media-regen
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      - uses: ./.github/actions/setup-cargo-just
+      - run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet -r requirements-dev.txt
+          .venv/bin/python3 scripts/gen-media.py --only docs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: media-${{ github.sha }}
+          path: docs/images/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      # main at the rendered commit, for the tree the media commit sits on.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: media-${{ github.sha }}
+          path: rendered
+      - env:
+          # A fine-grained PAT, because a GITHUB_TOKEN PR starts no CI. A GitHub
+          # App installation token is the least-privilege upgrade.
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          BRANCH: bot/media-regen
+        run: |
+          set -euo pipefail
+          rm -rf docs/images
+          mv rendered docs/images
+          if [ -z "$(git status --porcelain -- docs/images)" ]; then
+            echo "main's README media are current"
+            gh pr close "$BRANCH" --comment "main renders these already." --delete-branch 2>/dev/null || true
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$BRANCH"
+          git add --all -- docs/images
+          git commit --quiet --message "chore(media): regenerate from ${GITHUB_SHA::8}"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push --force origin "HEAD:refs/heads/$BRANCH"
+          if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" != OPEN ]; then
+            gh pr create --base main --head "$BRANCH" --title "chore(media): regenerate" \
+              --body "The README's \`docs/images\`, rendered from main (\`media-regen.yml\`). Mergify queues it once the gate holds."
+          fi

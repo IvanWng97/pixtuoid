@@ -287,6 +287,29 @@
     - .jobs["closed-pr"].permissions.contents = "write"
     - .jobs["closed-pr"].steps[0].uses = "actions/checkout@v7"
 
+- id: media-regen-bounds-its-token
+  file: .github/workflows/media-regen.yml
+  why: >-
+    publish holds a repository write token, which stays bounded only while no
+    other job can read it, publish builds and runs nothing from the tree, and
+    the one thing it commits is the README's media.
+  assert: |
+    ([.jobs.publish.steps[] | .run // ""] | join("\n")) as $publish
+    | .permissions == {}
+      and .jobs.render.permissions == {"contents": "read"}
+      and (.jobs.render | tostring | test("secrets\\.") | not)
+      and .jobs.publish.permissions == {}
+      and ($publish | test("\\b(cargo|just|npm|pip|python3?|make)\\b") | not)
+      and ([$publish | scan("git add[^\\n]*")] == ["git add --all -- docs/images"])
+      and ((.on | keys) - ["push", "workflow_dispatch"]) == []
+  break:
+    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.RELEASE_PLZ_TOKEN }}"}, "run": "true"}]'
+    - '.jobs.render.permissions.contents = "write"'
+    - '.jobs.publish.permissions = {"contents": "write"}'
+    - '.jobs.publish.steps += [{"run": "cargo build"}]'
+    - '.jobs.publish.steps[-1].run |= sub("git add --all -- docs/images"; "git add --all -- .")'
+    - .on.pull_request = {}
+
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
   why: >-
