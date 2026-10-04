@@ -1,0 +1,43 @@
+name: 'Generate the site demos'
+description: 'Renders site/public/demos/ (clips, posters, stills) from this checkout via gen-media.py --only site'
+
+runs:
+  using: 'composite'
+  steps:
+    # The demos are a pure function of the renderer, the manifest and the theme
+    # and weather lists it expands, so an unchanged set restores them instead
+    # of building and encoding again.
+    - id: cache
+      uses: actions/cache@v6
+      with:
+        path: site/public/demos
+        key: site-demos-${{ hashFiles('crates/**', 'Cargo.lock', 'scripts/gen-media.py', 'scripts/media.json', 'site/src/themes.json', 'site/src/weather.json', 'requirements-dev.txt', '.github/actions/gen-demos/action.yml') }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: ./.github/actions/setup-alsa
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: ./.github/actions/setup-cargo-just
+      with:
+        shared-key: gen-demos
+    - name: Install ffmpeg and gifsicle
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        for attempt in 1 2 3; do
+          if sudo apt-get update "${apt_opts[@]}" \
+            && sudo apt-get install -y --no-install-recommends "${apt_opts[@]}" ffmpeg gifsicle; then
+            exit 0
+          fi
+          echo "ffmpeg/gifsicle install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
+          sleep "$((attempt * 15))"
+        done
+        exit 1
+    - name: Render the demos
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m venv .venv
+        .venv/bin/pip install --quiet -r requirements-dev.txt
+        .venv/bin/python3 scripts/gen-media.py --only site
