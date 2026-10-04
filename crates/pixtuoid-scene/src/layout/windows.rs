@@ -60,7 +60,7 @@ impl WindowBay {
 
     /// The glass inside its outer frame over the window `rows`, its mullion
     /// and transom included.
-    pub(crate) fn glass(self, rows: Range<u16>) -> Bounds {
+    pub(crate) fn glass_box(self, rows: Range<u16>) -> Bounds {
         Bounds {
             x: self.x + FRAME_W,
             y: rows.start + FRAME_W,

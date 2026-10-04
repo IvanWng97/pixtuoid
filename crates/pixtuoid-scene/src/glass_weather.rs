@@ -189,7 +189,7 @@ impl GlassWeather {
         if let Some((veil, alpha)) = self.veil {
             view.paint(|_, c| crate::composite::blend_rgb(c, veil, alpha));
         }
-        for m in self.marks(view.idx(), view.glass(), view.d()) {
+        for m in self.marks(view.idx(), view.glass_size(), view.d()) {
             view.paint_glass_at((m.x, m.y), |cell, under| m.over(under, cell.at));
         }
     }
