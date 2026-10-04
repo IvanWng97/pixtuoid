@@ -1969,6 +1969,50 @@ pub struct ValidationReport {
     /// Each mark a piece the caller stands props on leaves out: nothing stands
     /// there, in either look.
     pub missing_marks: Vec<MissingMark>,
+    /// Each density variant timed apart from its base: a renderer times a
+    /// variant by its base, so the variant's own timing never plays.
+    pub unread_variant_timing: Vec<UnreadTiming>,
+    /// Each of the caller's loops whose frames don't hold whole beats: the
+    /// beat skips or stretches one.
+    pub off_beat_loops: Vec<OffBeatLoop>,
+}
+
+/// A density variant's timing that differs from its base's, which is the
+/// timing that plays.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadTiming {
+    /// The variant, e.g. `typing@4x`.
+    pub name: String,
+    /// The field it sets apart.
+    pub field: UnreadField,
+}
+
+/// The timing field an [`UnreadTiming`] sets apart, with both values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnreadField {
+    /// [`Sprite::frame_ms`].
+    FrameMs {
+        /// The base's, which plays.
+        base: u32,
+        /// The variant's.
+        variant: u32,
+    },
+    /// [`Sprite::stride`].
+    Stride {
+        /// The base's, which plays.
+        base: Option<NonZeroU16>,
+        /// The variant's.
+        variant: NonZeroU16,
+    },
+}
+
+/// A loop whose `frame_ms` is not a whole number of the caller's beats.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OffBeatLoop {
+    /// The animation.
+    pub name: String,
+    /// Its `frame_ms`.
+    pub frame_ms: u32,
 }
 
 /// A mark a piece's first frame leaves out, at one of its densities.
@@ -1990,6 +2034,11 @@ pub struct PackContract<'a> {
     /// Each piece the caller stands props on, with the marks its first frame
     /// carries at every density.
     pub marks: &'a [(&'static str, &'static [&'static str])],
+    /// The animations the caller loops on its beat, unless they carry a
+    /// [`stride`](Sprite::stride).
+    pub loops: &'a [&'static str],
+    /// The beat `loops` step on, in ms; 0 checks none.
+    pub beat_ms: u64,
 }
 
 impl ValidationReport {
@@ -2013,6 +2062,8 @@ impl ValidationReport {
             orphan_hairstyles,
             walks_without_stride: _,
             missing_marks: _,
+            unread_variant_timing: _,
+            off_beat_loops: _,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
@@ -2042,6 +2093,8 @@ impl ValidationReport {
             orphan_hairstyles: _,
             walks_without_stride,
             missing_marks,
+            unread_variant_timing,
+            off_beat_loops,
         } = self;
         missing_optional.len()
             + partial_sets.len()
@@ -2051,6 +2104,8 @@ impl ValidationReport {
             + overhanging_hair.len()
             + walks_without_stride.len()
             + missing_marks.len()
+            + unread_variant_timing.len()
+            + off_beat_loops.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -2071,12 +2126,28 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         art_sets,
         walks,
         marks,
+        loops,
+        beat_ms,
     } = *contract;
     let mut report = ValidationReport {
         walks_without_stride: walks
             .iter()
             .filter(|&&name| pack.animation(name).is_some_and(|a| a.stride().is_none()))
             .map(|&name| name.to_string())
+            .collect(),
+        off_beat_loops: loops
+            .iter()
+            .filter_map(|&name| Some((name, pack.animation(name)?)))
+            .filter(|(_, a)| a.frames().len() > 1 && a.stride().is_none())
+            .filter(|(_, a)| {
+                u64::from(a.frame_ms())
+                    .checked_rem(beat_ms)
+                    .is_some_and(|r| r != 0)
+            })
+            .map(|(name, a)| OffBeatLoop {
+                name: name.to_string(),
+                frame_ms: a.frame_ms(),
+            })
             .collect(),
         ..ValidationReport::default()
     };
@@ -2125,7 +2196,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         .collect();
     report.missing_optional = missing_optional;
 
-    let variants: Vec<(&str, &Sprite, &'static str, Density)> = pack
+    let mut variants: Vec<(&str, &Sprite, &'static str, Density)> = pack
         .animations
         .iter()
         .filter_map(|(name, variant)| {
@@ -2133,6 +2204,8 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             Some((name.as_str(), variant, base, density?))
         })
         .collect();
+    // by name, so a report lists a pack's findings in one order every run
+    variants.sort_unstable_by_key(|v| v.0);
 
     for &(piece, wanted) in marks {
         let densities = variants.iter().filter(|v| v.2 == piece).map(|v| (v.0, v.1));
@@ -2180,6 +2253,24 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             report.orphan_variants.push(name.to_string());
             continue;
         };
+        if variant.frame_ms() != base.frame_ms() {
+            report.unread_variant_timing.push(UnreadTiming {
+                name: name.to_string(),
+                field: UnreadField::FrameMs {
+                    base: base.frame_ms(),
+                    variant: variant.frame_ms(),
+                },
+            });
+        }
+        if let Some(stride) = variant.stride().filter(|&s| Some(s) != base.stride()) {
+            report.unread_variant_timing.push(UnreadTiming {
+                name: name.to_string(),
+                field: UnreadField::Stride {
+                    base: base.stride(),
+                    variant: stride,
+                },
+            });
+        }
         if variant_redraws(base, density, variant) {
             continue;
         }
@@ -2320,6 +2411,92 @@ mod validation_floor_tests {
         pack_with(&format!(
             "[animations.{name}]\nframes={frames_toml}\nframe_ms=100\n"
         ))
+    }
+
+    /// A variant timed apart from its base is reported, each field its own
+    /// warning; one that keeps its base's timing, or leaves the stride to it,
+    /// is not.
+    #[test]
+    fn a_variant_timed_apart_from_its_base_is_reported() {
+        let pack = pack_with(
+            "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n\
+             [animations.\"walking@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=200\nstride=3\n\
+             [animations.typing]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n",
+        );
+        let report = validate_pack_animations(&pack, &PackContract::default());
+        let (errors, warnings) = (report.error_count(), report.warning_count());
+        let stride = |n| NonZeroU16::new(n).expect("nonzero");
+        assert_eq!(
+            report.unread_variant_timing,
+            vec![
+                UnreadTiming {
+                    name: "typing@4x".to_string(),
+                    field: UnreadField::Stride {
+                        base: None,
+                        variant: stride(2),
+                    },
+                },
+                UnreadTiming {
+                    name: "walking@2x".to_string(),
+                    field: UnreadField::FrameMs {
+                        base: 100,
+                        variant: 200,
+                    },
+                },
+                UnreadTiming {
+                    name: "walking@2x".to_string(),
+                    field: UnreadField::Stride {
+                        base: Some(stride(2)),
+                        variant: stride(3),
+                    },
+                },
+            ]
+        );
+        let timed_alike = ValidationReport {
+            unread_variant_timing: Vec::new(),
+            ..report
+        };
+        assert_eq!(
+            timed_alike.error_count(),
+            errors,
+            "the variant still draws: no error"
+        );
+        assert_eq!(timed_alike.warning_count() + 3, warnings);
+    }
+
+    /// A caller's loop off its beat is reported, a warning; one on it, a
+    /// one-frame one, a strided one, and any the caller doesn't loop are not.
+    #[test]
+    fn a_loop_off_the_beat_is_reported() {
+        let pack = pack_with(
+            "[animations.typing]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=400\n\
+             [animations.typing_back]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=250\n\
+             [animations.fish_tank]\nframes=[\"f.sprite\"]\nframe_ms=300\n\
+             [animations.cat_walk]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\nstride=2\n\
+             [animations.printer]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\n",
+        );
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                loops: &["typing", "typing_back", "fish_tank", "cat_walk"],
+                beat_ms: 125,
+                ..PackContract::default()
+            },
+        );
+        assert_eq!(
+            report.off_beat_loops,
+            vec![OffBeatLoop {
+                name: "typing".to_string(),
+                frame_ms: 400,
+            }]
+        );
+        assert_eq!(
+            report.error_count(),
+            validate_pack_animations(&pack, &PackContract::default()).error_count(),
+            "an off-beat loop still plays: no error"
+        );
     }
 
     /// Each of the caller's walks shipped without a stride is reported, a
@@ -2918,9 +3095,20 @@ mod validation_floor_tests {
                 name: "desk@4x".to_string(),
                 mark: "cup",
             }],
+            unread_variant_timing: vec![UnreadTiming {
+                name: "typing@4x".to_string(),
+                field: UnreadField::FrameMs {
+                    base: 125,
+                    variant: 250,
+                },
+            }],
+            off_beat_loops: vec![OffBeatLoop {
+                name: "typing".to_string(),
+                frame_ms: 400,
+            }],
         };
         assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 8);
+        assert_eq!(report.warning_count(), 10);
     }
 
     /// A piece the caller stands props on, at any of its densities, leaves out
