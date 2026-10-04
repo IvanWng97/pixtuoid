@@ -13,6 +13,10 @@ pub enum Easing {
     EaseOutCubic,
     EaseInOutCubic,
     EaseInQuad,
+    /// GLSL's `smoothstep` Hermite, `t²(3 − 2t)`
+    /// (<https://registry.khronos.org/OpenGL-Refpages/gl4/html/smoothstep.xhtml>):
+    /// flat at both ends, so what it moves leaves and lands without a jolt.
+    Smoothstep,
 }
 
 impl Easing {
@@ -30,6 +34,7 @@ impl Easing {
                 }
             }
             Easing::EaseInQuad => t * t,
+            Easing::Smoothstep => t * t * (3.0 - 2.0 * t),
         }
     }
 }
@@ -370,12 +375,21 @@ mod tests {
     }
 
     #[test]
+    fn smoothstep_is_the_hermite_cubic() {
+        assert_eq!(Easing::Smoothstep.apply(0.0), 0.0);
+        assert_eq!(Easing::Smoothstep.apply(1.0), 1.0);
+        // 3t² − 2t³, exact in f32; a linear curve gives 0.25.
+        assert_eq!(Easing::Smoothstep.apply(0.25), 0.15625);
+    }
+
+    #[test]
     fn all_curves_are_monotone_non_decreasing() {
         for curve in [
             Easing::Linear,
             Easing::EaseOutCubic,
             Easing::EaseInOutCubic,
             Easing::EaseInQuad,
+            Easing::Smoothstep,
         ] {
             let mut prev = -1.0_f32;
             for i in 0..=100 {
