@@ -34,6 +34,7 @@ jobs:
       - run: npm run knip
       - run: npm run test:unit
       - uses: ./.github/actions/gen-wasm
+      - uses: ./.github/actions/gen-demos
       - run: npm run build
         env:
           GH_STARS_E2E: 1

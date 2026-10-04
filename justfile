@@ -779,7 +779,7 @@ site-e2e: gen-wasm
 # Regenerate the committed artifacts that derive from a single source of truth,
 # and check the committed copies (each `*-check` header says against what).
 
-[doc('Regenerate the committed art (generated sprites + icons + README sections + docs images + site demos)')]
+[doc('Regenerate the generated art (sprites + icons + README sections + docs images + site demos)')]
 [group('gen')]
 gen: gen-art gen-icons gen-media gen-readme gen-cutaway-golden
 
@@ -917,18 +917,22 @@ gen-wasm-check:
     # new poorly-compressible code and falling means new sprite text.
     echo "wasm $WIRE / $CAP bytes gzipped ($((WIRE * 100 / CAP))% of cap, $(((CAP - WIRE) / 1024)) KB headroom; $RAW raw, compressing to $((WIRE * 100 / RAW))%)"
 
-# scripts/gen-media.py's docstring says what `--check` compares. Run by
-# ci-tests.yml's smoke job; runnable locally
-# before pushing a visual change. A red check after an INTENTIONAL office change
-# means: run `just gen` and commit everything it rewrote in the same change.
-# Requires the .venv + node; it builds the examples it renders with.
 [doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
-gen-check: compare-selftest gen-readme-check gen-art-check
+gen-check: compare-selftest gen-readme-check gen-art-check gen-media-check
+
+# scripts/gen-media.py's docstring says what `--check` compares. The README's
+# media only: the site's demos are rendered in CI and never committed. On a PR
+# a drift here is evidence for the generated-art lens, not a gate (ci-tests.yml's
+# smoke job); main's media are regenerated after merge.
+# Requires the .venv + node; it builds the examples it renders with.
+[doc("Diff the README's committed media against what gen-media renders")]
+[group('gen')]
+gen-media-check:
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
-    .venv/bin/python3 scripts/gen-media.py --check
+    .venv/bin/python3 scripts/gen-media.py --check --only docs
     .venv/bin/python3 scripts/gen-pix-icons.py --check
 
 # ── release ───────────────────────────────────────────────────────

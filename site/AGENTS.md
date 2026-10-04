@@ -30,7 +30,8 @@ build:
   edit), `lighthouserc.json`, and the smoke viewport table.
 
 `public/wasm/` is gitignored `just gen-wasm` output; without it the office
-silently stays on its poster.
+silently stays on its poster. `public/demos/` is gitignored too:
+`just gen-media --only site` renders it locally, and CI renders it per build.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is

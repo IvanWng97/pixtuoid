@@ -126,8 +126,13 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Artifact-drift gate (everything `just gen` writes)
-        run: just gen-check
+      - name: Source drift gate (generated sprites, README sections, the comparator)
+        run: just compare-selftest gen-readme-check gen-art-check
+      # Evidence, not a gate: a look-changing PR doesn't commit media, and the
+      # generated-art lens reads the overlays below.
+      - name: README media drift (evidence)
+        continue-on-error: true
+        run: just gen-media-check
       - name: Upload gen-check diff overlays
         if: always()
         uses: actions/upload-artifact@v7
