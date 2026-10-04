@@ -4,7 +4,8 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use pixtuoid_core::sprite::format::{
     DensityMismatch, FrameCountMismatch, HairOverhang, MissingHairView, MissingMark,
-    MissingOptional, OrphanDerived, PartialSet, StandIn, UnmarkedHead, ValidationReport, load_pack,
+    MissingOptional, OffBeatLoop, OrphanDerived, PartialSet, StandIn, UnmarkedHead, UnreadField,
+    UnreadTiming, ValidationReport, load_pack,
 };
 
 use crate::{cli_stdout, strip_control_chars};
@@ -67,6 +68,33 @@ fn walk_without_stride_line(name: &str) -> String {
     format!(
         "WARN:  \"{}\" has no stride: it steps on its clock, so its feet slide as its pace changes",
         strip_control_chars(name)
+    )
+}
+
+fn unread_timing_line(t: &UnreadTiming) -> String {
+    let (field, base, variant) = match t.field {
+        UnreadField::FrameMs { base, variant } => {
+            ("frame_ms", base.to_string(), variant.to_string())
+        }
+        UnreadField::Stride { base, variant } => (
+            "stride",
+            base.map_or_else(|| "none".to_string(), |b| b.to_string()),
+            variant.to_string(),
+        ),
+    };
+    format!(
+        "WARN:  \"{}\" sets {field} = {variant}, its base {base}: a density variant plays \
+         its base's timing",
+        strip_control_chars(&t.name)
+    )
+}
+
+fn off_beat_loop_line(l: &OffBeatLoop) -> String {
+    format!(
+        "WARN:  \"{}\" holds each frame {} ms, not whole beats: the beat skips or stretches \
+         its frames",
+        strip_control_chars(&l.name),
+        l.frame_ms
     )
 }
 
@@ -192,6 +220,8 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         orphan_hairstyles,
         walks_without_stride,
         missing_marks,
+        unread_variant_timing,
+        off_beat_loops,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it.
@@ -231,6 +261,12 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     }
     for m in missing_marks {
         writeln!(out, "{}", missing_mark_line(m))?;
+    }
+    for t in unread_variant_timing {
+        writeln!(out, "{}", unread_timing_line(t))?;
+    }
+    for l in off_beat_loops {
+        writeln!(out, "{}", off_beat_loop_line(l))?;
     }
     for u in unmarked_heads {
         writeln!(out, "{}", unmarked_head_line(u))?;
@@ -309,6 +345,44 @@ mod tests {
         assert_eq!(
             line,
             "ERROR: \"typing@2x[31m\" frame 1 (from 0) is 3x1, but its name claims 2x2"
+        );
+    }
+
+    #[test]
+    fn an_unread_timing_line_names_both_values() {
+        let line = |field| {
+            unread_timing_line(&UnreadTiming {
+                name: "typing@4x\u{1b}".to_string(),
+                field,
+            })
+        };
+        assert_eq!(
+            line(UnreadField::FrameMs {
+                base: 125,
+                variant: 250
+            }),
+            "WARN:  \"typing@4x\" sets frame_ms = 250, its base 125: a density variant plays \
+             its base's timing"
+        );
+        let stride = std::num::NonZeroU16::new(3).expect("nonzero");
+        assert!(
+            line(UnreadField::Stride {
+                base: None,
+                variant: stride
+            })
+            .contains("sets stride = 3, its base none")
+        );
+    }
+
+    #[test]
+    fn an_off_beat_loop_line_names_its_frame_ms() {
+        assert_eq!(
+            off_beat_loop_line(&OffBeatLoop {
+                name: "typing".to_string(),
+                frame_ms: 400
+            }),
+            "WARN:  \"typing\" holds each frame 400 ms, not whole beats: the beat skips or \
+             stretches its frames"
         );
     }
 

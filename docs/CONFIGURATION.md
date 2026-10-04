@@ -83,6 +83,9 @@ graphics protocol, SIXEL or iTerm2's inline images: it takes the
 densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
+A variant plays its base's `frame_ms` and `stride`, and `validate-pack` warns
+on one that sets them apart; it also warns on a looping animation whose
+`frame_ms` is not a whole number of the office's beats.
 
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
