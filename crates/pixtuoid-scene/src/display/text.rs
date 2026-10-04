@@ -1,6 +1,6 @@
 //! Text as the display list lays it out: a grapheme cluster takes the cells
-//! ratatui's buffer writes for it, each [`ADVANCE`] art pixels wide on a line
-//! [`LINE_H`] tall. At the pack's 4x art a cell is one logical column, the
+//! ratatui's buffer writes for it, each `ADVANCE` art pixels wide on a line
+//! `LINE_H` tall. At the pack's 4x art a cell is one logical column, the
 //! classic badge's terminal column. The rasterizer's font draws into these
 //! cells.
 
