@@ -641,13 +641,12 @@ fn each_strike_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
             r.set_weather(strike.weather);
             r.set_motion(pixtuoid_scene::anim::Motion::Full);
             let scene = office();
-            let mut now = strike.start - lead(frame) + offset;
+            let now = strike.start - lead(frame) + offset;
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             let tiles = wire.take().matches(intro(protocol)).count();
             let mut changed = Vec::new();
-            while now < strike.end + lead(frame) {
-                now += frame;
+            for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
                 screen.at(now);
                 r.render(&scene, pack(), now).expect("render");
                 if 2 * wire.take().matches(intro(protocol)).count() > tiles {
@@ -836,7 +835,7 @@ fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         r.set_help_open(true);
         let scene = office();
-        let mut now = strike.start - lead(frame) + offset;
+        let now = strike.start - lead(frame) + offset;
         screen.at(now);
         r.render(&scene, pack(), now).expect("render");
         let free: Vec<ratatui::layout::Position> = r
@@ -850,8 +849,7 @@ fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
         };
         let mut shown = half_blocks(&r);
         let mut changed = Vec::new();
-        while now < strike.end + lead(frame) {
-            now += frame;
+        for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             assert!(!wire.take().contains(SIXEL), "the modal covers every tile");
@@ -914,13 +912,12 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
                 screen.at(at);
                 r.render(&scene, pack(), at).expect("render");
             }
-            let mut now = stutter.start - lead(frame) + offset;
+            let now = stutter.start - lead(frame) + offset;
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             wire.take();
             let mut changed = Vec::new();
-            while now < stutter.end + lead(frame) {
-                now += frame;
+            for now in crate::test_flash::frames_after(now, frame, stutter.end + lead(frame)) {
                 screen.at(now);
                 r.render(&scene, pack(), now).expect("render");
                 if tube_sent(&wire.take()) {

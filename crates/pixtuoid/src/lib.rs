@@ -450,6 +450,20 @@ pub(crate) mod test_flash {
             .flat_map(|frame| [(frame, Duration::ZERO), (frame, frame / 2)])
     }
 
+    /// The instants a painter's frames land after `from`, each `frame` on,
+    /// through the first at or past `until`. Each is `from` plus a multiple,
+    /// never a running sum, so a clock coarser than `frame` (Windows'
+    /// `SystemTime` counts 100 ns) truncates it once rather than drifting.
+    pub(crate) fn frames_after(
+        from: SystemTime,
+        frame: Duration,
+        until: SystemTime,
+    ) -> impl Iterator<Item = SystemTime> {
+        let span = until.duration_since(from).unwrap_or_default();
+        let n = u32::try_from(span.as_nanos().div_ceil(frame.as_nanos())).unwrap_or(u32::MAX);
+        (1..=n).map(move |k| from + frame * k)
+    }
+
     /// How far before a phase a painter's frames start, on its frame grid:
     /// the dark before has shown the floor, as the gap between strikes sees
     /// to.

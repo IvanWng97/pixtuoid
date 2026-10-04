@@ -77,14 +77,13 @@ fn each_strike_phase_holds_the_floor_on_screen_in_half_blocks() {
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
-        let mut now = strike.start - lead(frame) + offset;
+        let now = strike.start - lead(frame) + offset;
         screen.at(now);
         r.render(&scene, pack(), now).expect("render");
         let cells = crate::tui::renderer::scene_rect(flushed(&r).area);
         let mut shown = flushed(&r).clone();
         let mut changed = Vec::new();
-        while now < strike.end + lead(frame) {
-            now += frame;
+        for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             let differ = cells
@@ -269,13 +268,12 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
         let snapshot = |r: &TuiRenderer<Slow>| -> Vec<ratatui::buffer::Cell> {
             tube.iter().map(|&p| flushed(r)[p].clone()).collect()
         };
-        let mut now = stutter.start - lead(frame) + offset;
+        let now = stutter.start - lead(frame) + offset;
         screen.at(now);
         r.render(&scene, pack(), now).expect("render");
         let mut shown = snapshot(&r);
         let mut changed = Vec::new();
-        while now < stutter.end + lead(frame) {
-            now += frame;
+        for now in crate::test_flash::frames_after(now, frame, stutter.end + lead(frame)) {
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             let shot = snapshot(&r);

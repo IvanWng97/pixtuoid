@@ -619,11 +619,10 @@ mod tests {
         let strike = storm_strike();
         for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
             let mut window = Window::new(strike.weather);
-            let mut now = strike.start - lead(frame) + offset;
+            let now = strike.start - lead(frame) + offset;
             let mut shown = window.present(now);
             let mut changed = Vec::new();
-            while now < strike.end + lead(frame) {
-                now += frame;
+            for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
                 let presented = window.present(now);
                 let differ = presented
                     .as_slice()
@@ -663,11 +662,10 @@ mod tests {
             for at in stutter.setup {
                 window.present(at);
             }
-            let mut now = stutter.start - lead(frame) + offset;
+            let now = stutter.start - lead(frame) + offset;
             let mut shown = tube(&window.present(now));
             let mut changed = Vec::new();
-            while now < stutter.end + lead(frame) {
-                now += frame;
+            for now in crate::test_flash::frames_after(now, frame, stutter.end + lead(frame)) {
                 let presented = tube(&window.present(now));
                 if presented != shown {
                     changed.push(now);
