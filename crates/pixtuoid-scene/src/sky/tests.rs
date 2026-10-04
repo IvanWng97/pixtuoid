@@ -261,7 +261,7 @@ fn lightning_envelope_is_a_two_pulse_then_dark() {
 
 /// A strike stays inside the photosensitive-safe envelope: at most four
 /// phases, each at least [`PHOTOSENSITIVE_PHASE_MIN_MS`], and at most
-/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] flashes.
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] flashes in any second.
 ///
 /// [`PHOTOSENSITIVE_PHASE_MIN_MS`]: crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
 /// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
