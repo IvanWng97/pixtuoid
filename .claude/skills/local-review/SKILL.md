@@ -1,43 +1,43 @@
 ---
-name: two-lens-review
-version: 2.0.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (the correctness + design lenses as parallel agents; an optional pre-flight before the bots, mandatory for REVIEW.md's local escalation rows) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on 'review this PR/branch', 'is this ready to merge', a diff touching a local-only row, or 'whole-codebase review' / pre-release / periodic audit."
+name: local-review
+version: 3.0.0
+description: "Run pixtuoid's review locally at either scope — a DIFF review (one lens per matching REVIEW.md local escalation row; the correctness and design lenses are the CI bots, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use when a diff touches a local-only row, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
-# two-lens-review — local orchestration of REVIEW.md
+# local-review — local orchestration of REVIEW.md
 
 Every rule is [`REVIEW.md`](../../../REVIEW.md)'s; fill briefs from it, never a
 paraphrase here.
 
 ## When to run
 
-- **Diff scope**, optional pre-flight: before marking a PR ready.
-- **Diff scope**, mandatory: the diff matches a REVIEW.md escalation row
-  marked **local**.
+- **Diff scope**: the diff matches a REVIEW.md escalation row marked
+  **local**. The correctness and design lenses are the bots'; never re-run
+  them here.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
 
 ## Diff scope
 
 1. **Isolate** the branch in a worktree (two sessions on one tree race on
    HEAD). Note `path`, `branch`, `base` sha.
-2. **Dispatch** both lenses in parallel, in the background, plus one lens per
-   matching escalation row, each briefed:
+2. **Dispatch** one lens per matching local row, in parallel, in the
+   background: `model: sonnet` for a lens that reads evidence or runs a
+   mechanical check (test lists, mutations, renders, a walk), `opus` only for
+   a design gate. Each briefed:
 
    ```
-   You are the <correctness|design|row> lens for <PR/branch> on pixtuoid.
+   You are the <row> lens for <PR/branch> on pixtuoid.
    Worktree: <path> (branch <name>, base <sha>), read-only.
    Diff: git -C <path> diff <base>..HEAD.
-   Read AGENTS.md, then apply REVIEW.md's <lens or row>, its Lenses preamble
-   and Do not flag.
+   Read AGENTS.md, then apply REVIEW.md's <row>, its Lenses preamble and
+   Do not flag.
    <change-specific claims (from the PR body's impl-plan answers) or design
    questions, one per line>
    Run the applicable gates; report each exit code as observed, never through
-   a pipe. Each finding carries an integer confidence 0–100. The comment audit
-   reports N items each with a disposition, never "passed", plus the diff's
-   net added comment lines and every sentence deletable with nothing lost.
-   Your final message is the report, ending in one verdict: APPROVE or
+   a pipe. Each finding carries an integer confidence 0–100. Your final
+   message is the report, ending in one verdict: APPROVE or
    REQUEST-CHANGES.
    ```
 
