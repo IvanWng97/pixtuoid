@@ -95,21 +95,18 @@ pub enum VenueKey {
 
 /// A live conversation among the agents currently at a venue.
 pub struct ActiveChitchat {
-    /// The venue this conversation belongs to.
-    pub venue: VenueKey,
     /// Current attendees, sorted ascending by raw id for a stable rotation.
-    pub participants: Vec<AgentId>,
+    pub(crate) participants: Vec<AgentId>,
     /// When the conversation began — the turn/expiry clock.
-    pub started_at: SystemTime,
+    pub(crate) started_at: SystemTime,
     seed: u64,
 }
 
 impl ActiveChitchat {
     /// Starts a conversation at `venue` among `participants`.
-    pub fn new(venue: VenueKey, participants: Vec<AgentId>, now: SystemTime) -> Self {
+    pub fn new(participants: Vec<AgentId>, now: SystemTime) -> Self {
         let ms = crate::anim::epoch_ms(now);
         let mut chat = Self {
-            venue,
             participants: Vec::new(),
             started_at: now,
             seed: 0,
@@ -277,7 +274,7 @@ pub fn update_and_collect(
         }
         let chat = state
             .entry(*venue)
-            .or_insert_with(|| ActiveChitchat::new(*venue, agents.clone(), now));
+            .or_insert_with(|| ActiveChitchat::new(agents.clone(), now));
         chat.set_participants(agents.clone());
 
         if let Some((speaker, text)) = chat.current_bubble(now) {
@@ -299,13 +296,6 @@ mod tests {
 
     fn aid(s: &str) -> AgentId {
         AgentId::from_transcript_path(s)
-    }
-
-    fn vk(wp: usize) -> VenueKey {
-        VenueKey::Waypoint {
-            floor_idx: 0,
-            wp_idx: wp,
-        }
     }
 
     fn vis(wp_idx: usize, id: &str, room_id: Option<usize>) -> Visitor {
@@ -348,14 +338,14 @@ mod tests {
     #[test]
     fn test_expires_after_total_ms() {
         let start = base_time();
-        let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
+        let chat = ActiveChitchat::new(vec![aid("/a"), aid("/b")], start);
         assert!(chat.is_expired(start + Duration::from_millis(7_000)));
     }
 
     #[test]
     fn test_not_expired_before_total_ms() {
         let start = base_time();
-        let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
+        let chat = ActiveChitchat::new(vec![aid("/a"), aid("/b")], start);
         assert!(!chat.is_expired(start + Duration::from_millis(3_000)));
     }
 
@@ -363,7 +353,7 @@ mod tests {
     fn round_robin_two_participants_alternates() {
         let start = base_time();
         let (a, b) = (aid("/a"), aid("/b"));
-        let chat = ActiveChitchat::new(vk(0), vec![a, b], start);
+        let chat = ActiveChitchat::new(vec![a, b], start);
         let p0 = chat.participants[0];
         let p1 = chat.participants[1];
         assert_eq!(chat.current_bubble(start).unwrap().0, p0);
@@ -385,7 +375,7 @@ mod tests {
     fn round_robin_cycles_all_participants() {
         let start = base_time();
         let ids: Vec<AgentId> = (0..4).map(|i| aid(&format!("/g{i}"))).collect();
-        let chat = ActiveChitchat::new(vk(0), ids.clone(), start);
+        let chat = ActiveChitchat::new(ids.clone(), start);
         let mut speakers = std::collections::HashSet::new();
         for turn in 0..4u64 {
             let t = start + Duration::from_millis(turn * 1_500);
@@ -400,7 +390,7 @@ mod tests {
     #[test]
     fn round_robin_three_participants_wraps() {
         let start = base_time();
-        let chat = ActiveChitchat::new(vk(0), vec![aid("/x"), aid("/y"), aid("/z")], start);
+        let chat = ActiveChitchat::new(vec![aid("/x"), aid("/y"), aid("/z")], start);
         let p = chat.participants.clone();
         let speaker = |turn: u64| {
             chat.current_bubble(start + Duration::from_millis(turn * 1_500))
@@ -416,14 +406,14 @@ mod tests {
     #[test]
     fn empty_participants_yields_no_bubble() {
         let start = base_time();
-        let chat = ActiveChitchat::new(vk(0), vec![], start);
+        let chat = ActiveChitchat::new(vec![], start);
         assert!(chat.current_bubble(start).is_none());
     }
 
     #[test]
     fn no_bubble_after_four_turns() {
         let start = base_time();
-        let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
+        let chat = ActiveChitchat::new(vec![aid("/a"), aid("/b")], start);
         assert!(
             chat.current_bubble(start + Duration::from_millis(6_000))
                 .is_none()
@@ -435,7 +425,7 @@ mod tests {
         // Every round-robin test above asserts only the SPEAKER (`.0`), so dropping
         // `turn` from `line_idx` — freezing every turn on one quip — goes uncaught.
         let start = base_time();
-        let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
+        let chat = ActiveChitchat::new(vec![aid("/a"), aid("/b")], start);
         let lines: Vec<&str> = (0..TURNS)
             .map(|t| {
                 chat.current_bubble(start + Duration::from_millis(t * TURN_MS))

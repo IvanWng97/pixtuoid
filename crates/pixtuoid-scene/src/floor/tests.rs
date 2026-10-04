@@ -96,7 +96,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut walk = WalkState::new(id);
+    let mut walk = WalkState::default();
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
     walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
@@ -738,7 +738,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new(Arc::clone(&pack));
-    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
+    session.floor.ctx.walks.insert(gone, WalkState::default());
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);

@@ -208,7 +208,7 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let idle = entry_slot(now - Duration::from_secs(60));
-    let mut walk = WalkState::new(idle.agent_id);
+    let mut walk = WalkState::default();
     walk.wander.phase = crate::walk::WanderPhase::AtWaypoint(walk_profile(
         100,
         WalkIntent::WanderBack,

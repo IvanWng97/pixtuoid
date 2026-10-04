@@ -240,10 +240,7 @@ pub fn derive_with_routing(
     if let Some(exit_time) = slot.exiting_at {
         let door_target = layout.door_threshold;
 
-        let walk = rctx
-            .walks
-            .entry(slot.agent_id)
-            .or_insert_with(|| WalkState::new(slot.agent_id));
+        let walk = rctx.walks.entry(slot.agent_id).or_default();
 
         if walk.exit.is_none() {
             // From wherever the agent actually is — otherwise one mid-coffee-run at
@@ -328,10 +325,7 @@ pub fn derive_with_routing(
     let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
     let settle = chair_settle.map_or(Settle::None, Settle::End);
 
-    let walk = rctx
-        .walks
-        .entry(slot.agent_id)
-        .or_insert_with(|| WalkState::new(slot.agent_id));
+    let walk = rctx.walks.entry(slot.agent_id).or_default();
 
     let entry_from = match re_enter {
         Some(ReEnter::Live(p)) => p,
@@ -468,10 +462,7 @@ pub fn derive_with_routing(
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;
     let pose = if desk_pose {
-        let walk = rctx
-            .walks
-            .entry(slot.agent_id)
-            .or_insert_with(|| WalkState::new(slot.agent_id));
+        let walk = rctx.walks.entry(slot.agent_id).or_default();
         // ARM ONCE per transition: `route_walking_pose` records the advancing walker
         // into history every call, so re-checking the gate on a second `derive` this
         // frame sees a CLOSER `prev` and drops the agent to Seated mid-walk. Keyed on
@@ -591,9 +582,7 @@ fn route_walking_pose(
     // re-routes onto a differently-shaped path, landing the frozen progress `t` on a
     // new pixel — the visible "flash" — and spiking the frame's A* cost.
     let path = {
-        let walk = walks
-            .entry(slot.agent_id)
-            .or_insert_with(|| WalkState::new(slot.agent_id));
+        let walk = walks.entry(slot.agent_id).or_default();
         match &walk.walk_path {
             Some(wp) if wp.from == from && wp.to == to => wp.path.clone(),
             _ => {

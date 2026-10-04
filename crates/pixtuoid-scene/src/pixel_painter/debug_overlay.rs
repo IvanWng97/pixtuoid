@@ -307,14 +307,16 @@ mod tests {
             scene.agents.insert(id, slot(id));
         }
         let mut walks: HashMap<AgentId, WalkState> = HashMap::new();
-        let mut ms_path = WalkState::new(id_path);
-        ms_path.walk_path = Some(WalkPathSnapshot {
-            from: Point { x: 5, y: 5 },
-            to: Point { x: 80, y: 80 },
-            path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
-        });
+        let ms_path = WalkState {
+            walk_path: Some(WalkPathSnapshot {
+                from: Point { x: 5, y: 5 },
+                to: Point { x: 80, y: 80 },
+                path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
+            }),
+            ..WalkState::default()
+        };
         walks.insert(id_path, ms_path);
-        walks.insert(id_nopath, WalkState::new(id_nopath));
+        walks.insert(id_nopath, WalkState::default());
         // id_absent is intentionally NOT in the walks map.
 
         let bg = Rgb { r: 0, g: 0, b: 0 };
