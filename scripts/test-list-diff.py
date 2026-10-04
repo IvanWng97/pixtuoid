@@ -7,6 +7,8 @@ base is the list of the main commit that merge's first parent names, not the
 merge-base: main's own test changes since then cancel out. Only API-set run
 metadata (`workflow_run.head_sha`, `head_branch`) is trusted; the artifact is
 PR-built data, so its claimed parents are checked against the PR head and main.
+Both lists are Linux's (the `snapshots` job): a `#[cfg(windows)]` or macOS-only
+test is in neither, so a refactor that moves one checks it on that OS.
 
 Usage: `test-list-diff.py PR [--head-list FILE] [--base-list FILE]`, in a clone
 with `gh` authenticated. A missing artifact (expired, or its run failed first)
