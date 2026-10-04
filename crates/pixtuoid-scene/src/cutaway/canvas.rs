@@ -19,6 +19,7 @@ use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
 /// A cutaway painter's frame buffer and what it shows, for one pack.
+#[derive(Debug)]
 pub struct CutawayCanvas {
     // Held, so no other pack can take its place unnoticed.
     pack: Arc<Pack>,
@@ -28,6 +29,7 @@ pub struct CutawayCanvas {
 }
 
 /// One frame from [`CutawayCanvas::frame`].
+#[derive(Debug)]
 pub struct CanvasFrame<'a> {
     /// The whole frame, as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
     /// paints it.
@@ -48,6 +50,7 @@ pub enum Dirty {
 
 /// What every pixel of a frame is painted under, beyond its display list and
 /// the canvas's pack.
+#[derive(Debug)]
 struct Epoch {
     // Held, so a later layout cannot reuse its address.
     layout: Arc<SceneLayout>,
@@ -55,7 +58,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    carpet: crate::atmosphere::Carpet,
+    carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -70,6 +73,7 @@ impl PartialEq for Epoch {
     }
 }
 
+#[derive(Debug)]
 struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
@@ -887,7 +891,7 @@ mod tests {
 
     /// The digests [`the_canvas_paints_the_pinned_frames`] pins, one frame a
     /// line.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     const PINNED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cutaway/canvas.golden");
 
     /// Every pixel of a fixed set of frames, as committed: a refactor of the
@@ -895,7 +899,7 @@ mod tests {
     /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
     /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
     // Without the density art every frame is d=1, and the d4 rows would go unchecked.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn the_canvas_paints_the_pinned_frames() {
         use crate::sky::{Weather, WeatherPolicy};

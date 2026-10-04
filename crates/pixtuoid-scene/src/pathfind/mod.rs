@@ -24,7 +24,7 @@ pub const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 /// Abstract pathfinder — routes from `from` to `to` over the supplied mask +
 /// overlay, returning a polyline (first = `from`, last = `to`, intermediate =
 /// corners).
-pub trait Router {
+pub trait Router: std::fmt::Debug {
     /// Compute or look up the route.
     fn route(
         &mut self,

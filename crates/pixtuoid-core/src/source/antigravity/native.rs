@@ -10,6 +10,7 @@ use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 
 /// Source that watches Antigravity CLI conversation log directories.
+#[derive(Debug)]
 pub struct AntigravitySource {
     /// The watched Antigravity brain-dir root; conversation-log JSONL lives under it.
     pub brain_root: PathBuf,

@@ -1,12 +1,12 @@
 //! Drop the bundled pack's density art — its `@Nx` animations, the hairstyles
 //! that dress them and its buildings' `@Nx` variants — for a build without the
-//! `density-art` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
+//! `cutaway-assets` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
 //! both run [`bundled_without_density_art`], so the manifest a feature-less
 //! build embeds is one a test has loaded.
 
 use std::collections::BTreeSet;
 
-/// `pack_toml` as a build without `density-art` embeds it — without its density
+/// `pack_toml` as a build without `cutaway-assets` embeds it — without its density
 /// art ([`strip_density_art`]), then without its comments — and the files it no
 /// longer draws.
 pub(crate) fn bundled_without_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
