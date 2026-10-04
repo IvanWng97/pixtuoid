@@ -5961,6 +5961,7 @@ fn the_outside_reaches_only_the_glass() {
                     indoor_scale: frame.indoor_scale,
                     neon: frame.neon,
                     beat: timing.beat,
+                    bulbs: crate::lighting::DeskBulbs::of(&pack),
                 },
             );
             let neon = crate::floor::neon_look(frame.neon, theme);
