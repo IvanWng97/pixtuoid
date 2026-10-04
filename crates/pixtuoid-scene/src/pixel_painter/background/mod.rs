@@ -21,6 +21,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use super::palette::{RgbLut, WHITE, blend_rgb};
 
 use crate::atmosphere::Moment;
+use crate::dither::Dithered;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{WindowBay, wall_trim_row, window_posts, window_rows};
 use crate::outside::Outside;
@@ -52,7 +53,7 @@ struct BaseFillKey {
     buf_w: u16,
     buf_h: u16,
     band_h: u16,
-    carpet: [Rgb; 3],
+    carpet: Dithered<[Rgb; 3]>,
     wall: Rgb,
 }
 
@@ -84,10 +85,11 @@ impl BaseFillCache {
                         .wrapping_mul(73)
                         .wrapping_add((y as u32).wrapping_mul(151))
                         ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
+                    let carpet = key.carpet.at(x, y);
                     let color = match hash % 17 {
-                        0 | 1 => key.carpet[0],
-                        2 | 3 => key.carpet[1],
-                        _ => key.carpet[2],
+                        0 | 1 => carpet[0],
+                        2 | 3 => carpet[1],
+                        _ => carpet[2],
                     };
                     self.filled.put(x, y, color);
                 }
@@ -114,8 +116,7 @@ pub(super) fn paint_ground_and_walls(
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let carpet = look.carpet(theme);
-    let carpet = [carpet.lit, carpet.dark, carpet.base];
+    let carpet = look.carpet(theme).map(|c| [c.lit, c.dark, c.base]);
     base_fill.blit_into(
         buf,
         BaseFillKey {
