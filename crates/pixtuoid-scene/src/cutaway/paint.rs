@@ -3628,8 +3628,9 @@ mod tests {
     #[test]
     fn the_outside_reaches_only_the_glass() {
         use crate::floor::{FloorMeta, FloorSession};
-        const UNPAINTED: pixtuoid_core::sprite::Rgb =
-            pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
+        use crate::outside::tests::{
+            UNPAINTED, assert_the_outside_reaches_only_the_glass, painted_alone,
+        };
         let pack = test_default_pack();
         let theme = &crate::theme::NORMAL;
         let office = FloorSession::new(std::sync::Arc::new(pack.clone()))
@@ -3661,28 +3662,22 @@ mod tests {
                 paint(layout, list, &mut CutawayCache::default(), &mut buf);
                 buf
             };
-            let mut hung_over_glass = 0;
-            let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
-            for weathered in crate::outside::tests::every_sky() {
-                let name = format!("{} at {s}x", weathered.name);
-                let timing = Motion::Full.timing(weathered.now);
-                let moment = |sky| Moment::resolve(sky, theme, 0.0, timing);
-                let shown = moment(weathered.sky);
-                let list = crate::display::compose::compose_at(
+            let moment = |weathered: &crate::outside::tests::Weathered, sky| {
+                Moment::resolve(sky, theme, 0.0, Motion::Full.timing(weathered.now))
+            };
+            let list = |shown: &Moment| {
+                crate::display::compose::compose_at(
                     &office.frame,
                     at,
-                    &shown,
+                    shown,
                     FloorMeta::ground(),
                     quiet_board(),
-                );
-                let mut bare = crate::display::compose::compose_at(
-                    &office.frame,
-                    at,
-                    &shown,
-                    FloorMeta::ground(),
-                    quiet_board(),
-                );
-                let plain = moment(weathered.bare);
+                )
+            };
+            let frames = |weathered: &crate::outside::tests::Weathered| {
+                let shown = moment(weathered, weathered.sky);
+                let mut bare = list(&shown);
+                let plain = moment(weathered, weathered.bare);
                 let mut views = Vec::new();
                 push_windows(at, &plain, &GlassWeather::of(&plain), &mut views);
                 for piece in bare.pieces_mut() {
@@ -3695,62 +3690,36 @@ mod tests {
                         piece.fingerprint = fingerprint(&piece.kind);
                     }
                 }
-                // What every piece but a window paints, a glass wall aside (it
-                // shows what lies behind it): one set an instant.
-                if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
-                    let mut over = RgbBuffer::filled(w, h, UNPAINTED);
-                    let mut painted = vec![false; usize::from(w) * usize::from(h)];
-                    let mut cache = CutawayCache::default();
-                    for piece in list.pieces() {
-                        if matches!(piece.kind, PieceKind::Window { .. })
-                            || piece.kind.reads_under()
-                        {
-                            continue;
-                        }
-                        let epoch = over.begin_writes();
-                        paint_piece(&piece.kind, &pack, theme, scale, &mut cache, &mut over);
-                        for y in scale.to_buffer(piece.span.y0)
-                            ..scale.to_buffer(piece.span.y1 + 1).min(h)
-                        {
-                            for x in scale.to_buffer(piece.span.x0)
-                                ..scale.to_buffer(piece.span.x1 + 1).min(w)
-                            {
-                                if over.written_in(x, y, epoch) {
-                                    painted[usize::from(y) * usize::from(w) + usize::from(x)] =
-                                        true;
-                                }
-                            }
-                        }
-                    }
-                    over.end_writes();
-                    covered = Some((weathered.now, painted));
-                }
-                let covered = &covered.as_ref().expect("filled above").1;
-                let (shown, plain) = (painted(&list), painted(&bare));
-                let mut glass = 0;
-                for y in 0..h {
-                    for x in 0..w {
-                        let on_glass = layout.glass_at(x / s, y / s);
-                        let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
-                        hung_over_glass += usize::from(on_glass && hung);
-                        if shown.get(x, y) == plain.get(x, y) {
-                            continue;
-                        }
-                        assert!(
-                            on_glass && !hung,
-                            "{name}: the outside reached ({x}, {y}), off the glass"
-                        );
-                        glass += 1;
-                    }
-                }
-                assert_eq!(
-                    glass > 0,
-                    weathered.changes_glass,
-                    "{name}: {glass} glass pixels"
-                );
-            }
+                [painted(&list(&shown)), painted(&bare)]
+            };
+            // What every piece but a window paints, a glass wall aside (it
+            // shows what lies behind it).
+            let covered = |weathered: &crate::outside::tests::Weathered| {
+                let list = list(&moment(weathered, weathered.sky));
+                let mut cache = CutawayCache::default();
+                painted_alone(
+                    (w, h),
+                    list.pieces().iter().filter(|piece| {
+                        !matches!(piece.kind, PieceKind::Window { .. }) && !piece.kind.reads_under()
+                    }),
+                    |piece| {
+                        (
+                            scale.to_buffer(piece.span.x0)..scale.to_buffer(piece.span.x1 + 1),
+                            scale.to_buffer(piece.span.y0)..scale.to_buffer(piece.span.y1 + 1),
+                        )
+                    },
+                    |piece, over| paint_piece(&piece.kind, &pack, theme, scale, &mut cache, over),
+                )
+            };
+            let hung_over_glass = assert_the_outside_reaches_only_the_glass(
+                &format!("cutaway at {s}x"),
+                (w, h),
+                |x, y| layout.glass_at(x / s, y / s),
+                frames,
+                covered,
+            );
             assert!(
-                hung_over_glass > 0,
+                !hung_over_glass.is_empty(),
                 "at {s}x nothing hangs over a window, so nothing was compared there"
             );
         }

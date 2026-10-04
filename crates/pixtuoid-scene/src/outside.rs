@@ -238,6 +238,7 @@ impl Outside {
 pub(crate) mod tests {
     use super::*;
     use crate::sky::{Sky, Weather};
+    use pixtuoid_core::sprite::RgbBuffer;
 
     /// One sky a painter's frame is drawn under, beside the no-weather sky of
     /// its instant, which its windows show in the frame it is held against.
@@ -279,6 +280,87 @@ pub(crate) mod tests {
             "the sweep reaches a sunset's blaze"
         );
         skies
+    }
+
+    /// What a test buffer holds where nothing painted.
+    pub(crate) const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
+
+    /// Which pixels of a `w`×`h` buffer some of `pieces` writes, each painted
+    /// alone by `paint` and looked for in the rows and columns `within` gives it.
+    pub(crate) fn painted_alone<P>(
+        (w, h): (u16, u16),
+        pieces: impl IntoIterator<Item = P>,
+        within: impl Fn(&P) -> (Range<u16>, Range<u16>),
+        mut paint: impl FnMut(&P, &mut RgbBuffer),
+    ) -> Vec<bool> {
+        let mut over = RgbBuffer::filled(w, h, UNPAINTED);
+        let mut painted = vec![false; usize::from(w) * usize::from(h)];
+        for piece in pieces {
+            let epoch = over.begin_writes();
+            paint(&piece, &mut over);
+            let (xs, ys) = within(&piece);
+            for y in ys.start..ys.end.min(h) {
+                for x in xs.start..xs.end.min(w) {
+                    if over.written_in(x, y, epoch) {
+                        painted[usize::from(y) * usize::from(w) + usize::from(x)] = true;
+                    }
+                }
+            }
+        }
+        over.end_writes();
+        painted
+    }
+
+    /// Under each of [`every_sky`], a painter's frame matches the one whose
+    /// windows show its instant's no-weather sky everywhere but on glass
+    /// nothing else paints, and a sky other than a clear one changes some
+    /// glass. `frames` paints a sky's frame and that twin, `covered` gives each
+    /// pixel something other than a window paints at the sky's instant (see
+    /// [`painted_alone`]) and `on_glass` whether a pixel is glass. Returns the
+    /// glass pixels something hangs over, for the painter's population guard.
+    pub(crate) fn assert_the_outside_reaches_only_the_glass(
+        painter: &str,
+        (w, h): (u16, u16),
+        on_glass: impl Fn(u16, u16) -> bool,
+        mut frames: impl FnMut(&Weathered) -> [RgbBuffer; 2],
+        mut covered: impl FnMut(&Weathered) -> Vec<bool>,
+    ) -> std::collections::HashSet<(u16, u16)> {
+        let mut hung_over_glass = std::collections::HashSet::new();
+        let mut at_instant: Option<(std::time::SystemTime, Vec<bool>)> = None;
+        for weathered in every_sky() {
+            let name = format!("{painter}, {}", weathered.name);
+            if at_instant
+                .as_ref()
+                .is_none_or(|(now, _)| *now != weathered.now)
+            {
+                at_instant = Some((weathered.now, covered(&weathered)));
+            }
+            let covered = &at_instant.as_ref().expect("filled above").1;
+            let [shown, bare] = frames(&weathered);
+            let mut glass = 0;
+            for y in 0..h {
+                for x in 0..w {
+                    let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
+                    if hung && on_glass(x, y) {
+                        hung_over_glass.insert((x, y));
+                    }
+                    if shown.get(x, y) == bare.get(x, y) {
+                        continue;
+                    }
+                    assert!(
+                        on_glass(x, y) && !hung,
+                        "{name}: the outside reached ({x}, {y}), off the glass"
+                    );
+                    glass += 1;
+                }
+            }
+            assert_eq!(
+                glass > 0,
+                weathered.changes_glass,
+                "{name}: {glass} glass pixels"
+            );
+        }
+        hung_over_glass
     }
 
     fn bay() -> WindowBay {
