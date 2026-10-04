@@ -574,6 +574,7 @@
   assert: |
     all(.queue_rules[];
       .branch_protection_injection_mode == "none"
+      and (.merge_bot_account // "" | length > 0)
       and ((["check-success = ci-gate", "check-success = GitGuardian Security Checks",
              "check-success = claude-review/correctness", "check-success = claude-review/design",
              "#review-threads-unresolved = 0"] - .queue_conditions) == [])
@@ -582,4 +583,5 @@
     - .queue_rules[0].queue_conditions |= map(select(. != "check-success = claude-review/design"))
     - .queue_rules[0].queue_conditions |= map(select(. != "#review-threads-unresolved = 0"))
     - .queue_rules[0].branch_protection_injection_mode = "queue"
+    - del(.queue_rules[0].merge_bot_account)
     - .queue_rules[0].merge_conditions = []

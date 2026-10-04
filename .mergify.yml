@@ -22,6 +22,9 @@ queue_rules:
     # a PR out and costs a full CI rerun; this covers the backlogged full tier.
     checks_timeout: 60 min
     branch_protection_injection_mode: none
+    # `none` requires an account that satisfies the protections itself
+    # (docs.mergify.com/configuration/file-format); enforce_admins holds it to them.
+    merge_bot_account: IvanWng97
     # The PR itself: branch protection's required checks (here the light-tier
     # ci-gate) and conversation resolution, restated since nothing is injected.
     queue_conditions:
