@@ -22,6 +22,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
+use crate::dither::Dithered;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts, window_rows,
@@ -53,7 +54,7 @@ struct BaseFillKey {
     buf_w: u16,
     buf_h: u16,
     band_h: u16,
-    carpet: [Rgb; 3],
+    carpet: Dithered<[Rgb; 3]>,
     wall: Rgb,
 }
 
@@ -85,10 +86,11 @@ impl BaseFillCache {
                         .wrapping_mul(73)
                         .wrapping_add((y as u32).wrapping_mul(151))
                         ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
+                    let carpet = key.carpet.at(x, y);
                     let color = match hash % 17 {
-                        0 | 1 => key.carpet[0],
-                        2 | 3 => key.carpet[1],
-                        _ => key.carpet[2],
+                        0 | 1 => carpet[0],
+                        2 | 3 => carpet[1],
+                        _ => carpet[2],
                     };
                     self.filled.put(x, y, color);
                 }
@@ -117,8 +119,7 @@ pub(super) fn paint_ground_and_walls(
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let carpet = look.carpet(theme);
-    let carpet = [carpet.lit, carpet.dark, carpet.base];
+    let carpet = look.carpet(theme).map(|c| [c.lit, c.dark, c.base]);
     base_fill.blit_into(
         buf,
         BaseFillKey {
@@ -177,12 +178,15 @@ pub(super) fn paint_ground_and_walls(
     }
 }
 
-/// Wash a flat translucent color over `pane`'s glass INTERIOR, one pixel in
-/// from each edge: it takes the raw window rect and does its own offset math.
-fn wash_glass(buf: &mut RgbBuffer, pane: Bounds, color: Rgb, alpha: f32) {
+/// Wash `wash` over `pane`'s glass INTERIOR, one pixel in from each edge:
+/// it takes the raw window rect and does its own offset math.
+fn wash_glass(buf: &mut RgbBuffer, pane: Bounds, wash: Dithered<Option<(Rgb, f32)>>) {
     for dy in 1..pane.height.saturating_sub(1) {
         for dx in 1..pane.width.saturating_sub(1) {
-            blend_pixel(buf, pane.x + dx, pane.y + dy, color, alpha);
+            let (x, y) = (pane.x + dx, pane.y + dy);
+            if let Some((color, alpha)) = wash.at(x, y) {
+                blend_pixel(buf, x, y, color, alpha);
+            }
         }
     }
 }
@@ -247,9 +251,7 @@ fn paint_floor_to_ceiling_window(
 
     // The veil goes on BEFORE the marks and the bolt, so rain and lightning
     // still read on top of the murk.
-    if let Some((color, alpha)) = glass_weather.veil {
-        wash_glass(buf, pane, color, alpha);
-    }
+    wash_glass(buf, pane, glass_weather.veil);
 
     // Unclipped by the mullion and transom, which the classic's marks run over.
     let marks = glass_weather.marks(
@@ -271,7 +273,7 @@ fn paint_floor_to_ceiling_window(
     // level so it fires in lockstep with `paint_lightning_flash`.
     let level = sky.flash();
     if level > 0.0 {
-        wash_glass(buf, pane, WHITE, 0.6 * level);
+        wash_glass(buf, pane, Dithered::solid(Some((WHITE, 0.6 * level))));
     }
 
     if let Some(blaze) = sky_view.blaze() {

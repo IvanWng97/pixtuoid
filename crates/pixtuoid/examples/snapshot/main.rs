@@ -133,9 +133,10 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
 
-    /// Minutes past `--now-hour` (0–59): a weather transition runs mid-hour.
-    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..60))]
-    now_min: u64,
+    /// Seconds past `--now-hour` (0–3599), fine enough to sample a weather
+    /// transition.
+    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..3600))]
+    now_sec: u64,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
@@ -362,7 +363,7 @@ fn main() -> Result<()> {
         Some(h) => {
             pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
                 .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?
-                + std::time::Duration::from_secs(60 * args.now_min)
+                + std::time::Duration::from_secs(args.now_sec)
         }
         None => SystemTime::now(),
     };
