@@ -211,18 +211,23 @@ fn run(
     r.set_motion(case.motion);
     let start = start_for(case.motion)?;
     let scene = office(start);
-    let frames = SCENARIO.as_nanos() / tick.as_nanos();
+    // By frame index: `tick` is a truncated third of a second, so no multiple
+    // of it lands exactly on a whole second.
+    let frame_at = |d: Duration| d.as_nanos() / tick.as_nanos();
+    let frames = frame_at(SCENARIO);
+    let (mut slid, mut resized) = (false, false);
     let mut out = Vec::new();
     for n in 0..frames {
-        let at = tick * u32::try_from(n)?;
-        let now = start + at;
-        if at == SLIDE_AT {
+        let now = start + tick * u32::try_from(n)?;
+        if n == frame_at(SLIDE_AT) {
             r.navigate_floor(1, now);
+            slid = r.transition().is_some();
         }
-        if at == RESIZE_AT {
+        if n == frame_at(RESIZE_AT) {
             r.terminal
                 .backend_mut()
                 .resize(TERMINAL.0 - RESIZE_BY.0, TERMINAL.1 - RESIZE_BY.1);
+            resized = true;
         }
         wire.take();
         clock.take();
@@ -243,6 +248,11 @@ fn run(
             bytes,
         });
     }
+    anyhow::ensure!(
+        slid && resized,
+        "{}: the slide or the resize never ran",
+        case.name
+    );
     Ok(out)
 }
 

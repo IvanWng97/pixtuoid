@@ -891,8 +891,8 @@ fn rain_at_maps_audible_rain_under_its_policy() {
     }
 }
 
-/// From any start, a full storm on a moving tier has a strike to find; at rest
-/// it has none.
+/// From any start, a full storm on a moving tier has a strike to find, and the
+/// instant found flashes; at rest it has none.
 #[test]
 fn a_strike_follows_every_start_on_a_moving_tier() {
     use crate::anim::Motion;
@@ -904,8 +904,10 @@ fn a_strike_follows_every_start_on_a_moving_tier() {
             if motion.pace().is_none() {
                 assert_eq!(strike, None, "{motion:?}");
             } else {
+                let storm = WeatherPolicy::Forced(Weather::Storm);
                 assert!(
-                    strike.is_some_and(|t| t >= after),
+                    strike
+                        .is_some_and(|t| t >= after && flash_level_at(motion.beat(t), storm) > 0.0),
                     "{motion:?} from {start} ms"
                 );
             }
