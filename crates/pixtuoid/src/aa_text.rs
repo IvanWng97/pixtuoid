@@ -323,6 +323,14 @@ mod tests {
         assert_eq!(blend_channel(0, 200, 0.5), 146);
         assert_eq!(blend_channel(255, 0, 0.5), 188);
         assert_eq!(blend_channel(200, 0, 0.5), 146, "symmetric in light");
+        // Uncovered and fully covered pixels are exact for every pair: the
+        // glyph rasterizer hands zero-coverage pixels over too.
+        for bg in 0..=u8::MAX {
+            for fg in 0..=u8::MAX {
+                assert_eq!(blend_channel(bg, fg, 0.0), bg, "{bg} under {fg}");
+                assert_eq!(blend_channel(bg, fg, 1.0), fg, "{fg} over {bg}");
+            }
+        }
         assert_eq!(blend_channel(0, 200, 2.0), 200, "over-coverage clamps");
         assert_eq!(blend_channel(0, 200, -1.0), 0, "negative clamps");
     }

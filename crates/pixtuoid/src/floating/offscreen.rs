@@ -235,8 +235,8 @@ impl<'a> XrgbSurface<'a> {
         }
     }
 
-    /// Alpha-composite `color` over the pixel at `(x, y)` by `coverage` — a straight
-    /// linear blend in `0x00RRGGBB` space; the badge/board sit on opaque office
+    /// Alpha-composite `color` over the pixel at `(x, y)` by `coverage`, through
+    /// [`crate::aa_text::blend_channel`]; the badge/board sit on opaque office
     /// pixels, so there is no alpha channel to keep. Off-surface is a no-op.
     fn blend(&mut self, x: i32, y: i32, color: u32, coverage: f32) {
         if x < 0 || y < 0 || (x as usize) >= self.w || (y as usize) >= self.h {

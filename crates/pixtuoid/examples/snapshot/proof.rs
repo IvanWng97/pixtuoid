@@ -130,9 +130,9 @@ fn aa_draw_text_at(
     })
 }
 
-/// Alpha-composite `color` onto the existing pixel at `coverage`. The panel's
-/// text always sits on an opaque dark ground, never a transparent surface, so a
-/// straight linear blend with no alpha channel to preserve is correct.
+/// Alpha-composite `color` onto the existing pixel at `coverage`, through
+/// `blend_channel`. The panel's text always sits on an opaque dark ground, never
+/// a transparent surface, so there is no alpha channel to preserve.
 fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32) {
     if x < 0 || y < 0 || (x as u32) >= img.width() || (y as u32) >= img.height() {
         return;
