@@ -144,7 +144,7 @@ mod tests {
 
     /// A theme's fixtures take its colours.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_recolour_rethemes_the_fixture_art() {
         let pack = crate::pack::test_default_pack();
         let art = pack
@@ -167,7 +167,7 @@ mod tests {
     /// A recolour re-derives the shading: one shaded cell of the vending art
     /// is a different colour in two themes whose appliance bodies differ.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_recolour_reshades_the_appliance_art() {
         let pack = crate::pack::test_default_pack();
         let art = pack

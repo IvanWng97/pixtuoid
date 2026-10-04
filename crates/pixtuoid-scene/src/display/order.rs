@@ -105,17 +105,20 @@ impl Span {
         Self { layer, ..self }
     }
 
-    /// Whether it shares a cell with `area`, in the same logical units. An
-    /// empty area shares none.
+    /// Whether it shares a cell with `area`, in the same logical units.
+    #[cfg(test)]
     pub(crate) fn meets(self, area: Bounds) -> bool {
-        // u32: an area's exclusive end can lie one past `u16::MAX`.
-        let end = |at: u16, len: u16| u32::from(at) + u32::from(len);
-        area.width > 0
-            && area.height > 0
-            && area.x <= self.x1
-            && u32::from(self.x0) < end(area.x, area.width)
-            && area.y <= self.y1
-            && u32::from(self.y0) < end(area.y, area.height)
+        self.bounds().overlaps(area)
+    }
+
+    /// The same cells as a [`Bounds`].
+    pub(crate) fn bounds(self) -> Bounds {
+        Bounds {
+            x: self.x0,
+            y: self.y0,
+            width: (self.x1 - self.x0).saturating_add(1),
+            height: (self.y1 - self.y0).saturating_add(1),
+        }
     }
 
     fn key(self) -> (u16, Layer) {

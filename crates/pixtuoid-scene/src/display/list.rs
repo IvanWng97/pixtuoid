@@ -4,7 +4,9 @@ use pixtuoid_core::sprite::format::Pack;
 
 use super::Span;
 use crate::atmosphere::Carpet;
+use crate::dither::Dithered;
 use crate::layout::{Bounds, Point};
+use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -75,7 +77,7 @@ pub(crate) struct Badge {
     pub(crate) tone: crate::overlay::LabelTone,
 }
 
-/// One frame's pieces — the windows' glass, the decor hung on the wall and
+/// One frame's pieces — the windows, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
@@ -90,9 +92,11 @@ pub(crate) struct DisplayList<'a> {
     /// change repaints the whole frame.
     pub(super) ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
-    pub(super) carpet: Carpet,
+    pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::cutaway::light::Flash,
+    /// The figures' hovers, in `pieces`' order.
+    pub(super) hovers: super::Hovers,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pub(super) pack: &'a Pack,
@@ -117,6 +121,24 @@ pub(crate) struct Piece {
     /// one layout, theme, pack, scale and ambient: it does not capture a change
     /// to those.
     pub(crate) fingerprint: u64,
+}
+
+impl Piece {
+    /// Its hover: a character's body, a creature's span; no other piece is
+    /// one.
+    pub(crate) fn hover(&self) -> Option<super::Hover> {
+        let (at, target) = match &self.kind {
+            PieceKind::Character { figure, body, .. } => {
+                (*body, super::HoverTarget::Agent(figure.key.frame.agent_id))
+            }
+            PieceKind::Creature { who, .. } => (self.span, who.clone()),
+            _ => return None,
+        };
+        Some(super::Hover {
+            at: at.bounds(),
+            target,
+        })
+    }
 }
 
 /// One of the room's lights: what it lifts, over which cells. A change repaints
@@ -168,7 +190,7 @@ impl<'a> DisplayList<'a> {
         self.ambient
     }
 
-    pub(crate) fn carpet(&self) -> Carpet {
+    pub(crate) fn carpet(&self) -> Dithered<Carpet> {
         self.carpet
     }
 
@@ -188,29 +210,16 @@ impl<'a> DisplayList<'a> {
         self.scale
     }
 
+    pub(crate) fn hovers(&self) -> &super::Hovers {
+        &self.hovers
+    }
+
     /// Each drawn agent's badge, in draw order.
     #[cfg(test)]
     pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
             PieceKind::Badge { badge } => Some(badge),
             _ => None,
-        })
-    }
-
-    /// Each piece's hover box and the agent it shows, in draw order: a
-    /// character's `body`, every other piece's span showing none. A badge is
-    /// no hover target, as in the classic: neighbours' plates overlap, so one
-    /// would claim the body under another's
-    /// (`hovering_a_sitter_under_a_neighbours_badge_names_the_sitter`).
-    pub(crate) fn hover_spans(
-        &self,
-    ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
-        self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Character { figure, body, .. } => {
-                Some((*body, Some(figure.key.frame.agent_id)))
-            }
-            PieceKind::Badge { .. } => None,
-            _ => Some((p.span, None)),
         })
     }
 }
@@ -232,7 +241,12 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
-        PieceKind::Creature { at, art, degraded } => (at, art, degraded).hash(&mut h),
+        PieceKind::Creature {
+            at,
+            art,
+            degraded,
+            who: _,
+        } => (at, art, degraded).hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
@@ -258,7 +272,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Badge { ref badge } => badge.hash(&mut h),
         PieceKind::Board { ref board } => board.hash(&mut h),
         PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
-        PieceKind::Glass { ref view } => view.hash(&mut h),
+        PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
     }
@@ -267,8 +281,8 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
 
 impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
-    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
-    /// [`PieceKind::Glass`].
+    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
+    /// ([`PieceKind::Window`]).
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
@@ -297,7 +311,7 @@ impl PieceKind {
             | PieceKind::Door { .. }
             | PieceKind::Neon { .. }
             | PieceKind::Clock { .. }
-            | PieceKind::Glass { .. }
+            | PieceKind::Window { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Creature { .. }
@@ -320,9 +334,10 @@ impl PieceKind {
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
 pub(crate) enum PieceKind {
-    /// One window's glass and what it looks out on.
-    Glass {
+    /// One window: its glass, then its joinery in `frame`.
+    Window {
         view: WindowView,
+        frame: pixtuoid_core::sprite::Rgb,
     },
     /// Decor hung on the north band, blitted at its top-left `at`.
     Hung {
@@ -391,6 +406,7 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
         degraded: bool,
+        who: super::HoverTarget,
     },
     Character {
         figure: Figure,
@@ -475,14 +491,4 @@ impl std::fmt::Debug for Figure {
             .field("frame_idx", &self.key.frame.frame_idx)
             .finish()
     }
-}
-
-/// What one window shows this frame, resolved when the list is built: the
-/// art pixels of its box from its top-left, row by row, `None` on its frame.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct WindowView {
-    pub(crate) x: u16,
-    pub(crate) y: u16,
-    pub(crate) w: u16,
-    pub(crate) px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
 }

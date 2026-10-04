@@ -1,93 +1,27 @@
-//! The cutaway's one grid: the art pixel.
-//!
-//! The sprites are authored at a density `d` — `d` art pixels per logical unit —
-//! and a render at scale `s` blits each art pixel `s / d` buffer pixels square.
-//! Whatever else the cutaway paints lands on that same grid, so nothing in the
-//! room is finer or coarser than the art beside it: a pixel-art frame mixes no
-//! pixel sizes. Painting through a [`Pen`] is what holds that, because it has no
-//! way to address a buffer pixel.
+//! Painting on the [`Pen`]'s art grid.
 
-use std::num::NonZeroU16;
-
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::shade::fill;
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::dither::Stepped;
-use crate::render_scale::RenderScale;
-
-/// A length or coordinate on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct ArtPx(pub(crate) u16);
-
-/// A rect on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ArtRect {
-    pub(crate) x: ArtPx,
-    pub(crate) y: ArtPx,
-    pub(crate) w: ArtPx,
-    pub(crate) h: ArtPx,
-}
-
-/// Paints on a render's art grid (the module doc): `k` buffer pixels make one
-/// art pixel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Pen {
-    d: NonZeroU16,
-    k: NonZeroU16,
-}
 
 impl Pen {
-    /// The classic painter's grid: one buffer pixel per logical unit.
-    pub(crate) const UNIT: Self = Self {
-        d: NonZeroU16::MIN,
-        k: NonZeroU16::MIN,
-    };
-
-    /// The pen for art authored at density `d`, painted at `scale`; `None` when
-    /// `d` does not divide it, since an art pixel would then straddle buffer
-    /// pixels.
-    pub(crate) fn new(scale: RenderScale, d: u16) -> Option<Self> {
-        let d = NonZeroU16::new(d)?;
-        let s = scale.get();
-        if !s.is_multiple_of(d.get()) {
-            return None;
+    /// Copy `from`'s art pixel onto `buf` wherever `take` holds for it.
+    pub(crate) fn take_where(
+        self,
+        buf: &mut RgbBuffer,
+        from: &RgbBuffer,
+        take: impl Fn(ArtPx, ArtPx) -> bool,
+    ) {
+        let k = self.buffer(ArtPx(1));
+        for y in 0..buf.height().min(from.height()) {
+            for x in 0..buf.width().min(from.width()) {
+                if take(ArtPx(x / k), ArtPx(y / k)) {
+                    buf.put(x, y, from.get(x, y));
+                }
+            }
         }
-        Some(Self {
-            d,
-            k: NonZeroU16::new(s / d.get())?,
-        })
-    }
-
-    /// The pen for `pack` at `scale`: the densest of its variant densities that
-    /// divides `scale`, else the base art's. [`densest_frame`](crate::pack::densest_frame)
-    /// applies the same rule per piece, so the room shares every piece's grid
-    /// only while the pack draws its variants at one density
-    /// (`the_bundled_pack_draws_every_variant_at_one_density`).
-    pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
-        pack.density_variants()
-            .into_iter()
-            .find_map(|d| Self::new(scale, d.get()))
-            .unwrap_or(Self {
-                d: NonZeroU16::MIN,
-                k: scale.factor(),
-            })
-    }
-
-    /// `logical` layout units, as art pixels: the one conversion from the
-    /// layout's units onto the grid.
-    pub(crate) fn art(self, logical: u16) -> ArtPx {
-        ArtPx(logical.saturating_mul(self.d.get()))
-    }
-
-    /// The logical unit art pixel `a` lies in.
-    pub(crate) fn logical(self, a: ArtPx) -> u16 {
-        a.0 / self.d.get()
-    }
-
-    /// `a` art pixels, as buffer pixels.
-    pub(crate) fn buffer(self, a: ArtPx) -> u16 {
-        a.0.saturating_mul(self.k.get())
     }
 
     /// Paint `r` solid, clipped to the buffer.
@@ -191,7 +125,7 @@ impl Pen {
         if y1 <= y0 {
             return;
         }
-        let k = self.k.get();
+        let k = self.buffer(ArtPx(1));
         let span = u32::from(y1.0 - y0.0);
         let columns = buf.width().div_ceil(k);
         for y in y0.0..y1.0 {
@@ -220,18 +154,7 @@ impl Pen {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[cfg(feature = "density-art")]
-    fn the_bundled_pack_draws_every_variant_at_one_density() {
-        let pack = crate::pack::test_default_pack();
-        assert_eq!(
-            pack.density_variants().len(),
-            1,
-            "{:?}",
-            pack.density_variants()
-        );
-    }
+    use crate::render_scale::RenderScale;
 
     const LIGHT: Rgb = Rgb {
         r: 200,
@@ -247,27 +170,6 @@ mod tests {
 
     fn pen(s: u16, d: u16) -> Pen {
         Pen::new(RenderScale::new(s).expect("nonzero"), d).expect("d divides s")
-    }
-
-    #[test]
-    fn a_pen_needs_its_density_to_divide_the_scale() {
-        let s = RenderScale::new(8).expect("nonzero");
-        assert_eq!(Pen::new(s, 4).map(|p| p.k.get()), Some(2));
-        assert_eq!(
-            Pen::new(s, 3),
-            None,
-            "an art pixel would straddle buffer pixels"
-        );
-        assert_eq!(Pen::new(s, 0), None);
-    }
-
-    #[test]
-    fn a_pens_density_is_the_densest_the_pack_draws_at_that_scale() {
-        let pack = crate::pack::test_default_pack();
-        let d = pack.max_density_variant().get();
-        let at = |s: u16| Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
-        assert_eq!(at(d * 2), pen(d * 2, d), "the variant's grid");
-        assert_eq!(at(1), pen(1, 1), "no variant fits: the base art's grid");
     }
 
     #[test]
@@ -287,6 +189,27 @@ mod tests {
                             "s {s} d {d}: the art pixel at ({x}, {y}) is split"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_take_copies_whole_art_pixels_where_it_holds() {
+        let take = |x: ArtPx, y: ArtPx| (x.0 + 2 * y.0).is_multiple_of(3);
+        for (s, d) in [(1u16, 1u16), (8, 4), (12, 4)] {
+            let pen = pen(s, d);
+            let k = s / d;
+            let mut buf = RgbBuffer::filled(9 * k, 9 * k, BG);
+            pen.take_where(&mut buf, &RgbBuffer::filled(9 * k, 9 * k, LIGHT), take);
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
+                    let want = if take(ArtPx(x / k), ArtPx(y / k)) {
+                        LIGHT
+                    } else {
+                        BG
+                    };
+                    assert_eq!(buf.get(x, y), want, "s {s} d {d}: ({x}, {y})");
                 }
             }
         }

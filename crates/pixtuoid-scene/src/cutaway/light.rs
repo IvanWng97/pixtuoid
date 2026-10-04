@@ -10,8 +10,8 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::display::Span;
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::lighting::{Emitter, EmitterKind};
 use crate::theme::Theme;
 
@@ -94,7 +94,7 @@ pub(crate) fn bolt_steps(sky: &crate::sky::Sky) -> u8 {
     flash_steps(sky, BOLT_MAX_STEPS)
 }
 
-/// `sky`'s flash level in whole steps up to `max`: zero except in a storm, by
+/// `sky`'s flash level in whole steps up to `max`, by
 /// [`Sky::flash`](crate::sky::Sky::flash).
 fn flash_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
     (sky.flash().clamp(0.0, 1.0) * f32::from(max)).round() as u8
@@ -250,7 +250,7 @@ impl LightView {
     }
 
     /// Where it lifts most, in art pixels: the middle of its brightest.
-    #[cfg(all(test, feature = "density-art"))]
+    #[cfg(all(test, feature = "cutaway-assets"))]
     pub(crate) fn peak(&self) -> (f32, f32) {
         let top = self.lift.iter().copied().max().unwrap_or(0);
         let w = usize::from(self.w.max(1));
@@ -381,7 +381,7 @@ pub(crate) fn net_pass(
 
 /// [`net_pass`]'s colours, kept across frames: OKLab maths a room asks again
 /// every frame.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct NetMemo {
     colours: std::collections::HashMap<NetKey, Rgb, std::hash::BuildHasherDefault<SplitMix>>,
     /// Neighbouring pixels mostly ask the last question again.
