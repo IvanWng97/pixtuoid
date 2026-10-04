@@ -71,10 +71,12 @@ pub struct Rendered<'r> {
     pub occupied_waypoints: HashSet<usize>,
 }
 
-/// The office's raster state, shared by every floor: the cutaway's art.
+/// The office's raster state, shared by every floor and both looks: the
+/// cutaway's art and the clouds' masses.
 #[derive(Default)]
 pub struct OfficeRaster {
-    cutaway: crate::cutaway::paint::CutawayCache,
+    pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
+    pub(crate) clouds: crate::clouds::CloudCache,
 }
 
 impl OfficeRaster {
@@ -242,7 +244,7 @@ pub fn render<'r>(
                     world,
                     &stepped.layout,
                     theme,
-                    &mut classic.caches,
+                    (&mut classic.caches, &mut office.raster.clouds),
                     &mut classic.buf,
                     &ctx.walks,
                     debug_walkable,
@@ -272,7 +274,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                &mut office.raster.cutaway,
+                office.raster,
             );
             (buf, if switched { Dirty::All } else { dirty })
         }

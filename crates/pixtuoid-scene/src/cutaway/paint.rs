@@ -113,7 +113,7 @@ pub fn render_cutaway(
     cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
-    let list = compose(frame, office, showing);
+    let list = compose(frame, office, showing, None);
     paint(office.layout, &list, cache, buf);
 }
 
@@ -2100,6 +2100,7 @@ pub(crate) mod tests {
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
+            None,
         );
         let mut cast = 0;
         for piece in list.pieces() {
@@ -2164,9 +2165,21 @@ pub(crate) mod tests {
             );
             paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
             let mut order = Vec::new();
-            push_windows(office, &moment, &GlassWeather::of(&moment), &mut order);
+            push_windows(
+                office,
+                &moment,
+                &GlassWeather::of(&moment),
+                &mut order,
+                None,
+            );
             let mut again = Vec::new();
-            push_windows(office, &moment, &GlassWeather::of(&moment), &mut again);
+            push_windows(
+                office,
+                &moment,
+                &GlassWeather::of(&moment),
+                &mut again,
+                None,
+            );
             let prints = |o: &[(Span, PieceKind)]| -> Vec<u64> {
                 o.iter().map(|(_, kind)| fingerprint(kind)).collect()
             };
@@ -2192,6 +2205,7 @@ pub(crate) mod tests {
                 band,
                 density,
                 GlassWeather::of(&moment),
+                None,
             );
             let sky = crate::celestial::SkyView::of(&moment, band.0, band.1, theme);
             let at = |(ax, ay): (u16, u16)| buf.get(ax * k, ay * k);
@@ -2363,6 +2377,7 @@ pub(crate) mod tests {
                     &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
+                    None,
                 );
                 let mut buf = RgbBuffer::filled(
                     scale.to_buffer(layout.buf_w),
@@ -3622,6 +3637,7 @@ pub(crate) mod tests {
                 crate::floor::FloorMeta::ground(),
                 std::time::SystemTime::UNIX_EPOCH,
             ),
+            None,
         );
         let plate = list
             .pieces()
@@ -3718,6 +3734,7 @@ pub(crate) mod tests {
                     &shown,
                     FloorMeta::ground(),
                     quiet_board(),
+                    None,
                 );
                 let mut bare = crate::display::compose::compose_at(
                     &office.frame,
@@ -3725,10 +3742,11 @@ pub(crate) mod tests {
                     &shown,
                     FloorMeta::ground(),
                     quiet_board(),
+                    None,
                 );
                 let plain = moment(weathered.bare);
                 let mut views = Vec::new();
-                push_windows(at, &plain, &GlassWeather::of(&plain), &mut views);
+                push_windows(at, &plain, &GlassWeather::of(&plain), &mut views, None);
                 for piece in bare.pieces_mut() {
                     if let PieceKind::Window { .. } = piece.kind {
                         let i = views
@@ -3878,6 +3896,7 @@ pub(crate) mod tests {
             moment,
             weather,
             &mut order,
+            None,
         );
         order
             .into_iter()
@@ -3990,6 +4009,7 @@ pub(crate) mod tests {
                     &moment,
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
+                    None,
                 );
                 for &Piece { span, ref kind, .. } in list.pieces() {
                     if only_people
@@ -4318,6 +4338,7 @@ pub(crate) mod tests {
                 &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
+                None,
             );
             (list.carpet(), carpet)
         };
@@ -4409,6 +4430,7 @@ pub(crate) mod tests {
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
+                        None,
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
@@ -4463,6 +4485,7 @@ pub(crate) mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
+                None,
             );
             let is_window = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
             same_fingerprint_same_pixels(painted, &list, &layout, is_window);
@@ -5007,6 +5030,7 @@ pub(crate) mod tests {
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
+                        None,
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
@@ -5070,7 +5094,8 @@ pub(crate) mod tests {
                     Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
-                quiet_board()
+                quiet_board(),
+                None
             )),
             summary(&compose_at(
                 frame,
@@ -5087,7 +5112,8 @@ pub(crate) mod tests {
                     Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
-                quiet_board()
+                quiet_board(),
+                None
             )),
         );
     }
@@ -5115,6 +5141,7 @@ pub(crate) mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
+                None,
             );
             let pieces: Vec<&Piece> = list
                 .pieces()
@@ -5217,6 +5244,7 @@ pub(crate) mod tests {
             &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
+            None,
         )
     }
 

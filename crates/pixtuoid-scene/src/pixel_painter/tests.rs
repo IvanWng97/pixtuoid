@@ -773,6 +773,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
+            None,
         );
         let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -1752,6 +1753,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         floor: crate::floor::FloorMeta::ground(),
         walks: &walks,
         debug_walkable: false,
+        clouds: None,
     };
     let lights = crate::lighting::Lights::of(
         layout,
@@ -3409,6 +3411,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            clouds: None,
         },
         &frame,
     );
@@ -3661,6 +3664,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            clouds: None,
         },
         &frame,
     );
@@ -3790,6 +3794,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                clouds: None,
             },
             &frame,
         );
@@ -4894,6 +4899,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 floor,
                 walks: &walks,
                 debug_walkable: false,
+                clouds: None,
             };
             let mut drawables = Vec::new();
             let pet_frame = frame
@@ -5125,6 +5131,7 @@ fn paint_drawn(
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            clouds: None,
         },
         frame,
     )
@@ -5923,6 +5930,7 @@ fn the_outside_reaches_only_the_glass() {
                     floor: crate::floor::FloorMeta::ground(),
                     walks: &owned.route.walks,
                     debug_walkable: false,
+                    clouds: None,
                 },
                 &frame,
             );
@@ -5948,6 +5956,7 @@ fn the_outside_reaches_only_the_glass() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                clouds: None,
             };
             let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
             let lights = Lights::of(

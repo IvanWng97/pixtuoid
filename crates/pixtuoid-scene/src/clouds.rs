@@ -93,6 +93,13 @@ struct Mass {
     weather: Weather,
     /// Its seed for the base's waver.
     seed: u64,
+    /// Its place in its weather's deck.
+    id: usize,
+    /// Its west reach at full share, undrifted: what its own noise keys on,
+    /// so its waver and shading ride with it as it drifts.
+    anchor: f32,
+    /// How far east it has drifted this frame, in units.
+    off: f32,
 }
 
 impl Mass {
@@ -113,24 +120,31 @@ impl Mass {
 
     /// The flat base at `x`, wavering a little by column.
     fn base_at(&self, x: f32) -> f32 {
-        self.base + BASE_WAVER * noise(self.seed, x / BASE_WAVER_PERIOD) - BASE_WAVER / 2.0
+        let local = (x - self.anchor) / BASE_WAVER_PERIOD;
+        self.base + BASE_WAVER * noise(self.seed, local) - BASE_WAVER / 2.0
     }
 
-    /// The mass `share` of the way grown from its base, slid `dx` east.
-    fn grown(&self, share: f32, dx: f32) -> Mass {
+    /// The mass `share` of the way grown from its base, drifted `off` east.
+    fn grown(&self, share: f32, off: f32) -> Mass {
         let s = share.clamp(0.0, 1.0);
         Mass {
             lobes: self
                 .lobes
                 .iter()
                 .map(|l| Lobe {
-                    x: l.x + dx,
+                    x: l.x,
                     y: self.base - (self.base - l.y) * s,
                     r: l.r * s,
                 })
                 .collect(),
+            off,
             ..self.clone()
         }
+    }
+
+    /// Whether any lobe has grown in at all.
+    fn shows(&self) -> bool {
+        self.lobes.iter().any(|l| l.r > 0.0)
     }
 
     /// In a lobe, in a skirt under one, or in a short crease between two in
@@ -325,6 +339,9 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
                 base,
                 weather,
                 seed,
+                id: 0,
+                anchor: 0.0,
+                off: 0.0,
             });
         }
     };
@@ -356,8 +373,15 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
                 base,
                 weather,
                 seed,
+                id: 0,
+                anchor: 0.0,
+                off: 0.0,
             });
         }
+    }
+    for (id, m) in out.iter_mut().enumerate() {
+        m.id = id;
+        m.anchor = m.reach().0;
     }
     out
 }
@@ -567,9 +591,113 @@ struct Strike {
     dim: bool,
 }
 
+/// One mass's bands on a grid `d` cells to the unit, in its own undrifted
+/// frame: what a frame translates by its drift and composites, and what the
+/// office's [`CloudCache`] keeps.
+#[derive(Debug, PartialEq)]
+pub(crate) struct MassRaster {
+    /// Its first column and row, in grid cells from the run's west end and
+    /// the glass's top, undrifted.
+    x0: i32,
+    y0: i32,
+    w: usize,
+    h: usize,
+    bands: Vec<Option<Band>>,
+}
+
+impl MassRaster {
+    fn at(&self, col: i32, row: i32) -> Option<Band> {
+        let (x, y) = (
+            usize::try_from(col - self.x0).ok()?,
+            usize::try_from(row - self.y0).ok()?,
+        );
+        (x < self.w && y < self.h)
+            .then(|| self.bands[y * self.w + x])
+            .flatten()
+    }
+}
+
+/// What a [`MassRaster`] is drawn from: one mass of one weather's deck over
+/// one office's glass, at one density, grown to one share, under one light.
+/// Every input it reads is here, quantized, so a cached raster is the one an
+/// uncached frame would draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RasterKey {
+    weather: Weather,
+    id: usize,
+    span: u16,
+    glass_h: u16,
+    d: u16,
+    share: u8,
+    light: LightKey,
+}
+
+/// The light a mass's bands are cut under, in [`LIGHT_STEPS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct LightKey {
+    night: u8,
+    sunset: u8,
+    heaviness: u8,
+    storm: u8,
+}
+
+/// Each light input's steps: the deck's bands change with the hour and the
+/// weather at most this often.
+const LIGHT_STEPS: f32 = 16.0;
+/// A weather's share's steps: a mass grows in or out in this many.
+const SHARE_STEPS: f32 = 32.0;
+
+fn step(v: f32, steps: f32) -> u8 {
+    (v.clamp(0.0, 1.0) * steps).round() as u8
+}
+
+fn unstep(k: u8, steps: f32) -> f32 {
+    f32::from(k) / steps
+}
+
+/// The office's mass rasters, the most recently used first and at most
+/// [`CloudCache::CAPACITY`] of them: drawing a mass's bands is most of a
+/// cloudy frame's cost, and a drifting mass's bands don't change.
+#[derive(Debug, Default)]
+pub(crate) struct CloudCache {
+    entries: std::collections::VecDeque<(RasterKey, std::sync::Arc<MassRaster>)>,
+}
+
+impl CloudCache {
+    /// Room for two weathers' decks across a transition, at both densities.
+    const CAPACITY: usize = 64;
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn get_or_draw(
+        &mut self,
+        key: RasterKey,
+        draw: impl FnOnce() -> MassRaster,
+    ) -> std::sync::Arc<MassRaster> {
+        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
+            let hit = self.entries.remove(i).expect("found above");
+            let raster = std::sync::Arc::clone(&hit.1);
+            self.entries.push_front(hit);
+            return raster;
+        }
+        let raster = std::sync::Arc::new(draw());
+        self.entries
+            .push_front((key, std::sync::Arc::clone(&raster)));
+        self.entries.truncate(Self::CAPACITY);
+        raster
+    }
+}
+
 /// What the windows' clouds are this frame.
 pub(crate) struct Clouds {
     masses: Vec<Mass>,
+    /// Each mass's bands, by index.
+    rasters: Vec<std::sync::Arc<MassRaster>>,
+    /// The grid the rasters are drawn on, cells to the unit.
+    d: u16,
     lighting: Lighting,
     /// Each weather's tones under this light, by the weather's index.
     tones: Vec<(Weather, [Rgb; 3])>,
@@ -584,38 +712,34 @@ pub(crate) struct Clouds {
 
 impl Clouds {
     /// The clouds of `moment` over a window run `span` units wide and glass
-    /// `glass_h` tall.
-    pub(crate) fn of(moment: &Moment, span: u16, glass_h: u16) -> Self {
+    /// `glass_h` tall, drawn on a grid `d` to the unit; `cache` keeps the
+    /// masses' bands across frames, `None` draws them afresh.
+    pub(crate) fn of(
+        moment: &Moment,
+        (span, glass_h): (u16, u16),
+        d: u16,
+        mut cache: Option<&mut CloudCache>,
+    ) -> Self {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
+        let d = d.max(1);
         let weather = moment.sky.weather();
         let secs = moment.timing.beat.ms() as f32 / 1000.0;
-        let mut masses = Vec::new();
-        for (w, share) in weather.parts() {
-            let full = deck(w, span_f, glass_h_f);
-            let widest = full
-                .iter()
-                .map(|m| {
-                    let (west, east) = m.reach();
-                    east - west
-                })
-                .fold(0.0, f32::max);
-            for m in full {
-                let x0 = m.reach().0;
-                let west = drifted_west(x0, secs * m.layer.drift(), span_f, widest);
-                masses.push(m.grown(ease(share), west - x0));
-            }
-        }
-        masses.sort_by_key(|m| m.layer);
-        let look = &moment.look;
         let body = moment.sky.body();
         let night = match body.kind {
             crate::sky::BodyKind::Sun => 1.0 - ease(body.altitude / FULL_DAY_ALTITUDE),
             crate::sky::BodyKind::Moon => 1.0,
         };
-        let sunset = look.golden_hour.clamp(0.0, 1.0);
+        let light = LightKey {
+            night: step(night, LIGHT_STEPS),
+            sunset: step(moment.look.golden_hour, LIGHT_STEPS),
+            heaviness: step(weather.lerp(heaviness), LIGHT_STEPS),
+            storm: step(weather.share(Weather::Storm), LIGHT_STEPS),
+        };
+        let night = unstep(light.night, LIGHT_STEPS);
+        let sunset = unstep(light.sunset, LIGHT_STEPS);
         let day = (1.0 - night - sunset).max(0.0);
         let lighting = Lighting::mixed(day, sunset, night);
-        let heavy = weather.lerp(heaviness);
+        let heavy = unstep(light.heaviness, LIGHT_STEPS);
         let tones = weather
             .parts()
             .map(|(w, _)| {
@@ -627,18 +751,63 @@ impl Clouds {
                 (w, t)
             })
             .collect();
-        let diffuse = heavy >= if night > 0.5 { 0.6 } else { 0.35 } && day < 0.5;
         let mut clouds = Self {
-            masses,
+            masses: Vec::new(),
+            rasters: Vec::new(),
+            d,
             lighting,
             tones,
-            diffuse,
+            diffuse: heavy >= if night > 0.5 { 0.6 } else { 0.35 } && day < 0.5,
             heaviness: heavy,
-            storm: weather.share(Weather::Storm),
+            storm: unstep(light.storm, LIGHT_STEPS),
             night,
             rain: weather.share(Weather::Rain) + 0.8 * weather.share(Weather::Storm),
             strike: None,
         };
+        for (w, share) in weather.parts() {
+            let full = deck(w, span_f, glass_h_f);
+            let widest = full
+                .iter()
+                .map(|m| {
+                    let (west, east) = m.reach();
+                    east - west
+                })
+                .fold(0.0, f32::max);
+            let share = step(ease(share), SHARE_STEPS);
+            for m in full {
+                let west = drifted_west(m.anchor, secs * m.layer.drift(), span_f, widest);
+                let mass = m.grown(unstep(share, SHARE_STEPS), west - m.anchor);
+                let key = RasterKey {
+                    weather: w,
+                    id: m.id,
+                    span,
+                    glass_h,
+                    d,
+                    share,
+                    light,
+                };
+                let draw = || clouds.draw(&mass, glass_h_f, d);
+                let raster = match cache.as_deref_mut() {
+                    Some(cache) => cache.get_or_draw(key, draw),
+                    None => std::sync::Arc::new(draw()),
+                };
+                clouds.masses.push(mass);
+                clouds.rasters.push(raster);
+            }
+        }
+        // far to near: the nearest wins
+        let mut order: Vec<usize> = (0..clouds.masses.len()).collect();
+        order.sort_by_key(|&i| clouds.masses[i].layer);
+        let (masses, rasters) = order
+            .iter()
+            .map(|&i| {
+                (
+                    clouds.masses[i].clone(),
+                    std::sync::Arc::clone(&clouds.rasters[i]),
+                )
+            })
+            .unzip();
+        (clouds.masses, clouds.rasters) = (masses, rasters);
         let flash = moment.sky.flash();
         if flash > 0.0 {
             clouds.strike = clouds.strike_at(
@@ -651,18 +820,70 @@ impl Clouds {
         clouds
     }
 
+    /// Mass `m`'s bands over glass `glass_h` tall on a grid `d` to the unit,
+    /// in its own undrifted frame, closed: a notch narrower than
+    /// [`CLOSE`] fills.
+    fn draw(&self, m: &Mass, glass_h: f32, d: u16) -> MassRaster {
+        let df = f32::from(d);
+        let k = ((CLOSE * df).round() as i32).max(1);
+        let (west, east) = m.reach();
+        let x0 = ((west - SLIT) * df).floor() as i32 - k;
+        let x1 = ((east + SLIT) * df).ceil() as i32 + k;
+        let y0 = (m.top().min(0.0) * df).floor() as i32 - k;
+        let y1 = (glass_h * df).ceil() as i32;
+        let (w, h) = (
+            usize::try_from(x1 - x0).unwrap_or(0),
+            usize::try_from(y1 - y0).unwrap_or(0),
+        );
+        let unit = |i: usize| {
+            (
+                ((x0 + (i % w.max(1)) as i32) as f32 + 0.5) / df,
+                ((y0 + (i / w.max(1)) as i32) as f32 + 0.5) / df,
+            )
+        };
+        let raw: Vec<bool> = (0..w * h)
+            .map(|i| {
+                let (x, y) = unit(i);
+                m.shows() && m.inside(x, y)
+            })
+            .collect();
+        let k = k as usize;
+        let solid = erode(&dilate(&raw, w, h, k), w, h, k);
+        let bands = (0..w * h)
+            .map(|i| {
+                solid[i].then(|| {
+                    let (x, y) = unit(i);
+                    let band = self.band(m, x, y);
+                    if m.layer == Layer::Far && self.heaviness >= 0.6 {
+                        band.max(Band::Body)
+                    } else {
+                        band
+                    }
+                })
+            })
+            .collect();
+        MassRaster {
+            x0,
+            y0,
+            w,
+            h,
+            bands,
+        }
+    }
+
     /// The flat base of the nearest mass over column `x`, where a bolt from it
     /// starts; `None` with no mass overhead.
     pub(crate) fn base_at(&self, x: f32) -> Option<f32> {
-        self.nearest_over(x).map(|i| self.masses[i].base_at(x))
+        self.nearest_over(x)
+            .map(|i| self.masses[i].base_at(x - self.masses[i].off))
     }
 
     fn nearest_over(&self, x: f32) -> Option<usize> {
         (0..self.masses.len()).rev().find(|&i| {
-            self.masses[i]
-                .lobes
+            let m = &self.masses[i];
+            m.lobes
                 .iter()
-                .any(|l| l.r > 0.0 && (x - l.x).abs() < l.r)
+                .any(|l| l.r > 0.0 && (x - m.off - l.x).abs() < l.r)
         })
     }
 
@@ -697,6 +918,7 @@ impl Clouds {
             return;
         }
         let d = view.d();
+        debug_assert_eq!(d, self.d, "the clouds were drawn for another grid");
         let df = f32::from(d);
         let unit = |cell: Cell| {
             (
@@ -709,47 +931,26 @@ impl Clouds {
         if cols == 0 || rows == 0 {
             return;
         }
-        // The glass's grid, by glass offset: the run column of its west edge.
+        // The glass's grid, by glass offset: its west edge's column on the run's.
         let mut west = None;
         view.paint(|cell, c| {
             if west.is_none() {
-                west = Some(f32::from(cell.at.0) - f32::from(cell.glass.0));
+                west = Some(i32::from(cell.at.0) - i32::from(cell.glass.0) - i32::from(run_x0 * d));
             }
             c
         });
         let Some(west) = west else { return };
-        let to_unit = |gx: usize, gy: usize| {
-            (
-                (west + gx as f32 + 0.5) / df - f32::from(run_x0),
-                (gy as f32 + 0.5) / df,
-            )
-        };
-        // Each mass's shape over the glass, closed: a notch narrower than the
-        // reach fills, and the joinery never opens a hole in it.
-        let k = ((CLOSE * df).round() as usize).max(1);
-        let shapes: Vec<Vec<bool>> = self
+        let drift: Vec<i32> = self
             .masses
             .iter()
-            .map(|m| {
-                let raw: Vec<bool> = (0..rows * cols)
-                    .map(|i| {
-                        let (x, y) = to_unit(i % cols, i / cols);
-                        m.lobes.iter().any(|l| l.r > 0.0) && m.inside(x, y)
-                    })
-                    .collect();
-                erode(&dilate(&raw, cols, rows, k), cols, rows, k)
-            })
+            .map(|m| (m.off * df).round() as i32)
             .collect();
         let mut px: Vec<Option<(Band, usize)>> = (0..rows * cols)
             .map(|i| {
-                let hit = (0..self.masses.len()).rev().find(|&m| shapes[m][i])?;
-                let (x, y) = to_unit(i % cols, i / cols);
-                let m = &self.masses[hit];
-                let mut band = self.band(m, x, y);
-                if m.layer == Layer::Far && self.heaviness >= 0.6 {
-                    band = band.max(Band::Body);
-                }
-                Some((band, hit))
+                let (col, row) = (west + (i % cols) as i32, (i / cols) as i32);
+                (0..self.masses.len())
+                    .rev()
+                    .find_map(|m| self.rasters[m].at(col - drift[m], row).map(|b| (b, m)))
             })
             .collect();
         if d == 1 {
@@ -842,10 +1043,11 @@ impl Clouds {
         let ln = (lx * lx + ly * ly + lz * lz).sqrt();
         let mut v = (nx * lx + ny * ly + nz * lz) / (nn * ln);
         let t = (m.base_at(x) - y) / (m.base - m.top()).max(1.0);
-        // how far up the base's shadow climbs, by column: two octaves, never
-        // a ruled line
+        // how far up the base's shadow climbs, by the mass's own column: two
+        // octaves, never a ruled line
+        let lx = x - m.anchor;
         let reach =
-            0.12 + 0.22 * noise(0x1b5b, x * 2.3 + 40.0) + 0.14 * noise(0x1b5b, x * 6.1 + 13.0);
+            0.12 + 0.22 * noise(0x1b5b, lx * 2.3 + 40.0) + 0.14 * noise(0x1b5b, lx * 6.1 + 13.0);
         v -= (occlude + STORM_OCCLUDE * self.storm) * (1.0 - t / reach).max(0.0);
         let cuts = (
             0.55 + 0.12 * self.heaviness + rim,
@@ -904,7 +1106,7 @@ impl Clouds {
             m.layer >= Layer::Mid
                 && m.base < y
                 && y <= m.base + VIRGA_DEPTH
-                && m.lobes.iter().any(|l| (x - l.x).abs() < l.r * 0.7)
+                && m.lobes.iter().any(|l| (x - m.off - l.x).abs() < l.r * 0.7)
         }) else {
             return c;
         };
@@ -1129,7 +1331,7 @@ mod tests {
         let now = crate::localclock::at_hour(hour);
         let sky = Sky::at_with(now, weather).with_flash(flash);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-        Clouds::of(&moment, SPAN, GLASS_H)
+        Clouds::of(&moment, (SPAN, GLASS_H), 1, None)
     }
 
     /// A drifting mass wraps only out of sight: it has left the run's east end
@@ -1257,7 +1459,7 @@ mod tests {
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment =
                 Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Still.timing(now));
-            Clouds::of(&moment, SPAN, GLASS_H).masses
+            Clouds::of(&moment, (SPAN, GLASS_H), 1, None).masses
         };
         assert_eq!(at(0), at(600_000));
     }
