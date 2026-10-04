@@ -30,6 +30,31 @@ pub enum Protocol {
     Iterm2,
 }
 
+impl Protocol {
+    /// Every way the bench's office reaches a terminal, in the report's order.
+    pub const ALL: [Protocol; 4] = [
+        Protocol::HalfBlock,
+        Protocol::Kitty,
+        Protocol::Sixel,
+        Protocol::Iterm2,
+    ];
+
+    /// The image protocol the cutaway rides; `None` for the half-blocks.
+    fn image(self) -> Option<ImageProtocol> {
+        match self {
+            Protocol::HalfBlock => None,
+            Protocol::Kitty => Some(ImageProtocol::Kitty),
+            Protocol::Sixel => Some(ImageProtocol::Sixel),
+            Protocol::Iterm2 => Some(ImageProtocol::Iterm2),
+        }
+    }
+
+    /// Its name in the report: the image protocol's own, or `half-block`.
+    pub fn name(self) -> &'static str {
+        self.image().map_or("half-block", ImageProtocol::name)
+    }
+}
+
 /// What a [`Wire`] has carried: bytes, and the time spent writing them.
 #[derive(Debug, Default)]
 struct Carried {
@@ -161,17 +186,11 @@ pub fn renderer(
     };
     let mut r = TuiRenderer::new(
         Terminal::new(backend)?,
-        pixtuoid_scene::theme::ALL_THEMES[0],
+        &pixtuoid_scene::theme::NORMAL,
         pets,
         Arc::clone(&pack),
     );
-    let image = match protocol {
-        Protocol::HalfBlock => None,
-        Protocol::Kitty => Some(ImageProtocol::Kitty),
-        Protocol::Sixel => Some(ImageProtocol::Sixel),
-        Protocol::Iterm2 => Some(ImageProtocol::Iterm2),
-    };
-    if let Some(image) = image {
+    if let Some(image) = protocol.image() {
         let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
         let fit = Fit::new(cell, area, pack.max_density_variant())
             .context("the cell is too small for the cutaway")?;
@@ -189,4 +208,29 @@ pub fn renderer(
 /// The TUI loop's frame clock.
 pub fn frame_clock(period: std::time::Duration) -> tokio::time::Interval {
     crate::tui::frame_clock(period)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ImageProtocol, Protocol};
+
+    /// The bench measures every protocol the cutaway speaks: a new
+    /// `ImageProtocol` fails to compile in the first match until it has a
+    /// `Protocol`, and a new `Protocol` in the second until `ALL` lists it.
+    #[test]
+    fn all_lists_every_protocol_the_cutaway_speaks() {
+        let of = |image: ImageProtocol| match image {
+            ImageProtocol::Kitty => Protocol::Kitty,
+            ImageProtocol::Sixel => Protocol::Sixel,
+            ImageProtocol::Iterm2 => Protocol::Iterm2,
+        };
+        for protocol in Protocol::ALL {
+            match protocol {
+                Protocol::HalfBlock | Protocol::Kitty | Protocol::Sixel | Protocol::Iterm2 => {}
+            }
+            if let Some(image) = protocol.image() {
+                assert_eq!(of(image), protocol);
+            }
+        }
+    }
 }
