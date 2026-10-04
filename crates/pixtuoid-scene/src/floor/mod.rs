@@ -475,7 +475,7 @@ pub fn waypoint_kind_of(
 
 /// The mood [`TrackId`](crate::audio::TrackId) for `now` under `weather` — the
 /// ONE place the day/precip/epoch input wiring lives. Lives here (not `audio`)
-/// because it reaches [`crate::sky::is_day_at`] and [`crate::sky::rain_at`],
+/// because it reaches `sky::is_day_at` and `sky::rain_at`,
 /// which `audio` must not depend on.
 pub fn track_for(
     now: std::time::SystemTime,

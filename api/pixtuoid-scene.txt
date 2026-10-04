@@ -1608,8 +1608,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::sky::WeatherPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sky::WeatherPolicy
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sky::WeatherPolicy
 pub fn pixtuoid_scene::sky::hour_is_day(f32) -> bool
-pub fn pixtuoid_scene::sky::is_day_at(std::time::SystemTime) -> bool
-pub fn pixtuoid_scene::sky::rain_at(std::time::SystemTime, pixtuoid_scene::sky::WeatherPolicy) -> f32
 pub fn pixtuoid_scene::sky::weather_names() -> alloc::vec::Vec<&'static str>
 pub mod pixtuoid_scene::theme
 pub enum pixtuoid_scene::theme::ThemeKind

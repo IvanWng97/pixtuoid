@@ -347,7 +347,7 @@ pub fn hour_is_day(h: f32) -> bool {
 
 /// Day/night at `now` on the LOCAL clock: the native painters' feed for the
 /// audio track selector (wasm passes its own hour to [`hour_is_day`]).
-pub fn is_day_at(now: SystemTime) -> bool {
+pub(crate) fn is_day_at(now: SystemTime) -> bool {
     hour_is_day(local_hour_frac(now))
 }
 
@@ -358,7 +358,7 @@ pub fn weather_names() -> Vec<&'static str> {
 
 /// How hard it is raining at `now` under `policy` (0.0 dry … 1.0 storm; snow
 /// and fog are 0.0): the audio model's weather feed.
-pub fn rain_at(now: SystemTime, policy: WeatherPolicy) -> f32 {
+pub(crate) fn rain_at(now: SystemTime, policy: WeatherPolicy) -> f32 {
     Sky::at(crate::anim::Motion::Full.timing(now), policy).precipitation()
 }
 
