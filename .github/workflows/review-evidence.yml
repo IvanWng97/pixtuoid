@@ -84,7 +84,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.plan.outputs.head }}
+          # plan's own expression, not its output: a dispatch must visibly
+          # check out only the ref it runs on, whose cache it writes.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-alsa
