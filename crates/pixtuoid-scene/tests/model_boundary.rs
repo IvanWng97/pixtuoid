@@ -12,10 +12,10 @@ const RASTERIZERS: [&str; 2] = ["pixel_painter", "cutaway"];
 /// and the PR that removes the edge. A fix deletes its entry; a new edge under a
 /// listed path changes its count.
 const KNOWN_EDGES: &[(&str, usize, &str)] = &[
-    ("display/", 27, "pen: #1253; text, light and effects: #1270"),
+    ("display/", 29, "pen: #1253; text, light and effects: #1270"),
     (
         "floor/",
-        7,
+        8,
         "render_to_rgb_buffer, BaseFillCache and the both-painters tests: #1244; AgentFrame: #1270",
     ),
     (
@@ -23,7 +23,7 @@ const KNOWN_EDGES: &[(&str, usize, &str)] = &[
         6,
         "cutaway::text widths and AgentFrame: #1270",
     ),
-    ("wall.rs", 1, "cutaway::pen: #1253"),
+    ("wall.rs", 2, "cutaway::pen: #1253"),
 ];
 
 fn is_rasterizer(ident: &syn::Ident) -> bool {
@@ -46,19 +46,23 @@ impl RasterizerPaths {
     /// A macro's arguments are tokens, not syntax: an identifier counts where
     /// `::` joins it to a neighbour.
     fn scan_tokens(&mut self, tokens: proc_macro2::TokenStream) {
-        use proc_macro2::TokenTree;
+        use proc_macro2::{Spacing, TokenTree};
         let trees: Vec<TokenTree> = tokens.into_iter().collect();
-        let colon =
-            |t: Option<&TokenTree>| matches!(t, Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        let path_sep = |at: Option<usize>| {
+            let punct = |i: usize| match trees.get(i) {
+                Some(TokenTree::Punct(p)) if p.as_char() == ':' => Some(p.spacing()),
+                _ => None,
+            };
+            at.is_some_and(|i| punct(i) == Some(Spacing::Joint) && punct(i + 1).is_some())
+        };
         for (i, tree) in trees.iter().enumerate() {
             match tree {
                 TokenTree::Group(g) => self.scan_tokens(g.stream()),
-                TokenTree::Ident(id) if is_rasterizer(id) => {
-                    let after = colon(trees.get(i + 1));
-                    let before = i > 0 && colon(trees.get(i - 1));
-                    if after || before {
-                        self.0.push(format!("{id} in a macro"));
-                    }
+                TokenTree::Ident(id)
+                    if is_rasterizer(id)
+                        && (path_sep(Some(i + 1)) || path_sep(i.checked_sub(2))) =>
+                {
+                    self.0.push(format!("{id} in a macro"));
                 }
                 _ => {}
             }
@@ -75,17 +79,31 @@ impl<'ast> Visit<'ast> for RasterizerPaths {
         syn::visit::visit_path(self, path);
     }
 
+    /// One edge per item a `use` imports from under a rasterizer, so an item
+    /// added to an existing group moves the count.
     fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
-        let named = match tree {
-            syn::UseTree::Path(p) => Some(&p.ident),
-            syn::UseTree::Name(n) => Some(&n.ident),
-            syn::UseTree::Rename(r) => Some(&r.ident),
-            syn::UseTree::Glob(_) | syn::UseTree::Group(_) => None,
-        };
-        if let Some(id) = named.filter(|id| is_rasterizer(id)) {
-            self.0.push(format!("use {id}"));
+        fn leaves(tree: &syn::UseTree, rooted: bool, out: &mut Vec<String>) {
+            match tree {
+                syn::UseTree::Path(p) => leaves(&p.tree, rooted || is_rasterizer(&p.ident), out),
+                syn::UseTree::Name(syn::UseName { ident })
+                | syn::UseTree::Rename(syn::UseRename { ident, .. }) => {
+                    if rooted || is_rasterizer(ident) {
+                        out.push(format!("use {ident}"));
+                    }
+                }
+                syn::UseTree::Glob(_) => {
+                    if rooted {
+                        out.push("use *".into());
+                    }
+                }
+                syn::UseTree::Group(g) => {
+                    for item in &g.items {
+                        leaves(item, rooted, out);
+                    }
+                }
+            }
         }
-        syn::visit::visit_use_tree(self, tree);
+        leaves(tree, false, &mut self.0);
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
@@ -151,6 +169,7 @@ fn a_rasterizer_path_is_named_but_its_word_is_not() {
         "use super::super::cutaway::text;",
         "use crate::{\n    cutaway,\n};",
         "fn f() { assert!(crate::cutaway::text::LINE_H > 0); }",
+        "fn f() { m!(S { x: crate::cutaway::pen::Pen }); }",
         r#"fn f() { let _ = ("http://x", crate::pixel_painter::AgentFrame::default()); }"#,
     ] {
         assert!(!RasterizerPaths::of(named).is_empty(), "{named}");
@@ -162,7 +181,13 @@ fn a_rasterizer_path_is_named_but_its_word_is_not() {
         r#"fn f() { let _ = "crate::cutaway::pen"; }"#,
         "/* crate::cutaway::pen */ fn f() {}",
         "/// [`crate::cutaway::pen`]\nfn f() {}",
+        "fn f() { m!(S { cutaway: 1 }); }",
     ] {
         assert!(RasterizerPaths::of(unnamed).is_empty(), "{unnamed}");
     }
+    assert_eq!(
+        RasterizerPaths::of("use crate::pixel_painter::{a, b as c, d::*};").len(),
+        3,
+        "each item a rasterizer group imports is its own edge"
+    );
 }
