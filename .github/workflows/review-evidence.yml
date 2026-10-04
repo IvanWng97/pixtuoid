@@ -17,6 +17,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Concurrent mutants jobs: plan's matrix and the manifest's completeness both read it.
+  SHARD_JOBS: 4
+
 concurrency:
   group: review-evidence-${{ github.event.pull_request.number || github.ref }}
   # A draft's run skips every job, so it must not cancel the evidence of the
@@ -38,6 +42,7 @@ jobs:
       head: ${{ steps.base.outputs.head }}
       mutants: ${{ steps.list.outputs.count }}
       shards: ${{ steps.list.outputs.shards }}
+      jobs: ${{ steps.list.outputs.jobs }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -65,11 +70,14 @@ jobs:
           # counting as no mutants.
           listed=$(cargo mutants --in-diff pr.diff --list)
           count=$(printf '%s' "$listed" | grep -c . || true)
-          # About MUTANTS_PER_SHARD fit a shard's time box; past four shards'
-          # worth, the four jobs run the first four of more round-robin
-          # shards: an even sample rather than a run that times out.
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-          echo "shards=$(( count > 4 * MUTANTS_PER_SHARD ? (count + MUTANTS_PER_SHARD - 1) / MUTANTS_PER_SHARD : 4 ))" >> "$GITHUB_OUTPUT"
+          # About MUTANTS_PER_SHARD fit a shard's time box; past SHARD_JOBS
+          # shards' worth, the jobs run the first SHARD_JOBS of more
+          # round-robin shards: an even sample rather than a run that times out.
+          {
+            echo "count=$count"
+            echo "shards=$(( count > SHARD_JOBS * MUTANTS_PER_SHARD ? (count + MUTANTS_PER_SHARD - 1) / MUTANTS_PER_SHARD : SHARD_JOBS ))"
+            echo "jobs=$(jq -cn --argjson n "$SHARD_JOBS" '[range($n)]')"
+          } >> "$GITHUB_OUTPUT"
 
   mutants:
     name: mutants shard ${{ matrix.shard }}
@@ -80,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.plan.outputs.jobs) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -111,7 +119,8 @@ jobs:
   manifest:
     name: evidence manifest
     needs: [plan, mutants]
-    # Written whatever the shards did, so a lens sees a partial run as one.
+    # Written whatever the shards did, so a lens sees a partial run as one,
+    # and a diff with no mutants as `listed: 0`.
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -134,7 +143,7 @@ jobs:
           # A shard is whole only once cargo-mutants stamps its end_time, which
           # it also stamps after a failed baseline that mutated nothing.
           jq -n --arg base "$BASE" --arg head "$HEAD_SHA" --arg run "$RUN_ID" \
-            --argjson listed "$LISTED" --argjson shards "$SHARDS" \
+            --argjson listed "$LISTED" --argjson shards "$SHARDS" --argjson jobs "$SHARD_JOBS" \
             '[inputs] as $s
             | ($s | map(select(any(.outcomes[]?; .scenario == "Baseline" and .summary != "Success")))) as $failed
             | (($s | map(select(.end_time != null)) | length) - ($failed | length)) as $whole
@@ -142,10 +151,10 @@ jobs:
               head_sha: $head, base_sha: $base, run_id: ($run | tonumber),
               listed: $listed,
               shards_total: $shards,
-              sampled: ($shards > 4),
+              sampled: ($shards > $jobs),
               baseline_failed: ($failed | length > 0),
               shards_complete: $whole,
-              partial: ($listed > 0 and $whole < ([$shards, 4] | min)),
+              partial: ($listed > 0 and $whole < ([$shards, $jobs] | min)),
               caught: ($s | map(.caught) | add // 0),
               missed: ($s | map(.missed) | add // 0),
               timeout: ($s | map(.timeout) | add // 0),
