@@ -429,9 +429,14 @@ fn main() -> Result<()> {
         "interval_observed": stats(&observed),
         "interval_computed": stats(&modeled),
     }));
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/pacing");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("report.json");
+    let path = PathBuf::from(
+        std::env::args()
+            .nth(1)
+            .context("usage: pacing <report.json>")?,
+    );
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     std::fs::write(
         &path,
         serde_json::to_string_pretty(&serde_json::json!({

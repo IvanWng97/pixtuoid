@@ -323,7 +323,7 @@ bench *args:
 [doc('Frame pacing through the real TUI painter per protocol: frame time, budget overruns, interval jitter, bytes per frame')]
 [group('rust')]
 bench-pacing:
-    cargo run --release -p pixtuoid --example pacing
+    cargo run --release -p pixtuoid --example pacing -- target/pacing/report.json
 
 # Catches code that silently only builds with `native` on (the wasm core builds
 # without it). `--no-dev-deps check` builds no test, so scene's no-default tests
