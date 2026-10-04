@@ -1,19 +1,15 @@
 //! Pure-pixel paint pass — no ratatui types, no terminal I/O.
 //!
-//! [`render_to_rgb_buffer`] is the world-render seam every painter rides, and
-//! is itself TWO phases: `sim_step` advances the world with no pixel access
-//! into an immutable [`SimFrame`], then `paint_frame` consumes it. The whole
-//! public surface is on the published crate's api golden, so widen it
-//! deliberately.
+//! The classic's paint of a [`SimFrame`] the sim already stepped, which
+//! [`look::render`](crate::look::render) calls. The whole public surface is on
+//! the published crate's api golden, so widen it deliberately.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 use crate::display::{Hover, HoverTarget, Hovers};
 #[cfg(test)]
 use crate::floor::VacancyDim;
@@ -21,22 +17,6 @@ use crate::frame_cache::FrameCache;
 use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
 use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
-
-/// Everything the pure-pixel pass observed that the caller still needs.
-pub struct PixelPassResult {
-    /// Every character drawn this tick, in paint order, for its badge.
-    pub agents: Vec<AgentFrame>,
-    /// Every figure drawn this tick, in paint order.
-    pub hovers: Hovers,
-    /// Active speech bubbles this frame, for the caller's widget pass.
-    pub chitchat_bubbles: Vec<ChitchatBubble>,
-    /// Agent ids observed in `Walking { carrying_coffee: true }` this frame.
-    /// The caller inserts them into the persistent `CoffeeState`.
-    pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
-    /// Waypoint indices with an occupant this tick — the audio cue tracker's
-    /// appliance feed.
-    pub occupied_waypoints: std::collections::HashSet<usize>,
-}
 
 /// Where a drawn character's badge goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,9 +28,27 @@ pub struct AgentFrame {
 }
 
 /// What [`paint_frame`] drew that the caller points at or badges.
-struct Drawn {
-    agents: Vec<AgentFrame>,
-    hovers: Hovers,
+#[derive(Default)]
+pub(crate) struct Drawn {
+    pub(crate) agents: Vec<AgentFrame>,
+    pub(crate) hovers: Hovers,
+}
+
+/// The classic's raster state for one floor, kept across frames.
+pub(crate) struct ClassicCaches {
+    pub(crate) sprites: FrameCache,
+    pub(crate) base_fill: BaseFillCache,
+    pub(crate) shadows: crate::ground::DepthsCache,
+}
+
+impl ClassicCaches {
+    pub(crate) fn new() -> Self {
+        Self {
+            sprites: FrameCache::new(),
+            base_fill: BaseFillCache::new(),
+            shadows: crate::ground::DepthsCache::default(),
+        }
+    }
 }
 
 mod ambient;
@@ -103,7 +101,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
         }
     })
 }
-use crate::sim::{SimFrame, SimInputs, desk_occupant, sim_step};
+use crate::sim::{SimFrame, desk_occupant};
 pub(crate) use background::BaseFillCache;
 #[cfg(test)]
 pub(crate) use furniture::paint_area_rug;
@@ -115,64 +113,11 @@ use background::{
 };
 use drawable::{Drawable, DrawableKind, Layer, enqueue_room_walls, paint_drawable};
 
-pub use crate::sky::{Weather, WeatherPolicy};
-
-/// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
-pub fn weather_names() -> Vec<&'static str> {
-    crate::sky::Weather::ALL.iter().map(|w| w.name()).collect()
-}
-
-/// How hard it is raining at `now` under `weather` (0.0 dry … 1.0 storm; snow
-/// and fog are 0.0) — the audio model's weather feed.
-pub fn precipitation_level(now: std::time::SystemTime, weather: WeatherPolicy) -> f32 {
-    crate::sky::Sky::at(crate::anim::Motion::Full.timing(now), weather).precipitation()
-}
-
-/// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).
-/// Exposed so the wasm painter's `Office::is_day` can hand the site's
-/// sky-slider the SAME day/night boundary the office renders.
-pub fn hour_is_day(hour: f32) -> bool {
-    crate::sky::hour_is_day(hour)
-}
-
-/// Day/night at `now` on the LOCAL clock — the native painters' feed for the
-/// audio track selector (wasm passes its own hour). Same sun window the
-/// lighting renders: the music follows what the office SHOWS.
-pub fn is_day_at(now: std::time::SystemTime) -> bool {
-    crate::sky::hour_is_day(crate::sky::local_hour_frac(now))
-}
-
-/// Bundled input for the pixel-painting pass.
-pub struct PixelCtx<'a> {
-    /// The per-floor sim/paint STORES borrowed as ONE group. `buf` stays a
-    /// SEPARATE field: it is a sibling of the `FloorCtx` on a `PerFloor`,
-    /// borrowed disjointly by a multi-floor painter's `split_at_mut`.
-    pub store: &'a mut crate::floor::FloorCtx,
-    /// The RGB pixel buffer this pass paints into. Its pixels ARE `layout`'s
-    /// logical units — this pass has no scale of its own.
-    pub buf: &'a mut RgbBuffer,
-    /// The floor this pass renders.
-    pub world: crate::floor::FloorInputs<'a>,
-    /// The computed office geometry for this frame.
-    pub layout: &'a SceneLayout,
-    /// The active color theme.
-    pub theme: &'a crate::theme::Theme,
-    /// Carrier → fetch-time view of [`crate::floor::CoffeeState`]: key present
-    /// = has a desk cup, value = steam-window anchor.
-    pub coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
-    /// Per-venue active speech-bubble state, advanced across frames.
-    pub chitchat_state: &'a mut HashMap<crate::chitchat::VenueKey, ActiveChitchat>,
-    /// When set, composite the walkable / approach / route debug layer over the
-    /// finished scene (the live `w` toggle).
-    pub debug_walkable: bool,
-}
-
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
-/// `&mut`s are the pixel buffer and the paint-local caches (`FrameCache`,
-/// `BaseFillCache`); the sim stores are absent BY TYPE (`motion` is an
-/// immutable view, read by the debug route overlay), so painting cannot move
-/// the world.
-struct PaintCtx<'a> {
+/// `&mut`s are the pixel buffer and the paint-local caches; the sim stores are
+/// absent BY TYPE (`walks` is an immutable view, read by the debug route
+/// overlay), so painting cannot move the world.
+pub(crate) struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a SceneLayout,
     pack: &'a Pack,
@@ -191,7 +136,35 @@ struct PaintCtx<'a> {
     debug_walkable: bool,
 }
 
-impl PaintCtx<'_> {
+impl<'a> PaintCtx<'a> {
+    /// The classic pass over `world` on `layout`, painting into `buf` with `caches`.
+    pub(crate) fn classic(
+        world: crate::floor::FloorInputs<'a>,
+        layout: &'a SceneLayout,
+        theme: &'a crate::theme::Theme,
+        caches: &'a mut ClassicCaches,
+        buf: &'a mut RgbBuffer,
+        walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
+        debug_walkable: bool,
+    ) -> Self {
+        let timing = world.floor.motion.timing(world.now);
+        Self {
+            scene: world.scene,
+            layout,
+            pack: world.pack,
+            timing,
+            sky: crate::sky::Sky::at(timing, world.floor.weather),
+            buf,
+            cache: &mut caches.sprites,
+            base_fill: &mut caches.base_fill,
+            shadows: &mut caches.shadows,
+            theme,
+            floor: world.floor,
+            walks,
+            debug_walkable,
+        }
+    }
+
     /// The subset of the pass a [`Drawable`] paints with.
     fn drawable_ctx(&mut self) -> drawable::DrawableCtx<'_> {
         drawable::DrawableCtx {
@@ -204,51 +177,10 @@ impl PaintCtx<'_> {
     }
 }
 
-/// Render `ctx`'s scene into its buffer — the shared world render; the paint
-/// half borrows only `PaintCtx`.
-pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
-    let door_anim_max_ms = ctx.store.door_anim_max_ms;
-    let frame = sim_step(
-        &mut ctx.store.sim_stores(ctx.chitchat_state),
-        SimInputs {
-            world: ctx.world,
-            layout: ctx.layout,
-            coffee: ctx.coffee,
-            door_anim_max_ms,
-        },
-    );
-    let timing = ctx.world.floor.motion.timing(ctx.world.now);
-    let Drawn { agents, hovers } = paint_frame(
-        &mut PaintCtx {
-            scene: ctx.world.scene,
-            layout: ctx.layout,
-            pack: ctx.world.pack,
-            timing,
-            sky: crate::sky::Sky::at(timing, ctx.world.floor.weather),
-            buf: &mut *ctx.buf,
-            cache: &mut ctx.store.cache,
-            base_fill: &mut ctx.store.base_fill,
-            shadows: &mut ctx.store.shadows,
-            theme: ctx.theme,
-            floor: ctx.world.floor,
-            walks: &ctx.store.walks,
-            debug_walkable: ctx.debug_walkable,
-        },
-        &frame,
-    );
-    PixelPassResult {
-        agents,
-        hovers,
-        chitchat_bubbles: frame.chitchat_bubbles,
-        new_coffee_carriers: frame.new_coffee_carriers,
-        occupied_waypoints: frame.occupied_waypoints,
-    }
-}
-
 /// The PAINT half of the frame: blit the world the sim already advanced. Every
 /// positional/lifecycle decision was made in `sim_step` — this pass only
 /// resolves presentation (theme colors, sprite pixels) and composites.
-fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
+pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;

@@ -172,7 +172,7 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
 #[test]
 fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     // 100x16 → scene_rect 100x15 passes render()'s `MIN_SCENE_*` gate, but buf_h=30 is
-    // below compute_with_seed's office minimum → draw_scene returns Ok(None).
+    // below compute_with_seed's office minimum → draw_scene paints the footer-only frame.
     let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 16, vec![]);
     r.set_version_popup(true, t0());
@@ -421,4 +421,23 @@ fn layout_compute_none_bails_to_footer_only() {
         r.cached_layout().is_none(),
         "a layout that fails compute yields no cached layout"
     );
+}
+
+/// A refused frame steps nothing, but the door still closes on time: the
+/// clamp is the refused frame's own, not the last drawn one's.
+#[test]
+fn a_refused_classic_frame_keeps_the_doors_clamp_on_time() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let mut r = build(cols, rows, vec![]);
+    let scene = scene_with(vec![idle("/door/0.jsonl", 0, t0())], 16);
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(
+        r.floors[0].ctx.door_anim_max_ms > 0,
+        "the entry walk holds the door"
+    );
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    r.render(&scene, pack(), t0() + Duration::from_secs(600))
+        .expect("render");
+    assert_eq!(r.floors[0].ctx.door_anim_max_ms, 0, "the walk long arrived");
 }
