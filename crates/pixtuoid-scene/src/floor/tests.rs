@@ -730,30 +730,34 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
 
 #[test]
 fn floor_session_render_owns_the_dual_eviction() {
-    let pack = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
-    let mut session = FloorSession::new();
-    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    session.floor.walks.insert(gone, WalkState::new(gone));
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
-    let layout = session.render(FrameInputs {
-        world: FloorInputs {
-            scene: &scene,
-            pack: &pack,
-            now,
-            floor: FloorMeta::ground(),
-            pets: PetInputs::default(),
+    let layout = session.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            theme,
+            size: Size { w: 160, h: 96 },
+            place: crate::look::Place::default(),
+            debug_walkable: false,
         },
-        theme,
-        size: Size { w: 160, h: 96 },
-        debug_walkable: false,
-    });
+    );
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
-        !session.floor.ctx.walks.contains_key(&gone),
+        !session.floor.walks.contains_key(&gone),
         "render() evicts the floor half (motion) — the floating-leak class"
     );
     assert!(
@@ -766,7 +770,7 @@ fn floor_session_render_owns_the_dual_eviction() {
 fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     // `last_occupied` is the set the shared `AudioObserver` reads, so recording it
     // here is what lets a windowed painter avoid re-running the sim.
-    let pack = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
@@ -775,7 +779,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         slot.state_started_at = now0;
         slot.last_event_at = now0;
     }
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
     assert!(session.last_occupied.is_empty(), "empty before any render");
     // Requiring the FALL back to empty is the anti-stick tooth: an accumulating
     // `last_occupied` is monotone non-decreasing and can never produce it.
@@ -784,18 +788,22 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     for step in 0..600u64 {
         let now = now0 + Duration::from_secs(3 * step);
         let layout = session
-            .render(FrameInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: FloorMeta::ground(),
-                    pets: PetInputs::default(),
+            .render(
+                crate::look::Look::Classic,
+                crate::look::RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w: 160, h: 96 },
+                    place: crate::look::Place::default(),
+                    debug_walkable: false,
                 },
-                theme,
-                size: Size { w: 160, h: 96 },
-                debug_walkable: false,
-            })
+            )
             .expect("160x96 lays out");
         if session.last_occupied.is_empty() {
             if occupied_ever {
@@ -820,18 +828,22 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         fell_back_empty,
         "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
     );
-    let none = session.render(FrameInputs {
-        world: FloorInputs {
-            scene: &scene,
-            pack: &pack,
-            now: now0,
-            floor: FloorMeta::ground(),
-            pets: PetInputs::default(),
+    let none = session.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            theme,
+            size: Size { w: 8, h: 8 },
+            place: crate::look::Place::default(),
+            debug_walkable: false,
         },
-        theme,
-        size: Size { w: 8, h: 8 },
-        debug_walkable: false,
-    });
+    );
     assert!(none.is_none());
     assert!(
         session.last_occupied.is_empty(),
@@ -841,11 +853,11 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
 
 #[test]
 fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
-    let pack = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let scene = make_scene(1, 8);
     let id = AgentId::from_transcript_path("/p/0.jsonl");
     let t = t0() + Duration::from_millis(100); // 100ms in: entry walk in flight
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
 
     let frame = session
         .step(
@@ -865,18 +877,14 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         "the frame carries the agent's routed pose"
     );
     assert!(
-        session.floor.ctx.walks.contains_key(&id),
+        session.floor.walks.contains_key(&id),
         "the sim advanced: the entry leg was snapshotted into motion"
     );
     assert!(
-        session.floor.ctx.door_anim_max_ms > 0,
+        session.floor.door_anim_max_ms > 0,
         "the epilogue ran headlessly: the in-flight entry drives the door clamp"
     );
-    assert_eq!(
-        (session.buf().width(), session.buf().height()),
-        (0, 0),
-        "no pixel buffer was bought"
-    );
+    assert!(session.buf().is_none(), "no pixel buffer was bought");
 
     assert!(
         session
@@ -898,11 +906,11 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
 /// `step` hands back the memoized layout itself, not an equal copy.
 #[test]
 fn step_hands_back_the_layout_the_sim_stepped_on() {
-    let pack = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let scene = make_scene(1, 8);
     let size = Size { w: 160, h: 96 };
     let meta = FloorMeta::ground();
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
     let stepped = session
         .step(
             crate::floor::FloorInputs {
@@ -917,7 +925,6 @@ fn step_hands_back_the_layout_the_sim_stepped_on() {
         .expect("a layoutable size steps");
     let memoized = session
         .floor
-        .ctx
         .frame_layout(size.w, size.h, meta.floor_seed)
         .expect("the memoized layout");
     assert!(Arc::ptr_eq(&stepped.layout, &memoized));
@@ -964,43 +971,6 @@ fn session_types_default_equals_new() {
     );
     assert!(PerOffice::default().coffee.map().is_empty());
     assert!(PerOffice::default().chitchat.is_empty());
-    let s = FloorSession::default();
-    assert!(s.floor.ctx.walks.is_empty());
-    assert!(s.office.coffee.map().is_empty());
-}
-
-#[test]
-fn reset_frame_cache_clears_cached_sprites() {
-    use crate::frame_cache::FrameKey;
-    use pixtuoid_core::{AgentId, sprite::Frame};
-
-    let mut s = FloorSession::new();
-    // Prime the cache, so the assertion below distinguishes a real reset from a
-    // no-op on an already-empty cache.
-    s.floor.ctx.cache.get_or_make(
-        FrameKey {
-            agent_id: AgentId::from_parts("test", "agent"),
-            anim_name: "idle",
-            frame_idx: 0,
-            flip_x: false,
-            glow_tint: None,
-            burn: crate::burn::BurnTier::Normal,
-            density: pixtuoid_core::sprite::format::Density::ONE,
-        },
-        Frame::default,
-    );
-    assert_eq!(
-        s.floor.ctx.cache.len(),
-        1,
-        "priming must populate the cache"
-    );
-
-    s.reset_frame_cache();
-    assert_eq!(
-        s.floor.ctx.cache.len(),
-        0,
-        "reset must clear a populated cache"
-    );
 }
 
 #[test]
@@ -1565,7 +1535,7 @@ fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
     scene
 }
 
-/// Both painters' pixels for `scene` on `floor` at `now`, each from fresh
+/// Both looks' pixels for `scene` on `floor` at `now`, each from fresh
 /// stores so only the instant differs.
 fn both_painters(
     scene: &SceneState,
@@ -1573,49 +1543,35 @@ fn both_painters(
     pet: Option<&Pet>,
     now: SystemTime,
 ) -> (Vec<Rgb>, Vec<Rgb>) {
-    let pack = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let size = crate::layout::Size { w: 192, h: 80 };
-    let world = FloorInputs {
-        scene,
-        pack: &pack,
-        now,
-        floor,
-        pets: PetInputs { pet, petting: None },
-    };
-    let mut classic = FloorSession::new();
-    classic.render(FrameInputs {
-        world,
-        theme,
-        size,
-        debug_walkable: false,
-    });
-    let mut session = FloorSession::new();
-    let stepped = session.step(world, size).expect("lays out");
-    let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
-    let mut buf = RgbBuffer::filled(
-        scale.to_buffer(size.w),
-        scale.to_buffer(size.h),
-        theme.surface.bg_fallback,
-    );
-    let board = session.board(scene, floor.motion, now);
-    crate::cutaway::paint::render_cutaway(
-        &stepped.frame,
-        crate::display::Office {
-            layout: &stepped.layout,
+    let inputs = crate::look::RenderInputs {
+        world: FloorInputs {
+            scene,
             pack: &pack,
-            theme,
-            scale,
-        },
-        crate::display::Showing {
-            floor,
             now,
-            board: &board,
+            floor,
+            pets: PetInputs { pet, petting: None },
         },
-        &mut crate::cutaway::paint::CutawayCache::default(),
-        &mut buf,
-    );
-    (classic.buf().as_slice().to_vec(), buf.as_slice().to_vec())
+        theme,
+        size: crate::layout::Size { w: 192, h: 80 },
+        place: crate::look::Place {
+            gateway: crate::board::office_gateway(scene),
+            floor: None,
+        },
+        debug_walkable: false,
+    };
+    let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
+    let [classic, cutaway] = [
+        crate::look::Look::Classic,
+        crate::look::Look::Cutaway { scale },
+    ]
+    .map(|look| {
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        session.render(look, inputs).expect("lays out");
+        session.buf().expect("a frame").as_slice().to_vec()
+    });
+    (classic, cutaway)
 }
 
 /// Every ambient loop either painter draws reads its floor's beat: two

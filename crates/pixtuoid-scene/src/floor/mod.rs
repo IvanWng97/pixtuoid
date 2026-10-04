@@ -577,13 +577,16 @@ impl PerOffice {
     }
 }
 
-/// The OWNED single-floor painter session: one [`PerFloor`] + one [`PerOffice`]
-/// plus the dual `evict_missing` protocol behind one type, so a painter can't
-/// hand-roll (and silently skip) the eviction — a skipped eviction leaks
-/// per-agent state or teleports a recurring agent.
+/// The OWNED single-floor painter session: one floor's stores and
+/// [`Raster`](crate::look::Raster) + one [`PerOffice`] plus the dual
+/// `evict_missing` protocol behind one type, so a painter can't hand-roll (and
+/// silently skip) the eviction — a skipped eviction leaks per-agent state or
+/// teleports a recurring agent.
 pub struct FloorSession {
-    /// This session's single floor — its sim/paint stores + pixel buffer.
-    pub floor: PerFloor,
+    /// This session's single floor's stores.
+    pub floor: FloorCtx,
+    /// What this floor is drawn into, in each look.
+    pub raster: crate::look::Raster,
     /// The office-wide cross-frame state (coffee, chitchat, audio) shared across floors.
     pub office: PerOffice,
     /// The layout the last `render` laid out, so a painter can't pass a layout
@@ -592,20 +595,18 @@ pub struct FloorSession {
     /// The occupancy the last `render` observed, so a painter reads the SAME
     /// frame's occupancy it just painted.
     last_occupied: std::collections::HashSet<usize>,
-    /// The sprites the last `render` drew, which [`FloorSession::overlay`]
-    /// labels.
-    last_agents: Vec<crate::pixel_painter::AgentFrame>,
 }
 
 impl FloorSession {
-    /// An empty session — fresh floor + office state, nothing laid out yet.
-    pub fn new() -> Self {
+    /// An empty session drawing with `pack` — fresh floor + office state,
+    /// nothing laid out yet.
+    pub fn new(pack: Arc<Pack>) -> Self {
         Self {
-            floor: PerFloor::new(),
+            floor: FloorCtx::new(),
+            raster: crate::look::Raster::new(pack),
             office: PerOffice::default(),
             last_layout: None,
             last_occupied: std::collections::HashSet::new(),
-            last_agents: Vec::new(),
         }
     }
 
@@ -617,36 +618,34 @@ impl FloorSession {
         self.office.evict_missing(scene);
     }
 
-    /// Render one frame: the dual eviction, then the shared [`render_floor`]
-    /// seam. Returns the computed layout ([`FloorSession::buf`] holds the
-    /// pixels), or `None` when the size can't lay out. `scene` MUST be the full
-    /// live scene — the session evicts against it.
-    pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::SceneLayout>> {
+    /// Render one frame in `look`: the dual eviction, then
+    /// [`look::render`](crate::look::render). Returns the computed layout
+    /// ([`FloorSession::buf`] holds the pixels), or `None` when the size can't
+    /// lay out. `scene` MUST be the full live scene — the session evicts
+    /// against it.
+    pub fn render(
+        &mut self,
+        look: crate::look::Look,
+        inputs: crate::look::RenderInputs<'_>,
+    ) -> Option<Arc<crate::layout::SceneLayout>> {
         self.evict_missing(inputs.world.scene);
-        let frame = render_floor(
-            &mut self.floor.ctx,
-            &mut self.floor.buf,
-            &mut self.office.coffee,
-            &mut self.office.chitchat,
+        match crate::look::render(
+            &mut self.floor,
+            &mut self.raster,
+            &mut self.office,
+            look,
             inputs,
-        );
-        match frame {
-            Some(FloorFrame {
-                layout,
-                occupied_waypoints,
-                agents,
-            }) => {
-                self.last_layout = Some(Arc::clone(&layout));
+        ) {
+            Some(frame) => {
+                self.last_layout = Some(Arc::clone(&frame.layout));
                 // REPLACE, never extend: the cue tracker fires on edges, so an
                 // accumulating set would re-report stale waypoints forever.
-                self.last_occupied = occupied_waypoints;
-                self.last_agents = agents;
-                Some(layout)
+                self.last_occupied = frame.occupied_waypoints;
+                Some(frame.layout)
             }
             None => {
                 self.last_layout = None;
                 self.last_occupied.clear();
-                self.last_agents.clear();
                 None
             }
         }
@@ -659,7 +658,7 @@ impl FloorSession {
         scene: &SceneState,
         hovered: Option<AgentId>,
     ) -> Vec<crate::overlay::LabelElement> {
-        crate::overlay::build_overlay(scene, &self.last_agents, hovered)
+        crate::overlay::build_overlay(scene, self.raster.classic_agents(), hovered)
     }
 
     /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.
@@ -678,9 +677,9 @@ impl FloorSession {
         )
     }
 
-    /// The rendered pixel buffer (a borrow of the reused allocation).
-    pub fn buf(&self) -> &RgbBuffer {
-        &self.floor.buf
+    /// The last frame's pixels, `None` before the first `render`.
+    pub fn buf(&self) -> Option<&RgbBuffer> {
+        self.raster.pixels()
     }
 
     /// One frame of audio intent for THIS session's last render, fed from the
@@ -711,7 +710,7 @@ impl FloorSession {
     /// cached AGENT sprites don't render with the old palette; the env base
     /// fill needs no flush, since `BaseFillCache` keys on the palette.
     pub fn reset_frame_cache(&mut self) {
-        self.floor.ctx.cache = crate::frame_cache::FrameCache::new();
+        self.raster.reset_sprite_cache();
     }
 
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
@@ -721,7 +720,7 @@ impl FloorSession {
     pub fn step(&mut self, world: FloorInputs<'_>, size: Size) -> Option<SteppedFloor> {
         self.evict_missing(world.scene);
         step_floor(
-            &mut self.floor.ctx,
+            &mut self.floor,
             &mut self.office.coffee,
             &mut self.office.chitchat,
             world,
@@ -756,12 +755,6 @@ pub fn step_floor(
         world.now,
     );
     Some(SteppedFloor { layout, frame })
-}
-
-impl Default for FloorSession {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Per-floor indoor-lighting fade state: an emptied floor holds full light for

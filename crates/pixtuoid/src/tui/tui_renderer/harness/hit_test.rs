@@ -127,7 +127,7 @@ fn drawn(
     now: SystemTime,
 ) -> AgentFrame {
     let layout = r.cached_layout().expect("rendered layout");
-    let stepped = pixtuoid_scene::floor::FloorSession::new()
+    let stepped = pixtuoid_scene::floor::FloorSession::new(std::sync::Arc::new(pack().clone()))
         .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene,

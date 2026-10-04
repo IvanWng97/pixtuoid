@@ -903,7 +903,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walk_layout = Arc::new(walk_layout);
-        let office = crate::floor::FloorSession::new()
+        let office = crate::floor::FloorSession::new(Arc::clone(&pack))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),

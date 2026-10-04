@@ -96,6 +96,29 @@ impl Raster {
         }
     }
 
+    fn classic(&mut self) -> &mut Classic {
+        self.classic.get_or_insert_with(|| Classic {
+            buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
+            caches: ClassicCaches::new(),
+            hits: Hoverables::default(),
+        })
+    }
+
+    /// The agents the last classic frame drew, in paint order; none in another look.
+    pub(crate) fn classic_agents(&self) -> &[crate::pixel_painter::AgentFrame] {
+        match (self.shown, &self.classic) {
+            (Some(Look::Classic), Some(classic)) => &classic.hits.agents,
+            _ => &[],
+        }
+    }
+
+    /// Flush the classic's recolored sprites, after a theme change.
+    pub fn reset_sprite_cache(&mut self) {
+        if let Some(classic) = &mut self.classic {
+            classic.caches.sprites = crate::frame_cache::FrameCache::new();
+        }
+    }
+
     /// The pixels of the last frame drawn, `None` before the first.
     pub fn pixels(&self) -> Option<&RgbBuffer> {
         match self.shown? {
@@ -125,18 +148,24 @@ pub fn render<'r>(
         std::ptr::eq(world.pack, &*raster.pack),
         "the sim steps one pack and the raster draws another"
     );
-    let stepped = step_floor(floor, &mut office.coffee, &mut office.chitchat, world, size)?;
+    let Some(stepped) = step_floor(floor, &mut office.coffee, &mut office.chitchat, world, size)
+    else {
+        if look == Look::Classic {
+            raster
+                .classic()
+                .buf
+                .resize_fill(size.w, size.h, theme.surface.bg_fallback);
+            raster.shown = Some(look);
+        }
+        return None;
+    };
     let switched = raster
         .shown
         .replace(look)
         .is_none_or(|was| std::mem::discriminant(&was) != std::mem::discriminant(&look));
     let (pixels, dirty) = match look {
         Look::Classic => {
-            let classic = raster.classic.get_or_insert_with(|| Classic {
-                buf: RgbBuffer::filled(0, 0, theme.surface.bg_fallback),
-                caches: ClassicCaches::new(),
-                hits: Hoverables::default(),
-            });
+            let classic = raster.classic();
             classic
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);

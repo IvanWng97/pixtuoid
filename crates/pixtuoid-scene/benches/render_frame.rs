@@ -242,7 +242,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
     ] {
         let base = localclock::at_hour(hour);
         let scene = office_scene(12, 16, base, busy);
-        let mut session = FloorSession::new();
+        let mut session = FloorSession::new(Arc::clone(&pack));
         let stepped: Vec<(SystemTime, SteppedFloor, BoardModel)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);

@@ -556,8 +556,10 @@ fn every_painter_shows_the_one_board_of_a_floor() {
     };
 
     let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
-    let floating =
-        crate::floating::offscreen::OfficeRenderer::new().board(&one_floor, Motion::Full, now);
+    let floating = crate::floating::offscreen::OfficeRenderer::new(std::sync::Arc::new(
+        pack().clone(),
+    ))
+    .board(&one_floor, Motion::Full, now);
     assert_eq!(tui(&one_floor, 0), floating);
 
     let upper = tui(&with_gateway(two_floor_scene()), 1);

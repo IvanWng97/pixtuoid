@@ -24,12 +24,12 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::floor::{
-    FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
-};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::pixel_painter::WeatherPolicy;
+use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
@@ -114,8 +114,9 @@ pub struct Office {
     /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
     /// view into wasm memory, so blitting is zero-copy on the JS side.
     rgba: Vec<u8>,
-    pack: Pack,
+    pack: std::sync::Arc<Pack>,
     theme: &'static Theme,
+    look: Look,
     seed: u64,
     reducer: Reducer,
     beats: Vec<Beat>,
@@ -148,16 +149,18 @@ impl Office {
     /// only if the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
-        let pack = load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?;
+        let pack =
+            std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits
             // agents the rendered office can seat.
             scene: SceneState::default(),
-            session: FloorSession::new(),
+            session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
             theme: ALL_THEMES[0],
+            look: Look::Classic,
             seed: seed as u64,
             reducer: Reducer::new(),
             beats: hero_script(),
@@ -186,9 +189,10 @@ impl Office {
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        let size = self.logical(buf_w, buf_h);
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
-        self.sync_capacity(buf_w, buf_h);
+        self.sync_capacity(size);
         self.advance_script(now);
         self.reducer.tick(&mut self.scene, now);
         // The DAEMON sweep the app's reducer task runs: without it a `Down` row
@@ -201,8 +205,8 @@ impl Office {
         // `render` evicts per-agent render state for the agents the sweep removed
         // — load-bearing: the looped script REUSES agent ids, and a returning cast
         // member with stale walk legs teleports in.
-        self.render(now, buf_w, buf_h);
-        self.expand_rgba();
+        self.render(now, size);
+        self.expand_rgba(buf_w, buf_h);
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
@@ -235,6 +239,20 @@ impl Office {
     /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
+    }
+
+    /// Draw the office in `name`'s look, `"classic"` or `"cutaway"`; an unknown
+    /// name is a no-op. The cutaway draws at the pack's densest art.
+    pub fn set_look(&mut self, name: &str) {
+        let look = match name {
+            "classic" => Look::Classic,
+            "cutaway" => Look::Cutaway {
+                scale: RenderScale::new(self.pack.max_density_variant().get())
+                    .unwrap_or(RenderScale::ONE),
+            },
+            _ => return,
+        };
+        self.look = look;
     }
 
     /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
@@ -536,15 +554,26 @@ impl Office {
     /// anchors return `None`) while staying alive in the scene. A shrink lowers
     /// capacity for FUTURE admissions only; already-seated excess agents stay
     /// alive-but-offscreen, same as the TUI on terminal shrink.
-    fn sync_capacity(&mut self, buf_w: u16, buf_h: u16) {
-        if self.caps_size == Some((buf_w, buf_h)) {
+    fn sync_capacity(&mut self, size: Size) {
+        if self.caps_size == Some((size.w, size.h)) {
             return;
         }
-        // The SAME (size, cap=None, seed) computation `render` feeds
-        // `render_floor`, so reducer capacity and painted layout can't drift.
-        let cap = floor_capacity(buf_w, buf_h, self.seed);
+        // The SAME (size, cap=None, seed) computation `render` lays out, so
+        // reducer capacity and painted layout can't drift.
+        let cap = floor_capacity(size.w, size.h, self.seed);
         self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
-        self.caps_size = Some((buf_w, buf_h));
+        self.caps_size = Some((size.w, size.h));
+    }
+
+    /// The office a `buf_w`×`buf_h` canvas shows in this look.
+    fn logical(&self, buf_w: u16, buf_h: u16) -> Size {
+        match self.look {
+            Look::Classic => Size { w: buf_w, h: buf_h },
+            Look::Cutaway { scale } => Size {
+                w: scale.logical(buf_w),
+                h: scale.logical(buf_h),
+            },
+        }
     }
 
     /// Fire every scripted beat due by `now`, each applied at its SCHEDULED time
@@ -612,31 +641,47 @@ impl Office {
         .with_weather(self.weather)
     }
 
-    fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
+    fn render(&mut self, now: SystemTime, size: Size) {
         // Too-small layouts leave the cleared buffer; never panics.
         let floor_meta = self.floor_meta();
-        self.session.render(FrameInputs {
-            world: FloorInputs {
-                scene: &self.scene,
-                pack: &self.pack,
-                now,
-                floor: floor_meta,
-                pets: PetInputs::default(),
+        self.session.render(
+            self.look,
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &self.scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
+                theme: self.theme,
+                size,
+                place: Place {
+                    gateway: pixtuoid_scene::board::office_gateway(&self.scene),
+                    floor: None,
+                },
+                debug_walkable: false,
             },
-            theme: self.theme,
-            size: Size { w: buf_w, h: buf_h },
-            debug_walkable: false,
-        });
+        );
     }
 
-    /// `Rgb` is not `repr(C)`, so expand into the RGBA staging vec per-pixel
-    /// (opaque alpha) — don't cast.
-    fn expand_rgba(&mut self) {
-        let px = self.session.buf().as_slice();
+    /// Expand the frame into the `buf_w`×`buf_h` RGBA staging vec (opaque
+    /// alpha), the canvas's whole size: a cutaway frame a sub-unit short of it
+    /// is padded with the theme's background. `Rgb` is not `repr(C)`, so
+    /// per-pixel — don't cast.
+    fn expand_rgba(&mut self, buf_w: u16, buf_h: u16) {
+        let bg = self.theme.surface.bg_fallback;
+        let frame = self.session.buf();
         self.rgba.clear();
-        self.rgba.reserve(px.len() * 4);
-        for c in px {
-            self.rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
+        self.rgba
+            .reserve(usize::from(buf_w) * usize::from(buf_h) * 4);
+        for y in 0..buf_h {
+            for x in 0..buf_w {
+                let c = frame
+                    .filter(|f| x < f.width() && y < f.height())
+                    .map_or(bg, |f| f.get(x, y));
+                self.rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
+            }
         }
     }
 }
@@ -842,6 +887,23 @@ mod tests {
         assert_eq!(o.frame_len(), 8 * 8 * 4);
     }
 
+    /// The cutaway fills the same canvas, a size its scale doesn't divide included,
+    /// and paints a different office than the classic.
+    #[test]
+    fn the_cutaway_fills_the_canvas_the_classic_does() {
+        let (w, h) = (643, 365);
+        let mut o = office();
+        o.step(T0_MS, w, h);
+        let classic = o.frame().to_vec();
+        o.set_look("no-such-look");
+        o.step(T0_MS, w, h);
+        assert_eq!(o.frame(), classic, "an unknown look is a no-op");
+        o.set_look("cutaway");
+        o.step(T0_MS, w, h);
+        assert_eq!(o.frame_len(), (w * h * 4) as usize);
+        assert_ne!(o.frame(), classic, "the cutaway painted");
+    }
+
     #[test]
     fn beats_fire_once_at_scheduled_times_across_a_wrap() {
         let mut o = office();
@@ -1003,7 +1065,7 @@ mod tests {
         }
         assert!(
             o.scene.agents.contains_key(&cast_id(5))
-                && o.session.floor.ctx.walks.contains_key(&cast_id(5)),
+                && o.session.floor.walks.contains_key(&cast_id(5)),
             "agent 5 must be live with motion state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd + the exit grace + sweep.
@@ -1016,7 +1078,7 @@ mod tests {
             "agent 5 exited and was GC'd"
         );
         assert!(
-            !o.session.floor.ctx.walks.contains_key(&cast_id(5)),
+            !o.session.floor.walks.contains_key(&cast_id(5)),
             "agent 5's motion state was evicted with its slot"
         );
         assert!(

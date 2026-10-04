@@ -13,8 +13,9 @@ use anyhow::Result;
 use pixtuoid::floating::offscreen::OfficeRenderer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::theme::theme_by_name;
 
 fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
@@ -65,7 +66,7 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
 
 fn main() -> Result<()> {
     let theme = theme_by_name("normal").expect("normal theme");
-    let pack = pixtuoid_scene::pack::load_bundled_pack()?;
+    let pack = std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // (label, buffer w, h). The rich sizes are what a 192x80-cell terminal needs
@@ -88,12 +89,12 @@ fn main() -> Result<()> {
     for (label, w, h) in cases {
         let mut scene = SceneState::uniform(64);
         populate(&mut scene, base, 12);
-        let mut r = OfficeRenderer::new();
+        let mut r = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         // Warm the caches (layout memo + recolored frames) — steady state is
         // what a running office pays, not the first frame.
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
-            let _ = r.render(FrameInputs {
+            let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -103,6 +104,7 @@ fn main() -> Result<()> {
                 },
                 theme,
                 size: Size { w, h },
+                place: pixtuoid_scene::look::Place::default(),
                 debug_walkable: false,
             });
         }
@@ -113,7 +115,7 @@ fn main() -> Result<()> {
             // Advance time each frame so animation/motion actually re-derives.
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
-            let _ = r.render(FrameInputs {
+            let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -123,6 +125,7 @@ fn main() -> Result<()> {
                 },
                 theme,
                 size: Size { w, h },
+                place: pixtuoid_scene::look::Place::default(),
                 debug_walkable: false,
             });
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -155,10 +158,10 @@ fn main() -> Result<()> {
     for n in [0usize, 4, 12, 30, 60] {
         let mut scene = SceneState::uniform(64);
         populate(&mut scene, base, n);
-        let mut r = OfficeRenderer::new();
+        let mut r = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
-            let _ = r.render(FrameInputs {
+            let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -168,6 +171,7 @@ fn main() -> Result<()> {
                 },
                 theme,
                 size: Size { w: 768, h: 640 },
+                place: pixtuoid_scene::look::Place::default(),
                 debug_walkable: false,
             });
         }
@@ -175,7 +179,7 @@ fn main() -> Result<()> {
         for i in 0..60u64 {
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
-            let _ = r.render(FrameInputs {
+            let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -185,6 +189,7 @@ fn main() -> Result<()> {
                 },
                 theme,
                 size: Size { w: 768, h: 640 },
+                place: pixtuoid_scene::look::Place::default(),
                 debug_walkable: false,
             });
             best = best.min(t.elapsed().as_secs_f64() * 1000.0);
@@ -219,23 +224,26 @@ fn main() -> Result<()> {
     for (_, w, h) in cases {
         let mut scene = SceneState::uniform(64);
         populate(&mut scene, base, 12);
-        let mut r = OfficeRenderer::new();
+        let mut r = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         let mut enc_ms = f64::MAX;
         let mut bytes = 0usize;
         for i in 0..12u64 {
             let now = base + Duration::from_millis(i * 33);
-            let buf = r.render(FrameInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: FloorMeta::ground(),
-                    pets: PetInputs::default(),
-                },
-                theme,
-                size: Size { w, h },
-                debug_walkable: false,
-            });
+            let buf = r
+                .render(RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w, h },
+                    place: pixtuoid_scene::look::Place::default(),
+                    debug_walkable: false,
+                })
+                .expect("a frame");
             let (bw, bh) = (buf.width() as usize, buf.height() as usize);
             let t = Instant::now();
             sixel_encode(buf.as_slice(), bw, bh, &mut out);
@@ -255,18 +263,21 @@ fn main() -> Result<()> {
         // (img2sixel) can be run over the same input as a cross-check. Our
         // encoder is an instrument; an instrument nobody validated is a guess.
         if let Some(dir) = pixtuoid_core::platform::path_env("PIXTUOID_BENCH_DUMP") {
-            let buf = r.render(FrameInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now: base,
-                    floor: FloorMeta::ground(),
-                    pets: PetInputs::default(),
-                },
-                theme,
-                size: Size { w, h },
-                debug_walkable: false,
-            });
+            let buf = r
+                .render(RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now: base,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w, h },
+                    place: pixtuoid_scene::look::Place::default(),
+                    debug_walkable: false,
+                })
+                .expect("a frame");
             let (bw, bh) = (buf.width() as u32, buf.height() as u32);
             let mut img = image::RgbImage::new(bw, bh);
             for (i, p) in buf.as_slice().iter().enumerate() {
