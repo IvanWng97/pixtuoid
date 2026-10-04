@@ -37,7 +37,7 @@ exclude_re = [
     # Untestable glue inside otherwise-mutated files: ZERO test call sites, so
     # nothing exists that could kill them. Delete a name the moment a test reaches it.
     'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',
-    'runtime/driver\.rs.*replace (run|run_async|headless_loop|compute_boot_capacities) ->',
+    'runtime/driver\.rs.*replace (run|run_async|headless_loop) ->',
     'runtime/driver\.rs.*replace reducer_task with',
     # Reached under test, but only on a branch where the mutation is unobservable.
     'unix\.rs.*replace ensure_owned_socket_dir ->',   # tests hit only the no-op branch
