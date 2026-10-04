@@ -4,6 +4,7 @@ use pixtuoid_core::sprite::format::Pack;
 
 use super::Span;
 use crate::atmosphere::Carpet;
+use crate::dither::Dithered;
 use crate::layout::{Bounds, Point};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -90,7 +91,7 @@ pub(crate) struct DisplayList<'a> {
     /// change repaints the whole frame.
     pub(super) ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
-    pub(super) carpet: Carpet,
+    pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::cutaway::light::Flash,
     // What it was built with, so painting it cannot use anything else: a
@@ -168,7 +169,7 @@ impl<'a> DisplayList<'a> {
         self.ambient
     }
 
-    pub(crate) fn carpet(&self) -> Carpet {
+    pub(crate) fn carpet(&self) -> Dithered<Carpet> {
         self.carpet
     }
 
