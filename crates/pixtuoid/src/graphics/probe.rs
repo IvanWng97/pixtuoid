@@ -41,6 +41,18 @@ impl EnvHints {
         self.env.tmux_client
     }
 
+    /// The capability query, wrapped for tmux whenever this process is inside
+    /// it.
+    fn query(&self) -> String {
+        Parser::query(
+            self.env.tmux(),
+            QueryStdioOptions {
+                blacklist_protocols: self.blacklist(),
+                ..QueryStdioOptions::default()
+            },
+        )
+    }
+
     /// Protocols never asked for under WezTerm or Konsole: neither implements
     /// kitty's placeholders, Konsole's SIXEL is buggy, and WezTerm draws better
     /// through iTerm2 (`picker.rs:119-128`).
@@ -156,13 +168,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
     if hints.our_tmux_pane() && tmux_passthrough() == Some(false) {
         return Probe::TmuxPassthroughOff;
     }
-    let query = Parser::query(
-        hints.env.tmux(),
-        QueryStdioOptions {
-            blacklist_protocols: hints.blacklist(),
-            ..QueryStdioOptions::default()
-        },
-    );
+    let query = hints.query();
     let mut parser = Parser::new();
     let mut responses = Vec::new();
     match crate::term::query_tty(
@@ -350,6 +356,7 @@ mod tests {
         assert!(detected(&[Response::Kitty], &pane, None).tmux);
         assert!(pane.env.link().tmux);
         assert!(pane.our_tmux_pane());
+        assert!(pane.query().starts_with("\x1bPtmux;"), "{:?}", pane.query());
         let outer = EnvHints {
             iterm_session: true,
             ..pane
