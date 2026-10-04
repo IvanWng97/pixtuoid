@@ -18,7 +18,7 @@ pub(crate) use hover::Hover;
 pub use hover::{HoverTarget, Hovers, PetHover};
 pub(crate) use list::{
     Art, DisplayList, Emits, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp,
-    WindowView, fingerprint,
+    fingerprint,
 };
 #[cfg(test)]
 pub(crate) use order::check_order;

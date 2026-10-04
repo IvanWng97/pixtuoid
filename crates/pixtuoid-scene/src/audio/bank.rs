@@ -85,6 +85,7 @@ impl OneShotPool {
 /// The ONE-SHOT pools a player keeps for its whole life. The loop beds live in
 /// [`TrackBeds`] instead and are NOT retained — `RodioSink` copies each into its
 /// own `SamplesBuffer`, so holding the Arcs would double the bed RAM.
+#[derive(Debug)]
 pub struct AssetBank {
     pub keystrokes: Vec<Arc<Vec<f32>>>,
     pub drops: Vec<Arc<Vec<f32>>>,
@@ -126,6 +127,7 @@ impl AssetBank {
 /// in) with the sink, then DROPPED. The five musical beds and the NIGHT texture
 /// share ONE sample count (phase-locked); the DAY texture keeps its
 /// free-running power-of-two length.
+#[derive(Debug)]
 pub struct TrackBeds {
     beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
 }
