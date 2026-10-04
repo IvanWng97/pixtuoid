@@ -12,7 +12,7 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use crate::sim::{Cup, DeskProps, desk_cup_at};
+use crate::sim::DeskProps;
 use pixtuoid_core::AgentSlot;
 
 use super::AgentFrame;
@@ -27,7 +27,11 @@ pub(super) use crate::display::Layer;
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 use crate::layout::{Point, SceneLayout, Size};
-use crate::pack::{DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at};
+use crate::pack::{
+    DESK_CHAIR_SPRITE, DESK_CUP_SPRITE, MEETING_TABLE_SPRITE, TOKEN_SHEET_SPRITE,
+    TOKEN_TOWER_SPRITE, desk_art, desk_art_top, frame_at,
+};
+use crate::render_scale::RenderScale;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within the coffee
@@ -279,8 +283,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 theme.effects.monitor_idle,
                 lights.screen_idle,
             );
-            paint_desk_coffee(buf, *desk, props.cup, &props.effects, theme);
-            paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
+            paint_desk_props(buf, (*desk, *facing), props, pack, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
@@ -451,26 +454,57 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
     None
 }
 
-/// The cup, then the `steam` riding on it.
-fn paint_desk_coffee(
+/// The props on the 1x desk at `desk` facing its facing, each from the pack in
+/// the theme's cup and paper at the desk art's mark for it: the cup, the
+/// steam riding on it, then the token tower at its tier with the sheet falling
+/// onto it.
+fn paint_desk_props(
     buf: &mut RgbBuffer,
-    desk: Point,
-    cup: Option<Cup>,
-    steam: &[Effect],
+    (desk, facing): (Point, crate::layout::Facing),
+    props: &DeskProps,
+    pack: &Pack,
     theme: &crate::theme::Theme,
 ) {
-    if cup.is_none() {
-        return;
-    }
-    let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        buf.put_checked(x, y, c);
+    let overrides = crate::pack::desk_prop_overrides(theme);
+    // Frame `frame` of `sprite` stood on the row past its foot at `at`; its top row.
+    let stand = |buf: &mut RgbBuffer, sprite: &str, frame: usize, at: Point| {
+        let f = crate::pack::densest_frame(pack, sprite, frame, RenderScale::ONE)?;
+        let y = at.y.checked_sub(f.frame.height())?;
+        blit_frame(&f.recolorable.recolored(&overrides), at.x, y, buf);
+        Some(y)
     };
-    let Point { x: cx, y: cy } = desk_cup_at(desk);
-    put(buf, cx, cy, theme.furniture.coffee_cup);
-    put(buf, cx + 1, cy, theme.furniture.coffee_cup);
-    put(buf, cx, cy + 1, theme.furniture.coffee_cup_shadow);
-    put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
-    paint_effects(buf, steam, theme);
+    let mark = |name| crate::pack::desk_mark(pack, desk, facing, name);
+    if props.cup.is_some()
+        && let Some(at) = mark(crate::pack::CUP_MARK)
+    {
+        stand(buf, DESK_CUP_SPRITE, 0, at);
+    }
+    paint_effects(buf, &props.effects, theme);
+    let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
+        return;
+    };
+    let Some(at) = mark(crate::pack::TOWER_MARK) else {
+        return;
+    };
+    let Some(top) = stand(buf, TOKEN_TOWER_SPRITE, tier, at) else {
+        return;
+    };
+    // The sheet lands as the pile's next sheet: at its full fall it is gone.
+    if let Some(rest) = props
+        .sheet_fall
+        .and_then(|fallen| crate::token_meter::SHEET_FALL_PX.checked_sub(fallen))
+        .filter(|&rest| rest > 0)
+    {
+        stand(
+            buf,
+            TOKEN_SHEET_SPRITE,
+            0,
+            Point {
+                x: at.x,
+                y: top - (rest - 1),
+            },
+        );
+    }
 }
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
@@ -498,64 +532,6 @@ pub(super) fn paint_desk_lamp_pool(
     }
     super::background::paint_light(buf, &lights.lamp, theme.lighting.desk_lamp);
 }
-
-/// Token-meter paper tower: `tier` reams stacked on the desk surface against
-/// the monitor's east side, growing NORTH past the bezel at
-/// [`MAX_TIER`](crate::token_meter::MAX_TIER) so the silhouette reads across the
-/// room; that tier's top sheet teeters 1px east.
-///
-/// Tier 0 suppresses the SHEET too, deliberately: a sheet needs a pile to land
-/// on, it keeps the tier-0 desk byte-identical, and the early return is what
-/// makes the `h - 1` math below safe.
-fn paint_token_stack(
-    buf: &mut RgbBuffer,
-    desk: Point,
-    tier: u8,
-    sheet_fall: Option<u16>,
-    theme: &crate::theme::Theme,
-) {
-    if tier == 0 {
-        return;
-    }
-    let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
-        buf.put_checked(x, y, c);
-    };
-    let base_y = desk.y + STACK_BASE_DY;
-    let h = tier as u16 * STACK_PX_PER_TIER;
-    for i in 0..h {
-        let y = base_y.saturating_sub(i);
-        let c = if i % 2 == 1 {
-            theme.furniture.paper_shade
-        } else {
-            theme.furniture.paper
-        };
-        let teeter = tier == crate::token_meter::MAX_TIER && i == h - 1;
-        let dx = u16::from(teeter);
-        for xoff in 0..STACK_W {
-            put(buf, desk.x + STACK_X_OFF + xoff + dx, y, c);
-        }
-    }
-    if let Some(dist) = sheet_fall {
-        // The sheet starts SHEET_FALL_PX above the stack top and has fallen
-        // `dist`; at landing it merges into the pile (not painted).
-        let stack_top = base_y.saturating_sub(h - 1);
-        let remaining = crate::token_meter::SHEET_FALL_PX.saturating_sub(dist);
-        if remaining > 0 {
-            let sy = stack_top.saturating_sub(remaining);
-            for xoff in 0..STACK_W {
-                put(buf, desk.x + STACK_X_OFF + xoff, sy, theme.furniture.paper);
-            }
-        }
-    }
-}
-
-/// Tower geometry, relative to the desk sprite: the stack hugs the
-/// monitor's east side on the right wood wing, its base on the surface row.
-const STACK_X_OFF: u16 = 11;
-const STACK_W: u16 = 3;
-const STACK_BASE_DY: u16 = 3;
-/// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
-const STACK_PX_PER_TIER: u16 = 2;
 
 /// Paint a character at a top-left with per-agent recolor, returning
 /// the size of the frame it drew.
@@ -607,10 +583,26 @@ pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Ve
 mod tests {
     use super::*;
     use crate::anim::Motion;
-    use crate::layout::DESK_W;
+    use crate::layout::{DESK_W, Facing};
     use crate::pet::PetKind;
+    use crate::sim::Cup;
 
-    /// The 1x tower and sheet art are the classic's: a frame per tier up to
+    /// The 1x token tower's width and rows a tier, as its art draws them.
+    const STACK_W: u16 = 3;
+    const STACK_PX_PER_TIER: u16 = 2;
+
+    /// Where the 1x south desk at `desk` stands its tower: its west column and
+    /// its base row.
+    fn tower_base(pack: &Pack, desk: Point) -> Point {
+        let foot = crate::pack::desk_mark(pack, desk, Facing::South, crate::pack::TOWER_MARK)
+            .expect("the tower's mark");
+        Point {
+            x: foot.x,
+            y: foot.y - 1,
+        }
+    }
+
+    /// The 1x tower and sheet art: a frame per tier up to
     /// [`MAX_TIER`](crate::token_meter::MAX_TIER), each [`STACK_PX_PER_TIER`]
     /// rows a tier and [`STACK_W`] wide, the full tower a column wider for its
     /// teeter.
@@ -638,45 +630,6 @@ mod tests {
         }
         let sheet = &pack.animation("token_sheet").expect("the sheet").frames()[0];
         assert_eq!((sheet.width(), sheet.height()), (STACK_W, 1));
-    }
-
-    /// The 1x desk arts mark the cells the classic stands its props on, each
-    /// the prop's foot: the cup's under [`desk_cup_at`], the tower's at
-    /// [`STACK_X_OFF`] on [`STACK_BASE_DY`].
-    #[test]
-    fn the_1x_desk_arts_mark_the_classics_prop_cells() {
-        let pack = crate::pack::test_default_pack();
-        let cup_h = pack.animation("desk_cup").expect("the cup").frames()[0].height();
-        let desk = Point { x: 20, y: 30 };
-        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
-            let name = crate::pack::desk_sprite_name(facing);
-            let anim = pack.animation(name).expect("the desk");
-            let top = desk_art_top(&pack, desk.y, anim.frames()[0].height());
-            let mark = |n: &str| {
-                let m = anim.marks(0).iter().find(|m| m.name() == n)?;
-                Some(Point {
-                    x: desk.x + m.x(),
-                    y: top + m.y(),
-                })
-            };
-            let cup = desk_cup_at(desk);
-            assert_eq!(
-                mark("cup"),
-                Some(Point {
-                    x: cup.x,
-                    y: cup.y + cup_h - 1
-                }),
-                "{name}'s cup"
-            );
-            assert_eq!(
-                mark("tower"),
-                Some(Point {
-                    x: desk.x + STACK_X_OFF,
-                    y: desk.y + STACK_BASE_DY
-                }),
-                "{name}'s tower"
-            );
-        }
     }
 
     #[test]
@@ -716,7 +669,12 @@ mod tests {
                 desk,
                 facing: crate::layout::Facing::South,
                 screen_glow: None,
-                lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
+                lights: crate::lighting::DeskLights::new(
+                    desk,
+                    crate::layout::Facing::South,
+                    0.0,
+                    0.0,
+                ),
                 props: DeskProps {
                     cup: None,
                     token_tier,
@@ -743,14 +701,22 @@ mod tests {
 
     #[test]
     fn only_a_steaming_cup_steams() {
+        let pack = test_pack();
         let th = theme();
         let bg = Rgb { r: 1, g: 2, b: 3 };
         let desk = Point { x: 20, y: 30 };
         let render = |cup, ms| {
             let mut buf = RgbBuffer::filled(60, 60, bg);
             let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            let steam = crate::sim::cup_effects(desk, cup, Motion::Full.beat(now));
-            paint_desk_coffee(&mut buf, desk, cup, &steam, th);
+            let at = crate::sim::desk_cup_at(&pack, desk, Facing::South);
+            let props = DeskProps {
+                cup,
+                token_tier: 0,
+                sheet_fall: None,
+                effects: crate::sim::cup_effects(at, cup, Motion::Full.beat(now)),
+                scanline: 0,
+            };
+            paint_desk_props(&mut buf, (desk, Facing::South), &props, &pack, th);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
         let instants = (0..20u64).map(|i| i * 97);
@@ -808,7 +774,8 @@ mod tests {
         let pack = test_pack();
         let th = theme();
         let desk = Point { x: 40, y: 30 };
-        let base_y = desk.y + STACK_BASE_DY;
+        let tower = tower_base(&pack, desk);
+        let base_y = tower.y;
         let mut counts = Vec::new();
         for tier in 1..=3u8 {
             let mut cache = FrameCache::new();
@@ -827,13 +794,13 @@ mod tests {
             counts.push(paper_pixel_count(&buf, th));
             for xoff in 0..STACK_W {
                 assert_eq!(
-                    buf.get(desk.x + STACK_X_OFF + xoff, base_y),
+                    buf.get(tower.x + xoff, base_y),
                     th.furniture.paper,
                     "tier {tier} base row col {xoff}"
                 );
             }
             let top_y = base_y - (tier as u16 * STACK_PX_PER_TIER - 1);
-            let above = buf.get(desk.x + STACK_X_OFF, top_y - 1);
+            let above = buf.get(tower.x, top_y - 1);
             assert!(
                 above != th.furniture.paper && above != th.furniture.paper_shade,
                 "tier {tier} must top out at {top_y}"
@@ -854,7 +821,7 @@ mod tests {
             },
         );
         let t3_top = base_y - (3 * STACK_PX_PER_TIER - 1);
-        let overhang = buf.get(desk.x + STACK_X_OFF + STACK_W, t3_top);
+        let overhang = buf.get(tower.x + STACK_W, t3_top);
         assert!(
             overhang == th.furniture.paper || overhang == th.furniture.paper_shade,
             "T3 top sheet must overhang 1px east, got {overhang:?}"
@@ -866,7 +833,8 @@ mod tests {
         let pack = test_pack();
         let th = theme();
         let desk = Point { x: 40, y: 30 };
-        let base_y = desk.y + STACK_BASE_DY;
+        let tower = tower_base(&pack, desk);
+        let base_y = tower.y;
         let stack_top = base_y - (STACK_PX_PER_TIER - 1);
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
@@ -882,7 +850,7 @@ mod tests {
             },
         );
         let sy = stack_top - (crate::token_meter::SHEET_FALL_PX - 2);
-        assert_eq!(buf.get(desk.x + STACK_X_OFF, sy), th.furniture.paper);
+        assert_eq!(buf.get(tower.x, sy), th.furniture.paper);
         let mut cache = FrameCache::new();
         let mut buf2 = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(crate::token_meter::SHEET_FALL_PX));
@@ -898,7 +866,7 @@ mod tests {
         );
         for y in 0..stack_top {
             for xoff in 0..STACK_W {
-                let c = buf2.get(desk.x + STACK_X_OFF + xoff, y);
+                let c = buf2.get(tower.x + xoff, y);
                 assert!(
                     c != th.furniture.paper && c != th.furniture.paper_shade,
                     "landed sheet must not linger at ({xoff},{y})"
@@ -939,7 +907,12 @@ mod tests {
                 desk,
                 facing: crate::layout::Facing::South,
                 screen_glow: None,
-                lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
+                lights: crate::lighting::DeskLights::new(
+                    desk,
+                    crate::layout::Facing::South,
+                    0.0,
+                    0.0,
+                ),
                 props: DeskProps::default(),
             },
         ] {

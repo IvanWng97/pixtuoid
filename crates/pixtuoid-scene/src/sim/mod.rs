@@ -21,7 +21,7 @@ use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
-use crate::layout::{Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
+use crate::layout::{Facing, Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
 use crate::pathfind::Router;
 use crate::pet::PetKind;
 use crate::physics::walking_position;
@@ -366,7 +366,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
     let pet = pet_placement(&agents, layout, pack, pets, floor, timing);
     let mascots = mascot_placements(scene, layout, pack, timing);
-    let desks = desk_props(&agents, layout, coffee, timing);
+    let desks = desk_props(&agents, layout, pack, coffee, timing);
 
     let door_frame = anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
     SimFrame {
@@ -547,6 +547,7 @@ fn mascot_placements(
 fn desk_props(
     agents: &[AgentSlot],
     layout: &SceneLayout,
+    pack: &Pack,
     coffee: &HashMap<AgentId, SystemTime>,
     timing: Timing,
 ) -> Vec<DeskProps> {
@@ -565,18 +566,26 @@ fn desk_props(
                 cup,
                 token_tier: occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used)),
                 sheet_fall: occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, now)),
-                effects: cup_effects(layout.home_desks[i], cup, beat),
+                effects: cup_effects(
+                    desk_cup_at(
+                        pack,
+                        layout.home_desks[i],
+                        layout.desk_facing(FloorLocalDeskIndex(i)),
+                    ),
+                    cup,
+                    beat,
+                ),
                 scanline: scanline_col(layout.home_desks[i].x, beat),
             }
         })
         .collect()
 }
 
-/// What rides on the cup on the desk at `desk`: steam while it is fresh.
-pub(crate) fn cup_effects(desk: Point, cup: Option<Cup>, beat: Beat) -> Vec<Effect> {
-    match cup {
-        Some(Cup::Steaming) => effects::steam(desk_cup_at(desk), beat).to_vec(),
-        Some(Cup::Cold) | None => Vec::new(),
+/// What rides on the cup standing at `cup_at`: steam while it is fresh.
+pub(crate) fn cup_effects(cup_at: Option<Point>, cup: Option<Cup>, beat: Beat) -> Vec<Effect> {
+    match (cup, cup_at) {
+        (Some(Cup::Steaming), Some(at)) => effects::steam(at, beat).to_vec(),
+        _ => Vec::new(),
     }
 }
 
@@ -887,12 +896,15 @@ pub(crate) fn resolve_characters(
     )
 }
 
-/// Where the cup stands on the desk at `desk`: its top-left cell.
-pub(crate) fn desk_cup_at(desk: Point) -> Point {
-    Point {
-        x: desk.x + 2,
-        y: desk.y + 2,
-    }
+/// Where the cup stands on the 1x desk at `desk` facing `facing`: its top-left
+/// cell, at the desk art's cup mark; `None` where the pack marks none.
+pub(crate) fn desk_cup_at(pack: &Pack, desk: Point, facing: Facing) -> Option<Point> {
+    let foot = crate::pack::desk_mark(pack, desk, facing, crate::pack::CUP_MARK)?;
+    let cup_h = pack_frame_size(pack, crate::pack::DESK_CUP_SPRITE, 0)?.h;
+    Some(Point {
+        x: foot.x,
+        y: foot.y.checked_sub(cup_h)?,
+    })
 }
 
 /// The agent whose home desk is `local`, while they have not begun to leave.

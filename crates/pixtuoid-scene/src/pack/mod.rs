@@ -11,13 +11,13 @@ pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, DESK_CUP_SPRITE,
-    DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE, MEETING_TABLE_SPRITE,
-    NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE,
-    TOKEN_TOWER_SPRITE, VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at,
-    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
-    desk_prop_overrides, desk_sprite_name, drawn_in, fixture_overrides, frame_at,
-    looping_frame_index,
+    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
+    DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE,
+    MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
+    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
+    WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
+    appliance_sprite, desk_art, desk_art_top, desk_mark, desk_prop_overrides, desk_sprite_name,
+    drawn_in, fixture_overrides, frame_at, looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -70,8 +70,8 @@ fn art_sets() -> Vec<Vec<&'static str>> {
 /// The marks every desk's first frame carries: the cup and the token tower
 /// stand there ([`display`](crate::display)'s `push_desk_props`).
 const DESK_MARKS: [(&str, &[&str]); 2] = [
-    ("desk", &["cup", "tower"]),
-    ("desk_north", &["cup", "tower"]),
+    (lookup::DESK_SPRITE, &[CUP_MARK, TOWER_MARK]),
+    (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
 ];
 
 /// [`validate_pack_animations`], against this crate's painters' art sets,
@@ -792,8 +792,9 @@ mod tests {
         );
     }
 
-    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`.
-    /// Checked on the edge COLUMNS the monitor never covers — the middle legitimately differs.
+    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`,
+    /// and below it the same desk mirrored, as its arrangement mirrors the lamp. Checked on the
+    /// edge COLUMNS the monitor never covers — the middle legitimately differs.
     #[test]
     fn both_desk_variants_are_the_same_desk_below_the_monitor() {
         let pack = test_default_pack();
@@ -814,11 +815,11 @@ mod tests {
         for x in edges {
             for dy in 0..(base.height() - raise) {
                 let b = base.get(x, raise + dy);
-                let n = north.get(x, raise + lift + dy);
+                let n = north.get(base.width() - 1 - x, raise + lift + dy);
                 assert_eq!(
                     b, n,
                     "column {x} differs at desk.y+{dy}: the two variants must be \
-                     the same desk below the monitor"
+                     the same desk, mirrored, below the monitor"
                 );
             }
         }

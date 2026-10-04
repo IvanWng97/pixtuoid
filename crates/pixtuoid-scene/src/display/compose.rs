@@ -1002,14 +1002,14 @@ fn push_desk_props(
         ));
         Some(y)
     };
-    if let (Some(_), Some(at)) = (props.cup, mark("cup")) {
+    if let (Some(_), Some(at)) = (props.cup, mark(crate::pack::CUP_MARK)) {
         stand(DESK_CUP_SPRITE, 0, at);
     }
     let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
         return;
     };
-    let Some((x, top)) =
-        mark("tower").and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
+    let Some((x, top)) = mark(crate::pack::TOWER_MARK)
+        .and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
     else {
         return;
     };

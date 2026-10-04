@@ -94,6 +94,8 @@ pub(crate) const DESK_BEZEL_RAISE: u16 = 1;
 
 /// The base desk's pack animation, whose bottom row every desk's art keeps.
 pub(crate) const DESK_SPRITE: &str = "desk";
+/// The back-turned desk's pack animation.
+pub(crate) const DESK_NORTH_SPRITE: &str = "desk_north";
 
 /// The row a desk's art `art_h` tall blits from at `desk_y`: the bezel raise,
 /// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
@@ -106,11 +108,32 @@ pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
     desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
 }
 
+/// The marks a desk's art stands its cup and its token tower at.
+pub(crate) const CUP_MARK: &str = "cup";
+pub(crate) const TOWER_MARK: &str = "tower";
+
+/// Where the 1x desk at `desk` facing `facing` stands the prop its `mark`
+/// names: the column of the prop's west edge and the row past its foot.
+pub(crate) fn desk_mark(
+    pack: &Pack,
+    desk: crate::layout::Point,
+    facing: crate::layout::Facing,
+    mark: &str,
+) -> Option<crate::layout::Point> {
+    let art = pack.animation(desk_sprite_name(facing))?;
+    let top = desk_art_top(pack, desk.y, art.frames().first()?.height());
+    let m = art.marks(0).iter().find(|m| m.name() == mark)?;
+    Some(crate::layout::Point {
+        x: desk.x + m.x(),
+        y: top + m.y() + 1,
+    })
+}
+
 /// The desk art for a seat facing `facing`. Only a back-turned seat needs its
 /// own — its occupant y-sorts in FRONT and covers the screen.
 pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
     match facing {
-        crate::layout::Facing::North => "desk_north",
+        crate::layout::Facing::North => DESK_NORTH_SPRITE,
         crate::layout::Facing::South
         | crate::layout::Facing::East
         | crate::layout::Facing::West => DESK_SPRITE,

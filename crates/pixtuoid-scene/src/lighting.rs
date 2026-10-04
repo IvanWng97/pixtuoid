@@ -26,9 +26,14 @@ const DESK_LAMP_MAX: f32 = 0.42;
 /// The standby screen's ceiling. At parity with [`DESK_LAMP_MAX`] the lamp
 /// pool washes the desk's west half out.
 pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
-/// Where the desk lamp's bulb hangs from its desk's point, as the 1x desk art
-/// draws it: its `9` cell, under the shade.
-const DESK_LAMP_BULB: (u16, u16) = (1, 1);
+/// Where the desk lamp's bulb hangs from the point of a desk facing `facing`,
+/// as its 1x art draws it: on the wing the desk's arrangement puts the lamp.
+fn desk_lamp_bulb(facing: Facing) -> (u16, u16) {
+    match facing {
+        Facing::North => (12, 1),
+        Facing::South | Facing::East | Facing::West => (1, 1),
+    }
+}
 const _: () = assert!(DESK_LAMP_MAX < SCREEN_IDLE_MAX);
 
 /// A monitor halo's level.
@@ -366,6 +371,7 @@ impl Lights {
 fn desk_lights(desk: Point, facing: Facing, darkness: f32, indoor: f32) -> DeskLights {
     DeskLights::new(
         desk,
+        facing,
         darkness * indoor,
         screen_idle(facing, darkness, indoor),
     )
@@ -383,12 +389,14 @@ pub(crate) fn screen_idle(facing: Facing, darkness: f32, indoor: f32) -> f32 {
 }
 
 impl DeskLights {
-    /// The lights of a desk at `desk`: its lamp lit to `level`, its pool at
-    /// most [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
-    pub(crate) fn new(desk: Point, level: f32, screen_idle: f32) -> Self {
+    /// The lights of a desk at `desk` facing `facing`: its lamp lit to
+    /// `level`, its pool at most [`DESK_LAMP_MAX`], and its standby screen at
+    /// `screen_idle`.
+    pub(crate) fn new(desk: Point, facing: Facing, level: f32, screen_idle: f32) -> Self {
+        let (dx, dy) = desk_lamp_bulb(facing);
         let bulb = Point {
-            x: desk.x + DESK_LAMP_BULB.0,
-            y: desk.y + DESK_LAMP_BULB.1,
+            x: desk.x + dx,
+            y: desk.y + dy,
         };
         Self {
             lamp: Emitter {
