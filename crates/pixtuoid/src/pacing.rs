@@ -77,6 +77,7 @@ impl Write for Wire {
 
 /// A terminal `size` cells big whose cells are `cell` pixels, encoding through
 /// ratatui's crossterm backend into a [`Wire`]: nothing asks a real terminal.
+#[derive(Debug)]
 pub struct PacedBackend {
     inner: CrosstermBackend<Wire>,
     size: Size,

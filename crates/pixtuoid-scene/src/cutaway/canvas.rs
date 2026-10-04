@@ -6,19 +6,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::light::Ambient;
 use crate::cutaway::paint::paint;
-use crate::display::{Office, Showing, Span, compose};
+use crate::display::{Hovers, Office, Showing, Span, compose};
 use crate::floor::SteppedFloor;
 use crate::layout::{Bounds, SceneLayout};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
 /// A cutaway painter's frame buffer and what it shows, for one pack.
+#[derive(Debug)]
 pub struct CutawayCanvas {
     // Held, so no other pack can take its place unnoticed.
     pack: Arc<Pack>,
@@ -28,6 +28,7 @@ pub struct CutawayCanvas {
 }
 
 /// One frame from [`CutawayCanvas::frame`].
+#[derive(Debug)]
 pub struct CanvasFrame<'a> {
     /// The whole frame, as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
     /// paints it.
@@ -48,6 +49,7 @@ pub enum Dirty {
 
 /// What every pixel of a frame is painted under, beyond its display list and
 /// the canvas's pack.
+#[derive(Debug)]
 struct Epoch {
     // Held, so a later layout cannot reuse its address.
     layout: Arc<SceneLayout>,
@@ -55,7 +57,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    carpet: crate::atmosphere::Carpet,
+    carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -70,12 +72,12 @@ impl PartialEq for Epoch {
     }
 }
 
+#[derive(Debug)]
 struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
-    /// [`DisplayList::hover_spans`](crate::display::DisplayList::hover_spans).
-    hovers: Vec<(Span, Option<AgentId>)>,
+    hovers: Hovers,
 }
 
 impl CutawayCanvas {
@@ -120,7 +122,6 @@ impl CutawayCanvas {
             .map(|p| (p.reach(), p.fingerprint))
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
-        let hovers = list.hover_spans().collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
             Some(shown) if shown.epoch == epoch => Dirty::Rects(
@@ -140,7 +141,7 @@ impl CutawayCanvas {
         self.shown = Some(Shown {
             epoch,
             footprints,
-            hovers,
+            hovers: list.hovers().clone(),
         });
         CanvasFrame {
             buf: &self.buf,
@@ -153,12 +154,9 @@ impl CutawayCanvas {
         &self.buf
     }
 
-    /// The agent the last frame shows topmost over `area`, in LOGICAL units
-    /// as [`SceneLayout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
-    /// piece that is no agent lies over it, or none does.
-    pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
-        let shown = self.shown.as_ref()?;
-        shown.hovers.iter().rev().find(|(s, _)| s.meets(area))?.1
+    /// What the last frame answers a pointer with; `None` before the first.
+    pub(crate) fn hovers(&self) -> Option<&Hovers> {
+        self.shown.as_ref().map(|shown| &shown.hovers)
     }
 }
 
@@ -202,10 +200,13 @@ fn on_buffer(span: Span, scale: RenderScale, (w, h): (u16, u16)) -> Option<Bound
 mod tests {
     use std::time::{Duration, SystemTime};
 
+    use pixtuoid_core::AgentId;
+
     use super::*;
     use crate::anim::Motion;
     use crate::cutaway::paint::render_cutaway;
     use crate::display::compose::tests::{empty_frame, lively_office, sit_down};
+    use crate::display::{HoverTarget, PieceKind};
     use crate::floor::FloorMeta;
     use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
@@ -504,7 +505,7 @@ mod tests {
         assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
     }
 
-    /// A walk to a north-facing desk, shown at scale 2.
+    /// A walk to a desk, shown at scale 2.
     struct Hovering {
         layout: Arc<SceneLayout>,
         pack: Arc<Pack>,
@@ -513,8 +514,13 @@ mod tests {
     }
 
     impl Hovering {
+        /// To a north-facing desk.
         fn new() -> Self {
-            let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+            Self::facing(crate::layout::Facing::North)
+        }
+
+        fn facing(facing: crate::layout::Facing) -> Self {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
             Self {
                 layout: Arc::new(layout),
                 pack: Arc::new(pack),
@@ -527,7 +533,8 @@ mod tests {
             crate::localclock::at_hour(12)
         }
 
-        /// `frame`'s pieces as `(is a desk, hover box, agent)`, back to front.
+        /// `frame`'s pieces bar the badges as `(is a desk, box, agent)`, back
+        /// to front: a character's box is their body.
         fn boxes(&self, frame: &SimFrame) -> Vec<(bool, Span, Option<AgentId>)> {
             let office = Office {
                 layout: &self.layout,
@@ -542,20 +549,18 @@ mod tests {
             );
             list.pieces()
                 .iter()
-                .filter(|p| !matches!(p.kind, crate::display::PieceKind::Badge { .. }))
-                .zip(list.hover_spans())
-                .map(|(p, (span, agent))| {
-                    (
-                        matches!(p.kind, crate::display::PieceKind::Desk { .. }),
-                        span,
-                        agent,
-                    )
+                .filter_map(|p| match &p.kind {
+                    PieceKind::Badge { .. } => None,
+                    PieceKind::Character { figure, body, .. } => {
+                        Some((false, *body, Some(figure.key.frame.agent_id)))
+                    }
+                    kind => Some((matches!(kind, PieceKind::Desk { .. }), p.span, None)),
                 })
                 .collect()
         }
 
-        /// `canvas` after showing `frame`.
-        fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) {
+        /// `canvas` after showing `frame`, and the frame's hovers.
+        fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) -> Hovers {
             let stepped = SteppedFloor {
                 layout: Arc::clone(&self.layout),
                 frame: frame.clone(),
@@ -568,6 +573,7 @@ mod tests {
                 crate::display::compose::tests::showing(clear_ground(), Self::now()),
                 &mut cache,
             );
+            canvas.hovers().expect("a frame").clone()
         }
     }
 
@@ -603,8 +609,35 @@ mod tests {
             })
             .expect("the walk passes in front of a desk");
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-        h.show(&mut canvas, frame);
-        assert_eq!(canvas.hover_at(area), Some(id));
+        assert_eq!(
+            h.show(&mut canvas, frame).at(area),
+            Some(&HoverTarget::Agent(id))
+        );
+    }
+
+    /// A desk painted over its sitter's legs leaves them to the pointer: only
+    /// a later figure covers one.
+    #[test]
+    fn a_desk_over_a_sitter_names_the_sitter() {
+        let h = Hovering::facing(crate::layout::Facing::South);
+        let seated = h.frames.last().expect("a seated frame");
+        let boxes = h.boxes(seated);
+        let (area, id) = boxes
+            .iter()
+            .enumerate()
+            .find_map(|(i, &(_, b, agent))| {
+                let id = agent?;
+                boxes[i + 1..].iter().find_map(|&(desk, d, _)| {
+                    let area = cell((d.x0.max(b.x0), d.y0.max(b.y0)));
+                    (desk && d.meets(area) && b.meets(area)).then_some((area, id))
+                })
+            })
+            .expect("the desk lies over its sitter");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        assert_eq!(
+            h.show(&mut canvas, seated).at(area),
+            Some(&HoverTarget::Agent(id))
+        );
     }
 
     /// A cell showing floor no piece stands on hovers nothing.
@@ -619,9 +652,7 @@ mod tests {
             .find(|&a| boxes.iter().all(|&(_, s, _)| !s.meets(a)))
             .expect("bare floor");
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-        assert_eq!(canvas.hover_at(area), None, "before any frame");
-        h.show(&mut canvas, frame);
-        assert_eq!(canvas.hover_at(area), None);
+        assert_eq!(h.show(&mut canvas, frame).at(area), None);
     }
 
     /// Hovering answers from the last frame: where the walker stood before
@@ -643,10 +674,9 @@ mod tests {
             "the walker never left {area:?}"
         );
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-        h.show(&mut canvas, first);
-        assert_eq!(canvas.hover_at(area), Some(id));
-        h.show(&mut canvas, last);
-        assert_ne!(canvas.hover_at(area), Some(id));
+        let id = HoverTarget::Agent(id);
+        assert_eq!(h.show(&mut canvas, first).at(area), Some(&id));
+        assert_ne!(h.show(&mut canvas, last).at(area), Some(&id));
     }
 
     /// A neighbour sitting just south has their badge plate over the sitter's
@@ -712,17 +742,11 @@ mod tests {
             else {
                 continue;
             };
-            let mut alone = CutawayCanvas::new(Arc::clone(&h.pack));
-            h.show(&mut alone, seated);
-            if alone.hover_at(at) != Some(a_id) {
-                continue;
-            }
             tried += 1;
             let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-            h.show(&mut canvas, &both);
             assert_eq!(
-                canvas.hover_at(at),
-                Some(a_id),
+                h.show(&mut canvas, &both).at(at),
+                Some(&HoverTarget::Agent(a_id)),
                 "at {at:?}, {dy} rows south"
             );
         }
@@ -887,15 +911,15 @@ mod tests {
 
     /// The digests [`the_canvas_paints_the_pinned_frames`] pins, one frame a
     /// line.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     const PINNED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cutaway/canvas.golden");
 
     /// Every pixel of a fixed set of frames, as committed: a refactor of the
     /// cutaway leaves this file as it found it, and a change to its look
     /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
     /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
-    // Without the density art every frame is d=1, and the d4 rows would go unchecked.
-    #[cfg(feature = "density-art")]
+    // The golden pins 4x rows, which only `cutaway-assets` paints.
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn the_canvas_paints_the_pinned_frames() {
         use crate::sky::{Weather, WeatherPolicy};

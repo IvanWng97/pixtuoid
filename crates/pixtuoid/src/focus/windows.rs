@@ -69,6 +69,7 @@ fn top_level_window_of(pid: i32) -> Option<HWND> {
         let mut owner = 0u32;
         // SAFETY: hwnd comes from EnumWindows; owner is our own out-param.
         unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+        // SAFETY: hwnd comes from EnumWindows, live for the callback.
         if owner == search.pid && unsafe { IsWindowVisible(hwnd) } != 0 {
             search.hwnd = Some(hwnd);
             return 0; // stop enumeration
@@ -94,6 +95,7 @@ pub(crate) fn activate_os(pid: i32) -> bool {
     // A minimized window can become the foreground window and stay an icon.
     // SAFETY: hwnd is a live handle from the enumeration above.
     if unsafe { IsIconic(hwnd) } != 0 {
+        // SAFETY: the same live handle.
         unsafe { ShowWindow(hwnd, SW_RESTORE) };
     }
     if raise(hwnd) {

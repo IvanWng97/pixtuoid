@@ -57,6 +57,7 @@ impl std::error::Error for SocketBusy {}
 /// pipe) every CLI's hook shim connects to. Frames + decodes each payload onto
 /// the tagged `AgentEvent` channel; optionally attaches a pid-exit watch and the
 /// daemon presence side-channel.
+#[derive(Debug)]
 pub struct HookSocketListener {
     inner: imp::Listener,
     path: PathBuf,

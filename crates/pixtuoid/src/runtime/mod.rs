@@ -31,6 +31,7 @@ pub(crate) const FALLBACK_DESKS: usize = 16;
 /// The startup inputs shared by `run` + `run_async`. The `theme` is already resolved
 /// (`config::resolve_theme` validates CLI + config in one place), so an unknown theme
 /// can't reach the runtime by construction.
+#[derive(Debug)]
 pub struct RunConfig {
     pub socket: Option<PathBuf>,
     pub projects_root: Option<PathBuf>,
@@ -64,7 +65,7 @@ pub struct RunConfig {
 /// `[sources]` flags. On lock poison it recovers the set via `into_inner`: the data is
 /// always valid (insert/remove/contains never panic), and losing it would mass-evict
 /// the office.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ConnectedSources(Arc<Mutex<HashSet<String>>>);
 
 impl ConnectedSources {

@@ -12,7 +12,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
+use pixtuoid::tui::renderer::{DrawCtx, DrawOut, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
@@ -133,9 +133,10 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
 
-    /// Minutes past `--now-hour` (0–59): a weather transition runs mid-hour.
-    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..60))]
-    now_min: u64,
+    /// Seconds past `--now-hour` (0–3599), fine enough to sample a weather
+    /// transition.
+    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..3600))]
+    now_sec: u64,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
@@ -320,6 +321,32 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
         .collect()
 }
 
+/// The centre of the pixels a pointer finds the first mascot on.
+fn mascot_centre(drawn: &DrawOut) -> Option<pixtuoid_scene::layout::Point> {
+    use pixtuoid_scene::display::HoverTarget;
+    use pixtuoid_scene::layout::{Bounds, Point};
+    let layout = drawn.layout.as_deref()?;
+    let at = |(x, y)| {
+        drawn.hovers.at(Bounds {
+            x,
+            y,
+            width: 1,
+            height: 1,
+        })
+    };
+    let pixels = || (0..layout.buf_h).flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)));
+    let mascot = pixels().find_map(|p| at(p).filter(|t| matches!(t, HoverTarget::Mascot(_))))?;
+    let (x0, y0, x1, y1) = pixels()
+        .filter(|&p| at(p) == Some(mascot))
+        .fold((u16::MAX, u16::MAX, 0, 0), |(x0, y0, x1, y1), (x, y)| {
+            (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+        });
+    Some(Point {
+        x: x0.midpoint(x1),
+        y: y0.midpoint(y1),
+    })
+}
+
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
@@ -336,7 +363,7 @@ fn main() -> Result<()> {
         Some(h) => {
             pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
                 .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?
-                + std::time::Duration::from_secs(60 * args.now_min)
+                + std::time::Duration::from_secs(args.now_sec)
         }
         None => SystemTime::now(),
     };
@@ -723,11 +750,8 @@ fn main() -> Result<()> {
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
         // the renderer actually resolved, not a precomputed layout point.
-        let m = drawn
-            .mascots
-            .first()
-            .context("--crop-mascot needs a visible mascot")?;
-        Some(centered_crop(m.pos, cols, rows))
+        let at = mascot_centre(&drawn).context("--crop-mascot needs a visible mascot")?;
+        Some(centered_crop(at, cols, rows))
     } else {
         compute_crop_rect(&args, &scene, &floor.ctx.history, cols, rows, now)?
     };
