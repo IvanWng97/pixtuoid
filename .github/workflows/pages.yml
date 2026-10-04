@@ -19,7 +19,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A cold gen-demos (release build plus encodes) on top of a cold gen-wasm.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:

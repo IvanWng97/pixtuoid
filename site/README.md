@@ -82,7 +82,8 @@ keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
 
 ## Demo art
 
-`public/demos/*` is **generated**, never hand-placed — `just gen-media` from
+`public/demos/*` is **generated** and gitignored, never hand-placed:
+`just site-demos` renders it on a fresh clone (`just gen-media --only site` re-renders) from
 the repo root (`scripts/gen-media.py` + `scripts/media.json`, rendering
 through the real TuiRenderer; clips re-encode to `.mp4` + `.webm` + poster).
 Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer

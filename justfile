@@ -720,9 +720,20 @@ site-setup:
     npm --prefix site ci
     npx --prefix site playwright install chromium chromium-headless-shell
 
+# The site's config asserts each demo exists, and they are gitignored; render
+# them once on a fresh clone (`just gen-media --only site` re-renders).
+[doc('Render site/public/demos if absent')]
+[group('site')]
+site-demos:
+    #!/usr/bin/env sh
+    set -eu
+    [ -n "$(ls -A site/public/demos 2>/dev/null)" ] && exit 0
+    test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
+    .venv/bin/python3 scripts/gen-media.py --only site
+
 [doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]
 [group('site')]
-site-dev:
+site-dev: site-demos
     npm --prefix site run dev
 
 # Agent-facing dev-server lifecycle (Astro 7 `--background`): the daemon has no
@@ -734,7 +745,7 @@ site-dev:
 # (site-dev-stop) before `just site-e2e`, or its webServer spawn fails loud.
 [doc('Dev server as a background daemon (survives stdin EOF) — waits on /_astro/status; stop: just site-dev-stop')]
 [group('site')]
-site-dev-bg:
+site-dev-bg: site-demos
     #!/usr/bin/env sh
     set -eu
     cd site
@@ -757,7 +768,7 @@ site-dev-stop:
 
 [doc('Site static tier: `npm run verify` (site/package.json owns the steps; site CI adds e2e + lighthouse)')]
 [group('site')]
-site-check:
+site-check: site-demos
     npm --prefix site run verify
 
 [doc('Auto-format the site')]
