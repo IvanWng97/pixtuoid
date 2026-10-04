@@ -150,9 +150,7 @@ pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &cra
     }
 }
 
-/// Small doormat filling `mat`, the box
-/// [`MeetingRoom::doormat_rect`](crate::layout::MeetingRoom::doormat_rect)
-/// places and gates.
+/// Small doormat filling `mat`, its fixture's box.
 pub(super) fn paint_doormat(buf: &mut RgbBuffer, mat: Bounds, theme: &crate::theme::Theme) {
     let mat_color = theme.furniture.rug_trim;
     let mat_accent = theme.furniture.rug_field;

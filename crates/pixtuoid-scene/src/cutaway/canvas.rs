@@ -148,6 +148,11 @@ impl CutawayCanvas {
         }
     }
 
+    /// The last frame painted, empty before the first.
+    pub(crate) fn buf(&self) -> &RgbBuffer {
+        &self.buf
+    }
+
     /// The agent the last frame shows topmost over `area`, in LOGICAL units
     /// as [`SceneLayout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
     /// piece that is no agent lies over it, or none does.
@@ -898,7 +903,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walk_layout = Arc::new(walk_layout);
-        let office = crate::floor::FloorSession::new()
+        let office = crate::floor::FloorSession::new(Arc::clone(&pack))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),
