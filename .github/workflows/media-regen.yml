@@ -74,7 +74,9 @@ jobs:
           set -euo pipefail
           rm -rf docs/images
           mv rendered docs/images
-          if [ -z "$(git status --porcelain -- docs/images)" ]; then
+          # demo.gif isn't byte-stable across gifsicle builds (gen-media.py), so it
+          # rides along with a real change but never opens a PR on its own.
+          if [ -z "$(git status --porcelain -- docs/images ':!docs/images/demo.gif')" ]; then
             echo "main's README media are current"
             gh pr close "$BRANCH" --comment "main renders these already." --delete-branch 2>/dev/null || true
             exit 0
