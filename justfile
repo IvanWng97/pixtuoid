@@ -720,16 +720,19 @@ site-setup:
     npm --prefix site ci
     npx --prefix site playwright install chromium chromium-headless-shell
 
-# The site's config asserts each demo exists, and they are gitignored; render
-# them once on a fresh clone (`just gen-media --only site` re-renders).
-[doc('Render site/public/demos if absent')]
+# The site's config asserts each demo the manifests name exists, and they are
+# gitignored; a look change re-renders with `just gen-media --only site`.
+[doc('Render site/public/demos when absent or its manifests changed')]
 [group('site')]
 site-demos:
     #!/usr/bin/env sh
     set -eu
-    [ -n "$(ls -A site/public/demos 2>/dev/null)" ] && exit 0
+    stamp=target/site-demos.inputs
+    want=$(cat scripts/media.json scripts/gen-media.py site/src/themes.json site/src/weather.json | shasum | cut -d' ' -f1)
+    [ -d site/public/demos ] && [ "$(cat "$stamp" 2>/dev/null)" = "$want" ] && exit 0
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
     .venv/bin/python3 scripts/gen-media.py --only site
+    mkdir -p target && echo "$want" > "$stamp"
 
 [doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]
 [group('site')]
@@ -778,7 +781,7 @@ site-fmt:
 
 [doc('E2E smoke suite vs the PRODUCTION build (astro preview) — the runtime-contract gate')]
 [group('site')]
-site-e2e: gen-wasm
+site-e2e: gen-wasm site-demos
     #!/usr/bin/env sh
     set -eu
     cd site
