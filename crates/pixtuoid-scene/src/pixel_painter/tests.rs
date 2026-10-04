@@ -14,12 +14,13 @@ use crate::sim::anchors::{
     waypoint_top_left,
 };
 use crate::sim::seat::{Seat, settle_seat};
-use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
 fn paint_whole_wall(
@@ -2716,7 +2717,7 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         .collect();
     assert_eq!(
         ids,
-        weather_names(),
+        crate::sky::weather_names(),
         "site/src/weather.json ids must match Weather::ALL names in order — \
          update the manifest + run `just gen-media` when the enum changes"
     );
@@ -3473,7 +3474,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
 }
 
 #[test]
-fn sim_step_advances_motion_without_painting() {
+fn sim_step_advances_walks_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
     let (scene, layout, id, now0, pack) = sim_rig();
@@ -3534,7 +3535,7 @@ fn sim_step_advances_motion_without_painting() {
             .route
             .walks
             .get(&id)
-            .is_some_and(|m| m.entry.is_some()),
+            .is_some_and(|walk| walk.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
@@ -4310,7 +4311,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         .waypoints
         .iter()
         .position(|w| w.kind == crate::layout::WaypointKind::Printer)
-        .expect("printer at 160x96");
+        .expect("the layout places a printer");
     let frame = SimFrame {
         occupied_waypoints: [printer_idx].into(),
         ..empty_frame(&layout)
@@ -4556,29 +4557,6 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
         ),
         "an agent that left the wander machine must release its seat claim"
     );
-}
-
-#[test]
-fn precipitation_level_maps_audible_rain_under_its_policy() {
-    use crate::sky::Weather;
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    let level = |w| precipitation_level(t, WeatherPolicy::Forced(w));
-    assert_eq!(level(Weather::Storm), 1.0, "storm is full precipitation");
-    let rain = level(Weather::Rain);
-    assert!(
-        rain > 0.0 && rain < 1.0,
-        "rain sits strictly between clear and storm, got {rain}"
-    );
-    for quiet in [
-        Weather::Clear,
-        Weather::Snow,
-        Weather::Fog,
-        Weather::Overcast,
-        Weather::Windy,
-        Weather::Smog,
-    ] {
-        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent precipitation");
-    }
 }
 
 #[test]

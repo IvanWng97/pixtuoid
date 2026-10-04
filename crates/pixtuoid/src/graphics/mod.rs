@@ -44,8 +44,8 @@ pub(crate) struct TileShape {
 /// How long each wait of the capability probe may take: the query start to
 /// finish, and, inside tmux, the `allow-passthrough` read before it.
 ///
-/// The query ends with a device-status request (ratatui-image 11.0.8
-/// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
+/// The query ends with a device-status request (ratatui-image 11.1.0
+/// `cap_parser.rs:157-159`), so a terminal that answers ends the wait the
 /// moment its reply is complete; the budget is only spent where no reply comes
 /// (a hidden tmux pane refusing passthrough), which is why it can outlast
 /// [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has no such
@@ -232,8 +232,7 @@ fn env_text(name: &str) -> Option<String> {
     pixtuoid_core::platform::text_env(name).filter(|v| !v.trim().is_empty())
 }
 
-/// A marker variable, presence only: [`path_env`](pixtuoid_core::platform::path_env)'s
-/// rule, so a non-UTF-8 value (`$TMUX` holds a path) is set and a blank one is not.
+/// A marker variable, presence only, by [`path_env`](pixtuoid_core::platform::path_env)'s rule.
 fn env_set(name: &str) -> bool {
     pixtuoid_core::platform::path_env(name).is_some()
 }
@@ -260,18 +259,18 @@ impl TermEnv {
         }
     }
 
-    /// Upstream's test before wrapping every image in passthrough
-    /// (ratatui-image 11.0.8 `picker.rs:320-326`), on every platform.
-    fn tmux_term(&self) -> bool {
-        self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
+    /// Inside tmux: a tmux client (`$TMUX`), or the `TERM`/`TERM_PROGRAM` test
+    /// upstream wraps every image on (ratatui-image 11.1.0
+    /// `picker.rs:341-347`, which a tmux `TERM` carried over ssh also passes).
+    fn tmux(&self) -> bool {
+        self.tmux_client
+            || self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
             || self.term_program.as_deref() == Some("tmux")
     }
 
-    /// A tmux client, or a tmux terminal name carried over ssh: either way tmux
-    /// redraws every repaint.
     fn link(&self) -> Link {
         Link {
-            tmux: self.tmux_client || self.tmux_term(),
+            tmux: self.tmux(),
             ssh: self.ssh,
         }
     }
