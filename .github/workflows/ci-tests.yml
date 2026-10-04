@@ -94,12 +94,16 @@ jobs:
       # checkout is the merge commit, so its parents name the main commit whose
       # list is the base.
       - name: List the tests
+        id: test-list
         continue-on-error: true
         run: |
           mkdir -p target/test-list
           cargo nextest list --workspace --message-format json > target/test-list/tests.json
           git cat-file -p HEAD | sed -n 's/^parent //p' > target/test-list/parents.txt
-      - uses: actions/upload-artifact@v7
+      # `outcome` is the step's result before continue-on-error, so a failed
+      # listing uploads nothing rather than a partial list.
+      - if: steps.test-list.outcome == 'success'
+        uses: actions/upload-artifact@v7
         continue-on-error: true
         with:
           name: test-list

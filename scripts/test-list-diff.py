@@ -17,6 +17,7 @@ pure diff with no network; exit 0 = pass.
 
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 import subprocess
@@ -62,6 +63,28 @@ def show(t: TestId) -> str:
     return f"{t[0]} {t[1]}"
 
 
+def merge_parent(parents: list[str], head: str) -> str | None:
+    """The main commit a PR run merged `head` into, when its checkout's parents
+    say it built exactly that merge."""
+    return parents[0] if len(parents) == 2 and parents[1] == head else None
+
+
+def on_main(compare_status: str) -> bool:
+    """`compare/<commit>...main`'s status: main contains the commit."""
+    return compare_status in ("ahead", "identical")
+
+
+def read_artifact(got: pathlib.Path) -> tuple[str, list[str]] | None:
+    """(tests.json, parents), or None when the upload is partial or corrupt."""
+    try:
+        tests = (got / "tests.json").read_text()
+        parse_list(tests)
+        parents = (got / "parents.txt").read_text().split() if (got / "parents.txt").exists() else []
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return tests, parents
+
+
 def gh(*args: str) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
@@ -100,13 +123,17 @@ def fallback(side: str, sha: str, flag: str) -> int:
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
-    args = dict(zip(argv[1::2], argv[2::2]))
-    pr = argv[0]
+    cli = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    cli.add_argument("pr")
+    cli.add_argument("--head-list", type=pathlib.Path)
+    cli.add_argument("--base-list", type=pathlib.Path)
+    args = cli.parse_args(argv)
+    pr = args.pr
     head = gh("pr", "view", pr, "--json", "headRefOid", "--jq", ".headRefOid").strip()
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="test-list-"))
 
-    if "--head-list" in args:
-        head_list = pathlib.Path(args["--head-list"]).read_text()
+    if args.head_list:
+        head_list = args.head_list.read_text()
         base = gh("api", f"repos/{{owner}}/{{repo}}/compare/{MAIN}...{head}",
                   "--jq", ".merge_base_commit.sha").strip()
         print(f"head {head} (local list), base merge-base {base}")
@@ -114,27 +141,31 @@ def main(argv: list[str]) -> int:
         run = artifact_run(head, None)
         if run is None:
             return fallback("PR head", head, "--head-list")
-        got = download(run, tmp / "head")
-        parents = (got / "parents.txt").read_text().split()
-        if len(parents) != 2 or parents[1] != head:
+        art = read_artifact(download(run, tmp / "head"))
+        if art is None:
+            return fallback("PR head", head, "--head-list")
+        head_list, parents = art
+        base = merge_parent(parents, head)
+        if base is None:
             print(f"run {run}'s checkout was not a merge of {head}: {parents}", file=sys.stderr)
             return 1
-        base = parents[0]
-        on_main = gh("api", f"repos/{{owner}}/{{repo}}/compare/{base}...{MAIN}", "--jq", ".status")
-        if on_main.strip() not in ("ahead", "identical"):
+        status = gh("api", f"repos/{{owner}}/{{repo}}/compare/{base}...{MAIN}", "--jq", ".status")
+        if not on_main(status.strip()):
             print(f"run {run}'s merge parent {base} is not on {MAIN}", file=sys.stderr)
             return 1
-        head_list = (got / "tests.json").read_text()
         print(f"head {head} run {run} (merged with {MAIN} {base})")
 
-    if "--base-list" in args:
-        base_list = pathlib.Path(args["--base-list"]).read_text()
+    if args.base_list:
+        base_list = args.base_list.read_text()
         print(f"base {base} (local list)")
     else:
         run = artifact_run(base, MAIN)
         if run is None:
             return fallback(f"{MAIN} commit", base, "--base-list")
-        base_list = (download(run, tmp / "base") / "tests.json").read_text()
+        art = read_artifact(download(run, tmp / "base"))
+        if art is None:
+            return fallback(f"{MAIN} commit", base, "--base-list")
+        base_list = art[0]
         print(f"base {MAIN} {base} run {run}")
 
     removed, added, moved = diff(parse_list(base_list), parse_list(head_list))
@@ -173,6 +204,17 @@ def selftest() -> int:
             ),
         )
         check("identical", diff(base, base), ([], [], []))
+        check("merge of head", merge_parent(["m", "h"], "h"), "m")
+        check("parents swapped", merge_parent(["h", "m"], "h"), None)
+        check("not a merge", merge_parent(["h"], "h"), None)
+        for status, want in (("ahead", True), ("identical", True), ("behind", False), ("diverged", False)):
+            check(f"on main: {status}", on_main(status), want)
+        with tempfile.TemporaryDirectory() as d:
+            got = pathlib.Path(d)
+            (got / "tests.json").write_text("")
+            check("an empty list is no artifact", read_artifact(got), None)
+            (got / "tests.json").write_text(json.dumps(suites))
+            check("parents missing", read_artifact(got), (json.dumps(suites), []))
     except Exception:
         FAILS.append(traceback.format_exc())
     for f in FAILS:
