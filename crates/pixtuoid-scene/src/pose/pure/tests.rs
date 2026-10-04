@@ -981,24 +981,58 @@ fn a_base_walker_keeps_the_standing_figure() {
 }
 
 /// A walker's dust rises under a foot on the ground, in every frame of its
-/// walk, heading east or mirrored west.
+/// walk, heading east or mirrored west; on a passing frame, where only one
+/// foot touches the ground, under that one.
 #[test]
 fn a_walker_s_dust_rises_under_its_planted_foot() {
     let pack = crate::pack::test_default_pack();
+    let mut passing = 0;
     for name in crate::sim::WALKS {
         let frames = pack.animation(name).expect("a walk").frames();
         for (i, f) in frames.iter().enumerate() {
             for flip in [false, true] {
-                let foot = crate::effects::planted_foot(i, frames.len(), flip);
-                let x =
-                    crate::effects::look::walking_dust_foot(Point { x: 0, y: 0 }, foot as u64).x;
-                let art_x = if flip { f.width() - 1 - x } else { x };
                 let ground = f.height() - 1;
+                let on_ground = |foot: usize| {
+                    let x =
+                        crate::effects::look::walking_dust_foot(Point { x: 0, y: 0 }, foot as u64)
+                            .x;
+                    let art_x = if flip { f.width() - 1 - x } else { x };
+                    f.get(art_x, ground).copied().flatten().is_some()
+                };
+                let foot = crate::effects::planted_foot(i, frames.len(), flip);
                 assert!(
-                    f.get(art_x, ground).copied().flatten().is_some(),
+                    on_ground(foot),
                     "{name} {i} (flip {flip}): dust under a lifted foot"
                 );
+                if !on_ground(1 - foot) {
+                    passing += 1;
+                }
             }
+        }
+    }
+    assert!(
+        passing > 0,
+        "the walks must pass a foot to tell the feet apart"
+    );
+}
+
+/// A walk bears its weight on the art's east foot from the strike that opens
+/// its cycle and on its west from the one halfway; mirrored, the other.
+#[test]
+fn the_planted_foot_changes_at_the_halfway_strike() {
+    for frames in [2, 8] {
+        for i in 0..frames {
+            let east = usize::from(2 * i >= frames);
+            assert_eq!(
+                crate::effects::planted_foot(i, frames, false),
+                east,
+                "{i} of {frames}"
+            );
+            assert_eq!(
+                crate::effects::planted_foot(i, frames, true),
+                1 - east,
+                "{i} of {frames}, mirrored"
+            );
         }
     }
 }
