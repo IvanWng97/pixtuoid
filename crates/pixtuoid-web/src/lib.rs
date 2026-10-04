@@ -1003,7 +1003,7 @@ mod tests {
         }
         assert!(
             o.scene.agents.contains_key(&cast_id(5))
-                && o.session.floor.ctx.motion.contains_key(&cast_id(5)),
+                && o.session.floor.ctx.walks.contains_key(&cast_id(5)),
             "agent 5 must be live with motion state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd + the exit grace + sweep.
@@ -1016,7 +1016,7 @@ mod tests {
             "agent 5 exited and was GC'd"
         );
         assert!(
-            !o.session.floor.ctx.motion.contains_key(&cast_id(5)),
+            !o.session.floor.ctx.walks.contains_key(&cast_id(5)),
             "agent 5's motion state was evicted with its slot"
         );
         assert!(

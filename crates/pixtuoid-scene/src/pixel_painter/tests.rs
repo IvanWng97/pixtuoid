@@ -754,7 +754,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             theme.surface.bg_fallback,
         );
         let mut cache = crate::cutaway::paint::CutawayCache::default();
-        let office = crate::cutaway::paint::Office {
+        let office = crate::display::Office {
             layout: &layout,
             pack,
             theme,
@@ -764,14 +764,14 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
         crate::cutaway::paint::render_cutaway(
             &frame,
             office,
-            crate::cutaway::paint::tests::showing(ground, now0),
+            crate::display::compose::tests::showing(ground, now0),
             &mut cache,
             &mut buf,
         );
-        let list = crate::cutaway::paint::frame_list(
+        let list = crate::display::compose(
             &frame,
             office,
-            crate::cutaway::paint::tests::showing(ground, now0),
+            crate::display::compose::tests::showing(ground, now0),
         );
         let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -915,13 +915,13 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(&frame),
-            crate::cutaway::paint::Office {
+            crate::display::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            crate::cutaway::paint::tests::showing(
+            crate::display::compose::tests::showing(
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
@@ -1070,13 +1070,13 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(frame),
-            crate::cutaway::paint::Office {
+            crate::display::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            crate::cutaway::paint::tests::showing(
+            crate::display::compose::tests::showing(
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
@@ -1732,7 +1732,7 @@ fn empty_frame(layout: &SceneLayout) -> SimFrame {
 fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
     let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let (scene, motion) = (SceneState::uniform(16), HashMap::new());
+    let (scene, walks) = (SceneState::uniform(16), HashMap::new());
     let now = SystemTime::UNIX_EPOCH;
     let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
     let (mut cache, mut base_fill) = (FrameCache::new(), BaseFillCache::new());
@@ -1740,7 +1740,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         scene: &scene,
         layout,
         pack: &pack,
-        clock: Motion::Full.clock(now),
+        timing: Motion::Full.timing(now),
         sky: crate::sky::Sky::clock(now),
         buf: &mut buf,
         cache: &mut cache,
@@ -1748,7 +1748,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         shadows: &mut crate::ground::DepthsCache::default(),
         theme,
         floor: crate::floor::FloorMeta::ground(),
-        motion: &motion,
+        walks: &walks,
         debug_walkable: false,
     };
     let lights = crate::lighting::Lights::of(
@@ -1760,7 +1760,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
             floor_idx: 0,
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
-            beat: ctx.clock.beat,
+            beat: ctx.timing.beat,
         },
     );
     queue_fixtures(
@@ -2321,7 +2321,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
             top_left,
             drawn.map(|s| s.w),
             crate::sim::Cues::default(),
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         super::effects::paint_effects(
             &mut buf,
@@ -2390,7 +2390,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
             &pack,
             CHARACTER_SPRITE_W,
             &HashMap::new(),
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         let crowns: Vec<Point> = p
@@ -2818,7 +2818,7 @@ impl OwnedSimStores {
             router: &mut self.route.router,
             overlay: &mut self.route.overlay,
             history: &mut self.route.history,
-            motion: &mut self.route.motion,
+            walks: &mut self.route.walks,
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
@@ -3396,7 +3396,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             scene: &scene,
             layout: &layout,
             pack: &pack,
-            clock: Motion::Full.clock(now),
+            timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
@@ -3404,7 +3404,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         &frame,
@@ -3532,10 +3532,10 @@ fn sim_step_advances_motion_without_painting() {
     assert!(
         owned
             .route
-            .motion
+            .walks
             .get(&id)
             .is_some_and(|m| m.entry.is_some()),
-        "sim_step snapshotted the entry walk profile into the motion store"
+        "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
 
@@ -3647,7 +3647,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             scene: &scene,
             layout: &layout,
             pack: &pack,
-            clock: Motion::Full.clock(now),
+            timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
@@ -3655,7 +3655,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         &frame,
@@ -3717,7 +3717,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             },
         )
@@ -3759,7 +3759,7 @@ fn paint_frame_is_pure_and_byte_identical() {
     );
 
     let light_before = owned.vacancy_dim.level();
-    let motion_before = format!("{:?}", owned.route.motion);
+    let walks_before = format!("{:?}", owned.route.walks);
     let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
@@ -3775,7 +3775,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
                 buf,
                 cache: &mut cache,
@@ -3783,7 +3783,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                motion: &owned.route.motion,
+                walks: &owned.route.walks,
                 debug_walkable: false,
             },
             &frame,
@@ -3805,9 +3805,9 @@ fn paint_frame_is_pure_and_byte_identical() {
         "paint must not tick lighting"
     );
     assert_eq!(
-        format!("{:?}", owned.route.motion),
-        motion_before,
-        "paint must not move motion state"
+        format!("{:?}", owned.route.walks),
+        walks_before,
+        "paint must not move walk state"
     );
     assert_eq!(
         format!("{:?}", owned.route.history),
@@ -4145,8 +4145,8 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
             buf: &mut buf,
             pack: &pack,
             cache: &mut cache,
-            clock: Motion::Full
-                .clock(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
+            timing: Motion::Full
+                .timing(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
             theme: crate::theme::theme_by_name("normal").expect("theme"),
         },
     );
@@ -4470,8 +4470,8 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
 #[test]
 fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
-    use crate::motion::WanderKind;
     use crate::pose::Pose;
+    use crate::walk::WanderKind;
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
@@ -4519,7 +4519,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let sat_at = sat_at.expect("agent never reached a seat");
     assert!(
         matches!(
-            owned.route.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Named { wp_idx, .. } if wp_idx == sat_at
         ),
         "the seated agent should hold its seat's claim"
@@ -4551,7 +4551,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
 
     assert!(
         matches!(
-            owned.route.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Aimless
         ),
         "an agent that left the wander machine must release its seat claim"
@@ -4851,7 +4851,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let motion = HashMap::new();
+    let walks = HashMap::new();
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
@@ -4901,7 +4901,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
                 buf: &mut buf,
                 cache: &mut cache,
@@ -4909,7 +4909,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor,
-                motion: &motion,
+                walks: &walks,
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
@@ -5131,7 +5131,7 @@ fn paint_drawn(
             scene,
             layout,
             pack,
-            clock: Motion::Full.clock(now),
+            timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
@@ -5139,7 +5139,7 @@ fn paint_drawn(
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         frame,
@@ -5280,7 +5280,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
             &pack,
             CHARACTER_SPRITE_W,
             &HashMap::new(),
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
@@ -5342,7 +5342,7 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         &pack,
         CHARACTER_SPRITE_W,
         &HashMap::new(),
-        Motion::Full.clock(now),
+        Motion::Full.timing(now),
     );
     let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
     assert_eq!(drawn.len(), 3, "premise: all three are drawn");
