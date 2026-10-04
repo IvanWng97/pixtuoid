@@ -113,11 +113,11 @@ fn bin_freq(k: usize, n: usize, hz_per_bin: f32) -> f32 {
 /// `buf.len()` (internally pads to a power of 2).
 pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
     let (mut re, mut im, n, hz_per_bin) = forward_spectrum(buf);
-    for k in 0..n {
+    for (k, (r, i)) in re.iter_mut().zip(&mut im).enumerate() {
         let f = bin_freq(k, n, hz_per_bin);
         if f < lo_hz || f > hi_hz {
-            re[k] = 0.0;
-            im[k] = 0.0;
+            *r = 0.0;
+            *i = 0.0;
         }
     }
     fft(&mut re, &mut im, true);
@@ -167,12 +167,19 @@ pub fn warp_resample(buf: &[f32], warps: &[(f32, f32)]) -> Vec<f32> {
 /// envelope — CIRCULARLY seamless by construction (FFT-domain shaping is
 /// periodic in the block), so the returned block loops without a click.
 /// `bands` are `(lo_hz, hi_hz, energy_percent)` rows.
+///
+/// # Panics
+///
+/// If `n_pow2` is not a power of two.
 pub fn shaped_noise_loop(
     n_pow2: usize,
     bands: &[(f32, f32, f32)],
     rng: &mut NoiseStream,
 ) -> Vec<f32> {
-    debug_assert!(n_pow2.is_power_of_two());
+    assert!(
+        n_pow2.is_power_of_two(),
+        "a noise loop is a power-of-two block"
+    );
     let mut re: Vec<f32> = (0..n_pow2).map(|_| rng.norm()).collect();
     let mut im = vec![0.0f32; n_pow2];
     fft(&mut re, &mut im, false);
@@ -191,9 +198,9 @@ pub fn shaped_noise_loop(
     }
     // smooth the band stairs so edges don't ring
     let smoothed = moving_average(&gain, 201);
-    for k in 0..n_pow2 {
-        re[k] *= smoothed[k];
-        im[k] *= smoothed[k];
+    for ((r, i), s) in re.iter_mut().zip(&mut im).zip(&smoothed) {
+        *r *= s;
+        *i *= s;
     }
     fft(&mut re, &mut im, true);
     let peak = re.iter().fold(0.0f32, |a, &v| a.max(v.abs())).max(1e-9);
@@ -233,8 +240,8 @@ fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
 pub fn centroid_hz(buf: &[f32]) -> f32 {
     let (re, im, n, hz_per_bin) = forward_spectrum(buf);
     let (mut num, mut den) = (0.0f64, 0.0f64);
-    for k in 0..=n / 2 {
-        let p = (re[k] * re[k] + im[k] * im[k]) as f64;
+    for (k, (r, i)) in re.iter().zip(&im).take(n / 2 + 1).enumerate() {
+        let p = (r * r + i * i) as f64;
         num += k as f64 * hz_per_bin as f64 * p;
         den += p;
     }

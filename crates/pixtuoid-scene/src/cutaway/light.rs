@@ -368,13 +368,17 @@ pub(crate) fn net_pass(
         let art_row = usize::from(by / k - rect.y.0) * w;
         for bx in bx0..bx1 {
             let a = art_row + usize::from(bx / k - rect.x.0);
-            let (lift, tint) = (lift[a], tint[a]);
+            let (Some(&lift), Some(&tint)) = (lift.get(a), tint.get(a)) else {
+                continue;
+            };
             if lift == 0 && ambient.0 == 0 && flash.0 == 0 {
                 continue;
             }
             let i = usize::from(by) * bw + usize::from(bx);
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
-            pixels[i] = memo.of(pixels[i], glow, lift, tint, (ambient, flash));
+            if let Some(px) = pixels.get_mut(i) {
+                *px = memo.of(*px, glow, lift, tint, (ambient, flash));
+            }
         }
     }
 }

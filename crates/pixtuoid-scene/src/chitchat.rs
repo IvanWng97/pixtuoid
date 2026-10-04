@@ -72,6 +72,7 @@ pub const CHITCHAT_LINES: &[&str] = &[
     "lunch?",
     "ship friday",
 ];
+const _: () = assert!(!CHITCHAT_LINES.is_empty());
 
 /// A social venue that hosts at most one conversation at a time. Meeting-room
 /// slots all map to the same `Room`; every other social waypoint is its own.

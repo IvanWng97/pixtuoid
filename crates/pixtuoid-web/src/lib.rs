@@ -29,7 +29,7 @@ use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::sky::WeatherPolicy;
-use pixtuoid_scene::theme::{ALL_THEMES, Theme};
+use pixtuoid_scene::theme::{NORMAL, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
@@ -157,7 +157,7 @@ impl Office {
             session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
-            theme: ALL_THEMES[0],
+            theme: &NORMAL,
             seed: seed as u64,
             reducer: Reducer::new(),
             beats: hero_script(),
@@ -237,7 +237,7 @@ impl Office {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }
 
-    /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+    /// Recolor the whole office to one of the [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES) by name. Unknown
     /// name = no-op.
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
@@ -803,7 +803,7 @@ mod tests {
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
-        let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
+        let cc = NORMAL.source.claude_code;
         let expect = format!("\"color\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),

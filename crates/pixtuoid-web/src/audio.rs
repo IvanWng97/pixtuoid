@@ -167,14 +167,7 @@ impl WebAudioDriver {
         let Some(bank) = &self.bank else {
             return &[];
         };
-        match pool {
-            OneShotPool::Keystroke => bank.keystrokes.get(index).map(|a| a.as_slice()),
-            OneShotPool::Drop => bank.drops.get(index).map(|a| a.as_slice()),
-            OneShotPool::DoorChime => (index == 0).then(|| bank.door_chime.as_slice()),
-            OneShotPool::PrinterWhir => (index == 0).then(|| bank.printer_whir.as_slice()),
-            OneShotPool::VendingDrop => (index == 0).then(|| bank.vending_drop.as_slice()),
-        }
-        .unwrap_or(&[])
+        bank.get(pool, index).map_or(&[], |a| a.as_slice())
     }
 }
 
@@ -295,16 +288,13 @@ impl Adoption {
     }
 
     pub(crate) fn finish(self) -> Option<WebAudioDriver> {
-        if self.keystrokes.len() != KEYSTROKE_POOL || self.drops.len() != DROP_POOL {
-            return None;
-        }
-        let bank = AssetBank {
-            keystrokes: self.keystrokes,
-            drops: self.drops,
-            door_chime: self.door_chime?,
-            printer_whir: self.printer_whir?,
-            vending_drop: self.vending_drop?,
-        };
+        let bank = AssetBank::adopt(
+            self.keystrokes,
+            self.drops,
+            self.door_chime?,
+            self.printer_whir?,
+            self.vending_drop?,
+        )?;
         let beds = <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(self.beds).ok()?;
         Some(WebAudioDriver::adopted(self.track, bank, self.rain?, beds))
     }

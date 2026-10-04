@@ -94,8 +94,7 @@ fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
 /// `n` chained bursts — continuously Active, then the agent settles Idle and
 /// the engine's wander takes over until the next spell.
 fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
-    for k in 0..n {
-        let display = tools[(k as usize) % tools.len()];
+    for (k, &display) in (0..n).zip(tools.iter().cycle()) {
         let t = format!("s{at_ms}-{k}");
         beats.extend(tool(i, at_ms + k * BURST_SPACING_MS, &t, display));
     }

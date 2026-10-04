@@ -86,11 +86,11 @@ impl OneShotPool {
 /// [`TrackBeds`] instead and are NOT retained — `RodioSink` copies each into its
 /// own `SamplesBuffer`, so holding the Arcs would double the bed RAM.
 pub struct AssetBank {
-    pub keystrokes: Vec<Arc<Vec<f32>>>,
-    pub drops: Vec<Arc<Vec<f32>>>,
-    pub door_chime: Arc<Vec<f32>>,
-    pub printer_whir: Arc<Vec<f32>>,
-    pub vending_drop: Arc<Vec<f32>>,
+    keystrokes: Vec<Arc<Vec<f32>>>,
+    drops: Vec<Arc<Vec<f32>>>,
+    door_chime: Arc<Vec<f32>>,
+    printer_whir: Arc<Vec<f32>>,
+    vending_drop: Arc<Vec<f32>>,
 }
 
 impl AssetBank {
@@ -108,17 +108,47 @@ impl AssetBank {
         }
     }
 
-    /// Resolve an engine-emitted `(pool, index)` play to its buffer. `index` is
-    /// taken modulo the pool size so an out-of-range caller can't panic; the
-    /// single-sample appliance pools ignore it.
-    pub fn sample(&self, pool: OneShotPool, index: usize) -> Arc<Vec<f32>> {
+    /// A bank of buffers built elsewhere (the wasm worker's handoff); `None`
+    /// unless each pool holds its full size.
+    pub fn adopt(
+        keystrokes: Vec<Arc<Vec<f32>>>,
+        drops: Vec<Arc<Vec<f32>>>,
+        door_chime: Arc<Vec<f32>>,
+        printer_whir: Arc<Vec<f32>>,
+        vending_drop: Arc<Vec<f32>>,
+    ) -> Option<Self> {
+        (keystrokes.len() == KEYSTROKE_POOL && drops.len() == DROP_POOL).then_some(Self {
+            keystrokes,
+            drops,
+            door_chime,
+            printer_whir,
+            vending_drop,
+        })
+    }
+
+    /// The `index`th buffer of `pool`, `None` past its end; an appliance pool
+    /// holds one.
+    pub fn get(&self, pool: OneShotPool, index: usize) -> Option<&Arc<Vec<f32>>> {
         match pool {
-            OneShotPool::Keystroke => Arc::clone(&self.keystrokes[index % self.keystrokes.len()]),
-            OneShotPool::Drop => Arc::clone(&self.drops[index % self.drops.len()]),
-            OneShotPool::DoorChime => Arc::clone(&self.door_chime),
-            OneShotPool::PrinterWhir => Arc::clone(&self.printer_whir),
-            OneShotPool::VendingDrop => Arc::clone(&self.vending_drop),
+            OneShotPool::Keystroke => self.keystrokes.get(index),
+            OneShotPool::Drop => self.drops.get(index),
+            OneShotPool::DoorChime => (index == 0).then_some(&self.door_chime),
+            OneShotPool::PrinterWhir => (index == 0).then_some(&self.printer_whir),
+            OneShotPool::VendingDrop => (index == 0).then_some(&self.vending_drop),
         }
+    }
+
+    /// Resolve an engine-emitted `(pool, index)` play to its buffer, `index`
+    /// taken modulo the pool's size.
+    pub fn sample(&self, pool: OneShotPool, index: usize) -> Arc<Vec<f32>> {
+        let size = match pool {
+            OneShotPool::Keystroke => self.keystrokes.len(),
+            OneShotPool::Drop => self.drops.len(),
+            OneShotPool::DoorChime | OneShotPool::PrinterWhir | OneShotPool::VendingDrop => 1,
+        };
+        // `build` and `adopt` fill every pool, so the modulo has a buffer to land on.
+        self.get(pool, index % size)
+            .map_or_else(Default::default, Arc::clone)
     }
 }
 

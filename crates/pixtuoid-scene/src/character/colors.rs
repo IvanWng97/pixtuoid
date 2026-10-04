@@ -275,6 +275,7 @@ const HAIR_PRESETS: &[Rgb] = &[
         b: 0xb0,
     }, // silver-grey
 ];
+const _: () = assert!(!HAIR_PRESETS.is_empty());
 const SKIN_PRESETS: &[Rgb] = &[
     Rgb {
         r: 0xf4,
@@ -302,6 +303,7 @@ const SKIN_PRESETS: &[Rgb] = &[
         b: 0x64,
     }, // warm tan
 ];
+const _: () = assert!(!SKIN_PRESETS.is_empty());
 
 /// A burning agent's hair — an alias of the flame gradient's deep base, so a
 /// gradient tweak can't desync the hair from the crown.

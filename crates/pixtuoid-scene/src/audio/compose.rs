@@ -62,10 +62,10 @@ pub struct GeneratedScore {
     pub(super) lead_voice: LeadVoice,
     /// The 8-bar harmonic TIMELINE every stem reads: the template played twice,
     /// with (day) bar 8 swapped for the turnaround dominant.
-    pub(super) bar_chords: [[u8; 4]; 8],
+    pub(super) bar_chords: [[u8; 4]; GEN_LOOP_BARS],
     /// Harmonic root per timeline bar — voicings may be inversions, so this is
     /// not `chord[0]`.
-    pub(super) bar_roots: [u8; 8],
+    pub(super) bar_roots: [u8; GEN_LOOP_BARS],
     /// The TEMPLATE's roots — the timeline + day turnaround derive from these.
     pub(super) roots_pc: [u8; 4],
 }
@@ -406,12 +406,16 @@ fn dominant7_of(target_root_pc: u8) -> [u8; 4] {
 
 /// The 8-bar harmonic timeline + per-bar roots: template ×2, with (day) bar 8
 /// substituted by the dominant of the returning bar-1 root.
-fn timeline(chords: &[[u8; 4]; 4], roots_pc: &[u8; 4], mood: Mood) -> ([[u8; 4]; 8], [u8; 8]) {
-    let mut bars = [[0u8; 4]; 8];
-    let mut roots = [0u8; 8];
+fn timeline(
+    chords: &[[u8; 4]; 4],
+    roots_pc: &[u8; 4],
+    mood: Mood,
+) -> ([[u8; 4]; GEN_LOOP_BARS], [u8; GEN_LOOP_BARS]) {
+    let mut bars = [[0u8; 4]; GEN_LOOP_BARS];
+    let mut roots = [0u8; GEN_LOOP_BARS];
     for bar in 0..GEN_LOOP_BARS {
-        bars[bar] = chords[bar % 4];
-        roots[bar] = roots_pc[bar % 4];
+        bars[bar] = chords[bar % chords.len()];
+        roots[bar] = roots_pc[bar % roots_pc.len()];
     }
     if mood == Mood::Day {
         bars[7] = dominant7_of(roots_pc[0]);
@@ -520,7 +524,7 @@ const LEAD_GRID: [f32; 6] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
 /// answer with a peak — closing on a tone that resolves the loop.
 fn lead_events(
     rng: &mut NoiseStream,
-    bar_chords: &[[u8; 4]; 8],
+    bar_chords: &[[u8; 4]; GEN_LOOP_BARS],
     scale: &[u8; 7],
     mood: Mood,
 ) -> Vec<LeadEvent> {
@@ -837,7 +841,7 @@ fn sub_note(pc: u8) -> u8 {
 /// lagging the beat so the kick keeps the transient.
 fn bass_events(
     rng: &mut NoiseStream,
-    bar_roots: &[u8; 8],
+    bar_roots: &[u8; GEN_LOOP_BARS],
     beat_s: f32,
     mood: Mood,
 ) -> Vec<(f32, u8, f32)> {
@@ -863,10 +867,12 @@ fn bass_events(
             let at = b0 + answer_beat * beat_s + 0.014 + 0.010 * rng.unit();
             out.push((at, note, vel_base - 0.14 + 0.08 * rng.unit()));
         }
-        if chance(rng, pickup_p) && bar + 1 < GEN_LOOP_BARS {
+        if chance(rng, pickup_p)
+            && let Some(&next_root) = bar_roots.get(bar + 1)
+        {
             // literal semitone below the folded next root (pc-folding rendered an
             // 11-semitone drop); no last-bar pickup — place() clips at the seam
-            let next = sub_note(bar_roots[bar + 1]);
+            let next = sub_note(next_root);
             let at = b0 + 3.5 * beat_s + 0.012 + 0.008 * rng.unit();
             out.push((at, next - 1, 0.34 + 0.06 * rng.unit()));
         }
@@ -876,8 +882,8 @@ fn bass_events(
 
 fn keys_events(
     rng: &mut NoiseStream,
-    bar_chords: &[[u8; 4]; 8],
-    bar_roots: &[u8; 8],
+    bar_chords: &[[u8; 4]; GEN_LOOP_BARS],
+    bar_roots: &[u8; GEN_LOOP_BARS],
     beat_s: f32,
     mood: Mood,
 ) -> Vec<(f32, u8, f32)> {

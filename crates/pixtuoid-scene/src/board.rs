@@ -325,6 +325,14 @@ const PERSONA_CALM: &[Persona] = &[
     Persona::Says("quiet... too quiet"),
     Persona::Says("coffee break?"),
 ];
+// `board_line` picks from a pool modulo its length.
+const _: () = assert!(
+    !PERSONA_ALERT_ONE.is_empty()
+        && !PERSONA_ALERT_MANY.is_empty()
+        && !PERSONA_BUSY_ONE.is_empty()
+        && !PERSONA_BUSY_MANY.is_empty()
+        && !PERSONA_CALM.is_empty()
+);
 
 /// L2's plain-English face for `mood`; `pick` rotates the pool. Same 1-col
 /// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the
