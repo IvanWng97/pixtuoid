@@ -957,12 +957,22 @@ impl NeonFade {
 }
 
 // Every stutter bound on a whole Full tick, so the beat neither skips a flash
-// nor stretches one.
+// nor stretches one; every flash, and the dark up to the next (the cycle's
+// first, past its end), at least the photosensitive floor.
 const _: () = {
+    use crate::anim::{FULL_TICK_MS, PHOTOSENSITIVE_PHASE_MIN_MS};
+    let flashes = NeonState::STUTTER_FLASHES_MS;
     let mut i = 0;
-    while i < NeonState::STUTTER_FLASHES_MS.len() {
-        let (start, end) = NeonState::STUTTER_FLASHES_MS[i];
-        assert!(start % crate::anim::FULL_TICK_MS == 0 && end % crate::anim::FULL_TICK_MS == 0);
+    while i < flashes.len() {
+        let (start, end) = flashes[i];
+        let next = if i + 1 < flashes.len() {
+            flashes[i + 1].0
+        } else {
+            flashes[0].0 + NeonState::STUTTER_MS
+        };
+        assert!(start % FULL_TICK_MS == 0 && end % FULL_TICK_MS == 0);
+        assert!(end - start >= PHOTOSENSITIVE_PHASE_MIN_MS);
+        assert!(next - end >= PHOTOSENSITIVE_PHASE_MIN_MS);
         i += 1;
     }
 };

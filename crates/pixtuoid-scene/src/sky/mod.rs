@@ -9,7 +9,6 @@ use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::sprite::Rgb;
 
-#[cfg(test)]
 use crate::anim::Motion;
 
 #[cfg(test)]
@@ -484,43 +483,53 @@ fn moon_phase_at(now: SystemTime) -> f32 {
 /// Lightning cadence: one strike per bucket this long, at a hashed offset
 /// ([`strike_offset`]) — a much faster cadence reads as a hyperactive storm.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
-// Every change of weather, a transition's step or a slot's start, falls on a
-// bucket's start, which no strike runs across: a strike lights under the
-// weather it started in.
-const _: () =
-    assert!((TRANSITION_SECS / TRANSITION_STEPS * 1000).is_multiple_of(LIGHTNING_PERIOD_MS));
-/// The shortest a flash's phase may last: each of [`LIGHTNING_PHASES`] holds
-/// this long, the photosensitive-safe bound, and a whole Full beat so none is
-/// skipped.
-const MIN_FLASH_PHASE_MS: u64 = crate::anim::FULL_TICK_MS;
-/// A strike's levels in order, each held [`MIN_FLASH_PHASE_MS`]: the primary
+// A slot's start is a bucket's start on every moving tier's loop clock, so no
+// strike runs into the next slot's weather.
+const _: () = {
+    let slot_ms = WEATHER_CYCLE_SECS * 1000;
+    let mut i = 0;
+    while i < Motion::ALL.len() {
+        if let Some(pace) = Motion::ALL[i].pace() {
+            assert!(slot_ms.is_multiple_of(crate::anim::FULL_TICK_MS * pace));
+            assert!((slot_ms / pace).is_multiple_of(LIGHTNING_PERIOD_MS));
+        }
+        i += 1;
+    }
+};
+/// How long each of [`STRIKE_LEVELS`] holds: a whole Full beat, so the beat
+/// neither skips one nor stretches it.
+const STRIKE_PHASE_MS: u64 = crate::anim::FULL_TICK_MS;
+const _: () = assert!(
+    STRIKE_PHASE_MS >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
+        && STRIKE_GAP_MS >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
+);
+/// A strike's levels in order, each held [`STRIKE_PHASE_MS`]: the primary
 /// strike, a brief dim, an after-flash, so it reads as a flicker rather than a
 /// single blink.
-const LIGHTNING_PHASES: [f32; 3] = [1.0, 0.15, 0.55];
+const STRIKE_LEVELS: [f32; 3] = [1.0, 0.15, 0.55];
 /// How long one strike's [`lightning_envelope`] window lasts.
-const LIGHTNING_FLASH_MS: u64 = LIGHTNING_PHASES.len() as u64 * MIN_FLASH_PHASE_MS;
+const STRIKE_MS: u64 = STRIKE_LEVELS.len() as u64 * STRIKE_PHASE_MS;
 /// The least dark time between one strike's end and the next's start, so two
 /// strikes never put more than three flashes in a second.
-const FLASH_SEPARATION_MS: u64 = 1000;
+const STRIKE_GAP_MS: u64 = 1000;
 
 /// Intensity envelope (0..1) of a lightning flash given ms since the strike
-/// began: its [`LIGHTNING_PHASES`] in turn, then 0.
+/// began: its [`STRIKE_LEVELS`] in turn, then 0.
 fn lightning_envelope(since_strike_ms: u64) -> f32 {
-    usize::try_from(since_strike_ms / MIN_FLASH_PHASE_MS)
+    usize::try_from(since_strike_ms / STRIKE_PHASE_MS)
         .ok()
-        .and_then(|i| LIGHTNING_PHASES.get(i).copied())
+        .and_then(|i| STRIKE_LEVELS.get(i).copied())
         .unwrap_or(0.0)
 }
 
 /// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
 /// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
-/// offset, leaving the flash and [`FLASH_SEPARATION_MS`] after it inside the
+/// offset, leaving the flash and [`STRIKE_GAP_MS`] after it inside the
 /// bucket, so the next bucket's strike is never too close. It lands on a
 /// phase boundary, so each phase holds whole beats.
 fn strike_offset(bucket: u64) -> u64 {
-    let off = crate::splitmix_draw(bucket, 1)
-        % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS - FLASH_SEPARATION_MS);
-    off / MIN_FLASH_PHASE_MS * MIN_FLASH_PHASE_MS
+    let off = crate::splitmix_draw(bucket, 1) % (LIGHTNING_PERIOD_MS - STRIKE_MS - STRIKE_GAP_MS);
+    off / STRIKE_PHASE_MS * STRIKE_PHASE_MS
 }
 
 /// Whether `bucket`'s strike fires under a sky `storm` of storm, `0..=1`: a
@@ -542,12 +551,12 @@ fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
     let strike_ms = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
     let Some(since) = elapsed_ms
         .checked_sub(strike_ms)
-        .filter(|&since| since < LIGHTNING_FLASH_MS)
+        .filter(|&since| since < STRIKE_MS)
     else {
         return 0.0;
     };
     // The storm's share at the strike's start: a ramp step mid-strike would
-    // otherwise cut its phases short of `MIN_FLASH_PHASE_MS`.
+    // otherwise cut its phases short of `STRIKE_PHASE_MS`.
     let at_strike = std::time::UNIX_EPOCH + Duration::from_millis(beat.wall_ms(strike_ms));
     if strikes(bucket, policy.weather_at(at_strike).share(Weather::Storm)) {
         lightning_envelope(since)
