@@ -831,9 +831,10 @@ mod tests {
 
     impl Office {
         fn new(w: u16, h: u16) -> Self {
+            let pack = test_pack();
             Self {
-                session: FloorSession::new(),
-                pack: test_pack(),
+                session: FloorSession::new(std::sync::Arc::new(pack.clone())),
+                pack,
                 size: Size { w, h },
                 floor: FloorMeta::ground(),
             }

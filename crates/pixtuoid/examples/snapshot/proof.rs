@@ -568,7 +568,7 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) timeline: Timeline,
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
-    pub(crate) pack: &'a pixtuoid_core::sprite::format::Pack,
+    pub(crate) pack: &'a std::sync::Arc<pixtuoid_core::sprite::format::Pack>,
     pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }
 
@@ -595,10 +595,10 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
 
     let backend = TestBackend::new(job.cols, job.rows);
     let mut term = Terminal::new(backend)?;
-    let mut floor = pixtuoid_scene::floor::PerFloor::new();
+    let mut floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone(job.pack));
     let mut scene = SceneState::uniform(job.max_desks);
     let mut reducer = Reducer::new();
-    let mut chitchat_state = std::collections::HashMap::new();
+    let mut office = pixtuoid_scene::floor::PerOffice::new();
 
     let mut wide = FrameSink::pngs(&job.frames_dir.join("wide"))?;
     let mut tall = FrameSink::pngs(&job.frames_dir.join("tall"))?;
@@ -619,7 +619,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         reducer.tick(&mut scene, now);
         let mut draw_ctx = DrawCtx::offscreen(
             &mut floor,
-            &mut chitchat_state,
+            office.stores(),
             job.theme,
             &scene,
             job.pack,
