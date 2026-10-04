@@ -13,7 +13,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::display::light::{Ambient, Flash, LightView};
-use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtRect, BufferPx, Pen};
 
 /// The share of the way to its light's colour a pixel is tinted per step of
 /// lift: the brightest cells take the most colour, as they would.
@@ -124,17 +124,16 @@ pub(crate) fn net_pass(
             }
         }
     }
-    let k = pen.buffer(ArtPx(1));
-    let (bx0, by0) = (pen.buffer(rect.x), pen.buffer(rect.y));
-    let bx1 = bx0.saturating_add(pen.buffer(rect.w)).min(buf.width());
-    let by1 = by0.saturating_add(pen.buffer(rect.h)).min(buf.height());
+    let (bx0, by0) = (pen.buffer(rect.x).0, pen.buffer(rect.y).0);
+    let bx1 = bx0.saturating_add(pen.buffer(rect.w).0).min(buf.width());
+    let by1 = by0.saturating_add(pen.buffer(rect.h).0).min(buf.height());
     let bw = usize::from(buf.width());
     let pixels = buf.as_mut_slice();
     debug_assert_eq!(emission.glow.len(), pixels.len(), "one class per pixel");
     for by in by0..by1 {
-        let art_row = usize::from(by / k - rect.y.0) * w;
+        let art_row = usize::from(pen.art_of_buffer(BufferPx(by)).0 - rect.y.0) * w;
         for bx in bx0..bx1 {
-            let a = art_row + usize::from(bx / k - rect.x.0);
+            let a = art_row + usize::from(pen.art_of_buffer(BufferPx(bx)).0 - rect.x.0);
             let (lift, tint) = (lift[a], tint[a]);
             if lift == 0 && ambient.steps() == 0 && flash.steps() == 0 {
                 continue;
@@ -232,6 +231,7 @@ mod tests {
     use super::*;
     use crate::display::light::AMBIENT_MAX_STEPS;
     use crate::display::light::tests::{lamp, pen, view};
+    use crate::display::pen::ArtPx;
     use crate::layout::Point;
 
     const FLOOR: Rgb = Rgb {

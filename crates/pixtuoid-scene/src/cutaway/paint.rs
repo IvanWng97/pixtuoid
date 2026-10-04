@@ -8,7 +8,7 @@ use crate::atmosphere::Carpet;
 use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
 use crate::display::compose::{art_size, desk_art, desk_front_h};
-use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtPx, ArtRect, BufferPx, Pen};
 use crate::display::{
     Align, Art, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
     StoodProp, TextRun, compose, desk_span, face_rows, run_rect,
@@ -215,7 +215,10 @@ fn paint_pieces(
                 };
                 let glow = match piece.kind.emits() {
                     Emits::Pane(view)
-                        if view.shows((pen.art_of_buffer(x).0, pen.art_of_buffer(y).0)) =>
+                        if view.shows((
+                            pen.art_of_buffer(BufferPx(x)).0,
+                            pen.art_of_buffer(BufferPx(y)).0,
+                        )) =>
                     {
                         Glow::Pane
                     }
@@ -4405,13 +4408,12 @@ mod tests {
         // Two buffer pixels to the art pixel, so a key off the art grid shows.
         let d = pack.max_density_variant().get();
         let pen = Pen::for_pack(RenderScale::new(2 * d).expect("nonzero"), &pack);
-        let k = pen.buffer(ArtPx(1));
         let carpet = moment().look.carpet(theme);
         let [from, to] = carpet.ends();
         let lay = |paint: &dyn Fn(&mut RgbBuffer)| {
             let mut buf = RgbBuffer::filled(
-                pen.buffer(pen.art(layout.buf_w)),
-                pen.buffer(pen.art(layout.buf_h)),
+                pen.buffer(pen.art(layout.buf_w)).0,
+                pen.buffer(pen.art(layout.buf_h)).0,
                 Rgb { r: 0, g: 0, b: 0 },
             );
             paint(&mut buf);
@@ -4427,7 +4429,11 @@ mod tests {
             for x in 0..mid.width() {
                 let px = [&going, &coming, &mid].map(|b| b.get(x, y));
                 let what = format!("ground at ({x}, {y})");
-                tally(&mut took, &what, carpet.takes_to(x / k, y / k), px);
+                let (ax, ay) = (
+                    pen.art_of_buffer(BufferPx(x)),
+                    pen.art_of_buffer(BufferPx(y)),
+                );
+                tally(&mut took, &what, carpet.takes_to(ax.0, ay.0), px);
             }
         }
         assert!(took[0] > 0 && took[1] > 0, "ground: {took:?}");
@@ -4992,7 +4998,7 @@ mod tests {
         let mut list = list_at(frame, office, 12);
         let (painted, _) = by_day(&list, &layout);
         let pen = Pen::for_pack(scale, &pack);
-        let at = |(x, y): (u16, u16)| (pen.buffer(ArtPx(x)), pen.buffer(ArtPx(y)));
+        let at = |(x, y): (u16, u16)| (pen.buffer(ArtPx(x)).0, pen.buffer(ArtPx(y)).0);
         let bay = crate::layout::WindowBay {
             x: desk.x,
             w: 4,
