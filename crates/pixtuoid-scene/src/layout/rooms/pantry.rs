@@ -156,9 +156,9 @@ impl PantryRoom {
     }
 
     /// The trash bin's sprite box near the pantry's west counter, clear of it,
-    /// or `None` when the room can't fit it or it gives way (`clear_of`).
-    /// Shared placement authority for
-    /// `paint_trash_bin` and the hover hit-test — see [`Self::water_cooler_rect`].
+    /// or `None` when the room can't fit it or it gives way (`clear_of`). Shared
+    /// placement authority for `paint_trash_bin` and the hover hit-test — see
+    /// [`Self::water_cooler_rect`].
     pub fn trash_bin_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Gated first: `b.height - 14` must not run below the gate.
