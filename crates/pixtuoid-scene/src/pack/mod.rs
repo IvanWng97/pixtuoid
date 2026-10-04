@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
-use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, load_pack};
+use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, MissingMark, load_pack};
 use pixtuoid_core::sprite::format::{
     Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
@@ -113,7 +113,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         missing_hair_views: _,
         overhanging_hair: _,
         walks_without_stride: _,
-        missing_marks: _,
+        missing_marks,
         orphan_hairstyles,
     } = &report;
     for name in missing_required {
@@ -173,6 +173,15 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             variant_frames,
             "custom sprite pack density variant has a different frame count from its base — \
              renderers skip it for the densest art that fits"
+        );
+    }
+    // the classic stands its desk props only on the art's marks, as the cutaway does
+    for MissingMark { name, mark } in missing_marks {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            mark,
+            "custom sprite pack art leaves out a mark — nothing stands there, in either look"
         );
     }
     for style in orphan_hairstyles {
@@ -784,7 +793,8 @@ mod tests {
         let rows = vec![row; usize::from(desk.height()) * 4].join("\n");
         fs::write(
             tmp.path().join("desk4x.sprite"),
-            format!("@frame 0\n{rows}\n"),
+            // marked, so the orphan is its only finding
+            format!("@frame 0\n@mark {CUP_MARK} 0 0\n@mark {TOWER_MARK} 0 0\n{rows}\n"),
         )
         .expect("write desk4x.sprite");
         let toml_path = tmp.path().join("pack.toml");
@@ -792,6 +802,17 @@ mod tests {
         toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
         fs::write(&toml_path, toml).expect("write pack.toml");
         assert_eq!(load_warns(), 1, "the orphan desk@4x warns");
+
+        fs::write(
+            tmp.path().join("desk4x.sprite"),
+            format!("@frame 0\n{rows}\n"),
+        )
+        .expect("write desk4x.sprite");
+        assert_eq!(
+            load_warns(),
+            3,
+            "an unmarked desk@4x warns each mark it leaves out"
+        );
     }
 
     #[test]

@@ -12,6 +12,58 @@ fn bulbs() -> DeskBulbs {
     DeskBulbs::of(&crate::pack::test_default_pack())
 }
 
+/// [`desk_lights`] of [`DESK`] facing `facing`, its bulb the bundled pack's.
+fn lights(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> DeskLights {
+    desk_lights(DESK, facing, bulbs().at(facing), darkness, indoor)
+}
+
+/// A pack whose desk art draws no bulb lights no lamp, however dark.
+#[test]
+fn desk_art_without_a_bulb_lights_no_lamp() {
+    use crate::layout::Facing;
+    // the bulb's cells recoloured to the desk's body
+    let unlit = |src: &str| -> &'static str {
+        src.lines()
+            .map(|line| {
+                if line.starts_with(['@', '#']) {
+                    line.to_owned()
+                } else {
+                    let cell = |c: &str| {
+                        if c == crate::pack::DESK_BULB_KEY.to_string() {
+                            "D"
+                        } else {
+                            c
+                        }
+                        .to_owned()
+                    };
+                    line.split(' ').map(cell).collect::<Vec<_>>().join(" ")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .leak()
+    };
+    let pack = crate::pack::test_pack_with(&[
+        (
+            "desk.sprite",
+            unlit(include_str!("../../sprites/default/desk.sprite")),
+        ),
+        (
+            "desk_north.sprite",
+            unlit(include_str!("../../sprites/default/desk_north.sprite")),
+        ),
+    ]);
+    for facing in [Facing::North, Facing::South] {
+        assert!(
+            bulbs().at(facing).is_some(),
+            "the bundled {facing:?} desk draws a bulb"
+        );
+        let bulb = DeskBulbs::of(&pack).at(facing);
+        assert_eq!(bulb, None, "{facing:?}");
+        assert_eq!(desk_lights(DESK, facing, bulb, 1.0, 1.0).lamp.strength, 0.0);
+    }
+}
+
 /// A WALL-CLOCK-scale epoch — the magnitude [`neon_breath`]'s integer modulo
 /// exists for.
 const WALL_CLOCK_MS: u64 = 1_767_000_000_000;
@@ -221,8 +273,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
     // standby SCREEN is the one that gates on facing.
     for darkness in [0.0_f32, 0.5, 1.0] {
-        let north = desk_lights(DESK, (Facing::North, bulbs()), darkness, 1.0);
-        let south = desk_lights(DESK, (Facing::South, bulbs()), darkness, 1.0);
+        let north = lights(Facing::North, darkness, 1.0);
+        let south = lights(Facing::South, darkness, 1.0);
         assert_eq!(
             north.lamp.strength, south.lamp.strength,
             "the lamp may not depend on facing (darkness {darkness})"
@@ -233,10 +285,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
         );
     }
     assert!(
-        desk_lights(DESK, (Facing::South, bulbs()), 1.0, 1.0)
-            .lamp
-            .strength
-            > 0.0,
+        lights(Facing::South, 1.0, 1.0).lamp.strength > 0.0,
         "a viewer-facing desk must still light its lamp after dark"
     );
 }
@@ -248,8 +297,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
     let min = crate::floor::VacancyDim::MIN_LEVEL;
-    let lit = desk_lights(DESK, (Facing::North, bulbs()), 1.0, 1.0);
-    let empty = desk_lights(DESK, (Facing::North, bulbs()), 1.0, min);
+    let lit = lights(Facing::North, 1.0, 1.0);
+    let empty = lights(Facing::North, 1.0, min);
     for (what, lit, empty) in [
         ("lamp", lit.lamp.strength, empty.lamp.strength),
         ("screen_idle", lit.screen_idle, empty.screen_idle),

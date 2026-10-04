@@ -340,12 +340,8 @@ impl Lights {
                 .iter()
                 .enumerate()
                 .map(|(i, &desk)| {
-                    desk_lights(
-                        desk,
-                        (layout.desk_facing(FloorLocalDeskIndex(i)), inputs.bulbs),
-                        darkness,
-                        indoor,
-                    )
+                    let facing = layout.desk_facing(FloorLocalDeskIndex(i));
+                    desk_lights(desk, facing, inputs.bulbs.at(facing), darkness, indoor)
                 })
                 .collect(),
             monitor_halos: monitor_halos(layout, inputs),
@@ -386,18 +382,19 @@ impl Lights {
     }
 }
 
-/// A desk's lights, scaled by `darkness` — `1 − exterior`, so weather counts
-/// and not just the hour — and by `indoor`, which is what an emptied floor
-/// switches off.
+/// The lights of a desk facing `facing` that hangs its lamp's `bulb`, scaled
+/// by `darkness` — `1 − exterior`, so weather counts and not just the hour —
+/// and by `indoor`, which is what an emptied floor switches off.
 fn desk_lights(
     desk: Point,
-    (facing, bulbs): (Facing, DeskBulbs),
+    facing: Facing,
+    bulb: Option<(u16, u16)>,
     darkness: f32,
     indoor: f32,
 ) -> DeskLights {
     DeskLights::new(
         desk,
-        bulbs.at(facing),
+        bulb,
         darkness * indoor,
         screen_idle(facing, darkness, indoor),
     )
