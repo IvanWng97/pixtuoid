@@ -174,7 +174,8 @@ zizmor:
         echo "error: zizmor would run offline in CI and skip its online audits; give this step a GH_TOKEN" >&2; \
         exit 1; \
     fi
-    zizmor --strict-collection .
+    # Explicit: a linked worktree's discovery finds the MAIN checkout's config.
+    zizmor --config .github/zizmor.yml --strict-collection .
 
 # action_behavior_test.sh runs the workflows' own shell against stubs, which no
 # static contract can do.

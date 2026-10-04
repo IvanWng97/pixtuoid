@@ -190,8 +190,9 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
-9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
-   new repo docs.
+9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
+   a line on the narrowest rule it amends — never an agent's private memory,
+   which nobody reviews and nothing executes.
 
 **Skills.** Repo skills live in [`.claude/skills/`](../.claude/skills/)
 (committed; `.agents/skills/` aliases them for Codex).
@@ -230,6 +231,27 @@ Advisory backstops that surface risk but never gate:
 `scripts/check_upstream_drift.py` (wire-format drift) · `just fixture-age`
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
 `just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
+
+### Parallel sessions
+
+- **One `git worktree` and one cargo target per branch** — a target shared
+  across branches swaps uplifted examples and builds one branch's types into
+  another. Targets run to several GB each: check `df -h /` before parallel
+  builds, and remove a PR's worktree and local branch once it merges.
+- **No cargo while `just preflight full` runs** — `cargo hack --no-dev-deps`
+  rewrites `Cargo.toml` in place, and a killed run leaves it stripped
+  (`git checkout` the manifests).
+- **snapbox goldens escape a worktree** — `file!` resolves against the
+  outermost `Cargo.toml` ancestor, the main checkout; run or overwrite them
+  with `CARGO_RUSTC_CURRENT_DIR=<worktree>`.
+- **Open work stays under the queue's throughput** — at about ten open PRs,
+  stop opening and land: folds, main merges, thread replies, the follow-up
+  drafts the gate requires. A change to a surface an open PR already touches
+  folds into it.
+- **The queue never idles** — it checks PRs serially (`.mergify.yml`'s
+  `max_parallel_checks`), so queue every PR
+  that holds the gate, in priority order, at once; dequeue one only when it
+  would jump a priority PR that is already green.
 
 ## Conventions and architecture invariants
 
