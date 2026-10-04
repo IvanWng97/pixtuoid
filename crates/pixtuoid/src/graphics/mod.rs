@@ -259,9 +259,9 @@ impl TermEnv {
         }
     }
 
-    /// Inside tmux: a tmux client, or a terminal named tmux — upstream's test
-    /// before wrapping every image in passthrough (ratatui-image 11.1.0
-    /// `picker.rs:341-347`), which a tmux `TERM` carried over ssh also passes.
+    /// Inside tmux: a tmux client (`$TMUX`), or the `TERM`/`TERM_PROGRAM` test
+    /// upstream wraps every image on (ratatui-image 11.1.0
+    /// `picker.rs:341-347`, which a tmux `TERM` carried over ssh also passes).
     fn tmux(&self) -> bool {
         self.tmux_client
             || self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
