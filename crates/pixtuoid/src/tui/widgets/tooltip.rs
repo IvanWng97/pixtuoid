@@ -76,11 +76,18 @@ pub(crate) fn paint_text_runs(
                     .add_modifier(Modifier::BOLD);
                 vec![Span::styled(format!("\u{25b8}{name}"), style)]
             }
-            (TextRole::Indicator, Some(plate)) => run
-                .spans
-                .iter()
-                .map(|s| Span::styled(format!(" {} ", s.text), style(s.ink).bg(to_color(plate))))
-                .collect(),
+            (_, Some(plate)) if run.pad() > 0 => {
+                let pad = " ".repeat(usize::from(run.pad()));
+                run.spans
+                    .iter()
+                    .map(|s| {
+                        Span::styled(
+                            format!("{pad}{}{pad}", s.text),
+                            style(s.ink).bg(to_color(plate)),
+                        )
+                    })
+                    .collect()
+            }
             _ => run
                 .spans
                 .iter()
@@ -597,7 +604,8 @@ mod tests {
     /// A run the pointer can name is painted in exactly the cells its
     /// [`TextRun::bounds`](pixtuoid_scene::display::TextRun::bounds) gives the
     /// hit test, whichever row its anchor falls on: a board line and its star
-    /// as the classic writes them, and a badge over an odd and an even head.
+    /// as the classic writes them, the floor indicator on its padded plate, and
+    /// a badge over an odd and an even head.
     #[test]
     fn a_run_paints_the_cells_its_bounds_hit() {
         use pixtuoid_core::state::DaemonState;
@@ -626,6 +634,16 @@ mod tests {
                 &theme::NORMAL,
             ));
         }
+        runs.push(super::TextRun {
+            at: Point { x: 60, y: 30 },
+            align: pixtuoid_scene::display::Align::Centre,
+            spans: vec![pixtuoid_scene::display::TextSpan {
+                text: pixtuoid_scene::layout::floor_indicator_text(1),
+                ink: theme::NORMAL.ui.neon_brand,
+            }],
+            plate: Some(theme::NORMAL.ui.tooltip_bg),
+            role: super::TextRole::Indicator,
+        });
         let area = Rect::new(0, 0, 120, 44);
         for run in runs {
             let mut term = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
