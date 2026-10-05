@@ -30,7 +30,10 @@ build:
   edit), `lighthouserc.json`, and the smoke viewport table.
 
 `public/wasm/` is gitignored `just gen-wasm` output; without it the office
-silently stays on its poster.
+silently stays on its poster. `public/demos/` is gitignored too:
+`just gen-media --only site` renders it locally (before a build or dev server,
+which `astro.config.mjs`'s `demoAssets()` fails on a missing demo, and before
+`test:demos`), and CI renders it per build.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is
@@ -57,10 +60,11 @@ Every generated artifact, manifest seam, and rendered-copy sharp edge:
 `cspInlineHashes()` in `astro.config.mjs` owns the WHY; `config/csp-hashes.mjs`
 owns the parse. The rules a page author needs: an `is:inline` script needs NO
 manual CSP step; a hand-written `public/*.js` loaded by URL rides
-`script-src 'self'`; `style-src` must stay hash-free (one hash disables
-unsafe-inline for the directive, and inline style ATTRIBUTES cannot be hashed —
-so keep Prism's class-based highlighting, not Shiki). `astro dev` serves NO
-CSP; regressions surface in `just site-e2e`'s console watchdog.
+`script-src 'self'`; an inline `<style>` or `style` attribute needs none
+either — each is hashed, an attribute's under `'unsafe-hashes'`, but one set
+at runtime (`setAttribute('style', …)`, `style.cssText`, markup through
+`innerHTML`) is blocked: set `el.style.<property>` instead. `astro dev` serves
+NO CSP; regressions surface in `just site-e2e`'s console watchdog.
 
 ## Dev server (agent-driving)
 
@@ -76,15 +80,16 @@ moves there so the gzip proxy can take the audited port.
 ## Gates
 
 `just site-check` = `npm run verify` (format:check → lint → check → knip →
-test:unit → build → check:docs → audit). `just site-e2e` = Playwright vs the
+test:unit → test:demos → build → check:docs → audit). `just site-e2e` = Playwright vs the
 PRODUCTION build — the runtime-contract tier (`__pixLights`/`pix:onair`/
 `data-lit` seams, scrollspy keys, docs-nav variant, reduced-motion, console
 watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
 
 - **Lighthouse** (`npm run lighthouse`, in-repo runner
   `config/lighthouse-runner.mjs`, lighthouse 13 programmatic API, median of
-  three serial runs; runner-semantics pinned by its test — a renamed audit
-  FAILS instead of passing vacuously). **A category score is a budget, not a
+  `lighthouserc.json`'s `numberOfRuns` serial runs; runner-semantics pinned by
+  its test — a renamed audit FAILS instead of passing vacuously).
+  **A category score is a budget, not a
   contract**: `color-contrast` is a small weight in the a11y category, so a total
   contrast failure still clears the category budget — anything that must never regress gets
   its own per-audit assertion with `aggregationMethod: pessimistic` (median

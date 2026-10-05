@@ -16,6 +16,7 @@ use pixtuoid_scene::audio::{
     AudioEngine, AudioFrame, BUILD_SEED, MAX_DT_S, OneShotPool, TickCommands, TrackId, synth,
 };
 
+#[derive(Debug)]
 pub(crate) struct WebAudioDriver {
     rng: NoiseStream,
     bank: Option<AssetBank>,
@@ -102,7 +103,7 @@ impl WebAudioDriver {
             }
             _ => {}
         }
-        (WARMUP_STAGES.saturating_sub(self.stage)) as u32
+        u32::from(WARMUP_STAGES.saturating_sub(self.stage))
     }
 
     pub(crate) fn is_ready(&self) -> bool {
@@ -167,19 +168,13 @@ impl WebAudioDriver {
         let Some(bank) = &self.bank else {
             return &[];
         };
-        match pool {
-            OneShotPool::Keystroke => bank.keystrokes.get(index).map(|a| a.as_slice()),
-            OneShotPool::Drop => bank.drops.get(index).map(|a| a.as_slice()),
-            OneShotPool::DoorChime => (index == 0).then(|| bank.door_chime.as_slice()),
-            OneShotPool::PrinterWhir => (index == 0).then(|| bank.printer_whir.as_slice()),
-            OneShotPool::VendingDrop => (index == 0).then(|| bank.vending_drop.as_slice()),
-        }
-        .unwrap_or(&[])
+        bank.get(pool, index).map_or(&[], |a| a.as_slice())
     }
 }
 
 const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
 
+#[derive(Debug)]
 struct LaneBuild {
     score: GeneratedScore,
     beds: Vec<Arc<Vec<f32>>>,
@@ -205,6 +200,7 @@ impl LaneBuild {
     }
 }
 
+#[derive(Debug)]
 struct PendingBuild {
     to: TrackId,
     build: LaneBuild,
@@ -214,6 +210,7 @@ struct PendingBuild {
 /// instance are copied here piece-by-piece, because a postMessage transfer
 /// can't cross wasm memories. A torn handoff (worker died mid-stream) yields
 /// `None` so the click-time warmup runs instead.
+#[derive(Debug)]
 pub(crate) struct Adoption {
     track: TrackId,
     keystrokes: Vec<Arc<Vec<f32>>>,
@@ -295,16 +292,13 @@ impl Adoption {
     }
 
     pub(crate) fn finish(self) -> Option<WebAudioDriver> {
-        if self.keystrokes.len() != KEYSTROKE_POOL || self.drops.len() != DROP_POOL {
-            return None;
-        }
-        let bank = AssetBank {
-            keystrokes: self.keystrokes,
-            drops: self.drops,
-            door_chime: self.door_chime?,
-            printer_whir: self.printer_whir?,
-            vending_drop: self.vending_drop?,
-        };
+        let bank = AssetBank::adopt(
+            self.keystrokes,
+            self.drops,
+            self.door_chime?,
+            self.printer_whir?,
+            self.vending_drop?,
+        )?;
         let beds = <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(self.beds).ok()?;
         Some(WebAudioDriver::adopted(self.track, bank, self.rain?, beds))
     }

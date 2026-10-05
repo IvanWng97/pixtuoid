@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::{Map, Value};
 
 use crate::AgentId;
@@ -20,7 +20,8 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{CodexSource, live_codex_rollout_ids};
 
-/// The Codex CLI source's registry name (its `SourceDescriptor.name`).
+/// homebrew-core contract: their formula's `test do` asserts this exact id, so
+/// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
 pub const SOURCE_NAME: &str = "codex";
 
 /// Trailing canonical UUID (`8-4-4-4-12`) of a `rollout-<ts>-<UUID>.jsonl`
@@ -53,7 +54,6 @@ fn is_uuid(s: &str) -> bool {
 /// falls through (`Ok(None)`) to them. The parent link carried here is the
 /// ONLY one a flat Codex rollout gets.
 pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
         return Ok(None); // shared path reports the malformed payload
     };
@@ -70,7 +70,7 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
             .get("session_id")
             .and_then(|s| s.as_str())
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| anyhow!("missing/empty session_id"))?
+            .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id"))?
             .to_string();
         let child = obj
             .get("agent_id")
@@ -87,7 +87,8 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
         // tree (cascade / liveness / readiness).
         "SubagentStart" => {
             let (session_id, child) = guards(obj)?;
-            let child = child.ok_or_else(|| anyhow!("SubagentStart missing/empty agent_id"))?;
+            let child = child
+                .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "SubagentStart", "agent_id"))?;
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             Ok(Some(vec![AgentEvent::SessionStart {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
@@ -102,7 +103,8 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
         // leaves a harmless no-op plus that same fallback.
         "SubagentStop" => {
             let (_session_id, child) = guards(obj)?;
-            let child = child.ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
+            let child = child
+                .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "SubagentStop", "agent_id"))?;
             Ok(Some(vec![AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
                 as_child: true,

@@ -40,28 +40,34 @@ runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
 green PR.
 
-A draft PR runs only the **light tier**, every job without
-`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
-both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
-so read its light-tier verdict from the individual job checks. If a ready PR's
-`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
-run. The jobs:
+A PR's pushes run only the **light tier** (every job without
+`if: inputs.full`: linters, formatters, unit tests on every platform and
+compile checks), and its `ci-gate` judges that tier. Both tiers run on the
+merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
+merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
+a push to `main` or a manual dispatch
+([two-step CI](https://docs.mergify.com/merge-queue/two-step/)). CodeQL and
+CodSpeed skip drafts. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
   the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
   nextest skips.
-- **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
-  package generator (`just npm-check`)** — committed media and icons, README
-  freshness, and the npm package generator + OpenClaw plugin contract.
+- **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
+  compare-selftest`) — generated sprites, icons and README freshness, and the
+  image comparator.
+- **smoke · npm package generator (`just npm-check`)** — the release
+  binaries and the hook shim's silent exit, and the npm package generator +
+  OpenClaw plugin contract. The README's media drift (`just gen-media-check`)
+  is reported in smoke as evidence, not a gate.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
   the other-unix arms.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
-- **site** — `site.yml`: the site's static checks, then e2e and
+- **site** — `site.yml`: format, lint, types, knip and unit tests on every push; the demo-reading test, e2e and
   Lighthouse on a build with freshly built wasm, so a Rust change that breaks
   a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
@@ -155,7 +161,9 @@ our release never builds. Two consequences:
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
-  `crates/pixtuoid-core/src/source/claude_code.rs`.
+  `crates/pixtuoid-core/src/source/codex.rs`. Change homebrew-core's `test do`
+  first, against the released version, so the next autobump stays green; the
+  packaging-build action replays the block, so it changes in the same PR.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
@@ -210,8 +218,7 @@ crate IS.
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
-| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
+| once the branch is ready to merge and [a PR slot](../AGENTS.md#workflow) is free | open the PR ready: the light tier and the review bots run; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
 | when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
@@ -238,9 +245,6 @@ Advisory backstops that surface risk but never gate:
   across branches swaps uplifted examples and builds one branch's types into
   another. Targets run to several GB each: check `df -h /` before parallel
   builds, and remove a PR's worktree and local branch once it merges.
-- **No cargo while `just preflight full` runs** — `cargo hack --no-dev-deps`
-  rewrites `Cargo.toml` in place, and a killed run leaves it stripped
-  (`git checkout` the manifests).
 - **snapbox goldens escape a worktree** — `file!` resolves against the
   outermost `Cargo.toml` ancestor, the main checkout; run or overwrite them
   with `CARGO_RUSTC_CURRENT_DIR=<worktree>`.
@@ -270,16 +274,22 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-a queue update that only merges `main` in leaves the record standing. The
+an update that only merges `main` in leaves the record standing. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A published review passes whatever it found; a failed or missing status
 is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
-local row. The queue merges `main` into a PR that is behind and waits for CI and
-the bots at that head, so nobody merges `main` in by hand; branch protection
-still holds the merge until a re-review's new threads are resolved.
+local row. The queue tests up to `batch_size` PRs together on a draft PR
+(`mergify/merge-queue/…`) running the full tier, then merges the PRs
+themselves; it never updates a PR's own branch
+([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
+are the ones merged"), so the bots' statuses on the PR's head are the ones its
+`queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
+bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
+generated-art record: it renders main's merged code, which each look PR's lens
+already read as evidence.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can
@@ -287,7 +297,7 @@ resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
 The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
-too, until the queue's own update re-runs them as Mergify.
+too, again after every Dependabot rebase.
 
 ### Dispositions
 
@@ -298,11 +308,13 @@ sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
-whether or not this change touched its file: it never grows the PR, and is
-fixed in #N; a defect in another session's tree cites that session's PR). A
+and not FIXED in place — in place fits a small defect inside code this change
+already touches, adding no local row — so it is fixed in #N; a defect in
+another session's tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
-`FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one. A
+`FOLLOW-UP → #N: …`, where #N is a PR other than this one: open, merged, or
+closed under [the open-PR cap](../AGENTS.md#workflow) with the fix on its branch. A
 re-flag of an already-dispositioned finding replies with the original's
 disposition (link it). "Acknowledged" and "surfaced" are not states. Sweep at
 the FINAL merge head; check WHICH commit a bot re-flag was raised against

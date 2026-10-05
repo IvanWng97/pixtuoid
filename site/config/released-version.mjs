@@ -14,7 +14,8 @@ const RELEASE_TAG = /^v(\d+\.\d+\.\d+)$/;
  */
 export function latestReleaseTag() {
   try {
-    return execSync('git describe --tags --abbrev=0', {
+    // only release tags: the nearest tag of any other shape would hide one
+    return execSync("git describe --tags --abbrev=0 --match 'v[0-9]*'", {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();

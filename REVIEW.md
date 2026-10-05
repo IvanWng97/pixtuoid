@@ -138,8 +138,11 @@ invariant-breaking sequence against:
    special-case branches, one change smeared across many files; an invariant
    held by prose where a type or the one source of truth could make the
    failure impossible (#1142); a check outside [its own
-   layer](docs/CONTRIBUTING.md#convergence-contract). Documented load-bearing
-   defense (shim exit-0, config-never-wipe, liveness ladders) stays.
+   layer](docs/CONTRIBUTING.md#convergence-contract). A mechanism the diff
+   extends is judged as if new against AGENTS.md's [upkeep
+   rule](AGENTS.md#conventions); one that fails it draws "delete it".
+   Documented load-bearing defense (shim exit-0, config-never-wipe, liveness
+   ladders) stays.
 6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
    is faithful, clear and concise. Each finding cites what the name breaks;
    severity per [Severity](#severity), non-blocking by default.
@@ -167,7 +170,7 @@ its focused lens alone: the floor is never re-run locally.
 
 | Diff touches… | Paths | Local | The added lens must… |
 |---|---|---|---|
-| Generated art / clips | | local | Extract frames and READ them; census the money shot. |
+| Generated art / clips | | local | Extract frames and READ them; census the money shot. A PR's media diff is the smoke job's `gen-check-diffs` overlays. |
 | Reducer / liveness / sweeps | `crates/pixtuoid-core/src/state/`, `…/source/jsonl/liveness.rs`, `…/source/exit_watch.rs`, `…/source/daemon.rs` | local | Trace the downstream interaction graph (rebind, sweeps, TTLs, cascade, dedup, polarity) and the provenance of every newly keyed signal. |
 | A public rendered artifact | `site/src/`, `integrations/raycast/src/` | local | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455). |
 | An interactive TUI flow | | local | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |

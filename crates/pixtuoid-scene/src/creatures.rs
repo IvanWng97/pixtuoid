@@ -6,6 +6,8 @@
 //! `walk_between`, rest. Daemon state reads from the CADENCE (`MASCOT_*_CYCLE_MS`)
 //! and the sprite tint, never from the destination.
 
+use pixtuoid_core::SceneState;
+use pixtuoid_core::source::daemon::DaemonInstanceKey;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -140,8 +142,8 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
     let mut seg_lens: Vec<f32> = Vec::with_capacity(pts.len() - 1);
     let mut total = 0.0_f32;
     for w in pts.windows(2) {
-        let dx = (w[1].x as i32 - w[0].x as i32).unsigned_abs() as f32;
-        let dy = (w[1].y as i32 - w[0].y as i32).unsigned_abs() as f32;
+        let dx = (i32::from(w[1].x) - i32::from(w[0].x)).unsigned_abs() as f32;
+        let dy = (i32::from(w[1].y) - i32::from(w[0].y)).unsigned_abs() as f32;
         let len = dx.max(dy) + dx.min(dy) * (std::f32::consts::SQRT_2 - 1.0);
         seg_lens.push(len);
         total += len;
@@ -162,8 +164,8 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
             let a = pts[i];
             let b = pts[i + 1];
             return Point {
-                x: (a.x as f32 + (b.x as f32 - a.x as f32) * local_t) as u16,
-                y: (a.y as f32 + (b.y as f32 - a.y as f32) * local_t) as u16,
+                x: (f32::from(a.x) + (f32::from(b.x) - f32::from(a.x)) * local_t) as u16,
+                y: (f32::from(a.y) + (f32::from(b.y) - f32::from(a.y)) * local_t) as u16,
             };
         }
         cumul += slen;
@@ -204,6 +206,56 @@ pub(crate) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
     }
 }
 
+/// What a gateway's mascot says about it when hovered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayCard {
+    /// Human-readable gateway name (e.g. "OpenClaw").
+    pub name: &'static str,
+    /// WHICH instance of that gateway this is, so a hover over one of two
+    /// concurrent lobsters names the one under the cursor. `None` when its
+    /// source runs a single instance, whose id means nothing to the user.
+    pub instance: Option<String>,
+    /// An agent run is in flight. Keyed on the run state, NOT the session count
+    /// — a single-user gateway holds one persistent session even at rest.
+    pub busy: bool,
+    /// Gateway up but its model backend is failing every run.
+    pub degraded: bool,
+    /// Number of sessions the gateway currently holds.
+    pub active_sessions: u32,
+}
+
+impl GatewayCard {
+    /// `key`'s card in `scene`; `None` where it is absent or its source has no
+    /// mascot.
+    pub fn of(scene: &SceneState, key: &DaemonInstanceKey) -> Option<Self> {
+        let def = gateway_mascot_def(key.source())?;
+        let presence = scene.daemon(key.source(), key.instance())?;
+        let state = presence.display_state();
+        // Per SOURCE: two gateways of ONE daemon need their ports, while two
+        // daemon sources already read apart by name and sprite.
+        let siblings = scene
+            .daemons()
+            .filter(|&(s, _, _)| s == key.source())
+            .count();
+        Some(Self {
+            name: def.display_name,
+            instance: (siblings > 1).then(|| key.instance().as_str().to_string()),
+            busy: state == DaemonState::Busy,
+            degraded: state == DaemonState::Degraded,
+            active_sessions: presence.active_sessions,
+        })
+    }
+}
+
+/// The OpenClaw gateway listening on `port`.
+#[cfg(test)]
+pub(crate) fn openclaw_key(port: &str) -> DaemonInstanceKey {
+    DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new(port).expect("a port is an id"),
+    )
+}
+
 /// A* on the STATIC mask with a throwaway EMPTY overlay (identical inputs every
 /// frame of a leg ⇒ identical polyline ⇒ no flash), endpoints pre-snapped to
 /// walkable floor, sampled at arc-length `t`.
@@ -221,8 +273,8 @@ fn walk_between(layout: &SceneLayout, from: Point, to: Point, t: f32) -> Point {
         sample_polyline(&pts, t, dst)
     } else {
         Point {
-            x: (src.x as f32 + (dst.x as f32 - src.x as f32) * t) as u16,
-            y: (src.y as f32 + (dst.y as f32 - src.y as f32) * t) as u16,
+            x: (f32::from(src.x) + (f32::from(dst.x) - f32::from(src.x)) * t) as u16,
+            y: (f32::from(src.y) + (f32::from(dst.y) - f32::from(src.y)) * t) as u16,
         }
     }
 }
@@ -241,7 +293,7 @@ pub(crate) fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonI
         .bytes()
         .chain(std::iter::once(b'@'))
         .chain(instance.as_str().bytes())
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64))
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)))
 }
 
 /// How long one mascot may be held at the elevator before its walk-in starts.
@@ -595,7 +647,7 @@ mod tests {
         );
 
         let t = (0.125_f32 / PET_WALK_SHARE).clamp(0.0, 1.0);
-        let lerp = |a: u16, b: u16| (a as f32 + (b as f32 - a as f32) * t) as u16;
+        let lerp = |a: u16, b: u16| (f32::from(a) + (f32::from(b) - f32::from(a)) * t) as u16;
         let expected = Point {
             x: lerp(src_anchor.x, dst_anchor.x),
             y: lerp(src_anchor.y, dst_anchor.y),
@@ -861,6 +913,38 @@ mod tests {
             entered_at: now - std::time::Duration::from_millis(age_ms),
             in_flight_runs: Default::default(),
             current_pid: Some(1),
+        }
+    }
+
+    /// A gateway's one `DaemonState` lights exactly its own flag on its card.
+    #[test]
+    fn a_gateways_state_reaches_its_card() {
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(60);
+        let key = openclaw_key("18789");
+        let running = || std::collections::BTreeMap::from([("run".to_string(), now)]);
+        for (liveness, in_flight_runs, busy, degraded) in [
+            (DaemonLiveness::UP, Default::default(), false, false),
+            (DaemonLiveness::UP, running(), true, false),
+            (
+                DaemonLiveness::Up { degraded: true },
+                running(),
+                false,
+                true,
+            ),
+            (DaemonLiveness::Down, running(), false, false),
+        ] {
+            let mut scene = SceneState::uniform(16);
+            scene.insert_daemon(
+                key.source(),
+                key.instance().clone(),
+                DaemonPresence {
+                    liveness,
+                    in_flight_runs,
+                    ..idle_presence(now, 0)
+                },
+            );
+            let card = GatewayCard::of(&scene, &key).expect("a gateway with a mascot");
+            assert_eq!((card.busy, card.degraded), (busy, degraded), "{liveness:?}");
         }
     }
 

@@ -21,7 +21,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     // A warm cell's red channel barely rises while green/blue drop, so measure
     // DISTANCE to the blocked tint (220,60,60) rather than the red channel.
     let to_red = |c: pixtuoid_core::sprite::Rgb| {
-        (c.r as i32 - 220).abs() + (c.g as i32 - 60).abs() + (c.b as i32 - 60).abs()
+        (i32::from(c.r) - 220).abs() + (i32::from(c.g) - 60).abs() + (i32::from(c.b) - 60).abs()
     };
     assert!(
         to_red(on.get(bx, by)) < to_red(before.get(bx, by)),
@@ -336,7 +336,7 @@ fn pet_tooltip_on_hover() {
     let scene = scene_with(vec![active("/tt/p.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.drawn_pet().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -355,7 +355,7 @@ fn pet_tooltip_shows_custom_name() {
     };
     let mut r = build_pets(140, 48, vec![cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.drawn_pet().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -374,7 +374,7 @@ fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.drawn_pet().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());

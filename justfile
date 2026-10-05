@@ -721,9 +721,26 @@ site-setup:
     npm --prefix site ci
     npx --prefix site playwright install chromium chromium-headless-shell
 
+# The site's config asserts each demo the manifests name exists, and they are
+# gitignored; a look change re-renders with `just gen-media --only site`.
+[doc('Render site/public/demos when absent or its manifests changed')]
+[group('site')]
+site-demos:
+    #!/usr/bin/env sh
+    set -eu
+    stamp=target/site-demos.inputs
+    want=$(cat scripts/media.json scripts/gen-media.py site/src/themes.json site/src/weather.json | shasum | cut -d' ' -f1)
+    # The rendered listing rides in the stamp, so a lost or half-written demo
+    # re-renders instead of passing on the inputs alone.
+    have() { find site/public/demos -type f -exec cksum {} + 2>/dev/null | sort | shasum | cut -d' ' -f1; }
+    [ "$(cat "$stamp" 2>/dev/null)" = "$want $(have)" ] && exit 0
+    test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
+    .venv/bin/python3 scripts/gen-media.py --only site
+    mkdir -p target && echo "$want $(have)" > "$stamp"
+
 [doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]
 [group('site')]
-site-dev:
+site-dev: site-demos
     npm --prefix site run dev
 
 # Agent-facing dev-server lifecycle (Astro 7 `--background`): the daemon has no
@@ -735,7 +752,7 @@ site-dev:
 # (site-dev-stop) before `just site-e2e`, or its webServer spawn fails loud.
 [doc('Dev server as a background daemon (survives stdin EOF) — waits on /_astro/status; stop: just site-dev-stop')]
 [group('site')]
-site-dev-bg:
+site-dev-bg: site-demos
     #!/usr/bin/env sh
     set -eu
     cd site
@@ -758,7 +775,7 @@ site-dev-stop:
 
 [doc('Site static tier: `npm run verify` (site/package.json owns the steps; site CI adds e2e + lighthouse)')]
 [group('site')]
-site-check:
+site-check: site-demos
     npm --prefix site run verify
 
 [doc('Auto-format the site')]
@@ -768,7 +785,7 @@ site-fmt:
 
 [doc('E2E smoke suite vs the PRODUCTION build (astro preview) — the runtime-contract gate')]
 [group('site')]
-site-e2e: gen-wasm
+site-e2e: gen-wasm site-demos
     #!/usr/bin/env sh
     set -eu
     cd site
@@ -780,7 +797,7 @@ site-e2e: gen-wasm
 # Regenerate the committed artifacts that derive from a single source of truth,
 # and check the committed copies (each `*-check` header says against what).
 
-[doc('Regenerate the committed art (generated sprites + icons + README sections + docs images + site demos)')]
+[doc('Regenerate the generated art (sprites + icons + README sections + docs images + site demos)')]
 [group('gen')]
 gen: gen-art gen-icons gen-media gen-readme gen-cutaway-golden
 
@@ -918,19 +935,32 @@ gen-wasm-check:
     # new poorly-compressible code and falling means new sprite text.
     echo "wasm $WIRE / $CAP bytes gzipped ($((WIRE * 100 / CAP))% of cap, $(((CAP - WIRE) / 1024)) KB headroom; $RAW raw, compressing to $((WIRE * 100 / RAW))%)"
 
-# scripts/gen-media.py's docstring says what `--check` compares. Run by
-# ci-tests.yml's smoke job; runnable locally
-# before pushing a visual change. A red check after an INTENTIONAL office change
-# means: run `just gen` and commit everything it rewrote in the same change.
-# Requires the .venv + node; it builds the examples it renders with.
 [doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
-gen-check: compare-selftest gen-readme-check gen-art-check
+gen-check: compare-selftest gen-readme-check gen-art-check gen-icons-check gen-media-check
+
+# The icons also land in the site's committed assets and change only with their
+# source, so their drift stays a gate.
+[doc('Fail if a committed pix icon differs from what gen-pix-icons draws')]
+[group('gen')]
+gen-icons-check:
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
-    .venv/bin/python3 scripts/gen-media.py --check
     .venv/bin/python3 scripts/gen-pix-icons.py --check
+
+# scripts/gen-media.py's docstring says what `--check` compares. The README's
+# media only: the site's demos are rendered in CI and never committed. On a PR
+# a drift here is evidence for the generated-art lens, not a gate (ci-tests.yml's
+# smoke job); main's land in a `chore(media)` PR.
+# Requires the .venv + node; it builds the examples it renders with.
+[doc("Diff the README's committed media against what gen-media renders")]
+[group('gen')]
+gen-media-check:
+    #!/usr/bin/env sh
+    set -eu
+    test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
+    .venv/bin/python3 scripts/gen-media.py --check --only docs
 
 # ── release ───────────────────────────────────────────────────────
 

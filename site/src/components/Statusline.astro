@@ -589,18 +589,8 @@ const FEED_ROTATE_MS = 6000;
         document.documentElement.scrollHeight - bottomClampEpsilonPx;
       if (atBottom) setActive(btns[btns.length - 1].dataset.floorBtn);
     }
-    let bottomRaf = 0;
-    window.addEventListener(
-      'scroll',
-      function () {
-        if (bottomRaf) return;
-        bottomRaf = requestAnimationFrame(function () {
-          bottomRaf = 0;
-          clampToLastFloorAtBottom();
-        });
-      },
-      { passive: true }
-    );
+    // straight from the scroll event: it already fires at the frame rate (MDN scroll_event)
+    window.addEventListener('scroll', clampToLastFloorAtBottom, { passive: true });
     clampToLastFloorAtBottom(); // a hash-anchored load can already start at the bottom
 
     // The office pause switch (WCAG 2.2.2) governs every >5s auto-motion, so it

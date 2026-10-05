@@ -7,7 +7,8 @@ use pixtuoid_core::sprite::Rgb;
 use crate::atmosphere::Moment;
 use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
-use crate::layout::window_run;
+use crate::layout::{WindowBay, glass_rows, window_run};
+use crate::outside::WindowView;
 use crate::sky::{BodyKind, Sky};
 use crate::theme::Theme;
 
@@ -89,8 +90,8 @@ impl Disc {
         let span_left = f32::from(run.start) + DISC_RADIUS_PX;
         let span_right = (f32::from(run.end) - DISC_RADIUS_PX).max(span_left);
         let cx = span_left + e.azimuth * (span_right - span_left);
-        let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
-        let cy = horizon_y - e.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
+        let horizon_y = f32::from(top_wall_h) * HORIZON_FRAC;
+        let cy = horizon_y - e.altitude * (f32::from(top_wall_h) * ARC_RISE_FRAC);
         let (lit_frac, lit_right) = match e.kind {
             BodyKind::Sun => (1.0, true),
             BodyKind::Moon => (sky.moon_phase(), sky.moon_waxing()),
@@ -160,15 +161,15 @@ const STAR_TWINKLE_CYCLE_SPAN_BEATS: u64 = 24;
 /// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
 /// so it reads as one continuous sky rather than a per-window reseed.
 fn star_exists(px: u16, py: u16) -> bool {
-    let mut h = (px as u64).wrapping_mul(crate::GOLDEN_GAMMA);
-    h ^= (py as u64).wrapping_mul(crate::MURMUR64A_M);
+    let mut h = u64::from(px).wrapping_mul(crate::GOLDEN_GAMMA);
+    h ^= u64::from(py).wrapping_mul(crate::MURMUR64A_M);
     h = (h ^ (h >> 17)).wrapping_mul(pixtuoid_core::id::SPLITMIX64_M2);
     h.is_multiple_of(STAR_SPARSITY)
 }
 
 /// The star at `(px, py)`'s own seed, which picks its cycle and its turns.
 fn star_seed(px: u16, py: u16) -> u64 {
-    (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521)
+    u64::from(px).wrapping_mul(131) ^ u64::from(py).wrapping_mul(521)
 }
 
 /// How long a star seeded `seed` holds each turn.
@@ -209,7 +210,7 @@ const BLAZE_LEAN: [f32; 3] = [0.4, 0.25, 0.1];
 
 /// The golden hour's warm cast over open sky, at one strength a frame.
 #[derive(Clone, Copy)]
-pub(crate) struct Blaze(f32);
+struct Blaze(f32);
 
 impl Blaze {
     fn of(golden_hour: f32) -> Option<Self> {
@@ -217,7 +218,7 @@ impl Blaze {
     }
 
     /// `cur` under the blaze.
-    pub(crate) fn over(self, cur: Rgb) -> Rgb {
+    fn over(self, cur: Rgb) -> Rgb {
         let [r, g, b] = BLAZE_LEAN.map(|lean| self.0 * lean);
         Rgb {
             r: blend(cur.r, BLAZE.r, r),
@@ -270,14 +271,33 @@ impl SkyView {
         }
     }
 
-    /// The golden hour's cast over the open sky, while it shows.
-    pub(crate) fn blaze(&self) -> Option<Blaze> {
-        self.blaze
+    /// `bay`'s window over `rows`, on a grid of `d` cells to the unit, its
+    /// glass showing this sky under the golden hour's cast wherever `front`
+    /// stands nothing before it. A cell `front` fills never resolves the sky.
+    pub(crate) fn window(
+        &self,
+        bay: WindowBay,
+        rows: std::ops::Range<u16>,
+        d: u16,
+        front: impl Fn(crate::outside::Cell) -> Option<Rgb>,
+    ) -> WindowView {
+        let pane = self.pane(
+            bay.x,
+            bay.w,
+            glass_rows(rows.end.saturating_sub(rows.start)),
+            d,
+        );
+        WindowView::new(bay, rows, d, |cell| {
+            front(cell).unwrap_or_else(|| {
+                let open = pane.colour(cell.at, cell.glass_offset.1);
+                self.blaze.map_or(open, |b| b.over(open))
+            })
+        })
     }
 
     /// One pane's glass, over columns `x..x + w` and `glass_h` rows tall, on a
     /// grid of `d` cells to the unit.
-    pub(crate) fn pane(&self, x: u16, w: u16, glass_h: u16, d: u16) -> PaneSky<'_> {
+    fn pane(&self, x: u16, w: u16, glass_h: u16, d: u16) -> PaneSky<'_> {
         PaneSky {
             view: self,
             hosts_disc: self.disc.is_some_and(|d| d.hosted_by(x, w)),
@@ -290,7 +310,7 @@ impl SkyView {
 
 /// One pane's share of a [`SkyView`]: whether it shows the disc, and how far
 /// down its glass the open sky runs, where a star may shine.
-pub(crate) struct PaneSky<'a> {
+struct PaneSky<'a> {
     view: &'a SkyView,
     hosts_disc: bool,
     glass_h: u16,
@@ -303,7 +323,7 @@ impl PaneSky<'_> {
     /// A cell is sampled at its centre, in units with a unit's own centre on
     /// its integer, so at one cell to the unit a cell samples where it stands.
     /// A star is the one cell at its unit's centre.
-    pub(crate) fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
+    fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
         let v = self.view;
         let d = self.d;
         let unit = |c: u16| (f32::from(c) + 0.5) / f32::from(d) - 0.5;
@@ -444,6 +464,31 @@ mod tests {
             crate::anim::Motion::Full.timing(now),
         );
         SkyView::of(&moment, 160, 40, theme)
+    }
+
+    /// A window's glass is its pane's sky under the blaze, read from the
+    /// glass's top, at every density.
+    #[test]
+    fn a_window_shows_its_pane_s_sky_under_the_blaze() {
+        let v = view(19);
+        let blaze = v.blaze.expect("a clear 19h casts the golden hour");
+        let bay = WindowBay {
+            x: 30,
+            w: crate::layout::WINDOW_W,
+            idx: 1,
+        };
+        let rows = 1..33;
+        for d in [1, 4] {
+            let pane = v.pane(bay.x, bay.w, glass_rows(rows.end - rows.start), d);
+            let window = v.window(bay, rows.clone(), d, |_| None);
+            let mut cells = 0;
+            for (at, c) in window.cells() {
+                let ay = at.1 - rows.start * d;
+                assert_eq!(c, blaze.over(pane.colour(at, ay - d)), "{d}: {at:?}");
+                cells += 1;
+            }
+            assert!(cells > 0, "{d}: the window has glass");
+        }
     }
 
     #[test]

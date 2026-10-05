@@ -15,6 +15,7 @@ use pixtuoid_core::source::{
 };
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
+#[derive(Debug)]
 pub(crate) struct Beat {
     pub at_ms: u64,
     pub transport: Transport,
@@ -94,8 +95,7 @@ fn tool(i: usize, at_ms: u64, tuid: &str, display: &str) -> [Beat; 2] {
 /// `n` chained bursts — continuously Active, then the agent settles Idle and
 /// the engine's wander takes over until the next spell.
 fn spell(beats: &mut Vec<Beat>, i: usize, at_ms: u64, n: u64, tools: &[&str]) {
-    for k in 0..n {
-        let display = tools[(k as usize) % tools.len()];
+    for (k, &display) in (0..n).zip(tools.iter().cycle()) {
         let t = format!("s{at_ms}-{k}");
         beats.extend(tool(i, at_ms + k * BURST_SPACING_MS, &t, display));
     }
@@ -172,6 +172,7 @@ pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)>
 /// deliberately NOT a [`Beat`]/`AgentEvent` (invariant #2: the one event
 /// channel is `AgentId`-pure) — these ride their own lane and land through the
 /// REAL `source::daemon::apply_presence` state machine.
+#[derive(Debug)]
 pub(crate) struct PresenceBeat {
     pub at_ms: u64,
     pub update: DaemonPresenceUpdate,

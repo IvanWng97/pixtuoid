@@ -11,14 +11,17 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::id::normalize_path_key;
+use pixtuoid_core::source::daemon::DaemonInstanceKey;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{ActivityState, DaemonState, FloorLocalDeskIndex};
+use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::anim::{Beat, Timing};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
-use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
+use crate::creatures::{
+    GatewayCard, gateway_mascot_def, mascot_position, mascot_seed, pet_position,
+};
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
@@ -119,6 +122,17 @@ pub(crate) struct PetPlacement {
     pub(crate) effects: Vec<Effect>,
 }
 
+impl PetPlacement {
+    /// Who its hover names.
+    pub(crate) fn target(&self) -> crate::display::HoverTarget {
+        crate::display::HoverTarget::Pet(crate::display::PetHover {
+            kind: self.kind,
+            centre: self.pos,
+            anim: self.anim_name,
+        })
+    }
+}
+
 /// One gateway mascot this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct MascotPlacement {
@@ -130,16 +144,20 @@ pub(crate) struct MascotPlacement {
     pub(crate) anim_name: &'static str,
     /// The frame within `anim_name`.
     pub(crate) frame_idx: usize,
-    /// The gateway's display name.
-    pub(crate) name: &'static str,
-    /// The instance id, when its source runs more than one.
-    pub(crate) instance: Option<String>,
-    /// Its presence's [`display_state`](pixtuoid_core::state::DaemonPresence::display_state).
-    pub(crate) state: DaemonState,
+    /// Which gateway instance it is.
+    pub(crate) key: DaemonInstanceKey,
+    /// Its gateway's backend fails every run ([`GatewayCard::degraded`]), so
+    /// it greys.
+    pub(crate) degraded: bool,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
-    /// Sessions the gateway holds.
-    pub(crate) active_sessions: u32,
+}
+
+impl MascotPlacement {
+    /// Who its hover names.
+    pub(crate) fn target(&self) -> crate::display::HoverTarget {
+        crate::display::HoverTarget::Mascot(self.key.clone())
+    }
 }
 
 /// A coffee on a desk.
@@ -187,7 +205,7 @@ pub(crate) fn scanline_col(desk_x: u16, beat: Beat) -> u16 {
 /// Paint consumes it by `&` — rendering the same frame twice is byte-identical
 /// and cannot move the sim. Owned data, so the stores are free again the moment
 /// `sim_step` returns.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SimFrame {
     /// The tick's agent snapshot — placements index into it, paint borrows
     /// from it.
@@ -510,6 +528,8 @@ fn mascot_placements(
         .daemons()
         .filter_map(|(source, instance, presence)| {
             let def = gateway_mascot_def(source)?;
+            let key = DaemonInstanceKey::new(source, instance.clone());
+            let degraded = GatewayCard::of(scene, &key)?.degraded;
             let seed = mascot_seed(source, instance);
             let (pos, anim_name) =
                 mascot_position(layout, presence, def.walk, def.rest, timing, seed)?;
@@ -524,19 +544,13 @@ fn mascot_placements(
                 size,
                 anim_name,
                 frame_idx,
-                name: def.display_name,
-                // Only worth showing when there is something to disambiguate, and
-                // that is per SOURCE: two gateways of ONE daemon need their ports,
-                // while two daemon sources already read apart by name and sprite.
-                instance: (scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
-                    .then(|| instance.as_str().to_string()),
-                state: presence.display_state(),
+                key,
+                degraded,
                 effects: if runs > 0 {
                     effects::mascot_bubbles(pos, size.h, runs, beat).collect()
                 } else {
                     Vec::new()
                 },
-                active_sessions: presence.active_sessions,
             })
         })
         .collect()
@@ -797,8 +811,8 @@ pub(crate) fn resolve_characters(
                 }
                 let pos = walking_position(from, to, t_x1000);
                 let walker_top_left = walking_top_left(pos, char_w);
-                let dx = to.x as i32 - from.x as i32;
-                let dy = to.y as i32 - from.y as i32;
+                let dx = i32::from(to.x) - i32::from(from.x);
+                let dy = i32::from(to.y) - i32::from(from.y);
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
                 // `from` rising) renders in the SEAT's view and at the SEAT's
                 // sort row, NOT the travel direction's. Without it a window-facing
@@ -911,7 +925,7 @@ pub(crate) fn desk_occupant(
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)));
     pixtuoid_core::id::splitmix64(folded)
 }
 

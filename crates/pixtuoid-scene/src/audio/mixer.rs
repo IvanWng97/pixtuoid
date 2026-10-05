@@ -66,6 +66,7 @@ const BUS_TRIM: f32 = 0.35;
 
 /// Per-stem gain ramps chasing the scene's target levels. Mute ramps to
 /// silence through the same slew (no click).
+#[derive(Debug)]
 pub struct Mixer {
     current: [f32; LoopStem::ALL.len()],
     target: StemLevels,
@@ -138,6 +139,7 @@ impl Mixer {
 
 /// Typing-burst scheduler driven by the scene's `typing` level: 0 = silence,
 /// higher = more bursts.
+#[derive(Debug)]
 pub struct TypingScheduler {
     rng: NoiseStream,
     burst_left: u32,
@@ -166,14 +168,14 @@ impl TypingScheduler {
         let mut fired = 0u32;
         while self.next_at_s <= now_s {
             if self.burst_left == 0 {
-                let per_s = BURSTS_PER_MIN_AT_FULL / 60.0 * level as f64;
-                let gap = (0.5 + self.rng.unit() as f64) / per_s.max(1e-6);
+                let per_s = BURSTS_PER_MIN_AT_FULL / 60.0 * f64::from(level);
+                let gap = (0.5 + f64::from(self.rng.unit())) / per_s.max(1e-6);
                 self.burst_left = 8 + (self.rng.unit() * 14.0) as u32;
                 self.next_at_s += gap;
             } else {
                 fired += 1;
                 self.burst_left -= 1;
-                let mut gap = 0.066 + 0.030 * self.rng.unit() as f64;
+                let mut gap = 0.066 + 0.030 * f64::from(self.rng.unit());
                 if self.rng.unit() < 0.08 {
                     gap += 0.18;
                 }
@@ -185,6 +187,7 @@ impl TypingScheduler {
 }
 
 /// Runtime raindrop scatter — the bed loops, the drops never repeat.
+#[derive(Debug)]
 pub struct DropScheduler {
     rng: NoiseStream,
     next_at_s: f64,
@@ -209,11 +212,11 @@ impl DropScheduler {
         let mut fired = 0u32;
         while self.next_at_s <= now_s {
             fired += 1;
-            let gap = (0.4 + 1.2 * self.rng.unit() as f64) / DROPS_PER_S;
+            let gap = (0.4 + 1.2 * f64::from(self.rng.unit())) / DROPS_PER_S;
             self.next_at_s += gap;
             if self.rng.unit() < 0.35 {
                 fired += 1;
-                self.next_at_s += 0.20 + 0.15 * self.rng.unit() as f64;
+                self.next_at_s += 0.20 + 0.15 * f64::from(self.rng.unit());
             }
         }
         fired
@@ -308,14 +311,14 @@ mod tests {
         let mut t = TypingScheduler::new(1);
         let mut total = 0;
         for i in 0..600 {
-            total += t.tick(i as f64 * 0.1, 0.0);
+            total += t.tick(f64::from(i) * 0.1, 0.0);
         }
         assert_eq!(total, 0, "level 0 must never type");
         let first = t.tick(60.05, 0.5);
         assert!(first <= 1, "no backlog replay, got {first}");
         let mut typed = 0;
         for i in 0..1200 {
-            typed += t.tick(60.1 + i as f64 * 0.05, 0.5);
+            typed += t.tick(60.1 + f64::from(i) * 0.05, 0.5);
         }
         assert!(
             (60..=400).contains(&typed),
@@ -328,7 +331,7 @@ mod tests {
         let mut d = DropScheduler::new(2);
         let mut drops = 0;
         for i in 0..600 {
-            drops += d.tick(i as f64 * 0.1, 0.55);
+            drops += d.tick(f64::from(i) * 0.1, 0.55);
         }
         assert!(
             (30..=110).contains(&drops),

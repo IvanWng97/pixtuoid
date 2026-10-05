@@ -3,14 +3,22 @@
 //! rasterizer to draw.
 
 pub(crate) mod compose;
+pub(crate) mod effects;
+mod hover;
+pub(crate) mod light;
 mod list;
 mod order;
+pub(crate) mod pen;
+pub mod text;
 
+pub use crate::creatures::GatewayCard;
 pub use compose::{Office, Showing};
 pub(crate) use compose::{PLATE_PAD, board_runs, compose, desk_span, face_rows, indicator_plate};
+pub(crate) use hover::Hover;
+pub use hover::{HoverTarget, Hovers, PetHover};
 pub(crate) use list::{
     Art, Badge, DisplayList, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp,
-    WindowView, fingerprint,
+    fingerprint,
 };
 #[cfg(test)]
 pub(crate) use order::check_order;

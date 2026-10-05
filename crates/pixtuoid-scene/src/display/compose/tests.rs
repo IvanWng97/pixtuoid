@@ -643,7 +643,7 @@ fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
 #[test]
 #[cfg(feature = "cutaway-assets")]
 fn the_floor_indicator_stays_in_its_cell() {
-    use crate::cutaway::text::LINE_H;
+    use crate::display::text::LINE_H;
     let pack = crate::pack::test_default_pack();
     let door = SceneLayout::compute_with_seed(160, 96, None, 0)
         .expect("lays out")
@@ -942,7 +942,7 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
         PieceKind::Neon { .. } => "neon",
         PieceKind::Clock { .. } => "clock",
         PieceKind::Character { .. } => "character",
-        PieceKind::Glass { .. } => "glass",
+        PieceKind::Window { .. } => "window",
         PieceKind::Hung { .. } => "hung decor",
         PieceKind::Effect(_) => "effect",
         PieceKind::Badge { .. } => "badge",

@@ -136,7 +136,7 @@ fn fit(cols: u16, rows: u16) -> Fit {
 /// A renderer painting the cutaway over `protocol` into a `cols`×`rows`
 /// terminal.
 fn painter(cols: u16, rows: u16, protocol: ImageProtocol) -> (TuiRenderer<Window>, Wire) {
-    let (r, wire, _) = armed(cols, rows, protocol);
+    let (r, wire, _) = armed(cols, rows, protocol, vec![]);
     (r, wire)
 }
 
@@ -147,11 +147,14 @@ fn armed(
     cols: u16,
     rows: u16,
     protocol: ImageProtocol,
+    pets: Vec<PetKind>,
 ) -> (TuiRenderer<Window>, Wire, &'static AtomicBool) {
     let mut r = TuiRenderer::new(
         Terminal::new(Window::new(cols, rows)).expect("terminal"),
         normal_theme(),
-        vec![],
+        pets.into_iter()
+            .map(pixtuoid_scene::pet::Pet::defaulted)
+            .collect(),
         pack_arc(),
     );
     let (wire, in_grid) = (Wire::default(), Box::leak(Box::new(AtomicBool::new(false))));
@@ -231,7 +234,7 @@ fn shrinking_under_the_minimum_refuses_the_cutaway_frame() {
     r.render(&scene, pack(), t0()).expect("render");
     assert!(!wire.take().contains(TRANSMIT));
     assert_eq!(r.scene_area_at(cols / 2, rows / 2), None);
-    assert!(r.cached_pet_pos().is_none());
+    assert!(r.drawn_pet().is_none());
 }
 
 /// A resize clears the screen ratatui redraws, SIXEL and iTerm2 pixels with
@@ -466,6 +469,25 @@ fn a_failed_write_re_sends_next_frame() {
     assert!(sent.contains(TRANSMIT));
 }
 
+/// A cutaway slide whose two floors can't be borrowed apart (one floor,
+/// twice) ends at once, rather than warning every frame for its duration.
+#[test]
+fn an_unborrowable_cutaway_slide_cancels() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, _wire) = painter(cols, rows, ImageProtocol::Kitty);
+    let scene = two_floor_scene();
+    r.render(&scene, pack(), t0()).expect("render");
+    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
+    let logged = crate::test_capture::capture(|| {
+        r.render(&scene, pack(), t0()).expect("render");
+    });
+    assert!(r.transition().is_none());
+    assert!(
+        logged.contains("a slide between floors it cannot borrow"),
+        "the borrow arm, not another exit, ended it: {logged}"
+    );
+}
+
 #[test]
 fn a_redraw_re_sends_every_tile() {
     let (mut r, wire) = kitty(120, 40);
@@ -489,6 +511,23 @@ fn an_agent_under_the_cutaway_is_hit_tested_on_the_canvas() {
         frame_text(r.frame_buffer()).contains("Active"),
         "the hovered agent's tooltip"
     );
+}
+
+/// The pet and the gateways answer the pointer under the cutaway too: what
+/// its tooltip names is what a click acts on, a hovered agent's tooltip
+/// carrying the name the image's badge shows.
+#[test]
+fn what_the_tooltip_names_is_what_a_click_acts_on_under_the_cutaway() {
+    let (mut r, _wire, _) = armed(140, 48, ImageProtocol::Kitty, vec![PetKind::Cat]);
+    super::hit_test::the_tooltip_names_what_a_click_acts_on(&mut r, |a| a.label.to_string());
+}
+
+/// A click on an agent focuses it and a click on the pet pets it under the
+/// cutaway too, through the mouse handler itself.
+#[test]
+fn a_click_focuses_an_agent_and_pets_the_pet_under_the_cutaway() {
+    let (mut r, _wire, _) = armed(140, 48, ImageProtocol::Kitty, vec![PetKind::Cat]);
+    super::hit_test::a_click_acts_on_what_it_hits(&mut r);
 }
 
 #[test]
@@ -781,7 +820,7 @@ fn a_grid_image_arms_the_unwinds_erase() {
             .windows(4)
             .any(|w| w == b"\x1b[2J")
     };
-    let (mut r, _wire, in_grid) = armed(120, 40, ImageProtocol::Sixel);
+    let (mut r, _wire, in_grid) = armed(120, 40, ImageProtocol::Sixel, vec![]);
     assert!(!erases(in_grid), "nothing drawn yet");
     r.render(&office(), pack(), t0()).expect("render");
     assert!(erases(in_grid));
