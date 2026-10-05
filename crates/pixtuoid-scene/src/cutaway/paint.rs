@@ -10,11 +10,10 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
-    Align, Art, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
+    Align, Art, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
     StoodProp, TextRun, compose, desk_span, face_rows, run_rect,
 };
 use crate::dither::Dithered;
-use crate::effects::EffectKind;
 use crate::layout::{Bounds, FixtureKind, Point, SceneLayout};
 use crate::outside::WindowView;
 use crate::pack::{CLOCK_SPRITE, DOOR_SPRITE, drawn_in};
@@ -214,41 +213,15 @@ fn paint_pieces(
                     SHADED_MARK => Glow::Shaded,
                     _ => Glow::Lit,
                 };
-                let glow = match piece.kind {
-                    PieceKind::Window { ref view, .. }
+                let glow = match piece.kind.emits() {
+                    Emits::Pane(view)
                         if view.shows((pen.art_of_buffer(x).0, pen.art_of_buffer(y).0)) =>
                     {
                         Glow::Pane
                     }
-                    // A badge keeps the contrast its theme pins at every hour.
-                    PieceKind::Neon { .. } | PieceKind::Text { .. } => Glow::Emissive,
-                    PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
-                        Glow::Emissive
-                    }
-                    PieceKind::Desk { .. }
-                    | PieceKind::Prop { .. }
-                    | PieceKind::Animated { .. }
-                    | PieceKind::Hung { .. }
-                    | PieceKind::Door { .. }
-                        if glowing =>
-                    {
-                        marked()
-                    }
-                    PieceKind::Desk { .. }
-                    | PieceKind::Prop { .. }
-                    | PieceKind::Animated { .. }
-                    | PieceKind::Hung { .. }
-                    | PieceKind::Door { .. }
-                    | PieceKind::WallSeg { .. }
-                    | PieceKind::Chair { .. }
-                    | PieceKind::DeskProp(_)
-                    | PieceKind::Creature { .. }
-                    | PieceKind::PropBand { .. }
-                    | PieceKind::Table { .. }
-                    | PieceKind::Character { .. }
-                    | PieceKind::Effect(_)
-                    | PieceKind::Clock { .. }
-                    | PieceKind::Window { .. } => Glow::Lit,
+                    Emits::Emissive => Glow::Emissive,
+                    Emits::ByArt if glowing => marked(),
+                    Emits::Pane(_) | Emits::ByArt | Emits::Lit => Glow::Lit,
                 };
                 emission.set(x, y, glow);
             }
