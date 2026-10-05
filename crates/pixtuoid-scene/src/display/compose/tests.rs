@@ -44,7 +44,7 @@ fn sort_row(pivot: crate::layout::Pivot, pos: crate::layout::Point, h: u16, belo
 fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
     let pack = test_default_pack();
     let desk = crate::layout::Point { x: 0, y: 10 };
-    let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+    let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
     let desk_z = desk_span(&pack, art, desk, RenderScale::ONE)
         .expect("desk")
         .depth;
@@ -64,7 +64,7 @@ fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
     let pack = test_default_pack();
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
     let desk = crate::layout::Point { x: 0, y: 20 };
-    let art = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
+    let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
     let desk_box = desk_span(&pack, art, desk, scale).expect("desk");
     let (_, art_h) = art_size(&pack, art).expect("desk");
     // The first row south of the ART, measured from its placement.
@@ -108,7 +108,7 @@ fn a_character_north_of_the_desk_sorts_behind_it() {
     let desk = crate::layout::Point { x: 0, y: 20 };
     let (_, body_h) = base_size(&pack, "standing");
 
-    let plain = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
+    let plain = crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
     let desk_z = desk_span(&pack, plain, desk, RenderScale::ONE)
         .expect("desk")
         .depth;
@@ -134,7 +134,7 @@ fn a_character_north_of_the_desk_sorts_behind_it() {
 fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
     let pack = test_default_pack();
     let desk = crate::layout::Point { x: 0, y: 10 };
-    let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+    let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
     let desk_box = desk_span(&pack, art, desk, RenderScale::ONE).expect("desk");
     let seated = seated_back_span(&pack, desk);
     let (plant_w, plant_h) = base_size(&pack, "plant");

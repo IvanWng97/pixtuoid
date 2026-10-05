@@ -10,8 +10,6 @@ mod lookup;
 pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
-#[cfg(test)]
-pub(crate) use lookup::MONITOR_KEYS;
 pub(crate) use lookup::{
     CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
     DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE,
@@ -19,9 +17,11 @@ pub(crate) use lookup::{
     SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
     WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
     appliance_sprite, bulb_cell, desk_art, desk_art_name, desk_art_top, desk_bulb_offset,
-    desk_front, desk_mark, desk_prop_overrides, desk_props_mirrored, desk_sprite_name, drawn_in,
-    fixture_overrides, frame_at, looping_frame_index, prop_left,
+    desk_front, desk_mark, desk_prop_overrides, desk_props_mirrored, drawn_in, fixture_overrides,
+    frame_at, looping_frame_index, prop_left,
 };
+#[cfg(test)]
+pub(crate) use lookup::{MONITOR_KEYS, desk_sprite_name};
 
 #[cfg(feature = "native")]
 use std::path::{Path, PathBuf};

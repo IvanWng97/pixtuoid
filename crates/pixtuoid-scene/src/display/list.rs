@@ -389,7 +389,7 @@ pub(crate) enum PieceKind {
     },
     Desk {
         at: crate::layout::Point,
-        /// The facing's art (see [`desk_art`](crate::display::compose::desk_art)).
+        /// The facing's art ([`desk_art_name`](crate::pack::desk_art_name)).
         art: &'static str,
         screen: Screen,
     },

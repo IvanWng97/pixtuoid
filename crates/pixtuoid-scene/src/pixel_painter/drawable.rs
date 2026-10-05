@@ -267,6 +267,15 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
                 sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
+            paint_desk_props(buf, (*desk, *facing), props, pack, theme);
+            if let Some(front) = crate::pack::desk_art_name(pack, *facing)
+                .and_then(|art| crate::pack::desk_front(pack, art))
+                .and_then(|front| pack.animation(front)?.frames().first())
+            {
+                blit_frame(front, desk.x, sprite_top, buf);
+            }
+            // The desk's light falls on the whole group, its front and props
+            // included, as the cutaway lights every piece after painting it.
             paint_desk_lamp_pool(buf, lights, theme);
             paint_screen_idle(
                 buf,
@@ -275,13 +284,6 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
                 theme.effects.monitor_idle,
                 lights.screen_idle,
             );
-            paint_desk_props(buf, (*desk, *facing), props, pack, theme);
-            if let Some(front) = crate::pack::desk_art_name(pack, *facing)
-                .and_then(|art| crate::pack::desk_front(pack, art))
-                .and_then(|front| pack.animation(front)?.frames().first())
-            {
-                blit_frame(front, desk.x, sprite_top, buf);
-            }
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
@@ -845,6 +847,59 @@ mod tests {
             paper_pixel_count(&buf, th)
         };
         assert_eq!(paper(Some(1)), paper(None));
+    }
+
+    /// The desk's lamp lights its front as it lights the desk: at night a
+    /// monitor cell under the pool keeps its lit colour with the front drawn
+    /// over it, as the desk's art alone, lit, shows it.
+    #[test]
+    fn the_lamp_pool_lights_the_desk_front() {
+        use crate::layout::Facing;
+        let (pack, th) = (test_pack(), theme());
+        let desk = Point { x: 40, y: 30 };
+        let bulb = crate::lighting::DeskBulbs::of(&pack).at(Facing::South);
+        let lights = crate::lighting::DeskLights::new(desk, bulb, 1.0, 0.0);
+        let mut d = desk_cubicle_drawable(desk, 0, None);
+        if let DrawableKind::DeskCubicle { lights: l, .. } = &mut d.kind {
+            *l = lights;
+        }
+        let fill = Rgb { r: 1, g: 2, b: 3 };
+        let mut buf = RgbBuffer::filled(120, 80, fill);
+        paint_drawable(
+            &d.kind,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut FrameCache::new(),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
+                theme: th,
+            },
+        );
+        let name = crate::pack::desk_art_name(&pack, Facing::South).expect("a desk");
+        let art = crate::pack::densest_frame(&pack, name, 0, RenderScale::ONE).expect("art");
+        let top = crate::pack::desk_art_top(&pack, desk.y, art.frame.height());
+        let mut lit = RgbBuffer::filled(120, 80, fill);
+        blit_frame(art.frame, desk.x, top, &mut lit);
+        paint_desk_lamp_pool(&mut lit, &lights, th);
+        let front_name = crate::pack::desk_front(&pack, name).expect("a front");
+        let front = &pack.animation(front_name).expect("the front").frames()[0];
+        let mut pooled = 0;
+        for y in 0..front.height() {
+            for x in 0..front.width() {
+                if front.get(x, y).copied().flatten().is_none() {
+                    continue;
+                }
+                let (bx, by) = (desk.x + x, top + y);
+                pooled +=
+                    usize::from(art.frame.get(x, y).copied().flatten() != Some(lit.get(bx, by)));
+                assert_eq!(
+                    buf.get(bx, by),
+                    lit.get(bx, by),
+                    "the front at ({x}, {y}) lost its light"
+                );
+            }
+        }
+        assert!(pooled > 0, "the pool must reach the front");
     }
 
     #[test]
