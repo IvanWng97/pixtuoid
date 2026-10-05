@@ -7,7 +7,8 @@ name: bench
 # on a quiet local machine, recorded in commit messages. It still earns its
 # keep beside codspeed.yml: an x86 Linux wall-clock run is the one signal that
 # can check an architecture-specific claim from an aarch64 dev machine, which
-# instruction counting can't.
+# instruction counting can't. `just bench-pacing` rides along: the TUI
+# painter's frame time, overruns and bytes per frame, as `frame-pacing-report`.
 on:
   workflow_dispatch:
 
@@ -16,7 +17,7 @@ permissions:
 
 jobs:
   bench:
-    name: frame + wire benchmarks (on-demand, advisory)
+    name: frame, wire + pacing benchmarks (on-demand, advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -33,6 +34,8 @@ jobs:
       - name: Run frame + wire benchmarks (advisory, non-blocking)
         run: just bench
       - name: Run frame pacing (advisory, non-blocking)
+        # Independent of the criterion run: either one failing keeps the other.
+        if: always()
         run: just bench-pacing
       # JSON measurements only — the lean criterion feature set builds no HTML.
       - name: Upload criterion measurements
