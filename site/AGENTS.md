@@ -21,7 +21,7 @@ build:
   runs ahead of the released version mid-cycle). Both workflows checkout with
   `fetch-depth: 0`. `pages.yml` deploys on push to `main`, not on tag push, so
   a fresh tag shows after the next `main` commit or a `workflow_dispatch`.
-- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, PARALLEL-DELIVERY}.md`
+- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING}.md`
   → rendered routes via glob loaders in `src/content.config.ts`. **Adding,
   renaming, or REMOVING a rendered doc is a multi-point edit**: glob
   pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (`Nav.astro`
