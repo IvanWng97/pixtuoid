@@ -53,17 +53,20 @@ CodSpeed skip drafts. The jobs:
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
   the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
   nextest skips.
-- **smoke · readme drift (`just gen-readme-check`) · npm package generator
-  (`just npm-check`)** — generated sprites and README freshness, and the npm
-  package generator + OpenClaw plugin contract. The README's media drift
-  (`just gen-media-check`) is reported there as evidence, not a gate.
+- **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
+  compare-selftest`) — generated sprites, icons and README freshness, and the
+  image comparator.
+- **smoke · npm package generator (`just npm-check`)** — the release
+  binaries and the hook shim's silent exit, and the npm package generator +
+  OpenClaw plugin contract. The README's media drift (`just gen-media-check`)
+  is reported in smoke as evidence, not a gate.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
   the other-unix arms.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
-- **site** — `site.yml`: the site's static checks, then e2e and
+- **site** — `site.yml`: format and lint on every push; types, unit tests, e2e and
   Lighthouse on a build with freshly built wasm, so a Rust change that breaks
   a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
