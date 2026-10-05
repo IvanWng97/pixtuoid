@@ -1,46 +1,19 @@
-/** The JSON Schema keywords the committed `contract/*.schema.json` use. */
-export interface Schema {
-  type?: string | string[];
-  enum?: unknown[];
-  $ref?: string;
-  properties?: Record<string, Schema>;
-  required?: string[];
-  $defs?: Record<string, Schema>;
-}
+import Ajv2020, { type AnySchema } from "ajv/dist/2020.js";
 
-function typeOf(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  if (Number.isInteger(value)) return "integer";
-  return typeof value;
-}
+/** A committed `contract/*.schema.json` (draft 2020-12). */
+export type Schema = AnySchema;
 
-/** Whether `value` is an instance of `schema`, resolving `#/$defs/…` refs
- *  against `root`: the subset of JSON Schema the contract schemas use. A `$ref`
- *  outside it fails closed. A field the schema doesn't name is ignored (a
- *  Tolerant Reader): its `additionalProperties: false` types the TS
- *  interface, and a newer CLI's additions must not break an installed copy. */
-export function conforms(value: unknown, schema: Schema, root: Schema = schema): boolean {
-  if (schema.$ref !== undefined) {
-    const def = /^#\/\$defs\/(.+)$/.exec(schema.$ref)?.[1];
-    const target = def === undefined ? undefined : root.$defs?.[def];
-    return target !== undefined && conforms(value, target, root);
+// A Tolerant Reader: `removeAdditional: true` drops only the properties an
+// `additionalProperties: false` forbids (ajv docs/options.md), so a newer CLI's
+// added field is ignored rather than failing an installed copy.
+const ajv = new Ajv2020({ removeAdditional: true });
+
+/** Whether `value` is an instance of `schema`. A schema ajv can't compile, such
+ *  as one with an unresolvable `$ref`, fails closed. */
+export function conforms(value: unknown, schema: Schema): boolean {
+  try {
+    return ajv.validate(schema, value) === true;
+  } catch {
+    return false;
   }
-  if (schema.type !== undefined) {
-    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-    const got = typeOf(value);
-    if (!types.some((t) => t === got || (t === "number" && got === "integer"))) return false;
-  }
-  if (schema.enum !== undefined && !schema.enum.includes(value)) return false;
-  if (schema.properties !== undefined || schema.required !== undefined) {
-    if (typeOf(value) !== "object") return false;
-    const record = value as Record<string, unknown>;
-    const properties = schema.properties ?? {};
-    if (!(schema.required ?? []).every((key) => key in record)) return false;
-    for (const [key, field] of Object.entries(record)) {
-      const fieldSchema = properties[key];
-      if (fieldSchema !== undefined && !conforms(field, fieldSchema, root)) return false;
-    }
-  }
-  return true;
 }
