@@ -600,7 +600,17 @@ fn hash(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::anim::{Beat, Motion};
+
+    /// Every per-plane table is `Plane::ALL.map(..)` indexed by
+    /// [`Plane::index`], so each plane in `ALL` sits at its own index.
+    #[test]
+    fn all_lists_every_plane_at_its_index() {
+        for (i, plane) in Plane::ALL.into_iter().enumerate() {
+            assert_eq!(plane.index(), i);
+        }
+    }
 
     fn pack() -> Pack {
         crate::pack::test_default_pack()
