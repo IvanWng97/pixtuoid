@@ -661,8 +661,8 @@ mod tests {
             return;
         }
         let path = root.join("docs/CONFIGURATION.md");
-        let guide =
-            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let guide = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         for needle in [
             format!("@mark {CUP_MARK} <x> <y>"),
             format!("@mark {TOWER_MARK} <x> <y>"),
