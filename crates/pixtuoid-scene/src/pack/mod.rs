@@ -566,7 +566,16 @@ mod tests {
     /// the painters read: a rename here fails until the guide follows.
     #[test]
     fn the_guide_names_the_desk_contract() {
-        let guide = include_str!("../../../../docs/CONFIGURATION.md");
+        // Read at runtime: `include_str!` of a path outside the crate breaks
+        // `cargo publish`'s verify, and the extracted crate has no workspace
+        // to read the guide from.
+        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+        if !root.join("Cargo.toml").exists() {
+            return;
+        }
+        let path = root.join("docs/CONFIGURATION.md");
+        let guide =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         for needle in [
             format!("@mark {CUP_MARK} <x> <y>"),
             format!("@mark {TOWER_MARK} <x> <y>"),
