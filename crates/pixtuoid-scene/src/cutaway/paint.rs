@@ -94,10 +94,10 @@ pub fn render_cutaway(
     frame: &SimFrame,
     office: Office<'_>,
     showing: Showing<'_>,
-    cache: &mut CutawayCache,
+    (cache, cloud_cache): (&mut CutawayCache, &mut crate::clouds::CloudCache),
     buf: &mut RgbBuffer,
 ) {
-    let list = compose(frame, office, showing);
+    let list = compose(frame, office, showing, cloud_cache);
     paint(&list, cache, buf);
 }
 
@@ -2009,6 +2009,7 @@ mod tests {
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
+            &mut crate::clouds::CloudCache::default(),
         );
         let mut cast = 0;
         for piece in list.pieces() {
@@ -2079,9 +2080,21 @@ mod tests {
                 &mut buf,
             );
             let mut order = Vec::new();
-            push_windows(office, &moment, &GlassWeather::of(&moment), &mut order);
+            push_windows(
+                office,
+                &moment,
+                &GlassWeather::of(&moment),
+                &mut order,
+                &mut crate::clouds::CloudCache::default(),
+            );
             let mut again = Vec::new();
-            push_windows(office, &moment, &GlassWeather::of(&moment), &mut again);
+            push_windows(
+                office,
+                &moment,
+                &GlassWeather::of(&moment),
+                &mut again,
+                &mut crate::clouds::CloudCache::default(),
+            );
             let prints = |o: &[(Span, PieceKind)]| -> Vec<u64> {
                 o.iter().map(|(_, kind)| fingerprint(kind)).collect()
             };
@@ -2100,20 +2113,35 @@ mod tests {
             }
             let density = pixtuoid_core::sprite::format::Density::new(d).expect("nonzero");
             let band = (layout.buf_w, layout.wall_band_h());
+            let wall = crate::outside::Wall {
+                size: band,
+                bays: layout.window_bays().collect(),
+            };
             let outside = crate::outside::Outside::of(
                 &moment,
                 &pack,
                 theme,
-                band,
+                wall,
                 density,
                 GlassWeather::of(&moment),
+                &mut crate::clouds::CloudCache::default(),
             );
             let sky = crate::celestial::SkyView::of(&moment, band.0, band.1, theme);
+            let run = crate::layout::window_run(band.0);
+            let city = crate::skyline::CityStrip::draw(
+                &pack,
+                (
+                    run.end - run.start,
+                    crate::layout::glass_rows(rows.end - rows.start),
+                ),
+                &moment,
+                theme,
+                density,
+            );
             let at = |(ax, ay): (u16, u16)| buf.get(ax * k, ay * k);
             let (mut glass, mut buildings) = (0, 0);
-            for bay in layout.window_bays() {
+            for (bay, view) in outside.views() {
                 let here = format!("{day}/{hour}h bay {}", bay.idx);
-                let view = outside.through(bay);
                 for cell in view.joinery() {
                     assert_eq!(
                         at(cell),
@@ -2121,13 +2149,18 @@ mod tests {
                         "frame {here} {cell:?}"
                     );
                 }
-                for ((cell, c), (_, open)) in view
-                    .cells()
-                    .zip(sky.window(bay, rows.clone(), d, |_| None).cells())
+                let open = sky.window(bay, rows.clone(), d, |_| None);
+                let town = sky.window(bay, rows.clone(), d, city.front(run.start, d));
+                for (((cell, c), (_, sky)), (_, town)) in
+                    view.cells().zip(open.cells()).zip(town.cells())
                 {
                     glass += 1;
-                    buildings += usize::from(c != open);
                     assert_eq!(at(cell), c, "glass {here} {cell:?}");
+                    // the city stands in front of the clouds
+                    if town != sky {
+                        buildings += 1;
+                        assert_eq!(c, town, "city {here} {cell:?}");
+                    }
                 }
             }
             assert!(glass > 0 && buildings > 0, "windows, and a city in them");
@@ -2277,14 +2310,15 @@ mod tests {
                 theme,
                 scale,
             };
-            let drawn = |weather, flash| {
-                let sky = Sky::at_with(now, weather).with_flash(flash);
+            let drawn = |weather, strike| {
+                let sky = Sky::at_with(now, weather).with_strike(strike);
                 let list = compose_at(
                     &frame,
                     office,
                     &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
+                    &mut crate::clouds::CloudCache::default(),
                 );
                 let mut buf = RgbBuffer::filled(
                     scale.to_buffer(layout.buf_w),
@@ -2300,8 +2334,8 @@ mod tests {
                     .collect();
                 (buf, glass)
             };
-            let (calm, glass) = drawn(Weather::Storm, 0.0);
-            let (strike, _) = drawn(Weather::Storm, 1.0);
+            let (calm, glass) = drawn(Weather::Storm, None);
+            let (strike, _) = drawn(Weather::Storm, Some(crate::sky::StrikePhase::Primary));
             let in_glass = |x: u16, y: u16| {
                 let (lx, ly) = (x / s, y / s);
                 glass
@@ -2575,7 +2609,7 @@ mod tests {
                     crate::floor::FloorMeta::ground(),
                     crate::localclock::at_hour(hour),
                 ),
-                &mut cache,
+                (&mut cache, &mut crate::clouds::CloudCache::default()),
                 &mut buf,
             );
             buf.as_slice()
@@ -3419,7 +3453,7 @@ mod tests {
                 crate::floor::FloorMeta::ground(),
                 std::time::SystemTime::UNIX_EPOCH,
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf
@@ -3626,6 +3660,7 @@ mod tests {
                 crate::floor::FloorMeta::ground(),
                 std::time::SystemTime::UNIX_EPOCH,
             ),
+            &mut crate::clouds::CloudCache::default(),
         );
         let plate = list
             .pieces()
@@ -3720,6 +3755,7 @@ mod tests {
                     shown,
                     FloorMeta::ground(),
                     quiet_board(),
+                    &mut crate::clouds::CloudCache::default(),
                 )
             };
             let frames = |weathered: &crate::outside::tests::Weathered| {
@@ -3727,7 +3763,13 @@ mod tests {
                 let mut bare = list(&shown);
                 let plain = moment(weathered, weathered.bare);
                 let mut views = Vec::new();
-                push_windows(at, &plain, &GlassWeather::of(&plain), &mut views);
+                push_windows(
+                    at,
+                    &plain,
+                    &GlassWeather::of(&plain),
+                    &mut views,
+                    &mut crate::clouds::CloudCache::default(),
+                );
                 for piece in bare.pieces_mut() {
                     if let PieceKind::Window { .. } = piece.kind {
                         let i = views
@@ -3871,6 +3913,7 @@ mod tests {
             moment,
             weather,
             &mut order,
+            &mut crate::clouds::CloudCache::default(),
         );
         order
             .into_iter()
@@ -3979,6 +4022,7 @@ mod tests {
                     &moment,
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
+                    &mut crate::clouds::CloudCache::default(),
                 );
                 for &Piece { span, ref kind, .. } in list.pieces() {
                     if only_people
@@ -4488,6 +4532,7 @@ mod tests {
                 &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
+                &mut crate::clouds::CloudCache::default(),
             );
             (list.carpet(), carpet)
         };
@@ -4667,6 +4712,7 @@ mod tests {
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
+                        &mut crate::clouds::CloudCache::default(),
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
@@ -4721,6 +4767,7 @@ mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
+                &mut crate::clouds::CloudCache::default(),
             );
             let is_window = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
             same_fingerprint_same_pixels(painted, &list, &layout, is_window);
@@ -5266,6 +5313,7 @@ mod tests {
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
+                        &mut crate::clouds::CloudCache::default(),
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
@@ -5329,7 +5377,8 @@ mod tests {
                     Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
-                quiet_board()
+                quiet_board(),
+                &mut crate::clouds::CloudCache::default()
             )),
             summary(&compose_at(
                 frame,
@@ -5346,7 +5395,8 @@ mod tests {
                     Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
-                quiet_board()
+                quiet_board(),
+                &mut crate::clouds::CloudCache::default()
             )),
         );
     }
@@ -5374,6 +5424,7 @@ mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
+                &mut crate::clouds::CloudCache::default(),
             );
             let pieces: Vec<&Piece> = list
                 .pieces()
@@ -5494,6 +5545,7 @@ mod tests {
             &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
+            &mut crate::clouds::CloudCache::default(),
         )
     }
 
