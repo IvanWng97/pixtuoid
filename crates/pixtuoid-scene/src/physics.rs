@@ -131,6 +131,15 @@ impl WalkKinematics {
     }
 }
 
+/// How a walker moves: its cruise speed (octile/ms), its acceleration
+/// (octile/ms²) and its settle on arrival (ms).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Gait {
+    pub(crate) cruise: f32,
+    pub(crate) accel: f32,
+    pub(crate) pause_ms: u64,
+}
+
 /// Freeze a [`WalkProfile`] for one walk leg over `path_len_octile`, with cruise
 /// speed picked by `intent` and per-agent speed/pause personality seeded from
 /// `agent_id`.
@@ -140,23 +149,38 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
         WalkIntent::Entry | WalkIntent::Exit => V_CRUISE_COMMUTE,
         WalkIntent::WanderOut | WalkIntent::WanderBack => V_CRUISE_WANDER,
     };
-    let v = v_base * speed_mult(agent_id);
-    let a = match intent {
+    let accel = match intent {
         WalkIntent::SnapBack => WALK_ACCEL_SNAPBACK,
         _ => WALK_ACCEL,
     };
-    let l = path_len_octile as f32;
+    walk_profile_for(
+        path_len_octile,
+        Gait {
+            cruise: v_base * speed_mult(agent_id),
+            accel,
+            pause_ms: pause_ms_for(agent_id),
+        },
+    )
+}
 
+/// Freeze a [`WalkProfile`] for one walk leg over `path_len_octile` at `gait`.
+pub(crate) fn walk_profile_for(path_len_octile: u32, gait: Gait) -> WalkProfile {
+    let Gait {
+        cruise: v,
+        accel: a,
+        pause_ms,
+    } = gait;
     let duration_ms = if path_len_octile == 0 {
         0u64
     } else {
         // Already in ms: a is octile/ms², so T = sqrt(octile / (octile/ms²)) = ms.
-        WalkKinematics::resolve(l, v, a).total_ms().round() as u64
+        WalkKinematics::resolve(path_len_octile as f32, v, a)
+            .total_ms()
+            .round() as u64
     };
-
     WalkProfile {
         duration_ms,
-        pause_ms: pause_ms_for(agent_id),
+        pause_ms,
         path_len_octile,
         v_cruise: v,
         accel: a,
@@ -171,13 +195,13 @@ pub const PROGRESS_SCALE: u16 = 1000;
 /// `t_x1000` (0..=[`PROGRESS_SCALE`]).
 pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
     let (t, scale) = (i32::from(t_x1000), i32::from(PROGRESS_SCALE));
-    let dx = to.x as i32 - from.x as i32;
-    let dy = to.y as i32 - from.y as i32;
+    let dx = i32::from(to.x) - i32::from(from.x);
+    let dy = i32::from(to.y) - i32::from(from.y);
     // Left-walking agents cross through negative x if the interpolation
     // overshoots, and a bare `as u16` wraps to ~65k — blitting off-screen.
     Point {
-        x: (from.x as i32 + dx * t / scale).clamp(0, u16::MAX as i32) as u16,
-        y: (from.y as i32 + dy * t / scale).clamp(0, u16::MAX as i32) as u16,
+        x: (i32::from(from.x) + dx * t / scale).clamp(0, i32::from(u16::MAX)) as u16,
+        y: (i32::from(from.y) + dy * t / scale).clamp(0, i32::from(u16::MAX)) as u16,
     }
 }
 
@@ -251,7 +275,7 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     // The early return above prevents reaching here at t ≥ t_total, but f32
     // rounding can still nudge s slightly outside [0, L] at phase boundaries.
     let s_clamped = s.max(0.0).min(l);
-    (PROGRESS_SCALE as f32 * s_clamped / l).round() as u16
+    (f32::from(PROGRESS_SCALE) * s_clamped / l).round() as u16
 }
 
 /// Returns `true` when the full walk **and** its arrival pause have elapsed —
@@ -263,6 +287,42 @@ pub fn walk_arrived(p: &WalkProfile, elapsed_ms: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every profile `walk_profile` freezes over a sweep of lengths, intents
+    /// and agents, folded to one digest: a refactor of the kinematics leaves
+    /// the people's walks as they were.
+    #[test]
+    fn the_people_s_walk_profiles_are_pinned() {
+        let intents = [
+            WalkIntent::Entry,
+            WalkIntent::Exit,
+            WalkIntent::WanderOut,
+            WalkIntent::WanderBack,
+            WalkIntent::SnapBack,
+        ];
+        let words = [0u32, 1, 7, 10, 99, 100, 1_000, 4_321, 20_000]
+            .into_iter()
+            .flat_map(|len| {
+                intents.into_iter().flat_map(move |intent| {
+                    (0..32).map(move |i| {
+                        let agent = AgentId::from_transcript_path(&format!("/p/pin{i}.jsonl"));
+                        walk_profile(len, intent, agent)
+                    })
+                })
+            });
+        let digest = pixtuoid_core::id::fnv1a(words.flat_map(|p| {
+            [
+                p.duration_ms,
+                p.pause_ms,
+                u64::from(p.path_len_octile),
+                u64::from(p.v_cruise.to_bits()),
+                u64::from(p.accel.to_bits()),
+            ]
+        }));
+        assert_eq!(digest, WALK_PROFILE_DIGEST, "{digest:#018x}");
+    }
+
+    const WALK_PROFILE_DIGEST: u64 = 0xd201_4d4b_4be1_5652;
 
     #[test]
     fn leg_pixels_are_every_position_a_walk_lands_on() {
@@ -343,8 +403,8 @@ mod tests {
         let pairs: Vec<(f32, u64)> = (0..50u8)
             .map(|n| (speed_mult(id(n)), pause_ms_for(id(n))))
             .collect();
-        let speed_mid = (SPEED_MULT_MIN + SPEED_MULT_MAX) / 2.0;
-        let pause_mid = (PAUSE_MS_MIN + PAUSE_MS_MAX) / 2;
+        let speed_mid = f32::midpoint(SPEED_MULT_MIN, SPEED_MULT_MAX);
+        let pause_mid = u64::midpoint(PAUSE_MS_MIN, PAUSE_MS_MAX);
         let cross_a = pairs
             .iter()
             .filter(|(s, p)| *s < speed_mid && *p > pause_mid)
@@ -500,12 +560,12 @@ mod tests {
             .collect();
         let deltas: Vec<i32> = samples
             .windows(2)
-            .map(|w| w[1] as i32 - w[0] as i32)
+            .map(|w| i32::from(w[1]) - i32::from(w[0]))
             .collect();
         let first = deltas[0];
         for (i, d) in deltas.iter().enumerate() {
             assert!(
-                (d - first).abs() <= EPS as i32,
+                (d - first).abs() <= i32::from(EPS),
                 "cruise Δ[{i}]={d} differs from Δ[0]={first} by more than {EPS} — not constant velocity"
             );
         }

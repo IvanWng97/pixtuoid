@@ -3,7 +3,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::shade::fill;
-use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtPx, ArtRect, BufferPx, Pen};
 use crate::dither::Stepped;
 
 impl Pen {
@@ -14,10 +14,12 @@ impl Pen {
         from: &RgbBuffer,
         take: impl Fn(ArtPx, ArtPx) -> bool,
     ) {
-        let k = self.buffer(ArtPx(1));
         for y in 0..buf.height().min(from.height()) {
             for x in 0..buf.width().min(from.width()) {
-                if take(ArtPx(x / k), ArtPx(y / k)) {
+                if take(
+                    self.art_of_buffer(BufferPx(x)),
+                    self.art_of_buffer(BufferPx(y)),
+                ) {
                     buf.put(x, y, from.get(x, y));
                 }
             }
@@ -28,10 +30,10 @@ impl Pen {
     pub(crate) fn fill(self, buf: &mut RgbBuffer, r: ArtRect, c: Rgb) {
         fill(
             buf,
-            self.buffer(r.x),
-            self.buffer(r.y),
-            self.buffer(r.w),
-            self.buffer(r.h),
+            self.buffer(r.x).0,
+            self.buffer(r.y).0,
+            self.buffer(r.w).0,
+            self.buffer(r.h).0,
             c,
         );
     }
@@ -69,9 +71,9 @@ impl Pen {
     /// buffer: a tone relative to what is already painted there, not a colour
     /// of its own. An art pixel that was one colour stays one.
     fn shade(self, buf: &mut RgbBuffer, r: ArtRect, stepped: &mut Stepped) {
-        let (x0, y0) = (self.buffer(r.x), self.buffer(r.y));
-        let x1 = x0.saturating_add(self.buffer(r.w)).min(buf.width());
-        let y1 = y0.saturating_add(self.buffer(r.h)).min(buf.height());
+        let (x0, y0) = (self.buffer(r.x).0, self.buffer(r.y).0);
+        let x1 = x0.saturating_add(self.buffer(r.w).0).min(buf.width());
+        let y1 = y0.saturating_add(self.buffer(r.h).0).min(buf.height());
         for y in y0..y1 {
             for x in x0..x1 {
                 let c = stepped.of(buf.get(x, y));
@@ -97,7 +99,7 @@ impl Pen {
                     w: ArtPx(1),
                     h: ArtPx(1),
                 };
-                let (x, y) = (self.buffer(at.x), self.buffer(at.y));
+                let (x, y) = (self.buffer(at.x).0, self.buffer(at.y).0);
                 if x < buf.width() && y < buf.height() {
                     let c = f(dx, dy, buf.get(x, y));
                     self.fill(buf, at, c);
@@ -125,9 +127,8 @@ impl Pen {
         if y1 <= y0 {
             return;
         }
-        let k = self.buffer(ArtPx(1));
         let span = u32::from(y1.0 - y0.0);
-        let columns = buf.width().div_ceil(k);
+        let columns = self.art_covering(BufferPx(buf.width())).0;
         for y in y0.0..y1.0 {
             let through = f32::from(y - y0.0) / span as f32;
             for x in 0..columns {

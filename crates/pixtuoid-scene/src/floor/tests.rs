@@ -90,13 +90,26 @@ fn daemons_projects_onto_the_ground_floor_only() {
     );
 }
 
+/// A floor past the building's projects as an empty one, agreeing with
+/// `build_floor_scene`: the last real floor's agents don't leak through.
+#[test]
+fn a_floor_past_the_building_projects_empty() {
+    use pixtuoid_core::state::MAX_FLOORS;
+    let scene = make_scene(2 * MAX_FLOORS, 2);
+    assert!(scene.agents.values().any(|a| a.floor_idx == MAX_FLOORS - 1));
+    assert!(build_floor_scene(&scene, MAX_FLOORS).is_empty());
+    let past = project_floor_scene(&scene, MAX_FLOORS);
+    assert!(past.agents.is_empty());
+    assert_eq!(past.total_capacity(), 0);
+}
+
 #[test]
 fn door_anim_excludes_arrived_entry_profiles() {
     use crate::walk::WalkState;
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut walk = WalkState::new(id);
+    let mut walk = WalkState::default();
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
     walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
@@ -400,7 +413,7 @@ fn t0() -> SystemTime {
 fn light_steady_state_populated() {
     let mut dim = VacancyDim::new();
     let start = t0();
-    for ms in (0..3_000).step_by(33) {
+    for ms in (0..3_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         let level = dim.tick(false, start + Duration::from_millis(ms));
         assert!(
             (level - 1.0).abs() < 1e-6,
@@ -438,7 +451,7 @@ fn light_converges_to_min_when_empty_long_enough() {
     let mut dim = VacancyDim::new();
     let start = t0();
     // A realistic frame cadence for 30 s, so the exponential ease has fully landed.
-    for ms in (0..30_000).step_by(33) {
+    for ms in (0..30_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         dim.tick(true, start + Duration::from_millis(ms));
     }
     let level = dim.level();
@@ -452,12 +465,12 @@ fn light_converges_to_min_when_empty_long_enough() {
 fn light_rises_back_when_repopulated() {
     let mut dim = VacancyDim::new();
     let start = t0();
-    for ms in (0..20_000).step_by(33) {
+    for ms in (0..20_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         dim.tick(true, start + Duration::from_millis(ms));
     }
     assert!(dim.level() < 0.2);
     let later = start + Duration::from_millis(20_000);
-    for ms in (0..3_000).step_by(33) {
+    for ms in (0..3_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         dim.tick(false, later + Duration::from_millis(ms));
     }
     let level = dim.level();
@@ -738,7 +751,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new(Arc::clone(&pack));
-    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
+    session.floor.ctx.walks.insert(gone, WalkState::default());
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
@@ -982,7 +995,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
-        crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
+        crate::audio::stem_levels(&crate::tally::per_floor_counts(&scene)[0], precip),
         "stems must equal stem_levels(per_floor_counts[floor], precip)"
     );
     assert_eq!(
@@ -1102,9 +1115,9 @@ fn the_foreground_layer_is_lit_by_the_clock() {
                 && [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
                     .iter()
                     .any(|(dx, dy)| {
-                        let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                        (0..w as i32).contains(&nx)
-                            && (0..h as i32).contains(&ny)
+                        let (nx, ny) = (i32::from(x) + dx, i32::from(y) + dy);
+                        (0..i32::from(w)).contains(&nx)
+                            && (0..i32::from(h)).contains(&ny)
                             && frozen(nx as u16, ny as u16)
                     })
             {
@@ -1122,8 +1135,8 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     );
 }
 
-fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::OfficeMood {
-    crate::board::OfficeMood::of(crate::board::StateCounts {
+fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::neon_sign::OfficeMood {
+    crate::neon_sign::OfficeMood::of(crate::tally::StateCounts {
         active,
         waiting,
         idle,
@@ -1135,7 +1148,7 @@ fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::Office
 const ROOM_LIT: bool = false;
 const ROOM_DIMMED: bool = true;
 /// A live painter's frame tick — well under the shortest stutter flash.
-const FRAME: Duration = Duration::from_millis(1000 / crate::anim::PAINT_FPS as u64);
+const FRAME: Duration = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
 
 #[test]
 fn neon_first_tick_snaps_to_the_mood() {
@@ -1161,7 +1174,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
     let mut dim = VacancyDim::new();
     let mut neon = NeonState::new();
     let mut now = t0();
-    let mut run = |empty: bool, mood: crate::board::OfficeMood, ms: u64| {
+    let mut run = |empty: bool, mood: crate::neon_sign::OfficeMood, ms: u64| {
         let mut last = NeonLevels::CALM;
         for _ in 0..ms / FRAME.as_millis() as u64 {
             now += FRAME;
@@ -1175,7 +1188,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
     let (_, level) = run(false, neon_mood(2, 0, 0), 60_000);
     assert!(level < 1.0, "the premise: the f32 ease stalls short of 1.0");
     // The last agent walks out: the tally is Empty, the room is lit and populated.
-    let (walkout, _) = run(false, neon_mood(0, 0, 0), NeonState::FADE_MS as u64 * 2);
+    let (walkout, _) = run(false, neon_mood(0, 0, 0), u64::from(NeonState::FADE_MS) * 2);
     assert_eq!(walkout, NeonLevels::CALM, "a lit room keeps its sign");
 }
 
@@ -1206,7 +1219,7 @@ fn light_is_dimmed_exactly_once_the_debounce_runs_out() {
 #[test]
 fn neon_eases_into_a_new_mood_and_lands_on_it() {
     let mut neon = NeonState::new();
-    let fade = Duration::from_millis(NeonState::FADE_MS as u64);
+    let fade = Duration::from_millis(u64::from(NeonState::FADE_MS));
     let alert = neon_mood(2, 1, 0);
     neon.tick(neon_mood(2, 0, 0), ROOM_LIT, Motion::Full.timing(t0()));
     let changed = t0() + FRAME;
@@ -1238,7 +1251,7 @@ fn neon_eases_into_a_new_mood_and_lands_on_it() {
 /// wasm still's warm-up step, a floor switched back to.
 #[test]
 fn neon_snaps_when_its_last_light_is_older_than_a_fade() {
-    let fade = Duration::from_millis(NeonState::FADE_MS as u64);
+    let fade = Duration::from_millis(u64::from(NeonState::FADE_MS));
     let (calm, busy) = (neon_mood(0, 0, 1), neon_mood(3, 0, 0));
     let mut fresh = NeonState::new();
     fresh.tick(calm, ROOM_LIT, Motion::Full.timing(t0()));
@@ -1275,7 +1288,7 @@ fn neon_ignores_a_count_change_within_a_mood() {
 fn neon_reversing_mid_fade_starts_from_the_current_light() {
     let mut neon = NeonState::new();
     neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(t0()));
-    let half = Duration::from_millis(NeonState::FADE_MS as u64 / 2);
+    let half = Duration::from_millis(u64::from(NeonState::FADE_MS) / 2);
     neon.tick(neon_mood(0, 1, 3), ROOM_LIT, Motion::Full.timing(t0()));
     let mid = neon.tick(
         neon_mood(0, 1, 3),
@@ -1412,6 +1425,22 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
     }
 }
 
+/// A starved tube records the catch it draws, from the tick that draws it to
+/// the one that ends it.
+#[test]
+fn neon_records_the_catch_it_draws() {
+    let mut neon = NeonState::new();
+    let mut tick = |ms| {
+        let at = in_stutter_cycle(ms);
+        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(at));
+        (levels == NeonLevels::FLASH, neon.stutters())
+    };
+    let (start, end) = NeonState::STUTTER_FLASHES_MS[0];
+    assert_eq!(tick(start - crate::anim::FULL_TICK_MS), (false, false));
+    assert_eq!(tick(start), (true, true));
+    assert_eq!(tick(end), (false, false));
+}
+
 /// On every tier, ticked at a live painter's [`FRAME`], a starved tube
 /// flashes at most [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] times in any second
 /// of wall time.
@@ -1495,7 +1524,7 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
         NeonLevels::CALM
     );
     let mut coasting = NeonState::new();
-    let mut now = flash_at - Duration::from_millis(NeonState::FADE_MS as u64 / 2);
+    let mut now = flash_at - Duration::from_millis(u64::from(NeonState::FADE_MS) / 2);
     coasting.tick(
         neon_mood(2, 0, 0),
         ROOM_LIT,
@@ -1610,7 +1639,7 @@ fn both_painters(
         theme,
         size: crate::layout::Size { w: 192, h: 80 },
         place: crate::look::Place {
-            gateway: crate::board::office_gateway(scene),
+            gateway: crate::tally::office_gateway(scene),
             floor: None,
         },
         debug_walkable: false,

@@ -63,11 +63,6 @@ deltas; the two differ only when two monotonic reads land on the same instant,
 which no deterministic test can arrange. The non-boundary prune/dedupe behaviour
 *is* pinned by unclaim.rs's unit tests.
 
-**`hook/unix.rs` — `>` vs `>=` in `Listener::bind`.** The `tmp.len() > 100` picks
-between two bind strategies (temp-rename vs direct+chmod) whose end states are
-byte-identical. The boundary is `sun_path` headroom, distinguishable only by which
-syscall sequence ran — invisible to any external observation.
-
 **`cc_probe.rs` — `pid_start_time_secs`.** A cfg-twin pair (macOS `proc_pidinfo` /
 non-macOS `None`): on any host the other platform's variant is compiled out, so its
 mutants always survive as cross-compile noise. Both variants are pinned by cfg-twin
@@ -169,22 +164,6 @@ run mutants. Its `&&` sibling one column left IS observable off Windows (`false
 `a_drive_letter_group_dir_is_not_absolute_off_windows`.
 
 ## Deliberately NOT excluded
-
-`mascot_position`'s walk-in boundary (`if entered < MASCOT_ENTER_MS`) is an
-equivalent mutant — the walk-in ends at `walkable_target(seed, 0)` and wander
-cycle 0 departs from that same draw, so both branches render the identical
-`Point`. Stronger since the `mascot_home` beat was deleted: the two endpoints are
-one expression now, not two that happened to agree. But
-its **sibling** boundary, `if age < enter_delay`, is genuinely killable: the stagger
-returns `None` rather than holding at the elevator, so `<=` changes drawn to
-not-drawn at exactly `age == enter_delay`, caught by
-`the_walk_out_starts_from_where_the_mascot_was_when_it_died`.
-
-cargo-mutants describes both **identically** ("replace < with <= in
-mascot_position"), so no regex can exclude one without the other. Hence neither is:
-the walk-in shows up as a known-noise row, documented here, and the stagger one is
-caught. Same call as the `% with /` pair in `mascot_spot_for` before that fn was
-deleted.
 
 **`proc_start.rs` — `imp`'s cfg triplet (#828).** `pid_start_marker` substitutes
 into a per-OS `imp`: `cfg(macos)`, `cfg(linux)`, and a `cfg(not(any(…)))` stub.

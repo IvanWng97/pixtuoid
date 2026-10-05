@@ -4,7 +4,8 @@
 //! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
 //! Time is a PARAMETER (`now_ms` from JS): the engine never calls
-//! `SystemTime::now()` (it panics on wasm32-unknown-unknown).
+//! `SystemTime::now()` (it panics on wasm32-unknown-unknown). Only the flash
+//! hold reads a clock of its own, `page_clock`, when a frame is written.
 
 mod audio;
 mod script;
@@ -24,12 +25,13 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
+use pixtuoid_scene::flash::{FlashHold, FlashPhase, ScreenClock};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::sky::WeatherPolicy;
-use pixtuoid_scene::theme::{ALL_THEMES, Theme};
+use pixtuoid_scene::theme::{NORMAL, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
@@ -105,6 +107,25 @@ impl VisitorHires {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn performance_now() -> f64;
+}
+
+/// The page's monotonic clock, `performance.now()`, for the flash hold.
+#[cfg(target_arch = "wasm32")]
+fn page_clock() -> ScreenClock {
+    std::sync::Arc::new(|| Duration::from_secs_f64(performance_now().max(0.0) / 1_000.0))
+}
+
+/// The host's monotonic clock, where the office runs natively.
+#[cfg(not(target_arch = "wasm32"))]
+fn page_clock() -> ScreenClock {
+    pixtuoid_scene::flash::monotonic()
+}
+
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
 /// handle alive across `step` calls is what keeps walks/poses continuous.
 #[wasm_bindgen]
@@ -135,6 +156,8 @@ pub struct Office {
     /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
     weather: WeatherPolicy,
+    /// The flash the page shows: the frame `step` leaves is the one it draws.
+    flash: FlashHold<FlashPhase, (u16, u16)>,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -145,8 +168,11 @@ pub struct Office {
 
 #[wasm_bindgen]
 impl Office {
-    /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the bundled sprite pack fails to parse.
+    /// Build an office seeded with `seed` (drives the layout variant).
+    ///
+    /// # Errors
+    ///
+    /// If the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
@@ -159,8 +185,8 @@ impl Office {
             session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
-            theme: ALL_THEMES[0],
-            seed: seed as u64,
+            theme: &NORMAL,
+            seed: u64::from(seed),
             reducer: Reducer::new(),
             beats: hero_script(),
             cursor: 0,
@@ -171,23 +197,24 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather: WeatherPolicy::Clock,
+            flash: FlashHold::on(page_clock()),
             audio: None,
             adopting: None,
         })
     }
 
     /// Advance to `now_ms` and render at `w`×`h` pixels into the RGBA staging
-    /// buffer.
+    /// buffer, which keeps the last frame while the flash hold keeps this one
+    /// back.
     ///
     /// CONTRACT: `now_ms` must be UNIX-epoch milliseconds — `Date.now()`, NOT
     /// `performance.now()` and NOT a `requestAnimationFrame` timestamp: those are
     /// ms-since-page-load, which pins the day/night cycle and wall clock at 1970.
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
-        // `f64 as u64` saturates (negatives/NaN → 0), so no pre-clamp is needed.
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = from_epoch_ms(now_ms);
         self.last_now = Some(now);
-        let buf_w = w.clamp(1, u16::MAX as u32) as u16;
-        let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        let buf_w = w.clamp(1, u32::from(u16::MAX)) as u16;
+        let buf_h = h.clamp(1, u32::from(u16::MAX)) as u16;
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -204,7 +231,14 @@ impl Office {
         // — load-bearing: the looped script REUSES agent ids, and a returning cast
         // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
+        let flash = self.session.flash();
+        let shape = (buf_w, buf_h);
+        if self.flash.holds(flash, shape) {
+            return;
+        }
         self.expand_rgba();
+        // The page draws what `step` leaves in the same task, straight after.
+        self.flash.shown(flash, shape);
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
@@ -239,7 +273,7 @@ impl Office {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }
 
-    /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+    /// Recolor the whole office to one of the [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES) by name. Unknown
     /// name = no-op.
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
@@ -274,30 +308,28 @@ impl Office {
         };
         let theme = self.theme;
 
-        let labels = self.session.overlay(&self.scene, None);
         let board = self
             .session
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        for (i, el) in labels.iter().enumerate() {
+        for (i, badge) in self.session.badges().iter().enumerate() {
+            let pixtuoid_scene::display::Badge {
+                at, marker, name, ..
+            } = badge;
             if i > 0 {
                 out.push(',');
             }
-            out.push_str(&format!(
-                "{{\"x\":{},\"y\":{},\"text\":",
-                el.anchor_px.x, el.anchor_px.y
-            ));
+            out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
             push_json_string(
                 &mut out,
-                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
+                &format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, name.text),
             );
             // The site paints the ● in `color` and the name in `badge`.
-            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
             out.push_str(&format!(
                 ",\"color\":\"{}\",\"badge\":\"{}\"",
-                hex(ink.marker),
-                hex(ink.name)
+                hex(*marker),
+                hex(name.ink)
             ));
             out.push('}');
         }
@@ -375,23 +407,18 @@ impl Office {
     /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
+        const SILENT: &str = r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#;
         let Some(now) = self.last_now else {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+            return SILENT.to_string();
         };
-        if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
-        }
+        let meta = self.floor_meta();
+        let Some(audio) = self.audio.as_mut().filter(|a| a.is_ready()) else {
+            return SILENT.to_string();
+        };
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
-        let frame = self
-            .session
-            .audio_frame(&self.scene, self.floor_meta(), now);
-        let cmd = self
-            .audio
-            .as_mut()
-            .expect("audio ready checked above")
-            .tick(now_ms, frame);
-        audio::commands_json(&cmd)
+        let frame = self.session.audio_frame(&self.scene, meta, now);
+        audio::commands_json(&audio.tick(now_ms, frame))
     }
 
     /// Stage a handoff for the worker's spawn-time track. A stale epoch at click
@@ -457,13 +484,19 @@ pub struct SynthTake {
     epoch: u64,
 }
 
+/// JS's UNIX-epoch milliseconds as a `SystemTime`. `f64 as u64` saturates
+/// (negatives and NaN to 0), so no input needs a pre-clamp.
+fn from_epoch_ms(ms: f64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)
+}
+
 #[wasm_bindgen]
 impl SynthTake {
     /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) — selects
     /// the same day/night + weather track the office would at that instant.
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SynthTake {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = from_epoch_ms(now_ms);
         // `floor::track_for` is the ONE track-pick authority; its TrackId payload
         // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
         let track = pixtuoid_scene::floor::track_for(now, WeatherPolicy::Clock);
@@ -654,8 +687,8 @@ fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
-fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
-    hex(pixtuoid_scene::board::tone_rgb(tone, theme))
+fn board_hex(theme: &Theme, tone: pixtuoid_scene::neon_sign::BoardTone) -> String {
+    hex(tone.rgb(theme))
 }
 
 /// Append `s` as a JSON string literal (quotes + escapes) to `out`. Agent labels
@@ -680,7 +713,7 @@ fn push_json_string(out: &mut String, s: &str) {
 fn push_board_segment(
     out: &mut String,
     key: &str,
-    seg: &pixtuoid_scene::board::BoardSegment,
+    seg: &pixtuoid_scene::neon_sign::BoardSegment,
     theme: &Theme,
 ) {
     out.push_str(&format!("\"{key}\":{{\"text\":"));
@@ -690,7 +723,7 @@ fn push_board_segment(
 
 fn push_board_segments(
     out: &mut String,
-    segs: &[pixtuoid_scene::board::BoardSegment],
+    segs: &[pixtuoid_scene::neon_sign::BoardSegment],
     theme: &Theme,
 ) {
     out.push('[');
@@ -709,6 +742,7 @@ fn push_board_segments(
 mod tests {
     use super::*;
     use crate::script::cast_id;
+    use pixtuoid_scene::flash::ManualClock;
 
     /// `Office::new`'s error arm constructs a `JsError`, so unwrap via match.
     fn office() -> Office {
@@ -806,7 +840,7 @@ mod tests {
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
-        let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
+        let cc = NORMAL.source.claude_code;
         let expect = format!("\"color\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
@@ -834,6 +868,155 @@ mod tests {
         assert!(
             frame.chunks(4).any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0),
             "the office actually painted (not an all-black frame)"
+        );
+    }
+
+    /// The site backdrop's paint gate, read from its authority,
+    /// `OfficeBackdrop.astro`'s `FRAME_MS`.
+    fn backdrop_frame_ms() -> u64 {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../site/src/components/OfficeBackdrop.astro"
+        );
+        let page = std::fs::read_to_string(path).expect("the backdrop page");
+        page.split("const FRAME_MS = ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .and_then(|ms| ms.trim().parse().ok())
+            .expect("OfficeBackdrop.astro declares FRAME_MS")
+    }
+
+    /// A storm office whose flashes are held on a screen clock the test moves.
+    fn storm_on_screen() -> (Office, ManualClock) {
+        let mut o = office();
+        o.set_weather(Some("storm".into()));
+        let screen = ManualClock::default();
+        o.flash = FlashHold::on(screen.clock());
+        (o, screen)
+    }
+
+    /// A storm's first strike after [`T0_MS`]: when its phases change, in ms,
+    /// the first its start, and when it ends.
+    struct Strike {
+        changes: Vec<u64>,
+        end: u64,
+    }
+
+    /// Read from a probe office's own composed phase, forward in time only.
+    fn storm_strike() -> Strike {
+        use pixtuoid_scene::anim::FULL_TICK_MS;
+        const MINUTE_MS: u64 = 60_000;
+        let (mut probe, _) = storm_on_screen();
+        let mut phase = |ms: u64| {
+            probe.step(ms as f64, 160, 96);
+            probe.session.flash()
+        };
+        let t0 = T0_MS as u64;
+        let start = (t0..t0 + MINUTE_MS)
+            .step_by(FULL_TICK_MS as usize)
+            .find(|&ms| phase(ms) != FlashPhase::default())
+            .expect("a storm strikes within a minute");
+        let (mut was, mut changes) = (phase(start), vec![start]);
+        let end = (start + 1..start + MINUTE_MS)
+            .find(|&ms| {
+                let now = phase(ms);
+                if now != was {
+                    changes.push(ms);
+                    was = now;
+                }
+                now == FlashPhase::default()
+            })
+            .expect("a strike ends within a minute");
+        Strike { changes, end }
+    }
+
+    /// Step `o` to `ms` with its screen clock there too.
+    fn step_at(o: &mut Office, screen: &ManualClock, ms: u64) {
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(ms));
+        o.step(ms as f64, 160, 96);
+    }
+
+    /// Each phase of a strike stays on the page at least the photosensitive
+    /// floor at the backdrop's paint gate, its frames landing on a phase's
+    /// start or half a frame after: the frame `step` leaves is the one the
+    /// page draws. A strike lifts the whole room, so a frame that changes most
+    /// of the pixels is a change of phase.
+    #[test]
+    fn each_strike_phase_holds_the_floor_on_the_page() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS;
+        let strike = storm_strike();
+        let frame = backdrop_frame_ms();
+        // The dark before has shown the floor, as the gap between strikes sees to.
+        let lead = frame * (PHOTOSENSITIVE_PHASE_MIN_MS.div_ceil(frame) + 1);
+        for offset in [0, frame / 2] {
+            let (mut o, screen) = storm_on_screen();
+            let mut now = strike.changes[0] - lead + offset;
+            step_at(&mut o, &screen, now);
+            let mut shown = o.frame().to_vec();
+            let mut changed = Vec::new();
+            while now < strike.end + lead {
+                now += frame;
+                step_at(&mut o, &screen, now);
+                let pixels = o.frame().chunks(4).zip(shown.chunks(4));
+                if 2 * pixels.filter(|(a, b)| a != b).count() > shown.len() / 4 {
+                    changed.push(now);
+                }
+                shown = o.frame().to_vec();
+            }
+            assert_eq!(
+                changed.len(),
+                strike.changes.len(),
+                "+{offset} ms: {changed:?}"
+            );
+            for pair in changed.windows(2) {
+                let shown_ms = pair[1] - pair[0];
+                assert!(
+                    shown_ms >= PHOTOSENSITIVE_PHASE_MIN_MS,
+                    "+{offset} ms: a phase shown {shown_ms} ms"
+                );
+            }
+        }
+    }
+
+    /// A phase holds the floor from when its frame is written, not from the
+    /// instant `step` is handed: after a slow step, the next phase waits for
+    /// the floor to pass on the screen clock, though the page's own clock says
+    /// it has.
+    #[test]
+    fn a_slow_steps_phase_holds_the_floor_from_when_it_lands() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        const SLOW_MS: u64 = 60;
+        let strike = storm_strike();
+        let [first, second] = [strike.changes[0], strike.changes[1]];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, first - 2 * FLOOR_MS);
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(first + SLOW_MS));
+        o.step(first as f64, 160, 96);
+        let shown = o.frame().to_vec();
+        assert!(second - first >= FLOOR_MS, "the page's clock says it has");
+        step_at(&mut o, &screen, second);
+        assert!(o.frame() == shown.as_slice(), "held");
+        step_at(&mut o, &screen, first + SLOW_MS + FLOOR_MS);
+        assert!(o.frame() != shown.as_slice(), "shown once the floor has");
+    }
+
+    /// A paused page steps at one frozen instant, to repaint a resized canvas;
+    /// a hold that instant lands inside still runs out on the screen clock, so
+    /// the held frame goes out.
+    #[test]
+    fn a_pause_inside_a_hold_never_wedges_the_page() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        let next = storm_strike().changes[1];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, next - 1);
+        let shown = o.frame().to_vec();
+        step_at(&mut o, &screen, next);
+        assert!(o.frame() == shown.as_slice(), "held");
+        screen.advance(Duration::from_millis(FLOOR_MS));
+        o.step(next as f64, 160, 96);
+        assert!(
+            o.frame() != shown.as_slice(),
+            "the paused frame went out once the hold ran out"
         );
     }
 
@@ -912,17 +1095,17 @@ mod tests {
         let board = &v["board"];
         assert_eq!(
             board["brand"]["text"].as_str().unwrap(),
-            pixtuoid_scene::board::BOARD_BRAND
+            pixtuoid_scene::neon_sign::BOARD_BRAND
         );
         assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
         assert!(board["mood"].is_array() && board["context"].is_array());
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_W as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_W)
         );
         assert_eq!(
             board["rect"]["h"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_H as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_H)
         );
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 
@@ -935,9 +1118,10 @@ mod tests {
         }
     }
 
-    /// The site centres each span on `x`, so `x` is the anchor itself.
+    /// Every badge the frame drew reaches the site, in its text and inks, and
+    /// hangs at its anchor: the site centres each span on `x`.
     #[test]
-    fn overlay_json_hangs_each_label_at_its_anchor() {
+    fn overlay_json_carries_every_badge_at_its_anchor() {
         let mut o = office();
         let mut t = 0u64;
         while t <= LOOP_MS / 2 {
@@ -946,17 +1130,20 @@ mod tests {
         }
         let v: serde_json::Value =
             serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
-        let got: Vec<(u64, u64)> = v["labels"]
-            .as_array()
-            .expect("labels")
-            .iter()
-            .map(|l| (l["x"].as_u64().unwrap(), l["y"].as_u64().unwrap()))
-            .collect();
-        let want: Vec<(u64, u64)> = o
+        let got: Vec<serde_json::Value> = v["labels"].as_array().expect("labels").clone();
+        let want: Vec<serde_json::Value> = o
             .session
-            .overlay(&o.scene, None)
+            .badges()
             .iter()
-            .map(|e| (u64::from(e.anchor_px.x), u64::from(e.anchor_px.y)))
+            .map(|b| {
+                serde_json::json!({
+                    "x": b.at.x,
+                    "y": b.at.y,
+                    "text": format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, b.name.text),
+                    "color": hex(b.marker),
+                    "badge": hex(b.name.ink),
+                })
+            })
             .collect();
         assert!(!want.is_empty(), "premise: agents are drawn");
         assert_eq!(got, want);

@@ -300,13 +300,13 @@ fn departed_agent_walks_are_evicted_on_a_non_current_floor() {
 
     for _ in 0..10 {
         r.render(&scene, pack(), now).expect("render");
-        now += Duration::from_millis(33);
+        now += Duration::from_millis(PAINT_FRAME_MS);
     }
     r.navigate_floor(1, now);
     render_until_settled(&mut r, &scene, pack(), &mut now, 1);
     for _ in 0..10 {
         r.render(&scene, pack(), now).expect("render");
-        now += Duration::from_millis(33);
+        now += Duration::from_millis(PAINT_FRAME_MS);
     }
     assert!(
         r.floor_walks(1).and_then(|m| m.get(&b)).is_some(),
@@ -316,7 +316,7 @@ fn departed_agent_walks_are_evicted_on_a_non_current_floor() {
     r.navigate_floor(0, now);
     render_until_settled(&mut r, &scene, pack(), &mut now, 0);
     let scene_without_b = scene_with(vec![slot(a, 0, 0, t0() - Duration::from_secs(120))], cap);
-    now += Duration::from_millis(33);
+    now += Duration::from_millis(PAINT_FRAME_MS);
     r.evict_missing(&scene_without_b);
     r.render(&scene_without_b, pack(), now).expect("render");
 
@@ -339,13 +339,13 @@ fn evict_missing_drops_history_and_walks_on_every_floor() {
     let mut now = t0();
 
     for _ in 0..5 {
-        now += Duration::from_millis(33);
+        now += Duration::from_millis(PAINT_FRAME_MS);
         r.render(&scene, pack(), now).expect("render");
     }
     r.navigate_floor(1, now);
     render_until_settled(&mut r, &scene, pack(), &mut now, 1);
     for _ in 0..5 {
-        now += Duration::from_millis(33);
+        now += Duration::from_millis(PAINT_FRAME_MS);
         r.render(&scene, pack(), now).expect("render");
     }
     assert_eq!(
@@ -395,7 +395,7 @@ fn floor_transition_clears_stale_pet_position() {
     let mut now = t0();
     for _ in 0..3 {
         r.render(&scene, pack(), now).expect("render");
-        now += Duration::from_millis(33);
+        now += Duration::from_millis(PAINT_FRAME_MS);
     }
     assert!(
         r.drawn_pet().is_some(),

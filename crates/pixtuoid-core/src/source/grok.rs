@@ -83,6 +83,10 @@ pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
 /// carrier, because grok's `session_end` is unreliable (a TUI quit fires none)
 /// so a stale-swept LIVE session must walk back in on its next prompt.
 /// Anything unrecognized bails: registered-vs-decoded drift must be loud.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `hookEventName`, carries none of `sessionId`, `cwd` or `workspaceRoot`, names an unrecognized event, or is a subagent event without `subagentId`.
 pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -354,6 +358,10 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 /// line's `sessionId`: the path is the watcher's id space, and the two are
 /// equal by construction. The hook transport keys on the same string, so
 /// cross-transport dedup (hook `toolUseId` == ACP `toolCallId`) actually fires.
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &grok_id_from_path(Path::new(path)));
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {

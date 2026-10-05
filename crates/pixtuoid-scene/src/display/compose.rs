@@ -1,16 +1,17 @@
 //! Composing a frame's [`DisplayList`], the second reader of `SimFrame`. Of the
 //! sim's effects it lists those riding on people and creatures
-//! (`cutaway::effects`); steam stays with the classic pass.
+//! ([`effects`](crate::display::effects)); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::format::Pack;
 
 use super::{
-    Art, Badge, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span,
-    StoodProp, depth_sort, fingerprint,
+    Art, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span, StoodProp,
+    depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::display::text::{Align, LABEL_GAP, TextRole, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
@@ -31,20 +32,17 @@ const DESK_FRONT_NUMER: u16 = 2;
 /// Denominator of [`DESK_FRONT_NUMER`].
 const DESK_FRONT_DENOM: u16 = 5;
 
-/// Logical rows between a head and its name badge.
-const LABEL_GAP: u16 = 2;
-
 /// Art pixels between a plate's sides or bottom and its text ([`PLATE_H`] says why not the top).
 pub(crate) const PLATE_PAD: u16 = 1;
 
 /// A plate's height on the art grid: padded below only, since the line's
 /// accent rows already clear its capitals above.
-pub(crate) const PLATE_H: u16 = crate::cutaway::text::LINE_H + PLATE_PAD;
+pub(crate) const PLATE_H: u16 = crate::display::text::LINE_H + PLATE_PAD;
 
 /// A plate around `text` on the art grid, centred on column `centre`, its top
 /// at row `top`.
 fn plate_at(centre: ArtPx, top: ArtPx, text: &str) -> ArtRect {
-    let w = crate::cutaway::text::width(text)
+    let w = crate::display::text::width(text)
         .0
         .saturating_add(2 * PLATE_PAD);
     ArtRect {
@@ -67,97 +65,46 @@ fn topmost_span(r: ArtRect, pen: Pen) -> Span {
     }
 }
 
-impl Badge {
-    pub(crate) fn plate(&self, pen: Pen) -> ArtRect {
-        plate_at(
-            pen.art(self.at.x),
-            ArtPx(pen.art(self.at.y).0.saturating_sub(PLATE_H)),
-            &format!("{}{}", crate::overlay::BADGE_MARKER, self.text),
-        )
-    }
+/// A badge `run`'s plate on the art grid: centred over its anchor,
+/// [`LABEL_GAP`] rows up.
+pub(crate) fn badge_plate(run: &TextRun, pen: Pen) -> ArtRect {
+    let bottom = pen.art(run.at.y.saturating_sub(LABEL_GAP));
+    plate_at(
+        pen.art(run.at.x),
+        ArtPx(bottom.0.saturating_sub(PLATE_H)),
+        &run.text(),
+    )
 }
 
-/// The floor indicator over the elevator at `door`, naming floor `floor`: a
-/// plate filling the cell the classic writes it across
-/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)), not a
-/// badge's [`PLATE_H`], which would run into the door below. Under the pack's
-/// density the cell is shorter than a line, and the plate keeps the line.
-pub(crate) fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
-    let rows = crate::layout::floor_indicator_rows(door.y);
-    ArtRect {
-        h: ArtPx(
-            pen.art(rows.end - rows.start)
-                .0
-                .max(crate::cutaway::text::LINE_H),
-        ),
-        ..plate_at(
-            pen.art(door.x + crate::layout::ELEVATOR_W / 2),
-            pen.art(rows.start),
-            &crate::layout::floor_indicator_text(floor),
-        )
-    }
-}
-
-/// Each run of `board` and its top-left on the art grid, as the classic's
-/// terminal board lays it: line `i` on the neon interior's `i`th cell row,
-/// one cell a column, the star flush right.
-pub(crate) fn board_runs(
-    board: &crate::board::BoardModel,
-    pen: Pen,
-) -> Vec<((ArtPx, ArtPx), &crate::board::BoardSegment)> {
-    use crate::layout::{CELL_ROWS, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
-    let pad = pen
-        .art(CELL_ROWS)
-        .0
-        .saturating_sub(crate::cutaway::text::LINE_H)
-        / 2;
-    let at = |col: u16, line: u16| {
-        (
-            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::cutaway::text::columns(col).0),
-            ArtPx(pen.art(NEON_PANEL_INNER_Y + line * CELL_ROWS).0 + pad),
-        )
-    };
-    let cols = |s: &crate::board::BoardSegment| crate::cutaway::text::cells(&s.text);
-    let mut runs = vec![
-        (at(0, 0), &board.brand),
-        (
-            at(NEON_PANEL_INNER_W.saturating_sub(cols(&board.star)), 0),
-            &board.star,
-        ),
-    ];
-    for (line, segs) in (1..).zip([&board.mood, &board.context]) {
-        let mut col = 0;
-        for seg in segs {
-            runs.push((at(col, line), seg));
-            col += cols(seg);
+/// Where `run`'s line lands on the art grid: the plate a badge or the floor
+/// indicator sits on, else the box its glyphs ink. The indicator's plate fills
+/// the cell the classic writes it across, not a badge's [`PLATE_H`], which
+/// would run into the door below; under the pack's density the cell is
+/// shorter than a line, and the plate keeps the line.
+pub(crate) fn run_rect(run: &TextRun, pen: Pen) -> ArtRect {
+    use crate::display::text::{LINE_H, advance, width};
+    let text = run.text();
+    let cell = pen.art(crate::layout::CELL_ROWS).0;
+    match run.align {
+        Align::Over => badge_plate(run, pen),
+        Align::Centre => ArtRect {
+            h: ArtPx(cell.max(LINE_H)),
+            ..plate_at(pen.art(run.at.x), pen.art(run.at.y), &text)
+        },
+        Align::Left | Align::Right => {
+            let x = pen.art(run.at.x).0;
+            let x = match run.align {
+                Align::Right => x.saturating_sub(advance(&text).0),
+                _ => x,
+            };
+            ArtRect {
+                x: ArtPx(x),
+                y: ArtPx(pen.art(run.at.y).0 + cell.saturating_sub(LINE_H) / 2),
+                w: ArtPx(width(&text).0.max(1)),
+                h: ArtPx(LINE_H),
+            }
         }
     }
-    runs
-}
-
-/// The cells `board`'s text covers.
-fn board_span(board: &crate::board::BoardModel, pen: Pen) -> Span {
-    let runs = board_runs(board, pen);
-    let x1 = runs
-        .iter()
-        .map(|((x, _), s)| x.0 + crate::cutaway::text::width(&s.text).0)
-        .max()
-        .unwrap_or(0);
-    let y1 = runs
-        .iter()
-        .map(|((_, y), _)| y.0 + crate::cutaway::text::LINE_H)
-        .max()
-        .unwrap_or(0);
-    let (x0, y0) = runs.first().map_or((ArtPx(0), ArtPx(0)), |&(at, _)| at);
-    topmost_span(
-        ArtRect {
-            x: x0,
-            y: y0,
-            w: ArtPx(x1.saturating_sub(x0.0).max(1)),
-            h: ArtPx(y1.saturating_sub(y0.0).max(1)),
-        },
-        pen,
-    )
 }
 
 /// What a cutaway frame is drawn with and the next one is too: the office
@@ -184,8 +131,8 @@ pub struct Showing<'a> {
     /// The wall-clock instant: the sky, the room's light, the board's flap.
     pub now: std::time::SystemTime,
     /// The wall board, the classic painter's
-    /// ([`build_board`](crate::board::build_board)).
-    pub board: &'a crate::board::BoardModel,
+    /// ([`build_board`](crate::neon_sign::build_board)).
+    pub board: &'a crate::neon_sign::BoardModel,
 }
 
 /// `frame`'s [`DisplayList`] as `showing` says.
@@ -212,12 +159,12 @@ pub(crate) fn compose_at<'a>(
     office: Office<'a>,
     moment: &Moment,
     floor: crate::floor::FloorMeta,
-    board: &crate::board::BoardModel,
+    board: &crate::neon_sign::BoardModel,
 ) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
-    let ambient = crate::cutaway::light::Ambient::of(&moment.look);
+    let ambient = crate::display::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment);
     collected.extend(signs(office, floor.floor_idx, board));
     let sorted = depth_sort(
@@ -239,13 +186,41 @@ pub(crate) fn compose_at<'a>(
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
         carpet: moment.look.carpet(theme),
-        flash: crate::cutaway::light::Flash::of(&moment.sky),
+        flash: crate::display::light::Flash::of(&moment.sky),
+        flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
+        backdrop: crate::display::Backdrop::of(office.layout, theme),
+        recolours: crate::display::Recolours::of(theme),
         pack,
-        theme,
         scale,
     }
+}
+
+/// Each chitchat bubble over its speaker's badge, among the badges `order`
+/// already holds.
+fn push_bubbles(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let pen = Pen::for_pack(office.scale, office.pack);
+    let bubbles: Vec<_> = frame
+        .chitchat_bubbles
+        .iter()
+        .filter_map(|bubble| {
+            let badge_at = order.iter().find_map(|(_, kind)| match kind {
+                PieceKind::Text { run } if run.role == TextRole::Badge(bubble.speaker) => {
+                    Some(run.at)
+                }
+                _ => None,
+            })?;
+            Some(TextRun::bubble(bubble, badge_at, office.theme))
+        })
+        .map(|run| {
+            (
+                topmost_span(run_rect(&run, pen), pen),
+                PieceKind::Text { run },
+            )
+        })
+        .collect();
+    order.extend(bubbles);
 }
 
 /// The pet and the gateway mascots, each a figure sorted on its feet's row
@@ -263,7 +238,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             flip,
             false,
             &p.effects,
-            p.target(),
+            Some(p.target()),
         )
     });
     let mascots = frame.mascots.iter().map(|m| {
@@ -307,12 +282,13 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             continue;
         };
         for &effect in effects {
-            let riding = crate::cutaway::effects::Riding {
+            let riding = crate::display::effects::Riding {
                 effect,
                 head: None,
                 pen,
+                inks: crate::effects::look::Inks::of(theme),
             };
-            if let Some(s) = riding.span(theme, depth) {
+            if let Some(s) = riding.span(depth) {
                 order.push((s, PieceKind::Effect(riding)));
             }
         }
@@ -325,7 +301,7 @@ fn lights(
     office: Office<'_>,
     moment: &Moment,
     floor_idx: usize,
-    ambient: crate::cutaway::light::Ambient,
+    ambient: crate::display::light::Ambient,
 ) -> Vec<LightPiece> {
     let Office {
         layout,
@@ -382,9 +358,9 @@ fn lights(
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
         .filter_map(|e| {
-            crate::cutaway::light::LightView::of(
+            crate::display::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
+                crate::display::light::tint_of(e.kind, theme, frame.neon),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -462,9 +438,7 @@ pub(crate) fn ground_shadow(
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
         | PieceKind::Effect(_)
-        | PieceKind::Badge { .. }
-        | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. } => None,
+        | PieceKind::Text { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -493,27 +467,51 @@ pub(crate) fn ground_shadow(
     }
 }
 
-/// The room's signs: the wall board's text, and the floor indicator naming
-/// floor `floor_idx`.
+/// The room's signs: the wall board's lines, and the floor indicator naming
+/// floor `floor_idx`'s number over the elevator.
 fn signs(
     office: Office<'_>,
     floor_idx: usize,
-    board: &crate::board::BoardModel,
-) -> [(Span, PieceKind); 2] {
+    board: &crate::neon_sign::BoardModel,
+) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let (door, floor) = (office.layout.door, floor_idx + 1);
-    [
-        (
-            board_span(board, pen),
-            PieceKind::Board {
-                board: board.clone(),
-            },
-        ),
-        (
-            topmost_span(indicator_plate(door, floor, pen), pen),
-            PieceKind::Indicator { door, floor },
-        ),
-    ]
+    let indicator = TextRun::indicator(office.layout.door, floor_idx + 1, office.theme);
+    let mut drawn: Vec<(u16, ArtRect)> = Vec::new();
+    board
+        .runs(office.theme)
+        .into_iter()
+        .chain([indicator])
+        .filter_map(|run| {
+            let rect = run_rect(&run, pen);
+            // A run yields to one before it on its line: on the base art's grid
+            // the pixel font is too wide for the sign, and the star would write
+            // over the brand (`no_run_overprints_another_on_its_line`).
+            if drawn.iter().any(|&(y, r)| y == run.at.y && meets(r, rect)) {
+                return None;
+            }
+            drawn.push((run.at.y, rect));
+            Some((topmost_span(rect, pen), PieceKind::Text { run }))
+        })
+        .collect()
+}
+
+/// The logical cells `run`'s line takes on `pen`'s grid ([`run_rect`]): where
+/// a pointer names a run the cutaway drew.
+pub(crate) fn run_box(run: &TextRun, pen: Pen) -> Bounds {
+    let r = run_rect(run, pen);
+    let d = pen.art(1).0;
+    let (x, y) = (pen.logical(r.x), pen.logical(r.y));
+    Bounds {
+        x,
+        y,
+        width: (r.x.0 + r.w.0).div_ceil(d) - x,
+        height: (r.y.0 + r.h.0).div_ceil(d) - y,
+    }
+}
+
+/// Whether `a` and `b` share an art pixel.
+fn meets(a: ArtRect, b: ArtRect) -> bool {
+    a.x.0 < b.x.0 + b.w.0 && b.x.0 < a.x.0 + a.w.0 && a.y.0 < b.y.0 + b.h.0 && b.y.0 < a.y.0 + a.h.0
 }
 
 /// Every piece of the office, each with its [`Span`]. At one depth and layer,
@@ -528,11 +526,12 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &GlassWeather::of(moment), &mut order);
     let carried = push_characters(frame, office, moment.timing.now, &mut order);
+    push_bubbles(frame, office, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
-    wall_segments(layout, &mut order);
+    wall_segments(layout, crate::glass::WallTrim::of(office.theme), &mut order);
     order
 }
 
@@ -850,10 +849,11 @@ fn push_fixture(
                 PieceKind::Clock {
                     at: top_left,
                     reading: crate::sky::clock_reading(moment.timing.now),
+                    hand: theme.office.clock_hand,
                 },
             ));
         }
-        // The backdrop lays them ([`covering`]).
+        // The backdrop lays them ([`Covering`](crate::display::Covering)).
         K::MeetingRug { .. }
         | K::LoungeRug
         | K::Doormat { .. }
@@ -1119,7 +1119,7 @@ fn push_characters(
         scale,
     } = office;
     let pen = Pen::for_pack(scale, pack);
-    let namesakes = crate::overlay::Namesakes::of(&frame.agents);
+    let namesakes = crate::badge::Namesakes::of(&frame.agents);
     let mut carried = Vec::new();
     for c in &frame.characters {
         let Some(agent) = frame.agents.get(c.agent_idx) else {
@@ -1161,11 +1161,17 @@ fn push_characters(
             c.sort_row,
             chair.map(|(span, _)| span),
         );
-        let riders = riders(c, &key, (w, at), scale);
+        let riders = riders(
+            c,
+            &key,
+            (w, at),
+            scale,
+            crate::effects::look::Inks::of(theme),
+        );
         // Dust lies on the ground under its walker; the rest ride over them.
         let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
             for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
-                if let Some(s) = r.span(theme, span.depth) {
+                if let Some(s) = r.span(span.depth) {
                     order.push((s, PieceKind::Effect(*r)));
                 }
             }
@@ -1180,14 +1186,15 @@ fn push_characters(
             },
         ));
         ride(order, false);
-        let badge = Badge {
-            at: label_anchor(top, w, badge_ceiling),
-            text: namesakes.text(agent),
-            tone: crate::overlay::tone_of(agent),
-        };
+        let anchor = crate::sim::anchors::badge_anchor(
+            top,
+            crate::layout::Size { w, h: h + hair },
+            badge_ceiling,
+        );
+        let run = crate::display::Badge::new(anchor, agent, &namesakes, theme).run();
         order.push((
-            topmost_span(badge.plate(pen), pen),
-            PieceKind::Badge { badge },
+            topmost_span(badge_plate(&run, pen), pen),
+            PieceKind::Text { run },
         ));
     }
     carried
@@ -1200,7 +1207,8 @@ fn riders(
     key: &crate::character::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
-) -> Vec<crate::cutaway::effects::Riding> {
+    inks: crate::effects::look::Inks,
+) -> Vec<crate::display::effects::Riding> {
     let d = key.frame.density.get();
     let Some(pen) = Pen::new(scale, d) else {
         return Vec::new();
@@ -1211,12 +1219,12 @@ fn riders(
         Some(dress) => {
             let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
             let x = i32::from(dress.head.x);
-            Some(crate::cutaway::effects::ArtPoint {
+            Some(crate::display::effects::ArtPoint {
                 x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
                 y: i32::from(at.y) * d + dress.crest,
             })
         }
-        None if d == 1 => Some(crate::cutaway::effects::ArtPoint {
+        None if d == 1 => Some(crate::display::effects::ArtPoint {
             x: i32::from(at.x + w / 2),
             y: i32::from(at.y),
         }),
@@ -1224,7 +1232,12 @@ fn riders(
     };
     c.effects
         .iter()
-        .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
+        .map(|&effect| crate::display::effects::Riding {
+            effect,
+            head,
+            pen,
+            inks,
+        })
         .collect()
 }
 
@@ -1305,7 +1318,11 @@ fn push_sofa(
 
 /// Queue every room wall's [sort bands](crate::layout::WallPiece::sort_bands) as
 /// pieces: the long-object case [`crate::display::order`] documents.
-fn wall_segments(layout: &SceneLayout, order: &mut Vec<(Span, PieceKind)>) {
+fn wall_segments(
+    layout: &SceneLayout,
+    trim: crate::glass::WallTrim,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
     for &piece in &layout.wall_pieces {
         let (at, size) = piece.visual();
         for (rows, depth) in piece.sort_bands() {
@@ -1316,6 +1333,7 @@ fn wall_segments(layout: &SceneLayout, order: &mut Vec<(Span, PieceKind)>) {
                 PieceKind::WallSeg {
                     piece,
                     rows: (rows.start, rows.end),
+                    trim,
                 },
             ));
         }
@@ -1379,7 +1397,7 @@ pub(crate) fn push_windows(
     );
     let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
-    let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
+    let bolt = crate::display::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
         let mut view = outside.through(bay);
@@ -1401,27 +1419,6 @@ pub(crate) fn push_windows(
 /// side of its desk half the office sits on.
 fn cutaway_top_left(c: &crate::sim::CharacterPlacement) -> crate::layout::Point {
     c.top_left
-}
-
-/// The badge anchor for a body of `sprite_w` logical columns drawn at `at`:
-/// horizontally centred, [`LABEL_GAP`] logical rows clear of the head — and of
-/// `ceiling`, a logical row the badge must stay above (a raised monitor behind
-/// a back-turned sitter's head).
-///
-/// A free fn so the test can drive THE anchor rather than restate its
-/// arithmetic: a test asserting properties of its own copy stays green for any
-/// change to the real one.
-fn label_anchor(
-    at: crate::layout::Point,
-    sprite_w: u16,
-    ceiling: Option<u16>,
-) -> crate::layout::Point {
-    crate::layout::Point {
-        x: at.x + sprite_w / 2,
-        y: ceiling
-            .map_or(at.y, |top| at.y.min(top))
-            .saturating_sub(LABEL_GAP),
-    }
 }
 
 #[cfg(test)]

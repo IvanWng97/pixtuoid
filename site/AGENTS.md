@@ -21,7 +21,7 @@ build:
   runs ahead of the released version mid-cycle). Both workflows checkout with
   `fetch-depth: 0`. `pages.yml` deploys on push to `main`, not on tag push, so
   a fresh tag shows after the next `main` commit or a `workflow_dispatch`.
-- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, PARALLEL-DELIVERY}.md`
+- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING}.md`
   → rendered routes via glob loaders in `src/content.config.ts`. **Adding,
   renaming, or REMOVING a rendered doc is a multi-point edit**: glob
   pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (`Nav.astro`
@@ -60,10 +60,11 @@ Every generated artifact, manifest seam, and rendered-copy sharp edge:
 `cspInlineHashes()` in `astro.config.mjs` owns the WHY; `config/csp-hashes.mjs`
 owns the parse. The rules a page author needs: an `is:inline` script needs NO
 manual CSP step; a hand-written `public/*.js` loaded by URL rides
-`script-src 'self'`; `style-src` must stay hash-free (one hash disables
-unsafe-inline for the directive, and inline style ATTRIBUTES cannot be hashed —
-so keep Prism's class-based highlighting, not Shiki). `astro dev` serves NO
-CSP; regressions surface in `just site-e2e`'s console watchdog.
+`script-src 'self'`; an inline `<style>` or `style` attribute needs none
+either — each is hashed, an attribute's under `'unsafe-hashes'`, but one set
+at runtime (`setAttribute('style', …)`, `style.cssText`, markup through
+`innerHTML`) is blocked: set `el.style.<property>` instead. `astro dev` serves
+NO CSP; regressions surface in `just site-e2e`'s console watchdog.
 
 ## Dev server (agent-driving)
 
@@ -86,8 +87,9 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
 
 - **Lighthouse** (`npm run lighthouse`, in-repo runner
   `config/lighthouse-runner.mjs`, lighthouse 13 programmatic API, median of
-  three serial runs; runner-semantics pinned by its test — a renamed audit
-  FAILS instead of passing vacuously). **A category score is a budget, not a
+  `lighthouserc.json`'s `numberOfRuns` serial runs; runner-semantics pinned by
+  its test — a renamed audit FAILS instead of passing vacuously).
+  **A category score is a budget, not a
   contract**: `color-contrast` is a small weight in the a11y category, so a total
   contrast failure still clears the category budget — anything that must never regress gets
   its own per-audit assertion with `aggregationMethod: pessimistic` (median

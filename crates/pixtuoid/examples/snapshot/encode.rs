@@ -239,7 +239,10 @@ pub(crate) fn save_backend_as_png(
     path: &PathBuf,
     area: ratatui::layout::Rect,
 ) -> Result<()> {
-    let mut img = RgbImage::new(area.width as u32 * CELL_W, area.height as u32 * CELL_H);
+    let mut img = RgbImage::new(
+        u32::from(area.width) * CELL_W,
+        u32::from(area.height) * CELL_H,
+    );
     rasterize_cells(&mut img, term.backend().buffer(), area, |c| c);
     img.save(path)?;
     Ok(())
@@ -247,7 +250,10 @@ pub(crate) fn save_backend_as_png(
 
 pub(crate) fn cells_to_rgba(term_buf: &ratatui::buffer::Buffer) -> RgbaImage {
     let area = term_buf.area;
-    let mut rgba = RgbaImage::new(area.width as u32 * CELL_W, area.height as u32 * CELL_H);
+    let mut rgba = RgbaImage::new(
+        u32::from(area.width) * CELL_W,
+        u32::from(area.height) * CELL_H,
+    );
     rasterize_cells(&mut rgba, term_buf, area, |c| Rgba([c[0], c[1], c[2], 255]));
     rgba
 }
@@ -268,8 +274,8 @@ fn rasterize_cells<I: image::GenericImage>(
             let symbol = cell.symbol();
             let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
-            let x0 = x as u32 * CELL_W;
-            let y0 = y as u32 * CELL_H;
+            let x0 = u32::from(x) * CELL_W;
+            let y0 = u32::from(y) * CELL_H;
 
             let ch = symbol.chars().next().unwrap_or(' ');
             if symbol == "▀" {
@@ -323,8 +329,8 @@ impl Timeline {
     /// clock by the last frame — and a late --navigate-at then never fires.
     ///
     /// This does NOT make the site's `loop`ed clip seam-free, and no timing choice
-    /// can: `mascot_wander` picks each cycle's destination from a hash of the cycle
-    /// NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
+    /// can: each creature walk's destination is a seeded `walkable_target` draw
+    /// numbered by its roam, so the roaming is aperiodic BY DESIGN and frame N is never frame 0
     /// however the duration is chosen. Closing it would mean a scripted
     /// (non-wandering) timeline for the demo — a media decision, not a rendering one.
     pub(crate) fn elapsed_ms(&self, i: usize) -> u64 {

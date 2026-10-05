@@ -60,36 +60,15 @@ pub(in crate::pixel_painter) fn paint_shadows(
 }
 
 /// Blend `emitter`'s light in `color` over what is already painted, at the
-/// level the model gives each cell.
+/// level the model gives each cell, the window glass included.
 pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitter, color: Rgb) {
-    paint_light_sparing(buf, emitter, color, |_, _| false);
-}
-
-/// The neon sign's halo in `color`, off the window glass, which shows the
-/// outside rather than the wall the sign hangs on.
-pub(in crate::pixel_painter) fn paint_neon_halo(
-    buf: &mut RgbBuffer,
-    layout: &crate::layout::SceneLayout,
-    neon: &Emitter,
-    color: Rgb,
-) {
-    paint_light_sparing(buf, neon, color, |x, y| layout.glass_at(x, y));
-}
-
-/// [`paint_light`], leaving every cell `spared` holds alone.
-fn paint_light_sparing(
-    buf: &mut RgbBuffer,
-    emitter: &Emitter,
-    color: Rgb,
-    spared: impl Fn(u16, u16) -> bool,
-) {
     if emitter.strength <= 0.0 {
         return;
     }
     let ((x0, y0), (x1, y1)) = emitter.bounds();
     let (xs, ys) = (x0..x1.min(buf.width()), y0..y1.min(buf.height()));
     blend_falloff(buf, xs, ys, color, emitter.peak(), |x, y| {
-        (!spared(x, y)).then(|| emitter.level_at(x, y)).flatten()
+        emitter.level_at(x, y)
     });
 }
 
@@ -154,8 +133,8 @@ pub(in crate::pixel_painter) fn paint_clock(
     let (hour_turns, min_turns) = clock_reading(now).turns();
 
     let put = |buf: &mut RgbBuffer, ox: i32, oy: i32, color: Rgb| {
-        let px = x as i32 + 3 + ox;
-        let py = y as i32 + 3 + oy;
+        let px = i32::from(x) + 3 + ox;
+        let py = i32::from(y) + 3 + oy;
         if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, color);
         }
@@ -191,8 +170,8 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     for y in rect.y..max_y {
         for x in rect.x..max_x {
             let is_edge = y == rect.y || y + 1 == max_y;
-            let dy = (y - rect.y) as i32;
-            let dx = (x - rect.x) as i32;
+            let dy = i32::from(y - rect.y);
+            let dx = i32::from(x - rect.x);
             let diamond = ((dx + dy) % RUNNER_LATTICE_STRIDE == 0)
                 || ((dx - dy).rem_euclid(RUNNER_LATTICE_STRIDE) == 0);
             let color = if is_edge {
@@ -310,8 +289,8 @@ mod tests {
         );
     }
 
-    /// The pixel-art rule: a falloff is a few flat tones, dithered, never a
-    /// soft blend with a tone per pixel.
+    /// A falloff is a few flat tones, dithered, never a soft blend with a tone
+    /// per pixel.
     #[test]
     fn a_halo_paints_no_more_tones_than_its_ramp_has() {
         let (buf, look) = lit_wall(NeonLevels::ALERT);
@@ -445,58 +424,6 @@ mod tests {
             buf.get(8, 8),
             Rgb { r: 0, g: 0, b: 0 },
             "in-bounds frame paints"
-        );
-    }
-
-    #[test]
-    fn the_neon_halo_leaves_the_window_glass_alone() {
-        let layout =
-            crate::layout::SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
-                .expect("192x160 fits");
-        let sky =
-            crate::sky::Sky::at_with(crate::localclock::at_hour(23), crate::sky::Weather::Clear);
-        let lights = crate::lighting::Lights::of(
-            &layout,
-            &crate::atmosphere::SkyTones::resolve(&sky, &crate::theme::NORMAL),
-            &crate::lighting::LightInputs {
-                agents: &[],
-                seated: &std::collections::HashMap::new(),
-                floor_idx: 0,
-                indoor_scale: 1.0,
-                neon: NeonLevels::FLASH,
-                beat: Beat::at_ms(0),
-            },
-        );
-        let fill = Rgb {
-            r: 20,
-            g: 20,
-            b: 30,
-        };
-        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
-        paint_neon_halo(
-            &mut buf,
-            &layout,
-            &lights.neon,
-            Rgb {
-                r: 255,
-                g: 0,
-                b: 200,
-            },
-        );
-        let ((x0, y0), (x1, y1)) = lights.neon.bounds();
-        let cells: Vec<_> = (y0..y1.min(layout.buf_h))
-            .flat_map(|y| (x0..x1.min(layout.buf_w)).map(move |x| (x, y)))
-            .collect();
-        let (glass, wall): (Vec<_>, Vec<_>) =
-            cells.into_iter().partition(|&(x, y)| layout.glass_at(x, y));
-        assert!(!glass.is_empty(), "the halo reaches a window");
-        assert!(
-            glass.iter().all(|&(x, y)| buf.get(x, y) == fill),
-            "the glass is spared"
-        );
-        assert!(
-            wall.iter().any(|&(x, y)| buf.get(x, y) != fill),
-            "the wall around the sign is lit"
         );
     }
 }

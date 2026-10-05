@@ -300,17 +300,19 @@
       and .jobs.render.permissions == {"contents": "read"}
       and ([.jobs | to_entries[] | select(.key != "publish") | .value | tostring | test("secrets\\.")] | any | not)
       and .jobs.publish.permissions == {}
-      and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token"]) == []
+      and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token", "peter-evans/create-pull-request"]) == []
       and ([.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
       and ($publish | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
-      and ([$publish | scan("git\\s+(?:add|commit\\s+[^\\n]*-a)[^\\n]*")] == ["git add --all -- docs/images"])
+      and ($publish | test("\\bgit\\s+(add|commit|push)\\b") | not)
+      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]] == ["docs/images"])
       and ((.on | keys) - ["push", "workflow_dispatch"]) == []
   break:
     - '.jobs.render.steps += [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]'
     - '.jobs.render.permissions.contents = "write"'
     - '.jobs.publish.permissions = {"contents": "write"}'
     - '.jobs.publish.steps += [{"run": "cargo build"}]'
-    - '.jobs.publish.steps[-1].run |= sub("git add --all -- docs/images"; "git add --all -- .")'
+    - '(.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/")) | .with["add-paths"]) = "."'
+    - '.jobs.publish.steps += [{"run": "git add -A && git commit -m x"}]'
     - .on.pull_request = {}
     - '.permissions = {"contents": "write"}'
     - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]}'

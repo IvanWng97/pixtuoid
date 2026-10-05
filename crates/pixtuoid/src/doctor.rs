@@ -1365,6 +1365,10 @@ fn render(r: &DoctorReport) -> String {
 
 /// Returns the rendered report rather than printing it, so the WHOLE report
 /// builder is unit-testable.
+///
+/// # Errors
+///
+/// Never: building the report is infallible, and the `Result` is the shape of the sibling subcommand handlers.
 pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
     Ok(render(&collect(log_path, graphics)))
 }
@@ -2459,16 +2463,16 @@ mod tests {
         // root, or the broken verdict is unreachable hermetically.
         use crate::install::{install_target, target::CLAUDE};
         let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("settings.json");
-        std::fs::write(&cfg, "{}\n").unwrap();
-        install_target(
-            &CLAUDE,
-            Some(cfg.clone()),
-            Some(std::path::PathBuf::from("/nonexistent/pixtuoid-hook")),
-        )
-        .unwrap();
-
-        let d = diagnose(CLAUDE.core_source, "", Some(cfg));
+        let cfg = tmp.path().join("m/pixtuoid/hooks/hooks.json");
+        let d = crate::install::tests::with_fake_claude(|_| {
+            install_target(
+                &CLAUDE,
+                Some(cfg.clone()),
+                Some(std::path::PathBuf::from("/nonexistent/pixtuoid-hook")),
+            )
+            .unwrap();
+            diagnose(CLAUDE.core_source, "", Some(cfg))
+        });
         assert!(
             d.is_broken(),
             "a sentinel'd install with a missing shim must read broken through the injected root"

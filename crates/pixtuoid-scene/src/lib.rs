@@ -33,7 +33,7 @@ pub(crate) mod atmosphere;
 #[doc(hidden)]
 pub mod audio;
 #[doc(hidden)]
-pub mod board;
+pub mod badge;
 #[doc(hidden)]
 pub mod burn;
 pub(crate) mod celestial;
@@ -42,13 +42,15 @@ pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
-pub use creatures::PET_CYCLE_MS;
+pub use creatures::PET_LONGEST_REST_MS;
 #[doc(hidden)]
 pub mod cutaway;
 #[doc(hidden)]
 pub mod display;
 pub(crate) mod dither;
 pub(crate) mod effects;
+#[doc(hidden)]
+pub mod flash;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;
@@ -62,9 +64,9 @@ pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
 pub mod look;
-pub(crate) mod outside;
 #[doc(hidden)]
-pub mod overlay;
+pub mod neon_sign;
+pub(crate) mod outside;
 pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
@@ -76,11 +78,12 @@ pub mod render_scale;
 pub mod sim;
 pub mod sky;
 pub(crate) mod skyline;
+#[doc(hidden)]
+pub mod tally;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
 pub mod walk;
-pub(crate) mod wall;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
 pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -92,4 +95,29 @@ pub(crate) const MURMUR3_FMIX32_M1: u32 = 0x85eb_ca6b;
 /// is the bare finalizer, which maps 0 to 0.
 pub(crate) fn splitmix_draw(seed: u64, n: u64) -> u64 {
     pixtuoid_core::id::splitmix64(seed.wrapping_add(n.wrapping_mul(GOLDEN_GAMMA)))
+}
+
+/// `hash` spread over `0..len` alike on every target: the modulo runs in
+/// `u64`, so a 32-bit `usize` (the wasm build) keeps the hash's high bits. An
+/// empty range spreads to 0.
+pub(crate) fn spread(hash: u64, len: usize) -> usize {
+    u64::try_from(len)
+        .ok()
+        .and_then(|len| hash.checked_rem(len))
+        .and_then(|i| usize::try_from(i).ok())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod spread_tests {
+    /// The modulo is the hash's own, high bits included; nothing spreads over an
+    /// empty range. A 64-bit host can't see a 32-bit truncation, so the call
+    /// sites' `#[deny(clippy::cast_possible_truncation)]` is that guard.
+    #[test]
+    fn spread_keeps_the_high_bits_and_an_empty_range_is_zero() {
+        let hash = (1u64 << 40) | 5;
+        assert_eq!(super::spread(hash, 7), usize::try_from(hash % 7).unwrap());
+        assert_ne!(super::spread(hash, 7), super::spread(5, 7));
+        assert_eq!(super::spread(hash, 0), 0);
+    }
 }

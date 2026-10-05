@@ -13,6 +13,11 @@ use crate::render_scale::RenderScale;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ArtPx(pub(crate) u16);
 
+/// A length or coordinate in a render's buffer pixels, which a [`Pen`] turns
+/// an [`ArtPx`] into and back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct BufferPx(pub(crate) u16);
+
 /// A rect on the art grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ArtRect {
@@ -79,13 +84,19 @@ impl Pen {
     }
 
     /// The art pixel buffer pixel `b` lies in.
-    pub(crate) fn art_of_buffer(self, b: u16) -> ArtPx {
-        ArtPx(b / self.k.get())
+    pub(crate) fn art_of_buffer(self, b: BufferPx) -> ArtPx {
+        ArtPx(b.0 / self.k.get())
+    }
+
+    /// How many art columns it takes to cover `b` buffer pixels: the last one
+    /// partly.
+    pub(crate) fn art_covering(self, b: BufferPx) -> ArtPx {
+        ArtPx(b.0.div_ceil(self.k.get()))
     }
 
     /// `a` art pixels, as buffer pixels.
-    pub(crate) fn buffer(self, a: ArtPx) -> u16 {
-        a.0.saturating_mul(self.k.get())
+    pub(crate) fn buffer(self, a: ArtPx) -> BufferPx {
+        BufferPx(a.0.saturating_mul(self.k.get()))
     }
 }
 
@@ -119,6 +130,37 @@ mod tests {
             "an art pixel would straddle buffer pixels"
         );
         assert_eq!(Pen::new(s, 0), None);
+    }
+
+    /// Every buffer pixel an art pixel is painted on lies in it, the next one
+    /// does not, and covering one more buffer pixel takes one more art column.
+    #[test]
+    fn a_buffer_pixel_lies_in_the_art_pixel_painted_on_it() {
+        for (s, d) in [(1, 1), (8, 4), (12, 4)] {
+            let pen = pen(s, d);
+            let k = s / d;
+            for a in 0..20 {
+                let b = pen.buffer(ArtPx(a));
+                for dk in 0..k {
+                    assert_eq!(
+                        pen.art_of_buffer(BufferPx(b.0 + dk)),
+                        ArtPx(a),
+                        "s {s} d {d}"
+                    );
+                }
+                assert_eq!(
+                    pen.art_of_buffer(BufferPx(b.0 + k)),
+                    ArtPx(a + 1),
+                    "s {s} d {d}"
+                );
+                assert_eq!(pen.art_covering(b), ArtPx(a), "s {s} d {d}");
+                assert_eq!(
+                    pen.art_covering(BufferPx(b.0 + 1)),
+                    ArtPx(a + 1),
+                    "s {s} d {d}"
+                );
+            }
+        }
     }
 
     #[test]

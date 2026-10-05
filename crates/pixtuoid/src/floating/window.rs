@@ -160,23 +160,29 @@ impl FloatingApp {
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
-        let office = self.renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &self.pack,
-                now,
-                floor: floor_meta,
-                pets: PetInputs {
-                    pet: floor_pet,
-                    // Click-to-pet needs window pointer hit-testing (deferred).
-                    petting: None,
+        let office = self.renderer.render_live(
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs {
+                        pet: floor_pet,
+                        // Click-to-pet needs window pointer hit-testing (deferred).
+                        petting: None,
+                    },
                 },
+                theme: self.theme,
+                size: Size { w: buf_w, h: buf_h },
+                place: Place {
+                    gateway: pixtuoid_scene::tally::office_gateway(&scene),
+                    floor: None,
+                },
+                debug_walkable: false,
             },
-            theme: self.theme,
-            size: Size { w: buf_w, h: buf_h },
-            place: Place::default(),
-            debug_walkable: false,
-        });
+            (win_w, win_h),
+        );
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -188,20 +194,21 @@ impl FloatingApp {
         };
         let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
         let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
-            return; // nothing rendered — skip this frame
+            return; // nothing rendered, or held: the window keeps the last frame
         };
         let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
         };
         surf.fill_upscaled(office, scale);
-        let labels = self.renderer.labels(&scene);
-        super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
-        let board = self.renderer.board(&scene, floor_meta.motion, now);
+        super::offscreen::paint_labels_into_surface(
+            &mut surf,
+            self.renderer.badges(),
+            scale as i32,
+        );
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,
-            &board,
+            self.renderer.signs(),
             scale as i32,
-            self.theme,
         );
         let budget = super::offscreen::footer_budget(win_w);
         let footer = self
@@ -209,7 +216,9 @@ impl FloatingApp {
             .footer(&scene, budget, audio_audible, volume_flash);
         super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
         window.pre_present_notify();
-        let _ = sb.present();
+        if sb.present().is_ok() {
+            self.renderer.presented();
+        }
     }
 }
 
@@ -234,12 +243,12 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_inner_size(LogicalSize::new(
-                self.cfg.width as f64,
-                self.cfg.height as f64,
+                f64::from(self.cfg.width),
+                f64::from(self.cfg.height),
             ))
             .with_min_inner_size(LogicalSize::new(
-                config::FLOATING_MIN_W as f64,
-                config::FLOATING_MIN_H as f64,
+                f64::from(config::FLOATING_MIN_W),
+                f64::from(config::FLOATING_MIN_H),
             ));
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
@@ -377,14 +386,15 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // (clock hands, weather, lightning, day/night, the wandering pet) still
         // advances, and a 0fps idle would freeze it into a dead-looking window.
         // A LIVE gateway daemon lives in `daemons`, not `agents`, and is a
-        // time-driven WANDERING mascot, so it too holds the fast cadence.
+        // time-driven WANDERING mascot, so it too holds the fast cadence, as
+        // does a walking pet, whose legs step by the ground it covers.
         let office_idle = self.live.as_ref().is_none_or(|live| {
             let scene = live.scene_rx.borrow();
             scene.agents.is_empty()
                 && scene
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
-        });
+        }) && !self.renderer.a_creature_walks(SystemTime::now());
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).

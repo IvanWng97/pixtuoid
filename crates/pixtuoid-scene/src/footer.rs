@@ -2,7 +2,7 @@
 //!
 //! The SINGLE source of truth for the office's bottom status line. `scene` has no
 //! terminal/window deps (invariant #1), so the model carries a backend-agnostic
-//! [`FooterTone`] and [`footer_tone_rgb`] is the ONE tone→theme-role map both
+//! [`FooterTone`] and [`FooterTone::rgb`] is the ONE tone→theme-role map both
 //! painters share — each only converts the resolved `Rgb` to its own surface color
 //! type, so the hues can't drift across surfaces.
 //!
@@ -15,7 +15,8 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS, ToolKind};
 
-use crate::board::{GATEWAY_GLYPH, StateCounts, gateway_label};
+use crate::neon_sign::{GATEWAY_GLYPH, gateway_label};
+use crate::tally::StateCounts;
 use crate::theme::Theme;
 
 /// The four agent activity buckets as a shared vocabulary — each carries
@@ -83,7 +84,7 @@ impl RungKind {
 }
 
 /// A footer segment's tone — backend-agnostic; each painter maps it to its own
-/// color via [`footer_tone_rgb`]. Deliberately NOT [`crate::board::BoardTone`]:
+/// color via [`FooterTone::rgb`]. Deliberately NOT [`crate::neon_sign::BoardTone`]:
 /// the variant sets are disjoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FooterTone {
@@ -101,21 +102,25 @@ pub enum FooterTone {
     Warning,
 }
 
-/// Resolve a [`FooterTone`] to its theme color role — the SINGLE authority both
-/// footer painters share, so a `theme.ui` role change lands in ONE place and the
-/// surfaces can't drift.
-pub fn footer_tone_rgb(tone: FooterTone, theme: &Theme) -> Rgb {
-    match tone {
-        FooterTone::Neutral => theme.ui.label_idle,
-        FooterTone::Rung(RungKind::Active) => theme.ui.label_active,
-        FooterTone::Rung(RungKind::Waiting) => theme.ui.label_waiting,
-        FooterTone::Rung(RungKind::Idle) => theme.ui.label_idle,
-        FooterTone::Rung(RungKind::Exiting) => theme.ui.label_exiting,
-        FooterTone::Tool(kind) => theme.tool_glow.for_kind(kind),
-        FooterTone::Gateway(DaemonState::Idle) => theme.ui.label_idle,
-        FooterTone::Gateway(DaemonState::Busy) => theme.ui.label_active,
-        FooterTone::Gateway(DaemonState::Degraded | DaemonState::Down) => theme.ui.label_waiting,
-        FooterTone::Warning => theme.ui.label_waiting,
+impl FooterTone {
+    /// This tone's theme color role — the SINGLE authority both footer painters
+    /// share, so a `theme.ui` role change lands in ONE place and the surfaces
+    /// can't drift.
+    pub fn rgb(self, theme: &Theme) -> Rgb {
+        match self {
+            FooterTone::Neutral => theme.ui.label_idle,
+            FooterTone::Rung(RungKind::Active) => theme.ui.label_active,
+            FooterTone::Rung(RungKind::Waiting) => theme.ui.label_waiting,
+            FooterTone::Rung(RungKind::Idle) => theme.ui.label_idle,
+            FooterTone::Rung(RungKind::Exiting) => theme.ui.label_exiting,
+            FooterTone::Tool(kind) => theme.tool_glow.for_kind(kind),
+            FooterTone::Gateway(DaemonState::Idle) => theme.ui.label_idle,
+            FooterTone::Gateway(DaemonState::Busy) => theme.ui.label_active,
+            FooterTone::Gateway(DaemonState::Degraded | DaemonState::Down) => {
+                theme.ui.label_waiting
+            }
+            FooterTone::Warning => theme.ui.label_waiting,
+        }
     }
 }
 
@@ -212,7 +217,7 @@ impl<'a> FooterInputs<'a> {
     /// The footer over `drawn`, the (projected) floor scene the painter draws.
     pub fn new(drawn: &SceneState, context: FooterContext<'a>) -> Self {
         Self {
-            counts: crate::board::scene_stats(drawn),
+            counts: crate::tally::scene_stats(drawn),
             tools: footer_tool_tally(drawn),
             context,
         }
@@ -257,8 +262,8 @@ impl<'a> FooterContext<'a> {
         keys_alert: &'a str,
     ) -> Self {
         Self {
-            per_floor: crate::board::per_floor_counts(office),
-            gateway: crate::board::office_gateway(office),
+            per_floor: crate::tally::per_floor_counts(office),
+            gateway: crate::tally::office_gateway(office),
             floor,
             audio_audible,
             volume_flash,
@@ -270,8 +275,8 @@ impl<'a> FooterContext<'a> {
 }
 
 /// Column width of a footer string. The footer's own glyph vocabulary is ALL
-/// single-column (ambiguous EAW = 1 in a non-CJK terminal), so `chars().count()`
-/// equals the display width — keeping `unicode-width` OUT of `scene`. **Accepted
+/// single-column (ambiguous EAW = 1 in a non-CJK terminal), so
+/// [`cells`](crate::display::text::cells) equals `chars().count()` here. **Accepted
 /// residual**: the ONE variable-content field is the tool-tally TOKEN, and a
 /// hypothetical wide-CJK token would count short of its display width and nudge
 /// the right-flush by the excess.
@@ -566,10 +571,10 @@ mod tests {
         source_warning: Option<&'a str>,
     ) -> FooterInputs<'a> {
         FooterInputs {
-            counts: crate::board::scene_stats(scene),
+            counts: crate::tally::scene_stats(scene),
             tools: tools.to_vec(),
             context: FooterContext {
-                per_floor: crate::board::per_floor_counts(scene),
+                per_floor: crate::tally::per_floor_counts(scene),
                 gateway: None,
                 floor: None,
                 audio_audible,

@@ -19,7 +19,6 @@ use crate::walk::{
 };
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use pure::distance_at;
 pub use pure::{
     ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
     THINKING_WINDOW_SECS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive,
@@ -28,7 +27,7 @@ pub use pure::{
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame, walk_frame};
+pub(crate) use pure::{SpotClaims, distance_at, resolve_wander_target, typing_frame, walk_frame};
 
 use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
@@ -241,10 +240,7 @@ pub fn derive_with_routing(
     if let Some(exit_time) = slot.exiting_at {
         let door_target = layout.door_threshold;
 
-        let walk = rctx
-            .walks
-            .entry(slot.agent_id)
-            .or_insert_with(|| WalkState::new(slot.agent_id));
+        let walk = rctx.walks.entry(slot.agent_id).or_default();
 
         if walk.exit.is_none() {
             // From wherever the agent actually is — otherwise one mid-coffee-run at
@@ -329,10 +325,7 @@ pub fn derive_with_routing(
     let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
     let settle = chair_settle.map_or(Settle::None, Settle::End);
 
-    let walk = rctx
-        .walks
-        .entry(slot.agent_id)
-        .or_insert_with(|| WalkState::new(slot.agent_id));
+    let walk = rctx.walks.entry(slot.agent_id).or_default();
 
     let entry_from = match re_enter {
         Some(ReEnter::Live(p)) => p,
@@ -469,10 +462,7 @@ pub fn derive_with_routing(
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;
     let pose = if desk_pose {
-        let walk = rctx
-            .walks
-            .entry(slot.agent_id)
-            .or_insert_with(|| WalkState::new(slot.agent_id));
+        let walk = rctx.walks.entry(slot.agent_id).or_default();
         // ARM ONCE per transition: `route_walking_pose` records the advancing walker
         // into history every call, so re-checking the gate on a second `derive` this
         // frame sees a CLOSER `prev` and drops the agent to Seated mid-walk. Keyed on
@@ -487,8 +477,8 @@ pub fn derive_with_routing(
                 // To the CHAIR, not the desk origin: the chair is offset, so a
                 // desk-origin gate re-fires forever once the agent settles on it.
                 let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
-                let dist =
-                    (prev.x as i32 - chair.x as i32).abs() + (prev.y as i32 - chair.y as i32).abs();
+                let dist = (i32::from(prev.x) - i32::from(chair.x)).abs()
+                    + (i32::from(prev.y) - i32::from(chair.y)).abs();
                 if dist >= SNAP_BACK_MIN_DIST {
                     let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
                     let p = snapshot_leg_profile(
@@ -592,9 +582,7 @@ fn route_walking_pose(
     // re-routes onto a differently-shaped path, landing the frozen progress `t` on a
     // new pixel — the visible "flash" — and spiking the frame's A* cost.
     let path = {
-        let walk = walks
-            .entry(slot.agent_id)
-            .or_insert_with(|| WalkState::new(slot.agent_id));
+        let walk = walks.entry(slot.agent_id).or_default();
         match &walk.walk_path {
             Some(wp) if wp.from == from && wp.to == to => wp.path.clone(),
             _ => {
@@ -635,51 +623,72 @@ fn route_walking_pose(
         history.record(slot.agent_id, walking_position(from, to, t_x1000), now);
         return Some(Pose::walking(from, to, t_x1000, carrying_coffee));
     }
-    // By cumulative OCTILE distance — the metric A* planned with, so timing stays
-    // uniform along diagonals.
-    let mut leg_lens: Vec<u32> = Vec::with_capacity(path.len() - 1);
-    for w in path.windows(2) {
-        leg_lens.push(octile_distance(w[0], w[1]));
-    }
-    let total: u32 = leg_lens.iter().sum();
+    let total = crate::walk::octile_path_len(&path);
     if total == 0 {
         return Some(pose);
     }
     let travelled = distance_at(t_x1000, total);
-    let mut acc: u32 = 0;
-    for (i, &leg) in leg_lens.iter().enumerate() {
-        if acc + leg >= travelled {
-            let into_leg = travelled - acc;
-            let seg_t = (into_leg * 1000)
-                .checked_div(leg)
-                .map(|t| t.min(1000) as u16)
-                .unwrap_or(1000);
-            let cur_pos = walking_position(path[i], path[i + 1], seg_t);
-            history.record(slot.agent_id, cur_pos, now);
-            return Some(Pose::Walking {
-                from: path[i],
-                to: path[i + 1],
-                t_x1000: seg_t,
-                travelled,
-                carrying_coffee,
-            });
-        }
-        acc += leg;
-    }
-    let last = path.len() - 1;
-    history.record(slot.agent_id, path[last], now);
+    let leg = Leg::along(&path, travelled);
+    history.record(slot.agent_id, leg.at(), now);
     Some(Pose::Walking {
-        from: path[last - 1],
-        to: path[last],
-        t_x1000: 1000,
-        travelled: total,
+        from: leg.from,
+        to: leg.to,
+        t_x1000: leg.t_x1000,
+        travelled: leg.travelled,
         carrying_coffee,
     })
 }
 
+/// Where a walker `travelled` along a polyline is: the segment it is on and
+/// how far through it, by cumulative OCTILE distance — the metric A* planned
+/// with, so timing stays uniform along diagonals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Leg {
+    pub(crate) from: Point,
+    pub(crate) to: Point,
+    pub(crate) t_x1000: u16,
+    pub(crate) travelled: u32,
+}
+
+impl Leg {
+    /// `travelled` along `path` (two or more points), its last segment's end
+    /// past the whole of it.
+    pub(crate) fn along(path: &[Point], travelled: u32) -> Self {
+        let mut acc: u32 = 0;
+        for w in path.windows(2) {
+            let leg = octile_distance(w[0], w[1]);
+            if acc + leg >= travelled {
+                let t_x1000 = ((travelled - acc) * 1000)
+                    .checked_div(leg)
+                    .map(|t| t.min(1000) as u16)
+                    .unwrap_or(1000);
+                return Leg {
+                    from: w[0],
+                    to: w[1],
+                    t_x1000,
+                    travelled,
+                };
+            }
+            acc += leg;
+        }
+        let last = path.len().saturating_sub(1);
+        Leg {
+            from: path[last.saturating_sub(1)],
+            to: path[last],
+            t_x1000: 1000,
+            travelled: acc,
+        }
+    }
+
+    /// The point it stands on.
+    pub(crate) fn at(self) -> Point {
+        walking_position(self.from, self.to, self.t_x1000)
+    }
+}
+
 pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
-    let dx = (a.x as i32 - b.x as i32).unsigned_abs();
-    let dy = (a.y as i32 - b.y as i32).unsigned_abs();
+    let dx = (i32::from(a.x) - i32::from(b.x)).unsigned_abs();
+    let dy = (i32::from(a.y) - i32::from(b.y)).unsigned_abs();
     crate::pathfind::octile_cost(dx, dy)
 }
 
