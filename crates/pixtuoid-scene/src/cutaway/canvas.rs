@@ -43,18 +43,31 @@ pub enum Dirty {
     /// Anywhere.
     All,
     /// Only inside these, in buffer pixels on whole layout cells.
-    Rects(Vec<Bounds>),
+    Rects(Rects),
     /// Nowhere: the frame was not painted.
     Unchanged,
 }
 
+/// The rects a frame may differ inside: never none, which is
+/// [`Dirty::Unchanged`], so a consumer that skips on it skips every unchanged
+/// frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rects(Vec<Bounds>);
+
+impl Rects {
+    /// Each rect, in buffer pixels on whole layout cells.
+    pub fn as_slice(&self) -> &[Bounds] {
+        &self.0
+    }
+}
+
 impl Dirty {
     /// Only inside `rects`: [`Self::Unchanged`] when there are none.
-    fn within(rects: Vec<Bounds>) -> Self {
+    pub fn within(rects: Vec<Bounds>) -> Self {
         if rects.is_empty() {
             Self::Unchanged
         } else {
-            Self::Rects(rects)
+            Self::Rects(Rects(rects))
         }
     }
 }
@@ -820,7 +833,7 @@ mod tests {
             .iter()
             .filter_map(|&s| on_buffer(s, h.scale, size))
             .collect();
-        assert_eq!(dirty, Dirty::Rects(want));
+        assert_eq!(dirty, Dirty::within(want));
         let mut waiting = seated.clone();
         waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
             reason: "permission?".into(),
@@ -879,7 +892,25 @@ mod tests {
             .into_iter()
             .filter_map(|s| on_buffer(s, h.scale, size))
             .collect();
-        assert_eq!(dirty, Dirty::Rects(want));
+        assert_eq!(dirty, Dirty::within(want));
+    }
+
+    /// No list of rects is empty: "nowhere" is only ever
+    /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
+    /// unchanged frame.
+    #[test]
+    fn an_empty_list_of_rects_is_unchanged() {
+        let b = Bounds {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(Dirty::within(Vec::new()), Dirty::Unchanged);
+        let Dirty::Rects(rects) = Dirty::within(vec![b]) else {
+            panic!("a rect is somewhere");
+        };
+        assert_eq!(rects.as_slice(), [b]);
     }
 
     /// A new layout of the same size repaints everything, even one built after
