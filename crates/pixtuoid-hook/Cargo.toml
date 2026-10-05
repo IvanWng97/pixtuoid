@@ -39,7 +39,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 temp-env = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "macros", "net", "time", "io-util", "rt-multi-thread"] }

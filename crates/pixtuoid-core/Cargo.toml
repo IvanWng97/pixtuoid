@@ -83,15 +83,15 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # and `harness` would ship).
 pixtuoid-core = { path = ".", features = ["harness"] }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
-proptest = "1"
-tempfile = "3"
+proptest = { workspace = true }
+tempfile = { workspace = true }
 temp-env = { workspace = true }
 filetime = "0.2"
-insta = { version = "1", features = ["yaml"] }
+insta = { workspace = true, features = ["yaml"] }
 tracing-subscriber = { workspace = true }
 # Wire→state benchmarks (`just bench`); same CodSpeed compat passthrough as
 # `pixtuoid-scene`'s.
-criterion = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { workspace = true }
 
 [[bench]]
 name = "decode_reduce"

@@ -43,6 +43,9 @@ deny = [
     { crate = "miniz_oxide", deny-multiple-versions = true },
     { crate = "png", deny-multiple-versions = true },
     { crate = "base64-simd", deny-multiple-versions = true },
+    # Pinned to winit's stacks (crates/pixtuoid/Cargo.toml), likewise.
+    { crate = "objc2-app-kit", deny-multiple-versions = true },
+    { crate = "x11rb", deny-multiple-versions = true },
 ]
 
 [sources]
