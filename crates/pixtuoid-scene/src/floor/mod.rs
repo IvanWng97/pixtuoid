@@ -590,8 +590,9 @@ impl FloorSession {
         }
     }
 
-    /// The badges of the LAST rendered frame's sprites, in paint order. Empty
-    /// before the first `render`.
+    /// The text runs of the LAST frame the classic rendered, in paint order: its
+    /// sprites' badges, then the board and the floor indicator. Empty before
+    /// the first `render`, and after a cutaway frame, whose image holds its text.
     pub fn texts(&self) -> &[crate::display::TextRun] {
         self.floor.raster.classic_texts()
     }

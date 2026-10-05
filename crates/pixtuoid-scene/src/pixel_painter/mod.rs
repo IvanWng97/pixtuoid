@@ -21,7 +21,9 @@ use crate::walk::WalkState;
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Debug, Default)]
 pub(crate) struct Drawn {
-    /// Each drawn agent's badge, in paint order, then each chitchat bubble.
+    /// Each drawn agent's badge, in paint order, then each chitchat bubble;
+    /// `look::render` appends the board's runs and the floor indicator after
+    /// them.
     pub(crate) texts: Vec<TextRun>,
     pub(crate) hovers: Hovers,
 }

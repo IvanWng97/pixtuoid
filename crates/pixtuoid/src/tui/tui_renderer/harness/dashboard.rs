@@ -397,41 +397,49 @@ fn dashboard_closed_paints_no_popup() {
 
 /// The popup's content lines, so substring assertions don't false-match the
 /// office sprite labels behind it. The popup is borderless (no `│` to key on),
-/// so isolate it by its `tooltip_bg` fill: a badge's plate shares the colour
-/// but spans at most [`BADGE_CELLS`](pixtuoid_scene::badge::BADGE_CELLS)
-/// cells, and the popup's rows run wider.
+/// so find its rect by its `tooltip_bg` fill: a run of it wider than a badge's
+/// plate, [`BADGE_CELLS`](pixtuoid_scene::badge::BADGE_CELLS), is the
+/// popup's. Every cell inside the rect is read, whatever its background, so a
+/// popup row a cell of another colour splits is read whole.
 fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     let tb = pixtuoid_scene::theme::NORMAL.ui.tooltip_bg;
     let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
     let area = buf.area;
-    let mut out = String::new();
+    // Each run of the fill wider than a badge's plate, as (row, first, last).
+    let mut wide = Vec::new();
     for y in area.y..area.y + area.height {
-        let mut row = String::new();
-        let mut run = String::new();
-        let mut cells = 0;
+        let mut start = None;
         for x in area.x..=area.x + area.width {
-            match buf.cell((x, y)).filter(|cell| cell.bg == bg) {
-                Some(cell) => {
-                    run.push_str(cell.symbol());
-                    cells += 1;
-                }
-                None => {
-                    if cells > pixtuoid_scene::badge::BADGE_CELLS {
-                        row.push_str(&run);
+            let on = x < area.x + area.width && buf[(x, y)].bg == bg;
+            match (on, start) {
+                (true, None) => start = Some(x),
+                (false, Some(x0)) => {
+                    if x - x0 > pixtuoid_scene::badge::BADGE_CELLS {
+                        wide.push((y, x0, x - 1));
                     }
-                    run.clear();
-                    cells = 0;
+                    start = None;
                 }
+                _ => {}
             }
-        }
-        if !row.trim().is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&row);
         }
     }
-    out
+    let (Some(top), Some(bottom)) = (
+        wide.iter().map(|w| w.0).min(),
+        wide.iter().map(|w| w.0).max(),
+    ) else {
+        return String::new();
+    };
+    let left = wide.iter().map(|w| w.1).min().unwrap_or(area.x);
+    let right = wide.iter().map(|w| w.2).max().unwrap_or(left);
+    (top..=bottom)
+        .map(|y| {
+            (left..=right)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .filter(|row| !row.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]

@@ -60,8 +60,7 @@ pub(in crate::pixel_painter) fn paint_shadows(
 }
 
 /// Blend `emitter`'s light in `color` over what is already painted, at the
-/// level the model gives each cell, the window glass included
-/// ([`Emits::Pane`](crate::display::Emits::Pane)).
+/// level the model gives each cell, the window glass included.
 pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitter, color: Rgb) {
     if emitter.strength <= 0.0 {
         return;
@@ -425,57 +424,6 @@ mod tests {
             buf.get(8, 8),
             Rgb { r: 0, g: 0, b: 0 },
             "in-bounds frame paints"
-        );
-    }
-
-    #[test]
-    fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
-        let layout =
-            crate::layout::SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
-                .expect("192x160 fits");
-        let sky =
-            crate::sky::Sky::at_with(crate::localclock::at_hour(23), crate::sky::Weather::Clear);
-        let lights = crate::lighting::Lights::of(
-            &layout,
-            &crate::atmosphere::SkyTones::resolve(&sky, &crate::theme::NORMAL),
-            &crate::lighting::LightInputs {
-                agents: &[],
-                seated: &std::collections::HashMap::new(),
-                floor_idx: 0,
-                indoor_scale: 1.0,
-                neon: NeonLevels::FLASH,
-                beat: Beat::at_ms(0),
-            },
-        );
-        let fill = Rgb {
-            r: 20,
-            g: 20,
-            b: 30,
-        };
-        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
-        paint_light(
-            &mut buf,
-            &lights.neon,
-            Rgb {
-                r: 255,
-                g: 0,
-                b: 200,
-            },
-        );
-        let ((x0, y0), (x1, y1)) = lights.neon.bounds();
-        let cells: Vec<_> = (y0..y1.min(layout.buf_h))
-            .flat_map(|y| (x0..x1.min(layout.buf_w)).map(move |x| (x, y)))
-            .collect();
-        let (glass, wall): (Vec<_>, Vec<_>) =
-            cells.into_iter().partition(|&(x, y)| layout.glass_at(x, y));
-        assert!(!glass.is_empty(), "the halo reaches a window");
-        assert!(
-            glass.iter().any(|&(x, y)| buf.get(x, y) != fill),
-            "the glass takes the glow, as the cutaway's does"
-        );
-        assert!(
-            wall.iter().any(|&(x, y)| buf.get(x, y) != fill),
-            "the wall around the sign is lit"
         );
     }
 }

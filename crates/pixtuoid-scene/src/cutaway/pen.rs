@@ -127,9 +127,8 @@ impl Pen {
         if y1 <= y0 {
             return;
         }
-        let k = self.buffer(ArtPx(1)).0;
         let span = u32::from(y1.0 - y0.0);
-        let columns = buf.width().div_ceil(k);
+        let columns = self.art_covering(BufferPx(buf.width())).0;
         for y in y0.0..y1.0 {
             let through = f32::from(y - y0.0) / span as f32;
             for x in 0..columns {
