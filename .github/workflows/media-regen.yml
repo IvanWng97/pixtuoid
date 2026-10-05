@@ -1,0 +1,98 @@
+name: media regen
+
+# The README's docs/images are rendered from main here and nowhere else: a
+# look-changing PR merges without its media, and this keeps one bot PR that
+# brings them up to date. The write token lives only in `publish`, which
+# builds and runs nothing from the tree.
+on:
+  push:
+    branches: [main]
+    paths: ["crates/**", "Cargo.lock", "scripts/gen-media.py", "scripts/media.json"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: media-regen
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      - uses: ./.github/actions/setup-cargo-just
+      # The `demo` gif's optimizer; the runner image doesn't ship it.
+      - run: sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends gifsicle
+      - run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet -r requirements-dev.txt
+          .venv/bin/python3 scripts/gen-media.py --only docs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: media-${{ github.sha }}
+          path: docs/images/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: render
+    # A dispatch from another branch would publish that branch's render.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      # main at the rendered commit, for the tree the media commit sits on.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: media-${{ github.sha }}
+          path: rendered
+      # An App installation token, because a GITHUB_TOKEN PR starts no CI; it
+      # is minted per run for this repository alone and expires within the hour.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.MEDIA_APP_ID }}
+          private-key: ${{ secrets.MEDIA_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          BRANCH: bot/media-regen
+        run: |
+          set -euo pipefail
+          rm -rf docs/images
+          mv rendered docs/images
+          # demo.gif isn't byte-stable across gifsicle builds (gen-media.py), so it
+          # rides along with a real change but never opens a PR on its own.
+          if [ -z "$(git status --porcelain -- docs/images ':!docs/images/demo.gif')" ]; then
+            echo "main's README media are current"
+            gh pr close "$BRANCH" --comment "main renders these already." --delete-branch 2>/dev/null || true
+            exit 0
+          fi
+          bot="${APP_SLUG}[bot]"
+          git config user.name "$bot"
+          git config user.email "$(gh api "/users/$bot" --jq .id)+$bot@users.noreply.github.com"
+          git switch --create "$BRANCH"
+          git add --all -- docs/images
+          git commit --quiet --message "chore(media): regenerate from ${GITHUB_SHA::8}"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          # Masking covers the secret, not a value derived from it.
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push --force origin "HEAD:refs/heads/$BRANCH"
+          if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" != OPEN ]; then
+            gh pr create --base main --head "$BRANCH" --title "chore(media): regenerate" \
+              --body "The README's \`docs/images\`, rendered from main (\`media-regen.yml\`). Mergify queues it once the gate holds."
+          fi
