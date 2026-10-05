@@ -145,8 +145,7 @@ fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
 /// `flat_json_merge_install` would silently coerce to `{}`, dropping the user's
 /// document), run `mutate`, and package a `MergeOutcome` whose `changed` is a
 /// SEMANTIC parsed-doc diff — a byte diff would churn the user's formatting.
-/// The guard lives HERE, once,
-/// so a future flat-JSON target cannot forget it.
+/// The guard lives HERE, once, so a future flat-JSON target cannot forget it.
 pub(crate) fn flat_json_merge_outcome_install(
     content: &str,
     what: &str,
