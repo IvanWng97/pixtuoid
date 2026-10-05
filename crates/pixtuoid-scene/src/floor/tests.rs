@@ -982,7 +982,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
-        crate::audio::stem_levels(&crate::neon_sign::per_floor_counts(&scene)[0], precip),
+        crate::audio::stem_levels(&crate::tally::per_floor_counts(&scene)[0], precip),
         "stems must equal stem_levels(per_floor_counts[floor], precip)"
     );
     assert_eq!(
@@ -1123,7 +1123,7 @@ fn the_foreground_layer_is_lit_by_the_clock() {
 }
 
 fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::neon_sign::OfficeMood {
-    crate::neon_sign::OfficeMood::of(crate::neon_sign::StateCounts {
+    crate::neon_sign::OfficeMood::of(crate::tally::StateCounts {
         active,
         waiting,
         idle,
@@ -1610,7 +1610,7 @@ fn both_painters(
         theme,
         size: crate::layout::Size { w: 192, h: 80 },
         place: crate::look::Place {
-            gateway: crate::neon_sign::office_gateway(scene),
+            gateway: crate::tally::office_gateway(scene),
             floor: None,
         },
         debug_walkable: false,

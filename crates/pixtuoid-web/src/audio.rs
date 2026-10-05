@@ -437,7 +437,7 @@ mod tests {
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let busy = pixtuoid_scene::audio::stem_levels(
-            &pixtuoid_scene::neon_sign::StateCounts {
+            &pixtuoid_scene::tally::StateCounts {
                 active: 3,
                 waiting: 0,
                 idle: 0,
@@ -478,7 +478,7 @@ mod tests {
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let busy = pixtuoid_scene::audio::stem_levels(
-            &pixtuoid_scene::neon_sign::StateCounts {
+            &pixtuoid_scene::tally::StateCounts {
                 active: 3,
                 waiting: 0,
                 idle: 0,
@@ -514,7 +514,7 @@ mod tests {
         while d.warmup_step() > 0 {}
         let day = AudioFrame {
             stems: pixtuoid_scene::audio::stem_levels(
-                &pixtuoid_scene::neon_sign::StateCounts {
+                &pixtuoid_scene::tally::StateCounts {
                     active: 1,
                     waiting: 0,
                     idle: 0,
@@ -612,7 +612,7 @@ mod tests {
         let mut d = adopt_all_of(&src, track).finish().expect("handoff");
         let mk = |track| AudioFrame {
             stems: pixtuoid_scene::audio::stem_levels(
-                &pixtuoid_scene::neon_sign::StateCounts {
+                &pixtuoid_scene::tally::StateCounts {
                     active: 1,
                     waiting: 0,
                     idle: 0,
@@ -682,7 +682,7 @@ mod tests {
         while d.warmup_step() > 0 {}
         let mk = |track| AudioFrame {
             stems: pixtuoid_scene::audio::stem_levels(
-                &pixtuoid_scene::neon_sign::StateCounts {
+                &pixtuoid_scene::tally::StateCounts {
                     active: 1,
                     waiting: 0,
                     idle: 0,

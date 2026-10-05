@@ -1115,7 +1115,7 @@ mod listen_gate {
         let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
         // Tier levels come from the PRODUCTION mapping, not hand-rolled
         // literals — the wavs must audition what the app will mix.
-        let counts = |active: usize| pixtuoid_scene::neon_sign::StateCounts {
+        let counts = |active: usize| pixtuoid_scene::tally::StateCounts {
             active,
             waiting: 0,
             idle: 0,

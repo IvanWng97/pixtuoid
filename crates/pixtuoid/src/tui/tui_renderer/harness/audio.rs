@@ -37,7 +37,7 @@ fn audio_stems_count_only_the_viewed_floor() {
     assert!(!frames.is_empty(), "an enabled handle receives frames");
     let stems = frames.last().unwrap().stems;
     let moderate = pixtuoid_scene::audio::stem_levels(
-        &pixtuoid_scene::neon_sign::StateCounts {
+        &pixtuoid_scene::tally::StateCounts {
             active: 1,
             waiting: 0,
             idle: 0,

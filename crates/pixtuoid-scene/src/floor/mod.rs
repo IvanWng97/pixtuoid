@@ -442,7 +442,7 @@ impl AudioObserver {
         }
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
-        let counts = crate::neon_sign::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
+        let counts = crate::tally::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
         let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
@@ -606,7 +606,7 @@ impl FloorSession {
     ) -> crate::neon_sign::BoardModel {
         crate::neon_sign::wall_board(
             scene,
-            crate::neon_sign::office_gateway(scene),
+            crate::tally::office_gateway(scene),
             None,
             motion,
             now,

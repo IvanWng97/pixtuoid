@@ -853,7 +853,7 @@ mod tests {
     fn wall_board_paints_brand_and_mood_tones_into_the_panel() {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         // A generous scale, so full-coverage stroke interiors reach the exact tone colors.
-        let counts = pixtuoid_scene::neon_sign::StateCounts {
+        let counts = pixtuoid_scene::tally::StateCounts {
             active: 2,
             waiting: 1,
             idle: 1,
@@ -978,7 +978,7 @@ mod tests {
         assert!(!frames.is_empty(), "an enabled handle receives frames");
         let stems = frames.last().unwrap().stems;
         let moderate = pixtuoid_scene::audio::stem_levels(
-            &pixtuoid_scene::neon_sign::StateCounts {
+            &pixtuoid_scene::tally::StateCounts {
                 active: 1,
                 waiting: 0,
                 idle: 0,

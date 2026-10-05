@@ -8,7 +8,7 @@ pub(crate) fn quiet_board() -> &'static crate::neon_sign::BoardModel {
     static BOARD: std::sync::LazyLock<crate::neon_sign::BoardModel> =
         std::sync::LazyLock::new(|| {
             crate::neon_sign::build_board(
-                crate::neon_sign::StateCounts::default(),
+                crate::tally::StateCounts::default(),
                 0,
                 None,
                 None,
@@ -763,7 +763,7 @@ fn the_board_writes_inside_the_signs_interior() {
     };
     let pack = test_default_pack();
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
-    let counts = crate::neon_sign::StateCounts {
+    let counts = crate::tally::StateCounts {
         waiting: 12,
         active: 34,
         idle: 56,

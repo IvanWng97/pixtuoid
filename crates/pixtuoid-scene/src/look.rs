@@ -34,7 +34,7 @@ pub enum Look {
 /// board's gateway chip and breadcrumb.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Place {
-    /// The office's [`office_gateway`](crate::neon_sign::office_gateway).
+    /// The office's [`office_gateway`](crate::tally::office_gateway).
     pub gateway: Option<DaemonState>,
     /// Where the floor sits, `None` in a one-floor office.
     pub floor: Option<FooterFloor>,

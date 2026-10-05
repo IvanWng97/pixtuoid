@@ -861,10 +861,10 @@ mod tests {
         let h = Hovering::new();
         let seated = h.frames.last().expect("a seated frame");
         let quiet = crate::display::compose::tests::showing(clear_ground(), Hovering::now());
-        let counts = crate::neon_sign::StateCounts {
+        let counts = crate::tally::StateCounts {
             active: 3,
             total: 3,
-            ..crate::neon_sign::StateCounts::default()
+            ..crate::tally::StateCounts::default()
         };
         let busy =
             crate::neon_sign::build_board(counts, 60, None, None, Motion::Full, Hovering::now());

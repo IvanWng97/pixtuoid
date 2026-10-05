@@ -519,7 +519,7 @@ mod tests {
     fn the_board_runs_land_on_the_signs_interior() {
         use pixtuoid_core::state::DaemonState;
         use pixtuoid_scene::layout::{NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
-        let counts = pixtuoid_scene::neon_sign::StateCounts {
+        let counts = pixtuoid_scene::tally::StateCounts {
             active: 2,
             waiting: 1,
             idle: 1,
@@ -572,7 +572,7 @@ mod tests {
         use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
         let model = pixtuoid_scene::neon_sign::build_board(
-            pixtuoid_scene::neon_sign::StateCounts {
+            pixtuoid_scene::tally::StateCounts {
                 active: 2,
                 waiting: 1,
                 idle: 1,
