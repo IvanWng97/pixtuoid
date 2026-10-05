@@ -1019,6 +1019,7 @@ mod tests {
             crate::display::compose::tests::showing(floor, now),
             &mut cache,
         );
+        assert_eq!(shown.dirty, Dirty::All);
         assert!(
             shown.buf.as_slice()
                 == full_render(&b.layout, &pack, scale, (&b.frame, clear_ground()), now).as_slice(),
