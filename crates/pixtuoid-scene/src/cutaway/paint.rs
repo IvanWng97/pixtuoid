@@ -3668,9 +3668,9 @@ mod tests {
         );
     }
 
-    /// At every density the pack draws and under every sky the sweep draws, a
-    /// frame matches the one whose windows show its instant's no-weather sky —
-    /// the same room, lit alike — everywhere but on glass no other piece paints.
+    /// The cutaway holds to
+    /// [`assert_the_outside_reaches_only_the_glass`](crate::outside::tests::assert_the_outside_reaches_only_the_glass)
+    /// at every density the pack draws, its other pieces being what else paints.
     #[test]
     fn the_outside_reaches_only_the_glass() {
         use crate::floor::{FloorMeta, FloorSession};

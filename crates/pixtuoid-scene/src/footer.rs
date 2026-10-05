@@ -15,7 +15,8 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS, ToolKind};
 
-use crate::neon_sign::{GATEWAY_GLYPH, StateCounts, gateway_label};
+use crate::neon_sign::{GATEWAY_GLYPH, gateway_label};
+use crate::tally::StateCounts;
 use crate::theme::Theme;
 
 /// The four agent activity buckets as a shared vocabulary — each carries
@@ -216,7 +217,7 @@ impl<'a> FooterInputs<'a> {
     /// The footer over `drawn`, the (projected) floor scene the painter draws.
     pub fn new(drawn: &SceneState, context: FooterContext<'a>) -> Self {
         Self {
-            counts: crate::neon_sign::scene_stats(drawn),
+            counts: crate::tally::scene_stats(drawn),
             tools: footer_tool_tally(drawn),
             context,
         }
@@ -261,8 +262,8 @@ impl<'a> FooterContext<'a> {
         keys_alert: &'a str,
     ) -> Self {
         Self {
-            per_floor: crate::neon_sign::per_floor_counts(office),
-            gateway: crate::neon_sign::office_gateway(office),
+            per_floor: crate::tally::per_floor_counts(office),
+            gateway: crate::tally::office_gateway(office),
             floor,
             audio_audible,
             volume_flash,
@@ -570,10 +571,10 @@ mod tests {
         source_warning: Option<&'a str>,
     ) -> FooterInputs<'a> {
         FooterInputs {
-            counts: crate::neon_sign::scene_stats(scene),
+            counts: crate::tally::scene_stats(scene),
             tools: tools.to_vec(),
             context: FooterContext {
-                per_floor: crate::neon_sign::per_floor_counts(scene),
+                per_floor: crate::tally::per_floor_counts(scene),
                 gateway: None,
                 floor: None,
                 audio_audible,

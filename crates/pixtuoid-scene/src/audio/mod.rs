@@ -29,7 +29,7 @@ pub mod synth;
 pub use bank::OneShotPool;
 pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
-use crate::neon_sign::StateCounts;
+use crate::tally::StateCounts;
 
 /// Fixed RNG seeds for the four ambient-synth voices, in ONE place because both
 /// painters MUST seed identically — a per-crate copy silently desyncs the two

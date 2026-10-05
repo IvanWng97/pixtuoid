@@ -165,7 +165,7 @@ fn main() -> Result<()> {
             theme,
             size: Size { w: ow, h: oh },
             place: pixtuoid_scene::look::Place {
-                gateway: pixtuoid_scene::neon_sign::office_gateway(&scene),
+                gateway: pixtuoid_scene::tally::office_gateway(&scene),
                 floor: None,
             },
             debug_walkable: false,

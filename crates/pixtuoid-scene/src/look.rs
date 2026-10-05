@@ -34,7 +34,7 @@ pub enum Look {
 /// board's gateway chip and breadcrumb.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Place {
-    /// The office's [`office_gateway`](crate::neon_sign::office_gateway).
+    /// The office's [`office_gateway`](crate::tally::office_gateway).
     pub gateway: Option<DaemonState>,
     /// Where the floor sits, `None` in a one-floor office.
     pub floor: Option<FooterFloor>,
@@ -162,6 +162,22 @@ impl Raster {
         match (self.shown, &self.classic) {
             (Some(Look::Classic), Some(classic)) => &classic.hits.texts,
             _ => &[],
+        }
+    }
+
+    /// The cells of the star the last frame drew, where a pointer opens the
+    /// repo, in either look; `None` before the first or when it drew none.
+    pub fn star(&self) -> Option<crate::layout::Bounds> {
+        match self.shown? {
+            Look::Classic => self
+                .classic
+                .as_ref()?
+                .hits
+                .texts
+                .iter()
+                .find(|run| run.role == crate::display::TextRole::Star)
+                .map(crate::display::TextRun::bounds),
+            Look::Cutaway { .. } => self.cutaway.as_ref()?.star(),
         }
     }
 

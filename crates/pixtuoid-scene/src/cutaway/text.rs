@@ -235,7 +235,8 @@ mod tests {
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
     fn signs() -> std::collections::BTreeSet<char> {
-        use crate::neon_sign::{StateCounts, build_board};
+        use crate::neon_sign::build_board;
+        use crate::tally::StateCounts;
         use pixtuoid_core::state::DaemonState;
         let mut text = crate::layout::floor_indicator_text(12);
         let moods = [

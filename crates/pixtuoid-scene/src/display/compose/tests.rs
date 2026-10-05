@@ -8,7 +8,7 @@ pub(crate) fn quiet_board() -> &'static crate::neon_sign::BoardModel {
     static BOARD: std::sync::LazyLock<crate::neon_sign::BoardModel> =
         std::sync::LazyLock::new(|| {
             crate::neon_sign::build_board(
-                crate::neon_sign::StateCounts::default(),
+                crate::tally::StateCounts::default(),
                 0,
                 None,
                 None,
@@ -712,6 +712,47 @@ fn the_star_sits_flush_with_the_interior_at_every_scale() {
     }
 }
 
+/// At every scale, no sign run overprints another on its line: where the
+/// pixel font is too wide for the sign's interior (the base art's grid), the
+/// star yields to the brand rather than writing over it.
+#[test]
+fn no_run_overprints_another_on_its_line() {
+    let pack = test_default_pack();
+    let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
+    let d = pack.max_density_variant().get();
+    for s in [1, d, 2 * d] {
+        let scale = RenderScale::new(s).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme: &crate::theme::NORMAL,
+            scale,
+        };
+        let pen = Pen::for_pack(scale, &pack);
+        let rects: Vec<(crate::display::TextRole, u16, ArtRect)> = signs(office, 0, quiet_board())
+            .into_iter()
+            .filter_map(|(_, kind)| match kind {
+                PieceKind::Text { run } => Some((run.role, run.at.y, run_rect(&run, pen))),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            rects
+                .iter()
+                .any(|(r, ..)| *r == crate::display::TextRole::Brand),
+            "at scale {s} the brand is drawn"
+        );
+        for (i, (a, ya, ra)) in rects.iter().enumerate() {
+            for (b, yb, rb) in &rects[i + 1..] {
+                assert!(
+                    ya != yb || !meets(*ra, *rb),
+                    "at scale {s} {a:?} {ra:?} overprints {b:?} {rb:?}"
+                );
+            }
+        }
+    }
+}
+
 /// At the pack's 4x art the board writes inside the neon sign's dark
 /// interior, as the classic's terminal board does, however full its lines.
 #[test]
@@ -722,7 +763,7 @@ fn the_board_writes_inside_the_signs_interior() {
     };
     let pack = test_default_pack();
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
-    let counts = crate::neon_sign::StateCounts {
+    let counts = crate::tally::StateCounts {
         waiting: 12,
         active: 34,
         idle: 56,

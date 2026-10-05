@@ -88,6 +88,12 @@ impl Pen {
         ArtPx(b.0 / self.k.get())
     }
 
+    /// How many art columns it takes to cover `b` buffer pixels: the last one
+    /// partly.
+    pub(crate) fn art_covering(self, b: BufferPx) -> ArtPx {
+        ArtPx(b.0.div_ceil(self.k.get()))
+    }
+
     /// `a` art pixels, as buffer pixels.
     pub(crate) fn buffer(self, a: ArtPx) -> BufferPx {
         BufferPx(a.0.saturating_mul(self.k.get()))
@@ -126,8 +132,8 @@ mod tests {
         assert_eq!(Pen::new(s, 0), None);
     }
 
-    /// Every buffer pixel an art pixel is painted on lies in it, and the next
-    /// one does not.
+    /// Every buffer pixel an art pixel is painted on lies in it, the next one
+    /// does not, and covering one more buffer pixel takes one more art column.
     #[test]
     fn a_buffer_pixel_lies_in_the_art_pixel_painted_on_it() {
         for (s, d) in [(1, 1), (8, 4), (12, 4)] {
@@ -144,6 +150,12 @@ mod tests {
                 }
                 assert_eq!(
                     pen.art_of_buffer(BufferPx(b.0 + k)),
+                    ArtPx(a + 1),
+                    "s {s} d {d}"
+                );
+                assert_eq!(pen.art_covering(b), ArtPx(a), "s {s} d {d}");
+                assert_eq!(
+                    pen.art_covering(BufferPx(b.0 + 1)),
                     ArtPx(a + 1),
                     "s {s} d {d}"
                 );

@@ -431,7 +431,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Fixture
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::FixtureKind
 pub enum pixtuoid_scene::layout::Furniture
 pub pixtuoid_scene::layout::Furniture::Bookshelf
-pub pixtuoid_scene::layout::Furniture::CorkBoard
+pub pixtuoid_scene::layout::Furniture::BulletinBoard
 pub pixtuoid_scene::layout::Furniture::Couch
 pub pixtuoid_scene::layout::Furniture::Desk
 pub pixtuoid_scene::layout::Furniture::DeskChair
@@ -578,7 +578,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Station
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Station
 pub enum pixtuoid_scene::layout::WallDecor
 pub pixtuoid_scene::layout::WallDecor::Bookshelf
-pub pixtuoid_scene::layout::WallDecor::CorkBoard
+pub pixtuoid_scene::layout::WallDecor::BulletinBoard
 pub pixtuoid_scene::layout::WallDecor::ExitSign
 pub pixtuoid_scene::layout::WallDecor::MeetingScreen
 pub pixtuoid_scene::layout::WallDecor::Whiteboard
@@ -1170,6 +1170,7 @@ pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::O
 pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
+pub fn pixtuoid_scene::look::Raster::star(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 pub fn pixtuoid_scene::look::Raster::texts(&self) -> core::option::Option<&[crate::display::TextRun]>
 impl core::fmt::Debug for pixtuoid_scene::look::Raster
 pub fn pixtuoid_scene::look::Raster::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result

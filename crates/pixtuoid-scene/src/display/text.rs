@@ -1,6 +1,6 @@
 //! Text as the display list lays it out: a grapheme cluster takes the cells
-//! ratatui's buffer writes for it, each [`ADVANCE`] art pixels wide on a line
-//! [`LINE_H`] tall. At the pack's 4x art a cell is one logical column, the
+//! ratatui's buffer writes for it, each `ADVANCE` art pixels wide on a line
+//! `LINE_H` tall. At the pack's 4x art a cell is one logical column, the
 //! classic badge's terminal column. The rasterizer's font draws into these
 //! cells.
 
@@ -88,9 +88,9 @@ pub(crate) fn advance(text: &str) -> ArtPx {
 /// Logical rows between a badge's anchor and the line it sits on.
 pub const LABEL_GAP: u16 = 2;
 
-/// Logical rows a chitchat bubble's anchor rides over its speaker's badge's:
-/// two cell rows, a row clear of the badge.
-const BUBBLE_LIFT: u16 = 4;
+/// Logical rows a chitchat bubble's anchor rides over its speaker's badge's: a
+/// cell row clear of the badge.
+const BUBBLE_LIFT: u16 = 2 * crate::layout::CELL_ROWS;
 
 /// One line of text a frame shows: its spans laid end to end, on `plate` if it
 /// has one. Its inks are resolved, so a painter reads no theme for it.
@@ -197,7 +197,7 @@ impl TextRun {
 
     /// `bubble` over its speaker's badge among `badges`, in the tooltip's
     /// ink on its plate; `None` when its speaker wears no badge.
-    pub fn bubble(
+    pub(crate) fn bubble(
         bubble: &crate::chitchat::ChitchatBubble,
         badges: &[TextRun],
         theme: &Theme,
@@ -225,22 +225,41 @@ impl TextRun {
         self.spans.iter().map(|s| s.text.as_str()).collect()
     }
 
-    /// The logical cells its line covers: one per cell of its text, a cell
-    /// row tall.
+    /// The logical cells its line covers on the terminal's cell grid, one
+    /// per cell of its text and of its [`pad`](Self::pad): what the hit test
+    /// reads and the classic writes.
     pub fn bounds(&self) -> crate::layout::Bounds {
-        let (w, h) = (cells(&self.text()), crate::layout::CELL_ROWS);
+        let spans = u16::try_from(self.spans.len()).unwrap_or(u16::MAX);
+        self.place(cells(&self.text()) + 2 * self.pad() * spans)
+    }
+
+    /// The cells of plate the classic writes each side of each span: the floor
+    /// indicator and a chitchat bubble sit a cell clear inside their plates.
+    pub fn pad(&self) -> u16 {
+        match (self.role, self.plate) {
+            (TextRole::Indicator | TextRole::Bubble(_), Some(_)) => 1,
+            _ => 0,
+        }
+    }
+
+    /// The logical cells a line `w` cells wide takes where its align puts it:
+    /// the one placement the hit test and every terminal painter read. It
+    /// fills the cell row its anchor's row lies in, [`LABEL_GAP`] rows up for
+    /// [`Align::Over`].
+    pub fn place(&self, w: u16) -> crate::layout::Bounds {
+        let h = crate::layout::CELL_ROWS;
         let x = match self.align {
             Align::Left => self.at.x,
             Align::Right => self.at.x.saturating_sub(w),
             Align::Over | Align::Centre => self.at.x.saturating_sub(w / 2),
         };
-        let y = match self.align {
-            Align::Over => self.at.y.saturating_sub(LABEL_GAP + h),
+        let row = match self.align {
+            Align::Over => self.at.y.saturating_sub(LABEL_GAP),
             Align::Left | Align::Right | Align::Centre => self.at.y,
         };
         crate::layout::Bounds {
             x,
-            y,
+            y: row / h * h,
             width: w,
             height: h,
         }

@@ -33,6 +33,8 @@ pub(crate) mod atmosphere;
 #[doc(hidden)]
 pub mod audio;
 #[doc(hidden)]
+pub mod badge;
+#[doc(hidden)]
 pub mod burn;
 pub(crate) mod celestial;
 pub(crate) mod character;
@@ -40,11 +42,7 @@ pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
-pub mod neon_sign;
-#[doc(hidden)]
 pub use creatures::PET_CYCLE_MS;
-#[doc(hidden)]
-pub mod badge;
 #[doc(hidden)]
 pub mod cutaway;
 #[doc(hidden)]
@@ -64,6 +62,8 @@ pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
 pub mod look;
+#[doc(hidden)]
+pub mod neon_sign;
 pub(crate) mod outside;
 pub mod pack;
 pub mod pathfind;
@@ -76,6 +76,8 @@ pub mod render_scale;
 pub mod sim;
 pub mod sky;
 pub(crate) mod skyline;
+#[doc(hidden)]
+pub mod tally;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;

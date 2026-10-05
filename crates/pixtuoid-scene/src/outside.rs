@@ -312,12 +312,12 @@ pub(crate) mod tests {
     }
 
     /// Under each of [`every_sky`], a painter's frame matches the one whose
-    /// windows show its instant's no-weather sky everywhere but on glass
-    /// nothing else paints, and a sky other than a clear one changes some
-    /// glass. `frames` paints a sky's frame and that twin, `covered` gives each
-    /// pixel something other than a window paints at the sky's instant (see
-    /// [`painted_alone`]) and `on_glass` whether a pixel is glass. Returns the
-    /// glass pixels something hangs over, for the painter's population guard.
+    /// windows show its instant's no-weather sky — the same room, lit alike —
+    /// everywhere but on glass nothing else paints, and a sky other than a
+    /// clear one changes some glass. `frames` paints a sky's frame and that
+    /// twin, `covered` the pixels something else paints at its instant
+    /// ([`painted_alone`]). Returns the glass pixels something hangs over, for
+    /// the painter's population guard.
     pub(crate) fn assert_the_outside_reaches_only_the_glass(
         painter: &str,
         (w, h): (u16, u16),

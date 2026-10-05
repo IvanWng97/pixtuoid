@@ -3856,7 +3856,11 @@ fn a_bubble_hangs_over_its_speakers_badge_in_both_looks() {
     let bubble = find(&classic, TextRole::Bubble(speaker)).expect("the classic's bubble");
     assert_eq!(bubble.text(), "LGTM!");
     assert_eq!(bubble.at.x, badge.at.x, "centred over the badge");
-    assert!(bubble.at.y < badge.at.y, "above it");
+    assert_eq!(
+        badge.at.y - bubble.at.y,
+        2 * crate::layout::CELL_ROWS,
+        "two cell rows up, a row clear of the badge"
+    );
     let office = crate::display::Office {
         layout: &layout,
         pack: &pack,
@@ -6071,9 +6075,9 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
     assert!(asymmetric > 0, "a profile is not its own mirror");
 }
 
-/// Under every sky the sweep draws, a frame matches the one whose windows show
-/// its instant's no-weather sky — the same room, lit alike — everywhere but on
-/// glass no fixture paints.
+/// The classic holds to
+/// [`assert_the_outside_reaches_only_the_glass`](crate::outside::tests::assert_the_outside_reaches_only_the_glass),
+/// its fixtures being what else paints.
 #[test]
 fn the_outside_reaches_only_the_glass() {
     use crate::outside::tests::{UNPAINTED, painted_alone};
@@ -6209,4 +6213,76 @@ fn the_outside_reaches_only_the_glass() {
             "no {kind} hangs over a window, so none was compared there"
         );
     }
+}
+
+/// The neon halo lifts the window glass it falls on in the frame itself, as
+/// the cutaway's glass takes the sign's glow: the frame lit by the tube differs
+/// from the one with the tube off on glass the sign does not cover.
+#[test]
+fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
+    let (scene, _, _, now0, pack) = sim_rig();
+    let layout = SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+        .expect("192x160 fits");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let night = crate::localclock::at_hour(23);
+    let paint = |neon| {
+        let frame = SimFrame {
+            neon,
+            ..frame.clone()
+        };
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+        paint_frame(
+            &mut PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                timing: Motion::Full.timing(night),
+                sky: crate::sky::Sky::at_with(night, crate::sky::Weather::Clear),
+                outside: None,
+                buf: &mut buf,
+                cache: &mut FrameCache::new(),
+                base_fill: &mut BaseFillCache::new(),
+                shadows: &mut crate::ground::DepthsCache::default(),
+                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+                floor: crate::floor::FloorMeta::ground(),
+                walks: &owned.route.walks,
+                debug_walkable: false,
+            },
+            &frame,
+        );
+        buf
+    };
+    let (lit, dark) = (
+        paint(crate::floor::NeonLevels::FLASH),
+        paint(crate::floor::NeonLevels::EMPTY),
+    );
+    let sign = layout
+        .fixtures()
+        .find(|f| f.kind == FixtureKind::NeonSign)
+        .expect("the office hangs its sign")
+        .visual;
+    let under_sign = |x: u16, y: u16| {
+        (sign.x..sign.x + sign.width).contains(&x) && (sign.y..sign.y + sign.height).contains(&y)
+    };
+    let lifted = (0..layout.buf_h)
+        .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+        .filter(|&(x, y)| layout.glass_at(x, y) && !under_sign(x, y))
+        .filter(|&(x, y)| lit.get(x, y) != dark.get(x, y))
+        .count();
+    assert!(lifted > 0, "the sign's glow reaches no window glass");
 }

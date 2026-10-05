@@ -559,7 +559,7 @@ fn every_painter_shows_the_one_board_of_a_floor() {
     let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
     let floating = pixtuoid_scene::neon_sign::wall_board(
         &one_floor,
-        pixtuoid_scene::neon_sign::office_gateway(&one_floor),
+        pixtuoid_scene::tally::office_gateway(&one_floor),
         None,
         Motion::Full,
         now,

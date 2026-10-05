@@ -222,7 +222,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     // Straddlers: tall sprite on the wall, shallow ground strip
                     // on the carpet apron at the wall base.
                     WallDecor::Bookshelf | WallDecor::MeetingScreen => Container::WallApron,
-                    WallDecor::ExitSign | WallDecor::CorkBoard => Container::WallBand,
+                    WallDecor::ExitSign | WallDecor::BulletinBoard => Container::WallBand,
                 };
                 out.push(Piece::table(
                     format!("wall_decor[{item}] {kind:?}"),
@@ -1300,11 +1300,11 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
             missing.push(k);
         }
     }
-    // CorkBoard: allowlisted — unplaced by design, registered for pack
+    // BulletinBoard: allowlisted — unplaced by design, registered for pack
     // authors, so it has no push site in compute.
     for kind in WallDecor::ALL
         .iter()
-        .filter(|&&k| k != WallDecor::CorkBoard)
+        .filter(|&&k| k != WallDecor::BulletinBoard)
     {
         let k = format!("wall:{kind:?}");
         if !seen.contains(&k) {
