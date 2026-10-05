@@ -121,6 +121,7 @@ libc               = "0.2"
 windows-sys        = "0.61"
 criterion          = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
 insta              = "1"
+snapbox            = "1"
 proptest           = "1"
 tempfile           = "3"
 # Dev-only: every test that sets or unsets an env var goes through it, behind
