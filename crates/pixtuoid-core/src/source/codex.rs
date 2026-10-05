@@ -150,6 +150,10 @@ pub(crate) const RI_SEARCH: &[&str] =
 
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &codex_id_from_path(Path::new(transcript_path)));
     let Some(obj) = v.as_object() else {

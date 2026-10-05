@@ -384,7 +384,7 @@ pub const ELEVATOR_W: u16 = 16;
 pub const ELEVATOR_H: u16 = 14;
 
 /// The buffer rows a half-block terminal cell shows.
-pub(crate) const CELL_ROWS: u16 = 2;
+pub const CELL_ROWS: u16 = 2;
 
 /// The rows over a door whose top row is `door_y` that the terminal's floor
 /// indicator writes its text across: the whole cell above the door's.

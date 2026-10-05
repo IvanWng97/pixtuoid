@@ -147,6 +147,10 @@ pub(crate) const DECODED_FIELDS: &[&str] = &[
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` and never panic — real files
 /// carry embedded-newline / U+2028 corruption (upstream copilot-cli #2649/#2012).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_copilot_line(
     transcript_path: &str,
     source: &str,

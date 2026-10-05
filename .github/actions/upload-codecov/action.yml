@@ -1,4 +1,4 @@
-name: Upload report to Codecov
+name: Upload coverage to Codecov
 description: Require a generated report and make advisory upload failures visible
 
 inputs:
@@ -7,9 +7,6 @@ inputs:
     required: true
   flag:
     description: Codecov flag for this report
-    required: true
-  report_type:
-    description: Codecov report type (coverage or test_results)
     required: true
 
 runs:
@@ -34,7 +31,7 @@ runs:
       with:
         files: ${{ inputs.file }}
         flags: ${{ inputs.flag }}
-        report_type: ${{ inputs.report_type }}
+        report_type: coverage
         disable_search: true
         plugins: noop
         fail_ci_if_error: true
@@ -46,9 +43,8 @@ runs:
       env:
         REPORT_FILE: ${{ inputs.file }}
         REPORT_FLAG: ${{ inputs.flag }}
-        REPORT_TYPE: ${{ inputs.report_type }}
       run: |
-        message="Codecov $REPORT_TYPE upload failed for $REPORT_FILE (flag: $REPORT_FLAG); the report was generated, so this external-service failure is advisory."
+        message="Codecov coverage upload failed for $REPORT_FILE (flag: $REPORT_FLAG); the report was generated, so this external-service failure is advisory."
         echo "::warning title=Codecov upload failed::$message"
         {
           echo "### Codecov upload warning"

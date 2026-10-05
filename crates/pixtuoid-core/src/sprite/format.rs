@@ -1427,6 +1427,10 @@ pub const PACK_MANIFEST: &str = "pack.toml";
 
 /// Load a `Pack` from `dir`'s [`PACK_MANIFEST`] and its on-disk frame files,
 /// guarding each frame path against directory traversal outside `dir`.
+///
+/// # Errors
+///
+/// [`PackError::NoManifest`] if `dir` has no [`PACK_MANIFEST`]; otherwise if a file cannot be read or parsed, a frame path leaves `dir`, or the pack fails validation.
 #[cfg(feature = "native")]
 pub fn load_pack(dir: &Path) -> Result<Pack> {
     let toml_path = dir.join(PACK_MANIFEST);
@@ -1480,6 +1484,10 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
 }
 
 /// `load_pack` from in-memory strings, so it reads no files.
+///
+/// # Errors
+///
+/// If `pack_toml` does not parse, a frame it names is absent from `frames`, or the pack fails validation.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     let parsed: PackToml =
         toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
@@ -2949,8 +2957,7 @@ mod validation_floor_tests {
         );
     }
 
-    /// A density is author input multiplied by a frame dimension: unbounded, a
-    /// typo like `desk@60000x` overflows it.
+    /// Pins [`MAX_DENSITY_VARIANT`].
     #[test]
     fn a_density_past_the_ceiling_is_not_a_variant_at_all() {
         assert_eq!(split_density_variant("desk@60000x"), None);
