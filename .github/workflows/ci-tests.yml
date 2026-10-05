@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       full:
-        description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
+        description: 'False on a PR outside the merge queue: the Windows and macOS tests and the `if: inputs.full` jobs skip'
         type: boolean
         required: true
 
@@ -13,16 +13,38 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # The test platforms, listed once; the light tier keeps Linux. The full tier
+  # adds what the Linux entry compiles out: Windows (pipes, atomic-write retries;
+  # windows-latest is tracked to catch hosted-image changes) and macos-14 (Apple
+  # Silicon, BSD CLI, launchd, config paths). A job output, not include/exclude:
+  # `include` is applied after `exclude` and re-adds what it excluded
+  # (github/docs workflow-syntax.md, jobs.<job_id>.strategy.matrix).
+  platforms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        env:
+          FULL: ${{ inputs.full }}
+          ALL: >-
+            [{"platform": "linux", "runner": "ubuntu-latest", "flag": "unit", "timeout": 25},
+             {"platform": "windows", "runner": "windows-latest", "flag": "windows", "timeout": 25},
+             {"platform": "macos", "runner": "macos-14", "flag": "macos", "timeout": 20}]
+        run: |
+          echo "include=$(jq -c --argjson full "$FULL" \
+            'if $full then . else map(select(.platform == "linux")) end' <<< "$ALL")" >> "$GITHUB_OUTPUT"
+
   test:
     name: ${{ matrix.platform }}-test
+    needs: platforms
     strategy:
       fail-fast: false
-      # The light tier tests Linux; the full tier adds what the Linux entry
-      # compiles out: Windows (pipes, atomic-write retries; windows-latest is
-      # tracked to catch hosted-image changes) and macos-14 (Apple Silicon, BSD
-      # CLI, launchd, config paths).
       matrix:
-        include: ${{ fromJSON(inputs.full && '[{"platform":"linux","runner":"ubuntu-latest","flag":"unit","timeout":25},{"platform":"windows","runner":"windows-latest","flag":"windows","timeout":25},{"platform":"macos","runner":"macos-14","flag":"macos","timeout":20}]' || '[{"platform":"linux","runner":"ubuntu-latest","flag":"unit","timeout":25}]') }}
+        include: ${{ fromJSON(needs.platforms.outputs.include) }}
     runs-on: ${{ matrix.runner }}
     # nextest owns per-test hang limits.
     timeout-minutes: ${{ matrix.timeout }}
@@ -136,7 +158,7 @@ jobs:
     # single protected ci-gate silently lose coverage.
     if: ${{ always() }}
     needs:
-      [test, snapshots, smoke]
+      [platforms, test, snapshots, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

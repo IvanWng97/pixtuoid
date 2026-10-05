@@ -34,7 +34,9 @@ jobs:
     steps:
       - id: tier
         env:
-          FULL: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/merge-queue/') }}
+          # The queue's branches live in this repo; a fork's same-named branch
+          # must not buy itself the full tier's runners.
+          FULL: ${{ github.event_name != 'pull_request' || (startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.head.repo.full_name == github.repository) }}
         run: echo "full=$FULL" >> "$GITHUB_OUTPUT"
 
   lint:
