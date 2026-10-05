@@ -44,7 +44,6 @@ base64-simd        = { version = "0.8", optional = true }
 png                = { version = "0.18", optional = true }
 miniz_oxide        = { version = "0.8", optional = true }
 crossterm          = { workspace = true }
-unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
 # `preserve_order` is enabled HERE, not workspace-wide: config merges are a

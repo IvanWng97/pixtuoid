@@ -406,7 +406,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             paint_effects(buf, *effects, theme);
         }
         DrawableKind::RoomWall { piece, rows } => {
-            crate::wall::paint_wall(
+            crate::cutaway::wall::paint_wall(
                 buf,
                 theme,
                 *piece,

@@ -417,7 +417,7 @@ mod tests {
             bytes
         };
         assert!(sent(&Dirty::All) > 0);
-        assert_eq!(sent(&Dirty::Rects(vec![])), 0);
+        assert_eq!(sent(&Dirty::Unchanged), 0);
         assert_eq!(sent(&Dirty::All), 0);
     }
 }
