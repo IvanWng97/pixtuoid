@@ -210,7 +210,7 @@ fn placeholders_fill_the_scene_and_never_the_footer() {
 }
 
 /// The board's star is a link in both looks: the pointer finds it on the
-/// cells it is drawn on, the image's as the half-blocks'.
+/// cells the classic writes it in, the image's as the half-blocks'.
 #[test]
 fn the_star_is_clickable_in_both_looks() {
     use crate::tui::hit_test::SceneHit;
@@ -226,7 +226,22 @@ fn the_star_is_clickable_in_both_looks() {
     };
     let on_classic = star_cells(&|c, r| matches!(classic.scene_hit_at(c, r), Some(SceneHit::Star)));
     let on_cutaway = star_cells(&|c, r| matches!(cutaway.scene_hit_at(c, r), Some(SceneHit::Star)));
-    assert!(!on_classic.is_empty(), "the classic's star is a link");
+    let buf = classic.terminal.backend().buffer();
+    let star: Vec<char> = pixtuoid_scene::board::BOARD_STAR.chars().collect();
+    let width = star.len() as u16;
+    let written: Vec<(u16, u16)> = (0..40u16)
+        .flat_map(|row| (0..=120 - width).map(move |col| (col, row)))
+        .find(|&(col, row)| {
+            (col..)
+                .zip(&star)
+                .all(|(x, c)| buf[(x, row)].symbol() == &*c.encode_utf8(&mut [0; 4]))
+        })
+        .map(|(col, row)| (col..col + width).map(|x| (x, row)).collect())
+        .expect("the classic writes the star");
+    assert_eq!(
+        on_classic, written,
+        "the classic's star is a link on its cells"
+    );
     assert_eq!(
         on_cutaway, on_classic,
         "the cutaway's star is the same link"
