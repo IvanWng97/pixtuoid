@@ -403,13 +403,15 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_subscribes_only_verified_emit_channels_and_never_awaits() {
+    fn the_plugin_subscribes_only_verified_channels_and_never_awaits() {
         // Allowlist, not denylist: upstream carries ~21 non-emit (waterfall/
         // serial/parallel) events and the set churns, so naming bad ones can
         // only sample the invariant. The enforceable form: every `ctx.on`
-        // call site names a channel verified `@mode emit` upstream
-        // (`runtime-types.ts` for the two agent channels, `session/src/
-        // index.ts` for `session/event`; fetched 2026-09-01).
+        // call site names a channel verified upstream — `@mode emit`, or
+        // `agent/created`, `@mode serial` since dsh renamed `agent/session-start`
+        // (deepseek-harness 9b7a8ccc), whose listener the no-await assert below
+        // keeps synchronous (`runtime-types.ts` for the agent channels,
+        // `session/src/index.ts` for `session/event`; fetched 2026-10-05).
         let subscribed: std::collections::BTreeSet<&str> = PLUGIN_TEMPLATE
             .split(r#"ctx.on("#)
             .skip(1)
@@ -420,11 +422,8 @@ mod tests {
                     .expect("closed quote")
             })
             .collect();
-        let allowed = std::collections::BTreeSet::from([
-            "agent/session-start",
-            "agent/disposed",
-            "session/event",
-        ]);
+        let allowed =
+            std::collections::BTreeSet::from(["agent/created", "agent/disposed", "session/event"]);
         assert_eq!(subscribed, allowed);
         assert!(
             !PLUGIN_TEMPLATE.contains("await"),
