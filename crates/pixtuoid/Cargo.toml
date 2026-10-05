@@ -44,7 +44,6 @@ base64-simd        = { version = "0.8", optional = true }
 png                = { version = "0.18", optional = true }
 miniz_oxide        = { version = "0.8", optional = true }
 crossterm          = { workspace = true }
-unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
 # `preserve_order` is enabled HERE, not workspace-wide: config merges are a
@@ -64,7 +63,7 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 which              = "8"
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
-chrono             = { version = "0.4", default-features = false, features = ["clock"] }
+chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays
 # window-free): winit is the frameless always-on-top window + main-thread event
@@ -112,33 +111,33 @@ audio = ["dep:rodio"]
 graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
-# O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs. Same 0.2 as
-# pixtuoid-core/hook — no second build.
+# O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 # Focus-jump activation (focus/macos.rs). Pinned to the SAME objc2 stack winit
 # already pulls so the bindings don't double-compile. This MUST track winit's
 # objc2-app-kit major, never float ahead: a lone bump to 0.3.x drags in a whole
 # SECOND objc2 stack beside winit's AND breaks the activate API — so dependabot is
-# told to ignore it (.github/dependabot.yml) until winit itself moves.
+# told to ignore it (.github/dependabot.yml) until winit itself moves, and
+# deny.toml fails CI on a second copy.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
 
 # Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol needs
 # an X11 client, and x11rb is already in-tree transitively via winit — so this MUST
 # track the version winit AND softbuffer resolve to, exactly like the objc2-app-kit
-# stanza above. A grouped dependabot bump to "0.14" silently built a SECOND x11rb +
-# x11rb-protocol on every Linux build, and `cargo deny`'s [bans] is only "warn" so
-# nothing caught it; dependabot holds this at 0.13.x until winit itself moves.
+# stanza above. A grouped dependabot bump to "0.14" once silently built a SECOND
+# x11rb + x11rb-protocol on every Linux build; dependabot holds this at 0.13.x
+# until winit itself moves, and deny.toml fails CI on a second copy.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = "0.13"
 
 # GetShortPathNameW for the Codex/Reasonix Windows hook path: a
 # space/metacharacter-bearing install path resolves to its DOS 8.3 short form so
-# cmd.exe /C can invoke it. Same 0.61 major as pixtuoid-core — no second build.
+# cmd.exe /C can invoke it.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = [
+windows-sys = { workspace = true, features = [
     "Win32_Storage_FileSystem",
     # focus/windows.rs: Toolhelp32 ancestor walk + EnumWindows/SetForegroundWindow
     "Win32_System_Diagnostics_ToolHelp",
@@ -151,7 +150,7 @@ windows-sys = { version = "0.61", features = [
 # `tests/wire_to_pixels.rs` drives real fixture bytes through the shared
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
-tempfile = "3"
+tempfile = { workspace = true }
 temp-env = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
@@ -161,10 +160,10 @@ snapbox  = { version = "1", features = ["json"] }
 schemars = "1"
 # test-util: paused-clock signal-arm tests in runtime/driver.rs (headless_loop).
 tokio    = { workspace = true, features = ["test-util"] }
-image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
-# A decoder our SIXEL encoder's tests did not write: ratatui-image's own.
+image    = { workspace = true, features = ["gif"] }
+# A decoder our SIXEL encoder's tests did not write.
 icy_sixel = "0.5"
-insta    = "1"
+insta    = { workspace = true }
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
 
