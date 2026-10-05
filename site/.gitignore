@@ -1,6 +1,8 @@
 # build output
 dist/
 public/wasm/
+# Rendered from the tree by .github/actions/gen-demos (site CI and Pages).
+public/demos/
 # deps
 node_modules/
 # astro

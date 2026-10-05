@@ -46,7 +46,6 @@ miniz_oxide        = { version = "0.8", optional = true }
 # `event-stream`: the TUI loop awaits input beside its frame clock and signals.
 crossterm          = { workspace = true, features = ["event-stream"] }
 futures-util       = { version = "0.3", default-features = false }
-unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
 # `preserve_order` is enabled HERE, not workspace-wide: config merges are a

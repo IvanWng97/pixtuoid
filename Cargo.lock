@@ -2703,7 +2703,6 @@ dependencies = [
  "toml_edit",
  "tracing",
  "tracing-subscriber",
- "unicode-width",
  "which",
  "windows-sys 0.61.2",
  "winit",
@@ -2764,6 +2763,7 @@ dependencies = [
  "tempfile",
  "toml_edit",
  "tracing",
+ "unicode-segmentation",
  "unicode-width",
 ]
 
