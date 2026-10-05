@@ -43,11 +43,14 @@ fn sources_json_lists_every_source_in_an_isolated_home() {
 #[test]
 fn a_failing_connect_emits_the_outcome_rows_and_exits_nonzero() {
     let home = tempfile::tempdir().expect("tempdir");
-    // Block claude-code's hook install deterministically: `~/.claude` as a
-    // regular FILE makes writing `~/.claude/settings.json` error, while the
-    // pixtuoid config under `~/.config` still writes — so connect reaches the
-    // install step, fails it, and rolls the flag back.
-    std::fs::write(home.path().join(".claude"), b"not a directory").expect("seed .claude file");
+    // Block claude-code's hook install deterministically: its plugin dir as a
+    // regular FILE makes writing the hooks file error, while the pixtuoid config
+    // beside it still writes — so connect reaches the install step, fails it,
+    // and rolls the flag back.
+    let pixtuoid_config = home.path().join(".config").join("pixtuoid");
+    std::fs::create_dir_all(&pixtuoid_config).expect("pixtuoid config dir");
+    std::fs::write(pixtuoid_config.join("claude-plugin"), b"not a directory")
+        .expect("seed the plugin dir as a file");
 
     let output = common::isolated(&["connect", "claude-code", "--json"], home.path())
         .output()

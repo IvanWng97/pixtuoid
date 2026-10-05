@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde_json::{Value, json};
 
 use crate::install::SENTINEL_KEY;
@@ -52,10 +52,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         .ok_or_else(|| {
             // Erroring mirrors the sibling home-anchored targets instead of
             // silently writing a CWD-relative config Reasonix never reads.
-            anyhow!(
-                "cannot resolve Reasonix's home (REASONIX_HOME and the platform \
-                 home/config dir unset); pass --config <path>"
-            )
+            io::home_unset("Reasonix's home", "REASONIX_HOME/APPDATA/HOME/USERPROFILE")
         })
 }
 

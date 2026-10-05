@@ -284,7 +284,8 @@ fn pet_leg_boundary_no_pop() {
         .unwrap();
     let after = r.drawn_pet().map(|f| (f.centre.x, f.centre.y));
     if let (Some((x0, y0)), Some((x1, y1))) = (before, after) {
-        let gap = (x0 as i32 - x1 as i32).unsigned_abs() + (y0 as i32 - y1 as i32).unsigned_abs();
+        let gap = (i32::from(x0) - i32::from(x1)).unsigned_abs()
+            + (i32::from(y0) - i32::from(y1)).unsigned_abs();
         assert!(
             gap <= 16,
             "pet leg boundary teleports (gap={gap}px, ({x0},{y0})→({x1},{y1}))"
