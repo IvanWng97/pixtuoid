@@ -887,13 +887,38 @@ fn save_version_refuses_to_overwrite_a_malformed_config() {
 }
 
 #[test]
-fn save_on_a_missing_config_creates_it() {
+fn save_backs_up_an_existing_config_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("config.toml");
+    let original = "theme = \"normal\"\nmax-desks = 8\n";
+    std::fs::write(&p, original).unwrap();
+    let bak = dir.path().join("config.toml.pixtuoid.bak");
+
+    save(&p, "cyberpunk").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&bak).unwrap(),
+        original,
+        "first overwrite of an existing config takes a one-time backup"
+    );
+
+    save(&p, "dracula").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&bak).unwrap(),
+        original,
+        "the backup is once — later saves must not churn it"
+    );
+    assert_eq!(load(&p, &mut Vec::new()).theme.as_deref(), Some("dracula"));
+}
+
+#[test]
+fn save_on_a_missing_config_creates_it_without_a_backup() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     save(&p, "cyberpunk").unwrap();
-    assert_eq!(
-        load(&p, &mut Vec::new()).theme.as_deref(),
-        Some("cyberpunk")
+    assert!(p.exists());
+    assert!(
+        !dir.path().join("config.toml.pixtuoid.bak").exists(),
+        "nothing existed to back up"
     );
 }
 

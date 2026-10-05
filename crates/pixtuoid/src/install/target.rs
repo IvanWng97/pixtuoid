@@ -16,7 +16,7 @@ pub enum BinaryStrategy {
 /// `changed` compares the PARSED document before and after the merge, never the
 /// serialized bytes (which always differ from a hand-formatted file). A byte
 /// comparison would make a semantic no-op look like a change, triggering a
-/// rewrite of the user's formatting.
+/// destructive rewrite and backup deletion on `uninstall`.
 #[derive(Debug)]
 pub struct MergeOutcome {
     pub content: String,
@@ -97,6 +97,8 @@ pub struct HostRegistration {
     pub legacy_config: fn() -> Result<PathBuf>,
     pub legacy_uninstall: fn(content: &str) -> Result<MergeOutcome>,
 }
+
+pub(crate) const BACKUP_SUFFIX: &str = "pixtuoid.bak";
 
 pub(crate) const CLAUDE: Target = Target {
     name: "claude",

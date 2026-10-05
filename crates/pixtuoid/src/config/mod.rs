@@ -298,6 +298,7 @@ where
         doc
     };
     mutate(&mut doc);
+    lock.backup_once(crate::install::target::BACKUP_SUFFIX)?;
     lock.write_atomic(&doc.to_string())
 }
 

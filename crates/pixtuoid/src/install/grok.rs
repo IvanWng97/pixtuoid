@@ -147,7 +147,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 }
 
 /// Render the whole managed file (it is wholly ours). `changed` is a SEMANTIC
-/// diff, so a hand-reformatted but equivalent file is never rewritten.
+/// diff, so a hand-reformatted but equivalent file never churns a backup.
 pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let rendered = render_hooks_file(hook_cmd);
     let existing: Value = serde_json::from_str(content.trim()).unwrap_or_else(|_| json!({}));
