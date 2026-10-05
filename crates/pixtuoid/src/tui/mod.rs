@@ -450,6 +450,10 @@ pub type Term = Terminal<CrosstermBackend<Stdout>>;
 /// Enters raw mode + the alternate screen ATOMICALLY: a failure after raw mode is on rolls
 /// the terminal all the way back, or the error path strands the user's shell echo-less
 /// and/or on the alt screen. `Terminal::new`'s `.size()` query can fail too.
+///
+/// # Errors
+///
+/// If the Windows console lacks VT support, or enabling raw mode, the alternate screen or mouse capture fails, or the terminal size query fails.
 pub fn setup_terminal() -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
@@ -483,6 +487,10 @@ pub fn setup_terminal() -> Result<Term> {
 /// DisableMouseCapture must run while raw mode is still ON: on Windows it restores the
 /// input mode snapshotted at Enable time (raw-era), so after `disable_raw_mode` it re-raws
 /// the console. Either slip strands the user's shell echo-less.
+///
+/// # Errors
+///
+/// If writing the graphics unwind, the mouse-capture and alternate-screen escapes, or `disable_raw` fails; every step still runs.
 pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
@@ -506,6 +514,11 @@ fn unwind_after<W: std::io::Write>(
     Ok(())
 }
 
+/// Restore the terminal modes and cursor that [`setup_terminal`] changed.
+///
+/// # Errors
+///
+/// If restoring the terminal modes or showing the cursor fails.
 pub fn teardown_terminal(term: &mut Term) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.

@@ -3566,7 +3566,11 @@ mod tests {
                 };
                 let shadow = ground_shadow(span, &kind, &pack).expect("a desk casts a shadow");
                 let ((_, top), (_, past)) = shadow.bounds();
-                assert_eq!((top + past) / 2, span.depth + 1, "{art} at scale {s}");
+                assert_eq!(
+                    u16::midpoint(top, past),
+                    span.depth + 1,
+                    "{art} at scale {s}"
+                );
             }
         }
     }
