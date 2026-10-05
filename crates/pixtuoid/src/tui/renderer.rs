@@ -499,7 +499,7 @@ pub(super) fn flush_buffer_to_term_at_offset(
     let cell_rows = (buf.height() / 2) as usize;
     for cy in 0..cell_rows {
         let target_y = cy as i32 + y_offset;
-        if target_y < 0 || target_y >= scene_rect.height as i32 {
+        if target_y < 0 || target_y >= i32::from(scene_rect.height) {
             continue;
         }
         for cx in 0..(buf.width() as usize) {
@@ -543,9 +543,9 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
         return;
     }
     for px in buf.as_mut_slice() {
-        px.r = (px.r as f32 * factor) as u8;
-        px.g = (px.g as f32 * factor) as u8;
-        px.b = (px.b as f32 * factor) as u8;
+        px.r = (f32::from(px.r) * factor) as u8;
+        px.g = (f32::from(px.g) * factor) as u8;
+        px.b = (f32::from(px.b) * factor) as u8;
     }
 }
 

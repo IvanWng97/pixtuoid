@@ -16,8 +16,7 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{ClaudeCodeSource, cc_watcher, live_cc_session_ids};
 
-/// homebrew-core contract: their formula's `test do` asserts this exact id, so
-/// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
+/// The Claude Code source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "claude-code";
 
 /// The label the attachment decoder synthesizes for the `ultra_effort_exit`

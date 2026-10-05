@@ -25,11 +25,14 @@ import tabs from '../install.json';
     </div>
 
     <div class="install__box reveal">
-      <div class="install__tabs" role="group" aria-label="Install method">
+      <div class="install__tabs" role="tablist" aria-label="Install method">
         {tabs.map((t, i) => <button
           class:list={['install__tab', { 'is-active': i === 0 }]}
+          id={`install-tab-${t.id}`}
+          role="tab"
           data-tab={t.id}
-          aria-pressed={i === 0 ? 'true' : 'false'}
+          aria-selected={i === 0 ? 'true' : 'false'}
+          tabindex={i === 0 ? 0 : -1}
           aria-controls={`install-panel-${t.id}`}
         >
           {t.label}
@@ -39,6 +42,8 @@ import tabs from '../install.json';
       {tabs.map((t, i) => <div
         id={`install-panel-${t.id}`}
         class:list={['install__panel', { 'is-active': i === 0 }]}
+        role="tabpanel"
+        aria-labelledby={`install-tab-${t.id}`}
         data-panel={t.id}
       >
         <Code code={t.cmds.join('\n')} lang="bash" theme="vesper" />
@@ -62,21 +67,39 @@ import tabs from '../install.json';
     const box = document.querySelector('.install__box');
     if (!box) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    box.querySelectorAll('.install__tab').forEach(function (tab) {
+    // WAI-ARIA APG tabs: one tab stop, arrows (and Home/End) move and select.
+    const tabs = Array.from(box.querySelectorAll('.install__tab'));
+    function select(tab) {
+      const id = tab.dataset.tab;
+      function swap() {
+        tabs.forEach(function (t) {
+          const on = t === tab;
+          t.classList.toggle('is-active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          t.tabIndex = on ? 0 : -1;
+        });
+        box.querySelectorAll('.install__panel').forEach(function (p) {
+          p.classList.toggle('is-active', p.dataset.panel === id);
+        });
+      }
+      if (!mq.matches && document.startViewTransition) document.startViewTransition(swap);
+      else swap();
+    }
+    tabs.forEach(function (tab, i) {
       tab.addEventListener('click', function () {
-        const id = tab.dataset.tab;
-        function swap() {
-          box.querySelectorAll('.install__tab').forEach(function (t) {
-            const on = t === tab;
-            t.classList.toggle('is-active', on);
-            t.setAttribute('aria-pressed', on ? 'true' : 'false');
-          });
-          box.querySelectorAll('.install__panel').forEach(function (p) {
-            p.classList.toggle('is-active', p.dataset.panel === id);
-          });
-        }
-        if (!mq.matches && document.startViewTransition) document.startViewTransition(swap);
-        else swap();
+        select(tab);
+      });
+      tab.addEventListener('keydown', function (e) {
+        const to = {
+          ArrowLeft: (i - 1 + tabs.length) % tabs.length,
+          ArrowRight: (i + 1) % tabs.length,
+          Home: 0,
+          End: tabs.length - 1,
+        }[e.key];
+        if (to === undefined) return;
+        e.preventDefault();
+        tabs[to].focus();
+        select(tabs[to]);
       });
     });
     box.querySelectorAll('.install__copy').forEach(function (btn) {

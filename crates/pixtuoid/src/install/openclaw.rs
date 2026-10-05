@@ -99,9 +99,9 @@ fn resolve_openclaw_state_dir(
         return Ok(d);
     }
     let home = openclaw_home_env.or(os_home_first).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve OpenClaw's home (OPENCLAW_STATE_DIR/OPENCLAW_HOME/HOME/USERPROFILE \
-                 unset); pass --config <path>"
+        io::home_unset(
+            "OpenClaw's home",
+            "OPENCLAW_STATE_DIR/OPENCLAW_HOME/HOME/USERPROFILE",
         )
     })?;
     let candidates = state_dir_candidates(&home);
@@ -660,7 +660,7 @@ mod tests {
     fn openclaw_state_dir_errors_when_nothing_resolves() {
         let err = resolve_openclaw_state_dir(None, None, None, |_| false).unwrap_err();
         assert!(
-            err.to_string().contains("pass --config"),
+            err.to_string().ends_with("unset); set one and reconnect"),
             "unresolvable home must surface the actionable error: {err}"
         );
     }

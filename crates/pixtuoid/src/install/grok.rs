@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 
@@ -67,10 +68,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         pixtuoid_core::platform::path_env("GROK_HOME").as_deref(),
         pixtuoid_core::platform::user_home_opt().as_deref(),
     ) {
-        anyhow::bail!(
-            "cannot resolve the home directory (HOME/USERPROFILE unset) and GROK_HOME is \
-             unset — grok would not read hooks written to a fallback path; pass --config <path>"
-        );
+        return Err(io::home_unset("grok's home", "GROK_HOME/HOME/USERPROFILE"));
     }
     Ok(pixtuoid_core::source::grok::grok_home()
         .join("hooks")
@@ -147,7 +145,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 }
 
 /// Render the whole managed file (it is wholly ours). `changed` is a SEMANTIC
-/// diff, so a hand-reformatted but equivalent file never churns a backup.
+/// diff, so a hand-reformatted but equivalent file is never rewritten.
 pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
     let rendered = render_hooks_file(hook_cmd);
     let existing: Value = serde_json::from_str(content.trim()).unwrap_or_else(|_| json!({}));

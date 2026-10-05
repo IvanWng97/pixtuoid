@@ -275,6 +275,7 @@ const HAIR_PRESETS: &[Rgb] = &[
         b: 0xb0,
     }, // silver-grey
 ];
+const _: () = assert!(!HAIR_PRESETS.is_empty());
 const SKIN_PRESETS: &[Rgb] = &[
     Rgb {
         r: 0xf4,
@@ -302,6 +303,7 @@ const SKIN_PRESETS: &[Rgb] = &[
         b: 0x64,
     }, // warm tan
 ];
+const _: () = assert!(!SKIN_PRESETS.is_empty());
 
 /// A burning agent's hair — an alias of the flame gradient's deep base, so a
 /// gradient tweak can't desync the hair from the crown.
@@ -321,20 +323,24 @@ pub(crate) const PANTS_KEY: char = 'P';
 /// One agent's colors, as the palette overrides a character frame is
 /// recolored with. `Some(glow_tint)` blends the skin toward the monitor glow so
 /// a seated agent reads as lit by their screen.
+#[deny(
+    clippy::cast_possible_truncation,
+    reason = "a hash picks through `crate::spread`, alike on every target"
+)]
 pub(crate) fn agent_overrides(
     agent: &AgentSlot,
     glow_tint: Option<Rgb>,
     burn: crate::burn::BurnTier,
 ) -> [(char, Pixel); 4] {
-    let id_seed = agent.agent_id.raw() as usize;
+    let id_seed = agent.agent_id.raw();
     let outfit_seed = outfit_seed_for(agent);
-    let outfit = OUTFITS[outfit_seed as usize % OUTFITS.len()];
+    let outfit = OUTFITS[crate::spread(outfit_seed, OUTFITS.len())];
     let hair = if burn == crate::burn::BurnTier::Normal {
-        HAIR_PRESETS[(id_seed / 7) % HAIR_PRESETS.len()]
+        HAIR_PRESETS[crate::spread(id_seed / 7, HAIR_PRESETS.len())]
     } else {
         EMBER_HAIR
     };
-    let skin = SKIN_PRESETS[(id_seed / 13) % SKIN_PRESETS.len()];
+    let skin = SKIN_PRESETS[crate::spread(id_seed / 13, SKIN_PRESETS.len())];
     let final_skin = if let Some(tint) = glow_tint {
         blend_rgb(skin, tint, 0.18)
     } else {

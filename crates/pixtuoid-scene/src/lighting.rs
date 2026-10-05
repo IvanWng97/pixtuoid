@@ -167,7 +167,7 @@ impl Emitter {
             // Nothing lights inside the panel: its brightest cells stand one
             // out from its edge.
             Light::Glow { reach, .. } => {
-                let near = 1.0 - 1.0 / reach as f32;
+                let near = 1.0 - 1.0 / f32::from(reach);
                 self.strength * near * near
             }
             Light::Patch { .. } => self.strength * MONITOR_HALO_SHARE,
@@ -195,18 +195,18 @@ impl Emitter {
                 share,
             } => {
                 let peak = strength * share;
-                let r2max = (radius as f32) * (radius as f32);
-                let dx = x - centre.x as f32;
-                let dy = y - centre.y as f32;
+                let r2max = f32::from(radius) * f32::from(radius);
+                let dx = x - f32::from(centre.x);
+                let dy = y - f32::from(centre.y);
                 let r2 = dx * dx + dy * dy;
                 (r2 <= r2max).then(|| (1.0 - (r2 / r2max).sqrt()) * peak)
             }
             Light::Glow { at, w, h, reach } => {
-                let (left, right) = (at.x as f32, (at.x + w - 1) as f32);
-                let (top, bottom) = (at.y as f32, (at.y + h - 1) as f32);
+                let (left, right) = (f32::from(at.x), f32::from(at.x + w - 1));
+                let (top, bottom) = (f32::from(at.y), f32::from(at.y + h - 1));
                 let dx = (left - x).max(x - right).max(0.0);
                 let dy = (top - y).max(y - bottom).max(0.0);
-                let left_of_reach = 1.0 - (dx * dx + dy * dy).sqrt() / reach as f32;
+                let left_of_reach = 1.0 - (dx * dx + dy * dy).sqrt() / f32::from(reach);
                 let outside = dx > 0.0 || dy > 0.0;
                 (outside && left_of_reach > 0.0).then_some(strength * left_of_reach * left_of_reach)
             }
@@ -226,7 +226,7 @@ impl Emitter {
                 }
                 let row = spill_rows(wx, w, slant).nth(usize::from(dy))?;
                 row.contains(&(x.floor() as i32))
-                    .then(|| strength * (1.0 - dy as f32 / SPILL_DEPTH as f32))
+                    .then(|| strength * (1.0 - f32::from(dy) / f32::from(SPILL_DEPTH)))
             }
             Light::Patch { centre } => {
                 let ((x0, y0), (x1, y1)) = self.bounds();
@@ -253,7 +253,7 @@ impl Emitter {
 fn spill_rows(x: u16, w: u16, slant: f32) -> impl Iterator<Item = std::ops::Range<i32>> {
     (0..SPILL_DEPTH).map(move |dy| {
         let widen = i32::from((dy / 2).min(SPILL_MAX_WIDEN));
-        let shift = (slant * dy as f32).round() as i32;
+        let shift = (slant * f32::from(dy)).round() as i32;
         let base_x = i32::from(x) + shift;
         base_x - widen..base_x + i32::from(w) + widen
     })
