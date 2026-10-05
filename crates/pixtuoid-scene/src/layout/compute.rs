@@ -595,14 +595,15 @@ pub(super) fn compute_with_seed(
 
     // ROUTER granularity, not just the pixel flood's — a ≤3 px channel is
     // pixel-connected and coarse-IMPASSABLE (#566).
-    let severed = |mask: &WalkableMask| -> bool {
+    // The router's reach of a connected `mask`; `None` while it is severed.
+    let connected = |mask: &WalkableMask| -> Option<ReachSet> {
         if !unreachable_walkable_cells(mask, conn_seed).is_empty() {
-            return true;
+            return None;
         }
         let reach = ReachSet::from_mask(mask, conn_seed);
         // South is where the demotion pass below retreats, so a reachable south seat
         // proves no decor arrangement strands a desk.
-        home_desks.iter().any(|&d| {
+        let stranded = home_desks.iter().any(|&d| {
             let chair = desk_walk_anchor_facing(d, crate::layout::Facing::South);
             approach_point(
                 Furniture::Desk,
@@ -613,29 +614,34 @@ pub(super) fn compute_with_seed(
                 chair,
                 &reach,
             ) == chair
-        })
+        });
+        (!stranded).then_some(reach)
     };
 
     let mut walkable = build_mask(&plants, &wall_decor);
     // Connectivity guard (#566): a decorative plant may NEVER disconnect the office. The
     // flood runs on EVERY compute — the check IS the guard, a net for ANY sealing decor.
-    if severed(&walkable) {
+    let mut reach = connected(&walkable);
+    if reach.is_none() {
         // The pocket cells sit ACROSS the drain from the seal-causing plant, so target
         // by "settled into the aisle", not "borders the pocket".
         plants.retain(|p| !plant_ground_in_bounds(p, &plan.cubicle_aisle));
         walkable = build_mask(&plants, &wall_decor);
+        reach = connected(&walkable);
         // Next rung — only a wall decor that TOUCHES THE FLOOR can seal a lane, so drop
         // those (by footprint, not by kind) before the drastic clear-all-plants.
-        if severed(&walkable) {
+        if reach.is_none() {
             wall_decor.retain(|d| !d.kind.stands_on_floor());
             walkable = build_mask(&plants, &wall_decor);
+            reach = connected(&walkable);
         }
-        if severed(&walkable) {
+        if reach.is_none() {
             plants.clear();
             walkable = build_mask(&plants, &wall_decor);
+            reach = connected(&walkable);
         }
         debug_assert!(
-            !severed(&walkable),
+            reach.is_some(),
             "#566 connectivity guard: a pocket (or a coarse-unroutable home desk) survived \
              dropping every scatter plant AND every floor-standing wall decor — a new NON-decor \
              seal cause needs its own fix"
@@ -643,7 +649,7 @@ pub(super) fn compute_with_seed(
     }
 
     // ReachSet's seed snap pulls a blocked seed into the adjacent component.
-    let reachable = ReachSet::from_mask(&walkable, conn_seed);
+    let reachable = reach.unwrap_or_else(|| ReachSet::from_mask(&walkable, conn_seed));
 
     // A narrow band can wall off a back-turned desk's SOUTH front — demote, don't drop.
     // A NET, not live code.
@@ -1128,8 +1134,8 @@ pub(super) fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Ve
     seen[idx(seed.x, seed.y)] = true;
     while let Some(p) = stack.pop() {
         for (dx, dy) in [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
-            let (nx, ny) = (p.x as i32 + dx, p.y as i32 + dy);
-            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+            let (nx, ny) = (i32::from(p.x) + dx, i32::from(p.y) + dy);
+            if nx < 0 || ny < 0 || nx >= i32::from(w) || ny >= i32::from(h) {
                 continue;
             }
             let (nx, ny) = (nx as u16, ny as u16);

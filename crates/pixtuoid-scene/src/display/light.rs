@@ -102,7 +102,7 @@ fn flash_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
     (sky.flash().clamp(0.0, 1.0) * f32::from(max)).round() as u8
 }
 
-/// One light as the cutaway paints it, resolved when the list is built: how many
+/// One light as the display list carries it, resolved when the list is built: how many
 /// steps it lifts each art pixel of its box, row by row from the top-left, the
 /// colour it tints them toward, and the room it lights, which bounds the lift.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -241,8 +241,8 @@ fn rank_of(kind: EmitterKind) -> u8 {
     }
 }
 
-/// The colour a light of `kind` tints toward, or `None` for one the cutaway
-/// leaves untinted.
+/// The colour a light of `kind` tints toward, or `None` for one that tints
+/// nothing.
 pub(crate) fn tint_of(
     kind: EmitterKind,
     theme: &Theme,

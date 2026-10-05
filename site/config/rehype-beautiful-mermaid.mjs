@@ -64,10 +64,11 @@ function labelled(svg, index, title, descr) {
     properties: { id: `${id}-${tagName}` },
     children: [{ type: 'text', value }],
   });
-  const labels = [];
-  if (title) labels.push(label('title', title));
-  if (descr) labels.push(label('desc', descr));
-  if (labels.length === 0) return svg;
+  // WCAG 1.1.1: a diagram is non-text content, so it ships its text alternative
+  if (!title || !descr) {
+    throw new Error(`mermaid diagram ${index} needs accTitle and accDescr (WCAG 1.1.1)`);
+  }
+  const labels = [label('title', title), label('desc', descr)];
   svg.children.unshift(...labels);
   svg.properties.role = 'img';
   svg.properties.ariaLabelledBy = labels.map((l) => l.properties.id).join(' ');

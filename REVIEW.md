@@ -138,8 +138,11 @@ invariant-breaking sequence against:
    special-case branches, one change smeared across many files; an invariant
    held by prose where a type or the one source of truth could make the
    failure impossible (#1142); a check outside [its own
-   layer](docs/CONTRIBUTING.md#convergence-contract). Documented load-bearing
-   defense (shim exit-0, config-never-wipe, liveness ladders) stays.
+   layer](docs/CONTRIBUTING.md#convergence-contract). A mechanism the diff
+   extends is judged as if new against AGENTS.md's [upkeep
+   rule](AGENTS.md#conventions); one that fails it draws "delete it".
+   Documented load-bearing defense (shim exit-0, config-never-wipe, liveness
+   ladders) stays.
 6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
    is faithful, clear and concise. Each finding cites what the name breaks;
    severity per [Severity](#severity), non-blocking by default.

@@ -1075,10 +1075,10 @@ mod listen_gate {
         let step_n = (step_s * dsp::SAMPLE_RATE as f32) as usize;
         let mut fired = vec![false; events_at.len()];
         let mut now_s = 0.0f64;
-        while now_s < secs as f64 {
+        while now_s < f64::from(secs) {
             let mut events = Vec::new();
             for (i, (at, ev)) in events_at.iter().enumerate() {
-                if !fired[i] && now_s >= *at as f64 {
+                if !fired[i] && now_s >= f64::from(*at) {
                     fired[i] = true;
                     events.push(*ev);
                 }
@@ -1098,9 +1098,49 @@ mod listen_gate {
                 sink.play_once(bank.sample(play.pool, play.index), play.gain);
             }
             sink.advance(step_n);
-            now_s += step_s as f64;
+            now_s += f64::from(step_s);
         }
         sink.master
+    }
+
+    /// The stems sum with no soft clip (`BUS_TRIM`'s doc), so the loudest
+    /// office there is stays under full scale: every agent active, a storm's
+    /// rain, and the appliances firing together over and over, through a whole
+    /// loop of epoch 0's day and night tracks once the gains have ramped.
+    #[test]
+    fn the_loudest_mix_stays_under_full_scale() {
+        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
+        let bank = AssetBank::build(&mut rng);
+        let rain = Arc::new(synth::rain_bed(&mut rng));
+        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
+        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
+        // The busy tier saturates, so no count is louder.
+        let busiest = pixtuoid_scene::tally::StateCounts {
+            active: usize::MAX,
+            waiting: 0,
+            idle: 0,
+            exiting: 0,
+            total: usize::MAX,
+        };
+        let stems = pixtuoid_scene::audio::stem_levels(&busiest, 1.0);
+        let volley: Vec<(f32, OneShot)> = (0..8u8)
+            .flat_map(|k| {
+                let at = 1.0 + f32::from(k) * 1.5;
+                [
+                    OneShot::DoorChime,
+                    OneShot::PrinterWhir,
+                    OneShot::VendingDrop,
+                ]
+                .map(|e| (at, e))
+            })
+            .collect();
+        for (beds, track) in [(&day, TrackId::GenDay(0)), (&night, TrackId::GenNight(0))] {
+            let secs = pixtuoid_scene::audio::compose_track(track).loop_secs()
+                + 1.0 / pixtuoid_scene::audio::mixer::RAMP_PER_S;
+            let buf = render_tier(&bank, beds, &rain, track, stems, &volley, secs);
+            let peak = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+            assert!(peak < 1.0, "{track:?} peaks at {peak}");
+        }
     }
 
     #[test]

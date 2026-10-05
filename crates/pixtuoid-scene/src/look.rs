@@ -100,6 +100,10 @@ struct Classic {
     caches: ClassicCaches,
     /// What the last frame drew that a pointer finds or a badge hangs from.
     hits: Drawn,
+    /// How many of `hits.texts` lead as the sprites' badges and their
+    /// bubbles, the rest being the signs: counted where they are drawn, not
+    /// read off the order.
+    badges: usize,
 }
 
 /// What the last classic frame drew besides its pixels, for a painter that
@@ -108,9 +112,12 @@ struct Classic {
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
-    /// Its text in paint order: each drawn agent's badge, each chitchat
-    /// bubble, then the wall board's lines and the floor indicator.
-    pub texts: &'a [crate::display::TextRun],
+    /// Each drawn agent's badge, then each chitchat bubble hung over one, in
+    /// paint order.
+    pub badges: &'a [crate::display::TextRun],
+    /// The wall board's lines and the floor indicator, over every badge and
+    /// bubble.
+    pub signs: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
 }
@@ -131,6 +138,7 @@ impl Raster {
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
             caches: ClassicCaches::new(),
             hits: Drawn::default(),
+            badges: 0,
         })
     }
 
@@ -140,9 +148,11 @@ impl Raster {
             .classic
             .as_mut()
             .filter(|_| self.shown == Some(Look::Classic))?;
+        let (badges, signs) = classic.hits.texts.split_at(classic.badges);
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
-            texts: &classic.hits.texts,
+            badges,
+            signs,
             hovers: &classic.hits.hovers,
         })
     }
@@ -176,17 +186,8 @@ impl Raster {
                 .texts
                 .iter()
                 .find(|run| run.role == crate::display::TextRole::Star)
-                .map(crate::display::TextRun::bounds),
+                .map(crate::display::TextRun::hit_box),
             Look::Cutaway { .. } => self.cutaway.as_ref()?.star(),
-        }
-    }
-
-    /// The text the last frame drawn sets, in either look; `None` before the
-    /// first.
-    pub fn texts(&self) -> Option<&[crate::display::TextRun]> {
-        match self.shown? {
-            Look::Classic => self.classic.as_ref().map(|c| c.hits.texts.as_slice()),
-            Look::Cutaway { .. } => self.cutaway.as_ref()?.texts(),
         }
     }
 
@@ -241,6 +242,7 @@ pub fn render<'r>(
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
             classic.hits = Drawn::default();
+            classic.badges = 0;
             raster.shown = Some(look);
         }
         return None;
@@ -274,6 +276,7 @@ pub fn render<'r>(
                 ),
                 &stepped.frame,
             );
+            classic.badges = classic.hits.texts.len();
             classic.hits.texts.extend(board.runs(theme));
             classic.hits.texts.push(crate::display::TextRun::indicator(
                 stepped.layout.door,

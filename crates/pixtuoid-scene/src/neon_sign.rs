@@ -187,10 +187,9 @@ impl OfficeMood {
 /// present state. Exiting agents are absent by design: a walkout isn't the mood.
 ///
 /// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
-/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
-/// equals the terminal display width — no `unicode-width` dep in `scene` (pinned
-/// where the width authority lives: the TUI's
-/// `every_l2_face_is_one_terminal_column_per_char`).
+/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so
+/// [`cells`](crate::display::text::cells) equals `chars().count()` here (pinned by
+/// the TUI's `every_l2_face_is_one_terminal_column_per_char`).
 pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
@@ -254,6 +253,14 @@ const PERSONA_CALM: &[Persona] = &[
     Persona::Says("quiet... too quiet"),
     Persona::Says("coffee break?"),
 ];
+// `board_line` picks from a pool modulo its length.
+const _: () = assert!(
+    !PERSONA_ALERT_ONE.is_empty()
+        && !PERSONA_ALERT_MANY.is_empty()
+        && !PERSONA_BUSY_ONE.is_empty()
+        && !PERSONA_BUSY_MANY.is_empty()
+        && !PERSONA_CALM.is_empty()
+);
 
 /// L2's plain-English face for `mood`; `pick` rotates the pool. Same 1-col
 /// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the

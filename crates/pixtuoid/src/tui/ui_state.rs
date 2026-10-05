@@ -63,7 +63,7 @@ impl DriftScan {
         if len == self.offset || f.seek(SeekFrom::Start(self.offset)).is_err() {
             return;
         }
-        let mut new = Vec::with_capacity((len - self.offset) as usize);
+        let mut new = Vec::with_capacity(usize::try_from(len - self.offset).unwrap_or(0));
         if f.take(len - self.offset).read_to_end(&mut new).is_err() {
             return;
         }

@@ -89,7 +89,7 @@ fn plot_sleep_z(plot: &mut impl FnMut(u16, u16, Rgb, f32), at: Point, phase_ms: 
     let Some((alpha, t)) = sleep_z_fade(phase_ms) else {
         return;
     };
-    let rise = (t * SLEEP_Z_MAX_RISE as f32) as u16;
+    let rise = (t * f32::from(SLEEP_Z_MAX_RISE)) as u16;
     let z_y = at.y.saturating_sub(rise + 3);
     for (dx, dy, _) in inked(SLEEP_Z_1X) {
         plot(at.x + 5 + dx, z_y + dy, z_color, alpha);

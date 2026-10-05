@@ -510,9 +510,9 @@ mod tests {
     // can share a luminance yet read as different colors, so mutual
     // distinguishability is a Manhattan-distance question, not a brightness one.
     fn manhattan(a: Rgb, b: Rgb) -> u32 {
-        (a.r as u32).abs_diff(b.r as u32)
-            + (a.g as u32).abs_diff(b.g as u32)
-            + (a.b as u32).abs_diff(b.b as u32)
+        u32::from(a.r).abs_diff(u32::from(b.r))
+            + u32::from(a.g).abs_diff(u32::from(b.g))
+            + u32::from(a.b).abs_diff(u32::from(b.b))
     }
 
     // Two glow roles too close to tell apart is a CORRECTNESS bug, not taste:

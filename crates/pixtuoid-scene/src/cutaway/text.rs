@@ -51,13 +51,20 @@ fn glyph(c: char) -> Option<Rows> {
     hand_drawn(c).map(rows_of).or_else(|| fallback(c))
 }
 
-/// `cluster`'s glyph: its first character's, when that is as wide as the
-/// cluster's `n` cells. A VS16 heart or a ZWJ sequence is not.
-fn glyph_of(cluster: &str, n: u16) -> Option<Rows> {
-    let first = cluster.chars().next()?;
-    (cells(first.encode_utf8(&mut [0; 4])) == n)
-        .then(|| glyph(first))
-        .flatten()
+/// What `cluster`'s `n` cells show, each glyph with the cells it takes. When
+/// its characters' own cells add up to `n`, each draws in its own: a letter
+/// under a combining accent, or a letter and a halfwidth sound mark. Otherwise,
+/// as with a VS16 heart or a ZWJ sequence, it is one box `n` cells wide.
+fn glyphs(cluster: &str, n: u16) -> impl Iterator<Item = (Rows, u16)> + '_ {
+    let own = |c: char| cells(c.encode_utf8(&mut [0; 4]));
+    let fits = cluster.chars().map(own).sum::<u16>() == n;
+    let each = cluster
+        .chars()
+        .filter(move |_| fits)
+        .map(move |c| (c, own(c)))
+        .filter(|&(_, k)| k > 0)
+        .map(|(c, k)| (glyph(c).unwrap_or_else(|| tofu(k)), k));
+    each.chain((!fits).then(|| (tofu(n), n)))
 }
 
 /// A hand-drawn glyph's [`Rows`], under the accent rows.
@@ -204,8 +211,7 @@ fn hand_drawn(c: char) -> Option<&'static str> {
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
 pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text: &str, ink: Rgb) {
     let mut left = x.0;
-    for (cluster, n) in clusters(text) {
-        let rows = glyph_of(cluster, n).unwrap_or_else(|| tofu(n));
+    for (rows, n) in clusters(text).flat_map(|(cluster, n)| glyphs(cluster, n)) {
         for (dy, mut bits) in (0u16..).zip(rows) {
             let mut dx = 0;
             while bits != 0 {
@@ -407,7 +413,7 @@ mod tests {
     }
 
     /// Project names in CJK, Cyrillic and accented Latin draw real glyphs,
-    /// each as wide as the cells `unicode-width` gives it.
+    /// each as wide as its [`cells`](crate::display::text::cells).
     #[cfg(feature = "cutaway-assets")]
     #[test]
     fn names_beyond_ascii_draw_glyphs_as_wide_as_their_cells() {
@@ -453,6 +459,26 @@ mod tests {
                 ink(&format!("{cluster}I")).contains(&(columns(2).0, ACCENT_ROWS)),
                 "{cluster:?}: the I's top bar opens the third cell"
             );
+        }
+    }
+
+    /// A halfwidth sound mark takes a cell of its own (ratatui-core's
+    /// `count_halfwidth_sound_marks`), so `ｶﾞ` draws the `ｶ` in its first
+    /// cell and the mark in its second, as each draws alone.
+    #[test]
+    fn a_halfwidth_sound_mark_draws_in_its_own_cell() {
+        for (base, mark) in [('\u{ff76}', '\u{ff9e}'), ('\u{ff8a}', '\u{ff9f}')] {
+            let cluster = format!("{base}{mark}");
+            assert_eq!(cells(&cluster), 2, "{cluster:?}");
+            let want: std::collections::BTreeSet<_> = ink(&base.to_string())
+                .into_iter()
+                .chain(
+                    ink(&mark.to_string())
+                        .into_iter()
+                        .map(|(x, y)| (x + columns(1).0, y)),
+                )
+                .collect();
+            assert_eq!(ink(&cluster), want, "{cluster:?}");
         }
     }
 

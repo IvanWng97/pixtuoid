@@ -387,7 +387,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
     let Some(ClassicDrawn {
         pixels,
-        texts,
+        badges,
+        signs,
         hovers,
     }) = ctx.floor.raster.classic_drawn()
     else {
@@ -397,10 +398,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let star = texts
+    let star = signs
         .iter()
         .find(|run| run.role == TextRole::Star)
-        .map(TextRun::bounds);
+        .map(TextRun::hit_box);
     let hit =
         mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
     let hovered = match hit {
@@ -420,7 +421,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_text_runs(f, texts, actual_scene, hovered);
+        // Badges and their bubbles first, then the signs, which a bubble must
+        // not cover.
+        paint_text_runs(f, badges, actual_scene, hovered);
+        paint_text_runs(f, signs, actual_scene, None);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,
@@ -490,7 +494,7 @@ pub(super) fn flush_buffer_to_term_at_offset(
     let cell_rows = (buf.height() / 2) as usize;
     for cy in 0..cell_rows {
         let target_y = cy as i32 + y_offset;
-        if target_y < 0 || target_y >= scene_rect.height as i32 {
+        if target_y < 0 || target_y >= i32::from(scene_rect.height) {
             continue;
         }
         for cx in 0..(buf.width() as usize) {
@@ -534,9 +538,9 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
         return;
     }
     for px in buf.as_mut_slice() {
-        px.r = (px.r as f32 * factor) as u8;
-        px.g = (px.g as f32 * factor) as u8;
-        px.b = (px.b as f32 * factor) as u8;
+        px.r = (f32::from(px.r) * factor) as u8;
+        px.g = (f32::from(px.g) * factor) as u8;
+        px.b = (f32::from(px.b) * factor) as u8;
     }
 }
 
