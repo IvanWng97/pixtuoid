@@ -117,7 +117,7 @@ pub struct TextSpan {
     pub ink: Rgb,
 }
 
-/// An agent's name badge: [`BADGE_MARKER`](crate::overlay::BADGE_MARKER) in
+/// An agent's name badge: [`BADGE_MARKER`](crate::badge::BADGE_MARKER) in
 /// the source's hue, then its name in its tone, on the badge plate, centred
 /// `LABEL_GAP` rows over `at`. Its parts are fields, so a painter reads them
 /// instead of a run's spans by position.
@@ -140,11 +140,11 @@ impl Badge {
     pub(crate) fn new(
         anchor: Point,
         agent: &AgentSlot,
-        namesakes: &crate::overlay::Namesakes<'_>,
+        namesakes: &crate::badge::Namesakes<'_>,
         theme: &Theme,
     ) -> Self {
         let text = namesakes.text(agent);
-        let ink = crate::overlay::badge_ink(&text, crate::overlay::tone_of(agent), theme);
+        let ink = crate::badge::badge_ink(&text, crate::badge::tone_of(agent), theme);
         Self {
             agent: agent.agent_id,
             at: anchor,
@@ -153,7 +153,7 @@ impl Badge {
                 text,
                 ink: ink.name,
             },
-            plate: crate::overlay::badge_plate(theme),
+            plate: crate::badge::badge_plate(theme),
         }
     }
 
@@ -164,7 +164,7 @@ impl Badge {
             align: Align::Over,
             spans: vec![
                 TextSpan {
-                    text: crate::overlay::BADGE_MARKER.to_string(),
+                    text: crate::badge::BADGE_MARKER.to_string(),
                     ink: self.marker,
                 },
                 self.name.clone(),
@@ -225,7 +225,7 @@ impl TextRun {
                 text: crate::layout::floor_indicator_text(floor),
                 ink: theme.ui.neon_brand,
             }],
-            plate: Some(crate::overlay::badge_plate(theme)),
+            plate: Some(crate::badge::badge_plate(theme)),
             role: TextRole::Indicator,
         }
     }

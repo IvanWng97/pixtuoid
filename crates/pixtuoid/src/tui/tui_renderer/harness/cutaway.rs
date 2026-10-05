@@ -251,7 +251,7 @@ fn the_star_is_clickable_in_both_looks() {
     let on_classic = star_cells(&|c, r| matches!(classic.scene_hit_at(c, r), Some(SceneHit::Star)));
     let on_cutaway = star_cells(&|c, r| matches!(cutaway.scene_hit_at(c, r), Some(SceneHit::Star)));
     let buf = classic.terminal.backend().buffer();
-    let star: Vec<char> = pixtuoid_scene::board::BOARD_STAR.chars().collect();
+    let star: Vec<char> = pixtuoid_scene::neon_sign::BOARD_STAR.chars().collect();
     let width = star.len() as u16;
     let written: Vec<(u16, u16)> = (0..40u16)
         .flat_map(|row| (0..=120 - width).map(move |col| (col, row)))

@@ -995,7 +995,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
-        crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
+        crate::audio::stem_levels(&crate::tally::per_floor_counts(&scene)[0], precip),
         "stems must equal stem_levels(per_floor_counts[floor], precip)"
     );
     assert_eq!(
@@ -1135,8 +1135,8 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     );
 }
 
-fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::OfficeMood {
-    crate::board::OfficeMood::of(crate::board::StateCounts {
+fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::neon_sign::OfficeMood {
+    crate::neon_sign::OfficeMood::of(crate::tally::StateCounts {
         active,
         waiting,
         idle,
@@ -1174,7 +1174,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
     let mut dim = VacancyDim::new();
     let mut neon = NeonState::new();
     let mut now = t0();
-    let mut run = |empty: bool, mood: crate::board::OfficeMood, ms: u64| {
+    let mut run = |empty: bool, mood: crate::neon_sign::OfficeMood, ms: u64| {
         let mut last = NeonLevels::CALM;
         for _ in 0..ms / FRAME.as_millis() as u64 {
             now += FRAME;
@@ -1639,7 +1639,7 @@ fn both_painters(
         theme,
         size: crate::layout::Size { w: 192, h: 80 },
         place: crate::look::Place {
-            gateway: crate::board::office_gateway(scene),
+            gateway: crate::tally::office_gateway(scene),
             floor: None,
         },
         debug_walkable: false,
