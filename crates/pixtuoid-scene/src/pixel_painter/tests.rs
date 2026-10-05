@@ -3991,7 +3991,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
     furniture::paint_area_rug(&mut buf, l.pantry_entry_mat().expect("the mat"), theme);
-    let cx = (dw.start.x + dw.end.x) / 2;
+    let cx = u16::midpoint(dw.start.x, dw.end.x);
     let mat_cy = dw.start.y + WALL_THICK_H + 3;
     assert_ne!(buf.get(cx, mat_cy), floor, "mat center row painted");
     assert_ne!(buf.get(cx - 7, mat_cy), floor, "mat spans west of center");

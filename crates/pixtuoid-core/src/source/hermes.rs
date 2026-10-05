@@ -100,6 +100,10 @@ fn resolve_hermes_home(
 /// The activity arms prepend an [`AgentEvent::Identity`] because Hermes is HOOK-ONLY:
 /// a slot the reducer synthesizes mid-turn has no transcript back-fill path, so
 /// without the attached identity it would stay a blank `#N` ghost.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `hook_event_name`, carries neither `session_id` nor `cwd`, or names an unregistered event.
 pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

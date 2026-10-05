@@ -110,9 +110,12 @@ impl Driven {
         self.events.len() - self.seed_events
     }
 
-    /// Assert bytes WE control drove cleanly: every line parsed, no decoder
-    /// `Err`, no panic. Not for unbounded bytes (the corpus shell reports the
-    /// same three counts instead).
+    /// Assert bytes WE control drove cleanly. Not for unbounded bytes (the
+    /// corpus shell reports the same three counts instead).
+    ///
+    /// # Panics
+    ///
+    /// If a line was not valid JSON, the decoder returned `Err`, or the decoder panicked.
     pub fn assert_clean(&self, what: &str) {
         assert_eq!(
             self.unparseable, 0,
