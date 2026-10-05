@@ -165,8 +165,8 @@ impl Drop for AttachedInput {
 /// thread may never have minted one. MSDN disagrees with itself on which calls
 /// mint it, so prime it rather than trust the `EnumWindows` above.
 fn ensure_message_queue() {
-    // SAFETY: all-zero bytes are a valid MSG; PeekMessage writes only that
-    // buffer, and a null hwnd with PM_NOREMOVE is the documented no-op probe.
+    // SAFETY: all-zero bytes are a valid MSG and PeekMessage writes only that
+    // buffer; PM_NOREMOVE leaves any posted message queued.
     unsafe {
         let mut msg: MSG = std::mem::zeroed();
         PeekMessageW(

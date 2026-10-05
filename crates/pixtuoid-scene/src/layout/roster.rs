@@ -804,7 +804,7 @@ impl SceneLayout {
             .checked_sub(mat.width)
             .filter(|&x| x >= b.x)?;
         mat.x = mat.x.clamp(b.x, last_x);
-        // Shifted west off the cooler standing against the east wall.
+        // Shifted west off the cooler standing at the room's east edge.
         if let Some(cooler) = p.water_cooler_rect().filter(|c| c.overlaps(mat)) {
             mat.x = cooler
                 .x

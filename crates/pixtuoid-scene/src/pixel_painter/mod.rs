@@ -369,7 +369,6 @@ fn enqueue_pet<'a>(
     });
 }
 
-/// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
     pack: &Pack,
     mascots: &'a [crate::sim::MascotPlacement],
