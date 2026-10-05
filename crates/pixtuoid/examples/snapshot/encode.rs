@@ -329,8 +329,8 @@ impl Timeline {
     /// clock by the last frame — and a late --navigate-at then never fires.
     ///
     /// This does NOT make the site's `loop`ed clip seam-free, and no timing choice
-    /// can: `mascot_wander` picks each cycle's destination from a hash of the cycle
-    /// NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
+    /// can: each creature walk's destination is a seeded `walkable_target` draw
+    /// numbered by its roam, so the roaming is aperiodic BY DESIGN and frame N is never frame 0
     /// however the duration is chosen. Closing it would mean a scripted
     /// (non-wandering) timeline for the demo — a media decision, not a rendering one.
     pub(crate) fn elapsed_ms(&self, i: usize) -> u64 {

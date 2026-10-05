@@ -131,6 +131,8 @@ pub struct FloorCtx {
     pub(crate) neon: NeonState,
     /// Per-agent walk state (physics profiles for entry/exit/wander).
     pub walks: HashMap<AgentId, WalkState>,
+    /// The pet's and the gateway mascots' walks.
+    pub(crate) creatures: HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -157,6 +159,7 @@ impl FloorCtx {
             vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
             walks: HashMap::new(),
+            creatures: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
         }
@@ -175,6 +178,7 @@ impl FloorCtx {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
+            creatures: &mut self.creatures,
         }
     }
 
@@ -442,7 +446,7 @@ impl AudioObserver {
         }
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
-        let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
+        let counts = crate::tally::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
         let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
@@ -540,6 +544,8 @@ pub struct FloorSession {
     /// The occupancy the last `render` observed, so a painter reads the SAME
     /// frame's occupancy it just painted.
     last_occupied: std::collections::HashSet<usize>,
+    /// What of the last `render`'s frame flashes.
+    last_flash: crate::flash::FlashPhase,
 }
 
 impl FloorSession {
@@ -551,7 +557,14 @@ impl FloorSession {
             office: PerOffice::default(),
             last_layout: None,
             last_occupied: std::collections::HashSet::new(),
+            last_flash: crate::flash::FlashPhase::default(),
         }
+    }
+
+    /// What of the last [`render`](Self::render)'s frame flashes; nothing
+    /// before the first, or when it could not lay out.
+    pub fn flash(&self) -> crate::flash::FlashPhase {
+        self.last_flash
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves of the
@@ -580,11 +593,13 @@ impl FloorSession {
                 // REPLACE, never extend: the cue tracker fires on edges, so an
                 // accumulating set would re-report stale waypoints forever.
                 self.last_occupied = frame.occupied_waypoints;
+                self.last_flash = frame.flash;
                 Some(frame.layout)
             }
             None => {
                 self.last_layout = None;
                 self.last_occupied.clear();
+                self.last_flash = crate::flash::FlashPhase::default();
                 None
             }
         }
@@ -603,20 +618,27 @@ impl FloorSession {
         self.floor.raster.classic_signs()
     }
 
-    /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.
+    /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.
     pub fn board(
         &self,
         scene: &SceneState,
         motion: crate::anim::Motion,
         now: SystemTime,
-    ) -> crate::board::BoardModel {
-        crate::board::wall_board(
+    ) -> crate::neon_sign::BoardModel {
+        crate::neon_sign::wall_board(
             scene,
-            crate::board::office_gateway(scene),
+            crate::tally::office_gateway(scene),
             None,
             motion,
             now,
         )
+    }
+
+    /// Whether a creature on this floor is mid-walk at `now`: a painter that
+    /// slows while the office is idle keeps its pace while one walks, or its
+    /// legs freeze as it glides.
+    pub fn a_creature_walks(&self, now: SystemTime) -> bool {
+        self.floor.ctx.creatures.values().any(|w| w.walks_at(now))
     }
 
     /// The last frame's pixels, `None` before the first `render`.
@@ -866,6 +888,8 @@ pub(crate) struct NeonState {
     last_tick: Option<SystemTime>,
     /// The loop time the last tick read, which the stutter steps by.
     last_beat_ms: Option<u64>,
+    /// Whether the last tick's light was a stutter's flash.
+    stutter: bool,
 }
 
 #[derive(Debug)]
@@ -964,11 +988,11 @@ impl NeonState {
     /// out of a lit room, can't drop the sign.
     pub(crate) fn tick(
         &mut self,
-        mood: crate::board::OfficeMood,
+        mood: crate::neon_sign::OfficeMood,
         room_dimmed: bool,
         timing: crate::anim::Timing,
     ) -> NeonLevels {
-        use crate::board::OfficeMood;
+        use crate::neon_sign::OfficeMood;
         let now = timing.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,
@@ -1008,11 +1032,17 @@ impl NeonState {
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
         let drawable = step_ms.is_some_and(|step| step <= Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(timing.beat) {
+        self.stutter = current == NeonLevels::EMPTY && drawable && Self::stutter_flash(timing.beat);
+        if self.stutter {
             NeonLevels::FLASH
         } else {
             current
         }
+    }
+
+    /// Whether the last [`tick`](Self::tick)'s light was a stutter's flash.
+    pub(crate) fn stutters(&self) -> bool {
+        self.stutter
     }
 }
 

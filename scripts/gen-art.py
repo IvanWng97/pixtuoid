@@ -3332,7 +3332,7 @@ BUILDINGS = {
 
 
 # ---- the creatures: each species' master placed by hand at `S`, its 1x read from it
-# Every frame faces east: `pet_position` flips a walk heading west. A master is
+# Every frame faces east: `sim::pet_placement` flips a walk heading west. A master is
 # the art itself, key by key; the 1x frame is that master read block by block
 # (`creature_cell`), with `CREATURE_FIXES` setting the cells the reading gets
 # wrong, so the classic and the cutaway draw one animal.
