@@ -4,13 +4,12 @@ The **Raycast extension**: a self-contained **TypeScript / Node** project (NOT
 Rust) and a thin presenter over the `pixtuoid … --json` CLI contract. It ships
 two commands — `Manage Sources` (connect/disconnect over `pixtuoid
 sources|connect|disconnect --json`) and `Start Floating`. Parent guide: the
-workspace [`../../AGENTS.md`](../../AGENTS.md). The cross-area development model
-this consumer sits in: [`../../docs/PARALLEL-DELIVERY.md`](../../docs/PARALLEL-DELIVERY.md).
+workspace [`../../AGENTS.md`](../../AGENTS.md).
 
 > **You are in the TS consumer, not the Rust producer.** The workspace
 > `AGENTS.md` still loads above this file — but its Rust house rules
 > (TDD-in-Rust, `cargo`/`clippy`, `just preflight`, the crate CI gates)
-> **do not apply here**. This is a Node project; the gates are `tsc` + `eslint`.
+> **do not apply here**. This is a Node project; the gates are `tsc` + `eslint` + `npm test`.
 > Don't run `cargo` anything for a change scoped to this directory.
 
 ## What it is
@@ -36,8 +35,10 @@ struct↔schema golden tests (`just test`), the schema↔TS-type freshness check
 TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus` or
 `OutcomeRow`, run `just gen-contract`** (re-emits the schemas + the TS types)
 and commit all of it. `src/contract.ts` / `src/contract-outcome.ts` are
-generated — eslint/prettier-ignored, never hand-edit them. This is
-`PARALLEL-DELIVERY.md`'s "codegen-from-one-source" applied to pixtuoid itself.
+generated — eslint/prettier-ignored, never hand-edit them.
+At runtime `src/conforms.ts` checks every CLI row against the same committed
+schemas and fails closed on drift (`npm test`), so a stale schema there breaks
+the extension, not only the types.
 (The `source_status_json_shape` / `outcome_row_json_shape` byte tests pin the
 exact wire JSON; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
 owns its shape and the published-wire rule.)
@@ -71,10 +72,9 @@ it is clear.
 ## Gates
 
 CI runs `.github/workflows/raycast.yml`'s steps on a Linux runner; run them
-locally before "done." **`ray build` /
-`ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
-Raycast app** and only run before a store publish — they are NOT in CI, so a
-green PR does not prove the manifest is publishable. See the
+locally before "done." `ray build` writes `raycast-env.d.ts`, the
+manifest's generated `Preferences` that `tsc` reads, and `ray lint` validates
+the manifest, icons and metadata and runs the Prettier pass. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
 - **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.**
@@ -88,6 +88,6 @@ green PR does not prove the manifest is publishable. See the
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
   Preferences` action bound to `⌘,` (Raycast's own `OpenPreferences`) shipped
-  dead. Nothing else sees it: `tsc` types the chord fine and `ray lint` is not in
-  CI. Its sibling `@raycast/prefer-common-shortcut` stays a warning — style
-  advice a routine version bump could turn into a surprise red.
+  dead: `tsc` types the chord fine, and `ray lint` exits 0 on a warning too.
+  Its sibling `@raycast/prefer-common-shortcut` stays a warning — style advice
+  a routine version bump could turn into a surprise red.

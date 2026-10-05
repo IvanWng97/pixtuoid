@@ -94,7 +94,7 @@ A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@m
 
 `desk_north` is `desk` seen from its sitter's side, so it stands its props
 mirrored, each mark naming the prop's bottom-right cell instead of its
-bottom-left. `desk_front` is drawn over a `desk`'s props on the desk's own
+bottom-left; a `desk_north` marked before this needs its marks moved there. `desk_front` is drawn over a `desk`'s props on the desk's own
 canvas: whatever of the desk stands between the viewer and its sitter's props,
 the bundled one its monitor. It comes only with the desk it covers, so a pack
 with a `desk` of its own and no `desk_front` draws its props over the desk.

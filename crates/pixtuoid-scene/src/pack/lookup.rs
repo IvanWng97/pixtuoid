@@ -145,8 +145,8 @@ pub(crate) fn desk_props_mirrored(art: &str) -> bool {
     art == DESK_NORTH_SPRITE
 }
 
-/// The art the pack draws for a desk facing `facing`: the facing's own, or
-/// the piece standing in for it.
+/// The pack's desk art for a seat facing `facing`: the facing's own when the
+/// pack ships it, else what [`Pack::piece_or_source`] draws in its place.
 pub(crate) fn desk_art_name(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
     pack.piece_or_source(desk_sprite_name(facing))
 }

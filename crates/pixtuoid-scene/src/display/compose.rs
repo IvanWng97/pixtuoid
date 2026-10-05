@@ -331,7 +331,7 @@ fn lights(
             let bulb = layout
                 .home_desks
                 .get(i)
-                .zip(desk_art(pack, facing))
+                .zip(crate::pack::desk_art_name(pack, facing))
                 .and_then(|(&at, art)| desk_bulb(at, art, pack, scale));
             match (bulb, d.lamp.light) {
                 (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
@@ -936,7 +936,7 @@ fn push_desk(
         return;
     };
     let facing = layout.desk_facing(i);
-    let Some(art) = desk_art(pack, facing) else {
+    let Some(art) = crate::pack::desk_art_name(pack, facing) else {
         return;
     };
     let props = frame.desk(i);
@@ -1035,12 +1035,6 @@ fn push_desk_props(
     }
 }
 
-/// The pack's desk art for a seat facing `facing`: the facing's own when the
-/// pack ships it, else what [`Pack::piece_or_source`] draws in its place.
-pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
-    pack.piece_or_source(crate::pack::desk_sprite_name(facing))
-}
-
 /// The box a desk drawn with `art` at `desk` occupies at `scale`: the art and
 /// the face rows [`face_rows`] derives under it, sorted on the last of
 /// those. A taller art grows upward from the same bottom row
@@ -1135,7 +1129,7 @@ fn push_characters(
             carried.push(d);
         }
         let badge_ceiling = seat.and_then(|(d, facing)| {
-            desk_span(pack, desk_art(pack, facing)?, d, scale).map(|s| s.y0)
+            desk_span(pack, crate::pack::desk_art_name(pack, facing)?, d, scale).map(|s| s.y0)
         });
         let at = cutaway_top_left(c);
         let shadow = !c.seated;
