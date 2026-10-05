@@ -1,24 +1,20 @@
 use super::*;
+use crate::tui::geometry::CellArea;
 use pixtuoid_scene::layout::Size;
-
-/// The half-block cell row a buffer pixel row `px` falls in.
-fn cell_row(px: u16) -> u16 {
-    px / 2
-}
 
 #[test]
 fn coffee_machine_hit_test_returns_false_for_origin() {
     let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     assert!(!hit_test_coffee_machine(
         &layout,
-        crate::tui::geometry::CellArea::half_block(0, 0)
+        CellArea::half_block(0, 0)
     ));
 }
 
 /// The middle cell of the coffee machine on `layout`'s pantry counter.
 fn coffee_mid_cell(layout: &SceneLayout) -> (u16, u16) {
     let b = layout.coffee_machine().expect("a coffee machine");
-    (b.x + b.width / 2, cell_row(b.y + b.height / 2))
+    (b.x + b.width / 2, CellArea::row_of(b.y + b.height / 2))
 }
 
 #[test]
@@ -26,10 +22,7 @@ fn coffee_machine_hit_test_returns_true_for_machine_area() {
     let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
-        hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y)
-        ),
+        hit_test_coffee_machine(&layout, CellArea::half_block(mid_x, mid_cell_y)),
         "expected hit at coffee machine area ({mid_x}, {mid_cell_y})"
     );
 }
@@ -41,16 +34,10 @@ fn furniture_hit_test_returns_none_for_empty_space() {
     // are open shifts whenever the pod aisle spacing is retuned.
     let empty = (0..(layout.buf_h / 2))
         .flat_map(|cy| (0..layout.buf_w).map(move |cx| (cx, cy)))
-        .find(|&(cx, cy)| {
-            hit_test_furniture(&layout, crate::tui::geometry::CellArea::half_block(cx, cy))
-                .is_none()
-        })
+        .find(|&(cx, cy)| hit_test_furniture(&layout, CellArea::half_block(cx, cy)).is_none())
         .expect("some open-floor cell must report no furniture");
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(empty.0, empty.1)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(empty.0, empty.1)),
         None
     );
 }
@@ -59,22 +46,16 @@ fn furniture_hit_test_returns_none_for_empty_space() {
 fn furniture_hit_test_finds_desk() {
     let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let desk = layout.home_desks.first().expect("desk");
-    let cell_y = cell_row(desk.y + 2);
+    let cell_y = CellArea::row_of(desk.y + 2);
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(desk.x + 2, cell_y)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(desk.x + 2, cell_y)),
         Some("Desk")
     );
     let vis_w = pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture::Desk)
         .visual
         .w;
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(desk.x + vis_w - 1, cell_y)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(desk.x + vis_w - 1, cell_y)),
         Some("Desk"),
         "the desk's east overhang column must hover it"
     );
@@ -84,14 +65,11 @@ fn furniture_hit_test_finds_desk() {
 fn furniture_hit_test_finds_elevator() {
     let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let door = layout.door;
-    let cell_y = cell_row(door.y + pixtuoid_scene::layout::ELEVATOR_H / 2);
+    let cell_y = CellArea::row_of(door.y + pixtuoid_scene::layout::ELEVATOR_H / 2);
     assert_eq!(
         hit_test_furniture(
             &layout,
-            crate::tui::geometry::CellArea::half_block(
-                door.x + pixtuoid_scene::layout::ELEVATOR_W / 2,
-                cell_y
-            )
+            CellArea::half_block(door.x + pixtuoid_scene::layout::ELEVATOR_W / 2, cell_y)
         ),
         Some("Elevator")
     );
@@ -113,10 +91,7 @@ fn dense_room_1_has_coat_rack_and_doormat() {
         let cx = mr.x + mr.width - 5;
         let cy = mr.y + mr.height / 2 - 4;
         assert_eq!(
-            hit_test_furniture(
-                &layout,
-                crate::tui::geometry::CellArea::half_block(cx, cell_row(cy + 3))
-            ),
+            hit_test_furniture(&layout, CellArea::half_block(cx, CellArea::row_of(cy + 3))),
             Some("Coat Rack"),
             "seed {seed}: room 1 must hover its own coat rack"
         );
@@ -125,7 +100,7 @@ fn dense_room_1_has_coat_rack_and_doormat() {
         assert_eq!(
             hit_test_furniture(
                 &layout,
-                crate::tui::geometry::CellArea::half_block(mat_x + 1, cell_row(mat_y + 2))
+                CellArea::half_block(mat_x + 1, CellArea::row_of(mat_y + 2))
             ),
             Some("Doormat"),
             "seed {seed}: room 1 must hover its own doormat"
@@ -140,10 +115,7 @@ fn furniture_hit_test_finds_meeting_table() {
     let table = layout.meeting_rooms[0].trio.expect("trio").table;
     let cell_y = table.y / 2;
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(table.x, cell_y)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(table.x, cell_y)),
         Some("Meeting Table")
     );
 }
@@ -158,10 +130,7 @@ fn furniture_hit_test_respects_floor_seed() {
         let table = trio.table;
         let cell_y = table.y / 2;
         assert_ne!(
-            hit_test_furniture(
-                &layout1,
-                crate::tui::geometry::CellArea::half_block(table.x, cell_y)
-            ),
+            hit_test_furniture(&layout1, CellArea::half_block(table.x, cell_y)),
             Some("Meeting Table"),
         );
     }
@@ -181,10 +150,7 @@ fn furniture_hit_test_ficus_via_synthetic_plant() {
     });
     // Plants are center-anchored on `pos`; hover the center cell.
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(pos.x, pos.y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(pos.x, pos.y / 2)),
         Some("Ficus")
     );
 }
@@ -203,10 +169,7 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
             pos,
         });
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(pos.x, pos.y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(pos.x, pos.y / 2)),
         Some("Bulletin Board")
     );
 }
@@ -218,23 +181,17 @@ fn coffee_machine_returns_false_without_a_pantry() {
     let mut layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
-        hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y)
-        ),
+        hit_test_coffee_machine(&layout, CellArea::half_block(mid_x, mid_cell_y)),
         "precondition: coffee machine area should hit with the pantry present"
     );
     layout.pantry = None;
     assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y)
-        ),
+        !hit_test_coffee_machine(&layout, CellArea::half_block(mid_x, mid_cell_y)),
         "no pantry ⇒ the early return must yield false at the machine coords"
     );
     assert!(!hit_test_coffee_machine(
         &layout,
-        crate::tui::geometry::CellArea::half_block(0, 0)
+        CellArea::half_block(0, 0)
     ));
 }
 
@@ -252,12 +209,11 @@ fn assert_centered_hover_box(
 ) {
     let (x0, y0) = (pos.x - size.w / 2, pos.y - size.h / 2);
     for mx in pos.x - size.w..pos.x + size.w {
-        for my in cell_row(pos.y - size.h)..cell_row(pos.y + size.h) {
+        for my in CellArea::row_of(pos.y - size.h)..CellArea::row_of(pos.y + size.h) {
             let py = my * 2;
             let inside = mx >= x0 && mx < x0 + size.w && py + 1 >= y0 && py < y0 + size.h;
             assert_eq!(
-                hit_test_furniture(layout, crate::tui::geometry::CellArea::half_block(mx, my))
-                    == Some(label),
+                hit_test_furniture(layout, CellArea::half_block(mx, my)) == Some(label),
                 inside,
                 "{label} at cell ({mx}, {my})"
             );
@@ -326,10 +282,7 @@ fn furniture_hit_test_finds_floor_lamp_via_synthetic() {
         fish_tank: None,
     });
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(p.x, p.y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(p.x, p.y / 2)),
         Some("Floor Lamp")
     );
 }
@@ -344,10 +297,7 @@ fn furniture_hit_test_finds_fish_tank_via_synthetic() {
         fish_tank: Some(p),
     });
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(p.x, p.y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(p.x, p.y / 2)),
         Some("Fish Tank")
     );
 }
@@ -371,18 +321,12 @@ fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
     // `top_y / 2` holds the shelf's top row; on an odd edge only its lower half
     // shows it.
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(shelf.x, top_y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(shelf.x, top_y / 2)),
         Some("Snack Shelf"),
         "top shelf row hovers"
     );
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(shelf.x, shelf.y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(shelf.x, shelf.y / 2)),
         Some("Snack Shelf"),
         "sprite centre hovers"
     );
@@ -400,10 +344,7 @@ fn furniture_hit_test_finds_meeting_chairs_on_a_real_layout() {
     assert_eq!(chairs.len(), 2);
     for c in chairs {
         assert_eq!(
-            hit_test_furniture(
-                &layout,
-                crate::tui::geometry::CellArea::half_block(c.x, c.y / 2)
-            ),
+            hit_test_furniture(&layout, CellArea::half_block(c.x, c.y / 2)),
             Some("Meeting Chair")
         );
     }
@@ -419,10 +360,7 @@ fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
         pos: p,
     });
     assert_eq!(
-        hit_test_furniture(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(p.x, p.y / 2)
-        ),
+        hit_test_furniture(&layout, CellArea::half_block(p.x, p.y / 2)),
         Some("TV Stand")
     );
 }
@@ -433,8 +371,7 @@ fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
 fn the_neon_sign_raises_no_tooltip() {
     use pixtuoid_scene::layout::{NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
     let layout = SceneLayout::compute(160, 200, Some(16)).expect("layout");
-    let cell =
-        crate::tui::geometry::CellArea::half_block(NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y / 2);
+    let cell = CellArea::half_block(NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y / 2);
     assert_eq!(
         layout.fixture_at(cell.bounds()),
         Some(pixtuoid_scene::layout::FixtureKind::NeonSign)

@@ -51,8 +51,7 @@ impl<T> Grid<T> {
         &mut self.data
     }
 
-    /// Build from an existing row-major `Vec<T>`. Panics unless
-    /// `data.len() == width * height`.
+    /// Build from an existing row-major `Vec<T>`.
     ///
     /// # Panics
     ///

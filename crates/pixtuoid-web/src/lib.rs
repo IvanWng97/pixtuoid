@@ -375,22 +375,19 @@ impl Office {
     /// Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
     /// same as `step`) and return the JS glue commands as JSON:
     /// `{"gains":[g0..g6],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
-    /// ramps each `GainNode` to its gain, spawns the one-shots, and on `swapped`
+    /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
         const SILENT: &str = r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#;
         let Some(now) = self.last_now else {
             return SILENT.to_string();
         };
-        if self.audio.as_ref().is_none_or(|a| !a.is_ready()) {
-            return SILENT.to_string();
-        }
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
         let frame = self
             .session
             .audio_frame(&self.scene, self.floor_meta(), now);
-        let Some(audio) = self.audio.as_mut() else {
+        let Some(audio) = self.audio.as_mut().filter(|a| a.is_ready()) else {
             return SILENT.to_string();
         };
         audio::commands_json(&audio.tick(now_ms, frame))

@@ -1,11 +1,7 @@
 use super::*;
+use crate::tui::geometry::CellArea;
 use crate::tui::hit_test::SceneHit;
 use pixtuoid_scene::display::HoverTarget;
-
-/// The half-block cell row a buffer pixel row `px` falls in.
-fn cell_row(px: u16) -> u16 {
-    px / 2
-}
 
 #[test]
 fn furniture_hit_test_resolves_against_rendered_layout() {
@@ -16,7 +12,7 @@ fn furniture_hit_test_resolves_against_rendered_layout() {
     let desk = layout.home_desks[0];
     let hit = crate::tui::hit_test::hit_test_furniture(
         layout,
-        crate::tui::geometry::CellArea::half_block(desk.x + 4, desk.y / 2 + 1),
+        CellArea::half_block(desk.x + 4, desk.y / 2 + 1),
     );
     assert_eq!(
         hit,
@@ -44,10 +40,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
         for dy in -4i32..=4 {
             let mx = (i32::from(cx) + dx).max(0) as u16;
             let my = (i32::from(cy) + dy).max(0) as u16;
-            if crate::tui::hit_test::hit_test_coffee_machine(
-                layout,
-                crate::tui::geometry::CellArea::half_block(mx, my),
-            ) {
+            if crate::tui::hit_test::hit_test_coffee_machine(layout, CellArea::half_block(mx, my)) {
                 found = true;
             }
         }
@@ -105,7 +98,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     );
     let (dx, dy) = (
         seat.x + pixtuoid_scene::layout::CHARACTER_SPRITE_W / 2,
-        cell_row(seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2),
+        CellArea::row_of(seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2),
     );
     assert_eq!(r.hit_test_agent_at(dx, dy), Some(id));
 
@@ -169,11 +162,7 @@ fn drawn(r: &TuiRenderer<TestBackend>, scene: &SceneState, id: AgentId, now: Sys
 
 /// Whether the half-block cell `(col, row)` shows a pixel of `sprite`.
 fn cell_shows(sprite: Sprite, col: u16, row: u16) -> bool {
-    crate::tui::geometry::CellArea::half_block(col, row).overlaps(
-        sprite.top_left,
-        sprite.w,
-        sprite.h,
-    )
+    CellArea::half_block(col, row).overlaps(sprite.top_left, sprite.w, sprite.h)
 }
 
 /// Cells swept past each edge of the sprite, so the sweep sees its misses too.
@@ -213,8 +202,8 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
     };
 
     let mut moved = None;
-    for row in
-        cell_row(seat.y).saturating_sub(SWEEP_MARGIN)..=cell_row(seat.y + drawn.h) + SWEEP_MARGIN
+    for row in CellArea::row_of(seat.y).saturating_sub(SWEEP_MARGIN)
+        ..=CellArea::row_of(seat.y + drawn.h) + SWEEP_MARGIN
     {
         for col in seat.x.saturating_sub(SWEEP_MARGIN)..seat.x + drawn.w + SWEEP_MARGIN {
             let shows = cell_shows(drawn, col, row);
@@ -306,7 +295,6 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
 
 #[test]
 fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
-    use crate::tui::geometry::CellArea;
     let now = t0() + Duration::from_secs(20);
     let mut scene = scene_with(
         (0..6)

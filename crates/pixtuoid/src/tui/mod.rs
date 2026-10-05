@@ -484,7 +484,7 @@ pub fn setup_terminal() -> Result<Term> {
 ///
 /// Every step runs even when an earlier one fails and the FIRST error is returned — a `?`
 /// after the escape write would skip `disable_raw` exactly when it is needed most. And
-/// `DisableMouseCapture` must run while raw mode is still ON: on Windows it restores the
+/// DisableMouseCapture must run while raw mode is still ON: on Windows it restores the
 /// input mode snapshotted at Enable time (raw-era), so after `disable_raw_mode` it re-raws
 /// the console. Either slip strands the user's shell echo-less.
 ///
