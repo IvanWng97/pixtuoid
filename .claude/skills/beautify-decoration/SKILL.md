@@ -105,7 +105,6 @@ Run this checklist before each render you send in a beautify loop, and state eac
 | Visually differs | Diff is noticeable, not a sub-pixel tweak. If hash-identical to last attempt, you didn't actually rebuild. |
 | Subzone width | Each new sub-element ≥ 5 **display** cells wide (§3). |
 | Color distinctness | New elements use colors distinct from immediate neighbours. |
-| Pixel art | [`AGENTS.md`](../../../AGENTS.md#conventions)'s pixel-art rule holds for every pixel, mocks included. |
 | Alive | The asset ships what makes it alive — idle frames (`frame_ms`), a state-driven change, a response to weather or window light, or variety across agents — named in the PR body. |
 | `just test` | The connectivity tests pass (§6 step 3). |
 | `--debug-walkable` | Rendered the overlay and visually checked no narrow / isolated walkable pockets near the new element. |
