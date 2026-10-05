@@ -69,15 +69,6 @@ pub struct Rendered<'r> {
     pub occupied_waypoints: HashSet<usize>,
 }
 
-/// The frame entry's `tracing` span names, for a profiler's subscriber.
-#[doc(hidden)]
-pub mod spans {
-    /// Stepping the floor's model.
-    pub const COMPOSE: &str = "frame.compose";
-    /// Drawing the stepped floor in its look.
-    pub const RASTERIZE: &str = "frame.rasterize";
-}
-
 /// The office's raster state, shared by every floor: the cutaway's art.
 #[derive(Debug, Default)]
 pub struct OfficeRaster {
@@ -223,9 +214,7 @@ pub fn render<'r>(
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
         return None;
     }
-    let stepped = tracing::trace_span!(spans::COMPOSE)
-        .in_scope(|| step_floor(ctx, office.coffee, office.chitchat, world, size));
-    let Some(mut stepped) = stepped else {
+    let Some(mut stepped) = step_floor(ctx, office.coffee, office.chitchat, world, size) else {
         if look == Look::Classic {
             let classic = raster.classic();
             classic
@@ -241,7 +230,6 @@ pub fn render<'r>(
         .shown
         .replace(look)
         .is_none_or(|was| std::mem::discriminant(&was) != std::mem::discriminant(&look));
-    let _rasterize = tracing::trace_span!(spans::RASTERIZE).entered();
     let (pixels, dirty) = match look {
         Look::Classic => {
             let classic = raster.classic();

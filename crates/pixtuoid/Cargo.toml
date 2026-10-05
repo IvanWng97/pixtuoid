@@ -190,7 +190,3 @@ extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI
 [[example]]
 name              = "graphics_spike"
 required-features = ["graphics"]
-
-[[example]]
-name              = "pacing"
-required-features = ["graphics"]

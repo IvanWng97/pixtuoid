@@ -662,19 +662,6 @@ fn strikes(bucket: u64, storm: f32) -> bool {
     (draw as f32) < storm * (1u64 << f32::MANTISSA_DIGITS) as f32
 }
 
-/// The first instant from `after` at which a full storm lights a strike under
-/// `motion`, or `None` at rest: where the frame-pacing bench places its window.
-#[doc(hidden)]
-pub fn first_strike_after(after: SystemTime, motion: Motion) -> Option<SystemTime> {
-    let pace = motion.pace()?;
-    let storm = WeatherPolicy::Forced(Weather::Storm);
-    // Two periods: the strike of the bucket `after` falls in can be behind it,
-    // and the next bucket's can land as late as its end.
-    (0..=2 * LIGHTNING_PERIOD_MS * pace / crate::anim::FULL_TICK_MS)
-        .map(|n| after + Duration::from_millis(n * crate::anim::FULL_TICK_MS))
-        .find(|&t| flash_level_at(motion.beat(t), storm) > 0.0)
-}
-
 /// [`lightning_envelope`] on `beat` under `policy`, or 0 when not mid-strike
 /// or at rest.
 fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
