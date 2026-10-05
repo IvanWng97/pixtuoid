@@ -13,7 +13,7 @@ use ratatui::style::Color;
 
 use std::sync::Arc;
 
-use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover, TextRole, TextRun};
+use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
@@ -386,6 +386,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
+    let star = ctx.floor.raster.star();
     let Some(ClassicDrawn {
         pixels,
         badges,
@@ -400,10 +401,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let star = signs
-        .iter()
-        .find(|run| run.role == TextRole::Star)
-        .map(TextRun::hit_box);
     let hit =
         mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
     let hovered = match hit {
