@@ -197,6 +197,15 @@ jobs:
           .venv/bin/pip install -r requirements-dev.txt
       - name: Generated sprites and icons, README sections, the comparator
         run: just gen-readme-check gen-art-check gen-icons-check compare-selftest
+      # gen-icons-check's overlays; smoke uploads the media ones as gen-check-diffs.
+      - name: Upload drift overlays
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-drift-diffs
+          path: target/gen-check-diff/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # cargo-public-api complements release-plz's semver check: that one classifies
   # compatibility on the release PR, this golden shows the exact public surface
