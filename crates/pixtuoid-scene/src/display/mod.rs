@@ -23,7 +23,6 @@ pub(crate) use list::{
     StoodProp, fingerprint,
 };
 #[cfg(test)]
-#[cfg(test)]
 pub(crate) use order::check_order;
 pub(crate) use order::{Layer, Span, depth_sort};
 pub use text::{Align, Badge, TextRole, TextRun, TextSpan};
