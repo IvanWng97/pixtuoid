@@ -1,7 +1,5 @@
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::footer::{
-    FooterContext, FooterFloor, FooterInputs, build_footer, footer_tone_rgb,
-};
+use pixtuoid_scene::footer::{FooterContext, FooterFloor, FooterInputs, build_footer};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span;
@@ -79,12 +77,7 @@ pub(crate) fn build_status_spans<'a>(
     build_footer(inputs, term_width)
         .segments
         .into_iter()
-        .map(|seg| {
-            Span::styled(
-                seg.text,
-                Style::default().fg(to_color(footer_tone_rgb(seg.tone, theme))),
-            )
-        })
+        .map(|seg| Span::styled(seg.text, Style::default().fg(to_color(seg.tone.rgb(theme)))))
         .collect()
 }
 
@@ -140,7 +133,7 @@ mod tests {
         scene.agents.insert(slot.agent_id, slot);
         let inputs = FooterInputs::new(&scene, footer_context(&scene, None, false, None, None));
         let spans = build_status_spans(&inputs, 200, theme);
-        let active_rgb = footer_tone_rgb(FooterTone::Rung(RungKind::Active), theme);
+        let active_rgb = FooterTone::Rung(RungKind::Active).rgb(theme);
         let rung = spans
             .iter()
             .find(|s| s.content.contains("\u{25cf}1 A"))

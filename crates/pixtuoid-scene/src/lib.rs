@@ -33,7 +33,7 @@ pub(crate) mod atmosphere;
 #[doc(hidden)]
 pub mod audio;
 #[doc(hidden)]
-pub mod board;
+pub mod badge;
 #[doc(hidden)]
 pub mod burn;
 pub(crate) mod celestial;
@@ -49,6 +49,8 @@ pub mod cutaway;
 pub mod display;
 pub(crate) mod dither;
 pub(crate) mod effects;
+#[doc(hidden)]
+pub mod flash;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;
@@ -62,9 +64,9 @@ pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
 pub mod look;
-pub(crate) mod outside;
 #[doc(hidden)]
-pub mod overlay;
+pub mod neon_sign;
+pub(crate) mod outside;
 pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
@@ -76,6 +78,8 @@ pub mod render_scale;
 pub mod sim;
 pub mod sky;
 pub(crate) mod skyline;
+#[doc(hidden)]
+pub mod tally;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;

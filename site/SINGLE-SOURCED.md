@@ -52,7 +52,7 @@ Notes no gate carries:
   e2e test). The stall is intermittent and invisible to Playwright — pin
   changes here with repeated interleaved trials, never a single A/B.
 - **The caption overlay (`#office-overlay`)** lays DOM spans over the
-  pixelated canvas from `Office.overlay_json()` (same overlay/board model as
+  pixelated canvas from `Office.overlay_json()` (same badge/neon_sign model as
   the TUI/floating painters; `badge` = per-CLI hue, dot = activity tone). The
   engine re-derives the prefix by splitting on the FIRST `·` — a cross-crate
   echo pinned by the web `labels == badges` test, not a shared const. Rules:

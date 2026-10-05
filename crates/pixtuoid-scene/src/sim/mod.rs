@@ -230,6 +230,8 @@ pub struct SimFrame {
     pub indoor_scale: f32,
     /// The neon sign's light from `NeonState::tick`.
     pub(crate) neon: crate::floor::NeonLevels,
+    /// Whether that light is a starved tube's catch.
+    pub(crate) neon_stutter: bool,
     /// Active speech bubbles after this tick's venue update.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agents observed walking back with coffee this tick — the caller
@@ -294,7 +296,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
-        crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
+        crate::neon_sign::OfficeMood::of(crate::tally::scene_stats(scene)),
         stores.vacancy_dim.dimmed(),
         timing,
     );
@@ -414,6 +416,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         characters,
         indoor_scale,
         neon,
+        neon_stutter: stores.neon.stutters(),
         chitchat_bubbles,
         new_coffee_carriers,
         occupied_waypoints,

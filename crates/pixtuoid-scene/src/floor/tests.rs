@@ -995,7 +995,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
-        crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
+        crate::audio::stem_levels(&crate::tally::per_floor_counts(&scene)[0], precip),
         "stems must equal stem_levels(per_floor_counts[floor], precip)"
     );
     assert_eq!(
@@ -1135,8 +1135,8 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     );
 }
 
-fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::OfficeMood {
-    crate::board::OfficeMood::of(crate::board::StateCounts {
+fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::neon_sign::OfficeMood {
+    crate::neon_sign::OfficeMood::of(crate::tally::StateCounts {
         active,
         waiting,
         idle,
@@ -1174,7 +1174,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
     let mut dim = VacancyDim::new();
     let mut neon = NeonState::new();
     let mut now = t0();
-    let mut run = |empty: bool, mood: crate::board::OfficeMood, ms: u64| {
+    let mut run = |empty: bool, mood: crate::neon_sign::OfficeMood, ms: u64| {
         let mut last = NeonLevels::CALM;
         for _ in 0..ms / FRAME.as_millis() as u64 {
             now += FRAME;
@@ -1425,6 +1425,22 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
     }
 }
 
+/// A starved tube records the catch it draws, from the tick that draws it to
+/// the one that ends it.
+#[test]
+fn neon_records_the_catch_it_draws() {
+    let mut neon = NeonState::new();
+    let mut tick = |ms| {
+        let at = in_stutter_cycle(ms);
+        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(at));
+        (levels == NeonLevels::FLASH, neon.stutters())
+    };
+    let (start, end) = NeonState::STUTTER_FLASHES_MS[0];
+    assert_eq!(tick(start - crate::anim::FULL_TICK_MS), (false, false));
+    assert_eq!(tick(start), (true, true));
+    assert_eq!(tick(end), (false, false));
+}
+
 /// On every tier, ticked at a live painter's [`FRAME`], a starved tube
 /// flashes at most [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] times in any second
 /// of wall time.
@@ -1623,7 +1639,7 @@ fn both_painters(
         theme,
         size: crate::layout::Size { w: 192, h: 80 },
         place: crate::look::Place {
-            gateway: crate::board::office_gateway(scene),
+            gateway: crate::tally::office_gateway(scene),
             floor: None,
         },
         debug_walkable: false,

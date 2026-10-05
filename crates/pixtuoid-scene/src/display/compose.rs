@@ -131,8 +131,8 @@ pub struct Showing<'a> {
     /// The wall-clock instant: the sky, the room's light, the board's flap.
     pub now: std::time::SystemTime,
     /// The wall board, the classic painter's
-    /// ([`build_board`](crate::board::build_board)).
-    pub board: &'a crate::board::BoardModel,
+    /// ([`build_board`](crate::neon_sign::build_board)).
+    pub board: &'a crate::neon_sign::BoardModel,
 }
 
 /// `frame`'s [`DisplayList`] as `showing` says.
@@ -159,7 +159,7 @@ pub(crate) fn compose_at<'a>(
     office: Office<'a>,
     moment: &Moment,
     floor: crate::floor::FloorMeta,
-    board: &crate::board::BoardModel,
+    board: &crate::neon_sign::BoardModel,
 ) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
@@ -187,6 +187,7 @@ pub(crate) fn compose_at<'a>(
         ambient,
         carpet: moment.look.carpet(theme),
         flash: crate::display::light::Flash::of(&moment.sky),
+        flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
         pack,
@@ -469,7 +470,7 @@ pub(crate) fn ground_shadow(
 fn signs(
     office: Office<'_>,
     floor_idx: usize,
-    board: &crate::board::BoardModel,
+    board: &crate::neon_sign::BoardModel,
 ) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
     let indicator = TextRun::indicator(office.layout.door, floor_idx + 1, office.theme);
@@ -1115,7 +1116,7 @@ fn push_characters(
         scale,
     } = office;
     let pen = Pen::for_pack(scale, pack);
-    let namesakes = crate::overlay::Namesakes::of(&frame.agents);
+    let namesakes = crate::badge::Namesakes::of(&frame.agents);
     let mut carried = Vec::new();
     for c in &frame.characters {
         let Some(agent) = frame.agents.get(c.agent_idx) else {
