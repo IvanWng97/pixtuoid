@@ -94,8 +94,8 @@ impl BoardSegment {
 }
 
 /// The whole board, as tone-tagged segments — L1 `brand` + `star`, L2 `mood`,
-/// L3 `context`. No baked padding between brand/star (each painter right-flushes
-/// in its own coordinate space); the mood + context separators ARE baked.
+/// L3 `context`. No baked padding between brand/star ([`BoardModel::runs`]
+/// right-aligns the star); the mood + context separators ARE baked.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoardModel {
     pub brand: BoardSegment,
@@ -109,7 +109,7 @@ pub struct BoardModel {
 pub const BOARD_BRAND: &str = "pixtuoid";
 
 /// The board's L1 ★ CTA text — the ONE definition every painter renders AND the
-/// TUI's `star_hit_rect` measures, so the clickable target can't drift.
+/// star run's [`TextRun::hit_box`](crate::display::TextRun::hit_box) measures.
 pub const BOARD_STAR: &str = "\u{2605} Star";
 
 /// The waiting/active/idle glyphs — one definition for the tally AND the persona
