@@ -106,7 +106,7 @@ impl Tiles {
         match dirty {
             Dirty::All => self.owed.extend(0..self.sent.len() as u32),
             Dirty::Rects(rects) => {
-                for &r in rects {
+                for &r in rects.as_slice() {
                     self.owed.extend(self.reached(r));
                 }
             }
@@ -353,7 +353,7 @@ mod tests {
     }
 
     fn rect(x: u16, y: u16, width: u16, height: u16) -> Dirty {
-        Dirty::Rects(vec![Bounds {
+        Dirty::within(vec![Bounds {
             x,
             y,
             width,

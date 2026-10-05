@@ -23,11 +23,11 @@ use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalkPathSnapshot {
     /// Leg start point.
-    pub from: Point,
+    pub(crate) from: Point,
     /// Leg end point.
-    pub to: Point,
+    pub(crate) to: Point,
     /// The frozen A* polyline from `from` to `to`.
-    pub path: Vec<Point>,
+    pub(crate) path: Vec<Point>,
 }
 
 /// Phase the wander cycle is currently in for a given agent.
@@ -66,11 +66,11 @@ pub struct WanderFrame {
 #[derive(Debug, Clone)]
 pub struct WalkLeg {
     /// Wall-clock instant the leg armed.
-    pub started_at: SystemTime,
+    pub(crate) started_at: SystemTime,
     /// Frozen physics profile for the leg.
-    pub profile: WalkProfile,
+    pub(crate) profile: WalkProfile,
     /// Frozen leg origin, recorded at arm-time so the leg doesn't drift.
-    pub from: Point,
+    pub(crate) from: Point,
 }
 
 /// A resolved wander destination: the walkable target cell plus WHAT it is.
@@ -137,55 +137,51 @@ impl WanderKind {
 pub struct WanderState {
     /// Wander cycle counter, incremented each time `WalkingBack` completes —
     /// selects the waypoint destination (mirrors `pose::pure`'s derivation).
-    pub cycle_n: u64,
+    pub(crate) cycle_n: u64,
     /// Current phase of the wander cycle.
-    pub phase: WanderPhase,
+    pub(crate) phase: WanderPhase,
     /// Wall-clock instant the current phase began, reset every transition.
     /// Sentinel `UNIX_EPOCH` ⇒ a fresh agent `advance_wander` bootstraps.
-    pub phase_started_at: SystemTime,
+    pub(crate) phase_started_at: SystemTime,
     /// The current trip's resolved destination. Set on each new `WalkingOut`;
     /// its `kind` resets to `Aimless` when a cycle completes.
-    pub target: WanderTarget,
+    pub(crate) target: WanderTarget,
     /// Last `now` at which `advance_wander` performed a transition — idempotency:
     /// `now <= last_advanced_at` ⇒ a no-op on mutable state. Sentinel
     /// `UNIX_EPOCH` ⇒ never advanced.
-    pub last_advanced_at: SystemTime,
+    pub(crate) last_advanced_at: SystemTime,
 }
 
 /// Walk state for one live agent on one floor.
 #[derive(Debug, Clone)]
 pub struct WalkState {
-    /// The agent this walk state belongs to.
-    pub agent_id: AgentId,
-
     /// The arrival walk, snapshotted once at door-crossing. Carries its own
     /// `from` because a resurrect that cancels an IN-FLIGHT walkout re-enters
     /// from wherever the sprite is; a hardcoded door origin teleports it.
-    pub entry: Option<WalkLeg>,
+    pub(crate) entry: Option<WalkLeg>,
     /// The walkout, snapshotted once when `exiting_at` fires. `from` is where
     /// the sprite actually is (wander position if it was out, else the desk
     /// anchor), so the exit doesn't teleport to the desk.
-    pub exit: Option<WalkLeg>,
+    pub(crate) exit: Option<WalkLeg>,
     /// The state-transition snap-back walk. `from` is the FROZEN origin recorded
     /// when the leg armed, reused every frame so the walk doesn't drift toward
     /// the desk (mirrors `exit`).
-    pub snap_back: Option<WalkLeg>,
+    pub(crate) snap_back: Option<WalkLeg>,
 
     /// The elastic cyclic-wander timeline state machine. See [`WanderState`].
-    pub wander: WanderState,
+    pub(crate) wander: WanderState,
 
     /// Frozen A* polyline for the current walk leg, `None` while not walking.
     /// Re-snapshotted when the leg's `(from, to)` change. See
     /// [`WalkPathSnapshot`].
-    pub walk_path: Option<WalkPathSnapshot>,
+    pub(crate) walk_path: Option<WalkPathSnapshot>,
 }
 
-impl WalkState {
-    /// Construct a fresh `WalkState`. Both wander instants are `UNIX_EPOCH` so
+impl Default for WalkState {
+    /// A fresh `WalkState`. Both wander instants are `UNIX_EPOCH` so
     /// `advance_wander` detects a bootstrap agent via the sentinel.
-    pub fn new(agent_id: AgentId) -> Self {
+    fn default() -> Self {
         Self {
-            agent_id,
             entry: None,
             exit: None,
             snap_back: None,
@@ -202,6 +198,28 @@ impl WalkState {
             },
             walk_path: None,
         }
+    }
+}
+
+impl WalkState {
+    /// The agent's wander timeline.
+    #[doc(hidden)]
+    pub fn wander(&self) -> &WanderState {
+        &self.wander
+    }
+}
+
+impl WanderState {
+    /// When the current phase began.
+    #[doc(hidden)]
+    pub fn phase_started_at(&self) -> SystemTime {
+        self.phase_started_at
+    }
+
+    /// The last `now` at which the timeline transitioned.
+    #[doc(hidden)]
+    pub fn last_advanced_at(&self) -> SystemTime {
+        self.last_advanced_at
     }
 }
 
@@ -226,7 +244,7 @@ pub fn advance_wander(
     // Claims must be snapshotted BEFORE this agent's `&mut` — the two borrows of
     // `walks` can't overlap.
     let claimed = spot_claims(walks, id);
-    let walk = walks.entry(id).or_insert_with(|| WalkState::new(id));
+    let walk = walks.entry(id).or_default();
 
     // A fresh WalkState's epoch `phase_started_at` is below any real
     // `state_started_at`; we also re-seed when the slot (re-)entered Idle after a

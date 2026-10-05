@@ -79,9 +79,9 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
         for y in y0..y1 {
             for x in 0..w {
                 let p = buf.as_slice()[y * w + x];
-                r += p.r as u64;
-                g += p.g as u64;
-                b += p.b as u64;
+                r += u64::from(p.r);
+                g += u64::from(p.g);
+                b += u64::from(p.b);
                 n += 1;
             }
         }

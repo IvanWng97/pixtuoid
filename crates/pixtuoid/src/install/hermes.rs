@@ -21,6 +21,7 @@ use anyhow::{Result, anyhow, bail};
 use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, YamlOwned};
 
 use crate::install::SENTINEL_KEY;
+use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 
@@ -52,9 +53,7 @@ const HOOK_TIMEOUT_SECS: i64 = 5;
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     pixtuoid_core::source::hermes::hermes_home()
         .map(|d| d.join("config.yaml"))
-        .ok_or_else(|| {
-            anyhow!("cannot resolve the Hermes home (HERMES_HOME/HOME unset); pass --config <path>")
-        })
+        .ok_or_else(|| io::home_unset("the Hermes home", "HERMES_HOME/HOME"))
 }
 
 /// Probes the home DIR, not config.yaml: Hermes creates the home on first run but may

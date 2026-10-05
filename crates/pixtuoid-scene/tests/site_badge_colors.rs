@@ -1,6 +1,6 @@
 //! Pins the site manifest's per-CLI `badge_color` hexes to the NORMAL theme's
 //! `SourceColors` — the palette the site's live office renders with, since
-//! `pixtuoid-web` constructs its `Office` on `ALL_THEMES[0]`.
+//! `pixtuoid-web` constructs its `Office` on `NORMAL`.
 //!
 //! Reads the manifest at RUNTIME because `include_str!` of a path outside the
 //! crate breaks `cargo publish`'s verify. Workspace-only test, excluded from the
