@@ -190,8 +190,9 @@ pub(crate) fn compose_at<'a>(
         flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
+        backdrop: crate::display::Backdrop::of(office.layout, theme),
+        recolours: crate::display::Recolours::of(theme),
         pack,
-        theme,
         scale,
     }
 }
@@ -285,8 +286,9 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
                 effect,
                 head: None,
                 pen,
+                inks: crate::effects::look::Inks::of(theme),
             };
-            if let Some(s) = riding.span(theme, depth) {
+            if let Some(s) = riding.span(depth) {
                 order.push((s, PieceKind::Effect(riding)));
             }
         }
@@ -529,7 +531,7 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
-    wall_segments(layout, &mut order);
+    wall_segments(layout, crate::glass::WallTrim::of(office.theme), &mut order);
     order
 }
 
@@ -847,10 +849,11 @@ fn push_fixture(
                 PieceKind::Clock {
                     at: top_left,
                     reading: crate::sky::clock_reading(moment.timing.now),
+                    hand: theme.office.clock_hand,
                 },
             ));
         }
-        // The backdrop lays them ([`covering`]).
+        // The backdrop lays them ([`Covering`](crate::display::Covering)).
         K::MeetingRug { .. }
         | K::LoungeRug
         | K::Doormat { .. }
@@ -1158,11 +1161,17 @@ fn push_characters(
             c.sort_row,
             chair.map(|(span, _)| span),
         );
-        let riders = riders(c, &key, (w, at), scale);
+        let riders = riders(
+            c,
+            &key,
+            (w, at),
+            scale,
+            crate::effects::look::Inks::of(theme),
+        );
         // Dust lies on the ground under its walker; the rest ride over them.
         let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
             for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
-                if let Some(s) = r.span(theme, span.depth) {
+                if let Some(s) = r.span(span.depth) {
                     order.push((s, PieceKind::Effect(*r)));
                 }
             }
@@ -1198,6 +1207,7 @@ fn riders(
     key: &crate::character::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
+    inks: crate::effects::look::Inks,
 ) -> Vec<crate::display::effects::Riding> {
     let d = key.frame.density.get();
     let Some(pen) = Pen::new(scale, d) else {
@@ -1222,7 +1232,12 @@ fn riders(
     };
     c.effects
         .iter()
-        .map(|&effect| crate::display::effects::Riding { effect, head, pen })
+        .map(|&effect| crate::display::effects::Riding {
+            effect,
+            head,
+            pen,
+            inks,
+        })
         .collect()
 }
 
@@ -1303,7 +1318,11 @@ fn push_sofa(
 
 /// Queue every room wall's [sort bands](crate::layout::WallPiece::sort_bands) as
 /// pieces: the long-object case [`crate::display::order`] documents.
-fn wall_segments(layout: &SceneLayout, order: &mut Vec<(Span, PieceKind)>) {
+fn wall_segments(
+    layout: &SceneLayout,
+    trim: crate::glass::WallTrim,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
     for &piece in &layout.wall_pieces {
         let (at, size) = piece.visual();
         for (rows, depth) in piece.sort_bands() {
@@ -1314,6 +1333,7 @@ fn wall_segments(layout: &SceneLayout, order: &mut Vec<(Span, PieceKind)>) {
                 PieceKind::WallSeg {
                     piece,
                     rows: (rows.start, rows.end),
+                    trim,
                 },
             ));
         }
