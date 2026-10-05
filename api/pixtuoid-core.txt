@@ -1066,6 +1066,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Material
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Material
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Material
 pub enum pixtuoid_core::sprite::format::StandIn
+pub pixtuoid_core::sprite::format::StandIn::Bare(&'static str)
 pub pixtuoid_core::sprite::format::StandIn::DefaultPack
 pub pixtuoid_core::sprite::format::StandIn::OwnPiece(&'static str)
 pub pixtuoid_core::sprite::format::StandIn::OwnPose
@@ -1524,6 +1525,7 @@ pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
+pub const pixtuoid_core::sprite::format::OVERLAY_PIECES: &[(&str, &str)]
 pub const pixtuoid_core::sprite::format::PACK_MANIFEST: &str
 pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
 pub fn pixtuoid_core::sprite::format::claimed_variant_size(&pixtuoid_core::sprite::Frame, pixtuoid_core::sprite::format::Density) -> (u32, u32)

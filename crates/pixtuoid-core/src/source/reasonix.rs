@@ -49,6 +49,10 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 /// Reasonix is HOOK-ONLY: a slot the reducer's proof-of-life pre-pass
 /// synthesizes mid-turn has no JSONL back-fill path, so without the attached
 /// identity it would stay a blank `#N` ghost until the next `UserPromptSubmit`.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `event` or a non-empty `cwd`, or names an unregistered event.
 pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

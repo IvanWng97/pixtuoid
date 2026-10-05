@@ -53,8 +53,8 @@ mod imp {
     }
 
     pub(super) fn pids_by_name(name: &str) -> Option<Vec<i32>> {
-        // SAFETY: the null-buffer/0-size form is the documented sizing call —
-        // nothing is written.
+        // SAFETY: a null buffer is the sizing call — xnu's `proc_listpids`
+        // returns a count without writing (`bsd/kern/proc_info.c`).
         let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
         if count <= 0 {
             tracing::debug!(

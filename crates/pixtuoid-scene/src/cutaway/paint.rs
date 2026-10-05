@@ -10,11 +10,10 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
-    Art, Badge, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
-    StoodProp, board_runs, compose, desk_span, face_rows, indicator_plate,
+    Align, Art, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
+    StoodProp, TextRun, compose, desk_span, face_rows, run_rect,
 };
 use crate::dither::Dithered;
-use crate::effects::EffectKind;
 use crate::layout::{Bounds, FixtureKind, Point, SceneLayout};
 use crate::outside::WindowView;
 use crate::pack::{CLOCK_SPRITE, DOOR_SPRITE, drawn_in};
@@ -71,37 +70,22 @@ impl Screen {
     }
 }
 
-/// Fill `plate` with `ground`, then paint `runs` one after another inside it.
-fn paint_plate(
-    pen: Pen,
-    buf: &mut RgbBuffer,
-    plate: ArtRect,
-    ground: pixtuoid_core::sprite::Rgb,
-    runs: &[(&str, pixtuoid_core::sprite::Rgb)],
-) {
-    pen.fill(buf, plate, ground);
-    let mut x = plate.x.0 + PLATE_PAD;
-    for &(text, ink) in runs {
-        crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
-        x += crate::display::text::advance(text).0;
+/// Paint `run`: its plate, if it has one, then its spans end to end from its
+/// line's start, inside the plate's pad where it sits on one.
+fn paint_run(run: &TextRun, pen: Pen, buf: &mut RgbBuffer) {
+    let rect = run_rect(run, pen);
+    if let Some(ground) = run.plate {
+        pen.fill(buf, rect, ground);
     }
-}
-
-/// Paint `badge`'s plate, marker and text.
-fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let ink = crate::overlay::badge_ink(&badge.text, badge.tone, theme);
-    let marker = crate::overlay::BADGE_MARKER.to_string();
-    let runs = [
-        (marker.as_str(), ink.marker),
-        (badge.text.as_str(), ink.name),
-    ];
-    paint_plate(
-        pen,
-        buf,
-        badge.plate(pen),
-        crate::overlay::badge_plate(theme),
-        &runs,
-    );
+    let inset = match run.align {
+        Align::Over | Align::Centre => PLATE_PAD,
+        Align::Left | Align::Right => 0,
+    };
+    let mut x = rect.x.0 + inset;
+    for span in &run.spans {
+        crate::cutaway::text::paint(pen, buf, (ArtPx(x), rect.y), &span.text, span.ink);
+        x += crate::display::text::advance(&span.text).0;
+    }
 }
 
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
@@ -229,44 +213,15 @@ fn paint_pieces(
                     SHADED_MARK => Glow::Shaded,
                     _ => Glow::Lit,
                 };
-                let glow = match piece.kind {
-                    PieceKind::Window { ref view, .. }
+                let glow = match piece.kind.emits() {
+                    Emits::Pane(view)
                         if view.shows((pen.art_of_buffer(x).0, pen.art_of_buffer(y).0)) =>
                     {
                         Glow::Pane
                     }
-                    // A badge keeps the contrast its theme pins at every hour.
-                    PieceKind::Neon { .. }
-                    | PieceKind::Badge { .. }
-                    | PieceKind::Board { .. }
-                    | PieceKind::Indicator { .. } => Glow::Emissive,
-                    PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
-                        Glow::Emissive
-                    }
-                    PieceKind::Desk { .. }
-                    | PieceKind::Prop { .. }
-                    | PieceKind::Animated { .. }
-                    | PieceKind::Hung { .. }
-                    | PieceKind::Door { .. }
-                        if glowing =>
-                    {
-                        marked()
-                    }
-                    PieceKind::Desk { .. }
-                    | PieceKind::Prop { .. }
-                    | PieceKind::Animated { .. }
-                    | PieceKind::Hung { .. }
-                    | PieceKind::Door { .. }
-                    | PieceKind::WallSeg { .. }
-                    | PieceKind::Chair { .. }
-                    | PieceKind::DeskProp(_)
-                    | PieceKind::Creature { .. }
-                    | PieceKind::PropBand { .. }
-                    | PieceKind::Table { .. }
-                    | PieceKind::Character { .. }
-                    | PieceKind::Effect(_)
-                    | PieceKind::Clock { .. }
-                    | PieceKind::Window { .. } => Glow::Lit,
+                    Emits::Emissive => Glow::Emissive,
+                    Emits::ByArt if glowing => marked(),
+                    Emits::Pane(_) | Emits::ByArt | Emits::Lit => Glow::Lit,
                 };
                 emission.set(x, y, glow);
             }
@@ -323,6 +278,7 @@ fn mark(
         | PieceKind::WallSeg { .. }
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
+        | PieceKind::DeskFront { .. }
         | PieceKind::Creature { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
@@ -330,9 +286,7 @@ fn mark(
         | PieceKind::Effect(_)
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
-        | PieceKind::Badge { .. }
-        | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. } => false,
+        | PieceKind::Text { .. } => false,
     }
 }
 
@@ -571,6 +525,9 @@ fn paint_piece(
         PieceKind::Desk { at, art, screen } => {
             paint_desk(at, art, screen, (pack, scale), &mut cache.art, buf);
         }
+        PieceKind::DeskFront { at, art, screen } => {
+            paint_desk_front(at, art, screen, (pack, scale), &mut cache.art, buf);
+        }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
         PieceKind::Creature {
@@ -614,23 +571,7 @@ fn paint_piece(
             paint_window(view, frame, Pen::for_pack(scale, pack), buf);
         }
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
-        PieceKind::Badge { ref badge, .. } => {
-            paint_badge(badge, theme, Pen::for_pack(scale, pack), buf);
-        }
-        PieceKind::Board { ref board } => {
-            let pen = Pen::for_pack(scale, pack);
-            for (at, seg) in board_runs(board, pen) {
-                let ink = crate::board::tone_rgb(seg.tone, theme);
-                crate::cutaway::text::paint(pen, buf, at, &seg.text, ink);
-            }
-        }
-        PieceKind::Indicator { door, floor } => {
-            let pen = Pen::for_pack(scale, pack);
-            let text = crate::layout::floor_indicator_text(floor);
-            let plate = indicator_plate(door, floor, pen);
-            let runs = [(text.as_str(), theme.ui.neon_brand)];
-            paint_plate(pen, buf, plate, theme.ui.tooltip_bg, &runs);
-        }
+        PieceKind::Text { ref run } => paint_run(run, Pen::for_pack(scale, pack), buf),
     }
 }
 
@@ -979,6 +920,35 @@ fn paint_desk(
     );
 }
 
+/// The front of the desk art `art_name` draws at `at`, over its props: drawn
+/// on the desk's canvas as [`paint_desk`] draws the desk.
+fn paint_desk_front(
+    at: crate::layout::Point,
+    art_name: &'static str,
+    screen: Screen,
+    (pack, scale): (&Pack, RenderScale),
+    art: &mut ArtCache,
+    buf: &mut RgbBuffer,
+) {
+    let Some(front) = crate::pack::desk_front(pack, art_name) else {
+        return;
+    };
+    let (Some(span), Some(f)) = (
+        desk_span(pack, art_name, at, scale),
+        crate::pack::densest_frame(pack, front, 0, scale),
+    ) else {
+        return;
+    };
+    let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
+    blit_frame_scaled(
+        art.desk(front, &f, screen).unwrap_or(f.frame),
+        x,
+        top_y,
+        f.blit_at,
+        buf,
+    );
+}
+
 /// `rows` of front face under `art` drawn at `top_left`, in the material of its
 /// bottom row ([`dominant_opaque_row`]).
 fn paint_derived_face(
@@ -1225,7 +1195,7 @@ fn paint_creature(
     blit_frame_scaled(&shown, x, y, dense.blit_at, buf);
 }
 
-/// A desk prop in the theme's cup and paper.
+/// A desk prop in the theme's cup and paper, turned as its desk turns it.
 fn paint_desk_prop(
     prop: StoodProp,
     pack: &Pack,
@@ -1239,7 +1209,13 @@ fn paint_desk_prop(
     let f_themed = f
         .recolorable
         .recolored(&crate::pack::desk_prop_overrides(theme));
-    blit_frame_scaled(&f_themed, prop.at.0, prop.at.1, f.blit_at, buf);
+    blit_frame_scaled(
+        &prop.flip.turn(f_themed),
+        prop.at.0,
+        prop.at.1,
+        f.blit_at,
+        buf,
+    );
 }
 
 /// The pack keys art takes from the theme.
@@ -1517,7 +1493,7 @@ mod tests {
         base_size, empty_frame, kind_name, list_at, lively_office, many_layouts, queued,
         quiet_board, showing, sit_down, sit_down_as, sit_down_in,
     };
-    use crate::display::compose::{PLATE_H, compose_at, ground_shadow, push_windows};
+    use crate::display::compose::{compose_at, ground_shadow, push_windows};
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
     use crate::pack::{MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, test_default_pack};
@@ -1619,20 +1595,32 @@ mod tests {
                     let [cup, tower, sheet] = props[..] else {
                         panic!("desk at {at:?} stood {props:?}");
                     };
+                    // A prop stands with its west edge on its mark's cell, or, on
+                    // a desk that mirrors its props, turned, its east edge.
+                    let mirrored = crate::pack::desk_props_mirrored(art);
+                    let turn = if mirrored {
+                        Flip::Horizontal
+                    } else {
+                        Flip::None
+                    };
                     let foot = |prop: StoodProp| {
                         let f = crate::pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
                             .expect("prop art");
                         let b = f.blit_at.get();
-                        (prop.at.0, prop.at.1 + (f.frame.height() - 1) * b, b)
+                        let east = prop.at.0 + f.frame.width() * b;
+                        let edge = if mirrored { east } else { prop.at.0 };
+                        (edge, prop.at.1 + (f.frame.height() - 1) * b, b)
                     };
+                    let edge_of = |mx: u16| if mirrored { mx + k } else { mx };
                     for (prop, name) in [(cup, "cup"), (tower, "tower")] {
                         let (x, y, b) = foot(prop);
                         let (mx, my) = mark(name);
                         assert_eq!(
                             (x, y),
-                            (mx, my + k - b),
-                            "at scale {s}, the {name} is off its mark"
+                            (edge_of(mx), my + k - b),
+                            "at scale {s}, the {art} {name} is off its mark"
                         );
+                        assert_eq!(prop.flip, turn, "at scale {s}, the {art} {name} turned");
                     }
                     // The steam rises from `desk_cup_at`, in either look.
                     let facing = if art == crate::pack::desk_sprite_name(Facing::North) {
@@ -1648,13 +1636,84 @@ mod tests {
                     );
                     let rest = crate::token_meter::SHEET_FALL_PX - 1;
                     assert_eq!(
-                        (sheet.at.0, sheet.at.1),
-                        (tower.at.0, tower.at.1 - rest * s),
-                        "at scale {s}, the sheet hangs off its fall"
+                        (foot(sheet).0, sheet.at.1),
+                        (edge_of(mark("tower").0), tower.at.1 - rest * s),
+                        "at scale {s}, the {art} sheet hangs off its fall"
                     );
                     stood += 1;
                 }
                 assert!(stood > 0, "no desk stood its props");
+            }
+        }
+    }
+
+    /// No prop covers the monitor in the cutaway, in either facing, at every
+    /// density and tier, cup or none: its cells paint as the bare desk's.
+    #[test]
+    fn no_prop_covers_the_monitor_in_the_cutaway() {
+        use crate::layout::Facing;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        for facing in [Facing::North, Facing::South] {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            let seated = frames.last().expect("a seated frame");
+            for s in [1, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let render = |cup, tier| {
+                    let mut frame = seated.clone();
+                    for d in &mut frame.desks {
+                        (d.cup, d.token_tier, d.sheet_fall) = (cup, tier, None);
+                    }
+                    let list = list_at(&frame, office, 12);
+                    let mut buf = RgbBuffer::filled(
+                        scale.to_buffer(layout.buf_w),
+                        scale.to_buffer(layout.buf_h),
+                        theme.surface.bg_fallback,
+                    );
+                    paint(&layout, &list, &mut CutawayCache::default(), &mut buf);
+                    let monitors: Vec<(u16, u16)> = list
+                        .pieces()
+                        .iter()
+                        .filter_map(|p| match p.kind {
+                            PieceKind::Desk { art, .. } => Some((art, p.span)),
+                            _ => None,
+                        })
+                        .flat_map(|(art, span)| {
+                            let desk =
+                                crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
+                            let (w, b) = (usize::from(desk.frame.width()), desk.blit_at.get());
+                            let (x0, y0) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
+                            crate::pack::drawn_in(&desk, &crate::pack::MONITOR_KEYS)
+                                .into_iter()
+                                .enumerate()
+                                .filter(|&(_, m)| m)
+                                .map(move |(i, _)| {
+                                    (x0 + (i % w) as u16 * b, y0 + (i / w) as u16 * b)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .collect();
+                    (buf, monitors)
+                };
+                let (bare, monitors) = render(None, 0);
+                assert!(!monitors.is_empty(), "the desks draw monitors");
+                for tier in 0..=crate::token_meter::MAX_TIER {
+                    for cup in [None, Some(crate::sim::Cup::Cold)] {
+                        let (buf, _) = render(cup, tier);
+                        for &(x, y) in &monitors {
+                            assert_eq!(
+                                buf.get(x, y),
+                                bare.get(x, y),
+                                "{facing:?} at scale {s}, tier {tier}, cup {cup:?}: a prop covers the monitor at ({x}, {y})"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
@@ -1741,51 +1800,52 @@ mod tests {
         assert_eq!(far.x, near.x, "the seat side never moves the centring");
     }
 
-    /// A plate's runs and the board's segments step on one grid, wide
-    /// characters included: the run after `text` starts
+    /// A run's spans step on one grid, wide characters included, on a plate
+    /// or off one: the span after `text` starts
     /// [`advance`](crate::display::text::advance)`(text)` on.
     #[test]
-    fn plate_runs_and_board_columns_share_one_grid() {
-        use crate::board::{BoardSegment, BoardTone};
+    fn a_runs_spans_step_on_one_grid_on_a_plate_or_off_one() {
         use crate::display::text::advance;
+        use crate::display::{TextRole, TextSpan};
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
         let (first, second) = ("I日b", "I");
-        let mut board = quiet_board().clone();
-        board.mood = [first, second]
-            .map(|text| BoardSegment {
-                text: text.into(),
-                tone: BoardTone::Idle,
-            })
-            .to_vec();
-        // Brand, star, then the mood line's segments.
-        let runs = board_runs(&board, pen);
-        let ((x0, _), _) = runs[2];
-        let ((x1, _), _) = runs[3];
-        assert_eq!(x1.0 - x0.0, advance(first).0, "the board");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
-        let mut buf = RgbBuffer::filled(64, 16, Rgb { r: 0, g: 0, b: 0 });
-        let plate = ArtRect {
-            x: ArtPx(0),
-            y: ArtPx(0),
-            w: ArtPx(40),
-            h: ArtPx(PLATE_H),
-        };
-        paint_plate(
-            pen,
-            &mut buf,
-            plate,
-            Rgb { r: 1, g: 1, b: 1 },
-            &[(first, a), (second, b)],
-        );
-        // An `I`'s top bar spans its whole cell, so its first ink is its run's start.
-        let left =
-            |ink| (0..buf.width()).find(|&x| (0..buf.height()).any(|y| buf.get(x, y) == ink));
-        let (la, lb) = (
-            left(a).expect("the first run"),
-            left(b).expect("the second run"),
-        );
-        assert_eq!(lb - la, advance(first).0, "the plate");
+        for (align, plate, role) in [
+            (Align::Left, None, TextRole::Board),
+            (
+                Align::Centre,
+                Some(Rgb { r: 1, g: 1, b: 1 }),
+                TextRole::Indicator,
+            ),
+        ] {
+            let run = TextRun {
+                at: Point { x: 8, y: 0 },
+                align,
+                spans: vec![
+                    TextSpan {
+                        text: first.into(),
+                        ink: a,
+                    },
+                    TextSpan {
+                        text: second.into(),
+                        ink: b,
+                    },
+                ],
+                plate,
+                role,
+            };
+            let mut buf = RgbBuffer::filled(96, 16, Rgb { r: 0, g: 0, b: 0 });
+            paint_run(&run, pen, &mut buf);
+            // An `I`'s top bar spans its whole cell, so its first ink is its span's start.
+            let left =
+                |ink| (0..buf.width()).find(|&x| (0..buf.height()).any(|y| buf.get(x, y) == ink));
+            let (la, lb) = (
+                left(a).expect("the first span"),
+                left(b).expect("the second span"),
+            );
+            assert_eq!(lb - la, advance(first).0, "{align:?}");
+        }
     }
 
     /// The layout leaves walkable rows between the wall band and `top_margin`.
@@ -2266,7 +2326,7 @@ mod tests {
         let badge = list
             .pieces()
             .iter()
-            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .find(|p| matches!(p.kind, PieceKind::Text { .. }))
             .expect("the badge")
             .span;
         let rider = |kind| {
@@ -3531,7 +3591,11 @@ mod tests {
                 };
                 let shadow = ground_shadow(span, &kind, &pack).expect("a desk casts a shadow");
                 let ((_, top), (_, past)) = shadow.bounds();
-                assert_eq!((top + past) / 2, span.depth + 1, "{art} at scale {s}");
+                assert_eq!(
+                    u16::midpoint(top, past),
+                    span.depth + 1,
+                    "{art} at scale {s}"
+                );
             }
         }
     }
@@ -3607,7 +3671,7 @@ mod tests {
         let plate = list
             .pieces()
             .iter()
-            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .find(|p| matches!(p.kind, PieceKind::Text { .. }))
             .expect("the sitter has a badge")
             .span;
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
@@ -3942,11 +4006,7 @@ mod tests {
                     .collect()
             };
             assert_eq!(prints(5_000), prints(5_000), "{w:?}: one key");
-            let falls = matches!(
-                w,
-                Weather::Rain | Weather::Storm | Weather::Snow | Weather::Windy
-            );
-            assert_eq!(prints(5_000) != prints(5_600), falls, "{w:?}");
+            assert_eq!(prints(5_000) != prints(5_600), w.falls(), "{w:?}");
         }
     }
 
@@ -3989,7 +4049,7 @@ mod tests {
                             kind,
                             PieceKind::Character { .. }
                                 | PieceKind::Effect(_)
-                                | PieceKind::Badge { .. }
+                                | PieceKind::Text { .. }
                         )
                     {
                         continue;
@@ -4124,21 +4184,20 @@ mod tests {
             kinds.into_iter().collect::<Vec<_>>(),
             [
                 "animated",
-                "badge",
-                "board",
                 "chair",
                 "character",
                 "clock",
                 "desk",
+                "desk front",
                 "desk prop",
                 "door",
                 "effect",
                 "hung decor",
-                "indicator",
                 "neon",
                 "prop",
                 "prop band",
                 "table",
+                "text",
                 "wall",
                 "window"
             ],
@@ -5351,17 +5410,17 @@ mod tests {
                     "hover box {body:?} belongs to a piece that paints nothing"
                 );
             }
-            // Each drawn agent's badge, known by its text.
-            let namesakes = crate::overlay::Namesakes::of(&frame.agents);
-            let mut badged: Vec<_> = list.badges().map(|b| b.text.clone()).collect();
-            let mut drawn: Vec<_> = hovers
+            // Each drawn agent's badge, known by whose it is.
+            let badged: Vec<_> = list.badges().map(|run| run.role).collect();
+            let drawn: std::collections::HashSet<_> = hovers
                 .iter()
-                .filter_map(|&(id, _)| frame.agents.iter().find(|a| a.agent_id == id))
-                .map(|a| namesakes.text(a))
+                .map(|&(id, _)| crate::display::TextRole::Badge(id))
                 .collect();
-            badged.sort();
-            drawn.sort();
-            assert_eq!(badged, drawn);
+            assert_eq!(badged.len(), drawn.len());
+            assert_eq!(
+                badged.into_iter().collect::<std::collections::HashSet<_>>(),
+                drawn
+            );
         }
     }
 

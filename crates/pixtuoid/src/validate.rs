@@ -42,6 +42,7 @@ fn missing_optional_line(m: &MissingOptional) -> String {
         StandIn::DefaultPack => "the default pack draws it, in its own style".to_string(),
         StandIn::OwnPiece(piece) => format!("the pack's own \"{piece}\" stands in"),
         StandIn::OwnPose => "another of the pack's poses stands in".to_string(),
+        StandIn::Bare(piece) => format!("the pack's own \"{piece}\" draws without it"),
     };
     format!(
         "WARN:  missing optional animation \"{}\" ({stand_in})",
@@ -203,6 +204,11 @@ fn orphan_hairstyle_line(style: &str) -> String {
     )
 }
 
+/// Validate the sprite pack in `dir`, printing the report.
+///
+/// # Errors
+///
+/// If the pack at `dir` fails to load, stdout cannot be written, or the report contains errors.
 pub fn validate_pack(dir: &Path) -> Result<()> {
     let (mut out, mut err) = (cli_stdout(), std::io::stderr());
     let pack = load_pack(dir)?;
@@ -331,6 +337,9 @@ mod tests {
         );
         assert!(line("plant", StandIn::DefaultPack).contains("the default pack draws it"));
         assert!(line("walking_coffee", StandIn::OwnPose).contains("another of the pack's poses"));
+        assert!(
+            line("desk_front", StandIn::Bare("desk")).contains("own \"desk\" draws without it")
+        );
     }
 
     #[test]

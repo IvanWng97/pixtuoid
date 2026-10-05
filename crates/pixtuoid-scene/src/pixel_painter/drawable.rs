@@ -276,6 +276,12 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
                 lights.screen_idle,
             );
             paint_desk_props(buf, (*desk, *facing), props, pack, theme);
+            if let Some(front) = crate::pack::desk_art_name(pack, *facing)
+                .and_then(|art| crate::pack::desk_front(pack, art))
+                .and_then(|front| pack.animation(front)?.frames().first())
+            {
+                blit_frame(front, desk.x, sprite_top, buf);
+            }
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
@@ -450,11 +456,19 @@ fn paint_desk_props(
     theme: &crate::theme::Theme,
 ) {
     let overrides = crate::pack::desk_prop_overrides(theme);
-    // Frame `frame` of `sprite` stood on the row past its foot at `at`; its top row.
-    let stand = |buf: &mut RgbBuffer, sprite: &str, frame: usize, at: Point| {
+    // Frame `frame` of `sprite` stood on `at`, turned as its desk turns it; its
+    // top row.
+    let stand = |buf: &mut RgbBuffer, sprite: &str, frame: usize, at: crate::pack::PropMark| {
         let f = crate::pack::densest_frame(pack, sprite, frame, RenderScale::ONE)?;
-        let y = at.y.checked_sub(f.frame.height())?;
-        blit_frame(&f.recolorable.recolored(&overrides), at.x, y, buf);
+        let x = at.left(f.frame.width())?;
+        let y = at.at.y.checked_sub(f.frame.height())?;
+        let art = f.recolorable.recolored(&overrides);
+        let art = if at.mirrored {
+            art.mirror_horizontal()
+        } else {
+            art
+        };
+        blit_frame(&art, x, y, buf);
         Some(y)
     };
     let mark = |name| crate::pack::desk_mark(pack, desk, facing, name);
@@ -479,15 +493,14 @@ fn paint_desk_props(
         .and_then(|fallen| crate::token_meter::SHEET_FALL_PX.checked_sub(fallen))
         .filter(|&rest| rest > 0)
     {
-        stand(
-            buf,
-            TOKEN_SHEET_SPRITE,
-            0,
-            Point {
-                x: at.x,
+        let at = crate::pack::PropMark {
+            at: Point {
+                x: at.at.x,
                 y: top - (rest - 1),
             },
-        );
+            ..at
+        };
+        stand(buf, TOKEN_SHEET_SPRITE, 0, at);
     }
 }
 
@@ -580,7 +593,8 @@ mod tests {
     /// its base row.
     fn tower_base(pack: &Pack, desk: Point) -> Point {
         let foot = crate::pack::desk_mark(pack, desk, Facing::South, crate::pack::TOWER_MARK)
-            .expect("the tower's mark");
+            .expect("the tower's mark")
+            .at;
         Point {
             x: foot.x,
             y: foot.y - 1,
@@ -748,6 +762,64 @@ mod tests {
             },
         );
         assert_eq!(paper_pixel_count(&buf, th), 0);
+    }
+
+    /// No prop covers the monitor, in either facing, at any tier, cup or none:
+    /// what stands behind it hides under the desk's front, what stands before it
+    /// stands beside it, so its cells paint as the bare desk's.
+    #[test]
+    fn no_prop_covers_the_monitor_in_the_classic() {
+        use crate::layout::Facing;
+        let (pack, th) = (test_pack(), theme());
+        let desk = Point { x: 40, y: 30 };
+        for facing in [Facing::North, Facing::South] {
+            let paint = |cup, token_tier| {
+                let mut d = desk_cubicle_drawable(desk, token_tier, None);
+                if let DrawableKind::DeskCubicle {
+                    facing: f, props, ..
+                } = &mut d.kind
+                {
+                    *f = facing;
+                    props.cup = cup;
+                }
+                let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+                paint_drawable(
+                    &d.kind,
+                    &mut DrawableCtx {
+                        buf: &mut buf,
+                        pack: &pack,
+                        cache: &mut FrameCache::new(),
+                        timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
+                        theme: th,
+                    },
+                );
+                buf
+            };
+            let name = crate::pack::desk_art_name(&pack, facing).expect("a desk");
+            let art = crate::pack::densest_frame(&pack, name, 0, RenderScale::ONE).expect("art");
+            let w = usize::from(art.frame.width());
+            let top = crate::pack::desk_art_top(&pack, desk.y, art.frame.height());
+            let monitor: Vec<(u16, u16)> = crate::pack::drawn_in(&art, &crate::pack::MONITOR_KEYS)
+                .iter()
+                .enumerate()
+                .filter(|&(_, &m)| m)
+                .map(|(i, _)| (desk.x + (i % w) as u16, top + (i / w) as u16))
+                .collect();
+            assert!(!monitor.is_empty(), "{name} draws a monitor");
+            let bare = paint(None, 0);
+            for tier in 0..=crate::token_meter::MAX_TIER {
+                for cup in [None, Some(crate::sim::Cup::Cold)] {
+                    let buf = paint(cup, tier);
+                    for &(x, y) in &monitor {
+                        assert_eq!(
+                            buf.get(x, y),
+                            bare.get(x, y),
+                            "{name}, tier {tier}, cup {cup:?}: a prop covers the monitor at ({x}, {y})"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

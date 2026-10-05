@@ -12,6 +12,10 @@ pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 
 /// The pack key of a desk lamp's bulb, which glows of its own at any hour.
 pub(crate) const DESK_BULB_KEY: char = '9';
+/// The monitor's keys in the bundled desks: gen-art's casing, top and stand
+/// (`BEZEL`, `SLATE`, `SHADOW`), its glass and its text.
+#[cfg(test)]
+pub(crate) const MONITOR_KEYS: [char; 5] = ['M', '3', '4', SCREEN_GLASS_KEY, SCREEN_TEXT_KEY];
 
 /// The pack key of the wall clock's face, inside its rim.
 pub(crate) const CLOCK_FACE_KEY: char = 'ц';
@@ -108,21 +112,73 @@ pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
 pub(crate) const CUP_MARK: &str = "cup";
 pub(crate) const TOWER_MARK: &str = "tower";
 
+/// Where a desk stands a prop: its mark's cell, as the cell's column and the
+/// row past the prop's foot, and whether the art stands its props mirrored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PropMark {
+    pub(crate) at: crate::layout::Point,
+    pub(crate) mirrored: bool,
+}
+
+impl PropMark {
+    /// The column a 1x prop frame `w` wide stood here starts at.
+    pub(crate) fn left(self, w: u16) -> Option<u16> {
+        prop_left(self.at.x, 1, w, self.mirrored)
+    }
+}
+
+/// The column a prop frame `w` wide starts at on a mark whose cell starts at
+/// `x` and is `cell` wide: there, or on a desk that mirrors its props, so its
+/// east edge meets the cell's; `None` past the buffer's west edge.
+pub(crate) fn prop_left(x: u16, cell: u16, w: u16, mirrored: bool) -> Option<u16> {
+    if mirrored {
+        x.checked_add(cell)?.checked_sub(w)
+    } else {
+        Some(x)
+    }
+}
+
+/// Whether desk art `art` stands its props mirrored, each on its mark's
+/// bottom-right cell: the back-turned desk is the viewer-facing one turned
+/// round, so its props turn with it.
+pub(crate) fn desk_props_mirrored(art: &str) -> bool {
+    art == DESK_NORTH_SPRITE
+}
+
+/// The art the pack draws for a desk facing `facing`: the facing's own, or
+/// the piece standing in for it.
+pub(crate) fn desk_art_name(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
+    pack.piece_or_source(desk_sprite_name(facing))
+}
+
+/// The overlay drawn over the props on desk art `art`, when the pack ships
+/// one: what of that desk stands nearer the viewer than its sitter's props.
+pub(crate) fn desk_front(pack: &Pack, art: &str) -> Option<&'static str> {
+    pixtuoid_core::sprite::format::OVERLAY_PIECES
+        .iter()
+        .find(|&&(_, under)| under == art)
+        .map(|&(overlay, _)| overlay)
+        .filter(|overlay| pack.animation(overlay).is_some())
+}
+
 /// Where the 1x desk at `desk` facing `facing` stands the prop its `mark`
-/// names: the column of the prop's west edge and the row past its foot, on
-/// the art [`desk_art`] draws there.
+/// names, on the art [`desk_art`] draws there.
 pub(crate) fn desk_mark(
     pack: &Pack,
     desk: crate::layout::Point,
     facing: crate::layout::Facing,
     mark: &str,
-) -> Option<crate::layout::Point> {
-    let art = pack.animation_or_source(desk_sprite_name(facing))?;
+) -> Option<PropMark> {
+    let name = desk_art_name(pack, facing)?;
+    let art = pack.animation(name)?;
     let top = desk_art_top(pack, desk.y, art.frames().first()?.height());
     let m = art.marks(0).iter().find(|m| m.name() == mark)?;
-    Some(crate::layout::Point {
-        x: desk.x + m.x(),
-        y: top + m.y() + 1,
+    Some(PropMark {
+        at: crate::layout::Point {
+            x: desk.x + m.x(),
+            y: top + m.y() + 1,
+        },
+        mirrored: desk_props_mirrored(name),
     })
 }
 

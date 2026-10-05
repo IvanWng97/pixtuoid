@@ -260,6 +260,17 @@ frame_ms = 600
 frames   = ["desk_north@4x.sprite"]
 frame_ms = 600
 
+# What of `desk` stands nearer the viewer than its sitter's props, drawn over
+# them on the desk's own canvas: its monitor. OPTIONAL — it comes only with the
+# desk it covers, and a desk without it draws its props on top.
+[animations.desk_front]
+frames   = ["desk_front.sprite"]
+frame_ms = 600
+
+[animations."desk_front@4x"]
+frames   = ["desk_front@4x.sprite"]
+frame_ms = 600
+
 [animations.plant]
 frames   = ["plant.sprite"]
 frame_ms = 600

@@ -30,7 +30,7 @@ kind = "dog"        # name omitted → "Office Dog"
 | `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
 | `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
 | `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. Without it, a pack in `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` is used when present, and the bundled one if that fails to load. See [Custom sprite packs](#custom-sprite-packs). |
-| `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. Terminal graphics need a Unix terminal; on Windows `run` and `doctor` stay classic. `pixtuoid doctor` shows what your terminal supports. |
+| `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. Terminal graphics need macOS or Linux; on Windows `run` and `doctor` stay classic. `pixtuoid doctor` shows what your terminal supports. |
 | `motion` | `"auto"` | How much of the office's ambient life moves — flickers, twinkles, idle wandering, lightning. `full` moves all of it; `calm` plays it at a quarter of the pace, with a quarter of the repaints; `still` holds it still and flashes no lightning, for reduced motion. Agents still walk where they're going. `auto` is `full`, except `calm` over SIXEL or iTerm2 graphics, inside tmux or over ssh; the floating window's `auto` is `full`. An unknown value is ignored with a warning. |
 | `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
 
@@ -91,6 +91,13 @@ A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
 A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, and draws its lamp's bulb in palette key `9`, at every density: the lamp's pool centres on those pixels. Without the marks neither look stands the props, without the bulb neither look lights the lamp, and `validate-pack` warns of each.
+
+`desk_north` is `desk` seen from its sitter's side, so it stands its props
+mirrored, each mark naming the prop's bottom-right cell instead of its
+bottom-left. `desk_front` is drawn over a `desk`'s props on the desk's own
+canvas: whatever of the desk stands between the viewer and its sitter's props,
+the bundled one its monitor. It comes only with the desk it covers, so a pack
+with a `desk` of its own and no `desk_front` draws its props over the desk.
 
 A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full

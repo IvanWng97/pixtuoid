@@ -413,7 +413,7 @@ fn t0() -> SystemTime {
 fn light_steady_state_populated() {
     let mut dim = VacancyDim::new();
     let start = t0();
-    for ms in (0..3_000).step_by(33) {
+    for ms in (0..3_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         let level = dim.tick(false, start + Duration::from_millis(ms));
         assert!(
             (level - 1.0).abs() < 1e-6,
@@ -451,7 +451,7 @@ fn light_converges_to_min_when_empty_long_enough() {
     let mut dim = VacancyDim::new();
     let start = t0();
     // A realistic frame cadence for 30 s, so the exponential ease has fully landed.
-    for ms in (0..30_000).step_by(33) {
+    for ms in (0..30_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         dim.tick(true, start + Duration::from_millis(ms));
     }
     let level = dim.level();
@@ -465,12 +465,12 @@ fn light_converges_to_min_when_empty_long_enough() {
 fn light_rises_back_when_repopulated() {
     let mut dim = VacancyDim::new();
     let start = t0();
-    for ms in (0..20_000).step_by(33) {
+    for ms in (0..20_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         dim.tick(true, start + Duration::from_millis(ms));
     }
     assert!(dim.level() < 0.2);
     let later = start + Duration::from_millis(20_000);
-    for ms in (0..3_000).step_by(33) {
+    for ms in (0..3_000).step_by(crate::anim::PAINT_FRAME_MS as usize) {
         dim.tick(false, later + Duration::from_millis(ms));
     }
     let level = dim.level();
@@ -1148,7 +1148,7 @@ fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::Office
 const ROOM_LIT: bool = false;
 const ROOM_DIMMED: bool = true;
 /// A live painter's frame tick — well under the shortest stutter flash.
-const FRAME: Duration = Duration::from_millis(1000 / crate::anim::PAINT_FPS as u64);
+const FRAME: Duration = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
 
 #[test]
 fn neon_first_tick_snaps_to_the_mood() {

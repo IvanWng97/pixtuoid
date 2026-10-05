@@ -18,7 +18,6 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
 use serde_json::Value;
 
 mod cli_pid;
@@ -51,7 +50,7 @@ fn now_ms() -> u64 {
         .map_or(0, |d| ms_u128_to_u64(d.as_millis()))
 }
 
-fn main() -> Result<()> {
+fn main() {
     let socket = default_socket_path();
 
     // `args_os` + lossy, NOT `args()`: `std::env::args()` PANICS on any
@@ -77,11 +76,11 @@ fn main() -> Result<()> {
                 .read_to_string(&mut buf)
                 .is_err()
             {
-                return Ok(());
+                return;
             }
             match serde_json::from_str(&buf) {
                 Ok(v) => v,
-                Err(_) => return Ok(()),
+                Err(_) => return,
             }
         }
     };
@@ -90,7 +89,7 @@ fn main() -> Result<()> {
     // table, off-thread but not free — so the bound is armed first (see
     // `arm_watchdog`).
     let Some(bound) = transport::arm_watchdog() else {
-        return Ok(());
+        return;
     };
 
     if let Value::Object(map) = &mut payload {
@@ -108,7 +107,6 @@ fn main() -> Result<()> {
     let mut line = serde_json::to_vec(&payload).unwrap_or_default();
     line.push(b'\n');
     transport::send_line(&bound, &socket, &line);
-    Ok(())
 }
 
 /// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars.
