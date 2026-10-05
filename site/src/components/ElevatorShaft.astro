@@ -127,18 +127,8 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
         document.documentElement.scrollHeight - bottomClampEpsilonPx;
       if (atBottom) arrive(stops[stops.length - 1].dataset.shaftStop);
     }
-    let bottomRaf = 0;
-    window.addEventListener(
-      'scroll',
-      function () {
-        if (bottomRaf) return;
-        bottomRaf = requestAnimationFrame(function () {
-          bottomRaf = 0;
-          clampToLastFloorAtBottom();
-        });
-      },
-      { passive: true }
-    );
+    // straight from the scroll event: it already fires at the frame rate (MDN scroll_event)
+    window.addEventListener('scroll', clampToLastFloorAtBottom, { passive: true });
     clampToLastFloorAtBottom(); // a hash-anchored load can already start at the bottom
 
     // The pause switch stills the ding pulse ONLY. The car keeps riding while

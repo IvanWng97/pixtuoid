@@ -389,7 +389,7 @@ fn disc_lands_in_a_window_never_on_the_wall_margin() {
             for y in 1..(top_wall_h / 3).max(2) {
                 for x in 0..buf.width() {
                     let p = buf.get(x, y);
-                    if p.r > 240 && p.r as i16 - p.b as i16 > 40 {
+                    if p.r > 240 && i16::from(p.r) - i16::from(p.b) > 40 {
                         assert!(
                             x < last_right,
                             "buf_w={buf_w} h={h}: disc pixel at x={x} is past the \
@@ -423,7 +423,7 @@ fn disc_sweeps_across_a_single_window_buffer() {
             for x in 0..buf.width() {
                 let p = buf.get(x, y);
                 if p.r > 200 && p.r > p.b.saturating_add(40) {
-                    sum += x as u32;
+                    sum += u32::from(x);
                     count += 1;
                 }
             }
@@ -512,7 +512,7 @@ fn disc_never_bleeds_across_a_window_pillar() {
         for y in 1..(top_wall_h / 3).max(2) {
             for x in 0..buf.width() {
                 let p = buf.get(x, y);
-                if !(p.r > 240 && p.r as i16 - p.b as i16 > 40) {
+                if !(p.r > 240 && i16::from(p.r) - i16::from(p.b) > 40) {
                     continue;
                 }
                 if let Some(b) = bays.iter().find(|b| b.span().contains(&x)) {

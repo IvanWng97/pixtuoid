@@ -4,6 +4,7 @@ use super::*;
 use crate::anim::{Motion, epoch_ms};
 use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
 use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
+use crate::cutaway::wall::paint_wall;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::Size;
@@ -15,7 +16,6 @@ use crate::sim::anchors::{
 };
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
-use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -4845,13 +4845,13 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
         let seat = back_couch_top_left(stand, CHARACTER_SPRITE_W);
         let walk = waypoint_top_left(stand, CHARACTER_SPRITE_W);
         assert!(
-            (drawn.y as i32 - seat.y as i32).abs() <= 1,
+            (i32::from(drawn.y) - i32::from(seat.y)).abs() <= 1,
             "meeting-chair sitter y {} must track the seat top-left {} (±breath)",
             drawn.y,
             seat.y
         );
         assert!(
-            (drawn.y as i32 - walk.y as i32).abs() >= 4,
+            (i32::from(drawn.y) - i32::from(walk.y)).abs() >= 4,
             "meeting-chair sitter must NOT sit on the 5px-high waypoint_top_left {} (the bug)",
             walk.y
         );

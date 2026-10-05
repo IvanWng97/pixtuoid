@@ -499,7 +499,7 @@ mod tests {
     fn fog_ground_tint_is_brighter_than_overcast() {
         let fog = weather_ground_tint(Weather::Fog);
         let oc = weather_ground_tint(Weather::Overcast);
-        let lum = |c: Rgb| c.r as u16 + c.g as u16 + c.b as u16;
+        let lum = |c: Rgb| u16::from(c.r) + u16::from(c.g) + u16::from(c.b);
         assert!(
             lum(fog) > lum(oc),
             "fog {fog:?} should outshine overcast {oc:?}"

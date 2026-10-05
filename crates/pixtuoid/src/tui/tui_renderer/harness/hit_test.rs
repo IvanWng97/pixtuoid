@@ -37,8 +37,8 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
     let mut found = false;
     for dx in -14i32..=14 {
         for dy in -4i32..=4 {
-            let mx = (cx as i32 + dx).max(0) as u16;
-            let my = (cy as i32 + dy).max(0) as u16;
+            let mx = (i32::from(cx) + dx).max(0) as u16;
+            let my = (i32::from(cy) + dy).max(0) as u16;
             if crate::tui::hit_test::hit_test_coffee_machine(
                 layout,
                 crate::tui::geometry::CellArea::half_block(mx, my),

@@ -14,6 +14,18 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
     ignore:
+      # ratatui-image's own copies (crates/pixtuoid/Cargo.toml): a bump of ours
+      # alone builds a second copy, so they move only with ratatui-image;
+      # deny.toml fails CI when one side moves without the other.
+      - dependency-name: "miniz_oxide"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "png"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "base64-simd"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
       # objc2-app-kit MUST track winit's stack: winit 0.30.x still pulls 0.2.x,
       # so a 0.3+ bump builds a SECOND objc2 stack beside winit's AND breaks the
       # activate API. Lift when winit itself moves to objc2 0.6.

@@ -1029,8 +1029,14 @@ impl Clouds {
         })
     }
 
-    /// The clouds on `view`'s glass, its run starting `run_x0` units in.
-    pub(crate) fn paint(&self, view: &mut WindowView, run_x0: u16) {
+    /// The clouds on `view`'s glass, its run starting `run_x0` units in,
+    /// behind every cell `front` stands something in.
+    pub(crate) fn paint(
+        &self,
+        view: &mut WindowView,
+        run_x0: u16,
+        front: impl Fn(Cell) -> Option<Rgb>,
+    ) {
         if self.masses.is_empty() {
             return;
         }
@@ -1060,8 +1066,20 @@ impl Clouds {
             close_thin_runs(&mut px, cols, rows, usize::from(d));
         }
         let mut row_sky = vec![(0u32, [0u32; 3]); rows];
+        // The window resolved no sky behind `front`, so its cells are neither
+        // averaged into a row's sky nor clouded.
+        let mut hidden = vec![false; rows * cols];
         view.paint(|cell, c| {
-            let gy = usize::from(cell.glass_offset.1);
+            let (gx, gy) = (
+                usize::from(cell.glass_offset.0),
+                usize::from(cell.glass_offset.1),
+            );
+            if front(cell).is_some() {
+                if let Some(h) = hidden.get_mut(gy * cols + gx) {
+                    *h = true;
+                }
+                return c;
+            }
             if let Some(acc) = row_sky.get_mut(gy) {
                 acc.0 += 1;
                 acc.1[0] += u32::from(c.r);
@@ -1086,6 +1104,9 @@ impl Clouds {
                 usize::from(cell.glass_offset.0),
                 usize::from(cell.glass_offset.1),
             );
+            if hidden.get(gy * cols + gx).copied().unwrap_or(false) {
+                return c;
+            }
             let (x, y) = unit(cell);
             let mut c = match px.get(gy * cols + gx).copied().flatten() {
                 Some((band, m)) => {

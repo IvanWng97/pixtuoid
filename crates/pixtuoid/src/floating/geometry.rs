@@ -16,13 +16,13 @@ pub(crate) fn window_visible_on_monitors(
     monitors: impl IntoIterator<Item = (i32, i32, u32, u32)>,
 ) -> bool {
     let (wx, wy, ww, wh) = win;
-    let (win_l, win_t) = (wx as i64, wy as i64);
-    let (win_r, win_b) = (win_l + ww as i64, win_t + wh as i64);
+    let (win_l, win_t) = (i64::from(wx), i64::from(wy));
+    let (win_r, win_b) = (win_l + i64::from(ww), win_t + i64::from(wh));
     let mut any_monitor = false;
     for (mx, my, mw, mh) in monitors {
         any_monitor = true;
-        let (mon_l, mon_t) = (mx as i64, my as i64);
-        let (mon_r, mon_b) = (mon_l + mw as i64, mon_t + mh as i64);
+        let (mon_l, mon_t) = (i64::from(mx), i64::from(my));
+        let (mon_r, mon_b) = (mon_l + i64::from(mw), mon_t + i64::from(mh));
         if win_l < mon_r && win_r > mon_l && win_t < mon_b && win_b > mon_t {
             return true;
         }
@@ -35,7 +35,7 @@ pub(crate) fn window_visible_on_monitors(
 pub(crate) fn near_resize_corner(cursor: (f64, f64), size: (u32, u32), corner_px: f64) -> bool {
     let (cx, cy) = cursor;
     let (w, h) = size;
-    cx >= w as f64 - corner_px && cy >= h as f64 - corner_px
+    cx >= f64::from(w) - corner_px && cy >= f64::from(h) - corner_px
 }
 
 #[cfg(test)]
