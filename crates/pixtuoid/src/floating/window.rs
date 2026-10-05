@@ -234,12 +234,12 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_inner_size(LogicalSize::new(
-                self.cfg.width as f64,
-                self.cfg.height as f64,
+                f64::from(self.cfg.width),
+                f64::from(self.cfg.height),
             ))
             .with_min_inner_size(LogicalSize::new(
-                config::FLOATING_MIN_W as f64,
-                config::FLOATING_MIN_H as f64,
+                f64::from(config::FLOATING_MIN_W),
+                f64::from(config::FLOATING_MIN_H),
             ));
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)

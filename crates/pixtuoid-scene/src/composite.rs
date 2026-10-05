@@ -17,7 +17,7 @@ pub(crate) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
 /// Channel `b` over `a` at coverage `t`: cheap per pixel, and channel-separable,
 /// so a constant-tint pass can tabulate it.
 pub(crate) fn blend(a: u8, b: u8, t: f32) -> u8 {
-    ((a as f32) * (1.0 - t) + (b as f32) * t)
+    (f32::from(a) * (1.0 - t) + f32::from(b) * t)
         .round()
         .clamp(0.0, 255.0) as u8
 }
