@@ -17,6 +17,7 @@
 //!   mirror Codex/CodeWhale via `hook_cmd::shell_hook_command`. (CAPTURE-GATED,
 //!   like Cursor: if a live run proves Kimi argv-execs the command WITHOUT a
 //!   shell, switch to `exec_hook_command` — the Hermes form.)
+//! - Comments/ordering are lost on the `toml::Value` round-trip.
 
 use std::path::{Path, PathBuf};
 
