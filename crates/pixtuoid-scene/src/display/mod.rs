@@ -3,10 +3,13 @@
 //! rasterizer to draw.
 
 pub(crate) mod compose;
+pub(crate) mod effects;
 mod hover;
+pub(crate) mod light;
 mod list;
 mod order;
 pub(crate) mod pen;
+pub mod text;
 
 pub use crate::creatures::GatewayCard;
 pub use compose::{Office, Showing};

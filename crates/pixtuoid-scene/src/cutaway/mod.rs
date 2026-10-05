@@ -16,3 +16,4 @@ pub mod paint;
 pub(crate) mod pen;
 pub(crate) mod shade;
 pub(crate) mod text;
+pub(crate) mod wall;
