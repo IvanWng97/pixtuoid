@@ -230,7 +230,9 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
         PieceKind::WallSeg { piece, rows } => (piece, rows).hash(&mut h),
-        PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
+        PieceKind::Desk { at, art, screen } | PieceKind::DeskFront { at, art, screen } => {
+            (at, art, screen).hash(&mut h);
+        }
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
         PieceKind::Creature {
@@ -303,6 +305,7 @@ impl PieceKind {
             | PieceKind::Clock { .. }
             | PieceKind::Window { .. }
             | PieceKind::Desk { .. }
+            | PieceKind::DeskFront { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
@@ -342,6 +345,15 @@ pub(crate) enum PieceKind {
     Desk {
         at: crate::layout::Point,
         /// The facing's art (see [`desk_art`](crate::display::compose::desk_art)).
+        art: &'static str,
+        screen: Screen,
+    },
+    /// What of the desk at `at` stands nearer the viewer than its props
+    /// ([`desk_front`](crate::pack::desk_front)), drawn over them as the desk
+    /// is drawn.
+    DeskFront {
+        at: crate::layout::Point,
+        /// The desk's art, which the front covers.
         art: &'static str,
         screen: Screen,
     },
@@ -413,12 +425,13 @@ pub(crate) enum PieceKind {
 }
 
 /// One desk prop: frame `frame` of `sprite`, its art's top-left at buffer pixel
-/// `at`, where the desk art's mark for it stands it.
+/// `at`, where the desk art's mark for it stands it, turned as its desk turns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StoodProp {
     pub(crate) sprite: &'static str,
     pub(crate) frame: usize,
     pub(crate) at: (u16, u16),
+    pub(crate) flip: Flip,
 }
 
 /// Which art a prop draws: a sprite's frame, turned.

@@ -1102,7 +1102,9 @@ impl Pack {
             .iter()
             .filter(|(name, _)| RegisteredKey::parse(name).is_some_and(RegisteredKey::is_inherited))
             .filter(|(name, _)| {
-                !self.animations.contains_key(*name) && self.own_redrawn_piece(name).is_none()
+                !self.animations.contains_key(*name)
+                    && self.own_redrawn_piece(name).is_none()
+                    && self.own_overlaid_piece(name).is_none()
             })
             .map(|(name, sprite)| (name.clone(), sprite.clone()))
             .collect();
@@ -1123,6 +1125,19 @@ impl Pack {
     fn own_redrawn_piece<'n>(&self, name: &'n str) -> Option<&'n str> {
         redrawn_pieces(name).find(|piece| self.animations.contains_key(*piece))
     }
+
+    /// The piece of this pack's own that the overlay `name` draws over, at its
+    /// base or at `name`'s density: the default's overlay would draw the
+    /// default's art over it.
+    fn own_overlaid_piece(&self, name: &str) -> Option<&'static str> {
+        let (base, density) =
+            split_density_variant(name).map_or((name, None), |(b, d)| (b, Some(d)));
+        let piece = overlaid_piece(base)?;
+        let at_density = density.map(|d| density_variant_name(piece, d));
+        (self.animations.contains_key(piece)
+            || at_density.is_some_and(|v| self.animations.contains_key(&v)))
+        .then_some(piece)
+    }
 }
 
 /// Furniture drawn to match another piece (`desk_north` is `desk` with its
@@ -1132,6 +1147,20 @@ const DERIVED_PIECES: &[(&str, &str)] = &[
     ("desk_north", "desk"),
     ("meeting_sofa_north", "meeting_sofa"),
 ];
+
+/// Art drawn over another piece on that piece's canvas, as `(overlay, piece)`:
+/// `desk_front` is what of `desk` stands nearer the viewer than its sitter's
+/// props. An overlay comes only with its piece's art and never stands in, and
+/// keeps that piece's canvas rather than grounding on its own bottom row.
+pub const OVERLAY_PIECES: &[(&str, &str)] = &[("desk_front", "desk")];
+
+/// The piece `piece` draws over, if it is an overlay.
+fn overlaid_piece(piece: &str) -> Option<&'static str> {
+    OVERLAY_PIECES
+        .iter()
+        .find(|&&(overlay, _)| overlay == piece)
+        .map(|&(_, under)| under)
+}
 
 /// The piece `piece` is drawn to match, if it is a derived one.
 fn derived_source(piece: &str) -> Option<&'static str> {
@@ -1729,6 +1758,7 @@ impl RegisteredKey {
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "desk_north",
+    "desk_front",
     "filing_cabinet",
     "plant",
     "plant_tall",
@@ -1864,6 +1894,9 @@ pub enum StandIn {
     /// Another of the pack's own poses: character animations are never
     /// inherited.
     OwnPose,
+    /// Nothing: an overlay is never stood in for, so the pack's own piece it
+    /// would cover (`desk` for `desk_front`) draws bare.
+    Bare(&'static str),
 }
 
 /// An optional animation absent from a pack.
@@ -2143,9 +2176,12 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         .iter()
         .map(|&name| (name, StandIn::OwnPose))
         .chain(inherited_animation_names().map(|name| {
-            let stand_in = pack
-                .own_redrawn_piece(name)
-                .map_or(StandIn::DefaultPack, StandIn::OwnPiece);
+            let stand_in = match pack.own_overlaid_piece(name) {
+                Some(piece) => StandIn::Bare(piece),
+                None => pack
+                    .own_redrawn_piece(name)
+                    .map_or(StandIn::DefaultPack, StandIn::OwnPiece),
+            };
             (name, stand_in)
         }))
         .filter(|&(name, _)| pack.animation(name).is_none() && !named_elsewhere(name))
@@ -2522,6 +2558,57 @@ mod validation_floor_tests {
         let mut custom = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         custom.merge_from(&base);
         assert!(custom.animation("desk@4x").is_none());
+    }
+
+    /// An overlay comes only with its piece's own art: over a pack's own desk,
+    /// at either density, the default's `desk_front` would draw the default's
+    /// monitor.
+    #[test]
+    fn an_overlay_is_inherited_only_with_the_piece_it_covers() {
+        let base = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.desk_front]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk_front@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        let mut plant = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        plant.merge_from(&base);
+        assert!(
+            plant.animation("desk_front").is_some(),
+            "with the default desk"
+        );
+        assert!(plant.animation("desk_front@4x").is_some());
+        for own in ["desk", "\"desk@4x\""] {
+            let mut custom = pack_with(&format!(
+                "[animations.{own}]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
+            ));
+            custom.merge_from(&base);
+            assert!(
+                custom.animation("desk_front@4x").is_none(),
+                "over its own {own}, no 4x front"
+            );
+        }
+        let mut desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        desk.merge_from(&base);
+        assert!(
+            desk.animation("desk_front").is_none(),
+            "over its own desk, no front"
+        );
+    }
+
+    /// An overlay never stands in: a pack's own desk without its front draws
+    /// bare, and nothing draws the front in its place.
+    #[test]
+    fn a_missing_overlay_leaves_its_piece_bare() {
+        let desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert!(desk.animation_or_source("desk_front").is_none());
+        let report = validate_pack_animations(&desk, &PackContract::default());
+        let front = report
+            .missing_optional
+            .iter()
+            .find(|m| m.name == "desk_front")
+            .expect("desk_front is optional");
+        assert_eq!(front.stand_in, StandIn::Bare("desk"));
     }
 
     #[test]

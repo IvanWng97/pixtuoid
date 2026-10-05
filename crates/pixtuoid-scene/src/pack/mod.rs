@@ -10,15 +10,17 @@ mod lookup;
 pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
+#[cfg(test)]
+pub(crate) use lookup::MONITOR_KEYS;
 pub(crate) use lookup::{
     CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
     DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE,
-    MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
-    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
+    MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, PropMark, SCREEN_GLASS_KEY,
+    SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
     WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
-    appliance_sprite, bulb_cell, desk_art, desk_art_top, desk_bulb_offset, desk_mark,
-    desk_prop_overrides, desk_sprite_name, drawn_in, fixture_overrides, frame_at,
-    looping_frame_index,
+    appliance_sprite, bulb_cell, desk_art, desk_art_name, desk_art_top, desk_bulb_offset,
+    desk_front, desk_mark, desk_prop_overrides, desk_props_mirrored, desk_sprite_name, drawn_in,
+    fixture_overrides, frame_at, looping_frame_index, prop_left,
 };
 
 #[cfg(feature = "native")]
@@ -73,7 +75,8 @@ fn art_sets() -> Vec<Vec<&'static str>> {
 /// The marks every desk's first frame carries: the cup and the token tower
 /// stand there in both looks, and the cup's steam rises there — the
 /// cutaway's `push_desk_props` reads them, the classic and the steam through
-/// [`desk_mark`].
+/// [`desk_mark`]. A desk that mirrors its props ([`desk_props_mirrored`])
+/// marks each one's bottom-right cell.
 const DESK_MARKS: [(&str, &[&str]); 2] = [
     (lookup::DESK_SPRITE, &[CUP_MARK, TOWER_MARK]),
     (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
@@ -360,6 +363,7 @@ mod comments;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render_scale::RenderScale;
     use pixtuoid_core::sprite::format::Density;
     #[cfg(feature = "native")]
     use std::fs;
@@ -572,6 +576,79 @@ mod tests {
         assert_eq!(bulb(Facing::North), bulb(Facing::South));
     }
 
+    /// A desk's front is its own art, cut down: on the desk's canvas, every
+    /// pixel it draws the desk's, so a desk with no props in front of its
+    /// front paints as it always did.
+    #[test]
+    fn a_desk_front_is_its_desk_cut_down() {
+        let pack = test_default_pack();
+        let front = desk_front(&pack, lookup::DESK_SPRITE).expect("the bundled desk has a front");
+        for scale in [
+            RenderScale::ONE,
+            RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+        ] {
+            let desk = densest_frame(&pack, lookup::DESK_SPRITE, 0, scale).expect("the desk");
+            let over = densest_frame(&pack, front, 0, scale).expect("the front");
+            assert_eq!(
+                (over.frame.width(), over.frame.height(), over.blit_at),
+                (desk.frame.width(), desk.frame.height(), desk.blit_at),
+                "at {scale:?}, the front keeps its desk's canvas"
+            );
+            let mut drawn = 0;
+            for y in 0..desk.frame.height() {
+                for x in 0..desk.frame.width() {
+                    if let Some(px) = over.frame.get(x, y).copied().flatten() {
+                        drawn += 1;
+                        assert_eq!(
+                            desk.frame.get(x, y).copied().flatten(),
+                            Some(px),
+                            "at {scale:?}, the front differs from its desk at ({x}, {y})"
+                        );
+                    }
+                }
+            }
+            assert!(drawn > 0, "at {scale:?}, the front draws something");
+        }
+        assert_eq!(
+            desk_front(&pack, lookup::DESK_NORTH_SPRITE),
+            None,
+            "nothing stands before a back-turned sitter's props"
+        );
+    }
+
+    /// A back-turned desk's mirrored tower teeters off its west wing: every
+    /// such desk the layout places leaves it the room, so none loses its tower.
+    #[test]
+    fn every_back_turned_desk_has_room_for_its_teeter() {
+        use crate::layout::{Facing, SceneLayout};
+        let pack = test_default_pack();
+        let tower = densest_frame(&pack, TOKEN_TOWER_SPRITE, 0, RenderScale::ONE)
+            .expect("the tower")
+            .frame
+            .width();
+        let mut desks = 0;
+        for (w, h) in [(60, 40), (100, 60), (160, 96), (240, 144), (400, 240)] {
+            for seed in 0..4 {
+                let Some(layout) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    continue;
+                };
+                for &desk in &layout.home_desks {
+                    if layout.desk_facing_at(desk) != Facing::North {
+                        continue;
+                    }
+                    desks += 1;
+                    let mark = desk_mark(&pack, desk, Facing::North, TOWER_MARK).expect("a mark");
+                    assert!(mark.mirrored, "the back-turned desk mirrors its props");
+                    assert!(
+                        mark.left(tower).is_some(),
+                        "{w}x{h} seed {seed}: the desk at {desk:?} has no room for its tower"
+                    );
+                }
+            }
+        }
+        assert!(desks > 0, "the sample must place back-turned desks");
+    }
+
     /// The pack authors' guide names the desk's contract by the keys and marks
     /// the painters read: a rename here fails until the guide follows.
     #[test]
@@ -709,6 +786,9 @@ mod tests {
             .filter(|name| {
                 let base = name.split('@').next().unwrap_or(name);
                 pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+                    && !pixtuoid_core::sprite::format::OVERLAY_PIECES
+                        .iter()
+                        .any(|&(overlay, _)| overlay == base)
             })
             .filter(|name| {
                 pack.animation(name).is_some_and(|s| {

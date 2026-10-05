@@ -913,11 +913,11 @@ pub(crate) fn resolve_characters(
 /// Where the cup stands on the 1x desk at `desk` facing `facing`: its top-left
 /// cell, at the desk art's cup mark; `None` where the pack marks none.
 pub(crate) fn desk_cup_at(pack: &Pack, desk: Point, facing: Facing) -> Option<Point> {
-    let foot = crate::pack::desk_mark(pack, desk, facing, crate::pack::CUP_MARK)?;
-    let cup_h = pack_frame_size(pack, crate::pack::DESK_CUP_SPRITE, 0)?.h;
+    let mark = crate::pack::desk_mark(pack, desk, facing, crate::pack::CUP_MARK)?;
+    let cup = pack_frame_size(pack, crate::pack::DESK_CUP_SPRITE, 0)?;
     Some(Point {
-        x: foot.x,
-        y: foot.y.checked_sub(cup_h)?,
+        x: mark.left(cup.w)?,
+        y: mark.at.y.checked_sub(cup.h)?,
     })
 }
 

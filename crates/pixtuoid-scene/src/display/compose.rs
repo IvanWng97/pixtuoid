@@ -388,6 +388,7 @@ pub(crate) fn ground_shadow(
     match *kind {
         PieceKind::WallSeg { .. }
         | PieceKind::Window { .. }
+        | PieceKind::DeskFront { .. }
         | PieceKind::Hung { .. }
         | PieceKind::Door { .. }
         | PieceKind::Neon { .. }
@@ -927,6 +928,9 @@ fn push_desk(
         let span = span.with_depth(depth);
         order.push((span, PieceKind::Desk { at: d, art, screen }));
         push_desk_props(&props, (art, span), office, order);
+        if crate::pack::desk_front(pack, art).is_some() {
+            order.push((span, PieceKind::DeskFront { at: d, art, screen }));
+        }
     }
 }
 
@@ -950,11 +954,14 @@ fn push_desk_props(
         let m = desk.marks.iter().find(|m| m.name() == name)?;
         Some((x0 + m.x() * k, y0 + (m.y() + 1) * k))
     };
-    // Stand frame `frame` of `sprite` on `(x, foot)`; where its top lands.
+    let mirrored = crate::pack::desk_props_mirrored(art);
+    // Stand frame `frame` of `sprite` on the mark cell at `(x, foot)`, turned as
+    // its desk turns it; where its top lands.
     let mut stand = |sprite: &'static str, frame: usize, (x, foot): (u16, u16)| {
         let f = crate::pack::densest_frame(pack, sprite, frame, scale)?;
         let b = f.blit_at.get();
         let (w, h) = (f.frame.width() * b, f.frame.height() * b);
+        let x = crate::pack::prop_left(x, k, w, mirrored)?;
         let y = foot.checked_sub(h)?;
         let s = scale.get();
         let cells = |at: u16, len: u16| (at / s, (at + len - 1) / s - at / s + 1);
@@ -963,6 +970,11 @@ fn push_desk_props(
             sprite,
             frame,
             at: (x, y),
+            flip: if mirrored {
+                Flip::Horizontal
+            } else {
+                Flip::None
+            },
         };
         order.push((
             Span::new(cx, cy, cw, ch, 0)

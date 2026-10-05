@@ -1031,6 +1031,7 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
     match kind {
         PieceKind::WallSeg { .. } => "wall",
         PieceKind::Desk { .. } => "desk",
+        PieceKind::DeskFront { .. } => "desk front",
         PieceKind::Chair { .. } => "chair",
         PieceKind::Prop { .. } => "prop",
         PieceKind::PropBand { .. } => "prop band",
@@ -1171,11 +1172,15 @@ fn a_walker_just_south_of_a_desk_front_draws_over_it() {
     let Depth::Sorted { row, .. } = desk.depth else {
         panic!("a desk sorts: {desk:?}");
     };
-    let [(span, PieceKind::Desk { .. })] =
-        queued(&layout, &pack, RenderScale::ONE, &[], |k| k == desk.kind)[..]
-    else {
-        panic!("one desk piece");
+    let pieces = queued(&layout, &pack, RenderScale::ONE, &[], |k| k == desk.kind);
+    let [(span, PieceKind::Desk { .. }), ref front @ ..] = pieces[..] else {
+        panic!("the desk piece first");
     };
+    // its front, if any, sorts as the desk does
+    for (s, kind) in front {
+        assert!(matches!(kind, PieceKind::DeskFront { .. }), "{kind:?}");
+        assert_eq!(*s, span, "the front sorts with its desk");
+    }
     assert_eq!(span.depth, row, "the desk sorts on the roster's row");
     let walker = |depth| Span::new(span.x0, span.y0, 4, 8, 0).with_depth(depth);
     for (depth, over) in [(row + 1, true), (row - 1, false)] {
@@ -1588,6 +1593,74 @@ fn every_desk_follows_the_one_arrangement() {
             bulb(RenderScale::ONE),
             "{art}'s lamp moved wings"
         );
+    }
+    // The back-turned desk is the viewer-facing one turned round: each of its
+    // columns is the other's mirrored, its marks on their props' east cells.
+    let cols = |facing| {
+        let art = crate::pack::desk_sprite_name(facing);
+        let f = crate::pack::densest_frame(&pack, art, 0, RenderScale::ONE).expect("the desk");
+        let mark = |name: &str| {
+            f.marks
+                .iter()
+                .find(|m| m.name() == name)
+                .expect("a mark")
+                .x()
+        };
+        let bulb = desk_bulb(desk, art, &pack, RenderScale::ONE)
+            .expect("a bulb")
+            .x
+            - desk.x;
+        (
+            f.frame.width(),
+            [
+                mark(crate::pack::CUP_MARK),
+                mark(crate::pack::TOWER_MARK),
+                bulb,
+            ],
+        )
+    };
+    let ((w, south), (_, north)) = (cols(Facing::South), cols(Facing::North));
+    for (s, n) in south.into_iter().zip(north) {
+        assert_eq!(
+            s + n,
+            w - 1,
+            "the back-turned desk mirrors {south:?} as {north:?}"
+        );
+    }
+}
+
+/// A desk's cup stands on its sitter's side of the monitor: behind it as they
+/// face the viewer, before it once they turn their back.
+#[test]
+fn the_cup_stands_on_the_sitters_side() {
+    use crate::layout::Facing;
+    let pack = test_default_pack();
+    for scale in [
+        RenderScale::ONE,
+        RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+    ] {
+        for facing in [Facing::North, Facing::South] {
+            let art = crate::pack::desk_sprite_name(facing);
+            let f = crate::pack::densest_frame(&pack, art, 0, scale).expect("the desk");
+            let w = usize::from(f.frame.width());
+            let monitor_foot = crate::pack::drawn_in(&f, &crate::pack::MONITOR_KEYS)
+                .iter()
+                .rposition(|&m| m)
+                .map(|i| i / w)
+                .expect("a monitor") as u16;
+            let cup = f
+                .marks
+                .iter()
+                .find(|m| m.name() == crate::pack::CUP_MARK)
+                .expect("a cup mark")
+                .y();
+            let behind = facing == Facing::South;
+            assert_eq!(
+                cup < monitor_foot,
+                behind,
+                "{art} at {scale:?}: its cup's foot row {cup}, the monitor's {monitor_foot}"
+            );
+        }
     }
 }
 
