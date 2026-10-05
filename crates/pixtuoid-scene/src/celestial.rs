@@ -455,15 +455,29 @@ mod tests {
     use crate::sky::Weather;
 
     fn view(hour: u32) -> SkyView {
+        view_in(hour, Weather::Clear)
+    }
+
+    fn view_in(hour: u32, weather: Weather) -> SkyView {
         let now = crate::localclock::at_hour(hour);
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let moment = Moment::resolve(
-            Sky::at_with(now, Weather::Clear),
+            Sky::at_with(now, weather),
             theme,
             0.0,
             crate::anim::Motion::Full.timing(now),
         );
         SkyView::of(&moment, 160, 40, theme)
+    }
+
+    /// The window sky lights its stars on a clear night and none under
+    /// overcast: the decision itself, since a render's clouds would hide a
+    /// star wrongly lit behind them.
+    #[test]
+    fn the_window_sky_lights_stars_only_when_the_night_is_clear() {
+        assert!(view_in(2, Weather::Clear).stars, "a clear night");
+        assert!(!view_in(2, Weather::Overcast).stars, "an overcast night");
+        assert!(!view_in(12, Weather::Clear).stars, "a clear noon");
     }
 
     /// A window's glass is its pane's sky under the blaze, read from the
