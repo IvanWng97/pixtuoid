@@ -29,7 +29,7 @@ use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::sky::WeatherPolicy;
-use pixtuoid_scene::theme::{ALL_THEMES, Theme};
+use pixtuoid_scene::theme::{NORMAL, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
@@ -145,8 +145,11 @@ pub struct Office {
 
 #[wasm_bindgen]
 impl Office {
-    /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the bundled sprite pack fails to parse.
+    /// Build an office seeded with `seed` (drives the layout variant).
+    ///
+    /// # Errors
+    ///
+    /// If the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
@@ -159,8 +162,8 @@ impl Office {
             session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
-            theme: ALL_THEMES[0],
-            seed: seed as u64,
+            theme: &NORMAL,
+            seed: u64::from(seed),
             reducer: Reducer::new(),
             beats: hero_script(),
             cursor: 0,
@@ -183,11 +186,10 @@ impl Office {
     /// `performance.now()` and NOT a `requestAnimationFrame` timestamp: those are
     /// ms-since-page-load, which pins the day/night cycle and wall clock at 1970.
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
-        // `f64 as u64` saturates (negatives/NaN → 0), so no pre-clamp is needed.
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = from_epoch_ms(now_ms);
         self.last_now = Some(now);
-        let buf_w = w.clamp(1, u16::MAX as u32) as u16;
-        let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        let buf_w = w.clamp(1, u32::from(u16::MAX)) as u16;
+        let buf_h = h.clamp(1, u32::from(u16::MAX)) as u16;
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -239,7 +241,7 @@ impl Office {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }
 
-    /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+    /// Recolor the whole office to one of the [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES) by name. Unknown
     /// name = no-op.
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
@@ -274,30 +276,28 @@ impl Office {
         };
         let theme = self.theme;
 
-        let labels = self.session.overlay(&self.scene, None);
         let board = self
             .session
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        for (i, el) in labels.iter().enumerate() {
+        for (i, badge) in self.session.badges().iter().enumerate() {
+            let pixtuoid_scene::display::Badge {
+                at, marker, name, ..
+            } = badge;
             if i > 0 {
                 out.push(',');
             }
-            out.push_str(&format!(
-                "{{\"x\":{},\"y\":{},\"text\":",
-                el.anchor_px.x, el.anchor_px.y
-            ));
+            out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
             push_json_string(
                 &mut out,
-                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
+                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, name.text),
             );
             // The site paints the ● in `color` and the name in `badge`.
-            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
             out.push_str(&format!(
                 ",\"color\":\"{}\",\"badge\":\"{}\"",
-                hex(ink.marker),
-                hex(ink.name)
+                hex(*marker),
+                hex(name.ink)
             ));
             out.push('}');
         }
@@ -375,23 +375,18 @@ impl Office {
     /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
+        const SILENT: &str = r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#;
         let Some(now) = self.last_now else {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+            return SILENT.to_string();
         };
-        if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
-        }
+        let meta = self.floor_meta();
+        let Some(audio) = self.audio.as_mut().filter(|a| a.is_ready()) else {
+            return SILENT.to_string();
+        };
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
-        let frame = self
-            .session
-            .audio_frame(&self.scene, self.floor_meta(), now);
-        let cmd = self
-            .audio
-            .as_mut()
-            .expect("audio ready checked above")
-            .tick(now_ms, frame);
-        audio::commands_json(&cmd)
+        let frame = self.session.audio_frame(&self.scene, meta, now);
+        audio::commands_json(&audio.tick(now_ms, frame))
     }
 
     /// Stage a handoff for the worker's spawn-time track. A stale epoch at click
@@ -457,13 +452,19 @@ pub struct SynthTake {
     epoch: u64,
 }
 
+/// JS's UNIX-epoch milliseconds as a `SystemTime`. `f64 as u64` saturates
+/// (negatives and NaN to 0), so no input needs a pre-clamp.
+fn from_epoch_ms(ms: f64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)
+}
+
 #[wasm_bindgen]
 impl SynthTake {
     /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) — selects
     /// the same day/night + weather track the office would at that instant.
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SynthTake {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = from_epoch_ms(now_ms);
         // `floor::track_for` is the ONE track-pick authority; its TrackId payload
         // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
         let track = pixtuoid_scene::floor::track_for(now, WeatherPolicy::Clock);
@@ -806,7 +807,7 @@ mod tests {
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
-        let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
+        let cc = NORMAL.source.claude_code;
         let expect = format!("\"color\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
@@ -918,11 +919,11 @@ mod tests {
         assert!(board["mood"].is_array() && board["context"].is_array());
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_W as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_W)
         );
         assert_eq!(
             board["rect"]["h"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_H as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_H)
         );
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 
@@ -935,9 +936,10 @@ mod tests {
         }
     }
 
-    /// The site centres each span on `x`, so `x` is the anchor itself.
+    /// Every badge the frame drew reaches the site, in its text and inks, and
+    /// hangs at its anchor: the site centres each span on `x`.
     #[test]
-    fn overlay_json_hangs_each_label_at_its_anchor() {
+    fn overlay_json_carries_every_badge_at_its_anchor() {
         let mut o = office();
         let mut t = 0u64;
         while t <= LOOP_MS / 2 {
@@ -946,17 +948,20 @@ mod tests {
         }
         let v: serde_json::Value =
             serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
-        let got: Vec<(u64, u64)> = v["labels"]
-            .as_array()
-            .expect("labels")
-            .iter()
-            .map(|l| (l["x"].as_u64().unwrap(), l["y"].as_u64().unwrap()))
-            .collect();
-        let want: Vec<(u64, u64)> = o
+        let got: Vec<serde_json::Value> = v["labels"].as_array().expect("labels").clone();
+        let want: Vec<serde_json::Value> = o
             .session
-            .overlay(&o.scene, None)
+            .badges()
             .iter()
-            .map(|e| (u64::from(e.anchor_px.x), u64::from(e.anchor_px.y)))
+            .map(|b| {
+                serde_json::json!({
+                    "x": b.at.x,
+                    "y": b.at.y,
+                    "text": format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, b.name.text),
+                    "color": hex(b.marker),
+                    "badge": hex(b.name.ink),
+                })
+            })
             .collect();
         assert!(!want.is_empty(), "premise: agents are drawn");
         assert_eq!(got, want);

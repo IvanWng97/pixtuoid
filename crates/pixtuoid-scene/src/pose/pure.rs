@@ -146,7 +146,7 @@ pub fn personality_for(agent_id: AgentId) -> Personality {
 pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
     let mix = agent_id.raw() ^ cycle_n.wrapping_mul(crate::GOLDEN_GAMMA);
-    (mix % 100) < p.trip_chance_pct as u64
+    (mix % 100) < u64::from(p.trip_chance_pct)
 }
 
 /// Per-(agent, cycle) decision: when the agent takes a trip, is it an aimless
@@ -154,16 +154,17 @@ pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
 pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
     let type_mix = agent_id.raw() ^ cycle_n.wrapping_mul(pixtuoid_core::id::SPLITMIX64_M1);
-    (type_mix % 100) < p.aimless_pref_pct as u64
+    (type_mix % 100) < u64::from(p.aimless_pref_pct)
 }
 
 /// Per-(agent, cycle) waypoint index. Only meaningful when `takes_trip` is
 /// true AND `is_aimless_cycle` is false.
+#[deny(
+    clippy::cast_possible_truncation,
+    reason = "a hash picks through `crate::spread`, alike on every target"
+)]
 pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: usize) -> usize {
-    if num_waypoints == 0 {
-        return 0;
-    }
-    ((agent_id.raw() ^ cycle_n) as usize) % num_waypoints
+    crate::spread(agent_id.raw() ^ cycle_n, num_waypoints)
 }
 
 /// The pose an agent renders this frame — the output of pose derivation.
@@ -545,13 +546,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
         let t = ((phase_t - seated_end) * 1000 / span) as u16;
-        Pose::Walking {
-            from: desk,
-            to: dest,
-            t_x1000: t,
-            travelled: travelled_on(desk, dest, t),
-            carrying_coffee: false,
-        }
+        Pose::walking(desk, dest, t, false)
     } else if phase_t < at_wp_end {
         at_dest_pose
     } else {
@@ -560,14 +555,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         let span = cycle_ms - at_wp_end;
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
         let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
-        let carrying_coffee = target.kind.carries_coffee();
-        Pose::Walking {
-            from: dest,
-            to: desk,
-            t_x1000: t,
-            travelled: travelled_on(dest, desk, t),
-            carrying_coffee,
-        }
+        Pose::walking(dest, desk, t, target.kind.carries_coffee())
     }
 }
 

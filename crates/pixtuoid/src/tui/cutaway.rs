@@ -171,9 +171,9 @@ impl TileCutaway {
         Some(fitted)
     }
 
-    /// The plan's cell, which the terminal answered and so outranks the
-    /// window's (as [`crate::graphics::probe`] ranks them), until a font zoom
-    /// moves the window's cell from what it read on the first frame.
+    /// The plan's cell, the terminal's answer where it gave one (as
+    /// [`crate::graphics::probe`] ranks them), until a font zoom moves the
+    /// window's cell from what it read on the first frame.
     fn cell_under(&mut self, window: Option<CellSize>) -> CellSize {
         if self.first_window.is_none() {
             self.first_window = window;
@@ -206,7 +206,7 @@ impl TileCutaway {
         } else {
             Dirty::All
         };
-        if dirty != Dirty::Rects(Vec::new()) {
+        if dirty != Dirty::Unchanged {
             self.image.clone_from(frame);
         }
         self.stage(&dirty, now, fitted.scene.as_position());

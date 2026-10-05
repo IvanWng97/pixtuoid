@@ -154,6 +154,10 @@ pub struct SourceStatus {
 /// Resolve a user-supplied id to the `'static` registry id, or a clear error —
 /// the CLI surface takes arbitrary input and `config::save_source_connected`
 /// needs `&'static str`.
+///
+/// # Errors
+///
+/// If `id` is not a registered source name.
 pub fn registered_id(id: &str) -> Result<&'static str> {
     registry::registered_source_names()
         .find(|s| *s == id)
@@ -199,6 +203,10 @@ pub fn post_install_hint(id: &str) -> Option<&'static str> {
 /// in-TUI panel (which renders an absent CLI as `NoCli` and refuses the toggle),
 /// this installs for any registered id even if that CLI isn't installed yet —
 /// pre-provisioning for automation/onboarding where the caller stated intent.
+///
+/// # Errors
+///
+/// If `id` is not a registered source, saving the `[sources]` flag fails, or the hook install fails (the flag is then rolled back).
 pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
     connect_target(cfg, sid, by_source(sid))
@@ -244,6 +252,10 @@ fn connect_target(
 
 /// No rollback — a failed uninstall still leaves the user disconnected (the
 /// safer direction).
+///
+/// # Errors
+///
+/// If `id` is not a registered source or persisting the cleared `[sources]` flag fails; a failed hook removal is reported in the outcome instead.
 pub fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
     let sid = registered_id(id)?;
     disconnect_target(cfg, sid, by_source(sid))
@@ -339,6 +351,10 @@ pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
 /// `pub(crate)` can't reach. It is the PHRASE only — each surface adds its own
 /// framing, so neither can reword the fold alone.
 pub const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
+
+/// How both presenters word a disconnect that couldn't reach `claude` to
+/// deregister the plugin, which keeps it registered with no hooks.
+pub const PLUGIN_LEFT_REGISTERED_PHRASE: &str = "plugin left registered (claude not on PATH)";
 
 /// A folded hook-removal failure MUST surface as `Failed` (with the reason),
 /// NEVER a clean `Disconnected` — else a caller hides stale hooks behind it.
@@ -709,6 +725,7 @@ mod tests {
         presence_probe: None,
         extra_artifacts: None,
         post_install_hint: None,
+        host: None,
     };
 
     #[test]

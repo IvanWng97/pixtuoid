@@ -318,6 +318,13 @@ fn read_reply(
             return false;
         }
         let remaining = timeout - elapsed;
+        #[cfg_attr(
+            not(target_vendor = "apple"),
+            expect(
+                clippy::cast_lossless,
+                reason = "`suseconds_t` is `i32` on Apple targets, where no `From<u32>` exists"
+            )
+        )]
         let mut tv = libc::timeval {
             tv_sec: remaining.as_secs() as libc::time_t,
             tv_usec: remaining.subsec_micros() as libc::suseconds_t,

@@ -36,6 +36,17 @@ exceptions = [
 multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
+# Pinned to ratatui-image's own copies (crates/pixtuoid/Cargo.toml), which
+# .github/dependabot.yml stops bumping alone: a second version means one side
+# moved, ours or ratatui-image's, and the pins need to follow.
+deny = [
+    { crate = "miniz_oxide", deny-multiple-versions = true },
+    { crate = "png", deny-multiple-versions = true },
+    { crate = "base64-simd", deny-multiple-versions = true },
+    # Pinned to winit's stacks (crates/pixtuoid/Cargo.toml), likewise.
+    { crate = "objc2-app-kit", deny-multiple-versions = true },
+    { crate = "x11rb", deny-multiple-versions = true },
+]
 
 [sources]
 unknown-registry = "deny"

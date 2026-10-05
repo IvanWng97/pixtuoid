@@ -24,22 +24,20 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = { workspace = true }
-anyhow     = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 # The client-side peer-cred check (#495) and the `cli_pid` ancestor walk (#528)
-# need Win32 — verified decls beat hand-FFI in a never-panic shim. Pin the SAME
-# major as pixtuoid-core / pixtuoid so the bindings don't double-compile.
+# need Win32 — verified decls beat hand-FFI in a never-panic shim.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Pipes", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [dev-dependencies]
 temp-env = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "macros", "net", "time", "io-util", "rt-multi-thread"] }

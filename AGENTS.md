@@ -22,7 +22,7 @@ formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
 `completions <shell>` on clean stdout — breakage surfaces in THEIR CI on an
 autobump we never see, while our suite stays green (it asserts the same
 strings as goldens). The asserted rows are marked "homebrew-core contract" at
-`validate.rs`, `sources_cli.rs`, `claude_code.rs`; release-side consequences
+`validate.rs`, `sources_cli.rs`, `codex.rs`; release-side consequences
 in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## What this is
@@ -59,7 +59,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - clippy doesn't warm test's build ([why](docs/CONTRIBUTING.md#build--test)) — iterate with one of them. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
-- Look-changing PR → `just gen`, commit what it rewrote except media: the site's demos render in CI, and the README's `docs/images` land in a `chore(media)` PR.
+- Look-changing PR → `just gen`, commit everything it rewrote. Media is not a PR's: the site's demos render in CI, the README's `docs/images` in `media-regen.yml` from main.
 - Real wire bytes ride ONE pipeline, `pixtuoid_core::harness::Drive` — rules in [`tests/AGENTS.md`](crates/pixtuoid-core/tests/AGENTS.md#the-one-pipeline).
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
@@ -77,21 +77,38 @@ spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
 skill runs its local rows. Merging is `@mergifyio queue`; a release PR merges
 by hand.
 
+**At most 4 open PRs across the sessions** (bots' and outside contributors'
+aside): the runners take [20 jobs at once](https://docs.github.com/en/actions/reference/limits)
+and one light-tier push needs more, so a fifth open PR only queues. A PR
+opens, never as a draft, once preflight is green and its local rows are run;
+the bots review it from there. Until a slot frees, the branch stays pushed
+with no PR. A PR
+that stops being ready closes with its branch kept and never force-pushed,
+since a force-pushed branch can't reopen; a stacked one is retargeted to
+`main` first, because merging its base deletes that branch. Closing leaves its
+runs queued, and a plain cancel still runs the `always()` gate jobs, so
+[force-cancel](https://docs.github.com/en/rest/actions/workflow-runs#force-cancel-a-workflow-run)
+them.
+
 Repo skills (committed): `local-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
 
 ## Conventions
 
-- **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec.
+- **TDD first** — failing test → minimal impl → commit. **DRY.**
+- **Every mechanism earns its upkeep.** Code, config, a test, a CI job or a doc stays only if it names a failure it prevents that nothing else already does, or a need someone has. Extending a mechanism re-adds it: one you touch that can't name one is deleted, not polished. The load-bearing defenses [REVIEW.md](REVIEW.md#design)'s Proportion row lists have named theirs.
+- **Reuse before you build.** A need that a maintained library, the platform, or the upstream tool's own mechanism already meets is met by it (Claude Code's plugin install, `[workspace.dependencies]`); a hand-rolled copy is upkeep nothing else would cost. The exception is a reuse whose own cost is larger (wasm32, a second copy `deny.toml` bans, a version freeze), and the PR names that cost.
+- **Chibi figures and pets stay round**, the head flowing into the body.
+- **`#[allow(clippy::too_many_arguments)]` is a last resort** — group related parameters into a struct first.
 - **Comments: WHY only.** Only what the surrounding thing can't say (workaround, constraint, invariant). **Every comment the repo ships is in scope**, not just `//` and `#` in code: a `.md` doc's prose, a workflow or manifest comment, a justfile recipe header, a CI contract's `why` and a PR body are all held to the rules below — prose is where an assertion hides with no failure mode, so it earns its place the same way code does. Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. **A comment sits on the narrowest thing it constrains** — the declaration when it governs the whole item, the statement, struct-literal field or match arm when it governs only that one; hoisting a rationale to the declaration to shorten a body detaches it from the line it was pinned to, which is worse than the length it saved. The default is fewer: a comment is a cost the code must repay, and a link to the authority beats prose about it. A change leaves the net comment volume of what it touches no larger than it found it unless each added line earns its place — true of a PR that fixes comments too. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and an intra-doc link also turns a rename into a `doc-check` red, private items included (the magic-number rule, applied to prose).
 - **No magic numbers** — reuse the existing authority (a dep's const, our registry/theme/layout value), else ONE named `const` at the narrowest covering scope; prefer a type (enum/newtype) for a related set. Two copies of one value is a latent drift bug — if a copy must cross a boundary, pin the pair with a test. Self-evident `0`/`1`/`2`, indices, and test fixtures stay inline.
 - **Errors**: `anyhow::Result` in app code, `thiserror` in core; hook listener + JSONL watcher log-and-continue, never panic. **No `unwrap()` outside tests.**
-- **Visibility**: layer-internal stays `pub(crate)` (`unreachable_pub` is a hard gate); every `pub` item in a published crate carries a doc comment (`missing_docs`); `#[doc(hidden)] pub` = mechanism-not-contract escape hatch.
+- **Visibility**: layer-internal stays `pub(crate)` (`unreachable_pub` misses a `pub` reachable through a `pub mod`); `#[doc(hidden)] pub` is a mechanism-not-contract escape hatch.
 - **No scan-the-history** — keep state updated as events arrive; never derive it by scanning backward.
-- **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
+- **Shell**: match the surrounding shell; macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
-- **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is FIXED in place or a FOLLOW-UP → #N whose fix PR exists (a draft is enough) before the PR merges; which applies, and the four terminal states, are defined once in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#dispositions). Agents never file issues.**
+- **External-surface claims are fetched, not remembered**, and so is "best practice": cite the `path:line` or doc URL you fetched THIS session or add a `check_upstream_drift.py` row, and label anything unsourced opinion; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
+- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is FIXED in place or a FOLLOW-UP → #N whose fix PR exists (one closed under the open-PR cap is enough) before the PR merges; which applies, and the four terminal states, are defined once in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#dispositions). Agents never file issues.**
 - **Only the latest released version of each agent CLI is supported.** When upstream renames or reshapes a wire name, repoint the decoder, the plugin, and the drift-watcher anchor at the CURRENT declaration and DELETE the old one — no dual-listening beside a replacement, no legacy-format arm kept "just in case". Every superseded arm is a second copy of a wire contract that drifts silently and that the watcher then has to anchor twice (#981). Two things this does NOT govern: OUR OWN upgrade path (a `LEGACY_INSTANCE_ID` for a plugin file an older pixtuoid wrote is a compatibility arm for our artifact, not upstream's — #457), and mirroring a resolver upstream itself still branches on. Pre-dating arms exist (`opencode.rs`'s v1/v2 permission names, `codewhale.rs`'s `spawn_agent`); they are debt, not precedent.
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
@@ -106,8 +123,7 @@ Repo skills (committed): `local-review`, `beautify-decoration`,
 
 ## Ownership by crate
 
-Don't "fix" documented design — read the item's comments first. Who owns
-what: **core** owns session lifecycle/identity (registration, dedup,
+Who owns what: **core** owns session lifecycle/identity (registration, dedup,
 first-sight, liveness ladder, subagent parenting, feature boundaries) ·
 **scene** owns look/motion (per-agent palette recolor, walk timing,
 footprints, sky/light invariants, reachability) · **binary** owns
@@ -121,12 +137,12 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 ## Things NOT to do
 
 - No `ratatui`/`crossterm`/terminal anything in `pixtuoid-core` or `pixtuoid-scene`.
-- No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
+- No write to another CLI's config outside `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths — a print macro panics when its reader leaves (`| head`), so CLI and headless output goes through a `CliOut` (a command's is `pixtuoid::cli_stdout()`) and a stderr notice is a `let _ = writeln!`. Diagnostics are `tracing`, with a constant message and every value as a field (`error = %e`, `path = ?path`, `pid`): the constant message is a stable grep key and a field is filterable; a value baked into the format string is neither. Every path, session id and cwd rides a `?` field, never `%`, whatever its provenance, and so does an error chain that can embed one (`SourceDeath.error`, `SocketBusy`): `str`'s `Debug` escapes control and bidi chars, a Display field writes them raw, and the `fmt` layer's `EscapeGuard` covers the message only (`test_capture`'s `debug_fields_escape_control_and_bidi_chars`). Only a whole-message relay re-emitting an already-sanitized user-facing string (`config::warn_user`, the `read_log` warning in `sources_cli`) interpolates.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
-- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
+- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. A session pushes its own PR branches freely; never force-push or push to `main`.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging past the review gate (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
+- No merging past the review gate (PR #23 merged unreviewed with a path traversal), and no reviewer finding accepted before its premise is checked against the item it names.
 
 ## Where to look
 

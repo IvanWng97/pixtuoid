@@ -2,13 +2,9 @@ use super::*;
 use crate::pose::{RouteRig, is_aimless_cycle, waypoint_index_for_cycle};
 use pixtuoid_core::{AgentId, GlobalDeskIndex};
 
-fn id() -> AgentId {
-    AgentId::from_parts("test", "walk-test-agent")
-}
-
 #[test]
-fn walk_state_new_default_fields() {
-    let walk = WalkState::new(id());
+fn walk_state_default_fields() {
+    let walk = WalkState::default();
     assert!(walk.entry.is_none());
     assert!(walk.exit.is_none());
     assert!(walk.snap_back.is_none());
@@ -751,7 +747,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
     let mut t = t2;
     let end = at_wp_start + Duration::from_millis(dwell_dur.saturating_sub(2_000));
     while t < end {
-        t += Duration::from_millis(33);
+        t += Duration::from_millis(crate::anim::PAINT_FRAME_MS);
         rig.advance(t);
         assert!(
             !matches!(rig.state().wander.phase, WanderPhase::Seated),
@@ -815,7 +811,7 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
     let l = layout();
     let overlay = OccupancyOverlay::new();
     let mut router = Recording { calls: Vec::new() };
-    let mut walk = WalkState::new(trip_id);
+    let mut walk = WalkState::default();
     walk.wander.target.dest = Point { x: 40, y: 60 };
 
     let _ = snapshot_back_profile(&slot, &walk, &l, &mut router, &overlay);
@@ -949,7 +945,7 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
 }
 
 fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> WalkState {
-    let mut walk = WalkState::new(id);
+    let mut walk = WalkState::default();
     walk.wander.phase =
         WanderPhase::AtWaypoint(crate::physics::walk_profile(100, WalkIntent::WanderOut, id));
     walk.wander.target = WanderTarget {

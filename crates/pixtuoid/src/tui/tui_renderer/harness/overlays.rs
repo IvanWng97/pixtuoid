@@ -21,7 +21,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     // A warm cell's red channel barely rises while green/blue drop, so measure
     // DISTANCE to the blocked tint (220,60,60) rather than the red channel.
     let to_red = |c: pixtuoid_core::sprite::Rgb| {
-        (c.r as i32 - 220).abs() + (c.g as i32 - 60).abs() + (c.b as i32 - 60).abs()
+        (i32::from(c.r) - 220).abs() + (i32::from(c.g) - 60).abs() + (i32::from(c.b) - 60).abs()
     };
     assert!(
         to_red(on.get(bx, by)) < to_red(before.get(bx, by)),
@@ -666,7 +666,7 @@ fn hovered_then_removed_agent_is_a_safe_noop() {
     r.render(&scene, pack(), t0()).unwrap();
     super::hover_agent(&mut r, id);
     let empty = SceneState::uniform(16);
-    r.render(&empty, pack(), t0() + Duration::from_millis(33))
+    r.render(&empty, pack(), t0() + Duration::from_millis(PAINT_FRAME_MS))
         .expect("render must not panic when the hovered agent vanished");
 }
 

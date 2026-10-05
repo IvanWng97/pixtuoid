@@ -10,27 +10,19 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::display::{Hover, HoverTarget, Hovers};
+use crate::display::{Badge, Hover, HoverTarget, Hovers};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station, sort_row_at};
 use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
-
-/// Where a drawn character's badge goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentFrame {
-    /// Whose sprite it is.
-    pub agent_id: pixtuoid_core::AgentId,
-    /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
-    pub label_anchor: Point,
-}
 
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Debug, Default)]
 pub(crate) struct Drawn {
-    pub(crate) agents: Vec<AgentFrame>,
+    /// Each drawn agent's badge, in paint order.
+    pub(crate) badges: Vec<Badge>,
     pub(crate) hovers: Hovers,
 }
 
@@ -269,10 +261,8 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
-    let mut drawn = Drawn {
-        agents: Vec::new(),
-        hovers: Hovers::default(),
-    };
+    let mut drawn = Drawn::default();
+    let namesakes = crate::overlay::Namesakes::of(ctx.scene.agents.values());
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
@@ -286,11 +276,11 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
             label_anchor,
             ..
         } = d.kind
+            && let Some(agent) = ctx.scene.agents.get(&agent.agent_id)
         {
-            drawn.agents.push(AgentFrame {
-                agent_id: agent.agent_id,
-                label_anchor,
-            });
+            drawn
+                .badges
+                .push(Badge::new(label_anchor, agent, &namesakes, ctx.theme));
         }
         drawn.hovers.push(hover);
     }
@@ -374,7 +364,6 @@ fn enqueue_pet<'a>(
     });
 }
 
-/// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
     pack: &Pack,
     mascots: &'a [crate::sim::MascotPlacement],

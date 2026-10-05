@@ -524,7 +524,7 @@ fn the_clock_hangs_centred_on_a_window_post() {
         let clock = clock.visual;
         let centre = clock.x + clock.width / 2;
         assert!(
-            super::super::window_posts(l.buf_w).any(|p| (p.start + p.end) / 2 == centre),
+            super::super::window_posts(l.buf_w).any(|p| u16::midpoint(p.start, p.end) == centre),
             "{at}: {clock:?} off every post"
         );
     }

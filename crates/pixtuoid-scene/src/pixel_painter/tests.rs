@@ -4,9 +4,10 @@ use super::*;
 use crate::anim::{Motion, epoch_ms};
 use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
 use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
+use crate::cutaway::wall::paint_wall;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::layout::Size;
+use crate::layout::{Point, Size};
 use crate::pack::{desk_art_top, frame_at};
 use crate::pose;
 use crate::sim::anchors::{
@@ -15,7 +16,6 @@ use crate::sim::anchors::{
 };
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
-use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -774,7 +774,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             office,
             crate::display::compose::tests::showing(ground, now0),
         );
-        let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
+        let anchors: Vec<_> = list.badges().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
     };
 
@@ -2864,7 +2864,7 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
     let empty = SceneState::uniform(16);
     let coffee = std::collections::HashMap::new();
     let mut owned = OwnedSimStores::new();
-    let frame = Duration::from_millis(33);
+    let frame = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
     let mut now = now0;
     let mut run = |scene: &SceneState, ms: u64| {
         let mut last = None;
@@ -2917,8 +2917,9 @@ fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16
     Some(hi? - lo? + 1)
 }
 
-// The bundled 8-wide pack cannot tell char_w apart from the const, so the
-// differential against a wide (10px) fixture pack is what gives this teeth.
+// The bundled pack's figures are `CHARACTER_SPRITE_W` wide, so it cannot tell
+// char_w apart from the const; the differential against a wide (10px) fixture
+// pack is what gives this teeth.
 #[test]
 fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     use crate::layout::TEST_DEFAULT_DESKS;
@@ -3656,7 +3657,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
     // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
     sorted.sort_by_key(|&(row, _)| row);
     assert_ne!(sorted, queued, "premise: paint order is not the queue's");
-    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    let listed = badged_ids(&hover);
     assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
     let hovered: Vec<_> = hover
         .hovers
@@ -3711,9 +3712,13 @@ fn a_figure_whose_anim_is_missing_is_not_hoverable() {
         frame_idx: 0,
         effects: Vec::new(),
     });
+    let mut scene = SceneState::uniform(16);
+    for agent in &frame.agents {
+        scene.agents.insert(agent.agent_id, agent.clone());
+    }
     let drawn = paint_drawn(
         &OwnedSimStores::new(),
-        &SceneState::uniform(16),
+        &scene,
         &layout,
         &pack,
         SystemTime::UNIX_EPOCH,
@@ -3726,7 +3731,7 @@ fn a_figure_whose_anim_is_missing_is_not_hoverable() {
         .map(|h| h.target.clone())
         .collect();
     assert_eq!(hovered, vec![HoverTarget::Agent(walker)]);
-    let badged: Vec<_> = drawn.agents.iter().map(|a| a.agent_id).collect();
+    let badged = badged_ids(&drawn);
     assert_eq!(badged, vec![walker]);
 }
 
@@ -3797,6 +3802,37 @@ fn a_figure_hovers_on_the_box_it_is_drawn_in_in_both_looks() {
             );
             assert!(d.y <= f.y, "{d:?} sinks below {f:?}");
         }
+    }
+}
+
+/// Both looks hang each badge from the one anchor: at 1x the cutaway's badge
+/// runs are the classic's, on every frame of a walk to a desk.
+#[test]
+fn both_looks_hang_a_badge_from_the_one_anchor() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let (owned, now) = (OwnedSimStores::new(), SystemTime::UNIX_EPOCH);
+    for frame in &frames {
+        let mut scene = SceneState::uniform(16);
+        for agent in &frame.agents {
+            scene.agents.insert(agent.agent_id, agent.clone());
+        }
+        let classic: Vec<_> = paint_drawn(&owned, &scene, &layout, &pack, now, frame)
+            .badges
+            .iter()
+            .map(crate::display::Badge::run)
+            .collect();
+        let office = crate::display::Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: crate::render_scale::RenderScale::ONE,
+        };
+        let list = crate::display::compose::tests::list_at(frame, office, 12);
+        let cutaway: Vec<_> = list.badges().cloned().collect();
+        assert!(!classic.is_empty(), "premise: the walker wears a badge");
+        assert_eq!(cutaway, classic);
     }
 }
 
@@ -3991,7 +4027,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
     furniture::paint_area_rug(&mut buf, l.pantry_entry_mat().expect("the mat"), theme);
-    let cx = (dw.start.x + dw.end.x) / 2;
+    let cx = u16::midpoint(dw.start.x, dw.end.x);
     let mat_cy = dw.start.y + WALL_THICK_H + 3;
     assert_ne!(buf.get(cx, mat_cy), floor, "mat center row painted");
     assert_ne!(buf.get(cx - 7, mat_cy), floor, "mat spans west of center");
@@ -4841,13 +4877,13 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
         let seat = back_couch_top_left(stand, CHARACTER_SPRITE_W);
         let walk = waypoint_top_left(stand, CHARACTER_SPRITE_W);
         assert!(
-            (drawn.y as i32 - seat.y as i32).abs() <= 1,
+            (i32::from(drawn.y) - i32::from(seat.y)).abs() <= 1,
             "meeting-chair sitter y {} must track the seat top-left {} (±breath)",
             drawn.y,
             seat.y
         );
         assert!(
-            (drawn.y as i32 - walk.y as i32).abs() >= 4,
+            (i32::from(drawn.y) - i32::from(walk.y)).abs() >= 4,
             "meeting-chair sitter must NOT sit on the 5px-high waypoint_top_left {} (the bug)",
             walk.y
         );
@@ -5166,7 +5202,7 @@ fn sim_and_paint(
     layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
-) -> (SimFrame, Vec<(AgentFrame, crate::layout::Bounds)>) {
+) -> (SimFrame, Vec<(Badged, crate::layout::Bounds)>) {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
@@ -5216,13 +5252,29 @@ fn paint_drawn(
     )
 }
 
+/// A drawn sprite's badge: whose, and where it hangs.
+#[derive(Debug, Clone, Copy)]
+struct Badged {
+    agent_id: pixtuoid_core::AgentId,
+    label_anchor: Point,
+}
+
+/// Who `drawn` badged, in paint order.
+fn badged_ids(drawn: &Drawn) -> Vec<pixtuoid_core::AgentId> {
+    drawn.badges.iter().map(|badge| badge.agent).collect()
+}
+
 /// Each badged sprite and the box it hovers on, which is the box it is drawn
 /// in.
-fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
+fn badged(drawn: &Drawn) -> Vec<(Badged, crate::layout::Bounds)> {
     drawn
-        .agents
+        .badges
         .iter()
-        .map(|&f| {
+        .map(|badge| Badged {
+            agent_id: badge.agent,
+            label_anchor: badge.at,
+        })
+        .map(|f| {
             let hover = drawn
                 .hovers
                 .listed()
@@ -5238,7 +5290,7 @@ fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
 /// breath-free top, or higher only as far as the art of the desk it sits at.
 fn assert_badges_top_their_frames(
     frame: &SimFrame,
-    drawn: &[(AgentFrame, crate::layout::Bounds)],
+    drawn: &[(Badged, crate::layout::Bounds)],
     layout: &SceneLayout,
     pack: &Pack,
 ) {

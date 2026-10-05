@@ -590,14 +590,17 @@ impl FloorSession {
         }
     }
 
-    /// Agent labels for the LAST rendered frame's sprites. Empty before the
-    /// first `render`.
-    pub fn overlay(
-        &self,
-        scene: &SceneState,
-        hovered: Option<AgentId>,
-    ) -> Vec<crate::overlay::LabelElement> {
-        crate::overlay::build_overlay(scene, self.floor.raster.classic_agents(), hovered)
+    /// The badges of the LAST frame the classic rendered, in paint order.
+    /// Empty before the first `render`, and after a cutaway frame, whose image
+    /// holds its text.
+    pub fn badges(&self) -> &[crate::display::Badge] {
+        self.floor.raster.classic_badges()
+    }
+
+    /// The board's lines and the floor indicator of the LAST frame the classic
+    /// rendered. Empty before the first `render`, and after a cutaway frame.
+    pub fn signs(&self) -> &[crate::display::TextRun] {
+        self.floor.raster.classic_signs()
     }
 
     /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.
@@ -1113,9 +1116,10 @@ pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<ProjectedS
 
 /// Build a self-contained `SceneState` for one floor: a `uniform(cap)` scene, so
 /// floor arithmetic stays self-consistent with the remapped desk indices in
-/// `[0..cap)`.
+/// `[0..cap)`. A floor past the building's is an empty one.
 pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
-    let mut s = SceneState::uniform(scene.floor_capacities[floor_idx]);
+    let cap = scene.floor_capacities.get(floor_idx).copied().unwrap_or(0);
+    let mut s = SceneState::uniform(cap);
     for p in build_floor_scene(scene, floor_idx) {
         let mut slot = p.slot;
         // The RE-HOST, not a space mix-up: this `uniform(cap)` single-floor

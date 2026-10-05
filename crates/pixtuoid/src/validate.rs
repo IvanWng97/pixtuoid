@@ -159,6 +159,11 @@ fn orphan_hairstyle_line(style: &str) -> String {
     )
 }
 
+/// Validate the sprite pack in `dir`, printing the report.
+///
+/// # Errors
+///
+/// If the pack at `dir` fails to load, stdout cannot be written, or the report contains errors.
 pub fn validate_pack(dir: &Path) -> Result<()> {
     let (mut out, mut err) = (cli_stdout(), std::io::stderr());
     let pack = load_pack(dir)?;

@@ -144,7 +144,7 @@ fn weather_variants_render_without_panic_and_vary() {
                 let c = buf.get(x, y);
                 s = s
                     .wrapping_mul(1099511628211)
-                    .wrapping_add((c.r as u64) << 16 | (c.g as u64) << 8 | c.b as u64);
+                    .wrapping_add(u64::from(c.r) << 16 | u64::from(c.g) << 8 | u64::from(c.b));
             }
         }
         sigs.insert(s);
@@ -219,7 +219,7 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
     let cell_y0 = (mr.y / 2).saturating_sub(4);
     let cell_h = mr.height / 2 + 8;
 
-    // Coarse 250 ms beats rather than 33 ms frames: 250 ms stays well under the
+    // Coarse 250 ms beats rather than paint frames: 250 ms stays well under the
     // stale-resume trigger (≥7 s), so the wander machine still advances normally.
     const BUDGET: usize = 1200; // 250ms beats → 300s simulated
     let mut saw_characters = false;
@@ -298,9 +298,9 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
 
     let buf = r.buf().expect("a frame");
     let dist = |a: pixtuoid_core::sprite::Rgb, b: pixtuoid_core::sprite::Rgb| {
-        (a.r as i32 - b.r as i32).abs()
-            + (a.g as i32 - b.g as i32).abs()
-            + (a.b as i32 - b.b as i32).abs()
+        (i32::from(a.r) - i32::from(b.r)).abs()
+            + (i32::from(a.g) - i32::from(b.g)).abs()
+            + (i32::from(a.b) - i32::from(b.b)).abs()
     };
     // The glass has no single colour — a rim, and panes that show what is
     // behind them — so reference BOTH its rim (dx0) and a pane (dx2), sampled

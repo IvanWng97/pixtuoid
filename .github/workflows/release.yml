@@ -235,7 +235,7 @@ jobs:
       # the existing release's info for every key it isn't given), and omitting
       # `draft` is what publishes it once the assets are attached.
       - name: Fill and publish the draft release
-        uses: softprops/action-gh-release@v3 # zizmor: ignore[superfluous-actions] mature release action avoids hand-rolled gh release behavior
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3 # zizmor: ignore[superfluous-actions] mature release action avoids hand-rolled gh release behavior
         with:
           # Passed rather than inherited because the hand-tag recovery path
           # (release-plz.yml's own error message) leaves NO draft to inherit

@@ -165,8 +165,8 @@ impl BoardSegment {
 }
 
 /// The whole board, as tone-tagged segments — L1 `brand` + `star`, L2 `mood`,
-/// L3 `context`. No baked padding between brand/star (each painter right-flushes
-/// in its own coordinate space); the mood + context separators ARE baked.
+/// L3 `context`. No baked padding between brand/star ([`BoardModel::runs`]
+/// right-aligns the star); the mood + context separators ARE baked.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoardModel {
     pub brand: BoardSegment,
@@ -180,7 +180,7 @@ pub struct BoardModel {
 pub const BOARD_BRAND: &str = "pixtuoid";
 
 /// The board's L1 ★ CTA text — the ONE definition every painter renders AND the
-/// TUI's `star_hit_rect` measures, so the clickable target can't drift.
+/// star's hit area ([`Raster::star`](crate::look::Raster::star)) measures.
 pub const BOARD_STAR: &str = "\u{2605} Star";
 
 /// The waiting/active/idle glyphs — one definition for the tally AND the persona
@@ -258,10 +258,9 @@ impl OfficeMood {
 /// present state. Exiting agents are absent by design: a walkout isn't the mood.
 ///
 /// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
-/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
-/// equals the terminal display width — no `unicode-width` dep in `scene` (pinned
-/// where the width authority lives: the TUI's
-/// `every_l2_face_is_one_terminal_column_per_char`).
+/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so
+/// [`cells`](crate::display::text::cells) equals `chars().count()` here (pinned by
+/// the TUI's `every_l2_face_is_one_terminal_column_per_char`).
 pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
@@ -325,6 +324,14 @@ const PERSONA_CALM: &[Persona] = &[
     Persona::Says("quiet... too quiet"),
     Persona::Says("coffee break?"),
 ];
+// `board_line` picks from a pool modulo its length.
+const _: () = assert!(
+    !PERSONA_ALERT_ONE.is_empty()
+        && !PERSONA_ALERT_MANY.is_empty()
+        && !PERSONA_BUSY_ONE.is_empty()
+        && !PERSONA_BUSY_MANY.is_empty()
+        && !PERSONA_CALM.is_empty()
+);
 
 /// L2's plain-English face for `mood`; `pick` rotates the pool. Same 1-col
 /// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the
@@ -508,10 +515,97 @@ pub fn wall_board(
     )
 }
 
+impl BoardModel {
+    /// Its lines as the frame shows them, on the neon sign's dark interior: the
+    /// brand at its top-left, the star flush to its right, then the mood and
+    /// the context a cell row each.
+    pub fn runs(&self, theme: &Theme) -> Vec<crate::display::TextRun> {
+        use crate::display::{Align, TextRole, TextRun, TextSpan};
+        use crate::layout::{
+            CELL_ROWS, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
+        };
+        let span = |s: &BoardSegment| TextSpan {
+            text: s.text.clone(),
+            ink: tone_rgb(s.tone, theme),
+        };
+        let line = |n: u16| crate::layout::Point {
+            x: NEON_PANEL_INNER_X,
+            y: NEON_PANEL_INNER_Y + n * CELL_ROWS,
+        };
+        let run = |at, align, spans, role| TextRun {
+            at,
+            align,
+            spans,
+            plate: None,
+            role,
+        };
+        vec![
+            run(
+                line(0),
+                Align::Left,
+                vec![span(&self.brand)],
+                TextRole::Brand,
+            ),
+            run(
+                crate::layout::Point {
+                    x: NEON_PANEL_INNER_X + NEON_PANEL_INNER_W,
+                    ..line(0)
+                },
+                Align::Right,
+                vec![span(&self.star)],
+                TextRole::Star,
+            ),
+            run(
+                line(1),
+                Align::Left,
+                self.mood.iter().map(span).collect(),
+                TextRole::Board,
+            ),
+            run(
+                line(2),
+                Align::Left,
+                self.context.iter().map(span).collect(),
+                TextRole::Board,
+            ),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::anim::Motion;
+
+    /// Every face L2 can show — tally, persona, each drum glyph mid-roll — is
+    /// one cell per char inside the sign's interior, or a roll shoves the row
+    /// (`board_mood_segments`'s claim).
+    #[test]
+    fn every_l2_face_is_one_cell_per_char() {
+        use crate::display::text::cells;
+        const A_MINUTE_MS: u64 = 60_000;
+        const FRAME_MS: usize = crate::anim::PAINT_FRAME_MS as usize;
+        let offices = [(0, 0, 0), (0, 0, 3), (4, 0, 6), (4, 2, 6), (1, 1, 0)];
+        for (active, waiting, idle) in offices {
+            let counts = StateCounts {
+                active,
+                waiting,
+                idle,
+                exiting: 0,
+                total: active + waiting + idle,
+            };
+            for ms in (0..A_MINUTE_MS).step_by(FRAME_MS) {
+                let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+                let model = build_board(counts, 0, None, None, Motion::Full, now);
+                let l2: String = model.mood.iter().map(|s| s.text.as_str()).collect();
+                let n = usize::from(cells(&l2));
+                assert_eq!(n, l2.chars().count(), "{l2:?} at {ms}ms");
+                assert!(
+                    n <= usize::from(crate::layout::NEON_PANEL_INNER_W),
+                    "{l2:?} at {ms}ms"
+                );
+            }
+        }
+    }
 
     fn mood_text(counts: StateCounts) -> String {
         board_mood_segments(counts)

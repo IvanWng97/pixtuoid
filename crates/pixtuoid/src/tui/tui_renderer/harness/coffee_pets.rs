@@ -11,7 +11,7 @@ fn coffee_state_evicted_when_agent_leaves_scene() {
     assert!(r.coffee_contains(id));
     let empty = SceneState::uniform(16);
     r.evict_missing(&empty);
-    r.render(&empty, pack(), t0() + Duration::from_millis(33))
+    r.render(&empty, pack(), t0() + Duration::from_millis(PAINT_FRAME_MS))
         .unwrap();
     assert!(
         !r.coffee_contains(id),
@@ -32,10 +32,10 @@ fn coffee_state_is_evicted_during_a_floor_transition() {
     r.render(&scene, pack(), now).expect("render");
     assert!(r.coffee_contains(a), "cup staged");
 
-    now += Duration::from_millis(33);
+    now += Duration::from_millis(PAINT_FRAME_MS);
     r.navigate_floor(1, now);
     let gone = scene_with(vec![slot(b, 1, cap, t0())], cap);
-    now += Duration::from_millis(33);
+    now += Duration::from_millis(PAINT_FRAME_MS);
     r.evict_missing(&gone);
     r.render(&gone, pack(), now).expect("render");
     assert!(r.transition().is_some(), "still mid-slide");
@@ -126,7 +126,7 @@ fn injected_coffee_changes_desk_render() {
         vec![idle("/cof/steam.jsonl", 0, t0() - Duration::from_secs(30))],
         16,
     );
-    let t1 = t0() + Duration::from_millis(33);
+    let t1 = t0() + Duration::from_millis(PAINT_FRAME_MS);
 
     let mut base = build(100, 40, vec![]);
     base.render(&scene, pack(), t0()).unwrap();
@@ -300,7 +300,8 @@ fn pet_leg_boundary_no_pop() {
         .unwrap();
     let after = r.drawn_pet().map(|f| (f.centre.x, f.centre.y));
     if let (Some((x0, y0)), Some((x1, y1))) = (before, after) {
-        let gap = (x0 as i32 - x1 as i32).unsigned_abs() + (y0 as i32 - y1 as i32).unsigned_abs();
+        let gap = (i32::from(x0) - i32::from(x1)).unsigned_abs()
+            + (i32::from(y0) - i32::from(y1)).unsigned_abs();
         assert!(
             gap <= 16,
             "pet leg boundary teleports (gap={gap}px, ({x0},{y0})→({x1},{y1}))"

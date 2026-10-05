@@ -157,7 +157,7 @@ impl MeetingRoom {
             sofas: [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }],
             table: Point {
                 x: cx,
-                y: (north_y + south_y) / 2,
+                y: u16::midpoint(north_y, south_y),
             },
         }
     }

@@ -5,7 +5,7 @@
       "previewPort": 4320,
       "startServerReadyPattern": "http://localhost",
       "startServerReadyTimeout": 20000,
-      "numberOfRuns": 3,
+      "numberOfRuns": 5,
       "url": [
         "http://localhost:4321/?theme=day",
         "http://localhost:4321/architecture/?theme=day",

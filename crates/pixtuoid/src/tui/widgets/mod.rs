@@ -2,31 +2,27 @@
 
 mod connection;
 mod dashboard;
-mod elevator;
 mod footer;
 mod help;
 mod panel;
 mod theme_picker;
 mod tooltip;
 mod version_popup;
-mod wall_board;
 mod welcome;
 
 pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
-pub(super) use elevator::paint_elevator_indicator;
 pub use footer::footer_context;
 pub(super) use footer::paint_footer;
 pub(super) use help::paint_help_overlay;
 pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
-pub(crate) use tooltip::{TooltipAt, paint_hover_tooltip, paint_label_widgets};
+pub(crate) use tooltip::{TooltipAt, paint_badges, paint_hover_tooltip, paint_text_runs};
 pub(super) use tooltip::{
     paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
 };
 pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
-pub(super) use wall_board::{paint_wall_display, star_hit_rect};
 pub(super) use welcome::paint_welcome;
 // `pub`: the snapshot example reuses the real formatter so its --source-warning
 // screenshots cannot drift from production.
@@ -48,12 +44,10 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
-/// Display columns a string occupies in the terminal — the ONE width authority (the same
-/// `unicode-width` ratatui uses), replacing scattered `chars().count()` so a wide glyph
-/// in a HUD widget can't miscount its layout.
+/// Display columns a string occupies in the terminal:
+/// [`cells`](pixtuoid_scene::display::text::cells), the one width rule.
 pub(crate) fn display_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthStr;
-    s.width()
+    usize::from(pixtuoid_scene::display::text::cells(s))
 }
 
 pub(crate) use pixtuoid_scene::board::compact_hms;
@@ -85,9 +79,9 @@ const SHADOW_OFFSET: u16 = 1;
 fn dim_rgb(c: Color, f: f32) -> Color {
     match c {
         Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * f) as u8,
-            (g as f32 * f) as u8,
-            (b as f32 * f) as u8,
+            (f32::from(r) * f) as u8,
+            (f32::from(g) * f) as u8,
+            (f32::from(b) * f) as u8,
         ),
         other => other,
     }
