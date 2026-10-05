@@ -8,7 +8,7 @@
 //! movement still routes around live agents.
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
@@ -362,13 +362,88 @@ fn reconstruct(
     let mut turned = Vec::with_capacity(pts.len() * 2);
     for leg in pts.windows(2) {
         turned.push(leg[0]);
-        turned.extend(elbow(mask, leg[0], leg[1]));
+        turned.extend(leg_corners(mask, leg[0], leg[1]));
     }
     turned.push(to);
     simplify_polyline(mask, turned)
 }
 
-/// The corner an axis-aligned detour from `a` to `b` turns on, when the
+/// The corners a leg from `a` to `b` turns on to stay on open floor: none
+/// when the straight leg does, an [`elbow`] when an L does, else a
+/// [`pixel_detour`]. A leg neither clears stays straight.
+fn leg_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
+    if leg_clear(mask, a, b) {
+        return Vec::new();
+    }
+    elbow(mask, a, b)
+        .map(|c| vec![c])
+        .or_else(|| pixel_detour(mask, a, b))
+        .unwrap_or_default()
+}
+
+/// How far past the box a leg spans [`pixel_detour`] searches: the gap
+/// joining two half-open routing cells can lie beside either.
+const DETOUR_MARGIN: u16 = CELL_SIZE;
+
+/// The corners of a shortest walk from `a` to `b` over open pixels, stepping
+/// orthogonally inside the box the two span grown by [`DETOUR_MARGIN`], pulled
+/// straight wherever a leg stays on open floor; `None` when the box holds no
+/// such walk. Two routing cells are walkable at half open, so the gap joining
+/// them can be a pixel wide, where neither the straight leg nor an L fits.
+fn pixel_detour(mask: &WalkableMask, a: Point, b: Point) -> Option<Vec<Point>> {
+    let lo = |p: u16, q: u16| p.min(q).saturating_sub(DETOUR_MARGIN);
+    let hi = |p: u16, q: u16, end: u16| {
+        Some(
+            p.max(q)
+                .saturating_add(DETOUR_MARGIN)
+                .min(end.checked_sub(1)?),
+        )
+    };
+    let (x0, y0) = (lo(a.x, b.x), lo(a.y, b.y));
+    let (x1, y1) = (hi(a.x, b.x, mask.width())?, hi(a.y, b.y, mask.height())?);
+    let inside = |p: Point| (x0..=x1).contains(&p.x) && (y0..=y1).contains(&p.y);
+    if !inside(a) || !inside(b) {
+        return None;
+    }
+    let w = usize::from(x1 - x0) + 1;
+    let at = |p: Point| usize::from(p.y - y0) * w + usize::from(p.x - x0);
+    let mut came_from: Vec<Option<Point>> = vec![None; w * (usize::from(y1 - y0) + 1)];
+    came_from[at(a)] = Some(a);
+    let mut queue = VecDeque::from([a]);
+    while let Some(p) = queue.pop_front() {
+        if p == b {
+            break;
+        }
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (Some(x), Some(y)) = (p.x.checked_add_signed(dx), p.y.checked_add_signed(dy))
+            else {
+                continue;
+            };
+            let q = Point { x, y };
+            if inside(q) && came_from[at(q)].is_none() && (q == b || mask.is_walkable(x, y)) {
+                came_from[at(q)] = Some(p);
+                queue.push_back(q);
+            }
+        }
+    }
+    let mut walk = vec![b];
+    while let Some(&p) = walk.last().filter(|&&p| p != a) {
+        walk.push(came_from[at(p)]?);
+    }
+    walk.reverse();
+    let mut corners = Vec::new();
+    let mut i = 0;
+    while i + 1 < walk.len() {
+        i = (i + 1..walk.len())
+            .rev()
+            .find(|&j| leg_clear(mask, walk[i], walk[j]))
+            .unwrap_or(i + 1);
+        corners.extend(walk.get(i).filter(|_| i + 1 < walk.len()));
+    }
+    Some(corners)
+}
+
+/// The corner an axis-aligned L from `a` to `b` turns on, when the
 /// straight leg crosses blocked floor and one of the two L-shaped ones doesn't.
 /// Two adjacent routing cells are walkable at half open, so the straight leg
 /// between their anchors can clip the corner of a wall standing in either.
