@@ -90,11 +90,15 @@ pub fn tighten_to_owner_only(f: &File) {
 
 fn checked_home_join(home: Option<PathBuf>, rel: &str) -> Result<PathBuf> {
     home.map(|h| h.join(rel)).ok_or_else(|| {
-        anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>")
+        anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); {HOME_UNSET_REMEDY}")
     })
 }
 
 pub(crate) const HOOK_OVERRIDE_ENV: &str = "PIXTUOID_HOOK";
+
+/// The remedy for "no home resolves", shared by every home-anchored target; each
+/// message names the variables its resolver reads.
+pub(crate) const HOME_UNSET_REMEDY: &str = "set one and reconnect";
 
 /// The remedy sentence for "the shim isn't where we looked", shared by every site
 /// that offers one. It names `PIXTUOID_HOOK` and nothing else: the `--hook-path`
@@ -918,7 +922,7 @@ mod tests {
     fn checked_home_join_errors_without_home() {
         let err = checked_home_join(None, ".reasonix/settings.json").unwrap_err();
         assert!(
-            err.to_string().contains("--config"),
+            err.to_string().contains(HOME_UNSET_REMEDY),
             "must point at the workaround: {err}"
         );
     }

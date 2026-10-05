@@ -43,7 +43,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         .map(|d| d.join("hooks.json"))
         .ok_or_else(|| {
             anyhow!(
-                "cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>"
+                "cannot resolve the home directory (HOME/USERPROFILE unset); {}",
+                io::HOME_UNSET_REMEDY
             )
         })
 }

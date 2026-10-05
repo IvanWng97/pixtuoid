@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use toml::value::Table;
 
+use crate::install::io;
 use crate::install::target::MergeOutcome;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
 
@@ -75,7 +76,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         .map(|d| d.join("config.toml"))
         .ok_or_else(|| {
             anyhow!(
-                "cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>"
+                "cannot resolve the home directory (HOME/USERPROFILE unset); {}",
+                io::HOME_UNSET_REMEDY
             )
         })
 }

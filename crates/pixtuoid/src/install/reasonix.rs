@@ -54,7 +54,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
             // silently writing a CWD-relative config Reasonix never reads.
             anyhow!(
                 "cannot resolve Reasonix's home (REASONIX_HOME and the platform \
-                 home/config dir unset); pass --config <path>"
+                 home/config dir unset); {}",
+                io::HOME_UNSET_REMEDY
             )
         })
 }

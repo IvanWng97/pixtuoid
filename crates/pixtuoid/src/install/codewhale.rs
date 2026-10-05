@@ -95,7 +95,8 @@ fn resolve_config_path(
         (None, None) => {
             return Err(anyhow!(
                 "cannot resolve CodeWhale's home (CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/\
-                 CODEWHALE_HOME/HOME/USERPROFILE unset); pass --config <path>"
+                 CODEWHALE_HOME/HOME/USERPROFILE unset); {}",
+                io::HOME_UNSET_REMEDY
             ));
         }
     };
@@ -346,7 +347,7 @@ mod tests {
     fn config_path_errors_when_no_home_and_no_override() {
         let err = resolve_config_path(None, None, None, None, |_| false).unwrap_err();
         assert!(
-            err.to_string().contains("pass --config"),
+            err.to_string().contains(io::HOME_UNSET_REMEDY),
             "no home + no override must surface the actionable error: {err}"
         );
     }

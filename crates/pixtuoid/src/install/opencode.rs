@@ -53,7 +53,8 @@ fn config_dir_from(oc: Option<&Path>, xdg: Option<&Path>, home: Option<&Path>) -
     home.map(|h| h.join(".config").join("opencode"))
         .ok_or_else(|| {
             anyhow!(
-                "cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>"
+                "cannot resolve the home directory (HOME/USERPROFILE unset); {}",
+                io::HOME_UNSET_REMEDY
             )
         })
 }

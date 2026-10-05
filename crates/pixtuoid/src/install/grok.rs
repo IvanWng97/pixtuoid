@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 
@@ -69,7 +70,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
     ) {
         anyhow::bail!(
             "cannot resolve the home directory (HOME/USERPROFILE unset) and GROK_HOME is \
-             unset — grok would not read hooks written to a fallback path; pass --config <path>"
+             unset — grok would not read hooks written to a fallback path; {}",
+            io::HOME_UNSET_REMEDY
         );
     }
     Ok(pixtuoid_core::source::grok::grok_home()
