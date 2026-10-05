@@ -44,7 +44,7 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
 
 /// Paint `runs` as terminal text, each in the cells
 /// [`TextRun::place`] gives the line it writes, the cells the hit test reads
-/// (`a_run_paints_the_cells_its_bounds_hit`). The board's
+/// (`a_run_paints_where_place_puts_it`). The board's
 /// brand and star and the floor indicator are bold, the indicator padded a
 /// cell each side on its plate, and `hovered`'s badge reads `▸name` in bold
 /// white.
@@ -594,12 +594,14 @@ mod tests {
         assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
     }
 
-    /// A run the pointer can name is painted in exactly the cells its
-    /// [`TextRun::bounds`](pixtuoid_scene::display::TextRun::bounds) gives the
-    /// hit test, whichever row its anchor falls on: a board line and its star
-    /// as the classic writes them, and a badge over an odd and an even head.
+    /// A run is painted in exactly the cells
+    /// [`TextRun::place`](pixtuoid_scene::display::TextRun::place) gives its
+    /// line, whichever row its anchor falls on: the board's lines, and a badge
+    /// over an odd and an even head. The star, the one run a pointer hits, is
+    /// hit on those cells
+    /// ([`TextRun::hit_box`](pixtuoid_scene::display::TextRun::hit_box)).
     #[test]
-    fn a_run_paints_the_cells_its_bounds_hit() {
+    fn a_run_paints_where_place_puts_it() {
         use pixtuoid_core::state::DaemonState;
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::LabelTone;
@@ -627,6 +629,7 @@ mod tests {
             ));
         }
         let area = Rect::new(0, 0, 120, 44);
+        let mut stars = 0;
         for run in runs {
             let mut term = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
             term.draw(|f| super::paint_text_runs(f, std::slice::from_ref(&run), area, None))
@@ -636,12 +639,29 @@ mod tests {
                 .flat_map(|y| (0..area.width).map(move |x| (x, y)))
                 .filter(|&(x, y)| buf[(x, y)] != ratatui::buffer::Cell::default())
                 .collect();
-            let b = run.bounds();
-            let hit: Vec<(u16, u16)> = (b.y / 2..(b.y + b.height).div_ceil(2))
-                .flat_map(|y| (b.x..b.x + b.width).map(move |x| (x, y)))
-                .collect();
-            assert_eq!(painted, hit, "{:?} at {:?}", run.role, run.at);
+            let terminal_cells = |b: pixtuoid_scene::layout::Bounds| -> Vec<(u16, u16)> {
+                (b.y / 2..(b.y + b.height).div_ceil(2))
+                    .flat_map(|y| (b.x..b.x + b.width).map(move |x| (x, y)))
+                    .collect()
+            };
+            let placed = run.place(pixtuoid_scene::display::text::cells(&run.text()));
+            assert_eq!(
+                painted,
+                terminal_cells(placed),
+                "{:?} at {:?}",
+                run.role,
+                run.at
+            );
+            if run.role == super::TextRole::Star {
+                assert_eq!(
+                    terminal_cells(run.hit_box()),
+                    painted,
+                    "the star's hit area"
+                );
+                stars += 1;
+            }
         }
+        assert_eq!(stars, 1, "the board has its star");
     }
 
     /// The floor indicator centres on its anchor by display columns, not

@@ -401,7 +401,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let star = texts
         .iter()
         .find(|run| run.role == TextRole::Star)
-        .map(TextRun::bounds);
+        .map(TextRun::hit_box);
     let hit =
         mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
     let hovered = match hit {

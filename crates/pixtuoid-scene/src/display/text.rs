@@ -194,9 +194,10 @@ impl TextRun {
         self.spans.iter().map(|s| s.text.as_str()).collect()
     }
 
-    /// The logical cells its line covers on the terminal's cell grid, one
-    /// per cell of its text: what the hit test reads and the classic writes.
-    pub fn bounds(&self) -> crate::layout::Bounds {
+    /// The star's hit area: the logical cells its line covers on the
+    /// terminal's cell grid, one per cell of its text, where the classic
+    /// writes it.
+    pub fn hit_box(&self) -> crate::layout::Bounds {
         self.place(cells(&self.text()))
     }
 

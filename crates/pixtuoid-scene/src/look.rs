@@ -183,7 +183,7 @@ impl Raster {
                 .texts
                 .iter()
                 .find(|run| run.role == crate::display::TextRole::Star)
-                .map(crate::display::TextRun::bounds),
+                .map(crate::display::TextRun::hit_box),
             Look::Cutaway { .. } => self.cutaway.as_ref()?.star(),
         }
     }
