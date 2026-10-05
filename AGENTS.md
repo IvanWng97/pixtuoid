@@ -80,13 +80,15 @@ by hand.
 **At most 4 open PRs across the sessions** (bots' and outside contributors'
 aside): the runners take [20 jobs at once](https://docs.github.com/en/actions/reference/limits)
 and one light-tier push needs more, so a fifth open PR only queues. A PR
-opens, never as a draft, once its branch is ready to merge (preflight green,
-local rows run); until a slot frees, the branch stays pushed with no PR. A PR
+opens, never as a draft, once preflight is green and its local rows are run;
+the bots review it from there. Until a slot frees, the branch stays pushed
+with no PR. A PR
 that stops being ready closes with its branch kept and never force-pushed,
 since a force-pushed branch can't reopen; a stacked one is retargeted to
 `main` first, because merging its base deletes that branch. Closing leaves its
-runs queued, and a plain cancel still runs the `always()` gate jobs, so they
-are [force-cancelled](https://docs.github.com/en/rest/actions/workflow-runs#force-cancel-a-workflow-run).
+runs queued, and a plain cancel still runs the `always()` gate jobs, so
+[force-cancel](https://docs.github.com/en/rest/actions/workflow-runs#force-cancel-a-workflow-run)
+them.
 
 Repo skills (committed): `local-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
@@ -94,7 +96,7 @@ Repo skills (committed): `local-review`, `beautify-decoration`,
 ## Conventions
 
 - **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec.
-- **Every mechanism earns its upkeep.** Code, config, a test, a CI job or a doc stays only if it names a failure it prevents that nothing else already does, or a need someone has. Extending a mechanism re-adds it: one you touch that can't name one is deleted, not polished.
+- **Every mechanism earns its upkeep.** Code, config, a test, a CI job or a doc stays only if it names a failure it prevents that nothing else already does, or a need someone has. Extending a mechanism re-adds it: one you touch that can't name one is deleted, not polished. The load-bearing defenses [REVIEW.md](REVIEW.md#design)'s Proportion row lists have named theirs.
 - **Comments: WHY only.** Only what the surrounding thing can't say (workaround, constraint, invariant). **Every comment the repo ships is in scope**, not just `//` and `#` in code: a `.md` doc's prose, a workflow or manifest comment, a justfile recipe header, a CI contract's `why` and a PR body are all held to the rules below — prose is where an assertion hides with no failure mode, so it earns its place the same way code does. Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. **A comment sits on the narrowest thing it constrains** — the declaration when it governs the whole item, the statement, struct-literal field or match arm when it governs only that one; hoisting a rationale to the declaration to shorten a body detaches it from the line it was pinned to, which is worse than the length it saved. The default is fewer: a comment is a cost the code must repay, and a link to the authority beats prose about it. A change leaves the net comment volume of what it touches no larger than it found it unless each added line earns its place — true of a PR that fixes comments too. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and an intra-doc link also turns a rename into a `doc-check` red, private items included (the magic-number rule, applied to prose).
 - **No magic numbers** — reuse the existing authority (a dep's const, our registry/theme/layout value), else ONE named `const` at the narrowest covering scope; prefer a type (enum/newtype) for a related set. Two copies of one value is a latent drift bug — if a copy must cross a boundary, pin the pair with a test. Self-evident `0`/`1`/`2`, indices, and test fixtures stay inline.
 - **Errors**: `anyhow::Result` in app code, `thiserror` in core; hook listener + JSONL watcher log-and-continue, never panic. **No `unwrap()` outside tests.**
