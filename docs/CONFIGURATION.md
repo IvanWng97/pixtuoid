@@ -90,7 +90,7 @@ on one that sets them apart; it also warns on a looping animation whose
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
-A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, at every density; without them neither look stands them, and `validate-pack` warns.
+A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, and draws its lamp's bulb in palette key `9`, at every density: the lamp's pool centres on those pixels. Without the marks neither look stands the props, without the bulb neither look lights the lamp, and `validate-pack` warns of each.
 
 A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full

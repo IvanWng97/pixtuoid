@@ -599,6 +599,20 @@ mod tests {
         assert_eq!(bulb(Facing::North), bulb(Facing::South));
     }
 
+    /// The pack authors' guide names the desk's contract by the keys and marks
+    /// the painters read: a rename here fails until the guide follows.
+    #[test]
+    fn the_guide_names_the_desk_contract() {
+        let guide = include_str!("../../../../docs/CONFIGURATION.md");
+        for needle in [
+            format!("@mark {CUP_MARK} <x> <y>"),
+            format!("@mark {TOWER_MARK} <x> <y>"),
+            format!("palette key `{DESK_BULB_KEY}`"),
+        ] {
+            assert!(guide.contains(&needle), "CONFIGURATION.md lost {needle:?}");
+        }
+    }
+
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,
     /// hairstyle or building registers — a generated file whose `pack.toml`
     /// entry was never written — ships as dead bytes and draws nothing. A sprite
