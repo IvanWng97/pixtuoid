@@ -109,7 +109,7 @@ pub struct BoardModel {
 pub const BOARD_BRAND: &str = "pixtuoid";
 
 /// The board's L1 ★ CTA text — the ONE definition every painter renders AND the
-/// star run's [`TextRun::hit_box`](crate::display::TextRun::hit_box) measures.
+/// star's hit area ([`Raster::star`](crate::look::Raster::star)) measures.
 pub const BOARD_STAR: &str = "\u{2605} Star";
 
 /// The waiting/active/idle glyphs — one definition for the tally AND the persona
