@@ -341,10 +341,18 @@ fn cc_head_scan_ignores_codex_shaped_payload_cwd() {
     );
 }
 
-fn t_decode(_t: &str, _s: &str, _v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+fn t_decode(
+    _t: &str,
+    _s: &str,
+    _v: serde_json::Value,
+) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     Ok(vec![])
 }
-fn t_decode_lifecycle(t: &str, s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+fn t_decode_lifecycle(
+    t: &str,
+    s: &str,
+    v: serde_json::Value,
+) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     if v.get("subtype").and_then(|x| x.as_str()) == Some("session_end") {
         return Ok(vec![AgentEvent::SessionEnd {
             agent_id: AgentId::from_parts(s, t),
@@ -3048,9 +3056,15 @@ async fn walk_jsonl_resets_cursor_to_zero_when_known_file_truncated_below_cursor
 
 #[tokio::test]
 async fn walk_jsonl_skips_a_line_whose_decoder_errors_and_advances_cursor() {
-    fn err_decode(_t: &str, _s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+    fn err_decode(
+        _t: &str,
+        _s: &str,
+        v: serde_json::Value,
+    ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
         if v.get("boom").is_some() {
-            anyhow::bail!("boom");
+            return Err(crate::source::decoder::DecodeError::unsupported(
+                "fixture", "boom",
+            ));
         }
         Ok(vec![])
     }
@@ -3124,9 +3138,15 @@ async fn task_scan_skips_empty_and_non_utf8_lines_and_still_seeds_a_dispatch() {
 
 #[tokio::test]
 async fn task_scan_skips_a_decoder_error_line_and_still_seeds_a_later_dispatch() {
-    fn deco(t: &str, s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+    fn deco(
+        t: &str,
+        s: &str,
+        v: serde_json::Value,
+    ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
         if v.get("boom").is_some() {
-            anyhow::bail!("x");
+            return Err(crate::source::decoder::DecodeError::unsupported(
+                "fixture", "x",
+            ));
         }
         crate::source::claude_code::decode_cc_line(t, s, v)
     }
