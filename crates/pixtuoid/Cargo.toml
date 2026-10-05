@@ -162,7 +162,7 @@ schemars = "1"
 # test-util: paused-clock signal-arm tests in runtime/driver.rs (headless_loop).
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
-# A decoder our SIXEL encoder's tests did not write: ratatui-image's own.
+# A decoder our SIXEL encoder's tests did not write.
 icy_sixel = "0.5"
 insta    = "1"
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
