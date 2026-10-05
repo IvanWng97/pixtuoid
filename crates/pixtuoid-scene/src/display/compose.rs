@@ -11,7 +11,7 @@ use super::{
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-use crate::display::text::{Align, LABEL_GAP, TextRun};
+use crate::display::text::{Align, LABEL_GAP, TextRole, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
@@ -199,17 +199,18 @@ pub(crate) fn compose_at<'a>(
 /// already holds.
 fn push_bubbles(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let badges: Vec<TextRun> = order
-        .iter()
-        .filter_map(|(_, kind)| match kind {
-            PieceKind::Text { run } => Some(run.clone()),
-            _ => None,
-        })
-        .collect();
     let bubbles: Vec<_> = frame
         .chitchat_bubbles
         .iter()
-        .filter_map(|bubble| TextRun::bubble(bubble, &badges, office.theme))
+        .filter_map(|bubble| {
+            let badge_at = order.iter().find_map(|(_, kind)| match kind {
+                PieceKind::Text { run } if run.role == TextRole::Badge(bubble.speaker) => {
+                    Some(run.at)
+                }
+                _ => None,
+            })?;
+            Some(TextRun::bubble(bubble, badge_at, office.theme))
+        })
         .map(|run| {
             (
                 topmost_span(run_rect(&run, pen), pen),
@@ -1180,7 +1181,7 @@ fn push_characters(
             crate::layout::Size { w, h: h + hair },
             badge_ceiling,
         );
-        let run = TextRun::badge(anchor, agent, &namesakes, theme);
+        let run = crate::display::Badge::new(anchor, agent, &namesakes, theme).run();
         order.push((
             topmost_span(badge_plate(&run, pen), pen),
             PieceKind::Text { run },

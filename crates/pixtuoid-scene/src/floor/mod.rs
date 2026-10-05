@@ -590,11 +590,17 @@ impl FloorSession {
         }
     }
 
-    /// The text runs of the LAST frame the classic rendered, in paint order: its
-    /// sprites' badges, then the board and the floor indicator. Empty before
-    /// the first `render`, and after a cutaway frame, whose image holds its text.
-    pub fn texts(&self) -> &[crate::display::TextRun] {
-        self.floor.raster.classic_texts()
+    /// The badges of the LAST frame the classic rendered, in paint order.
+    /// Empty before the first `render`, and after a cutaway frame, whose image
+    /// holds its text.
+    pub fn badges(&self) -> &[crate::display::Badge] {
+        self.floor.raster.classic_badges()
+    }
+
+    /// The board's lines and the floor indicator of the LAST frame the classic
+    /// rendered. Empty before the first `render`, and after a cutaway frame.
+    pub fn signs(&self) -> &[crate::display::TextRun] {
+        self.floor.raster.classic_signs()
     }
 
     /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.

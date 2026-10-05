@@ -117,6 +117,70 @@ pub struct TextSpan {
     pub ink: Rgb,
 }
 
+/// An agent's name badge: [`BADGE_MARKER`](crate::badge::BADGE_MARKER) in
+/// the source's hue, then its name in its tone, on the badge plate, centred
+/// [`LABEL_GAP`] rows over `at`. Its parts are fields, so a painter reads them
+/// instead of a run's spans by position.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Badge {
+    /// Whose badge it is.
+    pub agent: AgentId,
+    /// The point it hangs over, its sprite's top-centre.
+    pub at: Point,
+    /// The marker's ink.
+    pub marker: Rgb,
+    /// The name, in its ink.
+    pub name: TextSpan,
+    /// The fill behind it.
+    pub plate: Rgb,
+}
+
+impl Badge {
+    /// `agent`'s badge over `anchor`.
+    pub(crate) fn new(
+        anchor: Point,
+        agent: &AgentSlot,
+        namesakes: &crate::badge::Namesakes<'_>,
+        theme: &Theme,
+    ) -> Self {
+        let text = namesakes.text(agent);
+        let ink = crate::badge::badge_ink(&text, crate::badge::tone_of(agent), theme);
+        Self {
+            agent: agent.agent_id,
+            at: anchor,
+            marker: ink.marker,
+            name: TextSpan {
+                text,
+                ink: ink.name,
+            },
+            plate: crate::badge::badge_plate(theme),
+        }
+    }
+
+    /// It as a run, for a painter that draws every run alike.
+    pub fn run(&self) -> TextRun {
+        TextRun {
+            at: self.at,
+            align: Align::Over,
+            spans: vec![
+                TextSpan {
+                    text: crate::badge::BADGE_MARKER.to_string(),
+                    ink: self.marker,
+                },
+                self.name.clone(),
+            ],
+            plate: Some(self.plate),
+            role: TextRole::Badge(self.agent),
+        }
+    }
+
+    /// The logical cells a line `w` cells wide takes over its anchor:
+    /// [`TextRun::place`] for its run.
+    pub fn place(&self, w: u16) -> crate::layout::Bounds {
+        place(self.at, Align::Over, w)
+    }
+}
+
 /// Where a [`TextRun`]'s `at` lies on its line, a cell row tall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Align {
@@ -148,35 +212,6 @@ pub enum TextRole {
 }
 
 impl TextRun {
-    /// `agent`'s badge over `anchor` ([`badge_anchor`](crate::sim::anchors::badge_anchor)):
-    /// its marker in the source's hue, then its name in its tone, on the
-    /// badge plate.
-    pub(crate) fn badge(
-        anchor: Point,
-        agent: &AgentSlot,
-        namesakes: &crate::badge::Namesakes<'_>,
-        theme: &Theme,
-    ) -> Self {
-        let text = namesakes.text(agent);
-        let ink = crate::badge::badge_ink(&text, crate::badge::tone_of(agent), theme);
-        Self {
-            at: anchor,
-            align: Align::Over,
-            spans: vec![
-                TextSpan {
-                    text: crate::badge::BADGE_MARKER.to_string(),
-                    ink: ink.marker,
-                },
-                TextSpan {
-                    text,
-                    ink: ink.name,
-                },
-            ],
-            plate: Some(crate::badge::badge_plate(theme)),
-            role: TextRole::Badge(agent.agent_id),
-        }
-    }
-
     /// The floor indicator naming floor `floor` (one-based) over the elevator
     /// at `door`: centred on the door, in the cell over it, on the badge plate.
     pub(crate) fn indicator(door: Point, floor: usize, theme: &Theme) -> Self {
@@ -195,20 +230,17 @@ impl TextRun {
         }
     }
 
-    /// `bubble` over its speaker's badge among `badges`, in the tooltip's
-    /// ink on its plate; `None` when its speaker wears no badge.
+    /// `bubble` over its speaker's badge, which hangs over `badge_at`, in
+    /// the tooltip's ink on its plate.
     pub(crate) fn bubble(
         bubble: &crate::chitchat::ChitchatBubble,
-        badges: &[TextRun],
+        badge_at: Point,
         theme: &Theme,
-    ) -> Option<Self> {
-        let badge = badges
-            .iter()
-            .find(|run| run.role == TextRole::Badge(bubble.speaker))?;
-        Some(Self {
+    ) -> Self {
+        Self {
             at: Point {
-                x: badge.at.x,
-                y: badge.at.y.saturating_sub(BUBBLE_LIFT),
+                x: badge_at.x,
+                y: badge_at.y.saturating_sub(BUBBLE_LIFT),
             },
             align: Align::Over,
             spans: vec![TextSpan {
@@ -217,7 +249,7 @@ impl TextRun {
             }],
             plate: Some(theme.ui.tooltip_bg),
             role: TextRole::Bubble(bubble.speaker),
-        })
+        }
     }
 
     /// Its spans' text, end to end.
@@ -237,22 +269,28 @@ impl TextRun {
     /// fills the cell row its anchor's row lies in, [`LABEL_GAP`] rows up for
     /// [`Align::Over`].
     pub fn place(&self, w: u16) -> crate::layout::Bounds {
-        let h = crate::layout::CELL_ROWS;
-        let x = match self.align {
-            Align::Left => self.at.x,
-            Align::Right => self.at.x.saturating_sub(w),
-            Align::Over | Align::Centre => self.at.x.saturating_sub(w / 2),
-        };
-        let row = match self.align {
-            Align::Over => self.at.y.saturating_sub(LABEL_GAP),
-            Align::Left | Align::Right | Align::Centre => self.at.y,
-        };
-        crate::layout::Bounds {
-            x,
-            y: row / h * h,
-            width: w,
-            height: h,
-        }
+        place(self.at, self.align, w)
+    }
+}
+
+/// The logical cells a line `w` cells wide takes, placed by `at` as `align`
+/// says.
+fn place(at: Point, align: Align, w: u16) -> crate::layout::Bounds {
+    let h = crate::layout::CELL_ROWS;
+    let x = match align {
+        Align::Left => at.x,
+        Align::Right => at.x.saturating_sub(w),
+        Align::Over | Align::Centre => at.x.saturating_sub(w / 2),
+    };
+    let row = match align {
+        Align::Over => at.y.saturating_sub(LABEL_GAP),
+        Align::Left | Align::Right | Align::Centre => at.y,
+    };
+    crate::layout::Bounds {
+        x,
+        y: row / h * h,
+        width: w,
+        height: h,
     }
 }
 

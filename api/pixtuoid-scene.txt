@@ -181,14 +181,15 @@ pub pixtuoid_scene::floor::FloorSession::floor: pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::FloorSession::office: pixtuoid_scene::floor::PerOffice
 impl pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> AudioFrame
+pub fn pixtuoid_scene::floor::FloorSession::badges(&self) -> &[crate::display::Badge]
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::neon_sign::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
+pub fn pixtuoid_scene::floor::FloorSession::signs(&self) -> &[crate::display::TextRun]
 pub fn pixtuoid_scene::floor::FloorSession::step(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
-pub fn pixtuoid_scene::floor::FloorSession::texts(&self) -> &[crate::display::TextRun]
 impl core::fmt::Debug for pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorSession
@@ -1119,7 +1120,8 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::look::Look
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Look
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Look
 pub struct pixtuoid_scene::look::ClassicDrawn<'a>
-pub pixtuoid_scene::look::ClassicDrawn::badges: &'a [crate::display::TextRun]
+pub pixtuoid_scene::look::ClassicDrawn::badges: &'a [crate::display::Badge]
+pub pixtuoid_scene::look::ClassicDrawn::bubbles: &'a [crate::display::TextRun]
 pub pixtuoid_scene::look::ClassicDrawn::hovers: &'a crate::display::Hovers
 pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a mut pixtuoid_core::sprite::RgbBuffer
 pub pixtuoid_scene::look::ClassicDrawn::signs: &'a [crate::display::TextRun]
