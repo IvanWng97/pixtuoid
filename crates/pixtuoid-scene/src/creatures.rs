@@ -131,7 +131,7 @@ pub(crate) fn pet_position(
 /// Sample a polyline at arc-length fraction `t ∈ [0, 1]`, using octile segment
 /// length so a diagonal leg doesn't move faster than a cardinal one. `t >= 1`
 /// returns `fallback` (the caller's snapped goal) exactly — no float overshoot
-/// onto a non-last cell. Precondition: `pts` non-empty (`find_path` guarantees it).
+/// onto a non-last cell. Precondition: `pts` non-empty (find_path guarantees it).
 fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
     let Some(&last_pt) = pts.last() else {
         return fallback;

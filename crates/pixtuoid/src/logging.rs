@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 /// Install the global tracing subscriber. TUI mode (and `floating`, a long-running
 /// GUI whose launching terminal would just collect noise) ALWAYS logs to the file —
 /// the alternate screen owns the terminal, so the log file is the only place a
-/// runtime error can surface — at a `warn` floor unless `$RUST_LOG`, `$PIXTUOID_LOG` or
+/// runtime error can surface — at a `warn` floor unless $RUST_LOG, $PIXTUOID_LOG or
 /// --log-level raises it. Every other mode goes to stderr.
 pub(crate) fn init(tui_active: bool, log_level: &'static str) {
     let rust_log = pixtuoid_core::platform::text_env("RUST_LOG");

@@ -39,14 +39,16 @@ pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
     // The gate (this) and the verify it guards MUST read the SAME config, or
     // `diagnose` through an injected root could never observe an install.
-    let path = match config.map_or_else(|| (t.default_config_path)(), Ok) {
+    let path = match config.map(Ok).unwrap_or_else(|| (t.default_config_path)()) {
         Ok(p) => p,
         Err(_) => return false,
     };
     match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
         // A merge that ERRS means "we could not tell" — never "installed".
-        Ok(c) => (t.merge_uninstall)(&c).map_or_else(|_| config_mentions_us(&c), |o| o.changed),
+        Ok(c) => (t.merge_uninstall)(&c)
+            .map(|o| o.changed)
+            .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }
 }
@@ -72,7 +74,7 @@ pub(crate) fn verify_target(
     config: Option<PathBuf>,
 ) -> verify::SchemaVerifyResult {
     use verify::ShimRef;
-    let path = match config.map_or_else(|| (t.default_config_path)(), Ok) {
+    let path = match config.map(Ok).unwrap_or_else(|| (t.default_config_path)()) {
         Ok(p) => p,
         Err(_) => {
             return verify::SchemaVerifyResult {
@@ -247,7 +249,9 @@ pub(crate) fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
 #[cfg(unix)]
 fn is_executable(p: &std::path::Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    std::fs::metadata(p)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 #[cfg(not(unix))]
@@ -339,7 +343,7 @@ pub struct InstallReport {
     pub post_install_hint: Option<&'static str>,
 }
 
-/// Install pixtuoid hooks into `t`'s config, returning a structured report. The `ConfigLock`
+/// Install pixtuoid hooks into `t`'s config, returning a structured report. The ConfigLock
 /// round (read→merge→backup→write) is the load-bearing write authority (invariant #4) and
 /// stays intact here; it serializes pixtuoid only against pixtuoid, since the agent CLI
 /// itself cannot honor this lock. Reads and backups go through the guard's PINNED
@@ -349,7 +353,9 @@ pub(crate) fn install_target(
     config: Option<PathBuf>,
     hook_path: Option<PathBuf>,
 ) -> Result<InstallReport> {
-    let path = config.map_or_else(|| (t.default_config_path)(), Ok)?;
+    let path = config
+        .map(Ok)
+        .unwrap_or_else(|| (t.default_config_path)())?;
     let env_hook = pixtuoid_core::platform::path_env(io::HOOK_OVERRIDE_ENV);
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
@@ -437,7 +443,9 @@ pub struct UninstallReport {
 /// lock scope as `install_target`, plus the load-bearing "never rewrite or delete
 /// the backup on a semantic no-op" rule.
 pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
-    let path = config.map_or_else(|| (t.default_config_path)(), Ok)?;
+    let path = config
+        .map(Ok)
+        .unwrap_or_else(|| (t.default_config_path)())?;
     // Decided BEFORE locking: `lock_config` creates the parent dir + a .lock sidecar, and
     // materializing ~/.reasonix here would flip that target's presence probe on a no-op.
     if !target::config_present(&path) {

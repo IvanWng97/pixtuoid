@@ -214,7 +214,7 @@ pub fn decode_dsh_payload(v: &Value) -> crate::source::decoder::DecodeResult<Vec
             },
         ]),
         USAGE => {
-            let n = |k: &str| obj.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0);
+            let n = |k: &str| obj.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
             // Fresh spend only: input + output + cache WRITES; cache reads are
             // re-served context (the CC `fresh_spend` semantics).
             Ok(vec![

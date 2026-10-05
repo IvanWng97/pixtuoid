@@ -147,6 +147,7 @@ fn chitchat_bubble_text_appears_in_buffer() {
     }
     assert!(
         found,
-        "chitchat bubble text '{bubble_text}' not found in any row"
+        "chitchat bubble text '{}' not found in any row",
+        bubble_text
     );
 }

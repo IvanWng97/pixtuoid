@@ -154,8 +154,7 @@ impl Piece {
     /// shadow falls on. A repaint of a damaged rect is complete only over the
     /// pieces whose reach meets it.
     pub(crate) fn reach(&self) -> Span {
-        let Some(((x0, y0), (x1, y1))) = self.shadow.map(super::super::ground::Contact::bounds)
-        else {
+        let Some(((x0, y0), (x1, y1))) = self.shadow.map(|c| c.bounds()) else {
             return self.span;
         };
         Span {

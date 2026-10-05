@@ -419,7 +419,7 @@ fn a_pet_over_the_coffee_machine_is_the_hover() {
     r.render(&scene, pack(), t0()).unwrap();
     let machine = r
         .cached_layout()
-        .and_then(pixtuoid_scene::layout::SceneLayout::coffee_machine)
+        .and_then(|l| l.coffee_machine())
         .expect("a 140x48 office has a coffee machine");
     let centre = pixtuoid_scene::layout::Point {
         x: machine.x + machine.width / 2,

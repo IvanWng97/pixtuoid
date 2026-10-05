@@ -337,13 +337,11 @@ impl Office {
     /// buffers + tick). JS loops it off `setTimeout(0)` so the multi-second
     /// synthesis never blocks the main thread in one shot.
     pub fn audio_warmup_step(&mut self) -> u32 {
-        self.audio
-            .as_mut()
-            .map_or(0, audio::WebAudioDriver::warmup_step)
+        self.audio.as_mut().map_or(0, |a| a.warmup_step())
     }
 
     /// The engine's sample rate (Hz) — JS builds its `AudioBuffer`s at this rate
-    /// (the browser resamples to the `AudioContext` rate).
+    /// (the browser resamples to the AudioContext rate).
     pub fn audio_sample_rate(&self) -> u32 {
         pixtuoid_scene::audio::dsp::SAMPLE_RATE
     }
@@ -802,7 +800,7 @@ mod tests {
     }
 
     /// Anchor sim time well past 0 so `exiting_at`-style guards never see the
-    /// `UNIX_EPOCH` sentinel; the value itself is arbitrary.
+    /// UNIX_EPOCH sentinel; the value itself is arbitrary.
     const T0_MS: f64 = 1_000_000_000.0;
 
     #[test]
@@ -1045,7 +1043,7 @@ mod tests {
         let lobster = |o: &Office| {
             o.scene
                 .daemon(gw.source(), gw.instance())
-                .map(pixtuoid_core::state::DaemonPresence::display_state)
+                .map(|p| p.display_state())
         };
         o.step(T0_MS, 160, 96);
         o.step(T0_MS + 10_000.0, 160, 96);

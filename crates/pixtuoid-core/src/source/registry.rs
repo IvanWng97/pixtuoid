@@ -16,8 +16,8 @@ use crate::source::{
     kimi, omp, openclaw, opencode, reasonix,
 };
 
-/// How the shared hook decoder derives the `AgentId` for this source. Moot for a
-/// [`HookCustom::ClaimsAll`] source (its decoder builds its own `AgentIds` and the
+/// How the shared hook decoder derives the AgentId for this source. Moot for a
+/// [`HookCustom::ClaimsAll`] source (its decoder builds its own AgentIds and the
 /// shared id-key branch is never reached) — pick `TranscriptPathThenSessionId`
 /// with an `// inert` comment there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -46,7 +46,7 @@ pub enum HookCustom {
     Extend(fn(&Value) -> Result<Option<Vec<AgentEvent>>>),
     /// CLAIMS every event: an alien-envelope source (no shared
     /// `hook_event_name`/`session_id` for the shared arms to key on) whose
-    /// decoder handles EVERYTHING and constructs its own `AgentIds`. It can NOT
+    /// decoder handles EVERYTHING and constructs its own AgentIds. It can NOT
     /// decline, so a payload never silently falls through to the shared arms.
     ClaimsAll(fn(&Value) -> Result<Vec<AgentEvent>>),
 }
@@ -81,7 +81,7 @@ impl ToolIdKey {
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
 #[derive(Debug)]
 pub struct HookDecoding {
-    /// The per-session `AgentId` key strategy, read by the shared arms only.
+    /// The per-session AgentId key strategy, read by the shared arms only.
     pub id_key: IdKey,
     /// The per-call tool id's wire name, read by the shared arms only.
     pub tool_id_key: ToolIdKey,
@@ -96,7 +96,7 @@ pub struct HookDecoding {
 /// policy falls out.
 #[derive(Debug, Clone, Copy)]
 pub struct SourceCaps {
-    /// Does a CLEAN exit leave any end signal at all (a `SessionEnd` hook and/or
+    /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook and/or
     /// a JSONL end marker — best-effort counts; "none of any kind" is the bar
     /// for `false`)? When false, the stale-sweep is the ONLY reaper a closed
     /// session ever gets.
@@ -582,7 +582,7 @@ const DSH: SourceDescriptor = SourceDescriptor {
 /// HOOK-ONLY: CodeWhale has NO tailable transcript (`rollout_path` is an unused
 /// `state.db` column; saved sessions are full-snapshot rewrites; headless
 /// `codewhale exec` runs hooks-off — only the TUI fires hooks). Its hook
-/// envelope is ALIEN (`snake_case` `event` discriminator, identity via
+/// envelope is ALIEN (snake_case `event` discriminator, identity via
 /// `DEEPSEEK_*` env vars), so the custom decoder claims every event — keyed on
 /// cwd, because `session_id` is inconsistent across events.
 const CODEWHALE: SourceDescriptor = SourceDescriptor {
@@ -726,7 +726,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
 /// HOOK-ONLY: Hermes Agent (Nous Research) has no tailable transcript; the
 /// reachable seam is Hermes shell hooks (the `config.yaml` under
 /// `hermes::hermes_home`, which is NOT `~/.hermes` on Windows). The envelope
-/// reuses CC's `hook_event_name` field NAME with `snake_case` values, so the
+/// reuses CC's `hook_event_name` field NAME with snake_case values, so the
 /// custom decoder claims every event and keys on `session_id` — not the
 /// workspace, which would merge a user's concurrent instances.
 const HERMES: SourceDescriptor = SourceDescriptor {
@@ -758,7 +758,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 /// Grok Build (`grok`, xai-org/grok-build). TRANSCRIPT-BEARING **with** a hook
 /// target. The decoder reads the camelCase envelope (`hookEventName`, `toolUseId`)
 /// — the only spelling pre-1.0 sent, hence the claims-all custom decoder; 1.0.x
-/// mirrors every key in CC's `snake_case` as well (`grok/tool-run-recorded`).
+/// mirrors every key in CC's snake_case as well (`grok/tool-run-recorded`).
 /// Coalescing rests on `sessionId == the transcript's parent-dir name` (upstream
 /// joins the id into `session_dir`), mirrored by `grok_id_from_path`. Transcript
 /// = `{grok_home}/sessions/<enc-cwd>/<session-id>/updates.jsonl`, append-only.
@@ -809,7 +809,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
 /// dir's `extensions/`) forwards what the transcript can never carry —
 /// pre-persist presence, empty-session shutdown, the approval wait, and the
 /// process's own `_pid` (#951). Both transports key on the sessionFile stem chain
-/// ([`omp::omp_id_from_path`]), so they mint ONE `AgentId` per session — the
+/// ([`omp::omp_id_from_path`]), so they mint ONE AgentId per session — the
 /// grok same-key pattern. Under `omp --no-extensions`, or with the bridge
 /// broken or absent, the transcript path IS the old transcript-only source.
 /// Subagents persist as SEPARATE nested files (`<parent-stem>/<taskId>.jsonl`),

@@ -8,7 +8,7 @@
 //! Keyed on `session_id`, not the workspace: a user may run several Hermes sessions
 //! in ONE project and cwd-keying would merge them (the Cursor lesson).
 //!
-//! The envelope reuses CC's `hook_event_name` field NAME but with `snake_case` VALUES
+//! The envelope reuses CC's `hook_event_name` field NAME but with snake_case VALUES
 //! alien to the shared CC-shaped arms, so per the `HookDecoding::custom` contract the
 //! decoder claims EVERY event (`.map(Some)`, never `Ok(None)`).
 //!
@@ -178,10 +178,8 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|e| e.get("description"))
                 .and_then(|d| d.as_str())
                 .filter(|s| !s.is_empty())
-                .map_or_else(
-                    || "permission".to_string(),
-                    |d| crate::source::decoder::ellipsize(d, MAX_DECODED_FIELD_CHARS),
-                );
+                .map(|d| crate::source::decoder::ellipsize(d, MAX_DECODED_FIELD_CHARS))
+                .unwrap_or_else(|| "permission".to_string());
             Ok(vec![
                 identity(),
                 AgentEvent::Waiting {
@@ -384,7 +382,7 @@ mod tests {
 
     /// The shape `hermes/tool-run` could never show, because a one-shot capture
     /// ends its only turn and its session together. `approval-recorded` is the
-    /// multi-turn capture that falsifies it: one `session_id`, one pid, TWO
+    /// multi-turn capture that falsifies it: one session_id, one pid, TWO
     /// `on_session_end`, and work after the first.
     #[test]
     fn a_second_turn_in_one_session_does_not_end_the_session() {

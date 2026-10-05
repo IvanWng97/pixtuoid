@@ -102,7 +102,7 @@ impl GlobalDeskIndex {
 pub enum ToolKind {
     /// Subagent dispatch (the typed `ToolDetail::Task`, displayed "Delegating").
     Task,
-    /// Edit / Write / `MultiEdit`.
+    /// Edit / Write / MultiEdit.
     Edit,
     /// Read.
     Read,
@@ -299,7 +299,7 @@ pub struct AgentSlot {
     pub exiting_at: Option<SystemTime>,
     /// Active→Idle debounce mark: set by `ActivityEnd` instead of an immediate
     /// state flip, expired by `reducer.tick` after `ACTIVE_GRACE_WINDOW`. Hides
-    /// the per-tool-call Active flicker rapid `PreToolUse` → `PostToolUse` chains
+    /// the per-tool-call Active flicker rapid PreToolUse → PostToolUse chains
     /// produce in CC.
     pub pending_idle_at: Option<SystemTime>,
     /// GLOBAL desk index (assigned once at `SessionStart`, never mutated).

@@ -727,14 +727,7 @@ fn meeting_slots_track_meeting_trios() {
                 )
             })
             .collect();
-        if l.meeting_rooms.is_empty() {
-            saw_no_room = true;
-            assert!(
-                sofa_slots.is_empty(),
-                "seed {seed}: no meeting room but {} meeting slots",
-                sofa_slots.len()
-            );
-        } else {
+        if !l.meeting_rooms.is_empty() {
             saw_room = true;
             assert!(
                 sofa_slots
@@ -763,6 +756,13 @@ fn meeting_slots_track_meeting_trios() {
                     "seed {seed}: dual meeting but no room-1 slot"
                 );
             }
+        } else {
+            saw_no_room = true;
+            assert!(
+                sofa_slots.is_empty(),
+                "seed {seed}: no meeting room but {} meeting slots",
+                sofa_slots.len()
+            );
         }
     }
     assert!(saw_room, "no seed produced a meeting room");

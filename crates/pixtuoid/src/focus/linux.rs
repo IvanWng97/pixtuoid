@@ -110,7 +110,7 @@ fn x11_window_of(pid: i32) -> Option<u32> {
     for win in clients.value32()? {
         if let Ok(Ok(prop)) = conn
             .get_property(false, win, net_wm_pid, AtomEnum::CARDINAL, 0, 1)
-            .map(x11rb::cookie::Cookie::reply)
+            .map(|c| c.reply())
             && prop.value32().and_then(|mut v| v.next()) == Some(pid as u32)
         {
             return Some(win);
@@ -149,7 +149,8 @@ fn run_detached(cmd: &str, args: &[&str]) -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .is_ok_and(|s| s.success())
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn x11_activate(pid: i32) -> Option<bool> {

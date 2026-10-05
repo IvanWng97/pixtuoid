@@ -19,7 +19,7 @@ use pixtuoid_scene::pixel_painter::AgentFrame;
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
 /// `tooltip_bg` fill + drop shadow); the 1-cell uniform padding is what the
 /// callers' `+2` size math accounts for.
-pub(super) fn framed_tooltip(lines: Vec<Line<'_>>) -> Paragraph<'_> {
+pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
     Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
 }
 
@@ -153,9 +153,8 @@ pub(crate) fn paint_hover_tooltip(
             if let Some(d) = detail.as_deref().filter(|d| !d.is_empty()) {
                 let (tool, rest) = d
                     .split_once(char::is_whitespace)
-                    .map_or((d.trim_end_matches(':'), ""), |(t, r)| {
-                        (t.trim_end_matches(':'), r.trim())
-                    });
+                    .map(|(t, r)| (t.trim_end_matches(':'), r.trim()))
+                    .unwrap_or((d.trim_end_matches(':'), ""));
                 if !tool.is_empty() {
                     state_spans.push(Span::raw(" \u{b7} "));
                     state_spans.push(Span::styled(
@@ -221,7 +220,8 @@ pub(crate) fn paint_hover_tooltip(
         let pct = (agent.active_ms / 1000)
             .checked_mul(100)
             .and_then(|n| n.checked_div(session_secs))
-            .map_or(0, |p| p.min(100));
+            .map(|p| p.min(100))
+            .unwrap_or(0);
         let filled = (pct as usize * 5).div_ceil(100).min(5);
         let meter: String = "\u{25ae}".repeat(filled) + &"\u{25af}".repeat(5 - filled);
         stats.push_str(&format!(" \u{b7} {meter} {pct}%"));
@@ -231,11 +231,7 @@ pub(crate) fn paint_hover_tooltip(
     let badge_tag = descriptor_for(agent.source.as_ref()).map_or("??", |d| d.label_prefix);
     let l1_head_w = 4 + 1 + display_width(&agent.label); // "[xx]" + space + label
     let id4 = format!("\u{b7}{}", disambig_suffix(&agent.session_id));
-    let body_w = body
-        .iter()
-        .map(ratatui::prelude::Line::width)
-        .max()
-        .unwrap_or(0);
+    let body_w = body.iter().map(|l| l.width()).max().unwrap_or(0);
     let content_w = body_w.max(l1_head_w + 2 + display_width(&id4));
     let pad = content_w.saturating_sub(l1_head_w + display_width(&id4));
     let l1 = Line::from(vec![
@@ -335,7 +331,7 @@ pub(crate) fn paint_furniture_tooltip(
     at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let text = format!(" {label} ");
+    let text = format!(" {} ", label);
     paint_simple_tooltip(f, &text, at, theme);
 }
 
@@ -526,7 +522,7 @@ mod tests {
                 }],
                 scene_rect,
                 &theme::NORMAL,
-            );
+            )
         })
         .unwrap();
         let row = row_of(&term, text).expect("the badge painted");
@@ -566,7 +562,7 @@ mod tests {
                         }],
                         f.area(),
                         theme,
-                    );
+                    )
                 })
                 .unwrap();
                 let row = row_of(&term, "repo").expect("the badge painted");
@@ -655,7 +651,7 @@ mod tests {
                     scene_rect: f.area(),
                 },
                 &theme::NORMAL,
-            );
+            )
         })
         .unwrap();
         let busy = buffer_text(&term);
@@ -680,7 +676,7 @@ mod tests {
                         scene_rect: f.area(),
                     },
                     &theme::NORMAL,
-                );
+                )
             })
             .unwrap();
         let degraded = buffer_text(&term2);
@@ -713,7 +709,7 @@ mod tests {
                     scene_rect: f.area(),
                 },
                 &theme::NORMAL,
-            );
+            )
         })
         .unwrap();
         let text = buffer_text(&term);
@@ -923,7 +919,7 @@ mod tests {
                     scene_rect: scene,
                 },
                 &theme::NORMAL,
-            );
+            )
         })
         .unwrap();
         let top_y = row_of(&top, "PROBE").expect("PROBE rendered when cursor at top");
@@ -943,7 +939,7 @@ mod tests {
                     scene_rect: scene,
                 },
                 &theme::NORMAL,
-            );
+            )
         })
         .unwrap();
         let low_y = row_of(&low, "PROBE").expect("PROBE rendered when cursor low");

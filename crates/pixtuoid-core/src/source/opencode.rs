@@ -3,12 +3,12 @@
 //! opencode has NO config-level shell-command hook and stores every session in
 //! SQLite with no tailable per-session transcript. Its ONLY external seam is the
 //! **plugin** system: a TS plugin gets an `event` hook receiving the SAME
-//! `EventV2` stream the server's SSE endpoint serves, and pipes the events into
+//! EventV2 stream the server's SSE endpoint serves, and pipes the events into
 //! the `pixtuoid-hook` shim on stdin. Connecting opencode drops that plugin at
 //! `<opencode-config>/plugins/pixtuoid.ts`, which opencode auto-discovers — so
 //! there is NO `opencode.jsonc` edit (see `install/opencode.rs`).
 //!
-//! The forwarded envelope is opencode's own `EventV2` shape:
+//! The forwarded envelope is opencode's own EventV2 shape:
 //!
 //! ```json
 //! {"type":"session.created","properties":{"sessionID":"ses_…","info":{"id":"ses_…","directory":"/repo","parentID":"ses_…?","agent":"build","model":{…}}},"_pid":12345}
@@ -198,7 +198,7 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
         .get("callID")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .map(std::string::ToString::to_string);
+        .map(|s| s.to_string());
 
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
     let identity = oc_identity(agent_id, session_id);
@@ -251,10 +251,8 @@ fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
     const KEYS: &[&str] = &["action", "permission", "title", "pattern", "type", "tool"];
     let reason = crate::source::decoder::first_present_str(props, KEYS)
         .filter(|s| !s.is_empty())
-        .map_or_else(
-            || "permission".to_string(),
-            |s| ellipsize(s, MAX_DECODED_FIELD_CHARS),
-        );
+        .map(|s| ellipsize(s, MAX_DECODED_FIELD_CHARS))
+        .unwrap_or_else(|| "permission".to_string());
     Ok(vec![
         oc_identity(agent_id, session_id),
         AgentEvent::Waiting {
@@ -369,8 +367,8 @@ mod tests {
         decode_all(v).pop().expect("at least one event")
     }
 
-    /// FIRST event — session.created piggybacks a `ModelInfo` behind the
-    /// `SessionStart` these lifecycle tests inspect.
+    /// FIRST event — session.created piggybacks a ModelInfo behind the
+    /// SessionStart these lifecycle tests inspect.
     fn decode_first(v: Value) -> AgentEvent {
         decode_all(v)
             .into_iter()

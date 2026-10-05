@@ -480,7 +480,8 @@ mod tests {
         assert_ne!(clear, fog, "fog desaturates");
         assert!(
             rain.b >= rain.r,
-            "rain tint should be cool (blue >= red), got {rain:?}"
+            "rain tint should be cool (blue >= red), got {:?}",
+            rain
         );
     }
 
@@ -489,7 +490,8 @@ mod tests {
         let clear = weather_ground_tint(Weather::Clear);
         assert!(
             clear.r > 200 && clear.g > 200 && clear.b > 200,
-            "clear should be a near-white slight-warm tint, got {clear:?}"
+            "clear should be a near-white slight-warm tint, got {:?}",
+            clear
         );
     }
 

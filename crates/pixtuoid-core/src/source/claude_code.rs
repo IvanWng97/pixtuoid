@@ -41,9 +41,9 @@ pub fn cc_id_from_path(path: &Path) -> String {
 }
 
 /// CC's source-specific hook arms — `SubagentStart`/`SubagentStop`, which change
-/// the event's SUBJECT to the child's `AgentId`; the shared session-keyed arms cannot,
+/// the event's SUBJECT to the child's AgentId; the shared session-keyed arms cannot,
 /// and every other CC hook event falls through (`Ok(None)`). Needed despite JSONL
-/// registration: a Workflow-tool fleet's subagents carry no `Agent` `tool_use` and no
+/// registration: a Workflow-tool fleet's subagents carry no `Agent` tool_use and no
 /// end marker, so without `SubagentStop` they hold desks until the stale sweep.
 pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     let Some(obj) = v.as_object() else {

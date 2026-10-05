@@ -130,7 +130,7 @@ fn recolor<'c>(
             recolored
         }
     });
-    let rise = key.dress.as_ref().map_or(0, hair::Dress::rise);
+    let rise = key.dress.as_ref().map_or(0, |d| d.rise());
     CharacterFrame {
         frame,
         blit_at: dense.blit_at,

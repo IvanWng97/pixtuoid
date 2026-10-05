@@ -239,14 +239,14 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
     assert_eq!(
         scene
             .daemon(pixtuoid_core::source::openclaw::SOURCE_NAME, &a)
-            .map(pixtuoid_core::state::DaemonPresence::display_state),
+            .map(|p| p.display_state()),
         Some(pixtuoid_core::state::DaemonState::Down)
     );
     let b = pixtuoid_core::state::DaemonInstanceId::new("19789").expect("non-empty");
     assert_eq!(
         scene
             .daemon(pixtuoid_core::source::openclaw::SOURCE_NAME, &b)
-            .map(pixtuoid_core::state::DaemonPresence::display_state),
+            .map(|p| p.display_state()),
         Some(pixtuoid_core::state::DaemonState::Idle),
         "the sibling gateway is untouched"
     );

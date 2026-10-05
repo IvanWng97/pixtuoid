@@ -267,11 +267,12 @@ impl Palette {
     /// Replace `key`'s entry in place: frames hold its index, so a second slot
     /// for the key would leave them reading the old one.
     fn set(&mut self, key: char, entry: Entry) {
-        if let Some(slot) = self.index.get(&key).and_then(|&i| self.entries.get_mut(i)) {
-            slot.1 = entry;
-        } else {
-            self.index.insert(key, self.entries.len());
-            self.entries.push((key, entry));
+        match self.index.get(&key).and_then(|&i| self.entries.get_mut(i)) {
+            Some(slot) => slot.1 = entry,
+            None => {
+                self.index.insert(key, self.entries.len());
+                self.entries.push((key, entry));
+            }
         }
     }
 

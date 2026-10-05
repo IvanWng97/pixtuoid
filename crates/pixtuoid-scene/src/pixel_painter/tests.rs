@@ -1248,7 +1248,8 @@ fn pet_sort_row_tracks_the_selected_anim_sprite_height() {
     let anim_h = |name: &str| {
         pack.animation(name)
             .and_then(|a| a.frames().first())
-            .map_or_else(|| panic!("missing pet anim {name}"), |f| f.height())
+            .map(|f| f.height())
+            .unwrap_or_else(|| panic!("missing pet anim {name}"))
     };
     for &kind in crate::pet::PetKind::ALL {
         let sleep_h = anim_h(kind.sleep_anim());
@@ -1701,10 +1702,10 @@ fn every_hover_size_is_its_painted_sprite_size() {
 
     let pack = crate::pack::test_default_pack();
     for (name, size, sprite) in pieces {
-        let frames = pack.animation(sprite).map_or_else(
-            || panic!("the bundled pack ships {sprite}"),
-            pixtuoid_core::Sprite::frames,
-        );
+        let frames = pack
+            .animation(sprite)
+            .map(|a| a.frames())
+            .unwrap_or_else(|| panic!("the bundled pack ships {sprite}"));
         for (i, art) in frames.iter().enumerate() {
             assert_eq!(
                 (size.w, size.h),
@@ -2607,7 +2608,7 @@ fn furniture_room_decor_large_bounds_paint() {
             big_pantry.water_cooler_rect().expect("fits"),
             Motion::Full.beat(std::time::SystemTime::UNIX_EPOCH),
             theme,
-        );
+        )
     });
     assert_paints(&|b| paint_trash_bin(b, big_pantry.trash_bin_rect().expect("fits")));
 }
@@ -2703,10 +2704,13 @@ fn furniture_corner_clip_does_not_panic() {
 #[test]
 fn weather_gallery_manifest_matches_the_weather_enum() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/weather.json");
-    // crates.io-packaged test runs don't ship the repo's site/ tree.
-    let Ok(json) = std::fs::read_to_string(path) else {
-        eprintln!("skipping: {path} not present (packaged build)");
-        return;
+    let json = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        // crates.io-packaged test runs don't ship the repo's site/ tree.
+        Err(_) => {
+            eprintln!("skipping: {path} not present (packaged build)");
+            return;
+        }
     };
     let manifest: Vec<serde_json::Value> =
         serde_json::from_str(&json).expect("weather.json parses");

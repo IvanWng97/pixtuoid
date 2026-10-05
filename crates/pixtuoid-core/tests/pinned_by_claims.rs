@@ -1,4 +1,4 @@
-//! Every ``Pinned by `x` `` comment names a function that exists — without this the
+//! Every `Pinned by `x`` comment names a function that exists — without this the
 //! citation is the prose the convention replaced. It caught `codex.rs` citing
 //! `escalated_permission_is_detected_by_the_exported_pair`, which had never
 //! existed.

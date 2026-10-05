@@ -99,7 +99,7 @@ impl PoseHistory {
     pub fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
         self.last.insert(agent_id, (anchor, now));
     }
-    /// Drop entries for agents no longer in `scene`. Without this, every `AgentId`
+    /// Drop entries for agents no longer in `scene`. Without this, every AgentId
     /// ever rendered leaks an entry for the process lifetime, per floor.
     pub fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
         self.last.retain(|id, _| scene.agents.contains_key(id));
@@ -652,7 +652,8 @@ fn route_walking_pose(
             let into_leg = travelled - acc;
             let seg_t = (into_leg * 1000)
                 .checked_div(leg)
-                .map_or(1000, |t| t.min(1000) as u16);
+                .map(|t| t.min(1000) as u16)
+                .unwrap_or(1000);
             let cur_pos = walking_position(path[i], path[i + 1], seg_t);
             history.record(slot.agent_id, cur_pos, now);
             return Some(Pose::Walking {
@@ -687,7 +688,7 @@ pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
 const JITTER_MAX_PX: i32 = 4;
 const JITTER_SPAN: u64 = (2 * JITTER_MAX_PX + 1) as u64;
 
-/// Per-agent routing-destination jitter, hashed from the `agent_id`, so converging
+/// Per-agent routing-destination jitter, hashed from the agent_id, so converging
 /// agents take visibly different polylines (breaks the "ant trail"). Output must
 /// stay bit-identical across every call site — a site routing the RAW goal
 /// measures a differently-shaped polyline than the one rendered AND mints a

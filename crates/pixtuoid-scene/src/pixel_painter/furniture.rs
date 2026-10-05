@@ -73,7 +73,7 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
 }
 
 /// Kitchen island — the pantry's counter-height centre piece; ALL dims read from
-/// the `FurnitureDef` row. The mask blocks only the south-anchored base
+/// the FurnitureDef row. The mask blocks only the south-anchored base
 /// (invariant #6).
 pub(super) fn paint_kitchen_island(
     buf: &mut RgbBuffer,
@@ -343,7 +343,7 @@ pub(super) fn paint_fish_tank(
     put(3, 6, fc.tank_plant);
 }
 
-/// Head-of-table meeting chair centered on its `MeetingChair` waypoint. The
+/// Head-of-table meeting chair centered on its MeetingChair waypoint. The
 /// backrest bar rides the OUTER side (`back_west`), so it carries the sitter's
 /// orientation even when the chair is empty.
 pub(super) fn paint_meeting_chair(

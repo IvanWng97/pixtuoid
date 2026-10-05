@@ -9,7 +9,7 @@
 //! ever wanted.
 //!
 //! The envelope reuses CC's `hook_event_name` field NAME with **camelCase
-//! values**; `tool_name` is `PascalCase` and the TOP-LEVEL `cwd` is empty —
+//! values**; `tool_name` is PascalCase and the TOP-LEVEL `cwd` is empty —
 //! `workspace_roots[0]` is the real workspace. Keyed on `session_id`, present
 //! and CONSISTENT across every CLI event, so concurrent sessions in one project
 //! stay distinct.

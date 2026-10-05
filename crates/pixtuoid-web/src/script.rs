@@ -194,7 +194,7 @@ const HERO_GATEWAY_PORT: &str = "18789";
 
 /// The lobster's loop: the OpenClaw mascot scuttles in mid-loop, shuttles
 /// through two busy runs, and walks out before the wrap — so every loop
-/// replays a clean enter animation (`GatewayUp` after Down re-anchors
+/// replays a clean enter animation (GatewayUp after Down re-anchors
 /// `entered_at`).
 pub(crate) fn lobster_beats() -> Vec<PresenceBeat> {
     use DaemonPresenceUpdate::*;

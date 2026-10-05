@@ -23,7 +23,8 @@ impl PetState {
     /// Whether the freeze/hearts effect is still playing at `now` (within `PET_DURATION_MS`).
     pub fn is_active(&self, now: SystemTime) -> bool {
         now.duration_since(self.petted_at)
-            .map_or(PET_DURATION_MS + 1, |d| d.as_millis() as u64)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(PET_DURATION_MS + 1)
             < PET_DURATION_MS
     }
 

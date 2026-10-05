@@ -25,17 +25,17 @@ pub enum WalkIntent {
 /// Cruise speed for Entry / Exit walks (octile/ms), tuned to keep the effective
 /// average walk pace ≈ 4 s while making duration distance-proportional.
 pub const V_CRUISE_COMMUTE: f32 = 0.36;
-/// Cruise speed for `WanderOut` / `WanderBack` walks (octile/ms) — ambling, tuned in
+/// Cruise speed for WanderOut / WanderBack walks (octile/ms) — ambling, tuned in
 /// proportion to [`V_CRUISE_COMMUTE`] to preserve the commute-vs-wander contrast.
 pub const V_CRUISE_WANDER: f32 = 0.25;
-/// Cruise speed for `SnapBack` walks (octile/ms) — faster than commute, since the
+/// Cruise speed for SnapBack walks (octile/ms) — faster than commute, since the
 /// agent visibly *hurries* back. Paired with the higher [`WALK_ACCEL_SNAPBACK`]
 /// so short (accel-limited) and far (cruise-limited) snap-backs both stay brisk.
 pub const V_CRUISE_SNAPBACK: f32 = 0.65;
 /// Shared acceleration/deceleration constant (octile/ms²), tuned for a ~0.55 s
 /// accel ramp (`t_a = v/a`).
 pub const WALK_ACCEL: f32 = 6.5e-4;
-/// Acceleration for `SnapBack` walks (octile/ms²) — ~3× [`WALK_ACCEL`]. Short
+/// Acceleration for SnapBack walks (octile/ms²) — ~3× [`WALK_ACCEL`]. Short
 /// snap-backs are acceleration-limited (`T = 2·√(L/a)`, cruise-independent), so
 /// the urgent return has to *accelerate harder* to stay snappy.
 pub const WALK_ACCEL_SNAPBACK: f32 = 2.0e-3;
@@ -66,7 +66,7 @@ pub struct WalkProfile {
     pub accel: f32,
 }
 
-/// Deterministic per-agent speed multiplier in [`SPEED_MULT_MIN`, `SPEED_MULT_MAX`].
+/// Deterministic per-agent speed multiplier in [SPEED_MULT_MIN, SPEED_MULT_MAX].
 ///
 /// Uses bits 24..34 of the agent's hash — disjoint from `personality_for`
 /// (bits 0..14) and from the low-16 bits used by `stale_resume_gap_ms`.
@@ -79,7 +79,7 @@ pub fn speed_mult(agent_id: AgentId) -> f32 {
     SPEED_MULT_MIN + t * (SPEED_MULT_MAX - SPEED_MULT_MIN)
 }
 
-/// Deterministic per-agent arrival pause in [`PAUSE_MS_MIN`, `PAUSE_MS_MAX`].
+/// Deterministic per-agent arrival pause in [PAUSE_MS_MIN, PAUSE_MS_MAX].
 ///
 /// Uses bits 40..52 of the agent's hash — a disjoint window from `speed_mult`,
 /// so a fast walker is not always a brief pauser.
@@ -359,7 +359,7 @@ mod tests {
         );
     }
 
-    /// `L_crit` = v²/a. A path shorter than `L_crit` never reaches cruise.
+    /// L_crit = v²/a. A path shorter than L_crit never reaches cruise.
     fn l_crit(v: f32) -> f32 {
         v * v / WALK_ACCEL
     }
@@ -660,7 +660,7 @@ mod prop {
 
     /// Sweep one profile's whole timeline: progress is bounded to
     /// [0, `PROGRESS_SCALE`], non-decreasing, exactly the scale at/after
-    /// `duration_ms`, and never panics.
+    /// duration_ms, and never panics.
     fn assert_progress_invariants(p: &WalkProfile) -> Result<(), TestCaseError> {
         let mut prev = walk_progress(p, 0);
         prop_assert!(prev <= PROGRESS_SCALE, "p(0)={} out of range", prev);

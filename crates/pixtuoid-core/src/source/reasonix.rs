@@ -13,7 +13,7 @@
 //! camelCase fields, `event` discriminator (not `hook_event_name`), and no
 //! transcript path or tool-call id anywhere (`internal/hook/hook.go` Payload).
 //! It DOES carry `sessionId` — 44/44 payloads across the recorded fixtures — so
-//! that is the `AgentId` key, cwd only as the fallback for a build that omits it.
+//! that is the AgentId key, cwd only as the fallback for a build that omits it.
 //! Keying on the workspace instead would merge two sessions in ONE project into
 //! a single sprite (the Cursor lesson; `hermes.rs` states it too).
 //!

@@ -42,8 +42,8 @@ pub trait Source: Send + 'static {
 }
 
 /// Object-safety twin of [`Source`] — the type `SourceManager` actually boxes
-/// (`Box<dyn DynSource>`). It exists ONLY because [`Source`]'s
-/// `-> impl Future + Send` return (RPITIT) is not dyn-compatible, so `dyn Source` cannot exist;
+/// (`Box<dyn DynSource>`). It exists ONLY because [`Source`]'s `-> impl Future
+/// + Send` return (RPITIT) is not dyn-compatible, so `dyn Source` cannot exist;
 /// don't merge the two traits. Source authors never name this trait: the blanket
 /// impl below + unsize coercion let `with_source(Box::new(my_source))` work directly.
 pub trait DynSource: Send + 'static {

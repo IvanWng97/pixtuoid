@@ -597,7 +597,8 @@ fn body_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> SkyBody {
 fn moon_age_at(now: SystemTime) -> f32 {
     let unix_days = now
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f32() / 86_400.0);
+        .map(|d| d.as_secs_f32() / 86_400.0)
+        .unwrap_or(0.0);
     (unix_days - NEW_MOON_EPOCH_UNIX_DAYS).rem_euclid(SYNODIC_DAYS)
 }
 

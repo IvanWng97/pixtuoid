@@ -136,7 +136,7 @@ struct UndeliveredEvents {
 impl UndeliveredEvents {
     fn new(evs: &[crate::source::AgentEvent]) -> Self {
         Self {
-            ids: evs.iter().map(super::AgentEvent::agent_id).collect(),
+            ids: evs.iter().map(|ev| ev.agent_id()).collect(),
             delivered: 0,
         }
     }
@@ -230,10 +230,8 @@ fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
     let mut stamp: Option<crate::source::PidIdentity> = None;
     for ev in evs {
         if let AgentEvent::Identity { source, pid: p, .. } = ev {
-            let channel = crate::source::registry::descriptor_for(source).map_or(
-                FocusChannel::Unsupported,
-                super::registry::SourceDescriptor::focus_channel,
-            );
+            let channel = crate::source::registry::descriptor_for(source)
+                .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
             if channel.accepts_stamp() {
                 *p = Some(*stamp.get_or_insert_with(|| crate::source::PidIdentity {
                     pid,
@@ -447,7 +445,7 @@ mod tests {
 
     /// omp is the first decoder that really pairs `SessionStart` + `Identity`
     /// in one batch, so the collapse the guard above pinned synthetically is
-    /// now load-bearing — and a `PluginStamp` pid needs no corroboration.
+    /// now load-bearing — and a PluginStamp pid needs no corroboration.
     #[test]
     fn an_omp_session_batch_pairs_start_and_identity_and_binds_once_trusted() {
         let evs = crate::source::omp::decode_omp_hook_payload(&serde_json::json!({

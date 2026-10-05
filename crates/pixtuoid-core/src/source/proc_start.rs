@@ -29,7 +29,7 @@ fn imp(pid: i32) -> Option<u64> {
             pid,
             libc::PROC_PIDTBSDINFO,
             0,
-            &raw mut info as *mut std::ffi::c_void,
+            &mut info as *mut _ as *mut std::ffi::c_void,
             size,
         )
     };
@@ -72,10 +72,10 @@ fn imp(pid: i32) -> Option<u64> {
     let ok = unsafe {
         GetProcessTimes(
             handle,
-            &raw mut created[0],
-            &raw mut rest[0],
-            &raw mut rest[1],
-            &raw mut rest[2],
+            &mut created[0],
+            &mut rest[0],
+            &mut rest[1],
+            &mut rest[2],
         )
     };
     // SAFETY: closing the handle OpenProcess just returned, exactly once.

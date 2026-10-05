@@ -13,10 +13,10 @@ pub struct Cli {
     pub cmd: Option<Cmd>,
 
     /// Log verbosity. The TUI always logs warn+ to a file
-    /// (~/.cache/pixtuoid/log, or `$PIXTUOID_LOG` /
-    /// $`XDG_STATE_HOME/pixtuoid/log`); debug/trace raise the file's
+    /// (~/.cache/pixtuoid/log, or $PIXTUOID_LOG /
+    /// $XDG_STATE_HOME/pixtuoid/log); debug/trace raise the file's
     /// verbosity. Non-TUI commands log to stderr at this level.
-    /// (`$RUST_LOG` remains the escape hatch for full directive syntax.)
+    /// ($RUST_LOG remains the escape hatch for full directive syntax.)
     #[arg(long, global = true, value_enum, default_value = "info")]
     pub log_level: LogLevel,
 
@@ -65,7 +65,7 @@ pub enum Cmd {
         /// Cap desks per floor, ≥ 1 (auto-computed from terminal size if
         /// unset). 0 is rejected: it would permanently zero every floor's
         /// capacity and silently drop every agent (the boot atomics only
-        /// grow via `fetch_max`, gated on capacity > 0).
+        /// grow via fetch_max, gated on capacity > 0).
         #[arg(long, hide = true, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
         max_desks: Option<usize>,
         /// Skip the TUI entirely — useful for CI / scripting.

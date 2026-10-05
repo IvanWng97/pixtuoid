@@ -178,7 +178,7 @@ pub(crate) fn approach_point(
                 }
             }
         }
-        return allowed.map_or(pos, |(_, p)| p);
+        return allowed.map(|(_, p)| p).unwrap_or(pos);
     } else if let Some(Size { w: fw, h: fh }) = approach_clearance_extent(kind, pantry_counter_size)
     {
         let (hx, hy) = (fw as i32 / 2, fh as i32 / 2);
@@ -210,7 +210,7 @@ pub(crate) fn approach_point(
             }
         }
     }
-    best.map_or(pos, |(_, p)| p)
+    best.map(|(_, p)| p).unwrap_or(pos)
 }
 
 #[cfg(test)]

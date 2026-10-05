@@ -185,7 +185,7 @@ fn a_task_round_is_two_linked_lifecycles_under_one_pid() {
 }
 
 /// The registry row's load-bearing claim, pinned hermetically per recorded
-/// round: BOTH transports mint one folded `AgentId`, and the approval round's
+/// round: BOTH transports mint one folded AgentId, and the approval round's
 /// Start twins — separated by human latency — count ONE call through a real
 /// `Reducer`.
 #[test]

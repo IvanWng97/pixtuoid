@@ -198,9 +198,7 @@ pub fn shaped_noise_loop(
     }
     fft(&mut re, &mut im, true);
     let peak = re.iter().fold(0.0f32, |a, &v| a.max(v.abs())).max(1e-9);
-    for v in &mut re {
-        *v /= peak;
-    }
+    re.iter_mut().for_each(|v| *v /= peak);
     re
 }
 

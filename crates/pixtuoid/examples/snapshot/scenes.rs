@@ -12,7 +12,10 @@ pub(crate) async fn capture_live_scene(
     projects_root: &str,
     listen_secs: u64,
 ) -> Result<SceneState> {
-    println!("listening for real CC events under {projects_root} for {listen_secs}s...");
+    println!(
+        "listening for real CC events under {} for {}s...",
+        projects_root, listen_secs
+    );
     let scene: Arc<RwLock<SceneState>> = Arc::new(RwLock::new(SceneState::uniform(12)));
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(1024);
     let tx_hook = tx.clone();
@@ -420,7 +423,7 @@ pub(crate) fn meeting_scene(
                 continue;
             }
             let mut sel = vec![base.clone()];
-            for c in &cands[i + 1..] {
+            for c in cands[i + 1..].iter() {
                 if c.dwell_ms - base.dwell_ms > MEETING_DWELL_SPREAD_MS {
                     break;
                 }

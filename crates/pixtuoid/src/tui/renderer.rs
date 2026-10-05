@@ -314,7 +314,8 @@ pub(crate) fn paint_scene_tooltip(
             let display_name = world
                 .pets
                 .pet
-                .map_or_else(|| kind.default_name(), |p| p.name.as_str());
+                .map(|p| p.name.as_str())
+                .unwrap_or_else(|| kind.default_name());
             paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
         }
         SceneHit::Figure(HoverTarget::Mascot(key)) => {
@@ -428,7 +429,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_chitchat_bubbles(f, chitchat_bubbles, agents, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
         let door = layout.door;
-        let current = floor_info.map_or(1, |fi| fi.current);
+        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
         paint_elevator_indicator(f, door, current, actual_scene, theme);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,

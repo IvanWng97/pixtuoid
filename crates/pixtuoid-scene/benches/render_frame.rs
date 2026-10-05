@@ -284,7 +284,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     now: *now,
                     board,
                 };
-                render_cutaway(frame, office(layout), showing, &mut cache, &mut buf);
+                render_cutaway(frame, office(layout), showing, &mut cache, &mut buf)
             });
         });
         if busy {

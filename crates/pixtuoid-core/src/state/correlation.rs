@@ -76,7 +76,7 @@ pub(super) struct ChildLedgerEntry {
     /// The last APPLIED parent link — `None` when the child was only ever
     /// seen ending (a Stop-before-Start reorder blocked its Start).
     pub(super) parent_id: Option<AgentId>,
-    /// When the child ended (`as_child` `SessionEnd`) or its slot was removed,
+    /// When the child ended (`as_child` SessionEnd) or its slot was removed,
     /// whichever came first. Starts TWO clocks: the [`CHILD_END_RELINK_TTL`]
     /// GC clock and the shorter [`CHILD_END_LEDGER_TTL`] gate.
     pub(super) ended_at: Option<SystemTime>,
@@ -87,7 +87,7 @@ pub(super) struct ChildLedgerEntry {
 /// lagged JSONL Start replay would falsely re-Activate and cancel the armed
 /// idle debounce — while a Start record suppresses only Starts. A JSONL End
 /// must never be eaten by its own tool's dispatch record: when the best-effort
-/// `PostToolUse` hook drops, an eaten Task self-End leaks `active_tasks` for the
+/// PostToolUse hook drops, an eaten Task self-End leaks `active_tasks` for the
 /// rest of the session. Don't "simplify" this to exact-kind matching — it
 /// would orphan the lagged-pair case (pinned by
 /// `late_batched_jsonl_pair_after_delivered_hook_end_is_fully_dropped`).
@@ -112,14 +112,14 @@ pub(super) struct Correlation {
     /// trailing hook event must not re-synthesize the session, and a reordered
     /// CHILD `SessionStart` must not register it (#242, both transports).
     pub(super) recent_hook_session_ends: HashMap<AgentId, SystemTime>,
-    /// Per-agent set of Task `tool_use_ids` currently in flight. CC's hook
+    /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a
     /// subagent is the actor, so subagent hook events hash to the parent's
-    /// `AgentId`. While the parent has any Task in flight, hook
-    /// ActivityStart/End events for that `AgentId` are dropped — JSONL has
-    /// correct attribution to the subagent's own `AgentId`.
+    /// AgentId. While the parent has any Task in flight, hook
+    /// ActivityStart/End events for that AgentId are dropped — JSONL has
+    /// correct attribution to the subagent's own AgentId.
     pub(super) active_tasks: HashMap<AgentId, HashSet<String>>,
-    /// Tombstones for Task `tool_use_ids` whose drain already completed: a
+    /// Tombstones for Task tool_use_ids whose drain already completed: a
     /// lagged JSONL pair-replay after the drain re-inserts the tuid as a
     /// FRESH first insert (set empty, dedup record GC'd), so the tracker's
     /// first-insert gate alone can't stop `enter_delegating` from clobbering
@@ -127,7 +127,7 @@ pub(super) struct Correlation {
     pub(super) recent_task_drains: HashMap<(AgentId, String), SystemTime>,
     /// Memory of CHILD (subagent) lifecycles, surviving the slots themselves
     /// (#244/#246). `parent_id` is upserted whenever a parent link is APPLIED,
-    /// `ended_at` by an `as_child` `SessionEnd` (regardless of slot existence,
+    /// `ended_at` by an `as_child` SessionEnd (regardless of slot existence,
     /// covering the Stop-before-Start reorder) and by `sweep_exited` removing
     /// the child's slot. Consumed by the `SessionStart` arm: a fresh
     /// `ended_at` gates a PARENTED re-registration (the dead child's late

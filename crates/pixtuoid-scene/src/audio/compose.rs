@@ -542,7 +542,7 @@ fn lead_events(
             .map(|_| LEAD_GRID[pick(rng, LEAD_GRID.len())])
             .collect();
         // the lofi push: occasionally a note lands a 16th AHEAD of a strong beat
-        for b in &mut beats {
+        for b in beats.iter_mut() {
             if max_per_bar > 1 && b.fract() == 0.0 && chance(rng, 0.15) {
                 *b -= 0.25;
             }
@@ -561,7 +561,7 @@ fn lead_events(
     let mut rhythm: Vec<Vec<f32>> = phrase_rhythm.clone();
     for statement in &phrase_rhythm {
         let mut beats = statement.clone();
-        for b in &mut beats {
+        for b in beats.iter_mut() {
             if chance(rng, 0.2) {
                 *b = (*b + if chance(rng, 0.5) { 0.5 } else { -0.5 }).clamp(0.5, 3.0);
             }

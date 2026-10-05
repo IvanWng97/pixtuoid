@@ -301,7 +301,7 @@ pub struct SourceColors {
     pub antigravity: Rgb,
     /// CodeWhale badge hue.
     pub codewhale: Rgb,
-    /// `OpenCode` badge hue.
+    /// OpenCode badge hue.
     pub opencode: Rgb,
     /// Copilot badge hue.
     pub copilot: Rgb,
@@ -429,10 +429,13 @@ mod tests {
         // themes.json and ALL_THEMES. Set equality, not order: the manifest's
         // order is a site presentation choice.
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/themes.json");
-        // crates.io-packaged test runs don't ship the repo's site/ tree.
-        let Ok(json) = std::fs::read_to_string(path) else {
-            eprintln!("skipping: {path} not present (packaged build)");
-            return;
+        let json = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            // crates.io-packaged test runs don't ship the repo's site/ tree.
+            Err(_) => {
+                eprintln!("skipping: {path} not present (packaged build)");
+                return;
+            }
         };
         let manifest: Vec<serde_json::Value> =
             serde_json::from_str(&json).expect("themes.json parses");

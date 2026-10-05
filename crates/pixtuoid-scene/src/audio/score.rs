@@ -295,7 +295,7 @@ mod night_tests {
                 .all(|&(_, k, _)| matches!(k, DrumKind::Kick | DrumKind::Hat)),
             "the night groove is kick + closed hat only"
         );
-        for &(at, note, _) in &NIGHT_KEYS {
+        for &(at, note, _) in NIGHT_KEYS.iter() {
             let bar = (at / (night_beat_s() * BEATS_PER_BAR)) as usize;
             let (chord, _) = night_chord_at_bar(bar);
             assert!(

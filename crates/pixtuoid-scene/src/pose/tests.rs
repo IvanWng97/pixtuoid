@@ -1117,10 +1117,13 @@ fn max_top_left_step(
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
 
-    let ob = l.corridor.map_or(Point { x: 40, y: 50 }, |c| Point {
-        x: c.x + c.width / 2,
-        y: c.y + 2,
-    });
+    let ob = l
+        .corridor
+        .map(|c| Point {
+            x: c.x + c.width / 2,
+            y: c.y + 2,
+        })
+        .unwrap_or(Point { x: 40, y: 50 });
 
     let mut prev: Option<Point> = None;
     let mut max_step = 0i32;

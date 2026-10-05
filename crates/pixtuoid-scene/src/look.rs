@@ -210,7 +210,7 @@ pub fn render<'r>(
         place,
         debug_walkable,
     } = inputs;
-    if !std::ptr::eq(world.pack, &raw const *raster.pack) {
+    if !std::ptr::eq(world.pack, &*raster.pack) {
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
         return None;
     }

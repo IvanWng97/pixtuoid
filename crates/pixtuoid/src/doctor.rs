@@ -277,7 +277,7 @@ const IMPLAUSIBLE_MAJOR: u64 = 1000;
 /// no dotted run = None, so a skew check silently no-ops rather than alarming on
 /// garbage. Banner-order robust — a banner can print a dotted DATE/build token
 /// BEFORE the semver (`Built 2026.06.04 — v1.2.3`) — while still parsing a
-/// genuine `CalVer` (`2026.06.04`, e.g. cursor) rather than letting it vanish.
+/// genuine CalVer (`2026.06.04`, e.g. cursor) rather than letting it vanish.
 pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let bytes = s.as_bytes();
     let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
@@ -671,7 +671,7 @@ struct DoctorReport {
     cc_registry: Option<(ShownPath, bool)>,
     codex_sessions: (ShownPath, bool),
     /// The other two probe roots (omp's probe is the stamp-less FALLBACK since
-    /// the `PluginStamp` flip). Each is source-specific — omp's is the resolved
+    /// the PluginStamp flip). Each is source-specific — omp's is the resolved
     /// sessions dir, grok's a registry FILE — so each needs its own
     /// hand-written row, pinned by `every_focusable_source_appears_in_the_focus_category`.
     omp_sessions: (ShownPath, bool),
@@ -842,11 +842,13 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         .map(|src| {
             let desc = registry::descriptor_for(src);
             let target = crate::install::target::by_source(src);
-            let hooks_installed = target.is_some_and(|t| crate::install::has_hooks(t, None));
+            let hooks_installed = target
+                .map(|t| crate::install::has_hooks(t, None))
+                .unwrap_or(false);
             let is_connected = connected.contains(src);
             let cli_detected = target.map(crate::install::target::is_present);
             DoctorSourceRow {
-                prefix: desc.map_or("??", |d| d.label_prefix),
+                prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
                 source_id: src,
                 connected: is_connected,
                 has_target: target.is_some(),
@@ -854,7 +856,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
                 installed_version: may_probe_version(is_connected, cli_detected)
                     .then(|| desc.and_then(|d| d.version_probe).and_then(probe_version))
                     .flatten(),
-                verified_version: desc.map_or("unknown", |d| d.verified_version),
+                verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
                 diag: diagnose(src, &log, None),
             }
         })
@@ -1157,7 +1159,11 @@ fn roots_category(roots: &[RootStatus], ink: &Ink) -> Option<Category> {
 /// straight from the registry, so a new source lands in the right bucket with
 /// no edit here.
 fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
-    let prefix_of = |src: &str| registry::descriptor_for(src).map_or("??", |d| d.label_prefix);
+    let prefix_of = |src: &str| {
+        registry::descriptor_for(src)
+            .map(|d| d.label_prefix)
+            .unwrap_or("??")
+    };
     let mut details = Vec::new();
     let mut problem = !r.backend_healthy;
     let cc_prefix = prefix_of(pixtuoid_core::source::claude_code::SOURCE_NAME);
@@ -2290,7 +2296,7 @@ mod tests {
             1,
             "deduped"
         );
-        assert!(!r.samples.iter().any(|s| s.chars().any(char::is_control)));
+        assert!(!r.samples.iter().any(|s| s.chars().any(|c| c.is_control())));
     }
 
     #[test]
@@ -2552,7 +2558,7 @@ mod tests {
         let got = first_sanitized_line(raw).unwrap();
         assert_eq!(got, "]0;pwnedcli [31m1.2.3[0m"); // ESC + BEL stripped, text kept
         assert!(
-            !got.chars().any(char::is_control),
+            !got.chars().any(|c| c.is_control()),
             "no control chars: {got:?}"
         );
         assert_eq!(first_sanitized_line(b""), None);

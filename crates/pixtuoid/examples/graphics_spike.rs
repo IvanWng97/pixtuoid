@@ -10,7 +10,7 @@
 //! time. Reading is not measuring, so this drives the real widget through a
 //! ratatui `TestBackend` and counts the bytes each frame actually emits.
 //!
-//! Run: cargo run --release --example `graphics_spike`
+//! Run: cargo run --release --example graphics_spike
 
 use image::{DynamicImage, Rgb, RgbImage};
 use ratatui::Terminal;
@@ -36,7 +36,7 @@ fn frame_bytes(term: &mut Terminal<TestBackend>, draw: impl FnOnce(&mut ratatui:
         .buffer()
         .content()
         .iter()
-        .map(ratatui::buffer::Cell::symbol)
+        .map(|c| c.symbol())
         .collect()
 }
 
@@ -108,10 +108,10 @@ fn main() {
         } else {
             format!("tile{}", n - 1)
         };
-        let colour = s.find("\x1b[38;2;").map_or_else(
-            || "<none>".into(),
-            |i| s[i + 7..].split('m').next().unwrap_or("?").to_string(),
-        );
+        let colour = s
+            .find("\x1b[38;2;")
+            .map(|i| s[i + 7..].split('m').next().unwrap_or("?").to_string())
+            .unwrap_or_else(|| "<none>".into());
         println!(
             "    {who:<7} id colour: {colour:<20} (len {}, transmit {}, placeholders {})",
             s.len(),
@@ -224,7 +224,7 @@ fn main() {
     // the claim-1 probe warmed the protocols — a shrinking byte count is a
     // proxy, the transmit count is the fact.
     let resend = sizes.iter().any(|(_, t)| *t > 0);
-    let steady = sizes.last().map_or(0, |(b, _)| *b);
+    let steady = sizes.last().map(|(b, _)| *b).unwrap_or(0);
     if resend {
         println!("    a steady-state frame still carries a transmit — pixels ARE re-shipped.");
     } else {

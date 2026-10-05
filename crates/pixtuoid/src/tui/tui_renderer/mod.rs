@@ -282,11 +282,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// changes, and a slide does not.
     fn office_extent(&self) -> (u16, u16) {
         #[cfg(feature = "graphics")]
-        if let Some(office) = self
-            .cutaway
-            .as_ref()
-            .and_then(super::cutaway::TileCutaway::office)
-        {
+        if let Some(office) = self.cutaway.as_ref().and_then(|c| c.office()) {
             return (office.w, office.h);
         }
         self.buf().map_or((0, 0), |b| (b.width(), b.height()))

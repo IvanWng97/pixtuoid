@@ -142,32 +142,33 @@ pub(crate) fn compute_crop_rect(
         // desk-seated agent — the majority, and every seated pose — has no entry.
         // Fall back to the seat the painter would draw them on rather than widen
         // a sim store for a dev tool (#909).
-        if let Some(p) = history.recent(slot.agent_id, u64::MAX, now) {
-            p
-        } else {
-            let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
-            // The agent's OWN floor: `desk_index` is global, and a scene with
-            // more agents than `--max-desks` puts them on floor 1+, whose
-            // geometry and seed both differ from floor 0's.
-            let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
-                buf_w,
-                buf_h,
-                Some(
-                    scene.floor_capacities
-                        [slot.floor_idx.min(pixtuoid_core::state::MAX_FLOORS - 1)],
-                ),
-                pixtuoid_scene::floor::floor_seed(slot.floor_idx),
-            )
-            .ok_or_else(|| anyhow::anyhow!("scene too small to compute a layout"))?;
-            let idx = scene.floor_local_desk(slot.desk_index);
-            let desk = layout.home_desk(idx).ok_or_else(|| {
-                anyhow::anyhow!("agent {agent_label:?} is neither placed nor at a home desk")
-            })?;
-            pixtuoid_scene::sim::seated_top_left(
-                desk,
-                pixtuoid_scene::layout::CHARACTER_SPRITE_W,
-                layout.desk_facing(idx),
-            )
+        match history.recent(slot.agent_id, u64::MAX, now) {
+            Some(p) => p,
+            None => {
+                let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+                // The agent's OWN floor: `desk_index` is global, and a scene with
+                // more agents than `--max-desks` puts them on floor 1+, whose
+                // geometry and seed both differ from floor 0's.
+                let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
+                    buf_w,
+                    buf_h,
+                    Some(
+                        scene.floor_capacities
+                            [slot.floor_idx.min(pixtuoid_core::state::MAX_FLOORS - 1)],
+                    ),
+                    pixtuoid_scene::floor::floor_seed(slot.floor_idx),
+                )
+                .ok_or_else(|| anyhow::anyhow!("scene too small to compute a layout"))?;
+                let idx = scene.floor_local_desk(slot.desk_index);
+                let desk = layout.home_desk(idx).ok_or_else(|| {
+                    anyhow::anyhow!("agent {agent_label:?} is neither placed nor at a home desk")
+                })?;
+                pixtuoid_scene::sim::seated_top_left(
+                    desk,
+                    pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+                    layout.desk_facing(idx),
+                )
+            }
         }
     } else if let Some(ref furniture_str) = args.crop_furniture {
         let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
@@ -428,8 +429,8 @@ impl AnimJob<'_> {
     }
 }
 
-/// Drive the real `TuiRenderer` (slide transition, footer floor chip, pet motion) frame by
-/// frame and encode its `TestBackend` cell buffer.
+/// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion) frame by
+/// frame and encode its TestBackend cell buffer.
 pub(crate) fn save_renderer_animation(
     job: &AnimJob,
     term: Terminal<TestBackend>,

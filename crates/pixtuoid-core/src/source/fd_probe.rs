@@ -153,7 +153,7 @@ mod imp {
                     pid,
                     fd.proc_fd,
                     PROC_PIDFDVNODEPATHINFO,
-                    &raw mut info as *mut c_void,
+                    &mut info as *mut _ as *mut c_void,
                     size,
                 )
             };

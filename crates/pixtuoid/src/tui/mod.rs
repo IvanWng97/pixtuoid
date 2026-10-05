@@ -342,8 +342,8 @@ fn dispatch_key(
     if modal.onboarding_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::OnboardingUp,
-            (KeyCode::Down | KeyCode::Char('j'), _) => KeyAction::OnboardingDown,
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::OnboardingUp,
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::OnboardingDown,
             (KeyCode::Char(' '), _) => KeyAction::OnboardingToggle,
             (KeyCode::Enter, _) => KeyAction::OnboardingConfirm,
             (KeyCode::Esc, _) => KeyAction::OnboardingSkip,
@@ -352,7 +352,9 @@ fn dispatch_key(
     }
     if modal.help_open {
         return match (code, mods) {
-            (KeyCode::Enter | KeyCode::Esc | KeyCode::Char('?'), _) => KeyAction::CloseHelp,
+            (KeyCode::Enter, _) | (KeyCode::Esc, _) | (KeyCode::Char('?'), _) => {
+                KeyAction::CloseHelp
+            }
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             _ => KeyAction::None,
         };
@@ -370,15 +372,15 @@ fn dispatch_key(
             return match (code, mods) {
                 _ if is_quit_chord(code, mods) => KeyAction::Quit,
                 (KeyCode::Char('y'), _) => KeyAction::ConnectionConfirm,
-                (KeyCode::Char('n') | KeyCode::Esc, _) => KeyAction::ConnectionCancelConfirm,
+                (KeyCode::Char('n'), _) | (KeyCode::Esc, _) => KeyAction::ConnectionCancelConfirm,
                 _ => KeyAction::None,
             };
         }
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Esc | KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
-            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
-            (KeyCode::Down | KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
+            (KeyCode::Esc, _) | (KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
             (KeyCode::Char('t'), _) => KeyAction::ConnectionToggle,
             _ => KeyAction::None,
         };
@@ -386,13 +388,13 @@ fn dispatch_key(
     if modal.dashboard_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Esc | KeyCode::Tab, _) => KeyAction::DashboardClose,
+            (KeyCode::Esc, _) | (KeyCode::Tab, _) => KeyAction::DashboardClose,
             (KeyCode::Enter, _) => KeyAction::DashboardJump,
             (KeyCode::Char('f'), _) => KeyAction::DashboardFocus,
-            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::DashboardUp,
-            (KeyCode::Down | KeyCode::Char('j'), _) => KeyAction::DashboardDown,
-            (KeyCode::Left | KeyCode::Char('h'), _) => KeyAction::DashboardFoldLeft,
-            (KeyCode::Right | KeyCode::Char('l'), _) => KeyAction::DashboardFoldRight,
+            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::DashboardUp,
+            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::DashboardDown,
+            (KeyCode::Left, _) | (KeyCode::Char('h'), _) => KeyAction::DashboardFoldLeft,
+            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => KeyAction::DashboardFoldRight,
             (KeyCode::Char('z'), _) => KeyAction::DashboardFoldAll,
             _ => KeyAction::None,
         };
@@ -417,8 +419,8 @@ fn dispatch_key(
     match code {
         KeyCode::Char('p') => KeyAction::TogglePause,
         KeyCode::Char('m') => KeyAction::ToggleAudioMute,
-        KeyCode::Char('+' | '=') => KeyAction::AdjustVolume(true),
-        KeyCode::Char('-' | '_') => KeyAction::AdjustVolume(false),
+        KeyCode::Char('+') | KeyCode::Char('=') => KeyAction::AdjustVolume(true),
+        KeyCode::Char('-') | KeyCode::Char('_') => KeyAction::AdjustVolume(false),
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
@@ -982,11 +984,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     // Yields to onboarding but still STAMPS `last_seen_version`. Gated on the overlay
     // SHOWING, not on `first_run`, which a no-CLI user carries forever.
-    let version_popup = if onboarding_ui.is_empty() {
-        resolve_version_popup(&config_path)
-    } else {
+    let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
+    } else {
+        resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut cap_sweep = FloorCapacitySweep::new();
@@ -1064,7 +1066,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             // poll above is synchronous, so this is the loop's only await point.
             let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
             tokio::select! {
-                () = tokio::time::sleep(rem) => {}
+                _ = tokio::time::sleep(rem) => {}
                 res = &mut ctrl_c => match res {
                     Ok(()) => break,
                     Err(e) => {
@@ -1076,7 +1078,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         ctrl_c = Box::pin(std::future::pending());
                     }
                 },
-                () = &mut terminate => break,
+                _ = &mut terminate => break,
             }
         }
         Ok(())

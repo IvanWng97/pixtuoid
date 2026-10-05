@@ -1110,8 +1110,8 @@ impl Pack {
         // A city comes whole or not at all: its buildings are drawn in its own
         // `[city]` materials, which a pack with a city of its own renames.
         if self.buildings.is_empty() {
-            self.buildings.clone_from(&base.buildings);
-            self.city_materials.clone_from(&base.city_materials);
+            self.buildings = base.buildings.clone();
+            self.city_materials = base.city_materials.clone();
         }
     }
 
@@ -1496,7 +1496,7 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
     build_pack(parsed, &mut |fname| {
         frame_lookup
             .get(fname)
-            .map(std::string::ToString::to_string)
+            .map(|s| s.to_string())
             .ok_or_else(|| PackError::MissingEmbeddedFrame {
                 file: fname.to_owned(),
             })
@@ -2313,7 +2313,7 @@ mod validation_floor_tests {
             pack.animation(name)
                 .expect("loaded")
                 .stride()
-                .map(std::num::NonZero::get)
+                .map(|s| s.get())
         };
         assert_eq!(stride("walking"), Some(12));
         assert_eq!(stride("seated"), None);

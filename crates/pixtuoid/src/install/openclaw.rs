@@ -83,7 +83,7 @@ fn openclaw_state_dir() -> Result<PathBuf> {
         pixtuoid_core::platform::path_env("OPENCLAW_HOME")
             .map(|v| io::expand_tilde(&v, home.as_deref())),
         home,
-        std::path::Path::exists,
+        |p| p.exists(),
     )
 }
 
@@ -139,7 +139,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
             .map(|v| io::expand_tilde(&v, home.as_deref())),
         openclaw_state_dir()?,
         legacy_home,
-        std::path::Path::exists,
+        |p| p.exists(),
     ))
 }
 
@@ -197,7 +197,7 @@ pub(crate) fn detect_installed() -> bool {
         pixtuoid_core::platform::path_env("OPENCLAW_HOME")
             .map(|v| io::expand_tilde(&v, home.as_deref())),
         home,
-        std::path::Path::exists,
+        |p| p.exists(),
     )
 }
 
@@ -264,7 +264,7 @@ fn is_plugin_id(v: &Value) -> bool {
 
 /// Does `v` carry an [`INCLUDE_KEY`] ANYWHERE, not just at the document root? A
 /// root-only check would hand a clean bill to a config whose real `plugins` block
-/// we never saw. Recursion depth is bounded by `serde_json`'s own parse limit.
+/// we never saw. Recursion depth is bounded by serde_json's own parse limit.
 fn contains_include(v: &Value) -> bool {
     match v {
         Value::Object(m) => m.contains_key(INCLUDE_KEY) || m.values().any(contains_include),
@@ -922,9 +922,10 @@ mod tests {
             assert!(
                 !after["plugins"]["load"]["paths"]
                     .as_array()
-                    .is_some_and(|a| a
+                    .map(|a| a
                         .iter()
-                        .any(|p| p.as_str() == plugin_dir().unwrap().to_str())),
+                        .any(|p| p.as_str() == plugin_dir().unwrap().to_str()))
+                    .unwrap_or(false),
                 "our path is gone: {after}"
             );
             assert_eq!(

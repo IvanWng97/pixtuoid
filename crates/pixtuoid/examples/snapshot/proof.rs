@@ -1,7 +1,7 @@
 //! `--proof`: the §3 split-screen causal-proof renderer. ONE committed CC session
 //! fixture drives BOTH sides of every frame: the left panel types the session,
-//! the right side is the REAL `draw_scene` pass replaying the SAME decoded
-//! `AgentEvent` stream through the real Reducer — the two sides structurally cannot
+//! the right side is the REAL draw_scene pass replaying the SAME decoded
+//! AgentEvent stream through the real Reducer — the two sides structurally cannot
 //! desync. scripts/gen-media.py (kind:"proof") encodes the frames.
 
 use anyhow::{Context as _, Result, anyhow};
@@ -222,7 +222,7 @@ fn capture_date_str(v: &serde_json::Value) -> Result<String> {
         .to_string())
 }
 
-/// First human-meaningful arg of a `tool_use` input, for the panel line.
+/// First human-meaningful arg of a tool_use input, for the panel line.
 fn tool_arg(input: Option<&serde_json::Value>) -> String {
     let Some(obj) = input.and_then(|i| i.as_object()) else {
         return String::new();

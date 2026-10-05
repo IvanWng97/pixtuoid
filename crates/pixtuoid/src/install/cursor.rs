@@ -22,7 +22,7 @@ use crate::install::target::MergeOutcome;
 /// `every_registered_cursor_event_decodes` below. `subagentStart`/`subagentStop`
 /// are deliberately absent (they don't fire in the CLI). `postToolUseFailure` FIRES
 /// instead of `postToolUse` on a failed tool, so it is registered too — else a
-/// failed tool's `ActivityStart` never closes under `-p` (where `stop` doesn't fire).
+/// failed tool's ActivityStart never closes under `-p` (where `stop` doesn't fire).
 pub(crate) const CURSOR_EVENTS: &[&str] = &[
     "sessionStart",
     "preToolUse",
@@ -83,7 +83,7 @@ pub(crate) fn detect_installed() -> bool {
 
 /// Cursor runs the `command` under a shell, so the OS forms are
 /// [`crate::install::hook_cmd::shell_hook_command`]'s. Err on non-UTF-8 (prevents
-/// the `to_string_lossy` dead-hook).
+/// the to_string_lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "cursor")
@@ -119,7 +119,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     // Only reachable on parseable JSON — an unparseable file is already a HARD
     // "no longer parses" issue from `flat_json_verify`.
     if let Ok(doc) = serde_json::from_str::<Value>(content)
-        && !doc.get("version").is_some_and(serde_json::Value::is_number)
+        && !doc.get("version").is_some_and(|v| v.is_number())
     {
         parse.issues.push(
             "hooks.json has no numeric top-level `version` key — Cursor requires it, \

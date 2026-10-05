@@ -30,7 +30,7 @@ pub(super) fn id_path(path: &Path) -> std::path::PathBuf {
 }
 
 /// First-sight decision, shared by EVERY path that can be the first to see a
-/// file: seed the cursor at EOF — suppressing `SessionStart` — when the session
+/// file: seed the cursor at EOF — suppressing SessionStart — when the session
 /// is historical (mtime outside `window`) OR already ended. Unifying the gate
 /// here is the #85 fix: the post-startup rescan used to bypass it and
 /// resurrect an ended/stale session as a phantom live sprite.
@@ -48,7 +48,7 @@ async fn should_seed_at_eof(
     activity_recency: ActivityRecency,
     probe_live: bool,
 ) -> bool {
-    let mtime_recent = meta.modified().is_ok_and(|m| within(m, window));
+    let mtime_recent = meta.modified().ok().is_some_and(|m| within(m, window));
     if !mtime_recent && !probe_live {
         return true;
     }
@@ -368,11 +368,12 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         if line.is_empty() {
             continue;
         }
-        let s = if let Ok(s) = std::str::from_utf8(line) {
-            s
-        } else {
-            warn!(path = ?path, "non-utf8 line skipped");
-            continue;
+        let s = match std::str::from_utf8(line) {
+            Ok(s) => s,
+            Err(_) => {
+                warn!(path = ?path, "non-utf8 line skipped");
+                continue;
+            }
         };
         let v: serde_json::Value = match serde_json::from_str(s) {
             Ok(v) => v,

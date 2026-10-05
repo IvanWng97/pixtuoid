@@ -463,7 +463,7 @@ mod tests {
 /// Live dogfood (manual, `--ignored`): walks THIS test process's own ancestor
 /// chain with the real OS table and activates the terminal app it finds. On
 /// Windows, alt-tab away after launching: run from the hosting terminal the
-/// first unattached attempt wins and the `AttachThreadInput` retry never runs.
+/// first unattached attempt wins and the AttachThreadInput retry never runs.
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod live_dogfood {
     use super::*;

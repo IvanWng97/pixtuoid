@@ -50,7 +50,7 @@ fn handler_is_managed(h: &toml::Value) -> bool {
     // Sentinel-only, no basename fallback: no released version ever wrote a
     // sentinel-less entry, so a basename match could only ever hit a USER
     // hand-written entry pointing at the shim, which uninstall must not touch.
-    h.get(SENTINEL_KEY).and_then(toml::Value::as_bool) == Some(true)
+    h.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
 fn prune_managed_handlers(group: &mut toml::Value) {
@@ -88,7 +88,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
                     shim = h
                         .get("command")
                         .and_then(|c| c.as_str())
-                        .map_or(ShimRef::Unknown, shell_shim_ref);
+                        .map(shell_shim_ref)
+                        .unwrap_or(ShimRef::Unknown);
                 }
             }
             None => missing.push(*ev),
@@ -101,7 +102,7 @@ fn group_has_no_hooks(group: &toml::Value) -> bool {
     group
         .get("hooks")
         .and_then(|h| h.as_array())
-        .is_some_and(std::vec::Vec::is_empty)
+        .is_some_and(|h| h.is_empty())
 }
 
 fn managed_group(hook_command: &str) -> toml::Value {

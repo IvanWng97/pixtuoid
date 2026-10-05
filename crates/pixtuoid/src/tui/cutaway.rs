@@ -292,7 +292,7 @@ impl TileCutaway {
                 }
             }
             ImageProtocol::Sixel | ImageProtocol::Iterm2 => {
-                self.in_grid.store(true, Ordering::Relaxed);
+                self.in_grid.store(true, Ordering::Relaxed)
             }
         }
         let mut wrote = if self.torn {

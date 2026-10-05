@@ -566,7 +566,7 @@ mod tests {
     use std::collections::HashSet;
 
     fn set(ids: &[&str]) -> HashSet<String> {
-        ids.iter().map(std::string::ToString::to_string).collect()
+        ids.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]

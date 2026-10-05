@@ -590,7 +590,7 @@ fn paint_piece(
             }
         }
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-            paint_art(at, art, pack, theme, scale, buf);
+            paint_art(at, art, pack, theme, scale, buf)
         }
         PieceKind::PropBand { at, sprite, rows } => {
             paint_prop_band(at, sprite, rows, pack, scale, buf);
@@ -2976,7 +2976,7 @@ mod tests {
             }
         }
         for kind in ["animated", "door", "neon", "clock"] {
-            let n = seen.get(kind).map_or(0, std::collections::HashSet::len);
+            let n = seen.get(kind).map_or(0, |s| s.len());
             assert!(
                 n > 1,
                 "the {kind} showed one fingerprint across what moves it"

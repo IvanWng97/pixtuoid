@@ -310,7 +310,9 @@ pub(crate) fn config_present(path: &Path) -> bool {
 pub(crate) fn is_present(t: &Target) -> bool {
     match t.presence_probe {
         Some(probe) => probe(),
-        None => (t.default_config_path)().is_ok_and(|p| config_present(&p)),
+        None => (t.default_config_path)()
+            .map(|p| config_present(&p))
+            .unwrap_or(false),
     }
 }
 

@@ -483,7 +483,7 @@ fn a_notice_board_hangs_within_one_pane() {
             let b = f.visual;
             assert!(
                 l.window_bays()
-                    .flat_map(super::super::windows::WindowBay::panes)
+                    .flat_map(|bay| bay.panes())
                     .any(|p| p.start <= b.x && b.x + b.width <= p.end),
                 "{}x{}: {b:?} straddles a frame",
                 l.buf_w,

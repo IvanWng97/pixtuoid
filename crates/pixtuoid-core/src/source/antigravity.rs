@@ -39,7 +39,7 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     // leaving the slot stuck Active until the reducer's stale-sweep.
     let Some(step_index) = obj
         .get("step_index")
-        .and_then(serde_json::Value::as_i64)
+        .and_then(|v| v.as_i64())
         .filter(|&s| s >= 0)
     else {
         return Ok(vec![]);

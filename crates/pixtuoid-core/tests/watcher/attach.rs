@@ -135,7 +135,7 @@ async fn attach_matrix_registers_exactly_the_live_set() {
 }
 
 /// The parent transcript is STALE with a pending Agent dispatch at its tail
-/// (a `tool_use` with no `tool_result`) and its UUID in the probe's live set; the
+/// (a tool_use with no tool_result) and its UUID in the probe's live set; the
 /// subagent transcript is fresh.
 #[tokio::test]
 async fn delegating_parent_attach_registers_parent_and_links_subagent() {
@@ -202,11 +202,7 @@ async fn delegating_parent_attach_registers_parent_and_links_subagent() {
                     detail,
                 },
             ))) if agent_id == expected_parent && tool_use_id.as_deref() == Some("tu_task") => {
-                dispatch_is_task = Some(
-                    detail
-                        .as_ref()
-                        .is_some_and(pixtuoid_core::ToolDetail::is_task),
-                );
+                dispatch_is_task = Some(detail.as_ref().is_some_and(|d| d.is_task()));
             }
             _ => {}
         }
@@ -231,9 +227,9 @@ async fn delegating_parent_attach_registers_parent_and_links_subagent() {
     handle.abort();
 }
 
-/// The parent transcript has > `MAX_PENDING_BYTES` pending at attach, so the
+/// The parent transcript has > MAX_PENDING_BYTES pending at attach, so the
 /// backlog is skipped to EOF instead of replayed and the in-flight Agent
-/// dispatch must be recovered by the `TASK_SCAN_BYTES` tail scan (#222), while
+/// dispatch must be recovered by the TASK_SCAN_BYTES tail scan (#222), while
 /// the parent still registers via the bounded head read (#204).
 #[tokio::test]
 async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
@@ -305,7 +301,7 @@ async fn oversized_delegating_parent_attach_replays_pending_dispatch() {
         matches!(e, AgentEvent::ActivityStart { agent_id, tool_use_id, detail }
             if *agent_id == expected_parent
                 && tool_use_id.as_deref() == Some("tu_task")
-                && detail.as_ref().is_some_and(pixtuoid_core::ToolDetail::is_task))
+                && detail.as_ref().is_some_and(|d| d.is_task()))
     };
 
     let mut events: Vec<(Transport, AgentEvent)> = Vec::new();

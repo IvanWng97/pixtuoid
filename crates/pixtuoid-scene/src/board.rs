@@ -82,7 +82,7 @@ pub fn gateway_rollup<'a>(
         }
     }
     daemons
-        .map(pixtuoid_core::state::DaemonPresence::display_state)
+        .map(|p| p.display_state())
         .max_by_key(|s| severity(*s))
 }
 

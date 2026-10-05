@@ -14,7 +14,7 @@ use super::tiles::TileImage;
 const PERCENT: u16 = 100;
 
 /// The colour registers a tile may define: as many as ratatui-image's own
-/// SIXEL encoder uses (`icy_sixel` 0.5.0 `encoder.rs:126`).
+/// SIXEL encoder uses (icy_sixel 0.5.0 `encoder.rs:126`).
 const REGISTERS: usize = 256;
 
 /// One step of the fixed colour cube a tile of more colours than
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(decode(&sixel), shown(w, &pixels));
     }
 
-    /// Two shades a quantizer would merge (`icy_sixel`'s Wu does) stay two,
+    /// Two shades a quantizer would merge (icy_sixel's Wu does) stay two,
     /// and the checker comes back cell for cell: nothing diffused.
     #[test]
     fn a_two_colour_checker_keeps_exactly_its_two_colours() {

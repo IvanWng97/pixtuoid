@@ -7,8 +7,8 @@
 //! edit files inside `sessions/`"*, and undocumented version-specific op `type`
 //! strings. So pixtuoid does NOT tail it. The seam is **hooks**
 //! (`<KIMI_CODE_HOME>/config.toml` `[[hooks]]`), whose envelope is
-//! CLAUDE-CODE-SHAPED: `snake_case`
-//! `hook_event_name`/`session_id`/`cwd`/`tool_name`/`tool_input` with `PascalCase`
+//! CLAUDE-CODE-SHAPED: snake_case
+//! `hook_event_name`/`session_id`/`cwd`/`tool_name`/`tool_input` with PascalCase
 //! event VALUES — **except the per-call id, which Kimi spells `tool_call_id`**
 //! (capture-verified: `fixtures/kimi/tool-run` never carries `tool_use_id`). That
 //! is a registry row, `ToolIdKey::ToolCall`, and NOT a reason to re-implement the
@@ -25,8 +25,8 @@
 //! FLAT until a byte-real capture can add nesting.
 //!
 //! **`PermissionRequest` needs a HUMAN to capture.** `kimi -p` auto-approves
-//! every tool — `rm -rf` included — so a headless run emits only `SessionStart` /
-//! `PreToolUse` / `PostToolUse` / Stop. The permission fixture came from an
+//! every tool — `rm -rf` included — so a headless run emits only SessionStart /
+//! PreToolUse / PostToolUse / Stop. The permission fixture came from an
 //! interactive TUI turn; re-record it the same way rather than composing one.
 
 use std::path::PathBuf;
@@ -99,7 +99,7 @@ fn kimi_cwd(obj: &Map<String, Value>) -> Option<PathBuf> {
 /// shared arms derive, so a failure event coalesces with the session's other
 /// events. `Err` rather than `Ok(None)` on a missing/empty id: having claimed
 /// the event, falling through would hit the shared arms' "unsupported
-/// `hook_event_name`" bail with a misleading message.
+/// hook_event_name" bail with a misleading message.
 fn kimi_session_id(obj: &Map<String, Value>) -> Result<String> {
     obj.get("session_id")
         .and_then(|s| s.as_str())
@@ -167,7 +167,7 @@ mod tests {
         .unwrap();
         match &evs[0] {
             AgentEvent::Identity { cwd, .. } => {
-                assert_eq!(*cwd, None, "empty cwd must map to None, not Some(\"\")");
+                assert_eq!(*cwd, None, "empty cwd must map to None, not Some(\"\")")
             }
             other => panic!("expected Identity, got {other:?}"),
         }

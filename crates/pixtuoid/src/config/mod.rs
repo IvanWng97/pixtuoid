@@ -386,7 +386,7 @@ pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String
 
 /// Resolve the config `max-desks` into the runtime desk cap. `0` is treated as
 /// unset with a warning: the cap clamps every floor via `min`, so an accepted 0
-/// would permanently zero every floor and silently drop every `SessionStart`. The
+/// would permanently zero every floor and silently drop every SessionStart. The
 /// `--max-desks` CLI flag rejects 0 at the clap seam; this is its config twin.
 pub(crate) fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) -> Option<usize> {
     match config.max_desks {
@@ -549,7 +549,8 @@ pub fn resolve_pets(
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .map_or_else(|| kind.default_name().to_string(), str::to_string);
+                    .map(str::to_string)
+                    .unwrap_or_else(|| kind.default_name().to_string());
                 out.push(Pet { kind, name });
             }
             if out.is_empty() && !entries.is_empty() {

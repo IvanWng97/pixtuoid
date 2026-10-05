@@ -326,7 +326,7 @@ async fn headless_loop_with_signal(
             return Ok(());
         }
         tokio::select! {
-            () = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
+            _ = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
                 let snapshot = scene_rx.borrow_and_update().clone();
                 let summary = summarize(&snapshot);
                 if summary != prev_summary {

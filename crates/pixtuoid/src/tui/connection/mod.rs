@@ -115,8 +115,8 @@ pub fn live_for(
     let dead = health.iter().any(|d| d.source == source_id);
     // Registry-driven, so a second daemon source inherits this the day its row
     // lands — no name match here.
-    let is_daemon = pixtuoid_core::source::registry::descriptor_for(source_id)
-        .is_some_and(pixtuoid_core::source::registry::SourceDescriptor::is_daemon);
+    let is_daemon =
+        pixtuoid_core::source::registry::descriptor_for(source_id).is_some_and(|d| d.is_daemon());
     if is_daemon {
         // ONE walk, so the count and the rollup cannot disagree.
         let mine: Vec<_> = scene

@@ -336,7 +336,9 @@ mod recorder {
     #[cfg(unix)]
     fn owned_by_us(p: &Path) -> bool {
         use std::os::unix::fs::MetadataExt;
-        std::fs::symlink_metadata(p).is_ok_and(|m| m.uid() == rustix::process::getuid().as_raw())
+        std::fs::symlink_metadata(p)
+            .map(|m| m.uid() == rustix::process::getuid().as_raw())
+            .unwrap_or(false)
     }
 
     fn run_cli(
@@ -429,7 +431,8 @@ mod recorder {
     fn today() -> String {
         let secs = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         let days = secs / 86_400;
         let (mut y, mut d) = (1970i64, days as i64);
         loop {
@@ -745,7 +748,9 @@ mod recorder {
     }
 
     fn count_lines(p: &Path) -> usize {
-        std::fs::read_to_string(p).map_or(0, |s| s.lines().filter(|l| !l.trim().is_empty()).count())
+        std::fs::read_to_string(p)
+            .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+            .unwrap_or(0)
     }
 
     fn sources_root() -> PathBuf {

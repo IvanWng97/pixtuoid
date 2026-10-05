@@ -79,7 +79,7 @@ fn peer_uid(fd: std::os::unix::io::RawFd) -> Option<u32> {
             libc::SOL_SOCKET,
             libc::SO_PEERCRED,
             std::ptr::addr_of_mut!(cred).cast(),
-            &raw mut len,
+            &mut len,
         )
     };
     (rc == 0).then_some(cred.uid)
@@ -90,7 +90,7 @@ fn peer_uid(fd: std::os::unix::io::RawFd) -> Option<u32> {
     let mut euid: libc::uid_t = 0;
     let mut egid: libc::gid_t = 0;
     // Safety: `fd` is a live connected socket; the kernel writes the out-params.
-    let rc = unsafe { libc::getpeereid(fd, &raw mut euid, &raw mut egid) };
+    let rc = unsafe { libc::getpeereid(fd, &mut euid, &mut egid) };
     (rc == 0).then_some(euid)
 }
 
@@ -183,20 +183,20 @@ mod peer {
     unsafe fn token_user_blob(process: HANDLE) -> Option<Vec<u64>> {
         let mut token: HANDLE = std::ptr::null_mut();
         // SAFETY: `process` is forwarded from this fn's contract; `token` is a live out-param.
-        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &raw mut token) } == 0 {
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
             return None;
         }
         // Size probe (returns 0 + sets `len`), then the real read.
         let mut len: u32 = 0;
         // SAFETY: `token` is open; a null buffer of length 0 is the documented size probe.
-        unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &raw mut len) };
+        unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len) };
         let blob = if len == 0 {
             None
         } else {
             let mut buf = vec![0u64; (len as usize).div_ceil(8)];
             // SAFETY: `token` is open and `buf` spans at least `len` bytes for the call.
             let read = unsafe {
-                GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &raw mut len)
+                GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len)
             };
             if read == 0 { None } else { Some(buf) }
         };
@@ -221,7 +221,7 @@ mod peer {
         // is closed exactly once; the two SID buffers outlive the EqualSid call.
         unsafe {
             let mut server_pid: u32 = 0;
-            if GetNamedPipeServerProcessId(handle, &raw mut server_pid) == 0 {
+            if GetNamedPipeServerProcessId(handle, &mut server_pid) == 0 {
                 return false;
             }
             // Our own user SID (GetCurrentProcess is a pseudo-handle — never closed).

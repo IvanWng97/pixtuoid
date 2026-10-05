@@ -165,7 +165,7 @@ const COUCH_GAP_GROWTH_BASE_H: u16 = 60;
 /// A meeting room narrower than this can't host the sofa body with enough
 /// walkable margin for the coarse router ([`COARSE_CELL_SIZE`]) to reach the
 /// seats buried in it —
-/// `find_path` returns None and an idle agent sent there TELEPORTS. Below it the
+/// find_path returns None and an idle agent sent there TELEPORTS. Below it the
 /// room degrades to bare floor.
 const MEETING_FURNITURE_MIN_W: u16 = 30;
 
@@ -1089,7 +1089,7 @@ fn first_blocking_waypoint(
 }
 
 /// Both placement rules for one plant spot: the sprite box never overlaps a
-/// rect in `desk_art`, and keeps `PLANT_OBSTACLE_CLEARANCE_PX` of air from every
+/// rect in `desk_art`, and keeps PLANT_OBSTACLE_CLEARANCE_PX of air from every
 /// obstacle waypoint's box.
 fn plant_spot_clear(
     kind: PlantKind,

@@ -30,7 +30,7 @@ use crate::install::target::MergeOutcome;
 /// command bakes `--event <name>` and the shim builds the envelope from env;
 /// `false` events (the subagent observer hooks) are forwarded RAW on stdin.
 ///
-/// `turn_end` / `mode_change` / `on_error` / `shell_env` are deliberately absent
+/// turn_end / mode_change / on_error / shell_env are deliberately absent
 /// (per-turn noise / no lifecycle meaning). CodeWhale has NO approval hook in the
 /// TUI path, so there is no Waiting event to register — no signal exists.
 pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
@@ -68,7 +68,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
             .map(|v| io::expand_tilde(&v, None)),
         pixtuoid_core::platform::path_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)),
         pixtuoid_core::platform::home_first_dir(),
-        std::path::Path::exists,
+        |p| p.exists(),
     )
 }
 
@@ -147,7 +147,7 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 fn is_managed_entry(entry: &toml::Value) -> bool {
-    entry.get(SENTINEL_KEY).and_then(toml::Value::as_bool) == Some(true)
+    entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
 }
 
 fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
@@ -165,7 +165,7 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
     toml::Value::Table(entry)
 }
 
-/// Install-schema verification: every `CODEWHALE_EVENTS` event still has a
+/// Install-schema verification: every CODEWHALE_EVENTS event still has a
 /// sentinel-tagged `{event, command}` entry, AND `[hooks].enabled != false` — it
 /// gates ALL hooks, so entries present under `enabled = false` is a silent-dead
 /// the other checks miss.
@@ -192,7 +192,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
                     shim = e
                         .get("command")
                         .and_then(|c| c.as_str())
-                        .map_or(ShimRef::Unknown, shell_shim_ref);
+                        .map(shell_shim_ref)
+                        .unwrap_or(ShimRef::Unknown);
                 }
             }
             None => missing.push(ev),
@@ -201,7 +202,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let mut extra = Vec::new();
     if hooks
         .and_then(|h| h.get("enabled"))
-        .and_then(toml::Value::as_bool)
+        .and_then(|v| v.as_bool())
         == Some(false)
     {
         extra.push(
@@ -256,7 +257,7 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     if hooks
         .get("hooks")
         .and_then(|h| h.as_array())
-        .is_some_and(std::vec::Vec::is_empty)
+        .is_some_and(|a| a.is_empty())
     {
         hooks.remove("hooks");
     }
@@ -265,7 +266,7 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     // so a surviving one is the user's OWN switch and keeps its table alive.
     let ours_only = hooks.is_empty()
         || (hooks.keys().all(|k| k == "enabled")
-            && hooks.get("enabled").and_then(toml::Value::as_bool) != Some(false));
+            && hooks.get("enabled").and_then(|v| v.as_bool()) != Some(false));
     if ours_only {
         root.remove("hooks");
     }

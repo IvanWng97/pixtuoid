@@ -133,7 +133,8 @@ fn managed_entry(hook_cmd: &str) -> YamlOwned {
 fn exec_shim_ref(command: &str) -> ShimRef {
     let path = command
         .rsplit_once(crate::install::hook_cmd::SOURCE_FLAG)
-        .map_or(command, |(p, _)| p)
+        .map(|(p, _)| p)
+        .unwrap_or(command)
         .trim();
     let unq = crate::install::verify::posix_unquote_if_quoted(path);
     if unq.is_empty() {

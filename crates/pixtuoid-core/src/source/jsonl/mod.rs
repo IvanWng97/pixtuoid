@@ -128,7 +128,7 @@ struct WatchCtx<'a> {
     seen: &'a Arc<Mutex<HashMap<PathBuf, bool>>>,
     tx: &'a TaggedSender,
     /// Recency window for the first-sight gate (an older file is seeded at EOF
-    /// without a `SessionStart`). One window for the whole watch, so every path
+    /// without a SessionStart). One window for the whole watch, so every path
     /// that can first-see a file gates identically (#85).
     window: Duration,
     /// Most recent liveness-probe snapshot (session ids in `IdDeriver` space),
@@ -524,7 +524,7 @@ impl JsonlWatcher {
                     drain_child_end_unclaims(unclaims.as_ref(), decoders, &ctx).await;
                     walk_jsonl(&path, decoders, &ctx).await;
                 }
-                () = &mut rescan_delay, if !rescan_done => {
+                _ = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
                     self.run_scan_pass(
                         &ctx, &mut scan_state,

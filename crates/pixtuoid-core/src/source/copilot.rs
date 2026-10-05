@@ -241,12 +241,10 @@ pub fn decode_copilot_line(
             let reason = data
                 .and_then(|d| d.get("permissionRequest"))
                 .and_then(|p| str_at(p, "kind"))
-                .map_or_else(
-                    || "permission".to_string(),
-                    // Capped at the decode boundary: `kind` is raw wire content that
-                    // persists in the slot + egresses on the headless summary.
-                    |k| ellipsize(&format!("permission: {k}"), MAX_DECODED_FIELD_CHARS),
-                );
+                // Capped at the decode boundary: `kind` is raw wire content that
+                // persists in the slot + egresses on the headless summary.
+                .map(|k| ellipsize(&format!("permission: {k}"), MAX_DECODED_FIELD_CHARS))
+                .unwrap_or_else(|| "permission".to_string());
             vec![AgentEvent::Waiting {
                 agent_id: acting,
                 reason,
@@ -331,7 +329,7 @@ pub fn decode_copilot_line(
                     details
                         .get(k)
                         .and_then(|b| b.get("tokenCount"))
-                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|n| n.as_u64())
                         .unwrap_or(0)
                 };
                 let fresh = bucket("input")

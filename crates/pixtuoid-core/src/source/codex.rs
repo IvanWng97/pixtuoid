@@ -3,7 +3,7 @@
 //! the lifecycle signals the shared hook socket lacks — most importantly the
 //! post-approval resume (`function_call_output`).
 //!
-//! Coalescing: `hook.session_id` == `session_meta.id` == filename UUID (verified),
+//! Coalescing: hook.session_id == session_meta.id == filename UUID (verified),
 //! so both transports merge onto one sprite.
 
 use std::path::{Path, PathBuf};
@@ -48,7 +48,7 @@ fn is_uuid(s: &str) -> bool {
 }
 
 /// Codex's source-specific hook arms — `SubagentStart`/`SubagentStop`. These
-/// change the event's SUBJECT (the child's `AgentId`, not the session's), which
+/// change the event's SUBJECT (the child's AgentId, not the session's), which
 /// the shared CC-shaped arms cannot express; every other Codex hook event
 /// falls through (`Ok(None)`) to them. The parent link carried here is the
 /// ONLY one a flat Codex rollout gets.
@@ -217,7 +217,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
                 .and_then(|i| i.get("last_token_usage"))
                 .and_then(|u| u.as_object());
             let fresh = last.map_or(0, |u| {
-                let field = |k: &str| u.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0);
+                let field = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
                 field("input_tokens")
                     .saturating_sub(field("cached_input_tokens"))
                     .saturating_add(field("output_tokens"))
@@ -493,7 +493,7 @@ mod tests {
                 assert!(
                     format!("{d:?}").contains("exec"),
                     "tool name must reach the detail: {d:?}"
-                );
+                )
             }
             other => panic!("expected an ActivityStart carrying the tool, got {other:?}"),
         }

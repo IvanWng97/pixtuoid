@@ -921,7 +921,7 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
 /// Widths inside the narrow-band DEGRADATION zone the discrete `SWEEP_SIZES`
 /// grid structurally skips. Floored by `MIN_LAYOUT_W`; the upper bound is 76,
 /// not 64, to cover the FULL single-pod-column window: the desk grid stays one
-/// column through `buf_w≈70` and only splits to two (two drains, robust) at ≈71,
+/// column through buf_w≈70 and only splits to two (two drains, robust) at ≈71,
 /// and the discrete grid's nearest points either side are 64 and 80.
 const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W..=76;
 
@@ -1354,7 +1354,7 @@ fn every_meeting_slot_sits_in_its_room() {
 
 /// Variant internals are private, so the shapes are compared observationally.
 /// The signature needs `cubicle_band.x`: Senior differs from Standard, and
-/// Lounge from `OpenPlan`, ONLY by the left-column percent — room presence alone
+/// Lounge from OpenPlan, ONLY by the left-column percent — room presence alone
 /// collapses the 5 variants to 3 shapes.
 #[test]
 fn the_sweep_reaches_every_floor_variant() {
