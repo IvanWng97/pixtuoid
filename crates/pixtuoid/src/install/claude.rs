@@ -291,7 +291,7 @@ pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef, assemble};
     let Ok(doc) = serde_json::from_str::<Value>(content) else {
-        return SchemaParse::broken("settings.json no longer parses as JSON");
+        return SchemaParse::broken("the plugin's hooks.json no longer parses as JSON");
     };
     let hooks = doc.get("hooks").and_then(|h| h.as_object());
     let mut missing = Vec::new();

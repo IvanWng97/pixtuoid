@@ -102,14 +102,14 @@ crossterm          = "0.29"
 unicode-width      = "0.2"
 clap               = { version = "4", features = ["derive"] }
 palette            = { version = "0.7", default-features = false, features = ["std"] }
-# Dev-only: every test that sets or unsets an env var goes through it, behind
-# one process-wide lock.
-temp-env           = "0.3"
 chrono             = { version = "0.4", default-features = false }
 image              = { version = "0.25", default-features = false, features = ["png"] }
+libc               = "0.2"
+windows-sys        = "0.61"
 criterion          = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
 insta              = "1"
 proptest           = "1"
 tempfile           = "3"
-libc               = "0.2"
-windows-sys        = "0.61"
+# Dev-only: every test that sets or unsets an env var goes through it, behind
+# one process-wide lock.
+temp-env           = "0.3"
