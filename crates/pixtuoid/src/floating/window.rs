@@ -197,10 +197,14 @@ impl FloatingApp {
             return;
         };
         surf.fill_upscaled(office, scale);
-        super::offscreen::paint_labels_into_surface(&mut surf, self.renderer.texts(), scale as i32);
+        super::offscreen::paint_labels_into_surface(
+            &mut surf,
+            self.renderer.badges(),
+            scale as i32,
+        );
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,
-            self.renderer.texts(),
+            self.renderer.signs(),
             scale as i32,
         );
         let budget = super::offscreen::footer_budget(win_w);
