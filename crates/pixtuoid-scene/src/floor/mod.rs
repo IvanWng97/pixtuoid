@@ -540,6 +540,8 @@ pub struct FloorSession {
     /// The occupancy the last `render` observed, so a painter reads the SAME
     /// frame's occupancy it just painted.
     last_occupied: std::collections::HashSet<usize>,
+    /// What of the last `render`'s frame flashes.
+    last_flash: crate::flash::FlashPhase,
 }
 
 impl FloorSession {
@@ -551,7 +553,14 @@ impl FloorSession {
             office: PerOffice::default(),
             last_layout: None,
             last_occupied: std::collections::HashSet::new(),
+            last_flash: crate::flash::FlashPhase::default(),
         }
+    }
+
+    /// What of the last [`render`](Self::render)'s frame flashes; nothing
+    /// before the first, or when it could not lay out.
+    pub fn flash(&self) -> crate::flash::FlashPhase {
+        self.last_flash
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves of the
@@ -580,11 +589,13 @@ impl FloorSession {
                 // REPLACE, never extend: the cue tracker fires on edges, so an
                 // accumulating set would re-report stale waypoints forever.
                 self.last_occupied = frame.occupied_waypoints;
+                self.last_flash = frame.flash;
                 Some(frame.layout)
             }
             None => {
                 self.last_layout = None;
                 self.last_occupied.clear();
+                self.last_flash = crate::flash::FlashPhase::default();
                 None
             }
         }
@@ -866,6 +877,8 @@ pub(crate) struct NeonState {
     last_tick: Option<SystemTime>,
     /// The loop time the last tick read, which the stutter steps by.
     last_beat_ms: Option<u64>,
+    /// Whether the last tick's light was a stutter's flash.
+    stutter: bool,
 }
 
 #[derive(Debug)]
@@ -1008,11 +1021,17 @@ impl NeonState {
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
         let drawable = step_ms.is_some_and(|step| step <= Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(timing.beat) {
+        self.stutter = current == NeonLevels::EMPTY && drawable && Self::stutter_flash(timing.beat);
+        if self.stutter {
             NeonLevels::FLASH
         } else {
             current
         }
+    }
+
+    /// Whether the last [`tick`](Self::tick)'s light was a stutter's flash.
+    pub(crate) fn stutters(&self) -> bool {
+        self.stutter
     }
 }
 
