@@ -242,9 +242,24 @@ ICONS = {
             ". . . . . . . . . .",
         ]
     },
-    # the OpenClaw gateway mascot, straight from the pack, so the icon IS the
-    # lobster as the office renders it
-    "lobster": {"sprite": "lobster_rest_0.sprite"},
+    # the OpenClaw gateway mascot, front-on: the pack's 1x top-down read is one
+    # solid mass at icon size
+    "lobster": {
+        "grid": [
+            ". . . . . a . . a . . . . .",
+            ". . . . . a . . a . . . . .",
+            ". A A . . . a a . . . A A .",
+            ". A A A . N o o N . A A A .",
+            ". A A A o e o o e o A A A .",
+            ". . N A . o Q Q o . A N . .",
+            ". . . N N o Q Q o N N . . .",
+            ". . . . . o o o o . . . . .",
+            ". . . N . N o o N . N . . .",
+            ". . . . . . o o . . . . . .",
+            ". . . . . o N N o . . . . .",
+            ". . . . o N o o N o . . . .",
+        ]
+    },
     # ambient atmosphere: day/night + weather + themes (NOT audio — that's the
     # lofi row). The cloud is fully grey-OUTLINED, not base-edged, or its white
     # body washes out on the light theme's cream.
