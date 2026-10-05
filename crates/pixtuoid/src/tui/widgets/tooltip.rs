@@ -109,7 +109,7 @@ pub(crate) fn paint_text_runs(
         if let Some(r) = clip_widget_rect(
             Rect {
                 x: scene_rect.x + at.x,
-                y: scene_rect.y + at.y / 2,
+                y: scene_rect.y + at.y / pixtuoid_scene::layout::CELL_ROWS,
                 width: at.width,
                 height: 1,
             },
@@ -805,7 +805,7 @@ mod tests {
         };
         let bubble = super::TextRun {
             at: Point {
-                y: speaker.at.y - 4,
+                y: speaker.at.y - 2 * pixtuoid_scene::layout::CELL_ROWS,
                 ..speaker.at
             },
             align: pixtuoid_scene::display::Align::Over,
