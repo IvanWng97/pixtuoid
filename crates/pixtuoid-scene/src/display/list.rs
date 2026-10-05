@@ -155,7 +155,7 @@ impl Piece {
             PieceKind::Character { figure, body, .. } => {
                 (*body, super::HoverTarget::Agent(figure.key.frame.agent_id))
             }
-            PieceKind::Creature { who, .. } => (self.span, who.clone()),
+            PieceKind::Creature { who, .. } => (self.span, who.clone()?),
             _ => return None,
         };
         Some(super::Hover {
@@ -489,7 +489,8 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
         degraded: bool,
-        who: super::HoverTarget,
+        /// `None`: it hovers as nothing ([`MascotPlacement::on_roster`](crate::sim::MascotPlacement::on_roster)).
+        who: Option<super::HoverTarget>,
     },
     Character {
         figure: Figure,
