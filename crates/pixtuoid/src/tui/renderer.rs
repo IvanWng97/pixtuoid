@@ -23,10 +23,9 @@ use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
-    paint_badges, paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel,
-    paint_dashboard, paint_footer, paint_furniture_tooltip, paint_help_overlay,
-    paint_mascot_tooltip, paint_pet_tooltip, paint_text_runs, paint_theme_picker,
-    paint_version_popup, paint_welcome,
+    paint_badges, paint_coffee_tooltip, paint_connection_panel, paint_dashboard, paint_footer,
+    paint_furniture_tooltip, paint_help_overlay, paint_mascot_tooltip, paint_pet_tooltip,
+    paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
 };
 
 pub use pixtuoid_scene::pet::PetState;
@@ -395,9 +394,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let Some(ClassicDrawn {
         pixels,
         badges,
+        bubbles,
         signs,
         hovers,
-        bubbles: chitchat_bubbles,
     }) = ctx.floor.raster.classic_drawn()
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
@@ -428,7 +427,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // Badges first, then a bubble over them, then the signs, which a
         // bubble must not cover.
         paint_badges(f, badges, actual_scene, hovered);
-        paint_chitchat_bubbles(f, chitchat_bubbles, badges, actual_scene, theme);
+        paint_text_runs(f, bubbles, actual_scene);
         paint_text_runs(f, signs, actual_scene);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,

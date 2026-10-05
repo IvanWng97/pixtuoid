@@ -9,7 +9,6 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::DaemonState;
 
-use crate::chitchat::ChitchatBubble;
 use crate::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use crate::display::Hovers;
 use crate::floor::{FloorInputs, OfficeStores, PerFloor, step_floor};
@@ -105,8 +104,6 @@ struct Classic {
     hits: Drawn,
     /// The last frame's wall board lines and floor indicator.
     signs: Vec<crate::display::TextRun>,
-    /// The last frame's speech bubbles, which only the classic sets as text.
-    bubbles: Vec<ChitchatBubble>,
 }
 
 /// What the last classic frame drew besides its pixels, for a painter that
@@ -117,12 +114,13 @@ pub struct ClassicDrawn<'a> {
     pub pixels: &'a mut RgbBuffer,
     /// Each drawn agent's badge, in paint order.
     pub badges: &'a [crate::display::Badge],
-    /// The wall board's lines and the floor indicator.
+    /// Each chitchat bubble, hung over its speaker's badge.
+    pub bubbles: &'a [crate::display::TextRun],
+    /// The wall board's lines and the floor indicator, over every badge and
+    /// bubble.
     pub signs: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
-    /// Active speech bubbles.
-    pub bubbles: &'a [ChitchatBubble],
 }
 
 impl Raster {
@@ -142,7 +140,6 @@ impl Raster {
             caches: ClassicCaches::new(),
             hits: Drawn::default(),
             signs: Vec::new(),
-            bubbles: Vec::new(),
         })
     }
 
@@ -155,9 +152,9 @@ impl Raster {
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
             badges: &classic.hits.badges,
+            bubbles: &classic.hits.bubbles,
             signs: &classic.signs,
             hovers: &classic.hits.hovers,
-            bubbles: &classic.bubbles,
         })
     }
 
@@ -248,7 +245,7 @@ pub fn render<'r>(
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
         return None;
     }
-    let Some(mut stepped) = step_floor(ctx, office.coffee, office.chitchat, world, size) else {
+    let Some(stepped) = step_floor(ctx, office.coffee, office.chitchat, world, size) else {
         if look == Look::Classic {
             let classic = raster.classic();
             classic
@@ -256,7 +253,6 @@ pub fn render<'r>(
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
             classic.hits = Drawn::default();
             classic.signs.clear();
-            classic.bubbles.clear();
             raster.shown = Some(look);
         }
         return None;
@@ -297,7 +293,6 @@ pub fn render<'r>(
                 world.floor.floor_idx + 1,
                 theme,
             ));
-            classic.bubbles = std::mem::take(&mut stepped.frame.chitchat_bubbles);
             (&classic.buf, Dirty::All)
         }
         Look::Cutaway { scale } => {

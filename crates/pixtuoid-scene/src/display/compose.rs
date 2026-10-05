@@ -11,7 +11,7 @@ use super::{
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-use crate::display::text::{Align, LABEL_GAP, TextRun};
+use crate::display::text::{Align, LABEL_GAP, TextRole, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
@@ -195,6 +195,32 @@ pub(crate) fn compose_at<'a>(
         theme,
         scale,
     }
+}
+
+/// Each chitchat bubble over its speaker's badge, among the badges `order`
+/// already holds.
+fn push_bubbles(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let pen = Pen::for_pack(office.scale, office.pack);
+    let bubbles: Vec<_> = frame
+        .chitchat_bubbles
+        .iter()
+        .filter_map(|bubble| {
+            let badge_at = order.iter().find_map(|(_, kind)| match kind {
+                PieceKind::Text { run } if run.role == TextRole::Badge(bubble.speaker) => {
+                    Some(run.at)
+                }
+                _ => None,
+            })?;
+            Some(TextRun::bubble(bubble, badge_at, office.theme))
+        })
+        .map(|run| {
+            (
+                topmost_span(run_rect(&run, pen), pen),
+                PieceKind::Text { run },
+            )
+        })
+        .collect();
+    order.extend(bubbles);
 }
 
 /// The pet and the gateway mascots, each a figure sorted on its feet's row
@@ -510,6 +536,7 @@ fn collect_pieces(
         clouds,
     );
     let carried = push_characters(frame, office, moment.timing.now, &mut order);
+    push_bubbles(frame, office, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
