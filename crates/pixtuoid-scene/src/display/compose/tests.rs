@@ -925,6 +925,7 @@ pub(crate) fn empty_frame(layout: &SceneLayout) -> SimFrame {
         characters: Vec::new(),
         indoor_scale: 1.0,
         neon: crate::floor::NeonLevels::CALM,
+        neon_stutter: false,
         chitchat_bubbles: Vec::new(),
         new_coffee_carriers: Vec::new(),
         occupied_waypoints: Default::default(),

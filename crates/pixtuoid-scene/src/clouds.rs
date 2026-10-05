@@ -774,7 +774,7 @@ fn dequantize(k: u8, steps: f32) -> f32 {
 }
 
 /// The office's mass rasters, the most recently used first and at most
-/// [`CloudCache::CAPACITY`] of them: drawing a mass's bands is most of a
+/// `CloudCache::CAPACITY` of them: drawing a mass's bands is most of a
 /// cloudy frame's cost, and a drifting mass's bands don't change.
 #[derive(Debug, Default)]
 pub struct CloudCache {

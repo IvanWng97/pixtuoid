@@ -652,7 +652,7 @@ impl StrikePhase {
         }
     }
 }
-/// How long one strike's [`lightning_envelope`] window lasts.
+/// How long one strike's [`STRIKE`] phases last together.
 const STRIKE_MS: u64 = STRIKE.len() as u64 * STRIKE_PHASE_MS;
 /// The least dark time between one strike's end and the next's start, so two
 /// strikes never put more than three flashes in a second.

@@ -66,6 +66,8 @@ pub struct Rendered<'r> {
     pub layout: Arc<SceneLayout>,
     /// Waypoints with an occupant: the appliance audio cues' feed.
     pub occupied_waypoints: HashSet<usize>,
+    /// What of the frame flashes, for a painter's hold.
+    pub flash: crate::flash::FlashPhase,
 }
 
 /// The office's raster state, shared by every floor and both looks: the
@@ -268,24 +270,23 @@ pub fn render<'r>(
         world.floor.motion,
         world.now,
     );
-    let (pixels, dirty) = match look {
+    let (pixels, dirty, flash) = match look {
         Look::Classic => {
             let classic = raster.classic();
             classic
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
-            classic.hits = paint_frame(
-                &mut PaintCtx::classic(
-                    world,
-                    &stepped.layout,
-                    theme,
-                    (&mut classic.caches, &mut office.raster.clouds),
-                    &mut classic.buf,
-                    &ctx.walks,
-                    debug_walkable,
-                ),
-                &stepped.frame,
+            let mut paint = PaintCtx::classic(
+                world,
+                &stepped.layout,
+                theme,
+                (&mut classic.caches, &mut office.raster.clouds),
+                &mut classic.buf,
+                &ctx.walks,
+                debug_walkable,
             );
+            let flash = paint.flash(&stepped.frame);
+            classic.hits = paint_frame(&mut paint, &stepped.frame);
             classic.signs.clear();
             classic.signs.extend(board.runs(theme));
             classic.signs.push(crate::display::TextRun::indicator(
@@ -293,13 +294,13 @@ pub fn render<'r>(
                 world.floor.floor_idx + 1,
                 theme,
             ));
-            (&classic.buf, Dirty::All)
+            (&classic.buf, Dirty::All, flash)
         }
         Look::Cutaway { scale } => {
             let canvas = raster
                 .cutaway
                 .get_or_insert_with(|| CutawayCanvas::new(Arc::clone(&raster.pack)));
-            let CanvasFrame { buf, dirty } = canvas.frame(
+            let CanvasFrame { buf, dirty, flash } = canvas.frame(
                 &stepped,
                 theme,
                 scale,
@@ -310,7 +311,7 @@ pub fn render<'r>(
                 },
                 (&mut office.raster.cutaway, &mut office.raster.clouds),
             );
-            (buf, if switched { Dirty::All } else { dirty })
+            (buf, if switched { Dirty::All } else { dirty }, flash)
         }
     };
     Some(Rendered {
@@ -318,6 +319,7 @@ pub fn render<'r>(
         dirty,
         layout: stepped.layout,
         occupied_waypoints: stepped.frame.occupied_waypoints,
+        flash,
     })
 }
 

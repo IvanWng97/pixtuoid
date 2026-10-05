@@ -35,6 +35,8 @@ pub struct CanvasFrame<'a> {
     pub buf: &'a RgbBuffer,
     /// Where it may differ from the canvas's previous frame.
     pub dirty: Dirty,
+    /// What of it flashes.
+    pub flash: crate::flash::FlashPhase,
 }
 
 /// Where a frame's pixels may differ from the frame before.
@@ -185,6 +187,7 @@ impl CutawayCanvas {
         CanvasFrame {
             buf: &self.buf,
             dirty,
+            flash: list.flash_phase(),
         }
     }
 
