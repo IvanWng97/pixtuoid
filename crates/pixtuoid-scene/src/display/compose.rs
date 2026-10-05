@@ -140,7 +140,7 @@ pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
-    clouds: Option<&mut crate::clouds::CloudCache>,
+    clouds: &mut crate::clouds::CloudCache,
 ) -> DisplayList<'a> {
     let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
@@ -161,7 +161,7 @@ pub(crate) fn compose_at<'a>(
     moment: &Moment,
     floor: crate::floor::FloorMeta,
     board: &crate::board::BoardModel,
-    clouds: Option<&mut crate::clouds::CloudCache>,
+    clouds: &mut crate::clouds::CloudCache,
 ) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
@@ -493,7 +493,7 @@ fn collect_pieces(
     frame: &SimFrame,
     office: Office<'_>,
     moment: &Moment,
-    clouds: Option<&mut crate::clouds::CloudCache>,
+    clouds: &mut crate::clouds::CloudCache,
 ) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let inputs = ComposeInputs {
@@ -1340,7 +1340,7 @@ pub(crate) fn push_windows(
     moment: &Moment,
     weather: &GlassWeather,
     order: &mut Vec<(Span, PieceKind)>,
-    clouds: Option<&mut crate::clouds::CloudCache>,
+    clouds: &mut crate::clouds::CloudCache,
 ) {
     let Office {
         layout,

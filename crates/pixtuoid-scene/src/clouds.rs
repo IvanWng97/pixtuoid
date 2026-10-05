@@ -629,6 +629,18 @@ const STORM_BASE: Rgb = Rgb {
     g: 20,
     b: 30,
 };
+/// How far a storm's shade sinks toward [`STORM_BASE`].
+const STORM_BASE_SINK: f32 = 0.6;
+/// A deck at least this heavy is a heavy one: its far masses fill in to their
+/// body, and a night's light under it is diffuse.
+const HEAVY_DECK: f32 = 0.6;
+/// The heaviness past which a day's light under the deck is diffuse.
+const DIFFUSE_DAY: f32 = 0.35;
+/// The share of night past which the light is night's, and of day short of
+/// which it is no longer day's.
+const LIGHT_SPLIT: f32 = 0.5;
+/// How much of a storm's precipitation hangs as virga, against rain's whole.
+const STORM_VIRGA: f32 = 0.8;
 /// The city's warm light on a night base: one warm-dark step, no more.
 const CITY_GLOW: Rgb = Rgb {
     r: 104,
@@ -822,13 +834,13 @@ pub(crate) struct Clouds {
 impl Clouds {
     /// The clouds of `moment` over a window run `span` units wide and glass
     /// `glass_h` tall, drawn on a grid `d` to the unit; `cache` keeps the
-    /// masses' bands across frames, `None` draws them afresh.
+    /// masses' bands across frames, and an empty one draws them afresh.
     pub(crate) fn of(
         moment: &Moment,
         (span, glass_h): (u16, u16),
         d: u16,
         panes: &[Range<u16>],
-        mut cache: Option<&mut CloudCache>,
+        cache: &mut CloudCache,
     ) -> Self {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
         let d = d.max(1);
@@ -857,7 +869,7 @@ impl Clouds {
                 let k = heaviness(w);
                 let mut t = [0, 1, 2].map(|i| lighting.tones[i].mix(STORM_GREY[i], k));
                 if w == Weather::Storm {
-                    t[2] = t[2].mix(STORM_BASE, 0.6);
+                    t[2] = t[2].mix(STORM_BASE, STORM_BASE_SINK);
                 }
                 (w, t)
             })
@@ -868,14 +880,21 @@ impl Clouds {
             d,
             lighting,
             tones,
-            diffuse: heavy >= if night > 0.5 { 0.6 } else { 0.35 } && day < 0.5,
+            diffuse: heavy
+                >= if night > LIGHT_SPLIT {
+                    HEAVY_DECK
+                } else {
+                    DIFFUSE_DAY
+                }
+                && day < LIGHT_SPLIT,
             heaviness: heavy,
             storm: dequantize(light.storm, LIGHT_STEPS),
             night,
             rain: weather.share(Element::Precipitation, Weather::Rain)
-                + 0.8 * weather.share(Element::Precipitation, Weather::Storm),
+                + STORM_VIRGA * weather.share(Element::Precipitation, Weather::Storm),
             strike: None,
         };
+        let mut drawn = Vec::new();
         for (w, share) in weather.parts(Element::Cloud) {
             let share = quantize(ease(share), SHARE_STEPS);
             for m in deck(w, span_f, glass_h_f) {
@@ -890,27 +909,13 @@ impl Clouds {
                     light,
                 };
                 let draw = || clouds.draw(&mass, glass_h_f);
-                let raster = match cache.as_deref_mut() {
-                    Some(cache) => cache.get_or_draw(key, draw),
-                    None => std::sync::Arc::new(draw()),
-                };
-                clouds.masses.push(mass);
-                clouds.rasters.push(raster);
+                let raster = cache.get_or_draw(key, draw);
+                drawn.push((mass, raster));
             }
         }
-        // far to near: the nearest wins
-        let mut order: Vec<usize> = (0..clouds.masses.len()).collect();
-        order.sort_by_key(|&i| clouds.masses[i].layer);
-        let (masses, rasters) = order
-            .iter()
-            .map(|&i| {
-                (
-                    clouds.masses[i].clone(),
-                    std::sync::Arc::clone(&clouds.rasters[i]),
-                )
-            })
-            .unzip();
-        (clouds.masses, clouds.rasters) = (masses, rasters);
+        // far to near, each mass beside its own bands: the nearest wins
+        drawn.sort_by_key(|(m, _)| m.layer);
+        (clouds.masses, clouds.rasters) = drawn.into_iter().unzip();
         let flash = moment.sky.flash();
         if flash > 0.0 {
             let beat = moment.timing.beat;
@@ -958,7 +963,7 @@ impl Clouds {
                 solid[i].then(|| {
                     let (x, y) = unit(i);
                     let band = self.band(m, x, y);
-                    if m.layer == Layer::Far && self.heaviness >= 0.6 {
+                    if m.layer == Layer::Far && self.heaviness >= HEAVY_DECK {
                         band.max(Band::Body)
                     } else {
                         band
@@ -1585,7 +1590,7 @@ mod tests {
     fn clouds_at(now: std::time::SystemTime, weather: Weather, flash: f32) -> Clouds {
         let sky = Sky::at_with(now, weather).with_flash(flash);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-        Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None)
+        Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default())
     }
 
     /// A transition's two fullest decks, on the classic's grid and the
@@ -1611,7 +1616,7 @@ mod tests {
             let now = crate::localclock::at_hour(12) + Duration::from_millis(ms);
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None).masses
+            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).masses
         };
         let beat = crate::anim::FULL_TICK_MS;
         let first = at(0);
@@ -1635,25 +1640,43 @@ mod tests {
         }
     }
 
-    /// A drifting mass wraps only out of sight: it has left the run's east end
-    /// whole, and comes back round wholly west of its west end.
+    /// A drifting mass wraps only out of sight, in every weather's real deck:
+    /// it has left the run's east end whole, and comes back round wholly west
+    /// of its west end.
     #[test]
     fn a_mass_wraps_only_out_of_sight() {
-        let (span, widest) = (f32::from(SPAN), 26.0);
-        for width in [5.0, 16.0, widest] {
-            let mut prev = drifted_west(10.0, 0.0, span, widest);
-            for step in 1..20_000 {
-                let west = drifted_west(10.0, f64::from(step) * 0.05, span, widest);
-                if west < prev {
-                    assert!(prev >= span, "wrapped at {prev}, still on the run");
-                    assert!(
-                        west + width <= 0.0,
-                        "came back at {west}, already on the run"
-                    );
+        let span = f32::from(SPAN);
+        let mut wraps = 0;
+        // a sample's step, in seconds: a mass comes back at most the drift of
+        // one step onto the run, sliding in from its west end
+        const STEP: f64 = 0.5;
+        for weather in Weather::ALL {
+            for m in deck(weather, span, f32::from(GLASS_H)) {
+                let (west, east) = m.reach();
+                let slide = m.layer.pace() * STEP as f32;
+                let mut prev = m.drift_at(0.0, span);
+                for step in 1..4_000 {
+                    let off = m.drift_at(f64::from(step) * STEP, span);
+                    if off < prev {
+                        wraps += 1;
+                        assert!(
+                            west + prev >= span,
+                            "{weather:?} mass {}: wrapped with its west at {}, still on the run",
+                            m.id,
+                            west + prev
+                        );
+                        assert!(
+                            east + off <= slide,
+                            "{weather:?} mass {}: came back with its east at {}, already on the run",
+                            m.id,
+                            east + off
+                        );
+                    }
+                    prev = off;
                 }
-                prev = west;
             }
         }
+        assert!(wraps > 0, "the sample must wrap");
     }
 
     /// A mass grows from its base: the base stays put, and it fills in as its
@@ -1699,7 +1722,7 @@ mod tests {
                 let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-                let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, None);
+                let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, &mut CloudCache::default());
                 let Some(&(x, y)) = c
                     .strike
                     .as_ref()
@@ -1741,7 +1764,7 @@ mod tests {
                 let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-                Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None).strike
+                Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).strike
             };
             let first = at(0);
             strikes += usize::from(first.is_some());
@@ -1944,7 +1967,7 @@ mod tests {
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment =
                 Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Still.timing(now));
-            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None).masses
+            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).masses
         };
         assert_eq!(at(0), at(600_000));
     }

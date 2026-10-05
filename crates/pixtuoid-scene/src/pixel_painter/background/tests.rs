@@ -18,7 +18,7 @@ fn paint_band(buf: &mut RgbBuffer, top_wall_h: u16, moment: &Moment, theme: &cra
         moment,
         &test_default_pack(),
         theme,
-        None,
+        &mut crate::clouds::CloudCache::default(),
     );
 }
 

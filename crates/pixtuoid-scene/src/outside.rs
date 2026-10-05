@@ -249,7 +249,7 @@ pub(crate) struct Outside {
 impl Outside {
     /// The outside at `moment` of `wall` under `weather`, at `density`, a
     /// strike landing only on the glass of its bays; `clouds` keeps the
-    /// clouds' masses across frames, `None` draws them afresh.
+    /// clouds' masses across frames, and an empty one draws them afresh.
     pub(crate) fn of(
         moment: &Moment,
         pack: &Pack,
@@ -257,7 +257,7 @@ impl Outside {
         wall: Wall,
         density: Density,
         weather: GlassWeather,
-        clouds: Option<&mut crate::clouds::CloudCache>,
+        clouds: &mut crate::clouds::CloudCache,
     ) -> Self {
         let Wall {
             size: (buf_w, band_h),
@@ -450,7 +450,7 @@ pub(crate) mod tests {
                     },
                     d,
                     GlassWeather::of(&moment),
-                    None,
+                    &mut crate::clouds::CloudCache::default(),
                 );
                 let rows = window_rows(wall.1);
                 for x in [0, crate::layout::WINDOW_W, 2 * crate::layout::WINDOW_W] {
@@ -486,7 +486,7 @@ pub(crate) mod tests {
         let pixels = |moment: &Moment,
                       wall: (u16, u16),
                       d: Density,
-                      cache: Option<&mut crate::clouds::CloudCache>| {
+                      cache: &mut crate::clouds::CloudCache| {
             let outside = Outside::of(
                 moment,
                 &pack,
@@ -539,8 +539,8 @@ pub(crate) mod tests {
                 let moment = moment(weather, now);
                 for d in [Density::ONE, pack.max_density_variant()] {
                     assert_eq!(
-                        pixels(&moment, wall, d, Some(&mut cache)),
-                        pixels(&moment, wall, d, None),
+                        pixels(&moment, wall, d, &mut cache),
+                        pixels(&moment, wall, d, &mut crate::clouds::CloudCache::default()),
                         "{weather:?} at 17h+{minutes}m, {d:?}"
                     );
                 }
@@ -596,30 +596,20 @@ pub(crate) mod tests {
         ];
         for (input, (a, wall_a, d_a), (b, wall_b, d_b)) in &pairs {
             let mut cache = crate::clouds::CloudCache::default();
-            let _ = pixels(a, *wall_a, *d_a, Some(&mut cache));
+            let _ = pixels(a, *wall_a, *d_a, &mut cache);
             assert_eq!(
-                pixels(b, *wall_b, *d_b, Some(&mut cache)),
-                pixels(b, *wall_b, *d_b, None),
+                pixels(b, *wall_b, *d_b, &mut cache),
+                pixels(b, *wall_b, *d_b, &mut crate::clouds::CloudCache::default()),
                 "a frame apart in its {input} drew the other's clouds"
             );
         }
 
         let mut cache = crate::clouds::CloudCache::default();
-        let _ = pixels(
-            &moment(overcast, noon),
-            wall,
-            Density::ONE,
-            Some(&mut cache),
-        );
+        let _ = pixels(&moment(overcast, noon), wall, Density::ONE, &mut cache);
         let drawn = cache.len();
         assert!(drawn > 0, "an overcast deck draws its masses");
         let later = noon + std::time::Duration::from_secs(60);
-        let _ = pixels(
-            &moment(overcast, later),
-            wall,
-            Density::ONE,
-            Some(&mut cache),
-        );
+        let _ = pixels(&moment(overcast, later), wall, Density::ONE, &mut cache);
         assert_eq!(cache.len(), drawn, "a drift redrew a mass");
     }
 
@@ -648,7 +638,7 @@ pub(crate) mod tests {
             },
             Density::ONE,
             GlassWeather::of(&moment),
-            None,
+            &mut crate::clouds::CloudCache::default(),
         );
         let mut pane = |x: u16, run_x0: u16| {
             outside.run_x0 = run_x0;
@@ -702,7 +692,7 @@ pub(crate) mod tests {
                     d,
                     // a clear pane's glass: no veil or rain over the bolt
                     GlassWeather::of(&at(Weather::Clear)),
-                    None,
+                    &mut crate::clouds::CloudCache::default(),
                 );
                 assert!(outside.run_x0 > 0, "a run off the wall's west edge");
                 let Some((x, y)) = outside.clouds.bolt_top() else {

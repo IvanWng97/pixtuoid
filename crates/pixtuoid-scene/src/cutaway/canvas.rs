@@ -137,7 +137,7 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let list = compose(&stepped.frame, office, showing, Some(clouds));
+        let list = compose(&stepped.frame, office, showing, clouds);
         let epoch = Epoch {
             layout: Arc::clone(layout),
             theme,
@@ -354,7 +354,7 @@ mod tests {
                 frame,
                 office,
                 crate::display::compose::tests::showing(floor, *now),
-                None,
+                &mut crate::clouds::CloudCache::default(),
             );
             let spans: Vec<(Span, u64)> = list
                 .pieces()
@@ -599,7 +599,7 @@ mod tests {
                 frame,
                 office,
                 crate::display::compose::tests::showing(clear_ground(), Self::now()),
-                None,
+                &mut crate::clouds::CloudCache::default(),
             );
             list.pieces()
                 .iter()
@@ -783,7 +783,7 @@ mod tests {
                     &both,
                     office,
                     crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
-                    None,
+                    &mut crate::clouds::CloudCache::default(),
                 );
                 list.pieces().iter().find(|p| {
                     matches!(&p.kind, crate::display::PieceKind::Text { run } if run.role == crate::display::TextRole::Badge(b.agent_id))
@@ -833,7 +833,7 @@ mod tests {
                 frame,
                 office,
                 crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
-                None,
+                &mut crate::clouds::CloudCache::default(),
             );
             list.pieces()
                 .iter()
@@ -916,15 +916,20 @@ mod tests {
                 theme: normal(),
                 scale,
             };
-            let drawn = compose(&stepped.frame, office, showing, None)
-                .texts()
-                .find(|run| run.role == TextRole::Star)
-                .map(|run| {
-                    crate::display::compose::run_box(
-                        run,
-                        crate::display::pen::Pen::for_pack(scale, &pack),
-                    )
-                });
+            let drawn = compose(
+                &stepped.frame,
+                office,
+                showing,
+                &mut crate::clouds::CloudCache::default(),
+            )
+            .texts()
+            .find(|run| run.role == TextRole::Star)
+            .map(|run| {
+                crate::display::compose::run_box(
+                    run,
+                    crate::display::pen::Pen::for_pack(scale, &pack),
+                )
+            });
             assert_eq!(drawn.is_some(), s == d, "at scale {s} the star is drawn");
             assert_eq!(canvas.star(), drawn, "at scale {s}");
         }
@@ -955,15 +960,20 @@ mod tests {
                 theme: normal(),
                 scale: h.scale,
             };
-            compose(seated, office, showing, None)
-                .pieces()
-                .iter()
-                .filter(|p| {
-                    matches!(&p.kind, PieceKind::Text { run }
+            compose(
+                seated,
+                office,
+                showing,
+                &mut crate::clouds::CloudCache::default(),
+            )
+            .pieces()
+            .iter()
+            .filter(|p| {
+                matches!(&p.kind, PieceKind::Text { run }
                         if matches!(run.role, TextRole::Brand | TextRole::Star | TextRole::Board))
-                })
-                .map(|p| (p.span, p.fingerprint))
-                .collect()
+            })
+            .map(|p| (p.span, p.fingerprint))
+            .collect()
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         h.show(&mut canvas, seated);

@@ -154,7 +154,7 @@ pub(super) fn paint_windows(
     moment: &Moment,
     pack: &Pack,
     theme: &Theme,
-    clouds: Option<&mut crate::clouds::CloudCache>,
+    clouds: &mut crate::clouds::CloudCache,
 ) {
     let wall = crate::outside::Wall {
         size: (buf.width(), top_wall_h),
