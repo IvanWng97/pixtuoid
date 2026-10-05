@@ -152,14 +152,18 @@ pub(crate) struct MascotPlacement {
     /// Its gateway's backend fails every run ([`GatewayCard::degraded`]), so
     /// it greys.
     pub(crate) degraded: bool,
+    /// Its gateway is in the roster; one walking out past that has no
+    /// [`GatewayCard`], so it hovers as nothing.
+    pub(crate) on_roster: bool,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
 }
 
 impl MascotPlacement {
-    /// Who its hover names.
-    pub(crate) fn target(&self) -> crate::display::HoverTarget {
-        crate::display::HoverTarget::Mascot(self.key.clone())
+    /// Who its hover names, while its gateway is on the roster.
+    pub(crate) fn target(&self) -> Option<crate::display::HoverTarget> {
+        self.on_roster
+            .then(|| crate::display::HoverTarget::Mascot(self.key.clone()))
     }
 }
 
@@ -545,6 +549,8 @@ struct DrawnMascot {
     stance: Stance,
     /// [`GatewayCard::degraded`]; false once its gateway left the roster.
     degraded: bool,
+    /// [`MascotPlacement::on_roster`].
+    on_roster: bool,
     /// Its gateway's runs in flight.
     runs: u32,
 }
@@ -603,6 +609,7 @@ fn mascot_placements(
         if let Some(stance) = walk.step(roam, ground, timing) {
             drawn.push(DrawnMascot {
                 degraded: GatewayCard::of(scene, &key).is_some_and(|card| card.degraded),
+                on_roster: true,
                 key,
                 stance,
                 runs: presence.in_flight_runs.len() as u32,
@@ -639,6 +646,7 @@ fn mascot_placements(
                 key,
                 stance,
                 degraded: false,
+                on_roster: false,
                 runs: 0,
             });
         }
@@ -651,6 +659,7 @@ fn mascot_placements(
                  key,
                  stance: Stance { at, walking },
                  degraded,
+                 on_roster,
                  runs,
              }| {
                 let def = gateway_mascot_def(key.source())?;
@@ -674,6 +683,7 @@ fn mascot_placements(
                     frame_idx,
                     key,
                     degraded,
+                    on_roster,
                     // The busy tell keys on in-flight RUNS, not the (persistent,
                     // single-user) session count, which sticks at 1 at rest.
                     effects: if runs > 0 {

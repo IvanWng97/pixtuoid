@@ -1212,11 +1212,17 @@ mod tests {
         let mut walking_out = 0;
         loop {
             ms += PAINT_MS;
-            match lobsters(&office.frame(&gone, None, None, ms))[..] {
+            let f = office.frame(&gone, None, None, ms);
+            match lobsters(&f)[..] {
                 [] => break,
                 [(_, anim)] => assert_eq!(anim, "lobster_walk", "still walking out"),
                 _ => panic!("one gateway, one lobster"),
             }
+            assert_eq!(
+                f.mascots[0].target(),
+                None,
+                "off the roster it has no card, so it hovers as nothing"
+            );
             walking_out += 1;
             assert!(
                 walking_out < 120_000 / PAINT_MS,
@@ -1313,6 +1319,40 @@ mod tests {
             }
         }
         assert_eq!(checked, 64, "the derived window must visit 8x8 sizes");
+    }
+
+    /// A gateway's one `DaemonState` lights exactly its own flag on its card.
+    #[test]
+    fn a_gateways_state_reaches_its_card() {
+        let key = openclaw_key("18789");
+        let running = || std::collections::BTreeMap::from([("run".to_string(), at(0))]);
+        for (liveness, in_flight_runs, busy, degraded) in [
+            (DaemonLiveness::UP, Default::default(), false, false),
+            (DaemonLiveness::UP, running(), true, false),
+            (
+                DaemonLiveness::Up { degraded: true },
+                running(),
+                false,
+                true,
+            ),
+            (DaemonLiveness::Down, running(), false, false),
+        ] {
+            let mut scene = SceneState::uniform(16);
+            scene.insert_daemon(
+                key.source(),
+                key.instance().clone(),
+                DaemonPresence {
+                    liveness,
+                    active_sessions: 0,
+                    last_seen: at(0),
+                    entered_at: at(0),
+                    in_flight_runs,
+                    current_pid: Some(1),
+                },
+            );
+            let card = GatewayCard::of(&scene, &key).expect("a gateway with a mascot");
+            assert_eq!((card.busy, card.degraded), (busy, degraded), "{liveness:?}");
+        }
     }
 
     /// Two gateways first seen together walk in apart: their staggers part
