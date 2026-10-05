@@ -17,3 +17,16 @@ export function conforms(value: unknown, schema: Schema): boolean {
     return false;
   }
 }
+
+/** `out` parsed as rows each conforming to `schema`: the installed binary may be
+ *  any version, and a cast checks nothing at runtime. All or nothing on purpose:
+ *  a row outside the schema, a new `outcome` token included (the wire is
+ *  published, so a new token needs a version handshake), is version skew the
+ *  user fixes by updating, never a partial list. */
+export function rowsOf<T>(out: string, schema: Schema, what: string): T[] {
+  const rows: unknown = JSON.parse(out);
+  if (!Array.isArray(rows) || !rows.every((row) => conforms(row, schema))) {
+    throw new Error(`pixtuoid ${what} printed rows this extension can't read — update pixtuoid or the extension`);
+  }
+  return rows as T[];
+}

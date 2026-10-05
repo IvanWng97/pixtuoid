@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { conforms } from "../src/conforms.ts";
+import { conforms, rowsOf } from "../src/conforms.ts";
 
 const schema = (name) => JSON.parse(readFileSync(new URL(`../contract/${name}.schema.json`, import.meta.url), "utf8"));
 const sourceStatus = schema("source-status");
@@ -41,4 +41,21 @@ test("an outcome row's token is one the schema's enum names", () => {
 test("a ref outside #/$defs fails closed", () => {
   assert.ok(!conforms("x", { $ref: "https://example.com/s.json" }));
   assert.ok(!conforms("x", { $ref: "#/$defs/Missing" }));
+});
+
+test("rowsOf returns conforming rows and throws the skew error on anything else", () => {
+  const source = { id: "codex", display_name: "Codex", connected: true, cli_present: false };
+  assert.deepEqual(rowsOf(JSON.stringify([source]), sourceStatus, "sources --json"), [source]);
+  assert.deepEqual(rowsOf("[]", outcomeRow, "connect --json"), []);
+  const skew = /pixtuoid sources --json printed rows this extension can't read/;
+  assert.throws(() => rowsOf("{}", sourceStatus, "sources --json"), skew);
+  assert.throws(() => rowsOf(JSON.stringify([source, { id: 1 }]), sourceStatus, "sources --json"), skew);
+  assert.throws(() => rowsOf(JSON.stringify([{ id: "codex", outcome: "partial" }]), outcomeRow, "sources --json"), skew);
+});
+
+test("each wire's rows fail the other wire's schema, so a swapped schema throws", () => {
+  const source = { id: "codex", display_name: "Codex", connected: true, cli_present: false };
+  const outcome = { id: "codex", outcome: "connected" };
+  assert.throws(() => rowsOf(JSON.stringify([source]), outcomeRow, "x"));
+  assert.throws(() => rowsOf(JSON.stringify([outcome]), sourceStatus, "x"));
 });

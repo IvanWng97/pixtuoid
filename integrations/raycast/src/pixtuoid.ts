@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 // with `npm run gen:contract`.
 import type { SourceStatus } from "./contract";
 import type { OutcomeRow } from "./contract-outcome";
-import { conforms, type Schema } from "./conforms";
+import { rowsOf } from "./conforms";
 import outcomeRowSchema from "../contract/outcome-row.schema.json";
 import sourceStatusSchema from "../contract/source-status.schema.json";
 
@@ -109,16 +109,6 @@ async function runPixtuoid(args: string[]): Promise<string> {
     }
     throw e;
   }
-}
-
-/** `out` parsed as rows each conforming to `schema`: the installed binary
- *  may be any version, and a cast checks nothing at runtime. */
-function rowsOf<T>(out: string, schema: Schema, what: string): T[] {
-  const rows: unknown = JSON.parse(out);
-  if (!Array.isArray(rows) || !rows.every((row) => conforms(row, schema))) {
-    throw new Error(`pixtuoid ${what} printed rows this extension can't read — update pixtuoid or the extension`);
-  }
-  return rows as T[];
 }
 
 export async function getSources(): Promise<SourceStatus[]> {
