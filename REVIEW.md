@@ -162,7 +162,7 @@ its focused lens alone: the floor is never re-run locally.
 
 | Diff touches… | Paths | Local | The added lens must… |
 |---|---|---|---|
-| Generated art / clips | | local | Extract frames and READ them; census the money shot. |
+| Generated art / clips | | local | Extract frames and READ them; census the money shot. A PR's media diff is the smoke job's `gen-check-diffs` overlays. |
 | Reducer / liveness / sweeps | `crates/pixtuoid-core/src/state/`, `…/source/jsonl/liveness.rs`, `…/source/exit_watch.rs`, `…/source/daemon.rs` | local | Trace the downstream interaction graph (rebind, sweeps, TTLs, cascade, dedup, polarity) and the provenance of every newly keyed signal. |
 | A public rendered artifact | `site/src/`, `integrations/raycast/src/` | local | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455). |
 | An interactive TUI flow | | local | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
