@@ -162,7 +162,7 @@ pub(crate) fn desk_front(pack: &Pack, art: &str) -> Option<&'static str> {
 }
 
 /// Where the 1x desk at `desk` facing `facing` stands the prop its `mark`
-/// names, on the art [`desk_art`] draws there.
+/// names, on the art [`desk_art_name`] names there.
 pub(crate) fn desk_mark(
     pack: &Pack,
     desk: crate::layout::Point,
@@ -184,10 +184,10 @@ pub(crate) fn desk_mark(
 
 /// Where the 1x desk facing `facing` hangs its lamp's bulb from the desk's
 /// point, the rows signed (a bulb may stand above the desk's row): the middle
-/// of its [`DESK_BULB_KEY`] cells on the art [`desk_art`] draws there; `None`
-/// for art that draws no bulb.
+/// of its [`DESK_BULB_KEY`] cells on the art [`desk_art_name`] names there;
+/// `None` for art that draws no bulb.
 pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, i16)> {
-    let name = pack.piece_or_source(desk_sprite_name(facing))?;
+    let name = desk_art_name(pack, facing)?;
     let art = super::densest_frame(pack, name, 0, crate::render_scale::RenderScale::ONE)?;
     let (x, y) = bulb_cell(&art)?;
     // the art's rows from the desk's: its top is `desk_art_top` off the desk
@@ -238,8 +238,9 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
 
 /// The art a desk seating its occupant toward `facing` draws.
 pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&Frame> {
-    pack.animation_or_source(desk_sprite_name(facing))
-        .and_then(|a| a.frames().first())
+    pack.animation(desk_art_name(pack, facing)?)?
+        .frames()
+        .first()
 }
 
 /// The desk task chair's pack animation.
