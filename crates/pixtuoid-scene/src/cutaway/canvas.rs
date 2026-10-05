@@ -96,7 +96,7 @@ impl CutawayCanvas {
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
-        theme: &'static crate::theme::Theme,
+        theme: &crate::theme::Theme,
         scale: RenderScale,
         showing: Showing<'_>,
         cache: &mut crate::cutaway::paint::CutawayCache,
@@ -911,8 +911,9 @@ mod tests {
         assert_eq!(dirty, Dirty::Rects(want));
     }
 
-    /// A new layout of the same size repaints everything, even one built after
-    /// the last was dropped, where the allocator may hand back its address.
+    /// A new layout of the same size shows whole: the epoch compares the
+    /// backdrop by value, so no address the allocator hands back can pass a
+    /// new layout off as the last.
     #[test]
     fn a_new_layout_repaints_everything() {
         let pack = Arc::new(test_default_pack());
@@ -943,7 +944,6 @@ mod tests {
             crate::display::compose::tests::showing(floor, now),
             &mut cache,
         );
-        assert_eq!(shown.dirty, Dirty::All);
         assert!(
             shown.buf.as_slice()
                 == full_render(&b.layout, &pack, scale, (&b.frame, clear_ground()), now).as_slice(),

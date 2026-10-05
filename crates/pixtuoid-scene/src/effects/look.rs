@@ -13,8 +13,8 @@ pub(crate) fn scanline_color(tint: Rgb) -> Rgb {
     tint.mix(WHITE, 0.7)
 }
 
-/// The theme's colours the effects are drawn in, resolved once per frame so a
-/// look reads no theme.
+/// The theme's colours the effects are drawn in, resolved where a look is
+/// built, so drawing it reads no theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Inks {
     pub(crate) sleep_z: Rgb,

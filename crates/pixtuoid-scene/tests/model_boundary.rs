@@ -213,29 +213,29 @@ impl<'e> ModelReads<'e> {
     }
 }
 
-/// Whether `attrs` hold a `#[cfg(...)]` that needs `test`: one naming it
-/// outside a `not(...)`.
+/// Whether `attrs` hold a `#[cfg(...)]` true only under `test`: `test` itself,
+/// an `all(..)` with a test-only arm, or an `any(..)` whose every arm is.
 fn is_test(attrs: &[syn::Attribute]) -> bool {
-    fn needs_test(tokens: proc_macro2::TokenStream) -> bool {
-        use proc_macro2::TokenTree;
-        let trees: Vec<TokenTree> = tokens.into_iter().collect();
-        trees.iter().enumerate().any(|(i, t)| match t {
-            TokenTree::Ident(id) => id == "test",
-            TokenTree::Group(g) => {
-                let negated = i
-                    .checked_sub(1)
-                    .and_then(|j| trees.get(j))
-                    .is_some_and(|p| matches!(p, TokenTree::Ident(id) if id == "not"));
-                !negated && needs_test(g.stream())
+    fn needs_test(meta: &syn::Meta) -> bool {
+        let arms = |list: &syn::MetaList| {
+            list.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            )
+            .map(|arms| arms.into_iter().collect::<Vec<_>>())
+            .unwrap_or_default()
+        };
+        match meta {
+            syn::Meta::Path(path) => path.is_ident("test"),
+            syn::Meta::List(list) if list.path.is_ident("all") => arms(list).iter().any(needs_test),
+            syn::Meta::List(list) if list.path.is_ident("any") => {
+                let arms = arms(list);
+                !arms.is_empty() && arms.iter().all(needs_test)
             }
-            _ => false,
-        })
+            syn::Meta::List(_) | syn::Meta::NameValue(_) => false,
+        }
     }
     attrs.iter().any(|a| {
-        a.path().is_ident("cfg")
-            && a.meta
-                .require_list()
-                .is_ok_and(|l| needs_test(l.tokens.clone()))
+        a.path().is_ident("cfg") && a.parse_args::<syn::Meta>().is_ok_and(|m| needs_test(&m))
     })
 }
 
@@ -296,6 +296,49 @@ impl<'ast> Visit<'ast> for ModelReads<'_> {
         syn::visit::visit_expr_method_call(self, call);
     }
 
+    /// A macro's arguments are tokens, not syntax: a model input named in them,
+    /// or a `.theme`/`.layout` read, counts as if parsed.
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        fn scan(tokens: proc_macro2::TokenStream, found: &mut Vec<String>) {
+            use proc_macro2::TokenTree;
+            let trees: Vec<TokenTree> = tokens.into_iter().collect();
+            for (i, tree) in trees.iter().enumerate() {
+                match tree {
+                    TokenTree::Group(g) => scan(g.stream(), found),
+                    TokenTree::Ident(id) if MODEL_INPUTS.iter().any(|m| id == m) => {
+                        found.push(format!("{id} in a macro"));
+                    }
+                    TokenTree::Ident(id) if id == "theme" || id == "layout" => {
+                        let after_dot = i.checked_sub(1).and_then(|j| trees.get(j)).is_some_and(
+                            |p| matches!(p, TokenTree::Punct(p) if p.as_char() == '.'),
+                        );
+                        let before_path = matches!(
+                            trees.get(i + 1),
+                            Some(TokenTree::Punct(p)) if p.as_char() == ':'
+                        );
+                        if after_dot || (id == "theme" && before_path) {
+                            found.push(format!("{id} in a macro"));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        scan(mac.tokens.clone(), &mut self.found);
+        syn::visit::visit_macro(self, mac);
+    }
+
+    /// A struct pattern that binds a `theme` or `layout` field, as destructuring
+    /// an `Office` does.
+    fn visit_field_pat(&mut self, field: &'ast syn::FieldPat) {
+        if let syn::Member::Named(name) = &field.member
+            && (name == "theme" || name == "layout")
+        {
+            self.found.push(format!("{{ {name} }}"));
+        }
+        syn::visit::visit_field_pat(self, field);
+    }
+
     fn visit_expr_field(&mut self, field: &'ast syn::ExprField) {
         if let syn::Member::Named(name) = &field.member
             && (name == "theme" || name == "layout")
@@ -348,6 +391,11 @@ fn a_model_read_is_named_but_a_test_or_an_entry_is_not() {
         "fn f(o: &O) { let w = o.layout.buf_w; }",
         "impl P { fn g(&self, t: &Theme) {} }",
         "#[cfg(not(test))]\nfn f(t: &Theme) {}",
+        "#[cfg(any(test, feature = \"x\"))]\nfn f(t: &Theme) {}",
+        "fn f(list: &L) { debug_assert!(list.theme().x == 1); }",
+        "fn f(o: &O) { assert_eq!(o.layout.buf_w, 3); }",
+        "fn f() { m!(crate::theme::NORMAL); }",
+        "fn f(o: O) { let Office { theme, .. } = o; }",
     ] {
         assert!(!ModelReads::of(read, &[]).is_empty(), "{read}");
     }
@@ -355,6 +403,8 @@ fn a_model_read_is_named_but_a_test_or_an_entry_is_not() {
         "#[cfg(test)]\nmod tests { use crate::theme::Theme; }",
         "#[cfg(test)]\nfn f(t: &Theme) {}",
         "#[cfg(all(test, feature = \"x\"))]\nfn f(t: &Theme) {}",
+        "#[cfg(any(test, all(test, feature = \"x\")))]\nfn f(t: &Theme) {}",
+        "fn f() { assert!(themes.is_empty(), \"layout of {}\", n); }",
         "fn entry(t: &Theme) {}",
         "impl P { fn entry(&self, l: &SceneLayout) {} }",
         "fn f() { let theme_free = 1; }",
