@@ -583,7 +583,7 @@ fn lead_events(
 
     let mut out: Vec<LeadEvent> = Vec::new();
     let start_pool = chord_tones_in(&bar_chords[0], lo.max(hi.saturating_sub(12)), hi);
-    let mut prev = nearest(&start_pool, (lo + hi) / 2 + 2);
+    let mut prev = nearest(&start_pool, u8::midpoint(lo, hi) + 2);
     let mut last_leap: i16 = 0;
     // bar 4 is reserved for the motif quote, so the lift lands on bar 5
     let peak_bar = 5;
