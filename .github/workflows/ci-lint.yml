@@ -185,12 +185,11 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/setup-just
-      - name: Cache pip downloads
-        uses: actions/cache@v6
+      - uses: actions/setup-python@v7
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
-          restore-keys: pip-${{ runner.os }}-
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv

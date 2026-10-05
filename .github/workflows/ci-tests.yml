@@ -118,12 +118,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Cache pip downloads
-        uses: actions/cache@v6
+      - uses: actions/setup-python@v7
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
-          restore-keys: pip-${{ runner.os }}-
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv
