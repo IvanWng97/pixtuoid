@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::geometry::CellArea;
 
 /// A scene carrying an OpenClaw gateway presence and nothing else, so its diff
 /// against [`no_presence`] is the lobster alone.
@@ -161,7 +162,7 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         // it still lands inside BOTH mascots without paying a full render per
         // pixel.
         for &(x, y) in cells.iter().step_by(5) {
-            r.set_mouse_pos(Some((x, y / 2)));
+            r.set_mouse_pos(Some((x, CellArea::row_of(y))));
             r.render(&scene, pack(), t0()).unwrap();
             let text = frame_text(r.frame_buffer());
             if text.contains("gateway") {
@@ -209,7 +210,7 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
     let cells: Vec<_> = mascot_cells(&mut r, &mixed, t0()).into_iter().collect();
     assert!(!cells.is_empty(), "openclaw still paints its lobster");
     for &(x, y) in cells.iter().step_by(5) {
-        r.set_mouse_pos(Some((x, y / 2)));
+        r.set_mouse_pos(Some((x, CellArea::row_of(y))));
         r.render(&mixed, pack(), t0()).unwrap();
         let text = frame_text(r.frame_buffer());
         if text.contains("gateway") {
@@ -438,11 +439,11 @@ fn gateway_mascot_tooltip_on_hover() {
     );
 
     let (x0, y0, x1, y1) = mascot_bbox(&mut r, &scene, t0()).expect("lobster on screen");
-    let cx = (x0 + x1) / 2;
-    let cy_px = (y0 + y1) / 2;
+    let cx = u16::midpoint(x0, x1);
+    let cy_px = u16::midpoint(y0, y1);
     // The hover is the painted frame, which tolerates the approximate
-    // center; half-block ⇒ /2.
-    r.set_mouse_pos(Some((cx, cy_px / 2)));
+    // center.
+    r.set_mouse_pos(Some((cx, CellArea::row_of(cy_px))));
     r.render(&scene, pack(), t0()).unwrap();
 
     // The literal "gateway" is exclusive to the mascot arm — pet/coffee/furniture

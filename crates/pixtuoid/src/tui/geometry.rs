@@ -80,6 +80,12 @@ impl CellArea {
         }
     }
 
+    /// The half-block cell row pixel row `px` falls in: [`Self::half_block`]'s inverse.
+    #[cfg(test)]
+    pub(crate) fn row_of(px: u16) -> u16 {
+        px / 2
+    }
+
     /// The pixels this cell shows.
     pub(crate) fn bounds(self) -> Bounds {
         Bounds {

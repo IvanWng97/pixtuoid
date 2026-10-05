@@ -91,6 +91,10 @@ fn instance_id(raw: String) -> Result<DaemonInstanceId> {
 /// presence deltas. Reads ONLY allowlisted scalar fields — never
 /// `messages`/`prompt`/`sessionFile`, even if the plugin regressed and forwarded them
 /// (defense in depth for the privacy invariant).
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `type`, or carries a `gatewayPort` that is not a non-zero `u16` port.
 pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
     let obj = v
         .as_object()

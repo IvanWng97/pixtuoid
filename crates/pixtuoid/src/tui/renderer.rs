@@ -330,6 +330,11 @@ pub(crate) fn paint_scene_tooltip(
     }
 }
 
+/// Draw one classic-look frame (scene, footer, overlays) and report what it painted for hit-testing.
+///
+/// # Errors
+///
+/// If querying the terminal size or drawing the frame to the backend fails.
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
