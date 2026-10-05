@@ -174,7 +174,8 @@ zizmor:
         echo "error: zizmor would run offline in CI and skip its online audits; give this step a GH_TOKEN" >&2; \
         exit 1; \
     fi
-    zizmor --strict-collection .
+    # Explicit: a linked worktree's discovery finds the MAIN checkout's config.
+    zizmor --config .github/zizmor.yml --strict-collection .
 
 # action_behavior_test.sh runs the workflows' own shell against stubs, which no
 # static contract can do.
@@ -796,9 +797,10 @@ site-e2e: gen-wasm site-demos
 # Regenerate the committed artifacts that derive from a single source of truth,
 # and check the committed copies (each `*-check` header says against what).
 
-[doc('Regenerate the generated art (sprites + icons + README sections + docs images + site demos)')]
+# No gen-media: media renders from main in media-regen.yml, never in a PR.
+[doc('Regenerate what a look-changing PR commits (sprites + icons + README sections + cutaway golden)')]
 [group('gen')]
-gen: gen-art gen-icons gen-media gen-readme gen-cutaway-golden
+gen: gen-art gen-icons gen-readme gen-cutaway-golden
 
 [doc("Regenerate the bundled pack's generated sprites (every @Nx variant + the 1x pieces it owns) from scripts/gen-art.py")]
 [group('gen')]
@@ -936,7 +938,7 @@ gen-wasm-check:
 
 [doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
-gen-check: compare-selftest gen-readme-check gen-art-check gen-icons-check gen-media-check
+gen-check: compare-selftest gen-readme-check gen-art-check gen-icons-check
 
 # The icons also land in the site's committed assets and change only with their
 # source, so their drift stays a gate.
@@ -951,7 +953,7 @@ gen-icons-check:
 # scripts/gen-media.py's docstring says what `--check` compares. The README's
 # media only: the site's demos are rendered in CI and never committed. On a PR
 # a drift here is evidence for the generated-art lens, not a gate (ci-tests.yml's
-# smoke job); main's land in a `chore(media)` PR.
+# smoke job); main's land through media-regen.yml.
 # Requires the .venv + node; it builds the examples it renders with.
 [doc("Diff the README's committed media against what gen-media renders")]
 [group('gen')]
