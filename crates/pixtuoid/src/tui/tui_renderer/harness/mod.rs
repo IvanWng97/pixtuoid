@@ -3,6 +3,7 @@
 use super::*;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
+use pixtuoid_scene::anim::PAINT_FRAME_MS;
 use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::pet::PetKind;
 use ratatui::Terminal;
@@ -51,7 +52,7 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     target_floor: usize,
 ) {
     for _ in 0..60 {
-        *now += Duration::from_millis(33);
+        *now += Duration::from_millis(PAINT_FRAME_MS);
         r.render(scene, pack, *now).expect("render");
         if r.current_floor() == target_floor && r.transition().is_none() {
             return;

@@ -142,7 +142,7 @@ pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOOR
 ///
 /// There is deliberately NO `cap == 0 → FALLBACK_DESKS` clause: `sync_floor_caps`
 /// `store`s the honest 0 for a window too small to lay out, and a fallback points the
-/// WRONG way, admitting 16 agents onto desks that do not exist.
+/// WRONG way, admitting `FALLBACK_DESKS` agents onto desks that do not exist.
 pub(crate) fn boot_capacities_for_window(size: PhysicalSize<u32>) -> [usize; MAX_FLOORS] {
     let (_scale, buf_w, buf_h) = window_buffer_geometry(size);
     floor_caps_for_buffer(buf_w, buf_h)
@@ -262,8 +262,7 @@ impl<'a> XrgbSurface<'a> {
 
 /// Paint `badges` into the upscaled [`XrgbSurface`]. Each badge's `at` is
 /// office-buffer space → multiply by `scale` for screen space; the badge is
-/// centered horizontally over it and sits just above the head. Drawn at native
-/// surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
+/// centered horizontally over it and sits just above the head.
 pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[Badge], scale: i32) {
     let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
     let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
@@ -615,8 +614,7 @@ mod tests {
     /// absorb it.
     #[test]
     fn the_first_redraws_publish_agrees_with_the_boot_seed() {
-        // DERIVED: a pinned 64x48 stopped being zero-capacity when the floor dropped, and
-        // the sibling above reds by name if this stops seeding zero.
+        // DERIVED as in the sibling above, which reds by name if this stops seeding zero.
         let min = pixtuoid_scene::layout::min_layout_size();
         let unlayoutable = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
         for window in [
@@ -1070,7 +1068,7 @@ mod tests {
 
         agents.push(active_on("/d/f1-new.jsonl", 1, cap));
         let scene = scene_with(agents.clone(), cap);
-        now += std::time::Duration::from_millis(33);
+        now += std::time::Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
         renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
@@ -1095,7 +1093,7 @@ mod tests {
 
         agents.push(active_on("/d/f0-new.jsonl", 0, 1));
         let scene = scene_with(agents, cap);
-        now += std::time::Duration::from_millis(33);
+        now += std::time::Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
         renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,

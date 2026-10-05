@@ -219,7 +219,7 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
     let cell_y0 = (mr.y / 2).saturating_sub(4);
     let cell_h = mr.height / 2 + 8;
 
-    // Coarse 250 ms beats rather than 33 ms frames: 250 ms stays well under the
+    // Coarse 250 ms beats rather than paint frames: 250 ms stays well under the
     // stale-resume trigger (≥7 s), so the wander machine still advances normally.
     const BUDGET: usize = 1200; // 250ms beats → 300s simulated
     let mut saw_characters = false;
