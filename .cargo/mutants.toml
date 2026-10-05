@@ -1,7 +1,8 @@
 # cargo-mutants config (`just mutants`). Advisory: exclude only where a surviving
 # mutant is NOISE, never where it is killable. Rationale for each entry lives in
-# the commit that added it; `docs/mutants-exclusions.md` holds the measured
-# derivations and the core/scene `test_workspace` blind spot.
+# the commit that added it. `test_workspace` stays at its default, the mutated
+# package's tests only, so the binary's harness may kill a core/scene survivor:
+# re-run it with `--test-workspace=true` before acting on it.
 test_tool = "nextest"
 
 exclude_globs = [
