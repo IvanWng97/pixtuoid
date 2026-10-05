@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
-use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::{HostRegistration, MergeOutcome};
@@ -129,12 +128,10 @@ fn register(config: &Path) -> Result<()> {
 
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
-fn unregister() -> Result<()> {
+fn unregister() -> Result<bool> {
     if claude_cli().is_none() {
-        tracing::warn!(
-            "claude not on PATH; leaving the pixtuoid plugin registered, its hooks file emptied"
-        );
-        return Ok(());
+        tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
+        return Ok(false);
     }
     let listed = run_claude(&[
         "plugin".as_ref(),
@@ -150,7 +147,7 @@ fn unregister() -> Result<()> {
             PLUGIN_NAME.as_ref(),
         ])?;
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Read where Claude Code records a user-scope install as enabled
@@ -173,7 +170,7 @@ fn marketplace_listed(json_out: &str) -> Result<bool> {
 }
 
 /// `which` applies PATHEXT, so an npm install's `claude.cmd` resolves on Windows.
-/// `None` when no `claude` is on PATH: an uninstall then has nothing to deregister.
+/// `None` when no `claude` is on PATH: an uninstall then can't deregister.
 fn claude_cli() -> Option<PathBuf> {
     which::which("claude").ok()
 }
@@ -351,9 +348,6 @@ fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
                     continue;
                 };
                 entries.retain_mut(|entry| {
-                    if is_managed_entry(entry) {
-                        return false;
-                    }
                     let Some(hs) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
                         return true;
                     };
@@ -391,15 +385,7 @@ fn hook_is_ours(hook: &Value) -> bool {
         }
 }
 
-// A foreign hook entry — another tool's, or one carrying an unrecognized legacy
-// sentinel — is inert (CC ignores unknown hooks) and is left untouched on
-// install/uninstall.
-fn is_managed_entry(entry: &Value) -> bool {
-    entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
-}
-
-/// The one place Claude's nested per-event shape lives; the shared merge treats the
-/// entry opaquely, keying only on the sentinel.
+/// The one place Claude's nested per-event shape lives.
 fn managed_entry(hook_command: &str) -> Value {
     json!({
         "matcher": ".*",
@@ -410,6 +396,7 @@ fn managed_entry(hook_command: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::install::SENTINEL_KEY;
 
     #[test]
     fn legacy_config_path_honors_claude_config_dir() {
@@ -484,15 +471,19 @@ mod tests {
         let mine = json!({ "type": "command", "command": "/usr/bin/say done" });
         let ours =
             json!({ "type": "command", "command": "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'" });
-        let doc =
-            json!({ "hooks": { "Stop": [{ "matcher": ".*", "hooks": [ours, mine.clone()] }] } });
-        let out = legacy_uninstall(&doc.to_string()).unwrap();
-        assert!(out.changed);
-        let cleaned: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(
-            cleaned,
-            json!({ "hooks": { "Stop": [{ "matcher": ".*", "hooks": [mine] }] } })
-        );
+        // Also when the user hand-appended into a group that kept our sentinel.
+        for group in [
+            json!({ "matcher": ".*", "hooks": [ours.clone(), mine.clone()] }),
+            json!({ SENTINEL_KEY: true, "matcher": ".*", "hooks": [ours.clone(), mine.clone()] }),
+        ] {
+            let mut kept = group.clone();
+            kept["hooks"] = json!([mine]);
+            let out =
+                legacy_uninstall(&json!({ "hooks": { "Stop": [group] } }).to_string()).unwrap();
+            assert!(out.changed);
+            let cleaned: Value = serde_json::from_str(&out.content).unwrap();
+            assert_eq!(cleaned, json!({ "hooks": { "Stop": [kept] } }));
+        }
     }
 
     #[test]
@@ -542,14 +533,16 @@ mod tests {
     fn legacy_cleanup_keeps_foreign_entries_and_settings() {
         let theirs =
             json!({ "matcher": "Write", "hooks": [{ "type": "command", "command": "/mine" }] });
-        let old_sentinel = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/renamed/shim" }] });
-        let doc = json!({ "hooks": { "PreToolUse": [theirs.clone(), old_sentinel], "Stop": "not-an-array" }, "theme": "dark" });
+        let ours = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/opt/pixtuoid-hook" }] });
+        // The sentinel alone doesn't make a hook ours.
+        let renamed = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/renamed/shim" }] });
+        let doc = json!({ "hooks": { "PreToolUse": [theirs.clone(), ours, renamed.clone()], "Stop": "not-an-array" }, "theme": "dark" });
         let out = legacy_uninstall(&doc.to_string()).unwrap();
         assert!(out.changed);
         let cleaned: Value = serde_json::from_str(&out.content).unwrap();
         assert_eq!(
             cleaned,
-            json!({ "hooks": { "PreToolUse": [theirs], "Stop": "not-an-array" }, "theme": "dark" })
+            json!({ "hooks": { "PreToolUse": [theirs, renamed], "Stop": "not-an-array" }, "theme": "dark" })
         );
         assert!(!legacy_uninstall(&out.content).unwrap().changed);
     }

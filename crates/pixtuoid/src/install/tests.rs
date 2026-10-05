@@ -434,7 +434,7 @@ fn install_target_reports_installed_then_up_to_date() {
     .unwrap();
     assert!(matches!(r.outcome, InstallOutcome::Installed));
     assert!(
-        r.backup.is_some(),
+        !r.backups.is_empty(),
         "first install of an existing file takes a backup"
     );
     assert_eq!(r.config_path, cfg);
@@ -446,7 +446,7 @@ fn install_target_reports_installed_then_up_to_date() {
     )
     .unwrap();
     assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
-    assert!(r2.backup.is_none(), "a no-op install reports no backup");
+    assert!(r2.backups.is_empty(), "a no-op install reports no backup");
 }
 
 #[test]
@@ -474,14 +474,14 @@ fn uninstall_target_reports_removed_then_nothing() {
 
     let r = uninstall_target(&FAKE2, Some(cfg.clone())).unwrap();
     assert!(matches!(r.outcome, UninstallOutcome::Removed));
-    assert_eq!(r.removed_backup.as_deref(), Some(bak.as_path()));
+    assert_eq!(r.removed_backups, std::slice::from_ref(&bak));
     assert!(!bak.exists());
 
     // An absent config is decided BEFORE locking, so there are no side effects.
     let missing = tmp.path().join("missing").join("settings.json");
     let r2 = uninstall_target(&CLAUDE_FILE, Some(missing.clone())).unwrap();
     assert!(matches!(r2.outcome, UninstallOutcome::NothingToRemove));
-    assert!(r2.removed_backup.is_none());
+    assert!(r2.removed_backups.is_empty());
     assert!(
         !missing.parent().unwrap().exists(),
         "a no-op uninstall leaves no dirs"
@@ -1341,6 +1341,11 @@ fn kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe() {
 /// the developer's Claude Code. It logs its argv to `calls.log` beside it and keeps
 /// the two listings in files the way the real CLI's state behaves.
 pub(crate) fn with_fake_claude<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
+    with_fake_claude_failing(None, f)
+}
+
+/// [`with_fake_claude`], whose `claude` exits 1 on the exact argument line `fail`.
+fn with_fake_claude_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Path) -> R) -> R {
     let dir = tempfile::TempDir::new().unwrap();
     #[cfg(unix)]
     {
@@ -1361,6 +1366,7 @@ pub(crate) fn with_fake_claude<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
         [
             ("PATH", Some(path.as_os_str())),
             ("CLAUDE_CONFIG_DIR", Some(config.as_os_str())),
+            ("FAKE_CLAUDE_FAIL", fail.map(std::ffi::OsStr::new)),
         ],
         || f(dir.path()),
     )
@@ -1370,6 +1376,7 @@ pub(crate) fn with_fake_claude<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
 const FAKE_CLAUDE_SH: &str = r#"#!/bin/sh
 d=$(dirname "$0")
 echo "$*" >> "$d/calls.log"
+[ "$*" = "${FAKE_CLAUDE_FAIL-}" ] && exit 1
 case "$*" in
 "plugin marketplace add "*) echo '[{"name":"pixtuoid"}]' > "$d/marketplaces.json" ;;
 "plugin install pixtuoid@pixtuoid") [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || echo '{"enabledPlugins":{"pixtuoid@pixtuoid":true}}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
@@ -1382,6 +1389,7 @@ esac
 const FAKE_CLAUDE_CMD: &str = "@echo off\r
 set \"d=%~dp0\"\r
 >>\"%d%calls.log\" echo %*\r
+if defined FAKE_CLAUDE_FAIL if \"%*\"==\"%FAKE_CLAUDE_FAIL%\" exit /b 1\r
 if \"%1 %2 %3\"==\"plugin marketplace add\" (>\"%d%marketplaces.json\" echo [{\"name\":\"pixtuoid\"}]& exit /b 0)\r
 if \"%1 %2\"==\"plugin install\" (if not exist \"%CLAUDE_CONFIG_DIR%\\settings.json\" (>\"%CLAUDE_CONFIG_DIR%\\settings.json\" echo {\"enabledPlugins\":{\"pixtuoid@pixtuoid\":true}})& exit /b 0)\r
 if \"%1 %2 %3\"==\"plugin marketplace remove\" (>\"%d%marketplaces.json\" echo []& exit /b 0)\r
@@ -1550,6 +1558,7 @@ fn claude_uninstall_without_claude_on_path_still_strips_the_legacy_hooks() {
             .unwrap();
             let u = uninstall_target(&CLAUDE, Some(plugin_hooks_path(tmp.path()))).unwrap();
             assert!(matches!(u.outcome, UninstallOutcome::Removed));
+            assert!(u.plugin_left_registered);
             let left: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&legacy).unwrap()).unwrap();
             assert_eq!(left, serde_json::json!({ "theme": "dark" }));
@@ -1561,6 +1570,7 @@ fn claude_uninstall_without_claude_on_path_still_strips_the_legacy_hooks() {
 fn claude_migration_keeps_the_backup_and_takes_one_when_absent() {
     with_fake_claude(|_| {
         let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(std::env::current_exe().unwrap());
         let legacy = (CLAUDE.host.unwrap().legacy_config)().unwrap();
         let bak = legacy.with_file_name("settings.json.pixtuoid.bak");
@@ -1568,7 +1578,8 @@ fn claude_migration_keeps_the_backup_and_takes_one_when_absent() {
             r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#;
         std::fs::write(&legacy, before).unwrap();
 
-        install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook.clone()).unwrap();
+        let r = install_target(&CLAUDE, Some(hooks.clone()), hook.clone()).unwrap();
+        assert!(r.backups.contains(&bak), "{:?}", r.backups);
         assert_eq!(
             std::fs::read_to_string(&bak).unwrap(),
             before,
@@ -1578,10 +1589,49 @@ fn claude_migration_keeps_the_backup_and_takes_one_when_absent() {
         // An existing snapshot (the user's pre-pixtuoid state) survives a migration.
         std::fs::write(&bak, "the user's original").unwrap();
         std::fs::write(&legacy, before).unwrap();
-        install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook).unwrap();
+        install_target(&CLAUDE, Some(hooks.clone()), hook).unwrap();
         assert_eq!(
             std::fs::read_to_string(&bak).unwrap(),
             "the user's original"
         );
+
+        // The uninstall that removes pixtuoid clears the snapshot, though the
+        // legacy strip itself is then a no-op.
+        let u = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+        assert!(u.removed_backups.contains(&bak), "{:?}", u.removed_backups);
+        assert!(!bak.exists());
+    });
+}
+
+#[test]
+fn claude_install_keeps_the_legacy_hooks_when_registering_fails() {
+    with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let legacy = (CLAUDE.host.unwrap().legacy_config)().unwrap();
+        let before =
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#;
+        std::fs::write(&legacy, before).unwrap();
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        assert!(install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook).is_err());
+        assert_eq!(std::fs::read_to_string(&legacy).unwrap(), before);
+    });
+}
+
+#[test]
+fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
+    with_fake_claude_failing(Some("plugin marketplace list --json"), |_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let legacy = (CLAUDE.host.unwrap().legacy_config)().unwrap();
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        install_target(&CLAUDE, Some(hooks.clone()), hook).unwrap();
+        std::fs::write(
+            &legacy,
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#,
+        )
+        .unwrap();
+        assert!(uninstall_target(&CLAUDE, Some(hooks.clone())).is_err());
+        assert!(!has_hooks(&CLAUDE, Some(hooks)), "the plugin is left inert");
+        assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "{}");
     });
 }

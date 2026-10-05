@@ -182,7 +182,7 @@ pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
             format!("\u{2713} {display_name} connected")
         }
     };
-    if r.backup.is_some() {
+    if !r.backups.is_empty() {
         s.push_str(" \u{00b7} backup saved");
     }
     if r.path_warning {
@@ -204,8 +204,11 @@ pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> Stri
             format!("\u{2713} {display_name} disconnected")
         }
     };
-    if r.removed_backup.is_some() {
+    if !r.removed_backups.is_empty() {
         s.push_str(" \u{00b7} backup cleared");
+    }
+    if r.plugin_left_registered {
+        s.push_str(" \u{00b7} \u{26a0} plugin left registered (claude not on PATH)");
     }
     s
 }

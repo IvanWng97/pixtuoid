@@ -87,8 +87,9 @@ pub struct HostRegistration {
     /// the plugin. Idempotent, and run on every install so a deregistered plugin
     /// heals.
     pub register: fn(config: &Path) -> Result<()>,
-    /// Deregister the plugin; a no-op when it isn't registered.
-    pub unregister: fn() -> Result<()>,
+    /// Deregister the plugin; a no-op when it isn't registered. `false` when the
+    /// CLI can't be reached, leaving the plugin registered.
+    pub unregister: fn() -> Result<bool>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,
     /// The config an earlier pixtuoid merged its hooks into, and the merge that

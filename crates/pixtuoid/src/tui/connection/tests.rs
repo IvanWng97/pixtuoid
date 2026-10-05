@@ -327,19 +327,22 @@ fn every_no_target_row_has_an_explicit_display_name_not_the_raw_id() {
 #[test]
 fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
     use crate::install::{InstallOutcome, InstallReport};
-    let base = |outcome, backup, path_warning| InstallReport {
+    let base = |outcome, backups, path_warning| InstallReport {
         outcome,
         config_path: PathBuf::from("/c"),
-        backup,
+        backups,
         path_warning,
         post_install_hint: None,
     };
     // Both outcomes read as "connected" (the flag flip is the real action).
-    let plain = format_connect_result(&base(InstallOutcome::Installed, None, false), "Claude Code");
+    let plain = format_connect_result(
+        &base(InstallOutcome::Installed, vec![], false),
+        "Claude Code",
+    );
     assert_eq!(plain, "\u{2713} Claude Code connected");
     assert_eq!(
         format_connect_result(
-            &base(InstallOutcome::AlreadyUpToDate, None, false),
+            &base(InstallOutcome::AlreadyUpToDate, vec![], false),
             "Claude Code"
         ),
         "\u{2713} Claude Code connected"
@@ -347,7 +350,7 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
     let noted = format_connect_result(
         &base(
             InstallOutcome::Installed,
-            Some(PathBuf::from("/c.bak")),
+            vec![PathBuf::from("/c.bak")],
             true,
         ),
         "Claude Code",
@@ -360,7 +363,7 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
         &InstallReport {
             outcome: InstallOutcome::Installed,
             config_path: PathBuf::from("/c"),
-            backup: None,
+            backups: vec![],
             path_warning: false,
             post_install_hint: Some("restart the gateway to load it"),
         },
@@ -407,16 +410,26 @@ fn format_disconnect_result_renders_disconnected_plus_backup_note() {
     let removed = UninstallReport {
         outcome: UninstallOutcome::Removed,
         config_path: PathBuf::from("/c"),
-        removed_backup: Some(PathBuf::from("/c.bak")),
+        removed_backups: vec![PathBuf::from("/c.bak")],
+        plugin_left_registered: false,
     };
     let s = format_disconnect_result(&removed, "Claude Code");
     assert!(s.contains("disconnected"), "{s}");
     assert!(s.contains("backup cleared"), "{s}");
+    assert!(!s.contains("registered"), "{s}");
+
+    let stranded = UninstallReport {
+        plugin_left_registered: true,
+        ..removed
+    };
+    let s = format_disconnect_result(&stranded, "Claude Code");
+    assert!(s.contains("plugin left registered"), "{s}");
 
     let nothing = UninstallReport {
         outcome: UninstallOutcome::NothingToRemove,
         config_path: PathBuf::from("/c"),
-        removed_backup: None,
+        removed_backups: vec![],
+        plugin_left_registered: false,
     };
     let s2 = format_disconnect_result(&nothing, "Codex");
     assert!(s2.contains("disconnected"), "{s2}");

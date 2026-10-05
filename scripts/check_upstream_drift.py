@@ -228,12 +228,12 @@ CC_PLUGIN_DOC_MARKERS = {
         "same shape as the `hooks` object in `settings.json`": "hooks/hooks.json's shape",
     },
     CC_PLUGIN_INSTALL_URL: {
-        "enabledPlugins": "where a user-scope install is recorded (is_registered)",
-        "claude plugin install": "the shell install command (register)",
-        "When you remove a marketplace, Claude Code uninstalls every plugin": "unregister by marketplace removal",
+        "The entry goes in `enabledPlugins` in `~/.claude/settings.json`.": "where a user-scope install is recorded (is_registered)",
+        "Run `claude plugin install` in your shell to install a plugin without starting a Claude Code session": "the shell install command (register)",
+        "When you remove a marketplace, Claude Code uninstalls every plugin you installed from it": "unregister by marketplace removal",
     },
     CC_PLUGIN_LOADING_URL: {
-        "loads in place": "a local-path marketplace's in-place load (no reinstall on update)",
+        "the plugin loads in place from its path inside the marketplace folder": "a local-path marketplace's in-place load (no reinstall on update)",
     },
 }
 
