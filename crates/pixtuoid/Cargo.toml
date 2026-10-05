@@ -162,7 +162,7 @@ schemars = "1"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { workspace = true, features = ["gif"] }
 # A decoder our SIXEL encoder's tests did not write.
-icy_sixel = "0.5"
+icy_sixel = "0.7"
 insta    = { workspace = true }
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
