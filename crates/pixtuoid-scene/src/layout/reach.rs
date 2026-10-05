@@ -59,7 +59,7 @@ impl ReachSet {
     /// Out-of-bounds or blocked → `false`.
     ///
     /// **Conservative at cell boundaries** (a walkable px in a coarse cell whose
-    /// largest `walk_piece` is under the walkable minimum reads unreachable), but
+    /// largest `walk_piece` is under `COARSE_CELL_WALKABLE_MIN` reads unreachable), but
     /// NEVER a false positive:
     /// `reaches(p) ⇒ A* can route to p`, so `approach_point` can safely drop any
     /// side `reaches` rejects.
