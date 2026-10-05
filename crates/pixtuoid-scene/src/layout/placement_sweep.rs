@@ -659,36 +659,80 @@ fn route_through_wall(l: &SceneLayout, path: &[Point]) -> Option<(Point, WallPie
         .find_map(|p| wall_at(l, p).map(|w| (p, w)))
 }
 
+/// Every route between two open pixels around one wall corner that passes
+/// through a wall, described.
+fn corner_routes_through_walls(w: u16, h: u16, seed: u64, l: &SceneLayout) -> Vec<String> {
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut v = Vec::new();
+    for probes in wall_corner_probes(l) {
+        for (i, &from) in probes.iter().enumerate() {
+            for &to in &probes[i + 1..] {
+                let Some(path) = find_path(&l.walkable, &overlay, None, from, to) else {
+                    continue;
+                };
+                if let Some((p, wall)) = route_through_wall(l, &path) {
+                    v.push(format!(
+                        "{w}x{h} seed {seed}: {from:?}->{to:?} passes {p:?} inside {:?}",
+                        wall.footprint()
+                    ));
+                }
+            }
+        }
+    }
+    v
+}
+
 /// No route between two open pixels around a wall's corner passes through a
 /// wall. The production legs carry the same assert in
 /// [`assert_home_desk_approaches_are_routable`] and
 /// `every_wander_destination_is_routable_from_its_desk`.
 #[test]
 fn no_route_around_a_wall_corner_cuts_through_it() {
-    use crate::pathfind::find_path;
-    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut v = Vec::new();
-    let mut check = |w: u16, h: u16, seed: u64, l: &SceneLayout| {
-        for probes in wall_corner_probes(l) {
-            for (i, &from) in probes.iter().enumerate() {
-                for &to in &probes[i + 1..] {
-                    let Some(path) = find_path(&l.walkable, &overlay, None, from, to) else {
-                        continue;
-                    };
-                    if let Some((p, wall)) = route_through_wall(l, &path) {
-                        v.push(format!(
-                            "{w}x{h} seed {seed}: {from:?}->{to:?} passes {p:?} inside {:?}",
-                            wall.footprint()
-                        ));
-                    }
-                }
-            }
-        }
-    };
+    let mut check =
+        |w, h, seed, l: &SceneLayout| v.extend(corner_routes_through_walls(w, h, seed, l));
     sweep(&mut check);
     sweep_production_floors(&mut check);
     assert_no_violations("route-through-wall", v);
 }
+
+/// The short floors, where the wall band leaves the door's stubs and posts
+/// beside the routing cells the band's one pod row narrows: every height from
+/// the floor to [`WALL_SCAN_TOP_H`] across the widths, on the floors a user
+/// sees. The discrete [`SWEEP_SIZES`] grid reaches this band at one width.
+#[test]
+fn no_route_on_a_short_floor_passes_through_a_wall() {
+    let mut v = Vec::new();
+    for h in super::compute::MIN_LAYOUT_H..=WALL_SCAN_TOP_H {
+        for w in (super::compute::MIN_LAYOUT_W..=WALL_SCAN_RIGHT_W).step_by(WALL_SCAN_W_STEP) {
+            for seed in (0..crate::floor::MAX_FLOORS).map(crate::floor::floor_seed) {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    panic!("{w}x{h} seed {seed}: refused above the floor");
+                };
+                v.extend(corner_routes_through_walls(w, h, seed, &l));
+                v.extend(wander_legs(&l).into_iter().filter_map(|(origin, a, path)| {
+                    let (p, wall) = route_through_wall(&l, &path?)?;
+                    Some(format!(
+                        "{w}x{h} seed {seed}: the leg {origin:?}->{a:?} passes {p:?} \
+                                 inside {:?}",
+                        wall.footprint()
+                    ))
+                }));
+            }
+        }
+    }
+    assert_no_violations("short-floor-route-through-wall", v);
+}
+
+/// The tallest floor [`no_route_on_a_short_floor_passes_through_a_wall`]
+/// scans: the band where a door's post and stubs crossed routes reached 63.
+const WALL_SCAN_TOP_H: u16 = 64;
+/// The widest floor that scan lays out.
+const WALL_SCAN_RIGHT_W: u16 = 240;
+/// That scan's width step, prime to the routing cell so each width shifts the
+/// walls against the grid.
+const WALL_SCAN_W_STEP: usize = 23;
 
 /// The door threshold is walkable AND every walkable pixel is reachable from it
 /// (4-connected), through the PRODUCTION `unreachable_walkable_cells` so the
@@ -746,45 +790,51 @@ fn the_spawn_threshold_stands_on_the_floor_not_the_wall_apron() {
 /// unroutable destination degrades the leg to a straight line through furniture.
 #[test]
 fn every_wander_destination_is_routable_from_its_desk() {
-    use crate::pathfind::find_path;
-    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     sweep(|w, h, seed, l| {
-        // Deduped: the desk loop otherwise re-routes one `(origin, approach)` pair
-        // once per desk sharing that approach cell.
-        let mut seen: std::collections::HashSet<(Point, Point)> = std::collections::HashSet::new();
-        for &desk in &l.home_desks {
-            let (origin, _) = crate::pose::desk_leg_endpoint(desk, l);
-            for wp in &l.waypoints {
-                let a = super::approach_point(
-                    wp.kind.furniture(),
-                    wp.pos,
-                    wp.facing,
-                    l.pantry_counter_size(),
-                    &l.walkable,
-                    desk,
-                    &l.reachable,
+        for (origin, a, path) in wander_legs(l) {
+            let path = path.unwrap_or_else(|| {
+                panic!("{w}x{h} seed {seed}: approach {a:?} unroutable from leg origin {origin:?}")
+            });
+            if let Some((p, wall)) = route_through_wall(l, &path) {
+                panic!(
+                    "{w}x{h} seed {seed}: the leg {origin:?}->{a:?} passes {p:?} inside {:?}",
+                    wall.footprint()
                 );
-                // A `wp.pos` sentinel is the documented "no valid approach"
-                // answer — `resolve_wander_target` ambles that cycle instead.
-                if a == wp.pos || !seen.insert((origin, a)) {
-                    continue;
-                }
-                let path = find_path(&l.walkable, &overlay, None, origin, a).unwrap_or_else(|| {
-                    panic!(
-                        "{w}x{h} seed {seed}: {:?} approach {a:?} unroutable from desk \
-                         {desk:?}'s leg origin {origin:?}",
-                        wp.kind
-                    )
-                });
-                if let Some((p, wall)) = route_through_wall(l, &path) {
-                    panic!(
-                        "{w}x{h} seed {seed}: the leg {origin:?}->{a:?} passes {p:?} inside {:?}",
-                        wall.footprint()
-                    );
-                }
             }
         }
     });
+}
+
+/// Each production wander-out leg, from a desk's leg origin to a waypoint's
+/// approach, with its route (`None` when unroutable).
+fn wander_legs(l: &SceneLayout) -> Vec<(Point, Point, Option<Vec<Point>>)> {
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    // Deduped: the desk loop otherwise re-routes one `(origin, approach)` pair
+    // once per desk sharing that approach cell.
+    let mut seen: std::collections::HashSet<(Point, Point)> = std::collections::HashSet::new();
+    let mut legs = Vec::new();
+    for &desk in &l.home_desks {
+        let (origin, _) = crate::pose::desk_leg_endpoint(desk, l);
+        for wp in &l.waypoints {
+            let a = super::approach_point(
+                wp.kind.furniture(),
+                wp.pos,
+                wp.facing,
+                l.pantry_counter_size(),
+                &l.walkable,
+                desk,
+                &l.reachable,
+            );
+            // A `wp.pos` sentinel is the documented "no valid approach"
+            // answer — `resolve_wander_target` ambles that cycle instead.
+            if a == wp.pos || !seen.insert((origin, a)) {
+                continue;
+            }
+            legs.push((origin, a, find_path(&l.walkable, &overlay, None, origin, a)));
+        }
+    }
+    legs
 }
 
 /// Nothing in the type system pins `desk_facings` parallel to `home_desks`; a short one
