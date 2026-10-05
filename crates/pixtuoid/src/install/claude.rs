@@ -349,11 +349,13 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 /// keeping everything else.
 fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
     merge::flat_json_merge_outcome_uninstall(content, |mut doc| {
+        let mut emptied = Vec::new();
         if let Some(Value::Object(hooks)) = doc.get_mut("hooks") {
-            for list in hooks.values_mut() {
+            for (event, list) in hooks.iter_mut() {
                 let Some(entries) = list.as_array_mut() else {
                     continue;
                 };
+                let before = entries.len();
                 entries.retain_mut(|entry| {
                     let sentinel = entry.get(SENTINEL_KEY).and_then(Value::as_bool) == Some(true);
                     let Some(hs) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
@@ -364,10 +366,18 @@ fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
                     hs.retain(|h| !(hook_is_ours(h) || sentinel && is_our_exec_form(h)));
                     hs.len() == before || !hs.is_empty()
                 });
+                if entries.len() < before && entries.is_empty() {
+                    emptied.push(event.clone());
+                }
             }
-            hooks.retain(|_, list| list.as_array().is_none_or(|a| !a.is_empty()));
+            // Only what this strip emptied goes: a user's own empty list stays.
+            for event in &emptied {
+                hooks.remove(event);
+            }
         }
-        if let Some(root) = doc.as_object_mut() {
+        if !emptied.is_empty()
+            && let Some(root) = doc.as_object_mut()
+        {
             merge::prune_empty(root, "hooks");
         }
         doc
@@ -479,6 +489,19 @@ mod tests {
             cleaned,
             json!({ "hooks": { "Stop": [theirs] }, "theme": "dark" })
         );
+    }
+
+    #[test]
+    fn legacy_cleanup_leaves_a_users_own_empty_hooks_alone() {
+        for doc in [
+            json!({ "hooks": { "Stop": [] }, "theme": "dark" }),
+            json!({ "hooks": {} }),
+        ] {
+            assert!(
+                !legacy_uninstall(&doc.to_string()).unwrap().changed,
+                "{doc}"
+            );
+        }
     }
 
     #[test]
