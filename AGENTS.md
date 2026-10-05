@@ -22,7 +22,7 @@ formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
 `completions <shell>` on clean stdout — breakage surfaces in THEIR CI on an
 autobump we never see, while our suite stays green (it asserts the same
 strings as goldens). The asserted rows are marked "homebrew-core contract" at
-`validate.rs`, `sources_cli.rs`, `claude_code.rs`; release-side consequences
+`validate.rs`, `sources_cli.rs`, `codex.rs`; release-side consequences
 in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## What this is
@@ -95,15 +95,14 @@ Repo skills (committed): `local-review`, `beautify-decoration`,
 
 ## Conventions
 
-- **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec.
-- **Use what exists before writing it.** A CLI's own plugin or command beats editing its config, and a maintained crate beats a hand-rolled parser, writer or protocol; hand-write only what neither covers.
+- **TDD first** — failing test → minimal impl → commit. **DRY.**
 - **Every mechanism earns its upkeep.** Code, config, a test, a CI job or a doc stays only if it names a failure it prevents that nothing else already does, or a need someone has. Extending a mechanism re-adds it: one you touch that can't name one is deleted, not polished. The load-bearing defenses [REVIEW.md](REVIEW.md#design)'s Proportion row lists have named theirs.
 - **Comments: WHY only.** Only what the surrounding thing can't say (workaround, constraint, invariant). **Every comment the repo ships is in scope**, not just `//` and `#` in code: a `.md` doc's prose, a workflow or manifest comment, a justfile recipe header, a CI contract's `why` and a PR body are all held to the rules below — prose is where an assertion hides with no failure mode, so it earns its place the same way code does. Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. **A comment sits on the narrowest thing it constrains** — the declaration when it governs the whole item, the statement, struct-literal field or match arm when it governs only that one; hoisting a rationale to the declaration to shorten a body detaches it from the line it was pinned to, which is worse than the length it saved. The default is fewer: a comment is a cost the code must repay, and a link to the authority beats prose about it. A change leaves the net comment volume of what it touches no larger than it found it unless each added line earns its place — true of a PR that fixes comments too. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and an intra-doc link also turns a rename into a `doc-check` red, private items included (the magic-number rule, applied to prose).
 - **No magic numbers** — reuse the existing authority (a dep's const, our registry/theme/layout value), else ONE named `const` at the narrowest covering scope; prefer a type (enum/newtype) for a related set. Two copies of one value is a latent drift bug — if a copy must cross a boundary, pin the pair with a test. Self-evident `0`/`1`/`2`, indices, and test fixtures stay inline.
 - **Errors**: `anyhow::Result` in app code, `thiserror` in core; hook listener + JSONL watcher log-and-continue, never panic. **No `unwrap()` outside tests.**
-- **Visibility**: layer-internal stays `pub(crate)` (`unreachable_pub` is a hard gate); every `pub` item in a published crate carries a doc comment (`missing_docs`); `#[doc(hidden)] pub` = mechanism-not-contract escape hatch.
+- **Visibility**: `#[doc(hidden)] pub` is a mechanism-not-contract escape hatch; the lints own the rest.
 - **No scan-the-history** — keep state updated as events arrive; never derive it by scanning backward.
-- **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
+- **Shell**: match the surrounding shell; macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
 - **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is FIXED in place or a FOLLOW-UP → #N whose fix PR exists (one closed under the open-PR cap is enough) before the PR merges; which applies, and the four terminal states, are defined once in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#dispositions). Agents never file issues.**
@@ -121,8 +120,7 @@ Repo skills (committed): `local-review`, `beautify-decoration`,
 
 ## Ownership by crate
 
-Don't "fix" documented design — read the item's comments first. Who owns
-what: **core** owns session lifecycle/identity (registration, dedup,
+Who owns what: **core** owns session lifecycle/identity (registration, dedup,
 first-sight, liveness ladder, subagent parenting, feature boundaries) ·
 **scene** owns look/motion (per-agent palette recolor, walk timing,
 footprints, sky/light invariants, reachability) · **binary** owns
@@ -136,12 +134,12 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 ## Things NOT to do
 
 - No `ratatui`/`crossterm`/terminal anything in `pixtuoid-core` or `pixtuoid-scene`.
-- No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
+- No write to another CLI's config outside `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths — a print macro panics when its reader leaves (`| head`), so CLI and headless output goes through a `CliOut` (a command's is `pixtuoid::cli_stdout()`) and a stderr notice is a `let _ = writeln!`. Diagnostics are `tracing`, with a constant message and every value as a field (`error = %e`, `path = ?path`, `pid`): the constant message is a stable grep key and a field is filterable; a value baked into the format string is neither. Every path, session id and cwd rides a `?` field, never `%`, whatever its provenance, and so does an error chain that can embed one (`SourceDeath.error`, `SocketBusy`): `str`'s `Debug` escapes control and bidi chars, a Display field writes them raw, and the `fmt` layer's `EscapeGuard` covers the message only (`test_capture`'s `debug_fields_escape_control_and_bidi_chars`). Only a whole-message relay re-emitting an already-sanitized user-facing string (`config::warn_user`, the `read_log` warning in `sources_cli`) interpolates.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
-- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
+- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. A session pushes its own PR branches freely; never force-push or push to `main`.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging past the review gate (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
+- No merging past the review gate (PR #23 merged unreviewed with a path traversal), and no reviewer finding accepted before its premise is checked against the item it names.
 
 ## Where to look
 
