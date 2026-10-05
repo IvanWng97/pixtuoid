@@ -88,7 +88,7 @@ pub struct HostRegistration {
     /// heals.
     pub register: fn(config: &Path) -> Result<()>,
     /// Deregister the plugin and delete the files `register` wrote beside the
-    /// hooks file `config`.
+    /// hooks file `config`; an unreachable CLI leaves both in place.
     pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,

@@ -335,7 +335,7 @@ fn verify_target_and_has_hooks_handle_unresolvable_config_path() {
 }
 
 #[test]
-fn install_target_claude_writes_sentinel_and_backs_up() {
+fn install_target_claude_writes_the_hook_command() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     std::fs::write(&cfg, "{}\n").unwrap();
@@ -617,7 +617,7 @@ fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
 }
 
 #[test]
-fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
+fn install_on_a_malformed_config_errors_without_rewriting() {
     for (t, malformed) in [
         (&CODEX, "this is = = not valid toml [[["),
         (&crate::install::target::CURSOR, "{ not valid json,,, "),
