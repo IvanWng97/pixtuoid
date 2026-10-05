@@ -1425,6 +1425,22 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
     }
 }
 
+/// A starved tube records the catch it draws, from the tick that draws it to
+/// the one that ends it.
+#[test]
+fn neon_records_the_catch_it_draws() {
+    let mut neon = NeonState::new();
+    let mut tick = |ms| {
+        let at = in_stutter_cycle(ms);
+        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(at));
+        (levels == NeonLevels::FLASH, neon.stutters())
+    };
+    let (start, end) = NeonState::STUTTER_FLASHES_MS[0];
+    assert_eq!(tick(start - crate::anim::FULL_TICK_MS), (false, false));
+    assert_eq!(tick(start), (true, true));
+    assert_eq!(tick(end), (false, false));
+}
+
 /// On every tier, ticked at a live painter's [`FRAME`], a starved tube
 /// flashes at most [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] times in any second
 /// of wall time.

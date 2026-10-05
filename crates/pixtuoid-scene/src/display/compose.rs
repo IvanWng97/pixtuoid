@@ -187,6 +187,7 @@ pub(crate) fn compose_at<'a>(
         ambient,
         carpet: moment.look.carpet(theme),
         flash: crate::display::light::Flash::of(&moment.sky),
+        flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
         backdrop: crate::display::Backdrop::of(office.layout, theme),
