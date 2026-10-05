@@ -3,6 +3,7 @@
 use super::*;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
+use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::pet::PetKind;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -147,7 +148,7 @@ pub(super) fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
     out
 }
 pub(super) fn lum(c: pixtuoid_core::sprite::Rgb) -> f32 {
-    0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32
+    0.299 * f32::from(c.r) + 0.587 * f32::from(c.g) + 0.114 * f32::from(c.b)
 }
 pub(super) fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 {
     let mut sum = 0.0;
@@ -165,9 +166,9 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     for y in y0..(y0 + h).min(a.height()).min(b.height()) {
         for x in x0..(x0 + w).min(a.width()).min(b.width()) {
             let (p, q) = (a.get(x, y), b.get(x, y));
-            d += (p.r as i32 - q.r as i32).unsigned_abs() as u64
-                + (p.g as i32 - q.g as i32).unsigned_abs() as u64
-                + (p.b as i32 - q.b as i32).unsigned_abs() as u64;
+            d += u64::from((i32::from(p.r) - i32::from(q.r)).unsigned_abs())
+                + u64::from((i32::from(p.g) - i32::from(q.g)).unsigned_abs())
+                + u64::from((i32::from(p.b) - i32::from(q.b)).unsigned_abs());
         }
     }
     d

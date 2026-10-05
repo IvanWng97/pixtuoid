@@ -53,6 +53,17 @@ pub struct OmpSource {
     first_party_roots: bool,
 }
 
+impl std::fmt::Debug for OmpSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OmpSource")
+            .field("sessions_root", &self.sessions_root)
+            .field("profile_sessions_roots", &self.profile_sessions_roots)
+            .field("rescan_interval", &self.rescan_interval)
+            .field("first_party_roots", &self.first_party_roots)
+            .finish_non_exhaustive()
+    }
+}
+
 impl OmpSource {
     /// Construct pointed at the default omp `sessions` root, plus every other
     /// profile's.

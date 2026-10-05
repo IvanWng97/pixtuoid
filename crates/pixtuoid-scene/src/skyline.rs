@@ -17,6 +17,7 @@ use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
 use crate::atmosphere::{Moment, SkyTones};
 use crate::layout::pct;
+use crate::outside::Cell;
 use crate::theme::Theme;
 
 /// A depth of the city.
@@ -565,9 +566,16 @@ impl CityStrip {
         }
     }
 
+    /// What of this city stands before the sky at a window cell on a grid `d`
+    /// cells to the unit, the run's west end at column `run_x0`.
+    pub(crate) fn front(&self, run_x0: u16, d: u16) -> impl Fn(Cell) -> Option<Rgb> + '_ {
+        let x0 = run_x0.saturating_mul(d);
+        move |cell| self.at(cell.at.0.wrapping_sub(x0), cell.glass_offset.1)
+    }
+
     /// What stands at `(x, y)` art pixels from the run's west end and the
     /// glass's top, or `None` where the sky shows.
-    pub(crate) fn at(&self, x: u16, y: u16) -> Option<Rgb> {
+    fn at(&self, x: u16, y: u16) -> Option<Rgb> {
         (x < self.w && y < self.h)
             .then(|| self.px[usize::from(y) * usize::from(self.w) + usize::from(x)])
             .flatten()
@@ -592,10 +600,58 @@ fn hash(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::anim::{Beat, Motion};
+
+    /// Every per-plane table is `Plane::ALL.map(..)` indexed by
+    /// [`Plane::index`], so each plane in `ALL` sits at its own index.
+    #[test]
+    fn all_lists_every_plane_at_its_index() {
+        for (i, plane) in Plane::ALL.into_iter().enumerate() {
+            assert_eq!(plane.index(), i);
+        }
+    }
 
     fn pack() -> Pack {
         crate::pack::test_default_pack()
+    }
+
+    /// A window shows the strip read from the run's west end and the glass's
+    /// top, at every density.
+    #[test]
+    fn a_window_shows_the_strip_from_the_runs_west_end() {
+        const SKY: Rgb = Rgb { r: 1, g: 2, b: 3 };
+        let now = crate::localclock::at_hour(12);
+        let theme = &crate::theme::NORMAL;
+        let moment = Moment::resolve(
+            crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
+            theme,
+            0.0,
+            Motion::Full.timing(now),
+        );
+        let (run_x0, glass_h) = (3, 30);
+        let rows = 1..glass_h + 3;
+        let bay = crate::layout::WindowBay {
+            x: run_x0 + 25,
+            w: crate::layout::WINDOW_W,
+            idx: 1,
+        };
+        for d in [1, 4] {
+            let density = Density::new(d).expect("nonzero");
+            let strip = CityStrip::draw(&pack(), (80, glass_h), &moment, theme, density);
+            let front = strip.front(run_x0, d);
+            let view = crate::outside::WindowView::new(bay, rows.clone(), d, |cell| {
+                front(cell).unwrap_or(SKY)
+            });
+            let mut buildings = 0;
+            for (at, c) in view.cells() {
+                let (ax, ay) = (at.0 - bay.x * d, at.1 - rows.start * d);
+                let stands = strip.at((bay.x - run_x0) * d + ax, ay - d);
+                assert_eq!(c, stands.unwrap_or(SKY), "{d}: {at:?}");
+                buildings += usize::from(stands.is_some());
+            }
+            assert!(buildings > 0, "{d}: the window shows a city");
+        }
     }
 
     /// Where each stand stands, for comparing two cities.

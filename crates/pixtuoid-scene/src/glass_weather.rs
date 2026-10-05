@@ -1,5 +1,5 @@
-//! The weather on the windows' glass, pixel-free: the veil over the view and
-//! the rain or snow running down the panes, placed on a grid of `d`
+//! The weather on the windows' glass: the veil over the view and the rain or
+//! snow running down the panes, drawn onto a [`WindowView`] on a grid of `d`
 //! cells to the layout unit, so each painter draws one design at its own
 //! density.
 
@@ -9,6 +9,7 @@ use crate::anim::Beat;
 use crate::atmosphere::Moment;
 use crate::dither::Dithered;
 use crate::layout::Size;
+use crate::outside::WindowView;
 use crate::sky::{Element, Weather, WeatherMix, WeatherPolicy};
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
@@ -17,7 +18,7 @@ use crate::sky::{Element, Weather, WeatherMix, WeatherPolicy};
 #[derive(Clone, Copy)]
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
-    pub(crate) veil: Dithered<Option<(Rgb, f32)>>,
+    veil: Dithered<Option<(Rgb, f32)>>,
     /// The weather at any instant.
     policy: WeatherPolicy,
     /// [`Sky::weather`](crate::sky::Sky::weather).
@@ -140,9 +141,9 @@ fn fall(w: Weather) -> Option<&'static Fall> {
 
 /// One cell a particle covers on a painter's grid, from the glass's top-left.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Mark {
-    pub(crate) x: u16,
-    pub(crate) y: u16,
+struct Mark {
+    x: u16,
+    y: u16,
     colour: Rgb,
     ink: Ink,
 }
@@ -161,7 +162,7 @@ enum Ink {
 impl Mark {
     /// The mark over `under`, at `at` on the painter's grid, which the falloff
     /// dithers by.
-    pub(crate) fn over(self, under: Rgb, at: (u16, u16)) -> Rgb {
+    fn over(self, under: Rgb, at: (u16, u16)) -> Rgb {
         match self.ink {
             Ink::Solid => self.colour,
             Ink::Fade { level, peak } => crate::composite::blend_rgb(
@@ -345,10 +346,26 @@ impl GlassWeather {
             })
     }
 
+    /// This weather on `view`'s glass: the veil, then the marks over it, so
+    /// rain still reads through the murk.
+    pub(crate) fn paint(&self, view: &mut WindowView) {
+        // A clear pane takes no veil, so it skips the pass.
+        if self.veil.as_solid() != Some(None) {
+            view.paint(|cell, c| {
+                self.veil
+                    .at(cell.at.0, cell.at.1)
+                    .map_or(c, |(v, a)| crate::composite::blend_rgb(c, v, a))
+            });
+        }
+        for m in self.marks(view.idx(), view.glass_size(), view.d()) {
+            view.paint_glass_at((m.x, m.y), |cell, under| m.over(under, cell.at));
+        }
+    }
+
     /// The marks on the glass of the window `idx`th in the run, `glass` units
     /// big, on a grid `d` cells to the unit. A streak is one cell wide and
     /// `d` cells per unit long; a flake is a square half a unit across.
-    pub(crate) fn marks(&self, idx: u16, glass: Size, d: u16) -> Vec<Mark> {
+    fn marks(&self, idx: u16, glass: Size, d: u16) -> Vec<Mark> {
         let mut marks = Vec::new();
         if glass.w == 0 || glass.h == 0 || d == 0 {
             return marks;
@@ -697,6 +714,52 @@ mod tests {
         for m in marks {
             let c = m.over(black, (m.x, m.y));
             assert!(tones.contains(&c), "{c:?} vs {tones:?}");
+        }
+    }
+
+    /// The veil keys its dither on the painter's grid, as the room's other
+    /// dithers do, never on the glass's corner: keyed there, its pattern would
+    /// shift with each window's place on the grid.
+    #[test]
+    fn the_veil_dithers_on_the_painters_grid() {
+        use crate::layout::{WINDOW_W, WindowBay, window_rows};
+        use crate::outside::WindowView;
+        const BARE: Rgb = Rgb { r: 0, g: 0, b: 0 };
+        const VEIL: Rgb = Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        // A share whose dither, unlike half's checkerboard, moves with any
+        // shift of its key.
+        let veil = Dithered::new(None, Some((VEIL, 1.0)), 0.4);
+        let weather = GlassWeather {
+            veil,
+            ..glass_weather(Motion::Full, Weather::Clear, 0)
+        };
+        let rows = window_rows(32);
+        let bay = WindowBay {
+            x: 2,
+            w: WINDOW_W,
+            idx: 0,
+        };
+        let corner = bay.glass_box(rows.clone());
+        assert!(
+            ![corner.x, corner.y]
+                .iter()
+                .any(|c| c.is_multiple_of(crate::dither::PERIOD)),
+            "the glass on the dither's phase at d=1: a key from its corner would pass"
+        );
+        for d in [1, 4] {
+            let mut view = WindowView::new(bay, rows.clone(), d, |_| BARE);
+            weather.paint(&mut view);
+            let mut took = [0; 2];
+            for (at, c) in view.cells() {
+                let takes = veil.takes_to(at.0, at.1);
+                assert_eq!(c, if takes { VEIL } else { BARE }, "d={d} at {at:?}");
+                took[usize::from(takes)] += 1;
+            }
+            assert!(took[0] > 0 && took[1] > 0, "d={d}: {took:?}");
         }
     }
 }

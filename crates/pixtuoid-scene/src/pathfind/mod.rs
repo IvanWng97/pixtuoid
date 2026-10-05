@@ -24,7 +24,7 @@ pub const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 /// Abstract pathfinder — routes from `from` to `to` over the supplied mask +
 /// overlay, returning a polyline (first = `from`, last = `to`, intermediate =
 /// corners).
-pub trait Router {
+pub trait Router: std::fmt::Debug {
     /// Compute or look up the route.
     fn route(
         &mut self,
@@ -138,13 +138,13 @@ fn path_clear_under(path: &[Point], overlay: &OccupancyOverlay) -> bool {
     }
     for w in path.windows(2) {
         let (a, b) = (w[0], w[1]);
-        let dx = b.x as i32 - a.x as i32;
-        let dy = b.y as i32 - a.y as i32;
+        let dx = i32::from(b.x) - i32::from(a.x);
+        let dy = i32::from(b.y) - i32::from(a.y);
         let steps = dx.abs().max(dy.abs()).max(1) / 4;
         let n = steps.max(2);
         for i in 0..=n {
-            let x = (a.x as i32 + dx * i / n).max(0) as u16;
-            let y = (a.y as i32 + dy * i / n).max(0) as u16;
+            let x = (i32::from(a.x) + dx * i / n).max(0) as u16;
+            let y = (i32::from(a.y) + dy * i / n).max(0) as u16;
             if overlay.blocks(x, y) {
                 return false;
             }
@@ -186,8 +186,8 @@ pub(crate) fn octile_cost(dx: u32, dy: u32) -> u32 {
 }
 
 fn heuristic(a: (u16, u16), b: (u16, u16)) -> u32 {
-    let dx = (a.0 as i32 - b.0 as i32).unsigned_abs();
-    let dy = (a.1 as i32 - b.1 as i32).unsigned_abs();
+    let dx = (i32::from(a.0) - i32::from(b.0)).unsigned_abs();
+    let dy = (i32::from(a.1) - i32::from(b.1)).unsigned_abs();
     octile_cost(dx, dy)
 }
 
@@ -477,10 +477,10 @@ fn simplify_polyline(mask: &WalkableMask, pts: Vec<Point>) -> Vec<Point> {
         let prev = out[out.len() - 1];
         let here = pts[i];
         let next = pts[i + 1];
-        let dx_in = here.x as i32 - prev.x as i32;
-        let dy_in = here.y as i32 - prev.y as i32;
-        let dx_out = next.x as i32 - here.x as i32;
-        let dy_out = next.y as i32 - here.y as i32;
+        let dx_in = i32::from(here.x) - i32::from(prev.x);
+        let dy_in = i32::from(here.y) - i32::from(prev.y);
+        let dx_out = i32::from(next.x) - i32::from(here.x);
+        let dy_out = i32::from(next.y) - i32::from(here.y);
         let collinear = dx_in * dy_out == dy_in * dx_out;
         let crossed_clean = leg_clear(mask, prev, here) && leg_clear(mask, here, next);
         if !collinear || (crossed_clean && !leg_clear(mask, prev, next)) {

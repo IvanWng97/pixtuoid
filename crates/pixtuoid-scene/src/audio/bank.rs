@@ -1,6 +1,7 @@
 //! The pre-rendered sample banks — the ONE place the office's sounds are
-//! synthesized into buffers, so the native rodio gateway and the wasm WebAudio
-//! painter build byte-identical audio. Pure: no device deps.
+//! synthesized into buffers, for the native rodio gateway and the wasm WebAudio
+//! painter alike: the same synthesis, not the same bits, as [`f32::sin`]'s and
+//! [`f32::exp`]'s precision varies by platform. Pure: no device deps.
 //!
 //! The `rng` DRAW ORDER is the sound — `AssetBank::build` then
 //! `TrackBeds::build` continue ONE stream in the ratified order, so every
@@ -85,12 +86,13 @@ impl OneShotPool {
 /// The ONE-SHOT pools a player keeps for its whole life. The loop beds live in
 /// [`TrackBeds`] instead and are NOT retained — `RodioSink` copies each into its
 /// own `SamplesBuffer`, so holding the Arcs would double the bed RAM.
+#[derive(Debug)]
 pub struct AssetBank {
-    pub keystrokes: Vec<Arc<Vec<f32>>>,
-    pub drops: Vec<Arc<Vec<f32>>>,
-    pub door_chime: Arc<Vec<f32>>,
-    pub printer_whir: Arc<Vec<f32>>,
-    pub vending_drop: Arc<Vec<f32>>,
+    keystrokes: Vec<Arc<Vec<f32>>>,
+    drops: Vec<Arc<Vec<f32>>>,
+    door_chime: Arc<Vec<f32>>,
+    printer_whir: Arc<Vec<f32>>,
+    vending_drop: Arc<Vec<f32>>,
 }
 
 impl AssetBank {
@@ -108,17 +110,49 @@ impl AssetBank {
         }
     }
 
-    /// Resolve an engine-emitted `(pool, index)` play to its buffer. `index` is
-    /// taken modulo the pool size so an out-of-range caller can't panic; the
-    /// single-sample appliance pools ignore it.
-    pub fn sample(&self, pool: OneShotPool, index: usize) -> Arc<Vec<f32>> {
+    /// A bank of buffers built elsewhere (the wasm worker's handoff); `None`
+    /// unless each pool holds its full size.
+    pub fn adopt(
+        keystrokes: Vec<Arc<Vec<f32>>>,
+        drops: Vec<Arc<Vec<f32>>>,
+        door_chime: Arc<Vec<f32>>,
+        printer_whir: Arc<Vec<f32>>,
+        vending_drop: Arc<Vec<f32>>,
+    ) -> Option<Self> {
+        (keystrokes.len() == KEYSTROKE_POOL && drops.len() == DROP_POOL).then_some(Self {
+            keystrokes,
+            drops,
+            door_chime,
+            printer_whir,
+            vending_drop,
+        })
+    }
+
+    /// The `index`th buffer of `pool`, `None` past its end; an appliance pool
+    /// holds one.
+    pub fn get(&self, pool: OneShotPool, index: usize) -> Option<&Arc<Vec<f32>>> {
         match pool {
-            OneShotPool::Keystroke => Arc::clone(&self.keystrokes[index % self.keystrokes.len()]),
-            OneShotPool::Drop => Arc::clone(&self.drops[index % self.drops.len()]),
-            OneShotPool::DoorChime => Arc::clone(&self.door_chime),
-            OneShotPool::PrinterWhir => Arc::clone(&self.printer_whir),
-            OneShotPool::VendingDrop => Arc::clone(&self.vending_drop),
+            OneShotPool::Keystroke => self.keystrokes.get(index),
+            OneShotPool::Drop => self.drops.get(index),
+            OneShotPool::DoorChime => (index == 0).then_some(&self.door_chime),
+            OneShotPool::PrinterWhir => (index == 0).then_some(&self.printer_whir),
+            OneShotPool::VendingDrop => (index == 0).then_some(&self.vending_drop),
         }
+    }
+
+    /// Resolve an engine-emitted `(pool, index)` play to its buffer, `index`
+    /// taken modulo the pool's size.
+    pub fn sample(&self, pool: OneShotPool, index: usize) -> Arc<Vec<f32>> {
+        let size = match pool {
+            OneShotPool::Keystroke => self.keystrokes.len(),
+            OneShotPool::Drop => self.drops.len(),
+            OneShotPool::DoorChime | OneShotPool::PrinterWhir | OneShotPool::VendingDrop => 1,
+        };
+        // `build` and `adopt` fill every pool; an empty one would play silence.
+        index
+            .checked_rem(size)
+            .and_then(|i| self.get(pool, i))
+            .map_or_else(Default::default, Arc::clone)
     }
 }
 
@@ -126,6 +160,7 @@ impl AssetBank {
 /// in) with the sink, then DROPPED. The five musical beds and the NIGHT texture
 /// share ONE sample count (phase-locked); the DAY texture keeps its
 /// free-running power-of-two length.
+#[derive(Debug)]
 pub struct TrackBeds {
     beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
 }

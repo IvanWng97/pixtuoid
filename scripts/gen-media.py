@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Regenerate every committed office image from a release `snapshot` build.
+"""Regenerate the office media from a release `snapshot` build: the README's
+committed images and the site's CI-rendered demos.
 
 Single source of truth for BOTH surfaces' render media. Every render job lives
 in scripts/media.json; this driver builds the binary once and runs each job,
@@ -9,9 +10,10 @@ Theme/weather lists are read from site/src/{themes,weather}.json (`@themes.json`
 
   just gen-media           # regenerate everything
   just gen-media --only docs   # docs/images/ only
-  just gen-check           # → gen-media.py --check (drift gate)
+  just gen-media-check     # → gen-media.py --check --only docs (evidence on a PR)
 
---check renders to a temp dir and pixel-diffs every committed PNG (threshold 0,
+--check renders to a temp dir and pixel-diffs every committed PNG of the
+selected targets (threshold 0,
 via scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated
 demo.gif are presence-checked only, since ffmpeg/gifsicle output is not
 byte-stable across versions. Exits non-zero on any drift.
@@ -61,7 +63,7 @@ def build_once():
 
 
 def expand_ref(ref):
-    return json.loads((SITE_SRC / ref[1:]).read_text())
+    return json.loads((SITE_SRC / ref[1:]).read_text(encoding="utf-8"))
 
 
 def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
@@ -102,7 +104,8 @@ def run_render(job, out_dirs, work, intermediates):
     for d in out_dirs:
         dst = d / f"{job['id']}.png"
         if scale:
-            img = Image.open(raw).convert("RGB")
+            with Image.open(raw) as im:
+                img = im.convert("RGB")
             img.resize((img.width * scale, img.height * scale), Image.NEAREST).save(dst)
         else:
             shutil.copyfile(raw, dst)
@@ -125,7 +128,8 @@ def run_crop(job, out_dirs, work, intermediates):
             f"gen-media: crop job '{job['id']}' needs its source render '{job['from']}' "
             f"— include it, e.g. --jobs {job['from']},{job['id']}"
         )
-    img = Image.open(src).convert("RGB")
+    with Image.open(src) as im:
+        img = im.convert("RGB")
     if "quadrants" in job:
         w, h = img.size
         scale = job.get("scale", 1)
@@ -151,7 +155,8 @@ def run_composite(job, out_dirs, work, intermediates):
              theme=theme)
         paths.append(p)
 
-    comp = Image.open(paths[0]).convert("RGB")
+    with Image.open(paths[0]) as im:
+        comp = im.convert("RGB")
     w, h = comp.size
     n = len(themes)
     half = h / 2
@@ -161,7 +166,8 @@ def run_composite(job, out_dirs, work, intermediates):
         return k * w / n + slant * (y - half)
 
     for i in range(n):
-        im = Image.open(paths[i]).convert("RGB")
+        with Image.open(paths[i]) as src:
+            im = src.convert("RGB")
         lt = -far if i == 0 else boundary(i, 0)
         lb = -far if i == 0 else boundary(i, h)
         rt = far if i == n - 1 else boundary(i + 1, 0)
@@ -197,7 +203,9 @@ def run_matrix(job, out_dirs, work, intermediates):
 
 
 # H.264 and VP9 both require even width/height. `neighbor`: the pixel-art rule
-# (no smoothing), where swscale's default is bicubic.
+# (no smoothing), where swscale's default is bicubic. Set in `flags`, which
+# ffmpeg-scaler deprecates for `scaler`: that option exists only from FFmpeg
+# 9.0 (3503b19711), and the apt ffmpeg a CI runner has is older.
 SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
@@ -240,7 +248,8 @@ def run_clip(job, out_dirs, work, intermediates):
     crop = job.get("crop")
     vf = f"crop={crop},{SCALE_EVEN}" if crop else SCALE_EVEN
     # RGB, not a copy of the frame: the snapshot writes opaque RGBA, far larger.
-    poster = Image.open(poster_frame(frames, job)).convert("RGB")
+    with Image.open(poster_frame(frames, job)) as im:
+        poster = im.convert("RGB")
     if crop:
         poster = crop_box(poster, crop, cid)
     for d in out_dirs:
@@ -252,7 +261,8 @@ def run_wasm_still(job, out_dirs, work, intermediates):
     # The live-office backdrop's poster: a REAL frame of the pixtuoid-web Office,
     # in the same buffer geometry the live canvas computes, so the poster→canvas
     # crossfade dissolves in place instead of reframing. Deterministic per
-    # (t0_ms, advance_ms) under the TZ=UTC pin, so --check pixel-gates it.
+    # (t0_ms, advance_ms) under the TZ=UTC pin, so a re-render reproduces it; it is
+    # site-only, so no gate compares it.
     subprocess.run(
         ["cargo", "build", "--release", "-p", "pixtuoid-web", "--example", "hero_still"],
         check=True,
@@ -427,7 +437,7 @@ def main():
 
     # Validate --jobs BEFORE the release build: an unknown id would otherwise be
     # a silent no-op that still prints "wrote media → …".
-    manifest = json.loads(MANIFEST.read_text())
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     if only_jobs:
         known = {j["id"] for j in manifest}
         unknown = sorted(only_jobs - known)

@@ -102,6 +102,20 @@ pub(crate) struct TileCutaway {
     torn: bool,
 }
 
+impl std::fmt::Debug for TileCutaway {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileCutaway")
+            .field("planned", &self.planned)
+            .field("density", &self.density)
+            .field("protocol", &self.protocol)
+            .field("tmux", &self.tmux)
+            .field("origin", &self.origin)
+            .field("pending", &self.pending.len())
+            .field("torn", &self.torn)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a [`TileCutaway`]'s image last showed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shown {
@@ -192,7 +206,7 @@ impl TileCutaway {
         } else {
             Dirty::All
         };
-        if dirty != Dirty::Rects(Vec::new()) {
+        if dirty != Dirty::Unchanged {
             self.image.clone_from(frame);
         }
         self.stage(&dirty, now, fitted.scene.as_position());

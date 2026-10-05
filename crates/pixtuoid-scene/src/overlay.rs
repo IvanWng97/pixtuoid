@@ -138,7 +138,7 @@ impl<'a> Namesakes<'a> {
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
-        let marker = crate::cutaway::text::char_cells(BADGE_MARKER);
+        let marker = crate::display::text::cells(BADGE_MARKER.encode_utf8(&mut [0; 4]));
         truncate_label(&raw, BADGE_CELLS.saturating_sub(marker)).into_owned()
     }
 }
@@ -167,7 +167,7 @@ pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
 /// not the suffix — otherwise the disambig becomes useless ("TikTok-Android·a"
 /// tells us nothing the base alone wouldn't).
 pub(crate) fn truncate_label(label: &str, budget: u16) -> std::borrow::Cow<'_, str> {
-    use crate::cutaway::text::cells;
+    use crate::display::text::cells;
     use std::borrow::Cow;
     if cells(label) <= budget {
         return Cow::Borrowed(label);
@@ -176,24 +176,11 @@ pub(crate) fn truncate_label(label: &str, budget: u16) -> std::borrow::Cow<'_, s
         let suffix = &label[sep_byte..];
         let suffix_cells = cells(suffix);
         if suffix_cells < budget {
-            let base = take_cells(&label[..sep_byte], budget - suffix_cells);
+            let base = crate::display::text::take(&label[..sep_byte], budget - suffix_cells);
             return Cow::Owned(format!("{base}{suffix}"));
         }
     }
-    Cow::Borrowed(take_cells(label, budget))
-}
-
-/// The longest start of `text` that fits `budget` cells.
-fn take_cells(text: &str, budget: u16) -> &str {
-    let mut used = 0u16;
-    let end = text
-        .char_indices()
-        .find(|&(_, c)| {
-            used = used.saturating_add(crate::cutaway::text::char_cells(c));
-            used > budget
-        })
-        .map_or(text.len(), |(i, _)| i);
-    &text[..end]
+    Cow::Borrowed(crate::display::text::take(label, budget))
 }
 
 /// 4-hex-char disambiguation suffix, hashed from the WHOLE `session_id` —
@@ -271,9 +258,6 @@ mod tests {
     fn drawn(slot: &AgentSlot, at: Point) -> AgentFrame {
         AgentFrame {
             agent_id: slot.agent_id,
-            top_left: at,
-            w: 8,
-            h: 12,
             label_anchor: at,
         }
     }
@@ -439,7 +423,7 @@ mod tests {
     /// [`BADGE_CELLS`]: super::BADGE_CELLS
     #[test]
     fn a_long_names_badge_fills_its_cells_marker_included() {
-        use crate::cutaway::text::cells;
+        use crate::display::text::cells;
         for label in [
             "cc\u{b7}a-very-long-project-name",
             "cc\u{b7}日本語プロジェクト管理ツール",

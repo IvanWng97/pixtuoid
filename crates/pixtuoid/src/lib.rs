@@ -75,6 +75,7 @@ pub fn display_path(p: &std::path::Path) -> String {
 /// completes its side effects and exits with its own verdict, where `println!`
 /// would panic. Any other write error still fails.
 #[doc(hidden)]
+#[derive(Debug)]
 pub struct CliOut<W> {
     inner: W,
     closed: bool,
@@ -340,16 +341,15 @@ mod tests {
     }
 
     /// Round-trip one probe name through `pixtuoid-core`'s copy of the predicate,
-    /// via `decode_hook_payload`'s unsupported-event `bail!`.
+    /// via `decode_hook_payload`'s unsupported-event error.
     fn core_display_safe(name: &str) -> String {
-        const PREFIX: &str = "unsupported hook_event_name: ";
         let v = serde_json::json!({"hook_event_name": name, "session_id": "s"});
         let e = pixtuoid_core::source::decoder::decode_hook_payload(v)
-            .expect_err("an unregistered hook_event_name must bail");
-        let msg = e.to_string();
-        msg.strip_prefix(PREFIX)
-            .unwrap_or_else(|| panic!("core's bail wording moved; re-point this pin: {msg:?}"))
-            .to_string()
+            .expect_err("an unregistered hook_event_name must be refused");
+        let pixtuoid_core::source::decoder::DecodeError::Unsupported { event, .. } = e else {
+            panic!("an unregistered hook_event_name must be Unsupported, got {e:?}");
+        };
+        event
     }
 
     #[test]

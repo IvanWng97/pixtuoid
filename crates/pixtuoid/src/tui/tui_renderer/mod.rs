@@ -17,6 +17,7 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
+use pixtuoid_scene::display::Hovers;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, OfficeStores, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene,
@@ -26,18 +27,6 @@ use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::look::Rendered;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pathfind::Router;
-use pixtuoid_scene::pet::PetFrame;
-
-/// Floors `a` and `b`, which differ, borrowed together.
-fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
-    if a < b {
-        let (lo, hi) = floors.split_at_mut(b);
-        (&mut lo[a], &mut hi[0])
-    } else {
-        let (lo, hi) = floors.split_at_mut(a);
-        (&mut hi[0], &mut lo[b])
-    }
-}
 
 fn floor_info_for(
     current_idx: usize,
@@ -65,6 +54,7 @@ struct PopupState {
     last_scale: f32,
 }
 
+#[derive(Debug)]
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     /// The pack every floor's raster draws with, which each frame's must be.
@@ -76,8 +66,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     last_extent: Option<(u16, u16)>,
     mouse_pos: Option<(u16, u16)>,
     cached_layout: Option<Arc<SceneLayout>>,
-    last_pet_pos: Option<PetFrame>,
-    last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
+    last_hovers: Hovers,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
@@ -92,6 +81,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
 
 /// Everything a frame shows besides the floor: kept apart from `floors` and
 /// `office` so a frame borrows it beside them ([`Chrome::frame`]).
+#[derive(Debug)]
 struct Chrome {
     theme: &'static pixtuoid_scene::theme::Theme,
     theme_picker: Option<usize>,
@@ -236,8 +226,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             last_extent: None,
             mouse_pos: None,
             cached_layout: None,
-            last_pet_pos: None,
-            last_agents: Vec::new(),
+            last_hovers: Hovers::default(),
             last_geometry: None,
             office: PerOffice::new(),
             debug_walkable: false,
@@ -391,16 +380,25 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_geometry?.area_at(col, row)
     }
 
-    /// [`hit_test_agent`](crate::tui::hit_test::hit_test_agent) against the last
-    /// frame drawn.
+    /// What cell `(col, row)` showed the pointer in the last frame drawn.
+    pub(crate) fn scene_hit_at(
+        &self,
+        col: u16,
+        row: u16,
+    ) -> Option<crate::tui::hit_test::SceneHit<'_>> {
+        let layout = self.cached_layout.as_deref()?;
+        crate::tui::hit_test::scene_hit(&self.last_hovers, layout, self.scene_area_at(col, row)?)
+    }
+
+    /// The agent topmost at cell `(col, row)` in the last frame drawn.
+    #[cfg(test)]
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
-        let area = self.scene_area_at(col, row)?;
-        if let Some(crate::tui::geometry::SceneGeometry::Cutaway { .. }) = self.last_geometry {
-            return self.floors[self.current_floor]
-                .raster
-                .hover_at(area.bounds());
+        match self.scene_hit_at(col, row)? {
+            crate::tui::hit_test::SceneHit::Figure(
+                pixtuoid_scene::display::HoverTarget::Agent(id),
+            ) => Some(*id),
+            _ => None,
         }
-        crate::tui::hit_test::hit_test_agent(&self.last_agents, area)
     }
 
     pub fn current_floor_seed(&self) -> u64 {
@@ -494,8 +492,25 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.active_pet.as_ref()
     }
 
-    pub fn cached_pet_pos(&self) -> Option<PetFrame> {
-        self.last_pet_pos
+    /// The pet the last frame drew, found as the pointer finds it: on some
+    /// logical pixel it is the topmost hover.
+    #[cfg(test)]
+    pub(crate) fn drawn_pet(&self) -> Option<pixtuoid_scene::display::PetHover> {
+        let layout = self.cached_layout.as_deref()?;
+        (0..layout.buf_h)
+            .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+            .find_map(|(x, y)| {
+                let pixel = pixtuoid_scene::layout::Bounds {
+                    x,
+                    y,
+                    width: 1,
+                    height: 1,
+                };
+                match self.last_hovers.at(pixel)? {
+                    pixtuoid_scene::display::HoverTarget::Pet(pet) => Some(*pet),
+                    _ => None,
+                }
+            })
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves: the
@@ -589,7 +604,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = self.version_popup_scale(now);
         let onboarding_dim = self.chrome.onboarding.dim;
 
-        let (from, to) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let Ok([from, to]) = self.floors.get_disjoint_mut([from_floor, to_floor]) else {
+            tracing::warn!(
+                from_floor,
+                to_floor,
+                "a slide between floors it cannot borrow"
+            );
+            self.cancel_transition();
+            return Ok(());
+        };
 
         // Transitions hide *text* overlays (tooltips, bubbles, labels) but keep
         // every pixel-level visual, so the slide reads as a continuous scene.
@@ -657,8 +680,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// must not land on its ghost.
     fn forget_drawn(&mut self) {
         self.cached_layout = None;
-        self.last_pet_pos = None;
-        self.last_agents.clear();
+        self.last_hovers = Hovers::default();
         self.last_geometry = None;
     }
 
@@ -679,8 +701,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         popup_scale: f32,
         now: SystemTime,
     ) {
-        self.last_pet_pos = out.pet_pos;
-        self.last_agents = out.agents;
+        self.last_hovers = out.hovers;
         self.last_geometry = out.geometry;
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
         // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
@@ -862,7 +883,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .slide_world(&from_scene, pack, now, from_floor, nf);
         let to_world = self.chrome.slide_world(&to_scene, pack, now, to_floor, nf);
-        let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let Ok([leaving, arriving]) = self.floors.get_disjoint_mut([from_floor, to_floor]) else {
+            tracing::warn!(
+                from_floor,
+                to_floor,
+                "a slide between floors it cannot borrow"
+            );
+            self.cancel_transition();
+            return Ok(());
+        };
         let mut transition_chitchat = std::collections::HashMap::new();
         let look = Look::Cutaway {
             scale: fitted.fit.render_scale(),
@@ -938,9 +967,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         nf: usize,
     ) -> Result<()> {
         use crate::tui::renderer::{
-            DrawOut, TooltipAt, draw_footer_only_frame, hit_test_coffee_machine,
-            hit_test_furniture, paint_coffee_tooltip, paint_footer, paint_furniture_tooltip,
-            paint_hover_tooltip, paint_overlays, scene_rect,
+            DrawOut, TooltipAt, draw_footer_only_frame, paint_footer, paint_overlays,
+            paint_scene_tooltip, scene_hit, scene_rect,
         };
         let scene_area = fitted.scene;
         let floor_scene = project_floor_scene(scene, self.current_floor);
@@ -989,15 +1017,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return drawn;
         };
         cutaway.paint(fitted, self.current_floor, pixels, dirty, now);
+        let hovers = self.floors[self.current_floor]
+            .raster
+            .hovers()
+            .cloned()
+            .unwrap_or_default();
         let geometry = fitted.geometry();
-        let layout = &*frame_layout;
-        let mouse = self
-            .mouse_pos
-            .and_then(|(mx, my)| Some((mx, my, geometry.area_at(mx, my)?)));
-        let hovered = mouse.and_then(|(.., cell)| {
-            self.floors[self.current_floor]
-                .raster
-                .hover_at(cell.bounds())
+        let mouse = self.mouse_pos.and_then(|(mx, my)| {
+            let hit = scene_hit(&hovers, &frame_layout, geometry.area_at(mx, my)?)?;
+            Some((mx, my, hit))
         });
         cutaway.before_flush(now);
         let mut covered = Vec::new();
@@ -1006,21 +1034,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let scene_area = scene_rect(full);
             paint_footer(f, &footer, full, theme);
             cutaway.place(f.buffer_mut(), scene_area);
-            if let Some((mx, my, cell)) = mouse {
+            if let Some((mx, my, hit)) = &mouse {
                 let at = TooltipAt {
-                    mx,
-                    my,
+                    mx: *mx,
+                    my: *my,
                     scene_rect: scene_area,
                 };
-                // The agent first, then the classic's fall-through, less the
-                // pet and mascots the cutaway does not report.
-                if let Some(id) = hovered {
-                    paint_hover_tooltip(f, &floor_scene, id, at, now, theme);
-                } else if hit_test_coffee_machine(layout, cell) {
-                    paint_coffee_tooltip(f, at, theme);
-                } else if let Some(label) = hit_test_furniture(layout, cell) {
-                    paint_furniture_tooltip(f, label, at, theme);
-                }
+                paint_scene_tooltip(f, hit, &world, at, theme);
             }
             paint_overlays(f, &overlays, now, full, theme);
             covered = cutaway.cover(f.buffer_mut(), scene_area);
@@ -1030,9 +1050,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             scene,
             DrawOut {
                 layout: Some(frame_layout),
+                hovers,
                 occupied_waypoints,
                 geometry: Some(geometry),
-                ..DrawOut::default()
             },
             popup_scale,
             now,

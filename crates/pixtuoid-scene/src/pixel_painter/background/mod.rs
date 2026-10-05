@@ -9,7 +9,6 @@
 mod ground_wash;
 mod lighting;
 
-use crate::celestial::SkyView;
 pub(super) use ground_wash::paint_ground_wash;
 pub(super) use lighting::{
     paint_clock, paint_corridor_runner, paint_light, paint_neon_halo, paint_neon_panel,
@@ -19,18 +18,18 @@ pub(super) use lighting::{
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
+use super::palette::{RgbLut, WHITE, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::dither::Dithered;
 use crate::glass_weather::GlassWeather;
-use crate::layout::{
-    Bounds, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts, window_rows,
-    window_run,
-};
+use crate::layout::{WindowBay, wall_trim_row, window_posts, window_rows};
+use crate::outside::Outside;
 use crate::sky::Sky;
-use crate::skyline::CityStrip;
 use crate::theme::Theme;
+
+/// How far a strike's peak washes the window glass white.
+const BOLT_ALPHA: f32 = 0.6;
 
 /// Room-wide ambient bounce from a lightning strike, at [`Sky::flash`].
 pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
@@ -49,7 +48,7 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
 /// named field here; a stale hit is invisible to every other gate, so this
 /// key IS the correctness boundary — a new input into the fill loops must
 /// join it.
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct BaseFillKey {
     buf_w: u16,
     buf_h: u16,
@@ -62,6 +61,7 @@ struct BaseFillKey {
 /// the largest single cost of a frame (#900's profile) yet their inputs
 /// ([`BaseFillKey`]) change only on a resize, theme swap, or weather-tint
 /// change.
+#[derive(Debug)]
 pub(crate) struct BaseFillCache {
     key: Option<BaseFillKey>,
     filled: RgbBuffer,
@@ -82,10 +82,10 @@ impl BaseFillCache {
             self.filled.resize_fill(key.buf_w, key.buf_h, key.wall);
             for y in key.band_h..key.buf_h {
                 for x in 0..key.buf_w {
-                    let hash = (x as u32)
+                    let hash = u32::from(x)
                         .wrapping_mul(73)
-                        .wrapping_add((y as u32).wrapping_mul(151))
-                        ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
+                        .wrapping_add(u32::from(y).wrapping_mul(151))
+                        ^ (u32::from(x).wrapping_mul(11) ^ u32::from(y).wrapping_mul(37));
                     let carpet = key.carpet.at(x, y);
                     let color = match hash % 17 {
                         0 | 1 => carpet[0],
@@ -102,15 +102,13 @@ impl BaseFillCache {
     }
 }
 
-/// The ground and the north wall band `top_wall_h` tall with the windows `bays`,
-/// over the whole of `buf`, at `moment`.
+/// The ground and the north wall band `top_wall_h` tall, the posts between
+/// its windows included, over the whole of `buf`, at `moment`.
 pub(super) fn paint_ground_and_walls(
     base_fill: &mut BaseFillCache,
     buf: &mut RgbBuffer,
     top_wall_h: u16,
-    bays: impl IntoIterator<Item = WindowBay>,
     moment: &Moment,
-    pack: &Pack,
     theme: &Theme,
 ) {
     let (buf_w, buf_h) = (buf.width(), buf.height());
@@ -132,36 +130,6 @@ pub(super) fn paint_ground_and_walls(
     );
 
     let rows = window_rows(top_wall_h);
-    let (window_y, window_h) = (rows.start, rows.end - rows.start);
-    let run = window_run(buf_w);
-    let city = CityStrip::draw(
-        pack,
-        (run.end - run.start, glass_rows(window_h)),
-        moment,
-        theme,
-        pixtuoid_core::sprite::format::Density::ONE,
-    );
-    let view = GlassView {
-        city: &city,
-        run_x0: run.start,
-        sky: &SkyView::of(moment, buf_w, top_wall_h, theme),
-        weather: GlassWeather::of(moment),
-    };
-    for w in bays {
-        paint_floor_to_ceiling_window(
-            buf,
-            Bounds {
-                x: w.x,
-                y: window_y,
-                width: w.w,
-                height: window_h,
-            },
-            window_frame,
-            w.idx,
-            moment,
-            view,
-        );
-    }
     for post in window_posts(buf_w) {
         for x in post {
             for y in rows.clone() {
@@ -178,114 +146,33 @@ pub(super) fn paint_ground_and_walls(
     }
 }
 
-/// Wash `wash` over `pane`'s glass INTERIOR, one pixel in from each edge:
-/// it takes the raw window rect and does its own offset math.
-fn wash_glass(buf: &mut RgbBuffer, pane: Bounds, wash: Dithered<Option<(Rgb, f32)>>) {
-    for dy in 1..pane.height.saturating_sub(1) {
-        for dx in 1..pane.width.saturating_sub(1) {
-            let (x, y) = (pane.x + dx, pane.y + dy);
-            if let Some((color, alpha)) = wash.at(x, y) {
-                blend_pixel(buf, x, y, color, alpha);
-            }
-        }
-    }
-}
-
-/// What one frame's windows look out on, the same through every pane.
-#[derive(Clone, Copy)]
-struct GlassView<'a> {
-    /// The city along the whole run of windows.
-    city: &'a CityStrip,
-    /// The column the city strip's west end stands at.
-    run_x0: u16,
-    sky: &'a SkyView,
-    weather: GlassWeather,
-}
-
-/// Floor-to-ceiling window `pane`, framed in `frame` and seeded by its tiling
-/// index `window_idx`, with mullion, and `view` behind its glass at `moment`.
-fn paint_floor_to_ceiling_window(
+/// The windows `bays` on a wall band `top_wall_h` tall, at `moment`.
+pub(super) fn paint_windows(
     buf: &mut RgbBuffer,
-    pane: Bounds,
-    frame: Rgb,
-    window_idx: u16,
+    top_wall_h: u16,
+    bays: impl IntoIterator<Item = WindowBay>,
     moment: &Moment,
-    view: GlassView<'_>,
+    pack: &Pack,
+    theme: &Theme,
 ) {
-    let Bounds {
-        x,
-        y,
-        width: w,
-        height: h,
-    } = pane;
-    let sky = &moment.sky;
-    let GlassView {
-        city,
-        run_x0,
-        sky: sky_view,
-        weather: glass_weather,
-    } = view;
-    let glass_h = glass_rows(h);
-    let glass = sky_view.pane(x, w, glass_h, 1);
-    let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
-
-    for dy in 0..h {
-        for dx in 0..w {
-            let px = x + dx;
-            let py = y + dy;
-            if px >= buf.width() || py >= buf.height() {
-                continue;
-            }
-            if window_frame(dx, dy, Size { w, h }) {
-                buf.put(px, py, frame);
-                continue;
-            }
-            let glass_dy = dy - 1;
-            if let Some(building) = building_at(px, glass_dy) {
-                buf.put(px, py, building);
-            } else {
-                buf.put(px, py, glass.colour((px, py), glass_dy));
-            }
-        }
-    }
-
-    // The veil goes on BEFORE the marks and the bolt, so rain and lightning
-    // still read on top of the murk.
-    wash_glass(buf, pane, glass_weather.veil);
-
-    // Unclipped by the mullion and transom, which the classic's marks run over.
-    let marks = glass_weather.marks(
-        window_idx,
-        Size {
-            w: w.saturating_sub(2),
-            h: glass_h,
-        },
-        1,
+    let outside = Outside::of(
+        moment,
+        pack,
+        theme,
+        (buf.width(), top_wall_h),
+        pixtuoid_core::sprite::format::Density::ONE,
+        GlassWeather::of(moment),
     );
-    for m in marks {
-        let (px, py) = (x + 1 + m.x, y + 1 + m.y);
-        if px < buf.width() && py < buf.height() {
-            buf.put(px, py, m.over(buf.get(px, py), (px, py)));
+    // The bolt, the strike's source, lights the glass in lockstep with
+    // `paint_lightning_flash`, over all it shows.
+    let bolt = BOLT_ALPHA * moment.sky.flash();
+    for bay in bays {
+        let mut view = outside.through(bay);
+        if bolt > 0.0 {
+            view.paint(|_, c| blend_rgb(c, WHITE, bolt));
         }
-    }
-
-    // The bright on-glass bolt — the strike's source. Rides the shared flash
-    // level so it fires in lockstep with `paint_lightning_flash`.
-    let level = sky.flash();
-    if level > 0.0 {
-        wash_glass(buf, pane, Dithered::solid(Some((WHITE, 0.6 * level))));
-    }
-
-    if let Some(blaze) = sky_view.blaze() {
-        for dy in 1..h.saturating_sub(1) {
-            let glass_dy = dy.saturating_sub(1);
-            for dx in 1..w.saturating_sub(1) {
-                let px = x + dx;
-                let py = y + dy;
-                if px < buf.width() && py < buf.height() && building_at(px, glass_dy).is_none() {
-                    buf.put(px, py, blaze.over(buf.get(px, py)));
-                }
-            }
+        for ((x, y), c) in view.every() {
+            buf.put_checked(x, y, c.unwrap_or(theme.surface.window_frame));
         }
     }
 }
