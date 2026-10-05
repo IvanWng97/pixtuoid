@@ -139,8 +139,8 @@ fn resolve_codex_home(codex_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf
 /// Source-verified HOME-first CLIs (the only consumers):
 /// - **CodeWhale** — `paths::user_home` = `$HOME ?? $USERPROFILE ??
 ///   HOMEDRIVE+HOMEPATH ?? dirs::home_dir()`. We mirror the first two; the
-///   Windows-pair rung is unmirrored but fails LOUD (`anyhow!` → "pass
-///   --config"), never silently to a wrong dir.
+///   Windows-pair rung is unmirrored but fails loud with an error, never
+///   silently to a wrong dir.
 /// - **OpenClaw** — `infra/home-dir.ts::resolveRawOsHomeDir` = `$HOME ??
 ///   $USERPROFILE ?? os.homedir()`.
 ///
