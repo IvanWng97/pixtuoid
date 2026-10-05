@@ -1964,7 +1964,6 @@ mod tests {
         }
     }
 
-    /// The photosensitive floor: a strike changes the clouds' light only as
     /// A strike lights the deck by the phase the sky's own envelope is in,
     /// walked through real strikes: one look through each phase, the primary
     /// and the dim apart, and nothing once it is over.

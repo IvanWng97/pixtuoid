@@ -704,7 +704,7 @@ pub(crate) fn strike_start_ms(beat: crate::anim::Beat) -> u64 {
 
 /// The phase of the strike `beat` falls in under `policy`, or `None` when not
 /// mid-strike or at rest.
-fn strike_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> Option<StrikePhase> {
+fn strike_phase_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> Option<StrikePhase> {
     if beat.is_rest() {
         return None;
     }
@@ -753,7 +753,7 @@ impl Sky {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
-        let strike = strike_at(timing.beat, policy);
+        let strike = strike_phase_at(timing.beat, policy);
         Self {
             policy,
             weather: policy.weather_at(now),

@@ -3,9 +3,9 @@ use super::*;
 use crate::localclock::{at_hour_min, on_day};
 use std::time::Duration;
 
-/// The level [`strike_at`] lights the sky with at `beat`, 0 with no strike.
+/// The level [`strike_phase_at`] lights the sky with at `beat`, 0 with no strike.
 fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
-    strike_at(beat, policy).map_or(0.0, StrikePhase::level)
+    strike_phase_at(beat, policy).map_or(0.0, StrikePhase::level)
 }
 
 #[test]
