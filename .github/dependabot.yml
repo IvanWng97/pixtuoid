@@ -61,6 +61,19 @@ updates:
     cooldown:
       default-days: 7
 
+  # requirements-dev.txt pins exact versions (pip.pypa.io topics/repeatable-installs);
+  # this moves the pins.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-deps:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
   - package-ecosystem: npm
     directory: /site
     schedule:
