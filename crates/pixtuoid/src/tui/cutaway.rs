@@ -206,7 +206,7 @@ impl TileCutaway {
         } else {
             Dirty::All
         };
-        if dirty != Dirty::Rects(Vec::new()) {
+        if dirty != Dirty::Unchanged {
             self.image.clone_from(frame);
         }
         self.stage(&dirty, now, fitted.scene.as_position());
