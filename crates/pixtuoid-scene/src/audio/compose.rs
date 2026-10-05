@@ -62,10 +62,10 @@ pub struct GeneratedScore {
     pub(super) lead_voice: LeadVoice,
     /// The 8-bar harmonic TIMELINE every stem reads: the template played twice,
     /// with (day) bar 8 swapped for the turnaround dominant.
-    pub(super) bar_chords: [[u8; 4]; 8],
+    pub(super) bar_chords: [[u8; 4]; GEN_LOOP_BARS],
     /// Harmonic root per timeline bar — voicings may be inversions, so this is
     /// not `chord[0]`.
-    pub(super) bar_roots: [u8; 8],
+    pub(super) bar_roots: [u8; GEN_LOOP_BARS],
     /// The TEMPLATE's roots — the timeline + day turnaround derive from these.
     pub(super) roots_pc: [u8; 4],
 }
@@ -379,16 +379,16 @@ fn transpose(p: &Progression, t: i8) -> ([[u8; 4]; 4], [u8; 4], [u8; 7]) {
     let mut chords = p.chords;
     for chord in &mut chords {
         for n in chord.iter_mut() {
-            *n = (*n as i16 + t as i16) as u8;
+            *n = (i16::from(*n) + i16::from(t)) as u8;
         }
     }
     let mut roots = p.roots_pc;
     for r in &mut roots {
-        *r = ((*r as i16 + t as i16).rem_euclid(12)) as u8;
+        *r = ((i16::from(*r) + i16::from(t)).rem_euclid(12)) as u8;
     }
     let mut scale = p.scale_pcs;
     for s in &mut scale {
-        *s = ((*s as i16 + t as i16).rem_euclid(12)) as u8;
+        *s = ((i16::from(*s) + i16::from(t)).rem_euclid(12)) as u8;
     }
     scale.sort_unstable();
     (chords, roots, scale)
@@ -406,12 +406,16 @@ fn dominant7_of(target_root_pc: u8) -> [u8; 4] {
 
 /// The 8-bar harmonic timeline + per-bar roots: template ×2, with (day) bar 8
 /// substituted by the dominant of the returning bar-1 root.
-fn timeline(chords: &[[u8; 4]; 4], roots_pc: &[u8; 4], mood: Mood) -> ([[u8; 4]; 8], [u8; 8]) {
-    let mut bars = [[0u8; 4]; 8];
-    let mut roots = [0u8; 8];
+fn timeline(
+    chords: &[[u8; 4]; 4],
+    roots_pc: &[u8; 4],
+    mood: Mood,
+) -> ([[u8; 4]; GEN_LOOP_BARS], [u8; GEN_LOOP_BARS]) {
+    let mut bars = [[0u8; 4]; GEN_LOOP_BARS];
+    let mut roots = [0u8; GEN_LOOP_BARS];
     for bar in 0..GEN_LOOP_BARS {
-        bars[bar] = chords[bar % 4];
-        roots[bar] = roots_pc[bar % 4];
+        bars[bar] = chords[bar % chords.len()];
+        roots[bar] = roots_pc[bar % roots_pc.len()];
     }
     if mood == Mood::Day {
         bars[7] = dominant7_of(roots_pc[0]);
@@ -439,7 +443,7 @@ fn shell_of(chord: &[u8; 4], root_pc: u8) -> (u8, u8) {
 
 /// The pitch with class `pc` nearest to `around`.
 fn nearest_with_pc(around: u8, pc: u8) -> u8 {
-    let a = around as i16;
+    let a = i16::from(around);
     for d in 0..=6i16 {
         for cand in [a - d, a + d] {
             if cand > 0 && cand.rem_euclid(12) as u8 == pc {
@@ -471,7 +475,7 @@ fn chord_tones_in(chord: &[u8; 4], lo: u8, hi: u8) -> Vec<u8> {
 fn nearest(pool: &[u8], target: u8) -> u8 {
     *pool
         .iter()
-        .min_by_key(|&&n| ((n as i16 - target as i16).abs(), n))
+        .min_by_key(|&&n| ((i16::from(n) - i16::from(target)).abs(), n))
         .expect("pool is never empty within the register windows")
 }
 
@@ -480,8 +484,8 @@ fn nearest(pool: &[u8], target: u8) -> u8 {
 fn snap_to_scale(n: i16, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
     for d in 0..=6i16 {
         for cand in [n - d, n + d] {
-            if cand >= lo as i16
-                && cand <= hi as i16
+            if cand >= i16::from(lo)
+                && cand <= i16::from(hi)
                 && scale.contains(&(cand.rem_euclid(12) as u8))
             {
                 return cand as u8;
@@ -494,12 +498,12 @@ fn snap_to_scale(n: i16, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
 /// Step `k` scale degrees from `note` (k may be negative), clamped to the
 /// register window. Stays in-scale by construction.
 fn scale_step(note: u8, k: i8, scale: &[u8; 7], lo: u8, hi: u8) -> u8 {
-    let mut n = note as i16;
+    let mut n = i16::from(note);
     let mut remaining = k.abs();
     let dir = if k >= 0 { 1 } else { -1 };
     while remaining > 0 {
         n += dir;
-        if n < lo as i16 || n > hi as i16 {
+        if n < i16::from(lo) || n > i16::from(hi) {
             n -= dir;
             break;
         }
@@ -520,7 +524,7 @@ const LEAD_GRID: [f32; 6] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
 /// answer with a peak — closing on a tone that resolves the loop.
 fn lead_events(
     rng: &mut NoiseStream,
-    bar_chords: &[[u8; 4]; 8],
+    bar_chords: &[[u8; 4]; GEN_LOOP_BARS],
     scale: &[u8; 7],
     mood: Mood,
 ) -> Vec<LeadEvent> {
@@ -579,7 +583,7 @@ fn lead_events(
 
     let mut out: Vec<LeadEvent> = Vec::new();
     let start_pool = chord_tones_in(&bar_chords[0], lo.max(hi.saturating_sub(12)), hi);
-    let mut prev = nearest(&start_pool, (lo + hi) / 2 + 2);
+    let mut prev = nearest(&start_pool, u8::midpoint(lo, hi) + 2);
     let mut last_leap: i16 = 0;
     // bar 4 is reserved for the motif quote, so the lift lands on bar 5
     let peak_bar = 5;
@@ -600,7 +604,7 @@ fn lead_events(
                 let opening = out.first().map_or(prev, |&(_, _, n, _)| n);
                 nearest(&tones, opening)
             } else if bar == peak_bar && i == 0 {
-                let target = (prev as i16 + 3 + pick(rng, 3) as i16).min(hi as i16) as u8;
+                let target = (i16::from(prev) + 3 + pick(rng, 3) as i16).min(i16::from(hi)) as u8;
                 nearest(&tones, target)
             } else if last_leap.abs() > 4 {
                 // resolve a leap: stepwise contrary motion
@@ -609,9 +613,9 @@ fn lead_events(
             } else if strong || chance(rng, 0.55) {
                 // chord tone near the walk, leap bounded to a fifth
                 let drift = pick(rng, 9) as i16 - 4;
-                let target = (prev as i16 + drift).clamp(lo as i16, hi as i16) as u8;
+                let target = (i16::from(prev) + drift).clamp(i16::from(lo), i16::from(hi)) as u8;
                 let n = nearest(&tones, target);
-                if (n as i16 - prev as i16).abs() > 7 {
+                if (i16::from(n) - i16::from(prev)).abs() > 7 {
                     nearest(&tones, prev)
                 } else {
                     n
@@ -620,7 +624,7 @@ fn lead_events(
                 let k = if chance(rng, 0.5) { 1 } else { -1 };
                 scale_step(prev, k * (1 + i8::from(chance(rng, 0.3))), scale, lo, hi)
             };
-            last_leap = note as i16 - prev as i16;
+            last_leap = i16::from(note) - i16::from(prev);
             prev = note;
             if bar == 0 && statement_head.len() < 2 {
                 statement_head.push(note);
@@ -837,7 +841,7 @@ fn sub_note(pc: u8) -> u8 {
 /// lagging the beat so the kick keeps the transient.
 fn bass_events(
     rng: &mut NoiseStream,
-    bar_roots: &[u8; 8],
+    bar_roots: &[u8; GEN_LOOP_BARS],
     beat_s: f32,
     mood: Mood,
 ) -> Vec<(f32, u8, f32)> {
@@ -863,10 +867,12 @@ fn bass_events(
             let at = b0 + answer_beat * beat_s + 0.014 + 0.010 * rng.unit();
             out.push((at, note, vel_base - 0.14 + 0.08 * rng.unit()));
         }
-        if chance(rng, pickup_p) && bar + 1 < GEN_LOOP_BARS {
+        if chance(rng, pickup_p)
+            && let Some(&next_root) = bar_roots.get(bar + 1)
+        {
             // literal semitone below the folded next root (pc-folding rendered an
             // 11-semitone drop); no last-bar pickup — place() clips at the seam
-            let next = sub_note(bar_roots[bar + 1]);
+            let next = sub_note(next_root);
             let at = b0 + 3.5 * beat_s + 0.012 + 0.008 * rng.unit();
             out.push((at, next - 1, 0.34 + 0.06 * rng.unit()));
         }
@@ -876,8 +882,8 @@ fn bass_events(
 
 fn keys_events(
     rng: &mut NoiseStream,
-    bar_chords: &[[u8; 4]; 8],
-    bar_roots: &[u8; 8],
+    bar_chords: &[[u8; 4]; GEN_LOOP_BARS],
+    bar_roots: &[u8; GEN_LOOP_BARS],
     beat_s: f32,
     mood: Mood,
 ) -> Vec<(f32, u8, f32)> {

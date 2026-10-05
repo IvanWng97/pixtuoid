@@ -3,6 +3,7 @@
 use super::*;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
+use pixtuoid_scene::anim::PAINT_FRAME_MS;
 use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::pet::PetKind;
 use ratatui::Terminal;
@@ -51,7 +52,7 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     target_floor: usize,
 ) {
     for _ in 0..60 {
-        *now += Duration::from_millis(33);
+        *now += Duration::from_millis(PAINT_FRAME_MS);
         r.render(scene, pack, *now).expect("render");
         if r.current_floor() == target_floor && r.transition().is_none() {
             return;
@@ -60,17 +61,7 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     panic!("floor transition to {target_floor} did not settle");
 }
 
-/// Parsed once per test process and shared by every harness test.
-pub(super) fn pack() -> &'static Pack {
-    pack_static()
-}
-pub(super) fn pack_arc() -> Arc<Pack> {
-    Arc::clone(pack_static())
-}
-fn pack_static() -> &'static Arc<Pack> {
-    static PACK: std::sync::OnceLock<Arc<Pack>> = std::sync::OnceLock::new();
-    PACK.get_or_init(|| Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack")))
-}
+pub(super) use crate::test_flash::{pack, pack_arc};
 pub(super) fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
 }
@@ -148,7 +139,7 @@ pub(super) fn frame_text(buf: &ratatui::buffer::Buffer) -> String {
     out
 }
 pub(super) fn lum(c: pixtuoid_core::sprite::Rgb) -> f32 {
-    0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32
+    0.299 * f32::from(c.r) + 0.587 * f32::from(c.g) + 0.114 * f32::from(c.b)
 }
 pub(super) fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 {
     let mut sum = 0.0;
@@ -166,12 +157,88 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     for y in y0..(y0 + h).min(a.height()).min(b.height()) {
         for x in x0..(x0 + w).min(a.width()).min(b.width()) {
             let (p, q) = (a.get(x, y), b.get(x, y));
-            d += (p.r as i32 - q.r as i32).unsigned_abs() as u64
-                + (p.g as i32 - q.g as i32).unsigned_abs() as u64
-                + (p.b as i32 - q.b as i32).unsigned_abs() as u64;
+            d += u64::from((i32::from(p.r) - i32::from(q.r)).unsigned_abs())
+                + u64::from((i32::from(p.g) - i32::from(q.g)).unsigned_abs())
+                + u64::from((i32::from(p.b) - i32::from(q.b)).unsigned_abs());
         }
     }
     d
+}
+
+/// A `TestBackend` whose flush, once `slow` is set, takes that long on a test
+/// screen clock: a write that lands late.
+pub(super) struct Slow {
+    pub(super) inner: TestBackend,
+    pub(super) slow: Option<(pixtuoid_scene::flash::ManualClock, Duration)>,
+}
+
+impl Backend for Slow {
+    type Error = <TestBackend as Backend>::Error;
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        self.inner.draw(content)
+    }
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+        &mut self,
+        position: P,
+    ) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear_type)
+    }
+    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+        self.inner.size()
+    }
+    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+        self.inner.window_size()
+    }
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        if let Some((screen, latency)) = &self.slow {
+            screen.advance(*latency);
+        }
+        self.inner.flush()
+    }
+}
+
+/// A half-block renderer over a `cols`×`rows` terminal, its flashes held on a
+/// screen clock the test moves.
+pub(super) fn half_blocks_on_screen(
+    cols: u16,
+    rows: u16,
+) -> (TuiRenderer<Slow>, pixtuoid_scene::flash::ManualClock) {
+    let screen = pixtuoid_scene::flash::ManualClock::default();
+    let backend = Slow {
+        inner: TestBackend::new(cols, rows),
+        slow: None,
+    };
+    let mut r = TuiRenderer::new(
+        Terminal::new(backend).expect("test backend"),
+        normal_theme(),
+        vec![],
+        pack_arc(),
+    );
+    r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
+    (r, screen)
+}
+
+/// What a [`half_blocks_on_screen`] renderer's terminal shows.
+pub(super) fn flushed(r: &TuiRenderer<Slow>) -> &ratatui::buffer::Buffer {
+    r.terminal.backend().inner.buffer()
 }
 
 pub(super) fn two_floor_scene() -> SceneState {

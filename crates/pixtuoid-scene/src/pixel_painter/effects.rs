@@ -5,7 +5,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::palette::{WHITE, blend_pixel};
 use crate::effects::Effect;
-use crate::effects::look::{plot_effect, scanline_color};
+use crate::effects::look::{Inks, plot_effect, scanline_color};
 use crate::layout::SCREEN_GLASS_COLS;
 use crate::theme::Theme;
 
@@ -73,7 +73,7 @@ pub(super) fn paint_screen_glow(
 
 /// Paint `e` in its look.
 pub(super) fn paint_effect(buf: &mut RgbBuffer, e: &Effect, theme: &Theme) {
-    plot_effect(e, theme, &mut |x, y, c, alpha| {
+    plot_effect(e, &Inks::of(theme), &mut |x, y, c, alpha| {
         if alpha >= 1.0 {
             buf.put_checked(x, y, c);
         } else {

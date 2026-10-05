@@ -37,7 +37,7 @@ fn audio_stems_count_only_the_viewed_floor() {
     assert!(!frames.is_empty(), "an enabled handle receives frames");
     let stems = frames.last().unwrap().stems;
     let moderate = pixtuoid_scene::audio::stem_levels(
-        &pixtuoid_scene::board::StateCounts {
+        &pixtuoid_scene::tally::StateCounts {
             active: 1,
             waiting: 0,
             idle: 0,
@@ -67,7 +67,7 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
 
     agents.push(active_on("/d/f1-new.jsonl", 1, cap));
     let scene = scene_with(agents.clone(), cap);
-    now += std::time::Duration::from_millis(33);
+    now += std::time::Duration::from_millis(PAINT_FRAME_MS);
     r.render(&scene, pack, now).expect("render");
     let off_floor: Vec<_> = drain_frames(&rx)
         .into_iter()
@@ -80,7 +80,7 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
 
     agents.push(active_on("/d/f0-new.jsonl", 0, 1));
     let scene = scene_with(agents, cap);
-    now += std::time::Duration::from_millis(33);
+    now += std::time::Duration::from_millis(PAINT_FRAME_MS);
     r.render(&scene, pack, now).expect("render");
     let on_floor: Vec<_> = drain_frames(&rx)
         .into_iter()
@@ -131,7 +131,7 @@ fn floor_switch_reprimes_without_a_chime_volley() {
         ],
         cap,
     );
-    now += std::time::Duration::from_millis(33);
+    now += std::time::Duration::from_millis(PAINT_FRAME_MS);
     r.render(&scene, pack, now).expect("render");
     let arrivals: Vec<_> = drain_frames(&rx)
         .into_iter()
@@ -208,7 +208,7 @@ fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
         let rain = drain_frames(&rx).last().expect("a frame").stems.rain;
         let still = r.buf().expect("a frame").as_slice().to_vec();
         r.navigate_floor(1, t0());
-        r.render(&scene, pack(), t0() + Duration::from_millis(33))
+        r.render(&scene, pack(), t0() + Duration::from_millis(PAINT_FRAME_MS))
             .expect("render");
         assert!(r.transition().is_some(), "{w:?}: mid-slide");
         let halves = [0, 1].map(|f| {

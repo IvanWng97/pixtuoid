@@ -151,7 +151,7 @@ fn main() -> Result<()> {
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
-    let (win_w, win_h) = (size.0 as u32, size.1 as u32);
+    let (win_w, win_h) = (u32::from(size.0), u32::from(size.1));
     let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
     let buf = renderer
         .render(RenderInputs {
@@ -164,7 +164,10 @@ fn main() -> Result<()> {
             },
             theme,
             size: Size { w: ow, h: oh },
-            place: pixtuoid_scene::look::Place::default(),
+            place: pixtuoid_scene::look::Place {
+                gateway: pixtuoid_scene::tally::office_gateway(&scene),
+                floor: None,
+            },
             debug_walkable: false,
         })
         .expect("a frame");
@@ -173,18 +176,11 @@ fn main() -> Result<()> {
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
     surf.fill_upscaled(buf, scale as usize);
     let (bw, bh) = (buf.width(), buf.height());
-    let labels = renderer.labels(&scene);
-    paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
-    let board = renderer.board(
-        &scene,
-        pixtuoid_scene::floor::FloorMeta::ground().motion,
-        now,
-    );
+    paint_labels_into_surface(&mut surf, renderer.badges(), scale as i32);
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
         &mut surf,
-        &board,
+        renderer.signs(),
         scale as i32,
-        theme,
     );
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);

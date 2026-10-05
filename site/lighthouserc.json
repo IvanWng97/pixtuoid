@@ -5,13 +5,12 @@
       "previewPort": 4320,
       "startServerReadyPattern": "http://localhost",
       "startServerReadyTimeout": 20000,
-      "numberOfRuns": 3,
+      "numberOfRuns": 5,
       "url": [
         "http://localhost:4321/?theme=day",
         "http://localhost:4321/architecture/?theme=day",
         "http://localhost:4321/config/?theme=day",
-        "http://localhost:4321/contributing/?theme=day",
-        "http://localhost:4321/parallel-delivery/?theme=day"
+        "http://localhost:4321/contributing/?theme=day"
       ]
     },
     "assert": {

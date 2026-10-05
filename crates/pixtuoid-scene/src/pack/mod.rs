@@ -66,10 +66,24 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
+/// Every walk a walker steps by the ground it covers: a person's, each pet's
+/// and each gateway mascot's.
+fn walks() -> Vec<&'static str> {
+    crate::sim::WALKS
+        .into_iter()
+        .chain(crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim()))
+        .chain(
+            pixtuoid_core::source::registry::registered_source_names()
+                .filter_map(crate::creatures::gateway_mascot_def)
+                .map(|d| d.walk),
+        )
+        .collect()
+}
+
 /// [`validate_pack_animations`], against this crate's painters' art sets and
 /// walks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets(), &crate::sim::WALKS)
+    validate_pack_animations(pack, &art_sets(), &walks())
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -172,6 +186,10 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
 /// Load the compiled-in default pack, with `source`'s custom pack merged over
 /// it. Reads nothing but the path `source` names, so a test, a benchmark or a
 /// committed snapshot draws the same art on every machine.
+///
+/// # Errors
+///
+/// If the bundled pack fails to load, or `source` is `Explicit` and its directory is not a loadable pack (`Discovered` falls back to the bundled pack instead).
 #[cfg(feature = "native")]
 pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
     let base = load_bundled_pack()?;
@@ -221,6 +239,10 @@ pub(crate) fn test_default_pack() -> Pack {
 const BUNDLED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/bundled_pack.toml"));
 
 /// The compiled-in default pack alone: all a build without `native` can load.
+///
+/// # Errors
+///
+/// If the embedded manifest or a bundled sprite source fails to parse or validate.
 pub fn load_bundled_pack() -> Result<Pack, PackError> {
     load_pack_from_strings(BUNDLED_PACK_TOML, &bundled_sprite_srcs())
 }
@@ -457,6 +479,22 @@ mod tests {
         // `StandIn::DefaultPack` promises the default draws what a custom pack
         // leaves out.
         assert_eq!(report.warning_count(), 0, "{report:?}");
+    }
+
+    /// A creature's walk steps by the ground like a person's, so a pack's
+    /// without a stride slides its feet too.
+    #[test]
+    fn a_creature_walk_without_a_stride_is_flagged() {
+        for (walk, stride) in [
+            ("cat_walk", "stride   = 2\n"),
+            ("lobster_walk", "stride   = 6\n"),
+        ] {
+            let manifest = format!(
+                "[animations.{walk}]\nframes   = [\"{walk}_0.sprite\", \"{walk}_1.sprite\"]\nframe_ms = 250\n"
+            );
+            let pack = test_pack_declaring(&format!("{manifest}{stride}"), &manifest);
+            assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
+        }
     }
 
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,

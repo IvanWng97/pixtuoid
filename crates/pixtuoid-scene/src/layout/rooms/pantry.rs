@@ -90,7 +90,7 @@ impl PantryRoom {
             } else {
                 (bounds.x + pct(bounds.width, 60)).clamp(min_cx, max_cx)
             },
-            // Single-sourced with the island clamp; only x is size-shaped.
+            // Single-sourced with the island clamp.
             y: Self::counter_center_y(bounds, counter),
         })
     }
@@ -155,7 +155,7 @@ impl PantryRoom {
         .filter(|&r| clear_of(r, [self.snack_shelf_rect()]))
     }
 
-    /// The trash bin's sprite box near the pantry's west counter, clear of it,
+    /// The trash bin's sprite box by the pantry's west edge, clear of the counter,
     /// or `None` when the room can't fit it or it gives way (`clear_of`). Shared
     /// placement authority for `paint_trash_bin` and the hover hit-test — see
     /// [`Self::water_cooler_rect`].

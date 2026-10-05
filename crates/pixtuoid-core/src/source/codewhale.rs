@@ -55,6 +55,10 @@ const SUBAGENT_TOOLS: &[&str] = &["agent_spawn", "spawn_agent"];
 /// The activity arms prepend an [`AgentEvent::Identity`]: CodeWhale is
 /// HOOK-ONLY, so a slot the reducer's proof-of-life pre-pass synthesizes
 /// mid-turn has no JSONL back-fill path.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `event`, names an unhandled event, or lacks a non-empty `cwd` (a subagent event needs a non-empty `agent_id` instead).
 pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

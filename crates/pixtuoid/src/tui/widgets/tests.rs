@@ -2,11 +2,10 @@ use super::*;
 use footer::{build_status_spans, build_status_summary, footer_context};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::board::{StateCounts, gateway_rollup, per_floor_counts, scene_stats};
 use pixtuoid_scene::footer::{FooterFloor, FooterInputs};
+use pixtuoid_scene::tally::{StateCounts, gateway_rollup, per_floor_counts, scene_stats};
 use std::path::PathBuf;
 use std::sync::Arc;
-use wall_board::BOARD_W;
 
 fn stat_slot(path: &str, state: ActivityState, exiting: bool) -> AgentSlot {
     let now = SystemTime::UNIX_EPOCH;
@@ -117,6 +116,31 @@ fn display_width_counts_terminal_columns_not_chars() {
     assert_eq!(display_width("[q]uit"), 6);
     assert_eq!(display_width("\u{1f99e}"), 2); // 🦞
     assert_eq!(display_width("a\u{0301}"), 1);
+}
+
+/// The one width rule is the cells ratatui's buffer writes, one grapheme
+/// cluster at a time, so a VS16 emoji or a ZWJ sequence takes the same cells
+/// in the cutaway's image, in a truncated badge and on the terminal.
+#[test]
+fn every_width_is_the_cells_the_buffer_writes() {
+    for text in [
+        "[q]uit",
+        "\u{6f22}\u{5b57}",
+        "a\u{301}",
+        "\u{2764}\u{fe0f}",
+        "\u{1f469}\u{200d}\u{1f4bb}",
+        "\u{644}\u{627}",
+        "cc\u{b7}\u{1f99e}",
+        "a\u{7}b",
+        "\u{ff76}\u{ff9e}",
+        "\u{ff8a}\u{ff9f}",
+        "\u{ff9e}",
+    ] {
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 40, 1));
+        let (x, _) = buf.set_stringn(0, 0, text, usize::MAX, ratatui::style::Style::default());
+        assert_eq!(pixtuoid_scene::display::text::cells(text), x, "{text:?}");
+        assert_eq!(display_width(text), usize::from(x), "{text:?}");
+    }
 }
 
 #[test]
@@ -742,14 +766,5 @@ fn footer_cross_floor_alarm_points_at_waiting_floor() {
     assert!(
         line.contains("\u{25b2}F2"),
         "cross-floor waiting cue: {line}"
-    );
-}
-
-#[test]
-fn board_width_pins_to_neon_panel_interior() {
-    assert_eq!(
-        BOARD_W,
-        pixtuoid_scene::layout::NEON_PANEL_INNER_W,
-        "board width must equal the painted panel's dark interior width"
     );
 }

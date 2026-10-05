@@ -13,19 +13,58 @@ pub(crate) fn scanline_color(tint: Rgb) -> Rgb {
     tint.mix(WHITE, 0.7)
 }
 
+/// The theme's colours the effects are drawn in, resolved where a look is
+/// built, so drawing it reads no theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Inks {
+    pub(crate) sleep_z: Rgb,
+    pub(crate) waiting: Rgb,
+    pub(crate) dust: Rgb,
+    pub(crate) steam: Rgb,
+}
+
+impl Inks {
+    /// `theme`'s effect colours.
+    pub(crate) fn of(theme: &Theme) -> Self {
+        let e = &theme.effects;
+        Self {
+            sleep_z: e.sleep_z,
+            waiting: e.waiting_bubble,
+            dust: e.walking_dust,
+            steam: e.coffee_steam,
+        }
+    }
+}
+
 /// `e`'s look in layout cells: each one `plot` gets is painted its colour over
 /// `alpha` of what lies there, a whole cell at `1.0`.
-pub(crate) fn plot_effect(e: &Effect, theme: &Theme, plot: &mut impl FnMut(u16, u16, Rgb, f32)) {
+pub(crate) fn plot_effect(e: &Effect, inks: &Inks, plot: &mut impl FnMut(u16, u16, Rgb, f32)) {
     match e.kind {
-        EffectKind::SleepZ => plot_sleep_z(plot, e.at, e.phase, theme),
-        EffectKind::WaitingMark => plot_waiting_mark(plot, e.at, theme),
-        EffectKind::WalkingDust => plot_walking_dust(plot, e.at, e.phase, theme),
+        EffectKind::SleepZ => plot_sleep_z(plot, e.at, e.phase, inks),
+        EffectKind::WaitingMark => plot_waiting_mark(plot, e.at, inks),
+        EffectKind::WalkingDust => plot_walking_dust(plot, e.at, e.phase, inks),
         EffectKind::FlameCrown => plot_flame_crown(plot, e.at, e.phase),
         EffectKind::PetHeart => plot_pet_heart(plot, e.at, e.phase),
-        EffectKind::SteamPuff => plot_steam_puff(plot, e.at, e.phase, theme),
+        EffectKind::SteamPuff => plot_steam_puff(plot, e.at, e.phase, inks),
         EffectKind::MascotBubble => plot_mascot_bubble(plot, e.at, e.phase),
     }
 }
+
+/// The sleep z on the base art, a layout cell per art cell: the classic's and
+/// the cutaway's at 1x.
+pub(crate) const SLEEP_Z_1X: &[&str] = &[
+    "##", //
+    ".#", //
+    "##", //
+];
+
+/// The waiting mark on the base art, as [`SLEEP_Z_1X`] is.
+pub(crate) const WAITING_MARK_1X: &[&str] = &[
+    "###", //
+    "..#", //
+    ".#.", //
+    ".#.", //
+];
 
 /// Layout rows a sleep z rises over its life.
 pub(crate) const SLEEP_Z_MAX_RISE: u16 = 4;
@@ -45,22 +84,15 @@ pub(crate) fn sleep_z_fade(phase_ms: u64) -> Option<(f32, f32)> {
     (alpha >= 0.06).then_some((alpha, t))
 }
 
-fn plot_sleep_z(
-    plot: &mut impl FnMut(u16, u16, Rgb, f32),
-    at: Point,
-    phase_ms: u64,
-    theme: &Theme,
-) {
-    let z_color = theme.effects.sleep_z;
+fn plot_sleep_z(plot: &mut impl FnMut(u16, u16, Rgb, f32), at: Point, phase_ms: u64, inks: &Inks) {
+    let z_color = inks.sleep_z;
     let Some((alpha, t)) = sleep_z_fade(phase_ms) else {
         return;
     };
-    let rise = (t * SLEEP_Z_MAX_RISE as f32) as u16;
-    let z_x = at.x + 5;
+    let rise = (t * f32::from(SLEEP_Z_MAX_RISE)) as u16;
     let z_y = at.y.saturating_sub(rise + 3);
-    const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
-    for (dx, dy) in GLYPH {
-        plot(z_x + dx, z_y + dy, z_color, alpha);
+    for (dx, dy, _) in inked(SLEEP_Z_1X) {
+        plot(at.x + 5 + dx, z_y + dy, z_color, alpha);
     }
 }
 
@@ -74,7 +106,7 @@ fn plot_steam_puff(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),
     spout: Point,
     phase: u64,
-    theme: &Theme,
+    inks: &Inks,
 ) {
     let rise = (phase / STEAM_ROW_MS) as u16;
     let alpha = 1.0 - phase as f32 / STEAM_CYCLE_MS as f32;
@@ -88,7 +120,7 @@ fn plot_steam_puff(
     };
     let px = spout.x + wiggle;
     let py = spout.y.saturating_sub(rise + 2);
-    plot(px, py, theme.effects.coffee_steam, alpha * 0.55);
+    plot(px, py, inks.steam, alpha * 0.55);
 }
 
 /// The cell under the foot a walker whose top-left is `walker_top_left` steps on in
@@ -104,10 +136,10 @@ fn plot_walking_dust(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),
     walker_top_left: Point,
     frame: u64,
-    theme: &Theme,
+    inks: &Inks,
 ) {
     let foot = walking_dust_foot(walker_top_left, frame);
-    plot(foot.x, foot.y, theme.effects.walking_dust, 0.45);
+    plot(foot.x, foot.y, inks.dust, 0.45);
 }
 
 /// One floating heart for the "pet the cat" interaction.
@@ -141,19 +173,24 @@ fn plot_mascot_bubble(plot: &mut impl FnMut(u16, u16, Rgb, f32), at: Point, rise
     plot(at.x, at.y.saturating_sub(rise as u16), bubble, 1.0);
 }
 
-fn plot_waiting_mark(plot: &mut impl FnMut(u16, u16, Rgb, f32), top_left: Point, theme: &Theme) {
-    let fg = theme.effects.waiting_bubble;
-    const GLYPH: &[&[u8]] = &[b".YYY.", b"...Y.", b"..Y..", b"..Y.."];
-    let bx = top_left.x + 1;
+fn plot_waiting_mark(plot: &mut impl FnMut(u16, u16, Rgb, f32), top_left: Point, inks: &Inks) {
+    let fg = inks.waiting;
     let by = top_left.y.saturating_sub(5) & !1u16;
-    for (dy, row) in GLYPH.iter().enumerate() {
-        for (dx, byte) in row.iter().enumerate() {
-            if *byte != b'Y' {
-                continue;
-            }
-            plot(bx + dx as u16, by + dy as u16, fg, 1.0);
-        }
+    for (dx, dy, _) in inked(WAITING_MARK_1X) {
+        plot(top_left.x + 2 + dx, by + dy, fg, 1.0);
     }
+}
+
+/// `glyph`'s inked cells, every one but a `.`, as offsets from its top-left
+/// with the character that inks it: the one transparency rule every look's
+/// glyph is drawn by.
+pub(crate) fn inked<'a>(glyph: &'a [&'a str]) -> impl Iterator<Item = (u16, u16, char)> + 'a {
+    (0u16..).zip(glyph).flat_map(|(dy, row)| {
+        (0u16..)
+            .zip(row.chars())
+            .filter(|&(_, c)| c != '.')
+            .map(move |(dx, c)| (dx, dy, c))
+    })
 }
 
 /// The flame gradient's deep-ember base, which a burning agent's hair also

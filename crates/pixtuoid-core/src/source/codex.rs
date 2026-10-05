@@ -20,7 +20,8 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{CodexSource, live_codex_rollout_ids};
 
-/// The Codex CLI source's registry name (its `SourceDescriptor.name`).
+/// homebrew-core contract: their formula's `test do` asserts this exact id, so
+/// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
 pub const SOURCE_NAME: &str = "codex";
 
 /// Trailing canonical UUID (`8-4-4-4-12`) of a `rollout-<ts>-<UUID>.jsonl`
@@ -149,6 +150,10 @@ pub(crate) const RI_SEARCH: &[&str] =
 
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &codex_id_from_path(Path::new(transcript_path)));
     let Some(obj) = v.as_object() else {

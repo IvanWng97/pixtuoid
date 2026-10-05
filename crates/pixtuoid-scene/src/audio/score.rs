@@ -106,14 +106,14 @@ mod tests {
         let sum3 = |t: &[(f32, u8, f32)]| {
             t.iter()
                 .fold((0.0f64, 0u32, 0.0f64), |(b, n, v), &(bb, nn, vv)| {
-                    (b + bb as f64, n + nn as u32, v + vv as f64)
+                    (b + f64::from(bb), n + u32::from(nn), v + f64::from(vv))
                 })
         };
         let (sb, sn, sv) = sum3(&SPARKLE_SCORE);
         assert!((sb - 172.5).abs() < 1e-3 && sn == 800 && (sv - 4.868_63).abs() < 1e-4);
         let (kb, kn, kv) = sum3(&KEYS_SCORE);
         assert!((kb - 461.4).abs() < 1e-3 && kn == 1574 && (kv - 17.052_462).abs() < 1e-4);
-        let hv: f64 = DRUM_HAT_VELS.iter().map(|&v| v as f64).sum();
+        let hv: f64 = DRUM_HAT_VELS.iter().map(|&v| f64::from(v)).sum();
         assert!((hv - 40.091_282).abs() < 1e-4, "hat-vel checksum: {hv}");
         assert!(
             SPARKLE_SCORE.iter().any(|&(b, _, _)| b >= 16.0),
@@ -264,7 +264,7 @@ mod night_tests {
         let sum3 = |t: &[(f32, u8, f32)]| {
             t.iter()
                 .fold((0.0f64, 0u32, 0.0f64), |(a, n, v), &(aa, nn, vv)| {
-                    (a + aa as f64, n + nn as u32, v + vv as f64)
+                    (a + f64::from(aa), n + u32::from(nn), v + f64::from(vv))
                 })
         };
         let (ka, kn, kv) = sum3(&NIGHT_KEYS);
@@ -274,7 +274,7 @@ mod night_tests {
         let (da, dg) = NIGHT_DRUMS
             .iter()
             .fold((0.0f64, 0.0f64), |(a, g), &(aa, _, gg)| {
-                (a + aa as f64, g + gg as f64)
+                (a + f64::from(aa), g + f64::from(gg))
             });
         assert!((da - 495.7997).abs() < 1e-3 && (dg - 14.081_426).abs() < 1e-4);
         assert_eq!(NIGHT_KEYS[0], (3.9989, 53, 0.501_036));
@@ -655,13 +655,13 @@ mod day_take_tests {
     fn sum3(t: &[(f32, u8, f32)]) -> (f64, u32, f64) {
         t.iter()
             .fold((0.0f64, 0u32, 0.0f64), |(a, n, v), &(aa, nn, vv)| {
-                (a + aa as f64, n + nn as u32, v + vv as f64)
+                (a + f64::from(aa), n + u32::from(nn), v + f64::from(vv))
             })
     }
 
     fn drum_sums(t: &[(f32, DrumKind, f32)]) -> (f64, f64) {
         t.iter().fold((0.0f64, 0.0f64), |(a, g), &(aa, _, gg)| {
-            (a + aa as f64, g + gg as f64)
+            (a + f64::from(aa), g + f64::from(gg))
         })
     }
 

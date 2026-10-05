@@ -298,9 +298,9 @@ fn a_strike_keeps_the_photosensitive_flash_bounds() {
 /// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
 #[test]
 fn a_storm_flashes_at_most_three_times_a_second_on_every_tier() {
-    use crate::anim::{Motion, PAINT_FPS, PHOTOSENSITIVE_FLASHES_PER_SECOND};
+    use crate::anim::{Motion, PAINT_FRAME_MS, PHOTOSENSITIVE_FLASHES_PER_SECOND};
     const BUCKETS: u64 = 40;
-    let frame_ms = 1000 / u64::from(PAINT_FPS);
+    let frame_ms = PAINT_FRAME_MS;
     let storm = WeatherPolicy::Forced(Weather::Storm);
     for motion in Motion::ALL {
         let span = BUCKETS * LIGHTNING_PERIOD_MS * motion.pace().unwrap_or(1);

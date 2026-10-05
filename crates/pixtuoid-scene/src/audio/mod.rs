@@ -29,7 +29,7 @@ pub mod synth;
 pub use bank::OneShotPool;
 pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
-use crate::board::StateCounts;
+use crate::tally::StateCounts;
 
 /// Fixed RNG seeds for the four ambient-synth voices, in ONE place because both
 /// painters MUST seed identically — a per-crate copy silently desyncs the two
@@ -53,18 +53,51 @@ const BUSY_ACTIVE_MIN: usize = 3;
 /// this via `DROP_GAIN × wanted.rain`.
 const RAIN_GAIN: f32 = 0.30;
 
+/// How busy the office is: what picks each stem's [`TierGain`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tier {
+    Empty,
+    Moderate,
+    Busy,
+}
+
+/// A stem's gain at each [`Tier`].
+struct TierGain {
+    empty: f32,
+    moderate: f32,
+    busy: f32,
+}
+
+impl TierGain {
+    const fn new([empty, moderate, busy]: [f32; 3]) -> Self {
+        Self {
+            empty,
+            moderate,
+            busy,
+        }
+    }
+
+    const fn at(&self, tier: Tier) -> f32 {
+        match tier {
+            Tier::Empty => self.empty,
+            Tier::Moderate => self.moderate,
+            Tier::Busy => self.busy,
+        }
+    }
+}
+
 /// Per-tier stem gains, `[empty, moderate, busy]` — the ratified demo mixes.
-const PAD_GAIN: [f32; 3] = [0.75, 0.70, 0.65];
-const SPARKLE_GAIN: [f32; 3] = [0.70, 0.0, 0.0];
-const KEYS_GAIN: [f32; 3] = [0.0, 0.60, 0.70];
-const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
+const PAD_GAIN: TierGain = TierGain::new([0.75, 0.70, 0.65]);
+const SPARKLE_GAIN: TierGain = TierGain::new([0.70, 0.0, 0.0]);
+const KEYS_GAIN: TierGain = TierGain::new([0.0, 0.60, 0.70]);
+const DRUMS_GAIN: TierGain = TierGain::new([0.0, 0.35, 0.60]);
 // Boosted far past the Phase-0 ratification: the hiss+crackle layer was
 // inaudible at the ratified level.
-const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
+const TEXTURE_GAIN: TierGain = TierGain::new([0.78, 0.84, 0.78]);
 // Never zero (the floor used to ride inside the night pad); the curve RISES
 // where the pad's falls — the lane must hold up once drums+keys+typing enter.
-const BASS_GAIN: [f32; 3] = [0.60, 0.70, 0.75];
-const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
+const BASS_GAIN: TierGain = TierGain::new([0.60, 0.70, 0.75]);
+const TYPING_GAIN: TierGain = TierGain::new([0.0, 0.50, 0.80]);
 
 /// Target mix levels (0..=1) for every stem, derived once per frame. `typing`
 /// is a PROCEDURAL stem: the consumer owns burst scheduling; the scene only says
@@ -297,14 +330,14 @@ impl AudioCueTracker {
     }
 }
 
-/// The busy-ness tier index for the gain tables: 0 empty, 1 moderate, 2 busy.
-fn tier(counts: &StateCounts) -> usize {
+/// How busy `counts` make the office.
+fn tier(counts: &StateCounts) -> Tier {
     if counts.active >= BUSY_ACTIVE_MIN {
-        2
+        Tier::Busy
     } else if counts.active >= 1 {
-        1
+        Tier::Moderate
     } else {
-        0
+        Tier::Empty
     }
 }
 
@@ -313,14 +346,14 @@ fn tier(counts: &StateCounts) -> usize {
 pub fn stem_levels(counts: &StateCounts, precipitation: f32) -> StemLevels {
     let t = tier(counts);
     StemLevels {
-        pad: PAD_GAIN[t],
-        sparkle: SPARKLE_GAIN[t],
-        keys: KEYS_GAIN[t],
-        drums: DRUMS_GAIN[t],
-        texture: TEXTURE_GAIN[t],
-        bass: BASS_GAIN[t],
+        pad: PAD_GAIN.at(t),
+        sparkle: SPARKLE_GAIN.at(t),
+        keys: KEYS_GAIN.at(t),
+        drums: DRUMS_GAIN.at(t),
+        texture: TEXTURE_GAIN.at(t),
+        bass: BASS_GAIN.at(t),
         rain: RAIN_GAIN * precipitation.clamp(0.0, 1.0),
-        typing: TYPING_GAIN[t],
+        typing: TYPING_GAIN.at(t),
     }
 }
 
@@ -444,32 +477,32 @@ mod tests {
     #[test]
     fn stem_levels_map_the_busyness_tiers() {
         let empty = stem_levels(&counts(0), 0.0);
-        assert_eq!(empty.pad, PAD_GAIN[0]);
-        assert_eq!(empty.sparkle, SPARKLE_GAIN[0]);
+        assert_eq!(empty.pad, PAD_GAIN.empty);
+        assert_eq!(empty.sparkle, SPARKLE_GAIN.empty);
         assert_eq!(empty.keys, 0.0);
         assert_eq!(empty.drums, 0.0);
         assert_eq!(empty.typing, 0.0);
 
         let moderate = stem_levels(&counts(1), 0.0);
-        assert_eq!(moderate.keys, KEYS_GAIN[1]);
+        assert_eq!(moderate.keys, KEYS_GAIN.moderate);
         assert_eq!(moderate.sparkle, 0.0);
 
         let last_moderate = stem_levels(&counts(BUSY_ACTIVE_MIN - 1), 0.0);
-        assert_eq!(last_moderate.drums, DRUMS_GAIN[1]);
+        assert_eq!(last_moderate.drums, DRUMS_GAIN.moderate);
         let busy = stem_levels(&counts(BUSY_ACTIVE_MIN), 0.0);
-        assert_eq!(busy.drums, DRUMS_GAIN[2]);
-        assert_eq!(busy.typing, TYPING_GAIN[2]);
-        assert_eq!(empty.bass, BASS_GAIN[0], "the floor never empties");
-        assert_eq!(busy.bass, BASS_GAIN[2]);
+        assert_eq!(busy.drums, DRUMS_GAIN.busy);
+        assert_eq!(busy.typing, TYPING_GAIN.busy);
+        assert_eq!(empty.bass, BASS_GAIN.empty, "the floor never empties");
+        assert_eq!(busy.bass, BASS_GAIN.busy);
     }
 
     #[test]
     fn stem_levels_typing_scales_with_active_agents() {
         assert_eq!(stem_levels(&counts(0), 0.0).typing, 0.0);
-        assert_eq!(stem_levels(&counts(1), 0.0).typing, TYPING_GAIN[1]);
+        assert_eq!(stem_levels(&counts(1), 0.0).typing, TYPING_GAIN.moderate);
         assert_eq!(
             stem_levels(&counts(BUSY_ACTIVE_MIN), 0.0).typing,
-            TYPING_GAIN[2]
+            TYPING_GAIN.busy
         );
     }
 

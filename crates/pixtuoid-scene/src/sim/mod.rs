@@ -8,19 +8,21 @@
 //! pixel pass.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::collections::hash_map::Entry;
+use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::source::daemon::DaemonInstanceKey;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
+use pixtuoid_core::state::{ActivityState, DaemonLiveness, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::anim::{Beat, Timing};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{
-    GatewayCard, gateway_mascot_def, mascot_position, mascot_seed, pet_position,
+    CreatureKey, CreatureWalk, GatewayCard, Ground, Roam, Stance, gateway_mascot_def,
+    mascot_elevator, mascot_enter_delay, mascot_seed, naps_here,
 };
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
@@ -54,6 +56,7 @@ pub(crate) struct SimStores<'a> {
     pub vacancy_dim: &'a mut VacancyDim,
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
+    pub creatures: &'a mut HashMap<CreatureKey, CreatureWalk>,
 }
 
 /// A theme-free glow decision for a character sprite. Sim decides WHETHER a
@@ -149,14 +152,18 @@ pub(crate) struct MascotPlacement {
     /// Its gateway's backend fails every run ([`GatewayCard::degraded`]), so
     /// it greys.
     pub(crate) degraded: bool,
+    /// Its gateway is in the roster; one walking out past that has no
+    /// [`GatewayCard`], so it hovers as nothing.
+    pub(crate) on_roster: bool,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
 }
 
 impl MascotPlacement {
-    /// Who its hover names.
-    pub(crate) fn target(&self) -> crate::display::HoverTarget {
-        crate::display::HoverTarget::Mascot(self.key.clone())
+    /// Who its hover names, while its gateway is on the roster.
+    pub(crate) fn target(&self) -> Option<crate::display::HoverTarget> {
+        self.on_roster
+            .then(|| crate::display::HoverTarget::Mascot(self.key.clone()))
     }
 }
 
@@ -223,6 +230,8 @@ pub struct SimFrame {
     pub indoor_scale: f32,
     /// The neon sign's light from `NeonState::tick`.
     pub(crate) neon: crate::floor::NeonLevels,
+    /// Whether that light is a starved tube's catch.
+    pub(crate) neon_stutter: bool,
     /// Active speech bubbles after this tick's venue update.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agents observed walking back with coffee this tick — the caller
@@ -287,7 +296,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
-        crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
+        crate::neon_sign::OfficeMood::of(crate::tally::scene_stats(scene)),
         stores.vacancy_dim.dimmed(),
         timing,
     );
@@ -382,8 +391,21 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
 
     let chitchat_bubbles =
         chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
-    let pet = pet_placement(&agents, layout, pack, pets, floor, timing);
-    let mascots = mascot_placements(scene, layout, pack, timing);
+    let mut ground = Ground {
+        layout,
+        router: &mut *stores.router,
+        overlay: &*stores.overlay,
+    };
+    let pet = pet_placement(
+        &agents,
+        pack,
+        pets,
+        floor,
+        timing,
+        &mut ground,
+        stores.creatures,
+    );
+    let mascots = mascot_placements(scene, pack, timing, &mut ground, stores.creatures);
     let desks = desk_props(&agents, layout, coffee, timing);
 
     let door_frame = anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
@@ -394,6 +416,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         characters,
         indoor_scale,
         neon,
+        neon_stutter: stores.neon.stutters(),
         chitchat_bubbles,
         new_coffee_carriers,
         occupied_waypoints,
@@ -425,71 +448,80 @@ pub(crate) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
 /// The bundled lobster's size, for a pack that lacks the mascot's anim.
 const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 
-/// The floor's pet this tick. A pet being petted holds still where it was
-/// clicked; otherwise `pet_position` roams it around the idle desks.
+/// The floor's pet this tick, walking the people's walker: a pet being
+/// petted holds still where it stands, and a resting one naps beside an idle
+/// desk.
 fn pet_placement(
     agents: &[AgentSlot],
-    layout: &SceneLayout,
     pack: &Pack,
     pets: PetInputs<'_>,
     floor: FloorMeta,
     timing: Timing,
+    ground: &mut Ground<'_>,
+    creatures: &mut HashMap<CreatureKey, CreatureWalk>,
 ) -> Option<PetPlacement> {
     let Timing { now, beat } = timing;
-    let kind = pets.pet.map(|p| p.kind)?;
-    let petting = pets
+    let layout = ground.layout;
+    let kind = pets.pet.map(|p| p.kind);
+    creatures.retain(|key, _| !matches!(key, CreatureKey::Pet(k) if Some(*k) != kind));
+    let kind = kind?;
+    let walk_anim = pack.animation(kind.walk_anim())?;
+    layout.corridor?;
+    let walk = creatures
+        .entry(CreatureKey::Pet(kind))
+        .or_insert_with(|| CreatureWalk::at_home(layout, floor.floor_seed, now));
+    let petted = pets
         .petting
         .filter(|p| p.is_active(now) && p.kind == kind && p.floor_idx == floor.floor_idx);
-    let fit = |anim, frame_idx, pos| {
-        on_canvas(
-            layout,
-            Pivot::Center,
-            pos,
-            frame_size(pack, anim, frame_idx, PET_FALLBACK),
-        )
-    };
-    if let Some(p) = petting {
-        let pos = fit(kind.sit_anim(), 0, p.pet_pos);
-        return Some(PetPlacement {
-            kind,
-            pos,
-            flip: false,
-            anim_name: kind.sit_anim(),
-            frame_idx: 0,
-            effects: pet_effects(kind, pos, kind.sit_anim(), Some(p.elapsed_ms(now)), beat),
-        });
+    if petted.is_some() {
+        walk.hold(now);
     }
-    let idle_desk_indices: Vec<FloorLocalDeskIndex> = agents
-        .iter()
-        .filter(|a| {
-            matches!(a.state, ActivityState::Idle)
-                && layout
-                    .home_desk(a.desk_index.single_floor_local())
-                    .is_some()
-                && a.exiting_at.is_none()
-        })
-        .map(|a| a.desk_index.single_floor_local())
-        .collect();
-    let all_idle = agents
-        .iter()
-        .all(|a| matches!(a.state, ActivityState::Idle));
-    let (pos, flip, anim_name, frame_idx) = pet_position(
-        kind,
+    let Stance { at, walking } = walk.step(Roam::pet(Some(walk_anim)), ground, timing)?;
+    // a petted pet sits for it, even held mid-leg
+    let (anim_name, frame_idx, flip) = match walking.filter(|_| petted.is_none()) {
+        Some(leg) => (
+            kind.walk_anim(),
+            pose::walk_frame(leg.travelled, walk_anim, now),
+            // its walk faces east
+            leg.to.x < leg.from.x,
+        ),
+        None => {
+            let all_idle = agents
+                .iter()
+                .all(|a| matches!(a.state, ActivityState::Idle));
+            let anim = if petted.is_none()
+                && (all_idle || (kind.sleeps_near_idle() && naps_here(layout, agents, at)))
+            {
+                kind.sleep_anim()
+            } else {
+                kind.sit_anim()
+            };
+            (
+                anim,
+                crate::pack::animation_frame_at(pack, anim, beat),
+                false,
+            )
+        }
+    };
+    let pos = on_canvas(
         layout,
-        pack,
-        timing,
-        &idle_desk_indices,
-        all_idle,
-        floor.floor_seed,
-    )?;
-    let pos = fit(anim_name, frame_idx, pos);
+        Pivot::Center,
+        at,
+        frame_size(pack, anim_name, frame_idx, PET_FALLBACK),
+    );
     Some(PetPlacement {
         kind,
         pos,
         flip,
         anim_name,
         frame_idx,
-        effects: pet_effects(kind, pos, anim_name, None, beat),
+        effects: pet_effects(
+            kind,
+            pos,
+            anim_name,
+            petted.map(|p| p.elapsed_ms(now)),
+            beat,
+        ),
     })
 }
 
@@ -514,45 +546,157 @@ pub(crate) fn pet_effects(
     }
 }
 
-/// Every gateway mascot present in the scene's daemon roster. The runtime keeps
-/// the roster honest, so "entry present" tracks "connected + alive", not merely
-/// "a hook arrived"; only the ground floor carries it, so each mascot shows once.
+/// One gateway mascot to draw this frame, and what its card shows.
+struct DrawnMascot {
+    key: DaemonInstanceKey,
+    stance: Stance,
+    /// [`GatewayCard::degraded`]; false once its gateway left the roster.
+    degraded: bool,
+    /// [`MascotPlacement::on_roster`].
+    on_roster: bool,
+    /// Its gateway's runs in flight.
+    runs: u32,
+}
+
+/// Every gateway mascot in the scene's daemon roster, walking the people's
+/// walker, plus each one still walking out after its gateway left the roster.
+/// The runtime keeps the roster honest, so "entry present" tracks "connected +
+/// alive", not merely "a hook arrived"; only the ground floor carries it, so
+/// each mascot shows once.
 fn mascot_placements(
     scene: &SceneState,
-    layout: &SceneLayout,
     pack: &Pack,
     timing: Timing,
+    ground: &mut Ground<'_>,
+    creatures: &mut HashMap<CreatureKey, CreatureWalk>,
 ) -> Vec<MascotPlacement> {
-    let beat = timing.beat;
-    scene
-        .daemons()
-        .filter_map(|(source, instance, presence)| {
-            let def = gateway_mascot_def(source)?;
-            let key = DaemonInstanceKey::new(source, instance.clone());
-            let degraded = GatewayCard::of(scene, &key)?.degraded;
-            let seed = mascot_seed(source, instance);
-            let (pos, anim_name) =
-                mascot_position(layout, presence, def.walk, def.rest, timing, seed)?;
-            let frame_idx = crate::pack::animation_frame_at(pack, anim_name, beat);
-            let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
-            let pos = on_canvas(layout, Pivot::Center, pos, size);
-            // The busy tell keys on in-flight RUNS, not the (persistent,
-            // single-user) session count, which sticks at 1 at rest.
-            let runs = presence.in_flight_runs.len() as u32;
-            Some(MascotPlacement {
-                pos,
-                size,
-                anim_name,
-                frame_idx,
+    let Timing { now, beat } = timing;
+    let Some(elevator) = mascot_elevator(ground.layout) else {
+        creatures.retain(|key, _| matches!(key, CreatureKey::Pet(_)));
+        return Vec::new();
+    };
+    let mut drawn: Vec<DrawnMascot> = Vec::new();
+    for (source, instance, presence) in scene.daemons() {
+        let Some(def) = gateway_mascot_def(source) else {
+            continue;
+        };
+        let state = presence.display_state();
+        let roam = Roam::mascot(pack.animation(def.walk), state);
+        let key = DaemonInstanceKey::new(source, instance.clone());
+        let creature = CreatureKey::Mascot(key.clone());
+        if presence.liveness != DaemonLiveness::Down
+            && creatures.get(&creature).is_some_and(CreatureWalk::leaving)
+        {
+            // back up: it walks in again
+            creatures.remove(&creature);
+        }
+        let walk = match creatures.entry(creature) {
+            Entry::Occupied(e) => e.into_mut(),
+            // one never seen alive was never in the room
+            Entry::Vacant(_) if presence.liveness == DaemonLiveness::Down => continue,
+            Entry::Vacant(e) => {
+                let seed = mascot_seed(source, instance);
+                let enters_at =
+                    presence.entered_at + Duration::from_millis(mascot_enter_delay(seed));
+                if now < enters_at {
+                    continue;
+                }
+                e.insert(CreatureWalk::arriving(
+                    elevator, seed, roam, ground, enters_at, now,
+                ))
+            }
+        };
+        if presence.liveness == DaemonLiveness::Down && !walk.leaving() {
+            walk.leave(elevator, roam, ground, now);
+        }
+        if let Some(stance) = walk.step(roam, ground, timing) {
+            drawn.push(DrawnMascot {
+                degraded: GatewayCard::of(scene, &key).is_some_and(|card| card.degraded),
+                on_roster: true,
                 key,
-                degraded,
-                effects: if runs > 0 {
-                    effects::mascot_bubbles(pos, size.h, runs, beat).collect()
-                } else {
-                    Vec::new()
-                },
-            })
+                stance,
+                runs: presence.in_flight_runs.len() as u32,
+            });
+        }
+    }
+    // One whose gateway left the roster walks out, on past the entry; in key
+    // order, so the draw order holds frame to frame.
+    let mut orphans: Vec<DaemonInstanceKey> = creatures
+        .keys()
+        .filter_map(|key| match key {
+            CreatureKey::Mascot(k) if scene.daemon(k.source(), k.instance()).is_none() => {
+                Some(k.clone())
+            }
+            CreatureKey::Mascot(_) | CreatureKey::Pet(_) => None,
         })
+        .collect();
+    orphans.sort();
+    for key in orphans {
+        let creature = CreatureKey::Mascot(key.clone());
+        let (Some(def), Some(walk)) = (
+            gateway_mascot_def(key.source()),
+            creatures.get_mut(&creature),
+        ) else {
+            creatures.remove(&creature);
+            continue;
+        };
+        let roam = Roam::mascot(pack.animation(def.walk), DaemonState::Down);
+        if !walk.leaving() {
+            walk.leave(elevator, roam, ground, now);
+        }
+        if let Some(stance) = walk.step(roam, ground, timing) {
+            drawn.push(DrawnMascot {
+                key,
+                stance,
+                degraded: false,
+                on_roster: false,
+                runs: 0,
+            });
+        }
+    }
+    creatures.retain(|key, walk| !matches!(key, CreatureKey::Mascot(_)) || !walk.gone());
+    drawn
+        .into_iter()
+        .filter_map(
+            |DrawnMascot {
+                 key,
+                 stance: Stance { at, walking },
+                 degraded,
+                 on_roster,
+                 runs,
+             }| {
+                let def = gateway_mascot_def(key.source())?;
+                let (anim_name, frame_idx) = match walking {
+                    Some(leg) => (
+                        def.walk,
+                        pack.animation(def.walk)
+                            .map_or(0, |anim| pose::walk_frame(leg.travelled, anim, now)),
+                    ),
+                    None => (
+                        def.rest,
+                        crate::pack::animation_frame_at(pack, def.rest, beat),
+                    ),
+                };
+                let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
+                let pos = on_canvas(ground.layout, Pivot::Center, at, size);
+                Some(MascotPlacement {
+                    pos,
+                    size,
+                    anim_name,
+                    frame_idx,
+                    key,
+                    degraded,
+                    on_roster,
+                    // The busy tell keys on in-flight RUNS, not the (persistent,
+                    // single-user) session count, which sticks at 1 at rest.
+                    effects: if runs > 0 {
+                        effects::mascot_bubbles(pos, size.h, runs, beat).collect()
+                    } else {
+                        Vec::new()
+                    },
+                })
+            },
+        )
         .collect()
 }
 
@@ -811,8 +955,8 @@ pub(crate) fn resolve_characters(
                 }
                 let pos = walking_position(from, to, t_x1000);
                 let walker_top_left = walking_top_left(pos, char_w);
-                let dx = to.x as i32 - from.x as i32;
-                let dy = to.y as i32 - from.y as i32;
+                let dx = i32::from(to.x) - i32::from(from.x);
+                let dy = i32::from(to.y) - i32::from(from.y);
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
                 // `from` rising) renders in the SEAT's view and at the SEAT's
                 // sort row, NOT the travel direction's. Without it a window-facing
@@ -925,7 +1069,7 @@ pub(crate) fn desk_occupant(
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)));
     pixtuoid_core::id::splitmix64(folded)
 }
 

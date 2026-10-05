@@ -70,7 +70,7 @@ fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> 
     // lights, so the two backgrounds would stop being byte-identical and the diff
     // would no longer be purely the agent's paint. Don't raise past ~150 frames.
     const SETTLE_FRAMES: usize = 30;
-    const FRAME_STEP: Duration = Duration::from_millis(33);
+    const FRAME_STEP: Duration = Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
     let pack = pack();
     let mut r = new_renderer(cols, rows);
     let mut t = now;

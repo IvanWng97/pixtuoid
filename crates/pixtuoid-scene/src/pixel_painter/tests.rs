@@ -4,9 +4,10 @@ use super::*;
 use crate::anim::{Motion, epoch_ms};
 use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
 use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
+use crate::cutaway::wall::paint_wall;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::layout::Size;
+use crate::layout::{Point, Size};
 use crate::pack::{desk_art_top, frame_at};
 use crate::pose;
 use crate::sim::anchors::{
@@ -15,7 +16,6 @@ use crate::sim::anchors::{
 };
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
-use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -31,7 +31,7 @@ fn paint_whole_wall(
     let (at, size) = piece.visual();
     paint_wall(
         buf,
-        theme,
+        crate::glass::WallTrim::of(theme),
         piece,
         at.y..at.y + size.h,
         crate::display::pen::Pen::UNIT,
@@ -774,7 +774,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             office,
             crate::display::compose::tests::showing(ground, now0),
         );
-        let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
+        let anchors: Vec<_> = list.badges().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
     };
 
@@ -1725,6 +1725,7 @@ fn empty_frame(layout: &SceneLayout) -> SimFrame {
         characters: Vec::new(),
         indoor_scale: 0.0,
         neon: crate::floor::NeonLevels::EMPTY,
+        neon_stutter: false,
         chitchat_bubbles: Vec::new(),
         new_coffee_carriers: Vec::new(),
         occupied_waypoints: Default::default(),
@@ -2809,6 +2810,8 @@ struct OwnedSimStores {
     vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
+    creatures:
+        std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
 }
 
 impl OwnedSimStores {
@@ -2818,6 +2821,7 @@ impl OwnedSimStores {
             vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
+            creatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2830,6 +2834,7 @@ impl OwnedSimStores {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
+            creatures: &mut self.creatures,
         }
     }
 }
@@ -2864,7 +2869,7 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
     let empty = SceneState::uniform(16);
     let coffee = std::collections::HashMap::new();
     let mut owned = OwnedSimStores::new();
-    let frame = Duration::from_millis(33);
+    let frame = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
     let mut now = now0;
     let mut run = |scene: &SceneState, ms: u64| {
         let mut last = None;
@@ -2917,8 +2922,9 @@ fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16
     Some(hi? - lo? + 1)
 }
 
-// The bundled 8-wide pack cannot tell char_w apart from the const, so the
-// differential against a wide (10px) fixture pack is what gives this teeth.
+// The bundled pack's figures are `CHARACTER_SPRITE_W` wide, so it cannot tell
+// char_w apart from the const; the differential against a wide (10px) fixture
+// pack is what gives this teeth.
 #[test]
 fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     use crate::layout::TEST_DEFAULT_DESKS;
@@ -3135,7 +3141,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
 }
 
 #[test]
-fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_stands() {
     let (scene, layout, _, now0, pack) = sim_rig();
     let coffee = HashMap::new();
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
@@ -3180,10 +3186,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         "a roaming cat is not being petted"
     );
 
-    let clicked = Point { x: 40, y: 50 };
     let petting = crate::pet::PetState {
         petted_at: now0,
-        pet_pos: clicked,
         kind: pet.kind,
         floor_idx: floor.floor_idx,
     };
@@ -3192,31 +3196,15 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&petting),
     })
     .expect("the petted cat");
-    assert_eq!(held.pos, clicked);
+    assert_eq!(
+        held.pos, roaming.pos,
+        "held where it stands, not where the click landed"
+    );
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(
         hearts(&held),
         [0],
         "petted just now: its first heart leaves"
-    );
-
-    // Held in the canvas's corner, its frame is fitted back on.
-    let in_corner = crate::pet::PetState {
-        pet_pos: Point { x: 0, y: 0 },
-        ..petting
-    };
-    let cornered = step(PetInputs {
-        pet: Some(&pet),
-        petting: Some(&in_corner),
-    })
-    .expect("the petted cat");
-    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
-    assert_eq!(
-        cornered.pos,
-        Point {
-            x: size.w / 2,
-            y: size.h / 2
-        }
     );
 
     let upstairs = crate::pet::PetState {
@@ -3277,6 +3265,7 @@ fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded,
+            on_roster: true,
             effects: Vec::new(),
         };
         let mut drawables = Vec::new();
@@ -3656,7 +3645,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
     // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
     sorted.sort_by_key(|&(row, _)| row);
     assert_ne!(sorted, queued, "premise: paint order is not the queue's");
-    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    let listed = badged_ids(&hover);
     assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
     let hovered: Vec<_> = hover
         .hovers
@@ -3711,9 +3700,13 @@ fn a_figure_whose_anim_is_missing_is_not_hoverable() {
         frame_idx: 0,
         effects: Vec::new(),
     });
+    let mut scene = SceneState::uniform(16);
+    for agent in &frame.agents {
+        scene.agents.insert(agent.agent_id, agent.clone());
+    }
     let drawn = paint_drawn(
         &OwnedSimStores::new(),
-        &SceneState::uniform(16),
+        &scene,
         &layout,
         &pack,
         SystemTime::UNIX_EPOCH,
@@ -3726,7 +3719,7 @@ fn a_figure_whose_anim_is_missing_is_not_hoverable() {
         .map(|h| h.target.clone())
         .collect();
     assert_eq!(hovered, vec![HoverTarget::Agent(walker)]);
-    let badged: Vec<_> = drawn.agents.iter().map(|a| a.agent_id).collect();
+    let badged = badged_ids(&drawn);
     assert_eq!(badged, vec![walker]);
 }
 
@@ -3798,6 +3791,88 @@ fn a_figure_hovers_on_the_box_it_is_drawn_in_in_both_looks() {
             assert!(d.y <= f.y, "{d:?} sinks below {f:?}");
         }
     }
+}
+
+/// Both looks hang each badge from the one anchor: at 1x the cutaway's badge
+/// runs are the classic's, on every frame of a walk to a desk.
+#[test]
+fn both_looks_hang_a_badge_from_the_one_anchor() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let (owned, now) = (OwnedSimStores::new(), SystemTime::UNIX_EPOCH);
+    for frame in &frames {
+        let mut scene = SceneState::uniform(16);
+        for agent in &frame.agents {
+            scene.agents.insert(agent.agent_id, agent.clone());
+        }
+        let classic: Vec<_> = paint_drawn(&owned, &scene, &layout, &pack, now, frame)
+            .badges
+            .iter()
+            .map(crate::display::Badge::run)
+            .collect();
+        let office = crate::display::Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: crate::render_scale::RenderScale::ONE,
+        };
+        let list = crate::display::compose::tests::list_at(frame, office, 12);
+        let cutaway: Vec<_> = list.badges().cloned().collect();
+        assert!(!classic.is_empty(), "premise: the walker wears a badge");
+        assert_eq!(cutaway, classic);
+    }
+}
+
+/// A chitchat bubble hangs over its speaker's badge, and both looks draw the
+/// same one.
+#[test]
+fn a_bubble_hangs_over_its_speakers_badge_in_both_looks() {
+    use crate::display::{TextRole, TextRun};
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let speaker = frame.agents[0].agent_id;
+    frame.chitchat_bubbles = vec![crate::chitchat::ChitchatBubble {
+        text: "LGTM!",
+        speaker,
+    }];
+    let mut scene = SceneState::uniform(16);
+    for agent in &frame.agents {
+        scene.agents.insert(agent.agent_id, agent.clone());
+    }
+    let now = SystemTime::UNIX_EPOCH;
+    let classic = paint_drawn(&OwnedSimStores::new(), &scene, &layout, &pack, now, &frame);
+    let find = |texts: &[TextRun], role| texts.iter().find(|run| run.role == role).cloned();
+    let badge = classic
+        .badges
+        .iter()
+        .find(|badge| badge.agent == speaker)
+        .expect("the speaker's badge");
+    let bubble = find(&classic.bubbles, TextRole::Bubble(speaker)).expect("the classic's bubble");
+    assert_eq!(bubble.text(), "LGTM!");
+    assert_eq!(bubble.at.x, badge.at.x, "centred over the badge");
+    assert_eq!(
+        badge.at.y - bubble.at.y,
+        2 * crate::layout::CELL_ROWS,
+        "two cell rows up, a row clear of the badge"
+    );
+    let office = crate::display::Office {
+        layout: &layout,
+        pack: &pack,
+        theme,
+        scale: crate::render_scale::RenderScale::ONE,
+    };
+    let cutaway: Vec<_> = crate::display::compose::tests::list_at(&frame, office, 12)
+        .texts()
+        .cloned()
+        .collect();
+    assert_eq!(
+        find(&cutaway, TextRole::Bubble(speaker)),
+        Some(bubble),
+        "the same bubble"
+    );
 }
 
 /// Two gateways of one source are two hovers, each naming its own instance,
@@ -3991,7 +4066,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
     furniture::paint_area_rug(&mut buf, l.pantry_entry_mat().expect("the mat"), theme);
-    let cx = (dw.start.x + dw.end.x) / 2;
+    let cx = u16::midpoint(dw.start.x, dw.end.x);
     let mat_cy = dw.start.y + WALL_THICK_H + 3;
     assert_ne!(buf.get(cx, mat_cy), floor, "mat center row painted");
     assert_ne!(buf.get(cx - 7, mat_cy), floor, "mat spans west of center");
@@ -4841,13 +4916,13 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
         let seat = back_couch_top_left(stand, CHARACTER_SPRITE_W);
         let walk = waypoint_top_left(stand, CHARACTER_SPRITE_W);
         assert!(
-            (drawn.y as i32 - seat.y as i32).abs() <= 1,
+            (i32::from(drawn.y) - i32::from(seat.y)).abs() <= 1,
             "meeting-chair sitter y {} must track the seat top-left {} (±breath)",
             drawn.y,
             seat.y
         );
         assert!(
-            (drawn.y as i32 - walk.y as i32).abs() >= 4,
+            (i32::from(drawn.y) - i32::from(walk.y)).abs() >= 4,
             "meeting-chair sitter must NOT sit on the 5px-high waypoint_top_left {} (the bug)",
             walk.y
         );
@@ -4948,6 +5023,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
     let mut escapes: Vec<String> = Vec::new();
+    let mut walking = 0;
     for port in 18900..18924u32 {
         // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
         // id — vary both, or the pet half of the sweep rides one trajectory.
@@ -4963,11 +5039,12 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
             boot,
         );
-        // Past the enter stagger + walk-in, then across several wander cycles so
-        // both the walking legs and the resting cells get sampled.
-        for step in 0..24u64 {
+        // One office's stores across the sweep: the creatures walk on state
+        // they keep. Past the enter stagger + walk-in, then across several roams,
+        // so both the walking legs and the resting cells get sampled.
+        let mut owned = OwnedSimStores::new();
+        for step in 0..48u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
-            let mut owned = OwnedSimStores::new();
             let frame = sim_step(
                 &mut owned.stores(),
                 SimInputs {
@@ -4986,6 +5063,17 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     door_anim_max_ms: 0,
                 },
             );
+            walking += frame
+                .mascots
+                .iter()
+                .filter(|m| m.anim_name.contains("walk"))
+                .count()
+                + usize::from(
+                    frame
+                        .pet
+                        .as_ref()
+                        .is_some_and(|p| p.anim_name.contains("walk")),
+                );
             for m in &frame.mascots {
                 let Size { w, h } = m.size;
                 if m.pos.x < w / 2
@@ -5020,6 +5108,10 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     assert!(
         escapes.is_empty(),
         "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+    assert!(
+        walking > 100,
+        "the sweep must catch them roaming, saw {walking}"
     );
 }
 
@@ -5166,7 +5258,7 @@ fn sim_and_paint(
     layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
-) -> (SimFrame, Vec<(AgentFrame, crate::layout::Bounds)>) {
+) -> (SimFrame, Vec<(Badged, crate::layout::Bounds)>) {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
@@ -5216,13 +5308,29 @@ fn paint_drawn(
     )
 }
 
+/// A drawn sprite's badge: whose, and where it hangs.
+#[derive(Debug, Clone, Copy)]
+struct Badged {
+    agent_id: pixtuoid_core::AgentId,
+    label_anchor: Point,
+}
+
+/// Who `drawn` badged, in paint order.
+fn badged_ids(drawn: &Drawn) -> Vec<pixtuoid_core::AgentId> {
+    drawn.badges.iter().map(|badge| badge.agent).collect()
+}
+
 /// Each badged sprite and the box it hovers on, which is the box it is drawn
 /// in.
-fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
+fn badged(drawn: &Drawn) -> Vec<(Badged, crate::layout::Bounds)> {
     drawn
-        .agents
+        .badges
         .iter()
-        .map(|&f| {
+        .map(|badge| Badged {
+            agent_id: badge.agent,
+            label_anchor: badge.at,
+        })
+        .map(|f| {
             let hover = drawn
                 .hovers
                 .listed()
@@ -5238,7 +5346,7 @@ fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
 /// breath-free top, or higher only as far as the art of the desk it sits at.
 fn assert_badges_top_their_frames(
     frame: &SimFrame,
-    drawn: &[(AgentFrame, crate::layout::Bounds)],
+    drawn: &[(Badged, crate::layout::Bounds)],
     layout: &SceneLayout,
     pack: &Pack,
 ) {
@@ -5973,11 +6081,12 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
     assert!(asymmetric > 0, "a profile is not its own mirror");
 }
 
-/// Under every sky the sweep draws, a frame matches the one whose windows show
-/// its instant's no-weather sky — the same room, lit alike — everywhere but on
-/// glass no fixture paints.
+/// The classic holds to
+/// [`assert_the_outside_reaches_only_the_glass`](crate::outside::tests::assert_the_outside_reaches_only_the_glass),
+/// its fixtures being what else paints.
 #[test]
 fn the_outside_reaches_only_the_glass() {
+    use crate::outside::tests::{UNPAINTED, painted_alone};
     let (scene, _, _, now0, pack) = sim_rig();
     // Wide enough for meeting rooms, whose notice boards hang on the panes.
     let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("240x144 lays out");
@@ -5998,49 +6107,18 @@ fn the_outside_reaches_only_the_glass() {
             door_anim_max_ms: 0,
         },
     );
-    const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
     let (w, h) = (layout.buf_w, layout.buf_h);
-    let mut hung_on_glass = std::collections::HashSet::new();
-    let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
-    for weathered in crate::outside::tests::every_sky() {
-        let name = &weathered.name;
-        let timing = Motion::Full.timing(weathered.now);
-        let paint = |outside| {
-            let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
-            paint_frame(
-                &mut PaintCtx {
-                    scene: &scene,
-                    layout: &layout,
-                    pack: &pack,
-                    timing,
-                    sky: weathered.sky,
-                    outside,
-                    buf: &mut buf,
-                    cache: &mut FrameCache::new(),
-                    base_fill: &mut BaseFillCache::new(),
-                    shadows: &mut crate::ground::DepthsCache::default(),
-                    theme,
-                    floor: crate::floor::FloorMeta::ground(),
-                    walks: &owned.route.walks,
-                    debug_walkable: false,
-                },
-                &frame,
-            );
-            buf
-        };
-        let (shown, bare) = (paint(None), paint(Some(weathered.bare)));
-        // Every pixel a fixture paints, each painted alone: one set an instant.
-        if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
-            let mut over = RgbBuffer::filled(w, h, UNPAINTED);
-            let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
-            let fctx = PaintCtx {
+    let paint = |weathered: &crate::outside::tests::Weathered, outside| {
+        let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
+        paint_frame(
+            &mut PaintCtx {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                timing,
+                timing: Motion::Full.timing(weathered.now),
                 sky: weathered.sky,
-                outside: None,
-                buf: &mut scratch,
+                outside,
+                buf: &mut buf,
                 cache: &mut FrameCache::new(),
                 base_fill: &mut BaseFillCache::new(),
                 shadows: &mut crate::ground::DepthsCache::default(),
@@ -6048,76 +6126,81 @@ fn the_outside_reaches_only_the_glass() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
-            };
-            let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
-            let lights = Lights::of(
-                &layout,
-                &moment.look,
-                &LightInputs {
-                    agents: &frame.agents,
-                    seated: &frame.seated_agents,
-                    floor_idx: 0,
-                    indoor_scale: frame.indoor_scale,
-                    neon: frame.neon,
-                    beat: timing.beat,
-                },
-            );
-            let neon = crate::floor::neon_look(frame.neon, theme);
-            let Furnishings { backdrop, sorted } =
-                queue_fixtures(&fctx, &frame, &lights.desks, neon);
-            let kinds = backdrop
-                .iter()
-                .map(|(_, k)| k)
-                .chain(sorted.iter().map(|d| &d.kind));
-            let mut painted = vec![false; usize::from(w) * usize::from(h)];
-            let mut cache = FrameCache::new();
-            for kind in kinds {
-                let epoch = over.begin_writes();
+            },
+            &frame,
+        );
+        buf
+    };
+    // Every pixel a fixture paints, each painted alone.
+    let covered = |weathered: &crate::outside::tests::Weathered| {
+        let timing = Motion::Full.timing(weathered.now);
+        let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
+        let fctx = PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            timing,
+            sky: weathered.sky,
+            outside: None,
+            buf: &mut scratch,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme,
+            floor: crate::floor::FloorMeta::ground(),
+            walks: &owned.route.walks,
+            debug_walkable: false,
+        };
+        let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
+        let lights = Lights::of(
+            &layout,
+            &moment.look,
+            &LightInputs {
+                agents: &frame.agents,
+                seated: &frame.seated_agents,
+                floor_idx: 0,
+                indoor_scale: frame.indoor_scale,
+                neon: frame.neon,
+                beat: timing.beat,
+            },
+        );
+        let neon = crate::floor::neon_look(frame.neon, theme);
+        let Furnishings { backdrop, sorted } = queue_fixtures(&fctx, &frame, &lights.desks, neon);
+        let kinds = backdrop
+            .iter()
+            .map(|(_, k)| k)
+            .chain(sorted.iter().map(|d| &d.kind));
+        let mut cache = FrameCache::new();
+        painted_alone(
+            (w, h),
+            kinds,
+            |_| (0..w, 0..h),
+            |kind, over| {
                 paint_drawable(
                     kind,
                     &mut drawable::DrawableCtx {
-                        buf: &mut over,
+                        buf: over,
                         pack: &pack,
                         cache: &mut cache,
                         timing,
                         theme,
                     },
                 );
-                for y in 0..h {
-                    for x in 0..w {
-                        if over.written_in(x, y, epoch) {
-                            painted[usize::from(y) * usize::from(w) + usize::from(x)] = true;
-                        }
-                    }
-                }
-            }
-            over.end_writes();
-            covered = Some((weathered.now, painted));
-        }
-        let covered = &covered.as_ref().expect("filled above").1;
-        let mut glass = 0;
-        for y in 0..h {
-            for x in 0..w {
-                let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
-                if hung && layout.glass_at(x, y) {
-                    hung_on_glass.insert((x, y));
-                }
-                if shown.get(x, y) == bare.get(x, y) {
-                    continue;
-                }
-                assert!(
-                    layout.glass_at(x, y) && !hung,
-                    "{name}: the outside reached ({x}, {y}), off the glass"
-                );
-                glass += 1;
-            }
-        }
-        assert_eq!(
-            glass > 0,
-            weathered.changes_glass,
-            "{name}: {glass} glass pixels"
-        );
-    }
+            },
+        )
+    };
+    let hung_on_glass = crate::outside::tests::assert_the_outside_reaches_only_the_glass(
+        "classic",
+        (w, h),
+        |x, y| layout.glass_at(x, y),
+        |weathered| {
+            [
+                paint(weathered, None),
+                paint(weathered, Some(weathered.bare)),
+            ]
+        },
+        covered,
+    );
     for kind in ["neon sign", "notice board"] {
         let over_glass = layout.fixtures().any(|f| {
             let named = match f.kind {
@@ -6136,4 +6219,76 @@ fn the_outside_reaches_only_the_glass() {
             "no {kind} hangs over a window, so none was compared there"
         );
     }
+}
+
+/// The neon halo lifts the window glass it falls on in the frame itself, as
+/// the cutaway's glass takes the sign's glow: the frame lit by the tube differs
+/// from the one with the tube off on glass the sign does not cover.
+#[test]
+fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
+    let (scene, _, _, now0, pack) = sim_rig();
+    let layout = SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+        .expect("192x160 fits");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let night = crate::localclock::at_hour(23);
+    let paint = |neon| {
+        let frame = SimFrame {
+            neon,
+            ..frame.clone()
+        };
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+        paint_frame(
+            &mut PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                timing: Motion::Full.timing(night),
+                sky: crate::sky::Sky::at_with(night, crate::sky::Weather::Clear),
+                outside: None,
+                buf: &mut buf,
+                cache: &mut FrameCache::new(),
+                base_fill: &mut BaseFillCache::new(),
+                shadows: &mut crate::ground::DepthsCache::default(),
+                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+                floor: crate::floor::FloorMeta::ground(),
+                walks: &owned.route.walks,
+                debug_walkable: false,
+            },
+            &frame,
+        );
+        buf
+    };
+    let (lit, dark) = (
+        paint(crate::floor::NeonLevels::FLASH),
+        paint(crate::floor::NeonLevels::EMPTY),
+    );
+    let sign = layout
+        .fixtures()
+        .find(|f| f.kind == FixtureKind::NeonSign)
+        .expect("the office hangs its sign")
+        .visual;
+    let under_sign = |x: u16, y: u16| {
+        (sign.x..sign.x + sign.width).contains(&x) && (sign.y..sign.y + sign.height).contains(&y)
+    };
+    let lifted = (0..layout.buf_h)
+        .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+        .filter(|&(x, y)| layout.glass_at(x, y) && !under_sign(x, y))
+        .filter(|&(x, y)| lit.get(x, y) != dark.get(x, y))
+        .count();
+    assert!(lifted > 0, "the sign's glow reaches no window glass");
 }

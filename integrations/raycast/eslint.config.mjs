@@ -8,9 +8,9 @@ export default defineConfig([
   ...raycastConfig,
   {
     // A chord Raycast reserves is silently swallowed, so the Action it decorates is
-    // unreachable — and no other gate here can see it (`tsc` types the shortcut fine;
-    // `ray build`/`ray lint` need the macOS app). Upstream ships this at WARN and
-    // `eslint .` exits 0 on warnings, which is how a dead `⌘,` binding shipped.
+    // unreachable, and `tsc` types the shortcut fine. Upstream ships this at WARN,
+    // and both `eslint .` and `ray lint` exit 0 on warnings, which is how a dead `⌘,`
+    // binding shipped.
     // Scoped to this one rule rather than a blanket `--max-warnings 0`: upstream's
     // style rules are advice a routine version bump could turn into a surprise red.
     rules: { "@raycast/no-reserved-shortcut": "error" },

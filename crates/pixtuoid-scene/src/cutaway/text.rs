@@ -1,31 +1,17 @@
 //! The cutaway's pixel font: text painted on the art grid, one glyph pixel per
-//! art pixel, never anti-aliased.
+//! art pixel, never anti-aliased, in the cells [`display::text`](crate::display::text)
+//! lays it out by.
 //!
 //! ASCII and the signs' symbols are [`hand_drawn`]; every other character
 //! comes from the [`fallback`] font, two open bitmap fonts
 //! `scripts/gen-fallback-font.py` aligns to the same lines. The workspace's
 //! other face (the binary's `aa_text`) is an anti-aliased OTF this wasm-clean
-//! crate must not embed. A character takes the terminal cells
-//! [`unicode-width`](unicode_width) gives it, each [`ADVANCE`] wide: at the
-//! pack's 4x art one logical column, the classic badge's terminal column.
+//! crate must not embed.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use unicode_width::UnicodeWidthChar;
 
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-
-/// A hand-drawn glyph's width in art pixels.
-const GLYPH_W: u16 = 3;
-/// A cell's width in art pixels: one glyph and its gap.
-const ADVANCE: u16 = GLYPH_W + 1;
-/// The rows above the capitals, which only accents and CJK ink.
-const ACCENT_ROWS: u16 = 2;
-/// A capital's height in art pixels.
-const CAP_H: u16 = 5;
-/// A line's height in art pixels: the accent rows, the capitals, and a row for
-/// descenders, Fusion Pixel 8px's own box. Pinned to the fallback font's
-/// header.
-pub(crate) const LINE_H: u16 = ACCENT_ROWS + CAP_H + 1;
+use crate::display::text::{ACCENT_ROWS, CAP_H, LINE_H, cells, clusters, columns};
 
 /// A glyph: each line row's ink, the high bit its leftmost pixel.
 type Rows = [u8; LINE_H as usize];
@@ -65,6 +51,22 @@ fn glyph(c: char) -> Option<Rows> {
     hand_drawn(c).map(rows_of).or_else(|| fallback(c))
 }
 
+/// What `cluster`'s `n` cells show, each glyph with the cells it takes. When
+/// its characters' own cells add up to `n`, each draws in its own: a letter
+/// under a combining accent, or a letter and a halfwidth sound mark. Otherwise,
+/// as with a VS16 heart or a ZWJ sequence, it is one box `n` cells wide.
+fn glyphs(cluster: &str, n: u16) -> impl Iterator<Item = (Rows, u16)> + '_ {
+    let own = |c: char| cells(c.encode_utf8(&mut [0; 4]));
+    let fits = cluster.chars().map(own).sum::<u16>() == n;
+    let each = cluster
+        .chars()
+        .filter(move |_| fits)
+        .map(move |c| (c, own(c)))
+        .filter(|&(_, k)| k > 0)
+        .map(|(c, k)| (glyph(c).unwrap_or_else(|| tofu(k)), k));
+    each.chain((!fits).then(|| (tofu(n), n)))
+}
+
 /// A hand-drawn glyph's [`Rows`], under the accent rows.
 fn rows_of(drawing: &str) -> Rows {
     let mut rows = Rows::default();
@@ -93,7 +95,7 @@ fn tofu(n: u16) -> Rows {
     rows
 }
 
-/// `c`'s rows from the capital line down, each [`GLYPH_W`] cells of `#` (ink)
+/// `c`'s rows from the capital line down, each [`GLYPH_W`](crate::display::text::GLYPH_W) cells of `#` (ink)
 /// or `.`, separated by spaces; rows not given are blank. Lowercase stands
 /// four rows tall under a one-row ascender.
 fn hand_drawn(c: char) -> Option<&'static str> {
@@ -206,42 +208,10 @@ fn hand_drawn(c: char) -> Option<&'static str> {
     })
 }
 
-/// `text`'s width in art pixels, from its first ink column to its last.
-pub(crate) fn width(text: &str) -> ArtPx {
-    ArtPx(advance(text).0.saturating_sub(1))
-}
-
-/// Art pixels from a run's left edge to where a run `n` cells on starts.
-pub(crate) fn columns(n: u16) -> ArtPx {
-    ArtPx(n.saturating_mul(ADVANCE))
-}
-
-/// The terminal cells `c` takes: two for a wide character, none for a
-/// combining mark or a control.
-pub(crate) fn char_cells(c: char) -> u16 {
-    c.width()
-        .map_or(0, |n| u16::try_from(n).unwrap_or(u16::MAX))
-}
-
-/// The cells `text` takes, the one width every run of it is laid out by.
-pub(crate) fn cells(text: &str) -> u16 {
-    text.chars().fold(0, |n, c| n.saturating_add(char_cells(c)))
-}
-
-/// [`columns`] past all of `text`: where the run after it starts.
-pub(crate) fn advance(text: &str) -> ArtPx {
-    columns(cells(text))
-}
-
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
 pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text: &str, ink: Rgb) {
     let mut left = x.0;
-    for c in text.chars() {
-        let n = char_cells(c);
-        if n == 0 {
-            continue;
-        }
-        let rows = glyph(c).unwrap_or_else(|| tofu(n));
+    for (rows, n) in clusters(text).flat_map(|(cluster, n)| glyphs(cluster, n)) {
         for (dy, mut bits) in (0u16..).zip(rows) {
             let mut dx = 0;
             while bits != 0 {
@@ -266,11 +236,13 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 mod tests {
     use super::*;
     use crate::anim::Motion;
+    use crate::display::text::{GLYPH_W, advance, width};
 
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
     fn signs() -> std::collections::BTreeSet<char> {
-        use crate::board::{StateCounts, build_board};
+        use crate::neon_sign::build_board;
+        use crate::tally::StateCounts;
         use pixtuoid_core::state::DaemonState;
         let mut text = crate::layout::floor_indicator_text(12);
         let moods = [
@@ -343,7 +315,7 @@ mod tests {
         let chars =
             (' '..='~')
                 .chain(signs())
-                .chain(['\u{b7}', crate::overlay::BADGE_MARKER, '\u{2603}']);
+                .chain(['\u{b7}', crate::badge::BADGE_MARKER, '\u{2603}']);
         for c in chars {
             let rows: Vec<&str> = hand_drawn(c).unwrap_or_default().split(' ').collect();
             assert!(
@@ -412,7 +384,7 @@ mod tests {
     /// cutaway's badges leading with a tofu box.
     #[test]
     fn the_font_draws_the_badge_marker() {
-        assert!(hand_drawn(crate::overlay::BADGE_MARKER).is_some());
+        assert!(hand_drawn(crate::badge::BADGE_MARKER).is_some());
     }
 
     /// A lowercase `w` closes its foot where `H` stands on open legs: the
@@ -441,7 +413,7 @@ mod tests {
     }
 
     /// Project names in CJK, Cyrillic and accented Latin draw real glyphs,
-    /// each as wide as the cells `unicode-width` gives it.
+    /// each as wide as its [`cells`](crate::display::text::cells).
     #[cfg(feature = "cutaway-assets")]
     #[test]
     fn names_beyond_ascii_draw_glyphs_as_wide_as_their_cells() {
@@ -460,7 +432,8 @@ mod tests {
         }
         let wide = ink("日");
         assert!(
-            wide.iter().any(|&(x, _)| x >= ADVANCE),
+            wide.iter()
+                .any(|&(x, _)| x >= crate::display::text::ADVANCE),
             "a CJK glyph spans its second cell: {wide:?}"
         );
         assert_eq!(advance("日I"), columns(3));
@@ -471,6 +444,44 @@ mod tests {
         );
     }
 
+    /// A grapheme cluster paints inside the cells it takes, and the run after
+    /// it starts there: a VS16 heart and a ZWJ sequence each take two.
+    #[test]
+    fn a_cluster_paints_inside_its_own_cells() {
+        for cluster in ["\u{2764}\u{fe0f}", "\u{1f469}\u{200d}\u{1f4bb}"] {
+            assert_eq!(cells(cluster), 2, "{cluster:?}");
+            let alone = ink(cluster);
+            assert!(
+                !alone.is_empty() && alone.iter().all(|&(x, _)| x < columns(2).0),
+                "{cluster:?} inks {alone:?}"
+            );
+            assert!(
+                ink(&format!("{cluster}I")).contains(&(columns(2).0, ACCENT_ROWS)),
+                "{cluster:?}: the I's top bar opens the third cell"
+            );
+        }
+    }
+
+    /// A halfwidth sound mark takes a cell of its own (ratatui-core's
+    /// `count_halfwidth_sound_marks`), so `ｶﾞ` draws the `ｶ` in its first
+    /// cell and the mark in its second, as each draws alone.
+    #[test]
+    fn a_halfwidth_sound_mark_draws_in_its_own_cell() {
+        for (base, mark) in [('\u{ff76}', '\u{ff9e}'), ('\u{ff8a}', '\u{ff9f}')] {
+            let cluster = format!("{base}{mark}");
+            assert_eq!(cells(&cluster), 2, "{cluster:?}");
+            let want: std::collections::BTreeSet<_> = ink(&base.to_string())
+                .into_iter()
+                .chain(
+                    ink(&mark.to_string())
+                        .into_iter()
+                        .map(|(x, y)| (x + columns(1).0, y)),
+                )
+                .collect();
+            assert_eq!(ink(&cluster), want, "{cluster:?}");
+        }
+    }
+
     /// The one fallback: a character neither font draws is a solid box,
     /// capital-high and its cells wide, so a run never collapses.
     #[test]
@@ -478,7 +489,7 @@ mod tests {
         // Thai, and CJK Extension A: in neither pinned font's subset.
         for (c, n) in [('\u{0e01}', 1), ('\u{3400}', 2)] {
             assert_eq!(glyph(c), None, "{c:?}");
-            assert_eq!(char_cells(c), n, "{c:?}");
+            assert_eq!(cells(c.encode_utf8(&mut [0; 4])), n, "{c:?}");
             let text = c.to_string();
             let want: std::collections::BTreeSet<_> = (0..width(&text).0)
                 .flat_map(|x| (ACCENT_ROWS..ACCENT_ROWS + CAP_H).map(move |y| (x, y)))
@@ -524,7 +535,7 @@ mod tests {
             .zip(glyphs)
             .filter_map(|(&point, rows)| {
                 let c = char::from_u32(u32::from(point))?;
-                let n = char_cells(c);
+                let n = cells(c.encode_utf8(&mut [0; 4]));
                 (!fits(rows, n)).then_some((c, n))
             })
             .collect();
@@ -557,11 +568,5 @@ mod tests {
         assert!(fits(&wide(0b1111_0000), 1));
         assert!(fits(&wide(u8::MAX), 2));
         assert!(!fits(&wide(0b1000_0000), 0));
-    }
-
-    #[test]
-    fn a_run_is_its_advances_less_the_trailing_gap() {
-        assert_eq!(width(""), ArtPx(0));
-        assert_eq!(width("cc\u{b7}a"), ArtPx(4 * ADVANCE - 1));
     }
 }

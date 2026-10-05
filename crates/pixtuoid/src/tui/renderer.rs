@@ -14,6 +14,7 @@ use ratatui::style::Color;
 use std::sync::Arc;
 
 use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
+use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
@@ -23,10 +24,9 @@ use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
-    paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
-    paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
-    paint_label_widgets, paint_mascot_tooltip, paint_pet_tooltip, paint_theme_picker,
-    paint_version_popup, paint_wall_display, paint_welcome,
+    paint_badges, paint_coffee_tooltip, paint_connection_panel, paint_dashboard, paint_footer,
+    paint_furniture_tooltip, paint_help_overlay, paint_mascot_tooltip, paint_pet_tooltip,
+    paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
 };
 
 pub use pixtuoid_scene::pet::PetState;
@@ -52,6 +52,9 @@ pub struct DrawCtx<'a> {
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
     pub connection: &'a crate::tui::connection::ConnectionFrame,
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
+    /// The flashes the terminal shows, for a live painter; a still has none
+    /// to hold.
+    pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -95,6 +98,7 @@ impl<'a> DrawCtx<'a> {
             dashboard: &CLOSED_DASHBOARD,
             connection: &CLOSED_CONNECTION,
             onboarding: &CLOSED_ONBOARDING,
+            flash: None,
         }
     }
 }
@@ -106,9 +110,14 @@ pub struct DrawOut {
     /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
     pub hovers: Hovers,
+    /// The board's star, a link the pointer finds.
+    pub star: Option<pixtuoid_scene::layout::Bounds>,
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
+    /// The flash hold kept the frame off the terminal, which still shows the
+    /// last one and its hit targets.
+    pub held: bool,
 }
 
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
@@ -247,7 +256,7 @@ mod min_size_tests {
     }
 }
 
-/// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
+/// Say WHY there is no office. Every caller of `draw_footer_only_frame` is
 /// a refusal — the scene rect is under the painter's own floor, `frame_layout`
 /// declined, or a floor transition hit the same gate — and a silent refusal reads
 /// as a crash on the small terminal a first-time user is most likely to be at.
@@ -325,9 +334,15 @@ pub(crate) fn paint_scene_tooltip(
         }
         SceneHit::Coffee => paint_coffee_tooltip(f, at, theme),
         SceneHit::Furniture(label) => paint_furniture_tooltip(f, label, at, theme),
+        SceneHit::Star => {}
     }
 }
 
+/// Draw one classic-look frame (scene, footer, overlays) and report what it painted for hit-testing.
+///
+/// # Errors
+///
+/// If querying the terminal size or drawing the frame to the backend fails.
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
@@ -344,7 +359,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let world = ctx.world;
     let FloorInputs { scene, now, .. } = world;
     let footer = FooterInputs::new(scene, ctx.footer);
-    let floor_info = footer.context.floor;
     let overlays = OverlayFrame {
         theme_picker: ctx.theme_picker,
         dashboard: ctx.dashboard,
@@ -368,24 +382,41 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             world,
             theme,
             size: Size { w: buf_w, h: buf_h },
-            place: Place::default(),
+            place: Place {
+                gateway: footer.context.gateway,
+                floor: footer.context.floor,
+            },
             debug_walkable: ctx.debug_walkable,
         },
     );
     let Some(Rendered {
         layout,
         occupied_waypoints,
+        flash,
         ..
     }) = rendered
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
+    let flashes = [flash; 2];
+    if ctx
+        .flash
+        .as_ref()
+        .is_some_and(|f| f.holds(flashes, term_size))
+    {
+        return Ok(DrawOut {
+            held: true,
+            ..DrawOut::default()
+        });
+    }
+    let star = ctx.floor.raster.star();
     let Some(ClassicDrawn {
         pixels,
-        agents,
+        badges,
+        bubbles,
+        signs,
         hovers,
-        bubbles: chitchat_bubbles,
     }) = ctx.floor.raster.classic_drawn()
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
@@ -394,7 +425,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let hit = mouse_pos.and_then(|(mx, my)| scene_hit(hovers, &layout, geometry.area_at(mx, my)?));
+    let hit =
+        mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
     let hovered = match hit {
         Some(SceneHit::Figure(HoverTarget::Agent(id))) => Some(*id),
         _ => None,
@@ -404,14 +436,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(pixels, ctx.onboarding.dim);
 
-    let labels = pixtuoid_scene::overlay::build_overlay(scene, agents, hovered);
-    let board = pixtuoid_scene::board::wall_board(
-        scene,
-        footer.context.gateway,
-        footer.context.floor,
-        ctx.world.floor.motion,
-        now,
-    );
     let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -420,12 +444,11 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_label_widgets(f, &labels, actual_scene, theme);
-        paint_chitchat_bubbles(f, chitchat_bubbles, agents, actual_scene, theme);
-        paint_wall_display(f, &board, actual_scene, theme);
-        let door = layout.door;
-        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
-        paint_elevator_indicator(f, door, current, actual_scene, theme);
+        // Badges first, then a bubble over them, then the signs, which a
+        // bubble must not cover.
+        paint_badges(f, badges, actual_scene, hovered);
+        paint_text_runs(f, bubbles, actual_scene);
+        paint_text_runs(f, signs, actual_scene);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,
@@ -436,15 +459,20 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
+    if let Some(flash) = ctx.flash.as_deref_mut() {
+        flash.shown(flashes, term_size);
+    }
     Ok(DrawOut {
         layout: Some(layout),
         hovers: hovers.clone(),
+        star,
         occupied_waypoints,
         geometry: Some(geometry),
+        held: false,
     })
 }
 
-/// The modal-overlay dispatch, centralized so the three draw paths can't drift in
+/// The modal-overlay dispatch, centralized so the draw paths can't drift in
 /// ordering or args. `bounds` is the FULL terminal area — a modal is centered over
 /// the whole frame, and `PanelGeometry` keeps it off the footer row itself.
 pub(super) fn paint_overlays(
@@ -494,7 +522,7 @@ pub(super) fn flush_buffer_to_term_at_offset(
     let cell_rows = (buf.height() / 2) as usize;
     for cy in 0..cell_rows {
         let target_y = cy as i32 + y_offset;
-        if target_y < 0 || target_y >= scene_rect.height as i32 {
+        if target_y < 0 || target_y >= i32::from(scene_rect.height) {
             continue;
         }
         for cx in 0..(buf.width() as usize) {
@@ -538,9 +566,9 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
         return;
     }
     for px in buf.as_mut_slice() {
-        px.r = (px.r as f32 * factor) as u8;
-        px.g = (px.g as f32 * factor) as u8;
-        px.b = (px.b as f32 * factor) as u8;
+        px.r = (f32::from(px.r) * factor) as u8;
+        px.g = (f32::from(px.g) * factor) as u8;
+        px.b = (f32::from(px.b) * factor) as u8;
     }
 }
 

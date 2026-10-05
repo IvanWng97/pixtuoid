@@ -5,7 +5,7 @@ use pixtuoid_core::sprite::format::Pack;
 use super::Span;
 use crate::atmosphere::Carpet;
 use crate::dither::Dithered;
-use crate::layout::{Bounds, Point};
+use crate::layout::Bounds;
 use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -19,7 +19,7 @@ const STANDBY_STOPS: u8 = 2;
 const STANDBY_LEVEL_PER_STOP: i8 = -2;
 
 /// What a desk's screen shows. A screen is its own light: whatever the room's
-/// lights do, they leave its glass alone ([`paint_list`](crate::cutaway::paint::paint_list)).
+/// lights do, they leave its glass alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Screen {
     /// Dark glass.
@@ -62,21 +62,6 @@ impl Screen {
     }
 }
 
-/// One agent's name badge, painted in the canvas so no terminal text shares a
-/// cell with the image: `overlay`'s text and
-/// [`BadgeInk`](crate::overlay::BadgeInk) on its
-/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body:
-/// `overlay::build_overlay`'s anchors hang off the classic-drawn sprite, which
-/// for a sitter is elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Badge {
-    /// Its bottom centre, in logical units: the sprite's centre, clear above
-    /// its head and any raised monitor behind it.
-    pub(crate) at: Point,
-    pub(crate) text: String,
-    pub(crate) tone: crate::overlay::LabelTone,
-}
-
 /// One frame's pieces — the windows, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
@@ -85,23 +70,62 @@ pub(crate) struct Badge {
 /// occlusion pass.
 pub(crate) struct DisplayList<'a> {
     pub(super) pieces: Vec<Piece>,
-    /// The room's own lights, which paint over every piece at once
-    /// ([`paint_list`](crate::cutaway::paint::paint_list)).
+    /// The room's own lights, which light every piece at once.
     pub(super) lights: Vec<LightPiece>,
     /// How dark the room is: every non-emissive pixel is painted under it, so a
     /// change repaints the whole frame.
-    pub(super) ambient: crate::cutaway::light::Ambient,
+    pub(super) ambient: crate::display::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
     pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
-    pub(super) flash: crate::cutaway::light::Flash,
+    pub(super) flash: crate::display::light::Flash,
+    /// What of the frame flashes, for a painter's hold.
+    pub(super) flash_phase: crate::flash::FlashPhase,
     /// The figures' hovers, in `pieces`' order.
     pub(super) hovers: super::Hovers,
+    /// What lies under every piece.
+    pub(super) backdrop: super::Backdrop,
+    pub(super) recolours: Recolours,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pub(super) pack: &'a Pack,
-    pub(super) theme: &'a Theme,
     pub(super) scale: RenderScale,
+}
+
+/// The pack keys art takes from the theme, resolved once a frame, so painting
+/// reads no theme.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Recolours {
+    /// The appliances' and fixtures' keys.
+    pub(crate) art: Vec<(char, pixtuoid_core::sprite::Pixel)>,
+    /// The desk props' cup and paper.
+    pub(crate) desk_props: [(char, pixtuoid_core::sprite::Pixel); 4],
+}
+
+/// The pack keys the desk props draw their cup's body and shadow in.
+pub(crate) const CUP_KEY: char = 'V';
+pub(crate) const CUP_SHADE_KEY: char = '%';
+/// The pack keys the token tower and its sheet draw their paper in.
+pub(crate) const PAPER_KEY: char = '¤';
+pub(crate) const PAPER_SHADE_KEY: char = '!';
+
+impl Recolours {
+    /// `theme`'s colours for the keys art takes from it.
+    pub(crate) fn of(theme: &Theme) -> Self {
+        let f = &theme.furniture;
+        Self {
+            art: crate::pack::appliance_overrides(&theme.appliance)
+                .into_iter()
+                .chain(crate::pack::fixture_overrides(theme))
+                .collect(),
+            desk_props: [
+                (CUP_KEY, Some(f.coffee_cup)),
+                (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
+                (PAPER_KEY, Some(f.paper)),
+                (PAPER_SHADE_KEY, Some(f.paper_shade)),
+            ],
+        }
+    }
 }
 
 /// One entry of a [`DisplayList`].
@@ -131,7 +155,7 @@ impl Piece {
             PieceKind::Character { figure, body, .. } => {
                 (*body, super::HoverTarget::Agent(figure.key.frame.agent_id))
             }
-            PieceKind::Creature { who, .. } => (self.span, who.clone()),
+            PieceKind::Creature { who, .. } => (self.span, who.clone()?),
             _ => return None,
         };
         Some(super::Hover {
@@ -143,10 +167,10 @@ impl Piece {
 
 /// One of the room's lights: what it lifts, over which cells. A change repaints
 /// its span from every light that meets it, which alone light a rect as the
-/// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
+/// whole frame does.
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
-    pub(crate) view: crate::cutaway::light::LightView,
+    pub(crate) view: crate::display::light::LightView,
     pub(crate) fingerprint: u64,
 }
 
@@ -186,7 +210,7 @@ impl<'a> DisplayList<'a> {
         &self.lights
     }
 
-    pub(crate) fn ambient(&self) -> crate::cutaway::light::Ambient {
+    pub(crate) fn ambient(&self) -> crate::display::light::Ambient {
         self.ambient
     }
 
@@ -194,16 +218,24 @@ impl<'a> DisplayList<'a> {
         self.carpet
     }
 
-    pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {
+    pub(crate) fn flash(&self) -> crate::display::light::Flash {
         self.flash
+    }
+
+    pub(crate) fn flash_phase(&self) -> crate::flash::FlashPhase {
+        self.flash_phase
     }
 
     pub(crate) fn pack(&self) -> &'a Pack {
         self.pack
     }
 
-    pub(crate) fn theme(&self) -> &'a Theme {
-        self.theme
+    pub(crate) fn backdrop(&self) -> &super::Backdrop {
+        &self.backdrop
+    }
+
+    pub(crate) fn recolours(&self) -> &Recolours {
+        &self.recolours
     }
 
     pub(crate) fn scale(&self) -> RenderScale {
@@ -214,11 +246,19 @@ impl<'a> DisplayList<'a> {
         &self.hovers
     }
 
-    /// Each drawn agent's badge, in draw order.
-    #[cfg(test)]
-    pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
+    /// Each text run, in draw order.
+    pub(crate) fn texts(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Badge { badge } => Some(badge),
+            PieceKind::Text { run } => Some(run),
+            _ => None,
+        })
+    }
+
+    /// Each agent's badge, in draw order.
+    #[cfg(test)]
+    pub(crate) fn badges(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Text { run } if matches!(run.role, super::TextRole::Badge(_)) => Some(run),
             _ => None,
         })
     }
@@ -237,7 +277,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
-        PieceKind::WallSeg { piece, rows } => (piece, rows).hash(&mut h),
+        PieceKind::WallSeg { piece, rows, trim } => (piece, rows, trim).hash(&mut h),
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
@@ -257,7 +297,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             hue,
             interior,
         } => (at, tube, hue, interior).hash(&mut h),
-        PieceKind::Clock { at, reading } => (at, reading).hash(&mut h),
+        PieceKind::Clock { at, reading, hand } => (at, reading, hand).hash(&mut h),
         // The body follows from `at` and `key`.
         PieceKind::Character {
             figure:
@@ -269,9 +309,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             chair,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
-        PieceKind::Badge { ref badge } => badge.hash(&mut h),
-        PieceKind::Board { ref board } => board.hash(&mut h),
-        PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
+        PieceKind::Text { ref run } => run.hash(&mut h),
         PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
@@ -279,7 +317,51 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
+/// How a piece takes the room's light, which the cutaway's emission pass
+/// reads. The classic paints its lights over everything they fall on, the
+/// glass included, so the two looks light a window alike
+/// (`the_neon_halo_lifts_the_window_glass_it_falls_on`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Emits<'a> {
+    /// A window. What its glass shows ([`WindowView::shows`]) is its own light,
+    /// which the room's lights still lift, so a light that falls on the glass
+    /// glows on it. Its joinery is lit.
+    Pane(&'a WindowView),
+    /// Its own light, as painted: a sign, or text that keeps the contrast its
+    /// theme pins at every hour.
+    Emissive,
+    /// Each pixel as its art marks it: a screen that glows, a bulb.
+    ByArt,
+    /// Darkened with the room, lifted by its lights: most of it.
+    Lit,
+}
+
 impl PieceKind {
+    /// How it takes the room's light.
+    pub(crate) fn emits(&self) -> Emits<'_> {
+        match self {
+            PieceKind::Window { view, .. } => Emits::Pane(view),
+            PieceKind::Neon { .. } | PieceKind::Text { .. } => Emits::Emissive,
+            PieceKind::Effect(r) if r.effect.kind == crate::effects::EffectKind::FlameCrown => {
+                Emits::Emissive
+            }
+            PieceKind::Desk { .. }
+            | PieceKind::Prop { .. }
+            | PieceKind::Animated { .. }
+            | PieceKind::Hung { .. }
+            | PieceKind::Door { .. } => Emits::ByArt,
+            PieceKind::WallSeg { .. }
+            | PieceKind::Chair { .. }
+            | PieceKind::DeskProp(_)
+            | PieceKind::Creature { .. }
+            | PieceKind::PropBand { .. }
+            | PieceKind::Table { .. }
+            | PieceKind::Character { .. }
+            | PieceKind::Effect(_)
+            | PieceKind::Clock { .. } => Emits::Lit,
+        }
+    }
+
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
     /// ([`PieceKind::Window`]).
@@ -317,9 +399,7 @@ impl PieceKind {
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
-            | PieceKind::Badge { .. }
-            | PieceKind::Board { .. }
-            | PieceKind::Indicator { .. } => false,
+            | PieceKind::Text { .. } => false,
         }
     }
 }
@@ -350,6 +430,7 @@ pub(crate) enum PieceKind {
         /// The logical rows of `piece` this segment paints, top inclusive and
         /// bottom exclusive.
         rows: (u16, u16),
+        trim: crate::glass::WallTrim,
     },
     Desk {
         at: crate::layout::Point,
@@ -397,6 +478,8 @@ pub(crate) enum PieceKind {
     Clock {
         at: crate::layout::Point,
         reading: crate::sky::ClockReading,
+        /// The theme's hand colour.
+        hand: pixtuoid_core::sprite::Rgb,
     },
     /// A prop the model stands on a desk (`push_desk_props`).
     DeskProp(StoodProp),
@@ -406,7 +489,8 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
         degraded: bool,
-        who: super::HoverTarget,
+        /// `None`: it hovers as nothing ([`MascotPlacement::on_roster`](crate::sim::MascotPlacement::on_roster)).
+        who: Option<super::HoverTarget>,
     },
     Character {
         figure: Figure,
@@ -417,18 +501,10 @@ pub(crate) enum PieceKind {
         body: Span,
     },
     /// An effect riding on the figure pushed beside it.
-    Effect(crate::cutaway::effects::Riding),
-    Badge {
-        badge: Badge,
-    },
-    /// The wall board's text, over the neon sign's interior.
-    Board {
-        board: crate::board::BoardModel,
-    },
-    /// The floor indicator over the elevator at `door`.
-    Indicator {
-        door: Point,
-        floor: usize,
+    Effect(crate::display::effects::Riding),
+    /// A line of text over everything it meets.
+    Text {
+        run: super::TextRun,
     },
 }
 

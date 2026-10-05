@@ -93,7 +93,7 @@ fn main() -> Result<()> {
         // Warm the caches (layout memo + recolored frames) — steady state is
         // what a running office pays, not the first frame.
         for i in 0..15u64 {
-            let now = base + Duration::from_millis(i * 33);
+            let now = base + Duration::from_millis(i * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
         let mut samples = Vec::with_capacity(ITERS as usize);
         for i in 0..ITERS {
             // Advance time each frame so animation/motion actually re-derives.
-            let now = base + Duration::from_millis((15 + i) * 33);
+            let now = base + Duration::from_millis((15 + i) * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let t = Instant::now();
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
@@ -133,7 +133,7 @@ fn main() -> Result<()> {
         samples.sort_by(f64::total_cmp);
         let min = samples[0];
         let p50 = samples[samples.len() / 2];
-        let px = w as f64 * h as f64;
+        let px = f64::from(w) * f64::from(h);
         // The office the layout DERIVES at this buffer size — the confound the
         // spec names: buffer pixels ARE layout units today, so a bigger
         // buffer builds a BIGGER office rather than a sharper one.
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
         populate(&mut scene, base, n);
         let mut r = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         for i in 0..15u64 {
-            let now = base + Duration::from_millis(i * 33);
+            let now = base + Duration::from_millis(i * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
@@ -177,7 +177,7 @@ fn main() -> Result<()> {
         }
         let mut best = f64::MAX;
         for i in 0..60u64 {
-            let now = base + Duration::from_millis((15 + i) * 33);
+            let now = base + Duration::from_millis((15 + i) * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let t = Instant::now();
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
@@ -200,7 +200,7 @@ fn main() -> Result<()> {
     // Transport arithmetic: what a rich Adapter must push per frame.
     println!("\ntransport cost per frame (uncompressed RGB -> base64, an upper bound):");
     for (label, w, h) in cases {
-        let raw = w as f64 * h as f64 * 3.0;
+        let raw = f64::from(w) * f64::from(h) * 3.0;
         let b64 = raw * 4.0 / 3.0;
         println!(
             "  {:<32} raw {:>8.2} MiB  base64 {:>8.2} MiB  @30fps {:>8.1} MiB/s",
@@ -228,7 +228,7 @@ fn main() -> Result<()> {
         let mut enc_ms = f64::MAX;
         let mut bytes = 0usize;
         for i in 0..12u64 {
-            let now = base + Duration::from_millis(i * 33);
+            let now = base + Duration::from_millis(i * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let buf = r
                 .render(RenderInputs {
                     world: FloorInputs {
@@ -250,7 +250,7 @@ fn main() -> Result<()> {
             enc_ms = enc_ms.min(t.elapsed().as_secs_f64() * 1000.0);
             bytes = out.len();
         }
-        let raw = w as f64 * h as f64 * 3.0;
+        let raw = f64::from(w) * f64::from(h) * 3.0;
         println!(
             "  {:<24} {:>10.2} {:>11.1} {:>12.1} {:>10.2}x",
             format!("{}x{}", w, h),
@@ -278,7 +278,7 @@ fn main() -> Result<()> {
                     debug_walkable: false,
                 })
                 .expect("a frame");
-            let (bw, bh) = (buf.width() as u32, buf.height() as u32);
+            let (bw, bh) = (u32::from(buf.width()), u32::from(buf.height()));
             let mut img = image::RgbImage::new(bw, bh);
             for (i, p) in buf.as_slice().iter().enumerate() {
                 img.put_pixel(i as u32 % bw, i as u32 / bw, image::Rgb([p.r, p.g, p.b]));

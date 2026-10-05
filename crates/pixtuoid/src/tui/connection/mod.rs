@@ -47,7 +47,7 @@ pub enum LiveFacet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DaemonRollup {
     pub instances: std::num::NonZeroUsize,
-    /// Their worst-of state via the shared `board::gateway_rollup` — the same
+    /// Their worst-of state via the shared `tally::gateway_rollup` — the same
     /// worst-of the footer's `⬢gw` chip and the wall board read.
     pub state: pixtuoid_core::state::DaemonState,
 }
@@ -125,7 +125,7 @@ pub fn live_for(
             .map(|(_, _, p)| p)
             .collect();
         let rollup = std::num::NonZeroUsize::new(mine.len())
-            .zip(pixtuoid_scene::board::gateway_rollup(mine.into_iter()))
+            .zip(pixtuoid_scene::tally::gateway_rollup(mine.into_iter()))
             .map(|(instances, state)| DaemonRollup { instances, state });
         return LiveInfo {
             facet: LiveFacet::Daemon(rollup),
@@ -182,9 +182,6 @@ pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
             format!("\u{2713} {display_name} connected")
         }
     };
-    if r.backup.is_some() {
-        s.push_str(" \u{00b7} backup saved");
-    }
     if r.path_warning {
         s.push_str(" \u{00b7} \u{26a0} pixtuoid-hook not on PATH");
     }
@@ -204,8 +201,9 @@ pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> Stri
             format!("\u{2713} {display_name} disconnected")
         }
     };
-    if r.removed_backup.is_some() {
-        s.push_str(" \u{00b7} backup cleared");
+    if r.plugin_left_registered {
+        s.push_str(" \u{00b7} \u{26a0} ");
+        s.push_str(crate::sources::PLUGIN_LEFT_REGISTERED_PHRASE);
     }
     s
 }

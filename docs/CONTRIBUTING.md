@@ -161,7 +161,9 @@ our release never builds. Two consequences:
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
-  `crates/pixtuoid-core/src/source/claude_code.rs`.
+  `crates/pixtuoid-core/src/source/codex.rs`. Change homebrew-core's `test do`
+  first, against the released version, so the next autobump stays green; the
+  packaging-build action replays the block, so it changes in the same PR.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
@@ -196,8 +198,9 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
-9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
-   new repo docs.
+9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
+   a line on the narrowest rule it amends — never an agent's private memory,
+   which nobody reviews and nothing executes.
 
 **Skills.** Repo skills live in [`.claude/skills/`](../.claude/skills/)
 (committed; `.agents/skills/` aliases them for Codex).
@@ -215,14 +218,10 @@ crate IS.
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once you need a PR number | open it as a draft: the light tier runs, and the billed review bots wait |
-| once the draft's light tier is green | mark it ready: the review bots start; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
+| once the branch is ready to merge and [a PR slot](../AGENTS.md#workflow) is free | open the PR ready: the light tier and the review bots run; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
 | when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
-
-One change spanning the Rust lib + the site + the Raycast extension:
-[`PARALLEL-DELIVERY.md`](PARALLEL-DELIVERY.md).
 
 The e2e tiers live under `scripts/lib/`; none runs in CI. Cheapest first:
 `just openclaw-e2e` (hermetic envelopes, free) · `just replay <fixture>` (a
@@ -236,6 +235,23 @@ Advisory backstops that surface risk but never gate:
 `scripts/check_upstream_drift.py` (wire-format drift) · `just fixture-age`
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
 `just bench` / `just bench-pacing` / CodSpeed (local numbers authoritative; CI benches advisory).
+
+### Parallel sessions
+
+- **One `git worktree` and one cargo target per branch** — a target shared
+  across branches swaps uplifted examples and builds one branch's types into
+  another. Targets run to several GB each: check `df -h /` before parallel
+  builds, and remove a PR's worktree and local branch once it merges.
+- **snapbox goldens escape a worktree** — `file!` resolves against the
+  outermost `Cargo.toml` ancestor, the main checkout (snapbox 1.2.2
+  `macros.rs:101-113`); run or overwrite them with
+  `CARGO_RUSTC_CURRENT_DIR=<worktree>`.
+- **Fold before opening** — a change to a surface an open PR already touches
+  folds into it.
+- **The queue never idles** — it checks one batch at a time (`.mergify.yml`'s
+  `max_parallel_checks`), so queue every PR that holds the gate, in priority
+  order, at once; dequeue one only when it would jump a priority PR that is
+  already green.
 
 ## Conventions and architecture invariants
 
@@ -295,7 +311,8 @@ already touches, adding no local row — so it is fixed in #N; a defect in
 another session's tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
-`FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one. A
+`FOLLOW-UP → #N: …`, where #N is a PR other than this one: open, merged, or
+closed under [the open-PR cap](../AGENTS.md#workflow) with the fix on its branch. A
 re-flag of an already-dispositioned finding replies with the original's
 disposition (link it). "Acknowledged" and "surfaced" are not states. Sweep at
 the FINAL merge head; check WHICH commit a bot re-flag was raised against
