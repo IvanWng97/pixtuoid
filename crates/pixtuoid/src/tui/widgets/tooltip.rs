@@ -633,7 +633,8 @@ mod tests {
         let mut stars = 0;
         for run in model.runs(&theme::NORMAL) {
             let painted = painted(&|f| super::paint_text_runs(f, std::slice::from_ref(&run), area));
-            let placed = run.place(pixtuoid_scene::display::text::cells(&run.text()));
+            let line: String = run.spans.iter().map(|s| s.text.as_str()).collect();
+            let placed = run.place(pixtuoid_scene::display::text::cells(&line));
             assert_eq!(
                 painted,
                 terminal_cells(placed),
