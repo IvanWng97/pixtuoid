@@ -34,7 +34,7 @@ fn paint_whole_wall(
         theme,
         piece,
         at.y..at.y + size.h,
-        crate::cutaway::pen::Pen::UNIT,
+        crate::display::pen::Pen::UNIT,
     );
 }
 
@@ -801,7 +801,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
 
 /// The TOML and art of a pet shipped at `density` too, drawn in palette `key`:
 /// both packs of a with-and-without-variant comparison carry it, so both paint
-/// the room on one art grid ([`Pen::for_pack`](crate::cutaway::pen::Pen::for_pack))
+/// the room on one art grid ([`Pen::for_pack`](crate::display::pen::Pen::for_pack))
 /// and differ only in the piece compared.
 fn grid_anchor(density: u16, key: char) -> (String, [(&'static str, String); 2]) {
     let square =
@@ -1147,6 +1147,7 @@ fn drawable(sort_row: u16) -> Drawable<'static> {
     Drawable {
         sort_row,
         layer: Layer::Under,
+        hover: None,
         kind: DrawableKind::MeetingTable {
             pos: Point { x: 0, y: 0 },
         },
@@ -1167,6 +1168,7 @@ fn drawables_sort_is_stable_on_ties() {
         Drawable {
             sort_row: 10,
             layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 1, y: 0 },
             },
@@ -1174,6 +1176,7 @@ fn drawables_sort_is_stable_on_ties() {
         Drawable {
             sort_row: 10,
             layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 2, y: 0 },
             },
@@ -1181,6 +1184,7 @@ fn drawables_sort_is_stable_on_ties() {
         Drawable {
             sort_row: 10,
             layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 3, y: 0 },
             },
@@ -1205,6 +1209,7 @@ fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
     let tied = |layer, x| Drawable {
         sort_row: 10,
         layer,
+        hover: None,
         kind: DrawableKind::MeetingTable {
             pos: Point { x, y: 0 },
         },
@@ -1225,6 +1230,7 @@ fn a_row_north_paints_first_whatever_its_layer() {
     let at = |sort_row, layer, x| Drawable {
         sort_row,
         layer,
+        hover: None,
         kind: DrawableKind::MeetingTable {
             pos: Point { x, y: 0 },
         },
@@ -3242,40 +3248,28 @@ fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
     );
 }
 
-/// The painter projects a mascot's one `DaemonState` onto the hover's and the
-/// sprite's flags; each state lights exactly its own.
+/// A mascot hovers as its gateway's instance, and its sprite greys exactly
+/// when its gateway is degraded.
 #[test]
-fn a_mascots_state_reaches_its_hover_and_its_sprite() {
-    use pixtuoid_core::state::DaemonState;
+fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
+    let pack = crate::pack::test_default_pack();
     let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw has a mascot");
-    for (state, busy, degraded) in [
-        (DaemonState::Idle, false, false),
-        (DaemonState::Busy, true, false),
-        (DaemonState::Degraded, false, true),
-        (DaemonState::Down, false, false),
-    ] {
+    for degraded in [false, true] {
         let mascot = crate::sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
             size: Size { w: 14, h: 12 },
             anim_name: def.walk,
             frame_idx: 0,
-            name: def.display_name,
-            instance: None,
-            state,
+            key: crate::creatures::openclaw_key("18789"),
+            degraded,
             effects: Vec::new(),
-            active_sessions: 0,
         };
         let mut drawables = Vec::new();
-        enqueue_gateway_mascots(std::slice::from_ref(&mascot), &mut drawables);
-        let hover = MascotFrame::of(&mascot, 0, 0);
-        assert_eq!(
-            (hover.busy, hover.degraded),
-            (busy, degraded),
-            "{state:?} hover"
-        );
+        enqueue_gateway_mascots(&pack, std::slice::from_ref(&mascot), &mut drawables);
         let [
             Drawable {
+                hover: Some(hover),
                 kind:
                     DrawableKind::GatewayMascot {
                         degraded: drawn, ..
@@ -3284,9 +3278,14 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
             },
         ] = drawables.as_slice()
         else {
-            panic!("{state:?}: one mascot drawable");
+            panic!("one drawn mascot");
         };
-        assert_eq!(*drawn, degraded, "{state:?} sprite");
+        assert_eq!(
+            hover.target,
+            HoverTarget::Mascot(mascot.key.clone()),
+            "the hover"
+        );
+        assert_eq!(*drawn, degraded, "the sprite");
     }
 }
 
@@ -3326,8 +3325,9 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     let [mascot] = frame.mascots.as_slice() else {
         panic!("one gateway, one mascot: {:?}", frame.mascots);
     };
-    assert_eq!(mascot.name, "OpenClaw");
-    assert_eq!(mascot.instance, None, "a lone instance needs no port");
+    let card = crate::creatures::GatewayCard::of(&scene, &mascot.key).expect("its card");
+    assert_eq!(card.name, "OpenClaw");
+    assert_eq!(card.instance, None, "a lone instance needs no port");
 }
 
 /// A mascot whose anim the pack lacks paints nothing, so it lists nothing to
@@ -3375,35 +3375,17 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
         .expect("the bundled pack draws the mascot");
     let mut ghost = drawn.clone();
     ghost.anim_name = "does_not_exist";
-    ghost.instance = Some("ghost".into());
+    ghost.key = crate::creatures::openclaw_key("18790");
     frame.mascots.push(ghost);
 
-    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
-    let hover = paint_frame(
-        &mut PaintCtx {
-            scene: &scene,
-            layout: &layout,
-            pack: &pack,
-            timing: Motion::Full.timing(now),
-            sky: crate::sky::Sky::clock(now),
-            outside: None,
-            buf: &mut buf,
-            cache: &mut FrameCache::new(),
-            base_fill: &mut BaseFillCache::new(),
-            shadows: &mut crate::ground::DepthsCache::default(),
-            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
-            floor: crate::floor::FloorMeta::ground(),
-            walks: &owned.route.walks,
-            debug_walkable: false,
-        },
-        &frame,
-    );
-    let listed: Vec<_> = hover
-        .mascots
+    let hovers = paint_drawn(&owned, &scene, &layout, &pack, now, &frame).hovers;
+    let listed: Vec<_> = hovers
+        .listed()
         .iter()
-        .map(|m| (m.instance.clone(), (m.w, m.h)))
+        .filter(|h| matches!(h.target, HoverTarget::Mascot(_)))
+        .map(|h| (h.target.clone(), (h.at.width, h.at.height)))
         .collect();
-    assert_eq!(listed, vec![(None, art)]);
+    assert_eq!(listed, vec![(HoverTarget::Mascot(key), art)]);
 }
 
 #[test]
@@ -3662,65 +3644,194 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
     assert_ne!(sorted, queued, "premise: paint order is not the queue's");
     let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
     assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
+    let hovered: Vec<_> = hover
+        .hovers
+        .listed()
+        .iter()
+        .map(|h| h.target.clone())
+        .collect();
+    assert_eq!(
+        hovered,
+        sorted
+            .iter()
+            .map(|&(_, id)| HoverTarget::Agent(id))
+            .collect::<Vec<_>>()
+    );
     assert!(!listed.contains(&off.agent_id));
     let [a, b] = [lead.agent_id, trail.agent_id].map(|id| {
-        *hover
-            .agents
+        hover
+            .hovers
+            .listed()
             .iter()
-            .find(|f| f.agent_id == id)
+            .find(|h| h.target == HoverTarget::Agent(id))
             .expect("drawn")
+            .at
     });
     assert!(
-        a.top_left.x < b.top_left.x + b.w
-            && b.top_left.x < a.top_left.x + a.w
-            && a.top_left.y < b.top_left.y + b.h
-            && b.top_left.y < a.top_left.y + a.h,
+        a.overlaps(b),
         "premise: the two arrivals overlap: {a:?} {b:?}"
     );
 }
 
-/// A character whose anim the pack lacks paints nothing, so it lists nothing to hover.
+/// A character or a pet whose anim the pack lacks paints nothing, so it
+/// neither hovers nor wears a badge.
 #[test]
-fn a_character_whose_anim_is_missing_is_not_hoverable() {
-    let pack = crate::pack::test_default_pack();
-    let slot = make_slot(
-        pixtuoid_core::AgentId::from_transcript_path("/c.jsonl"),
-        ActivityState::Idle,
+fn a_figure_whose_anim_is_missing_is_not_hoverable() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let mut frame = frames.last().expect("a walk").clone();
+    let walker = frame.agents[0].agent_id;
+    let mut ghost = frame.characters[0].clone();
+    ghost.anim_name = "does_not_exist";
+    ghost.agent_idx = frame.agents.len();
+    frame.agents.push(AgentSlot {
+        agent_id: pixtuoid_core::AgentId::from_transcript_path("/ghost.jsonl"),
+        ..frame.agents[0].clone()
+    });
+    frame.characters.push(ghost);
+    frame.pet = Some(crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos: frame.characters[0].top_left,
+        flip: false,
+        anim_name: "does_not_exist",
+        frame_idx: 0,
+        effects: Vec::new(),
+    });
+    let drawn = paint_drawn(
+        &OwnedSimStores::new(),
+        &SceneState::uniform(16),
+        &layout,
+        &pack,
+        SystemTime::UNIX_EPOCH,
+        &frame,
     );
-    let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
-    let mut cache = FrameCache::new();
-    let mut paint = |anim_name| {
-        paint_drawable(
-            &DrawableKind::Character {
-                agent: &slot,
-                pose: crate::character::SpritePose {
-                    anim_name,
-                    frame_idx: 0,
-                    flip_x: false,
-                    glow_tint: None,
-                },
-                top_left: Point { x: 20, y: 20 },
-                label_anchor: Point { x: 20, y: 20 },
-                effects: &[],
-            },
-            &mut drawable::DrawableCtx {
-                buf: &mut buf,
+    let hovered: Vec<_> = drawn
+        .hovers
+        .listed()
+        .iter()
+        .map(|h| h.target.clone())
+        .collect();
+    assert_eq!(hovered, vec![HoverTarget::Agent(walker)]);
+    let badged: Vec<_> = drawn.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(badged, vec![walker]);
+}
+
+/// Each figure on a walk to a desk hovers on exactly the box the classic
+/// blits its frame in; the cutaway's at 1x is the same box, and at its densest
+/// stands on the same feet, raised by the hair it draws.
+#[test]
+fn a_figure_hovers_on_the_box_it_is_drawn_in_in_both_looks() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let (owned, scene) = (OwnedSimStores::new(), SceneState::uniform(16));
+    let now = SystemTime::UNIX_EPOCH;
+    let mut scratch = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    for frame in &frames {
+        let blitted: Vec<_> = frame
+            .characters
+            .iter()
+            .map(|c| {
+                let agent = &frame.agents[c.agent_idx];
+                let pose = crate::character::SpritePose::of(c, agent, theme);
+                let size = paint_character_at(
+                    &mut scratch,
+                    pose,
+                    c.top_left,
+                    agent,
+                    &pack,
+                    &mut FrameCache::new(),
+                    now,
+                )
+                .expect("the bundled pack draws the walk");
+                Hover::figure(
+                    Pivot::TopLeft,
+                    c.top_left,
+                    size,
+                    HoverTarget::Agent(agent.agent_id),
+                )
+            })
+            .collect();
+        let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, frame);
+        assert_eq!(drawn.hovers.listed(), blitted);
+        let cutaway = |scale| {
+            let office = crate::display::Office {
+                layout: &layout,
                 pack: &pack,
-                cache: &mut cache,
-                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
-                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+                theme,
+                scale,
+            };
+            crate::display::compose::tests::list_at(frame, office, 12)
+                .hovers()
+                .clone()
+        };
+        let scale = crate::render_scale::RenderScale::new;
+        assert_eq!(
+            cutaway(scale(1).expect("nonzero")).listed(),
+            blitted,
+            "the cutaway at 1x"
+        );
+        let densest = cutaway(scale(pack.max_density_variant().get()).expect("nonzero"));
+        assert_eq!(densest.listed().len(), blitted.len());
+        for (dense, flat) in densest.listed().iter().zip(&blitted) {
+            let (d, f) = (dense.at, flat.at);
+            assert_eq!(dense.target, flat.target);
+            assert_eq!(
+                (d.x, d.width, d.y + d.height),
+                (f.x, f.width, f.y + f.height),
+                "the same columns and feet"
+            );
+            assert!(d.y <= f.y, "{d:?} sinks below {f:?}");
+        }
+    }
+}
+
+/// Two gateways of one source are two hovers, each naming its own instance,
+/// in paint order.
+#[test]
+fn each_mascot_hovers_as_its_own_instance() {
+    use pixtuoid_core::source::daemon::{DaemonPresenceUpdate, apply_presence};
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    for port in ["18789", "18790"] {
+        apply_presence(
+            &mut scene,
+            &crate::creatures::openclaw_key(port),
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            now0,
+        );
+    }
+    let now = now0 + std::time::Duration::from_secs(6);
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
             },
-        )
-    };
-    assert_eq!(paint("does_not_exist"), None);
-    let seated = pack
-        .animation("seated")
-        .and_then(|a| a.frames().first())
-        .expect("seated art");
-    let Some(drawable::Drawn::Agent(drawn)) = paint("seated") else {
-        panic!("a drawn character is hoverable");
-    };
-    assert_eq!((drawn.w, drawn.h), (seated.width(), seated.height()));
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let mut painted: Vec<_> = frame.mascots.iter().collect();
+    painted.sort_by_key(|m| sort_row_at(Pivot::Center, m.pos, m.size.h));
+    let expected: Vec<_> = painted
+        .iter()
+        .map(|m| HoverTarget::Mascot(m.key.clone()))
+        .collect();
+    assert_eq!(expected.len(), 2, "premise: both gateways walk in");
+    let hovers = paint_drawn(&owned, &scene, &layout, &pack, now, &frame).hovers;
+    let listed: Vec<_> = hovers
+        .listed()
+        .iter()
+        .map(|h| h.target.clone())
+        .filter(|t| matches!(t, HoverTarget::Mascot(_)))
+        .collect();
+    assert_eq!(listed, expected);
 }
 
 #[test]
@@ -4124,6 +4235,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
     let d = Drawable {
         sort_row: 23,
         layer: Layer::Under,
+        hover: None,
         kind: DrawableKind::Appliance {
             pos: Point { x: 30, y: 20 },
             sprite,
@@ -4817,9 +4929,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 
     let pack = crate::pack::test_default_pack();
     let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let walks = HashMap::new();
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
@@ -4864,30 +4974,6 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     door_anim_max_ms: 0,
                 },
             );
-            let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
-            let mut cache = FrameCache::new();
-            let mut base_fill = BaseFillCache::new();
-            let ctx = PaintCtx {
-                scene: &scene,
-                layout: &layout,
-                pack: &pack,
-                timing: Motion::Full.timing(now),
-                sky: crate::sky::Sky::clock(now),
-                outside: None,
-                buf: &mut buf,
-                cache: &mut cache,
-                base_fill: &mut base_fill,
-                shadows: &mut crate::ground::DepthsCache::default(),
-                theme,
-                floor,
-                walks: &walks,
-                debug_walkable: false,
-            };
-            let mut drawables = Vec::new();
-            let pet_frame = frame
-                .pet
-                .as_ref()
-                .map(|p| enqueue_pet(&ctx, p, &mut drawables));
             walking += frame
                 .mascots
                 .iter()
@@ -4912,9 +4998,9 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     ));
                 }
             }
-            if let Some(p) = pet_frame {
+            if let Some(p) = &frame.pet {
                 let (w, h) = pack
-                    .animation(p.anim)
+                    .animation(p.anim_name)
                     .and_then(|a| a.frames().first())
                     .map_or((0, 0), |f| (f.width(), f.height()));
                 if p.pos.x < w / 2
@@ -5083,7 +5169,7 @@ fn sim_and_paint(
     layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
-) -> (SimFrame, Vec<AgentFrame>) {
+) -> (SimFrame, Vec<(AgentFrame, crate::layout::Bounds)>) {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
@@ -5099,7 +5185,7 @@ fn sim_and_paint(
             door_anim_max_ms: 0,
         },
     );
-    let drawn = paint_drawn(owned, scene, layout, pack, now, &frame);
+    let drawn = badged(&paint_drawn(owned, scene, layout, pack, now, &frame));
     (frame, drawn)
 }
 
@@ -5110,7 +5196,7 @@ fn paint_drawn(
     pack: &Pack,
     now: SystemTime,
     frame: &SimFrame,
-) -> Vec<AgentFrame> {
+) -> Drawn {
     let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
     paint_frame(
         &mut PaintCtx {
@@ -5131,31 +5217,45 @@ fn paint_drawn(
         },
         frame,
     )
-    .agents
+}
+
+/// Each badged sprite and the box it hovers on, which is the box it is drawn
+/// in.
+fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
+    drawn
+        .agents
+        .iter()
+        .map(|&f| {
+            let hover = drawn
+                .hovers
+                .listed()
+                .iter()
+                .find(|h| h.target == HoverTarget::Agent(f.agent_id))
+                .expect("a badged sprite hovers");
+            (f, hover.at)
+        })
+        .collect()
 }
 
 /// Every drawn sprite's badge sits over its frame's top-centre: level with the
 /// breath-free top, or higher only as far as the art of the desk it sits at.
 fn assert_badges_top_their_frames(
     frame: &SimFrame,
-    drawn: &[AgentFrame],
+    drawn: &[(AgentFrame, crate::layout::Bounds)],
     layout: &SceneLayout,
     pack: &Pack,
 ) {
     // A breath lifts the drawn top by one pixel, never the badge.
     const BREATH: u16 = 1;
     assert!(!drawn.is_empty(), "premise: something is drawn");
-    for f in drawn {
+    for (f, body) in drawn {
         let at = f.label_anchor;
         assert_eq!(
             at.x,
-            f.top_left.x + f.w / 2,
+            body.x + body.width / 2,
             "{f:?}: off its frame's centre"
         );
-        assert!(
-            at.y <= f.top_left.y + BREATH,
-            "{f:?}: under its frame's top"
-        );
+        assert!(at.y <= body.y + BREATH, "{f:?}: under its frame's top");
         let c = frame
             .characters
             .iter()
@@ -5167,10 +5267,10 @@ fn assert_badges_top_their_frames(
         });
         match desk_top {
             Some(row) => assert!(
-                at.y <= row && (at.y == row || at.y >= f.top_left.y),
+                at.y <= row && (at.y == row || at.y >= body.y),
                 "{f:?}: a sitter's badge rises to its desk art's top {row} and no higher"
             ),
-            None => assert!(at.y >= f.top_left.y, "{f:?}: floats above its frame"),
+            None => assert!(at.y >= body.y, "{f:?}: floats above its frame"),
         }
     }
 }
@@ -5205,7 +5305,7 @@ fn every_seated_badge_tops_its_frame_and_clears_a_raised_monitor() {
     );
     assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
     assert!(
-        drawn.iter().any(|f| f.label_anchor.y < f.top_left.y),
+        drawn.iter().any(|(f, body)| f.label_anchor.y < body.y),
         "premise: some back-turned sitter's monitor rises over their head"
     );
 }
@@ -5231,10 +5331,10 @@ fn a_breathing_sitter_s_badge_holds_still() {
             &pack,
             now + Duration::from_millis(250 * step),
         );
-        let [f] = drawn[..] else {
+        let [(f, body)] = drawn[..] else {
             panic!("one agent, one sprite: {drawn:?}")
         };
-        tops.insert(f.top_left.y);
+        tops.insert(body.y);
         badges.insert((f.label_anchor.x, f.label_anchor.y));
     }
     assert_eq!(tops.len(), 2, "premise: the sprite breathes");
@@ -5371,10 +5471,10 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         &HashMap::new(),
         Motion::Full.timing(now),
     );
-    let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
+    let drawn = badged(&paint_drawn(&owned, &scene, &layout, &pack, now, &frame));
     assert_eq!(drawn.len(), 3, "premise: all three are drawn");
     assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
-    let xs: std::collections::BTreeSet<_> = drawn.iter().map(|f| f.label_anchor.x).collect();
+    let xs: std::collections::BTreeSet<_> = drawn.iter().map(|(f, _)| f.label_anchor.x).collect();
     assert_eq!(xs.len(), 3, "the badges stacked: {drawn:?}");
 }
 
@@ -5424,11 +5524,11 @@ fn a_badge_follows_its_sprite_fitted_to_the_canvas_rim() {
             if waypoint_top_left(*dest, w).x + w <= layout.buf_w {
                 continue;
             }
-            let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
+            let drawn = badged(&paint_drawn(&owned, &scene, &layout, &pack, now, &frame));
             assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
             at_the_rim += drawn
                 .iter()
-                .filter(|f| f.top_left.x + f.w == layout.buf_w)
+                .filter(|(_, body)| body.x + body.width == layout.buf_w)
                 .count();
             break;
         }

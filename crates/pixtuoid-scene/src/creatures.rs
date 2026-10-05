@@ -9,6 +9,7 @@
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::AgentSlot;
+use pixtuoid_core::SceneState;
 use pixtuoid_core::id::splitmix64;
 use pixtuoid_core::source::daemon::DaemonInstanceKey;
 use pixtuoid_core::sprite::Sprite;
@@ -464,6 +465,56 @@ pub(crate) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
         }),
         _ => None,
     }
+}
+
+/// What a gateway's mascot says about it when hovered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayCard {
+    /// Human-readable gateway name (e.g. "OpenClaw").
+    pub name: &'static str,
+    /// WHICH instance of that gateway this is, so a hover over one of two
+    /// concurrent lobsters names the one under the cursor. `None` when its
+    /// source runs a single instance, whose id means nothing to the user.
+    pub instance: Option<String>,
+    /// An agent run is in flight. Keyed on the run state, NOT the session count
+    /// — a single-user gateway holds one persistent session even at rest.
+    pub busy: bool,
+    /// Gateway up but its model backend is failing every run.
+    pub degraded: bool,
+    /// Number of sessions the gateway currently holds.
+    pub active_sessions: u32,
+}
+
+impl GatewayCard {
+    /// `key`'s card in `scene`; `None` where it is absent or its source has no
+    /// mascot.
+    pub fn of(scene: &SceneState, key: &DaemonInstanceKey) -> Option<Self> {
+        let def = gateway_mascot_def(key.source())?;
+        let presence = scene.daemon(key.source(), key.instance())?;
+        let state = presence.display_state();
+        // Per SOURCE: two gateways of ONE daemon need their ports, while two
+        // daemon sources already read apart by name and sprite.
+        let siblings = scene
+            .daemons()
+            .filter(|&(s, _, _)| s == key.source())
+            .count();
+        Some(Self {
+            name: def.display_name,
+            instance: (siblings > 1).then(|| key.instance().as_str().to_string()),
+            busy: state == DaemonState::Busy,
+            degraded: state == DaemonState::Degraded,
+            active_sessions: presence.active_sessions,
+        })
+    }
+}
+
+/// The OpenClaw gateway listening on `port`.
+#[cfg(test)]
+pub(crate) fn openclaw_key(port: &str) -> DaemonInstanceKey {
+    DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new(port).expect("a port is an id"),
+    )
 }
 
 /// The walkable cell the mascot enters from / leaves to: the elevator
@@ -1278,7 +1329,10 @@ mod tests {
             let f = office.frame(&scene, None, None, ms);
             // a sibling still in its stagger is a sibling: the port shows
             assert!(
-                f.mascots.iter().all(|m| m.instance.is_some()),
+                f.mascots
+                    .iter()
+                    .all(|m| GatewayCard::of(&scene, &m.key)
+                        .is_some_and(|card| card.instance.is_some())),
                 "a gateway's port hidden at +{ms}ms"
             );
             if let [(a, _), (b, _)] = lobsters(&f)[..] {

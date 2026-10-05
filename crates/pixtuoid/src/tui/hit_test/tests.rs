@@ -1,4 +1,5 @@
 use super::*;
+use pixtuoid_scene::layout::Size;
 
 #[test]
 fn coffee_machine_hit_test_returns_false_for_origin() {
@@ -26,6 +27,29 @@ fn coffee_machine_hit_test_returns_true_for_machine_area() {
         ),
         "expected hit at coffee machine area ({mid_x}, {mid_cell_y})"
     );
+}
+
+#[test]
+fn a_figure_over_the_coffee_machine_is_the_hit() {
+    let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
+    let cell = crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y);
+    let cat = HoverTarget::Pet(pixtuoid_scene::display::PetHover {
+        kind: pixtuoid_scene::pet::PetKind::Cat,
+        centre: pixtuoid_scene::layout::Point {
+            x: mid_x,
+            y: mid_cell_y * 2,
+        },
+        anim: "cat_walk",
+    });
+    assert!(matches!(
+        figure_or_fixture(Some(&cat), &layout, cell),
+        Some(SceneHit::Figure(t)) if *t == cat
+    ));
+    assert!(matches!(
+        figure_or_fixture(None, &layout, cell),
+        Some(SceneHit::Coffee)
+    ));
 }
 
 #[test]
@@ -161,123 +185,6 @@ fn furniture_hit_test_respects_floor_seed() {
     }
 }
 
-#[test]
-fn cat_hit_test_inside_sit_sprite() {
-    use pixtuoid_scene::layout::Point;
-    let pos = Point { x: 50, y: 80 };
-    let (top, bottom) = pet_rows(pos, "cat_sit");
-    for row in [top / 2, bottom / 2] {
-        assert!(
-            hit_test_pet(
-                PetKind::Cat,
-                pos,
-                "cat_sit",
-                crate::tui::geometry::CellArea::half_block(50, row)
-            ),
-            "cell row {row}"
-        );
-    }
-}
-
-#[test]
-fn cat_hit_test_outside_returns_false() {
-    use pixtuoid_scene::layout::Point;
-    let pos = Point { x: 50, y: 80 };
-    assert!(!hit_test_pet(
-        PetKind::Cat,
-        pos,
-        "cat_sit",
-        crate::tui::geometry::CellArea::half_block(10, 10)
-    ));
-}
-
-#[test]
-fn mascot_hit_test_inside_and_outside() {
-    use pixtuoid_scene::layout::Point;
-    // The 14x12 sprite centred at (50,80) spans x[43..57), y[74..86); cell 39
-    // shows rows 78–79.
-    let pos = Point { x: 50, y: 80 };
-    assert!(hit_test_mascot(
-        pos,
-        14,
-        12,
-        crate::tui::geometry::CellArea::half_block(50, 39)
-    ));
-    assert!(!hit_test_mascot(
-        pos,
-        14,
-        12,
-        crate::tui::geometry::CellArea::half_block(10, 10)
-    ));
-}
-
-#[test]
-fn an_agent_is_hit_from_exactly_the_cells_that_show_it() {
-    let id = AgentId::from_transcript_path("/hit/0.jsonl");
-    // An odd top row shows the sprite in its first cell's lower half and its
-    // last cell's upper half only.
-    for y in [30, 31] {
-        let agent = AgentFrame {
-            agent_id: id,
-            top_left: Point { x: 40, y },
-            w: 10,
-            h: 14,
-            label_anchor: Point { x: 45, y },
-        };
-        let tl = agent.top_left;
-        let agents = [agent];
-        let hits = |col, row| {
-            hit_test_agent(
-                &agents,
-                crate::tui::geometry::CellArea::half_block(col, row),
-            )
-        };
-        let (cols, rows) = covering_cells(agent);
-        for row in rows.clone() {
-            for col in cols.clone() {
-                assert_eq!(hits(col, row), Some(id), "cell ({col},{row}) shows {tl:?}");
-            }
-        }
-        let (row, col) = (*rows.start(), cols.start);
-        assert_eq!(hits(cols.start - 1, row), None, "west of the sprite");
-        assert_eq!(hits(cols.end, row), None, "east of the sprite");
-        assert_eq!(hits(col, rows.start() - 1), None, "north of the sprite");
-        assert_eq!(hits(col, rows.end() + 1), None, "south of the sprite");
-    }
-}
-
-#[test]
-fn overlapping_agents_hit_the_last_painted() {
-    let (under, over) = (
-        AgentId::from_transcript_path("/hit/under.jsonl"),
-        AgentId::from_transcript_path("/hit/over.jsonl"),
-    );
-    let at = |agent_id, x| AgentFrame {
-        agent_id,
-        top_left: Point { x, y: 30 },
-        w: 8,
-        h: 12,
-        label_anchor: Point { x: x + 4, y: 30 },
-    };
-    let cell = crate::tui::geometry::CellArea::half_block(44, 16);
-    for (first, last) in [(under, over), (over, under)] {
-        assert_eq!(
-            hit_test_agent(&[at(first, 40), at(last, 42)], cell),
-            Some(last)
-        );
-    }
-}
-
-/// The terminal cells that show some pixel of `agent`'s sprite: its columns,
-/// and every half-block row from the one holding its top pixel to the one
-/// holding its bottom pixel.
-fn covering_cells(agent: AgentFrame) -> (std::ops::Range<u16>, std::ops::RangeInclusive<u16>) {
-    let AgentFrame {
-        top_left: tl, w, h, ..
-    } = agent;
-    (tl.x..tl.x + w, tl.y / 2..=(tl.y + h - 1) / 2)
-}
-
 // BulletinBoard is never emitted by compute_with_seed and Ficus only appears on
 // ROOMY-band floors, so both are placed synthetically below.
 
@@ -320,39 +227,6 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
         ),
         Some("Bulletin Board")
     );
-}
-
-#[test]
-fn cat_hit_test_sleep_smaller_box() {
-    use pixtuoid_scene::layout::Point;
-    let pos = Point { x: 50, y: 80 };
-    let (sit_last, sleep_last) = (
-        pet_rows(pos, "cat_sit").1 / 2,
-        pet_rows(pos, "cat_sleep").1 / 2,
-    );
-    assert!(
-        sleep_last < sit_last,
-        "premise: the sleeping cat is shorter"
-    );
-    assert!(!hit_test_pet(
-        PetKind::Cat,
-        pos,
-        "cat_sleep",
-        crate::tui::geometry::CellArea::half_block(pos.x, sit_last)
-    ));
-    assert!(hit_test_pet(
-        PetKind::Cat,
-        pos,
-        "cat_sleep",
-        crate::tui::geometry::CellArea::half_block(pos.x, sleep_last)
-    ));
-}
-
-/// The top and bottom pixel rows of the cat's `anim` hitbox centred on `pos`.
-fn pet_rows(pos: Point, anim: &str) -> (u16, u16) {
-    let hitbox = PetKind::Cat.hitbox(anim);
-    let top = anchored_top_left(Pivot::Center, pos, hitbox.w, hitbox.h).y;
-    (top, top + hitbox.h - 1)
 }
 
 // Probing coords that DO hit while the pantry is present is what proves the

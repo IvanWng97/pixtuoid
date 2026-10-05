@@ -7,8 +7,8 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::display::Span;
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::effects::look::{
     FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_MAX_RISE, plot_effect, sleep_z_fade,
     walking_dust_foot,
