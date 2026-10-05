@@ -316,8 +316,8 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
 #[test]
 fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     use crate::layout::Facing;
-    // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
-    // standby SCREEN is the one that gates on facing.
+    // A lamp is a FIXTURE on a wing (west, east on the back-turned desk), visible
+    // from either side; the standby SCREEN is the one that gates on facing.
     for darkness in [0.0_f32, 0.5, 1.0] {
         let north = lights(Facing::North, darkness, 1.0);
         let south = lights(Facing::South, darkness, 1.0);
