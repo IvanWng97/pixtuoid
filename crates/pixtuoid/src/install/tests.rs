@@ -1352,7 +1352,7 @@ esac
 #[cfg(windows)]
 const FAKE_CLAUDE_CMD: &str = "@echo off\r
 set \"d=%~dp0\"\r
->>\"%d%calls.log\" echo %*\r
+>>\"%d%calls.log\" echo %~1 %~2 %~3 %~4\r
 if defined FAKE_CLAUDE_FAIL if \"%*\"==\"%FAKE_CLAUDE_FAIL%\" exit /b 1\r
 if \"%1 %2 %3\"==\"plugin marketplace add\" (>\"%d%marketplaces.json\" echo [{\"name\":\"pixtuoid\"}]& exit /b 0)\r
 if \"%1 %2\"==\"plugin install\" (if not exist \"%CLAUDE_CONFIG_DIR%\\settings.json\" (>\"%CLAUDE_CONFIG_DIR%\\settings.json\" echo {\"enabledPlugins\":{\"pixtuoid@pixtuoid\":true}})& exit /b 0)\r
