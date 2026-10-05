@@ -741,6 +741,14 @@ fn no_run_overprints_another_on_its_line() {
                 .any(|(r, ..)| *r == crate::display::TextRole::Brand),
             "at scale {s} the brand is drawn"
         );
+        // Without the density art every scale is the base art's grid.
+        assert_eq!(
+            rects
+                .iter()
+                .any(|(r, ..)| *r == crate::display::TextRole::Star),
+            cfg!(feature = "cutaway-assets") && s.is_multiple_of(d),
+            "at scale {s} the star is drawn exactly where the pack's density divides it"
+        );
         for (i, (a, ya, ra)) in rects.iter().enumerate() {
             for (b, yb, rb) in &rects[i + 1..] {
                 assert!(
