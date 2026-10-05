@@ -111,13 +111,25 @@ pub(crate) fn render_hash(
 /// the spawn works, and `LLVM_PROFILE_FILE` survives: `just coverage` sets it so
 /// an instrumented child writes its profile where the run collects it rather
 /// than into the crate dir.
+///
+/// A fake `claude` leads PATH, since connecting Claude Code runs `claude plugin`.
 #[cfg(unix)]
 pub(crate) fn isolated(args: &[&str], home: &std::path::Path) -> std::process::Command {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = home.join(".fake-bin");
+    std::fs::create_dir_all(&bin).expect("fake bin dir");
+    let claude = bin.join("claude");
+    std::fs::write(
+        &claude,
+        "#!/bin/sh\ncase \"$*\" in *--json) echo '[]' ;; esac\n",
+    )
+    .expect("fake claude");
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"));
     cmd.args(args)
         .env_clear()
         .env("HOME", home)
-        .env("PATH", "/usr/bin:/bin");
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
     if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
         cmd.env("LLVM_PROFILE_FILE", profile);
     }

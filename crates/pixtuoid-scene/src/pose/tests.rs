@@ -210,7 +210,7 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let idle = entry_slot(now - Duration::from_secs(60));
-    let mut walk = WalkState::new(idle.agent_id);
+    let mut walk = WalkState::default();
     walk.wander.phase = crate::walk::WanderPhase::AtWaypoint(walk_profile(
         100,
         WalkIntent::WanderBack,
@@ -1139,9 +1139,9 @@ fn max_top_left_step(
         }
         if let Some(a) = character_top_left(slot, l, now, &mut rig.rctx()) {
             if let Some(p) = prev {
-                let step = (a.x as i32 - p.x as i32)
+                let step = (i32::from(a.x) - i32::from(p.x))
                     .abs()
-                    .max((a.y as i32 - p.y as i32).abs());
+                    .max((i32::from(a.y) - i32::from(p.y)).abs());
                 max_step = max_step.max(step);
             }
             prev = Some(a);
@@ -1455,9 +1455,9 @@ fn wander_interrupted_by_active_does_not_teleport() {
     for i in 0..1500u64 {
         let t = now + Duration::from_millis(i * 33);
         if let Some(a) = character_top_left(&idle, &l, t, &mut rig.rctx()) {
-            let d = (a.x as i32 - seated.x as i32)
+            let d = (i32::from(a.x) - i32::from(seated.x))
                 .abs()
-                .max((a.y as i32 - seated.y as i32).abs());
+                .max((i32::from(a.y) - i32::from(seated.y)).abs());
             last_pos = a;
             if d > 30 {
                 flip_frame = Some(i);
@@ -1481,9 +1481,9 @@ fn wander_interrupted_by_active_does_not_teleport() {
     for i in (flip_frame + 1)..(flip_frame + 46) {
         let t = now + Duration::from_millis(i * 33);
         if let Some(a) = character_top_left(&active, &l, t, &mut rig.rctx()) {
-            let step = (a.x as i32 - prev.x as i32)
+            let step = (i32::from(a.x) - i32::from(prev.x))
                 .abs()
-                .max((a.y as i32 - prev.y as i32).abs());
+                .max((i32::from(a.y) - i32::from(prev.y)).abs());
             max_step = max_step.max(step);
             prev = a;
         }
@@ -1527,9 +1527,9 @@ fn floor_offscreen_then_resume_does_not_replay() {
         let t = now + Duration::from_millis(i * 33);
         if let Some(a) = character_top_left(&slot, &l, t, &mut rig.rctx()) {
             if let Some(p) = prev {
-                let step = (a.x as i32 - p.x as i32)
+                let step = (i32::from(a.x) - i32::from(p.x))
                     .abs()
-                    .max((a.y as i32 - p.y as i32).abs());
+                    .max((i32::from(a.y) - i32::from(p.y)).abs());
                 max_step = max_step.max(step);
             }
             prev = Some(a);
@@ -1579,9 +1579,9 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         let t = now + Duration::from_millis(i * 33);
         if let Some(a) = character_top_left(&idle, &l, t, &mut rig.rctx()) {
             last = a;
-            let d = (a.x as i32 - seat.x as i32)
+            let d = (i32::from(a.x) - i32::from(seat.x))
                 .abs()
-                .max((a.y as i32 - seat.y as i32).abs());
+                .max((i32::from(a.y) - i32::from(seat.y)).abs());
             // 20, not 30: "clearly away" must hold for the NEAREST legitimate trip
             // destination, and which one a cycle picks re-rolls whenever the
             // waypoint SET changes. The assertion under test is
@@ -1601,9 +1601,9 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     };
     let t_next = exit_at + Duration::from_millis(33);
     let first_exit = character_top_left(&exiting, &l, t_next, &mut rig.rctx()).expect("exit pose");
-    let jump = (first_exit.x as i32 - last.x as i32)
+    let jump = (i32::from(first_exit.x) - i32::from(last.x))
         .abs()
-        .max((first_exit.y as i32 - last.y as i32).abs());
+        .max((i32::from(first_exit.y) - i32::from(last.y)).abs());
     assert!(
         jump <= MAX_FRAME_STEP_PX,
         "exit-while-wandering teleported {jump}px from the waypoint ({last:?}) to the exit start ({first_exit:?})"
@@ -1615,9 +1615,9 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         let t = exit_at + Duration::from_millis(i * 33);
         match character_top_left(&exiting, &l, t, &mut rig.rctx()) {
             Some(a) => {
-                let step = (a.x as i32 - prev.x as i32)
+                let step = (i32::from(a.x) - i32::from(prev.x))
                     .abs()
-                    .max((a.y as i32 - prev.y as i32).abs());
+                    .max((i32::from(a.y) - i32::from(prev.y)).abs());
                 max_step = max_step.max(step);
                 prev = a;
             }
@@ -1751,9 +1751,9 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
         {
             let pos = walking_position(from, to, t_x1000);
             if let Some(p) = prev {
-                let step = (pos.x as i32 - p.x as i32)
+                let step = (i32::from(pos.x) - i32::from(p.x))
                     .abs()
-                    .max((pos.y as i32 - p.y as i32).abs());
+                    .max((i32::from(pos.y) - i32::from(p.y)).abs());
                 max_step = max_step.max(step);
             }
             prev = Some(pos);
@@ -1808,9 +1808,9 @@ fn multiple_agents_share_overlay_without_teleport() {
         for s in &slots {
             if let Some(a) = character_top_left(s, &l, t, &mut rig.rctx()) {
                 if let Some(p) = prev.get(&s.agent_id) {
-                    let step = (a.x as i32 - p.x as i32)
+                    let step = (i32::from(a.x) - i32::from(p.x))
                         .abs()
-                        .max((a.y as i32 - p.y as i32).abs());
+                        .max((i32::from(a.y) - i32::from(p.y)).abs());
                     max_step = max_step.max(step);
                 }
                 prev.insert(s.agent_id, a);

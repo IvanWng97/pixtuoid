@@ -48,12 +48,10 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
-/// Display columns a string occupies in the terminal — the ONE width authority (the same
-/// `unicode-width` ratatui uses), replacing scattered `chars().count()` so a wide glyph
-/// in a HUD widget can't miscount its layout.
+/// Display columns a string occupies in the terminal:
+/// [`cells`](pixtuoid_scene::display::text::cells), the one width rule.
 pub(crate) fn display_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthStr;
-    s.width()
+    usize::from(pixtuoid_scene::display::text::cells(s))
 }
 
 pub(crate) use pixtuoid_scene::board::compact_hms;
@@ -85,9 +83,9 @@ const SHADOW_OFFSET: u16 = 1;
 fn dim_rgb(c: Color, f: f32) -> Color {
     match c {
         Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * f) as u8,
-            (g as f32 * f) as u8,
-            (b as f32 * f) as u8,
+            (f32::from(r) * f) as u8,
+            (f32::from(g) * f) as u8,
+            (f32::from(b) * f) as u8,
         ),
         other => other,
     }

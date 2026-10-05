@@ -15,7 +15,7 @@ test('cold load: the dial marks the default channel pressed, accordion shows its
   await page.goto('./');
   // 'vibing' is the default channel (showcase.json's default:true)
   await expect(page.locator('button.mon[data-ch="vibing"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page.locator('#dial-desc')).toHaveText(descByChannel.get('vibing')!);
@@ -27,11 +27,11 @@ test('dial accordion: clicking a channel reveals its features.json desc under th
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
   const btn = page.locator('button.mon[data-ch="openclaw"]');
-  await expect(btn).toHaveAttribute('aria-expanded', 'false');
+  await expect(btn).toHaveAttribute('aria-selected', 'false');
   await btn.click();
-  await expect(btn).toHaveAttribute('aria-expanded', 'true');
+  await expect(btn).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('button.mon[data-ch="vibing"]')).toHaveAttribute(
-    'aria-expanded',
+    'aria-selected',
     'false'
   );
   await expect(page.locator('#dial-desc')).toHaveText(descByChannel.get('openclaw')!);
@@ -59,8 +59,26 @@ test('the feature roster stays a quiet, non-interactive grid — the dial is the
   await btn.click();
   await expect(page.locator('[data-stage="meetings"]')).toBeVisible();
   await expect(page.locator('[data-stage="vibing"]')).toBeHidden();
-  await expect(btn).toHaveAttribute('aria-pressed', 'true');
+  await expect(btn).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('section.features')).toHaveCount(0);
+});
+
+test('the dial is APG tabs: one tab stop, arrows tune the next live channel', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const tabs = page.locator('.dial[role="tablist"] button[role="tab"]');
+  await expect(page.locator('.dial button[role="tab"][tabindex="0"]')).toHaveCount(1);
+  const selected = page.locator('.dial button[role="tab"][aria-selected="true"]');
+  await selected.focus();
+  const from = await selected.getAttribute('data-ch');
+  await page.keyboard.press('ArrowRight');
+  const now = page.locator('.dial button[role="tab"][aria-selected="true"]');
+  await expect(now).toBeFocused();
+  expect(await now.getAttribute('data-ch')).not.toBe(from);
+  const panel = await now.getAttribute('aria-controls');
+  await expect(page.locator(`#${panel}[role="tabpanel"]`)).toBeVisible();
+  await page.keyboard.press('End');
+  await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');
 });
 
 test('CRT channel keys: a digit tunes the channel and does NOT ride the floor elevator', async ({
@@ -74,7 +92,7 @@ test('CRT channel keys: a digit tunes the channel and does NOT ride the floor el
   await page.keyboard.press('2');
   await expect(page.locator('[data-stage="openclaw"]')).toBeVisible();
   await expect(page.locator('button.dial__ch[data-ch="openclaw"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page.locator('[data-lift-digit]')).not.toHaveText('2F');

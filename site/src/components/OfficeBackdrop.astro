@@ -932,7 +932,18 @@ const officeDriverUrl = asset('office-driver.js');
       } catch (e) {}
       if (!remembered) return;
       const restore = function (e) {
+        // Only a gesture that grants user activation may start audio: HTML's
+        // activation-triggering events, where a touch's pointerdown and an Escape
+        // keydown are not.
+        const ua = navigator.userActivation;
+        const activates = ua
+          ? ua.isActive
+          : e.type === 'keydown'
+            ? e.key !== 'Escape'
+            : (e.pointerType === 'mouse') === (e.type === 'pointerdown');
+        if (!activates) return;
         window.removeEventListener('pointerdown', restore, true);
+        window.removeEventListener('pointerup', restore, true);
         window.removeEventListener('keydown', restore, true);
         // If the gesture IS the ♩ button, let its OWN click handler own the toggle — a capture-phase
         // restore→on followed by the click→off would invert the returning visitor's very first press.
@@ -943,6 +954,7 @@ const officeDriverUrl = asset('office-driver.js');
       if (restoreArmed) return; // reduce→un-reduce re-runs showAudioBtn — don't double-attach
       restoreArmed = true;
       window.addEventListener('pointerdown', restore, true);
+      window.addEventListener('pointerup', restore, true);
       window.addEventListener('keydown', restore, true);
     }
 

@@ -123,19 +123,16 @@ fn push_subtree(
     let child_count = kids.len();
     let collapsed = depth == 0 && folds.is_collapsed(node, child_count);
 
-    rows.push(row_for(
-        &scene.agents[&node],
-        parent_id,
-        depth,
-        child_count,
-        collapsed,
-    ));
+    let Some(slot) = scene.agents.get(&node) else {
+        return;
+    };
+    rows.push(row_for(slot, parent_id, depth, child_count, collapsed));
     if collapsed {
         return;
     }
 
     let mut kids = kids.clone();
-    kids.sort_by_key(|id| scene.agents[id].desk_index);
+    kids.sort_by_key(|id| scene.agents.get(id).map(|a| a.desk_index));
     for kid in kids {
         push_subtree(scene, children, folds, kid, depth + 1, Some(node), rows);
     }
