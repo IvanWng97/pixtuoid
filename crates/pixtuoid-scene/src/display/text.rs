@@ -88,6 +88,10 @@ pub(crate) fn advance(text: &str) -> ArtPx {
 /// Logical rows between a badge's anchor and the line it sits on.
 pub(crate) const LABEL_GAP: u16 = 2;
 
+/// Logical rows a chitchat bubble's anchor rides over its speaker's badge's: a
+/// cell row clear of the badge.
+const BUBBLE_LIFT: u16 = 2 * crate::layout::CELL_ROWS;
+
 /// One line of text a frame shows: its spans laid end to end, on `plate` if it
 /// has one. Its inks are resolved, so a painter reads no theme for it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -203,6 +207,8 @@ pub enum TextRole {
     Board,
     /// The floor indicator over the elevator.
     Indicator,
+    /// An agent's chitchat bubble.
+    Bubble(AgentId),
 }
 
 impl TextRun {
@@ -221,6 +227,28 @@ impl TextRun {
             }],
             plate: Some(crate::overlay::badge_plate(theme)),
             role: TextRole::Indicator,
+        }
+    }
+
+    /// `bubble` over its speaker's badge, which hangs over `badge_at`, in
+    /// the tooltip's ink on its plate.
+    pub(crate) fn bubble(
+        bubble: &crate::chitchat::ChitchatBubble,
+        badge_at: Point,
+        theme: &Theme,
+    ) -> Self {
+        Self {
+            at: Point {
+                x: badge_at.x,
+                y: badge_at.y.saturating_sub(BUBBLE_LIFT),
+            },
+            align: Align::Over,
+            spans: vec![TextSpan {
+                text: bubble.text.into(),
+                ink: theme.ui.tooltip_text,
+            }],
+            plate: Some(theme.ui.tooltip_bg),
+            role: TextRole::Bubble(bubble.speaker),
         }
     }
 
