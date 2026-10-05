@@ -83,7 +83,7 @@ fn paint_plate(
     let mut x = plate.x.0 + PLATE_PAD;
     for &(text, ink) in runs {
         crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
-        x += crate::cutaway::text::advance(text).0;
+        x += crate::display::text::advance(text).0;
     }
 }
 
@@ -167,7 +167,7 @@ pub(crate) fn paint_list(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: 
         buf,
     );
     let emission = paint_pieces(list, cache, buf);
-    let lights: Vec<&crate::cutaway::light::LightView> =
+    let lights: Vec<&crate::display::light::LightView> =
         list.lights().iter().map(|l| &l.view).collect();
     let whole = ArtRect {
         x: ArtPx(0),
@@ -607,7 +607,9 @@ fn paint_piece(
         PieceKind::WallSeg {
             piece,
             rows: (y0, y1),
-        } => crate::wall::paint_wall(buf, theme, piece, y0..y1, Pen::for_pack(scale, pack)),
+        } => {
+            crate::cutaway::wall::paint_wall(buf, theme, piece, y0..y1, Pen::for_pack(scale, pack))
+        }
         PieceKind::Window { ref view, frame } => {
             paint_window(view, frame, Pen::for_pack(scale, pack), buf);
         }
@@ -670,7 +672,7 @@ pub(crate) fn assert_variant_desk_foot(
 ) {
     // The room darkens every pixel by the hour's steps; its lights must be off.
     let tones = crate::atmosphere::SkyTones::resolve(&crate::sky::Sky::clock(now), theme);
-    let ambient = crate::cutaway::light::Ambient::of(&tones);
+    let ambient = crate::display::light::Ambient::of(&tones);
     let mut ground = RgbBuffer::filled(
         scale.to_buffer(layout.buf_w),
         scale.to_buffer(layout.buf_h),
@@ -825,11 +827,8 @@ fn paint_window(
         w: ArtPx(1),
         h: ArtPx(1),
     };
-    for (at, c) in view.cells() {
-        pen.fill(buf, cell(at), c);
-    }
-    for at in view.joinery() {
-        pen.fill(buf, cell(at), frame);
+    for (at, c) in view.every() {
+        pen.fill(buf, cell(at), c.unwrap_or(frame));
     }
 }
 
@@ -1744,11 +1743,11 @@ mod tests {
 
     /// A plate's runs and the board's segments step on one grid, wide
     /// characters included: the run after `text` starts
-    /// [`advance`](crate::cutaway::text::advance)`(text)` on.
+    /// [`advance`](crate::display::text::advance)`(text)` on.
     #[test]
     fn plate_runs_and_board_columns_share_one_grid() {
         use crate::board::{BoardSegment, BoardTone};
-        use crate::cutaway::text::advance;
+        use crate::display::text::advance;
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
         let (first, second) = ("I日b", "I");
@@ -2187,8 +2186,9 @@ mod tests {
                         "frame {here} {cell:?}"
                     );
                 }
-                for ((cell, c), (_, open)) in
-                    view.cells().zip(sky.window(bay, rows.clone(), d).cells())
+                for ((cell, c), (_, open)) in view
+                    .cells()
+                    .zip(sky.window(bay, rows.clone(), d, |_| None).cells())
                 {
                     glass += 1;
                     buildings += usize::from(c != open);
@@ -2288,7 +2288,7 @@ mod tests {
         let (z, _) = rider(K::SleepZ);
         let mut last: Option<Span> = None;
         for phase in (0..crate::effects::SLEEP_Z_RISE_MS).step_by(100) {
-            let r = crate::cutaway::effects::Riding {
+            let r = crate::display::effects::Riding {
                 effect: crate::effects::Effect { phase, ..z.effect },
                 ..z
             };
@@ -2327,7 +2327,7 @@ mod tests {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let frame = empty_frame(&layout);
         let now = crate::localclock::at_hour(23);
-        let lift = crate::cutaway::light::FLASH_MAX_STEPS as i8;
+        let lift = crate::display::light::FLASH_MAX_STEPS as i8;
         for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             let office = Office {
@@ -2562,7 +2562,7 @@ mod tests {
             &mut night,
         );
         paint_list(&list, &mut cache, &mut night);
-        let lights: Vec<&crate::cutaway::light::LightView> =
+        let lights: Vec<&crate::display::light::LightView> =
             list.lights().iter().map(|l| &l.view).collect();
         let k = scale.get() / Pen::for_pack(scale, &pack).art(1).0;
         let walls: Vec<Span> = list
@@ -4725,7 +4725,7 @@ mod tests {
         );
         let mut buf = RgbBuffer::filled(w, h, list.theme().surface.bg_fallback);
         let pen = Pen::for_pack(list.scale(), list.pack());
-        let lights: Vec<&crate::cutaway::light::LightView> =
+        let lights: Vec<&crate::display::light::LightView> =
             list.lights().iter().map(|l| &l.view).collect();
         crate::cutaway::light::net_pass(
             ArtRect {
@@ -4825,7 +4825,8 @@ mod tests {
     /// scale.
     #[test]
     fn a_light_paints_only_inside_its_span() {
-        use crate::cutaway::light::{Ambient, Emission, NetMemo, net_pass};
+        use crate::cutaway::light::{Emission, NetMemo, net_pass};
+        use crate::display::light::Ambient;
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
@@ -4853,7 +4854,7 @@ mod tests {
                 net_pass(
                     whole,
                     &[&light.view],
-                    (Ambient::default(), crate::cutaway::light::Flash::default()),
+                    (Ambient::default(), crate::display::light::Flash::default()),
                     &Emission::new(w, h),
                     pen,
                     &mut NetMemo::default(),

@@ -37,8 +37,9 @@ pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-feature
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
 unicode-width = { workspace = true }
+unicode-segmentation = { workspace = true }
 # `clock` gives Local::now() w/ system timezone for the wall clock.
-chrono        = { version = "0.4", default-features = false, features = ["clock"] }
+chrono        = { workspace = true, features = ["clock"] }
 
 [build-dependencies]
 toml_edit = { workspace = true }
@@ -48,8 +49,8 @@ toml_edit = { workspace = true }
 # requests it here rather than in [dependencies].
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-features = false, features = ["harness"] }
 serde_json = { workspace = true }
-proptest   = "1"
-tempfile   = "3"
+proptest   = { workspace = true }
+tempfile   = { workspace = true }
 # tests/model_boundary.rs parses the source, so comments and strings never count.
 syn         = { version = "2", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1", default-features = false }
@@ -59,7 +60,7 @@ toml_edit  = { workspace = true }
 # package is a documented passthrough to real criterion when CodSpeed is
 # inactive, so local `cargo bench` behaves as plain criterion; codspeed.yml
 # instruments the same benches in CI. Lean feature set: no plotters/rayon.
-criterion  = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
+criterion  = { workspace = true }
 
 [[bench]]
 name = "render_frame"

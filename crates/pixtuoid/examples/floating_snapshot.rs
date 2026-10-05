@@ -151,7 +151,7 @@ fn main() -> Result<()> {
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
-    let (win_w, win_h) = (size.0 as u32, size.1 as u32);
+    let (win_w, win_h) = (u32::from(size.0), u32::from(size.1));
     let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
     let buf = renderer
         .render(RenderInputs {
