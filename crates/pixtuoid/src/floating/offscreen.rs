@@ -183,6 +183,8 @@ pub(crate) fn sync_floor_caps(
 const LABEL_FONT_PX: f32 = 12.0;
 /// Window pixels a badge's plate reaches past its text on every side.
 const BADGE_PLATE_PAD_PX: i32 = 2;
+/// Window pixels a badge's text top sits above its anchor.
+const BADGE_LIFT_PX: i32 = 12;
 /// Badge drop-shadow — the AA text draws straight over the office (no TUI
 /// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
@@ -289,7 +291,6 @@ pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[Badge], sca
     } in badges
     {
         let tw = mw + crate::aa_text::text_width(&name.text, LABEL_FONT_PX);
-        const BADGE_LIFT_PX: i32 = 12;
         let cx = i32::from(at.x) * scale - tw / 2;
         let cy = i32::from(at.y) * scale - BADGE_LIFT_PX;
         let pad = BADGE_PLATE_PAD_PX;
@@ -688,7 +689,9 @@ mod tests {
         );
     }
 
-    /// A badge sits on its plate in the window too: a fill behind its text.
+    /// A badge sits on its plate in the window too: the plate reaches
+    /// [`BADGE_PLATE_PAD_PX`] past its text on every side and no further, and
+    /// the text draws over it.
     #[test]
     fn a_badge_sits_on_its_plate_in_the_window() {
         use pixtuoid_scene::badge::BadgeTone;
@@ -704,17 +707,42 @@ mod tests {
                 theme,
             )
         };
-        let (w, h) = (240usize, 120usize);
+        let (w, h, scale) = (240usize, 120usize, 2);
         let mut sb = vec![0x00FF_FFFFu32; w * h];
         paint_labels_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge],
-            2,
+            std::slice::from_ref(&badge),
+            scale,
         );
-        assert!(
-            sb.contains(&pack_xrgb(plate)),
-            "the plate fills behind the badge"
+        // The text's box, as `paint_labels_into_surface` lays it.
+        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
+        let tw = crate::aa_text::text_width(&marker, LABEL_FONT_PX)
+            + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);
+        let (cx, cy) = (
+            i32::from(badge.at.x) * scale - tw / 2,
+            i32::from(badge.at.y) * scale - BADGE_LIFT_PX,
         );
+        let (th, pad) = (LABEL_FONT_PX.ceil() as i32, BADGE_PLATE_PAD_PX);
+        let at = |x: i32, y: i32| sb[y as usize * w + x as usize];
+        let (left, top) = (cx - pad, cy - pad);
+        let (right, bottom) = (cx + tw + pad - 1, cy + th + pad - 1);
+        let plated = pack_xrgb(plate);
+        assert_eq!(at(left, top), plated, "the top-left corner");
+        assert_eq!(at(right, bottom), plated, "the bottom-right corner");
+        assert_ne!(at(left - 1, top), plated, "left of the plate");
+        assert_ne!(at(left, top - 1), plated, "above the plate");
+        assert_ne!(at(right + 1, bottom), plated, "right of the plate");
+        assert_ne!(at(right, bottom + 1), plated, "below the plate");
+        let inside: Vec<u32> = (top..=bottom)
+            .flat_map(|y| (left..=right).map(move |x| (x, y)))
+            .map(|(x, y)| at(x, y))
+            .collect();
+        for ink in [badge.marker, badge.name.ink] {
+            assert!(
+                inside.contains(&pack_xrgb(ink)),
+                "the text draws {ink:?} over the plate"
+            );
+        }
     }
 
     #[test]
