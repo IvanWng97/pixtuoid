@@ -325,42 +325,29 @@ fn every_no_target_row_has_an_explicit_display_name_not_the_raw_id() {
 }
 
 #[test]
-fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
+fn format_connect_result_renders_connected_plus_path_note() {
     use crate::install::{InstallOutcome, InstallReport};
-    let base = |outcome, backup, path_warning| InstallReport {
+    let base = |outcome, path_warning| InstallReport {
         outcome,
         config_path: PathBuf::from("/c"),
-        backup,
         path_warning,
         post_install_hint: None,
     };
     // Both outcomes read as "connected" (the flag flip is the real action).
-    let plain = format_connect_result(&base(InstallOutcome::Installed, None, false), "Claude Code");
+    let plain = format_connect_result(&base(InstallOutcome::Installed, false), "Claude Code");
     assert_eq!(plain, "\u{2713} Claude Code connected");
     assert_eq!(
-        format_connect_result(
-            &base(InstallOutcome::AlreadyUpToDate, None, false),
-            "Claude Code"
-        ),
+        format_connect_result(&base(InstallOutcome::AlreadyUpToDate, false), "Claude Code"),
         "\u{2713} Claude Code connected"
     );
-    let noted = format_connect_result(
-        &base(
-            InstallOutcome::Installed,
-            Some(PathBuf::from("/c.bak")),
-            true,
-        ),
-        "Claude Code",
-    );
+    let noted = format_connect_result(&base(InstallOutcome::Installed, true), "Claude Code");
     assert!(noted.contains("connected"), "{noted}");
-    assert!(noted.contains("backup saved"), "{noted}");
     assert!(noted.contains("PATH"), "{noted}");
 
     let hinted = format_connect_result(
         &InstallReport {
             outcome: InstallOutcome::Installed,
             config_path: PathBuf::from("/c"),
-            backup: None,
             path_warning: false,
             post_install_hint: Some("restart the gateway to load it"),
         },
@@ -402,25 +389,30 @@ fn only_restart_bound_targets_declare_a_post_install_step_naming_it() {
 }
 
 #[test]
-fn format_disconnect_result_renders_disconnected_plus_backup_note() {
+fn format_disconnect_result_renders_disconnected_plus_registration_note() {
     use crate::install::{UninstallOutcome, UninstallReport};
     let removed = UninstallReport {
         outcome: UninstallOutcome::Removed,
         config_path: PathBuf::from("/c"),
-        removed_backup: Some(PathBuf::from("/c.bak")),
+        plugin_left_registered: false,
     };
     let s = format_disconnect_result(&removed, "Claude Code");
-    assert!(s.contains("disconnected"), "{s}");
-    assert!(s.contains("backup cleared"), "{s}");
+    assert_eq!(s, "\u{2713} Claude Code disconnected");
+
+    let stranded = UninstallReport {
+        plugin_left_registered: true,
+        ..removed
+    };
+    let s = format_disconnect_result(&stranded, "Claude Code");
+    assert!(s.contains("plugin left registered"), "{s}");
 
     let nothing = UninstallReport {
         outcome: UninstallOutcome::NothingToRemove,
         config_path: PathBuf::from("/c"),
-        removed_backup: None,
+        plugin_left_registered: false,
     };
     let s2 = format_disconnect_result(&nothing, "Codex");
-    assert!(s2.contains("disconnected"), "{s2}");
-    assert!(!s2.contains("backup"), "{s2}");
+    assert_eq!(s2, "\u{2713} Codex disconnected");
 }
 
 #[test]

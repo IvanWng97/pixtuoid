@@ -316,7 +316,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
             setTheme(T.ok(saved) ? saved : T.fallback());
             return;
           }
-          if (e.key && e.key.length === 1) {
+          // WCAG 2.1.4 covers a typed sequence too: the digits' off-switch gates it
+          if (e.key && e.key.length === 1 && window.__pixKeys.enabled()) {
             buf = (buf + e.key.toLowerCase()).slice(-7);
             if (buf.indexOf('dracula') !== -1) {
               clearRetint();

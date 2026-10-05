@@ -1,6 +1,14 @@
 use super::*;
 use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
 
+/// Claude's settings-shaped JSON merge without its plugin registration, for the
+/// tests of the config-write path itself.
+const CLAUDE_FILE: Target = Target {
+    host: None,
+    presence_probe: None,
+    ..CLAUDE
+};
+
 static FAKE: Target = Target {
     name: "fake",
     core_source: "fake",
@@ -24,6 +32,7 @@ static FAKE: Target = Target {
     presence_probe: None,
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 // A fn-pointer `default_config_path` can't capture a TempDir, so FAKE2/FAKE_DIR
@@ -61,6 +70,7 @@ static FAKE2: Target = Target {
     presence_probe: None,
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 // FAKE_DIR's config path is created as a DIRECTORY, so read_config errors.
@@ -87,6 +97,7 @@ static FAKE_DIR: Target = Target {
     presence_probe: None,
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 // FAKE_NO_HOME's default_config_path Errs — the no-home-dir arm.
@@ -113,6 +124,7 @@ static FAKE_NO_HOME: Target = Target {
     presence_probe: None,
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 /// `/x/hook` is DRIVE-RELATIVE on Windows, where the absolutization rewrites it.
@@ -127,7 +139,7 @@ fn abs_fixture(unix: &str, windows: &str) -> PathBuf {
 #[test]
 fn resolve_hook_binary_explicit_path_wins() {
     let p = abs_fixture("/x/hook", r"C:\x\hook");
-    let got = resolve_hook_binary_from(&CLAUDE, Some(p.clone()), None, || {
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, Some(p.clone()), None, || {
         panic!("locate must not be called when --hook-path is given")
     });
     assert_eq!(got.unwrap(), (p, true));
@@ -138,7 +150,7 @@ fn resolve_hook_binary_absolutizes_a_relative_explicit_path() {
     // An embedded relative path would resolve against the CLI's cwd at hook time
     // and silently never fire from other dirs.
     let (got, explicit) = resolve_hook_binary_from(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(PathBuf::from("target/debug/pixtuoid-hook")),
         None,
         || unreachable!("explicit path must win"),
@@ -155,7 +167,7 @@ fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
     // Regression: a fresh-machine connect hard-failed when pixtuoid-hook wasn't
     // yet on PATH. Routed through the injected seam (env_hook: None) so an ambient
     // PIXTUOID_HOOK on the dev machine can't short-circuit the staged failure.
-    let got = resolve_hook_binary_from(&CLAUDE, None, None, || {
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, None, || {
         Err(anyhow::anyhow!("could not locate"))
     });
     assert_eq!(got.unwrap(), (PathBuf::from("pixtuoid-hook"), false));
@@ -166,7 +178,7 @@ fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
 #[cfg(windows)]
 #[test]
 fn resolve_hook_binary_claude_errors_when_unresolvable_on_windows() {
-    let got = resolve_hook_binary_from(&CLAUDE, None, None, || {
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, None, || {
         Err(anyhow::anyhow!("could not locate"))
     });
     assert!(got.is_err(), "exec form requires a real resolved .exe");
@@ -201,7 +213,7 @@ fn resolve_hook_binary_env_override_routes_through_the_explicit_arm() {
 fn resolve_hook_binary_cli_flag_outranks_env_override() {
     let cli = abs_fixture("/cli/hook", r"C:\cli\hook");
     let env = abs_fixture("/env/hook", r"C:\env\hook");
-    let got = resolve_hook_binary_from(&CLAUDE, Some(cli.clone()), Some(env), || {
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, Some(cli.clone()), Some(env), || {
         unreachable!("an explicit path must win over locate")
     });
     assert_eq!(got.unwrap(), (cli, true));
@@ -211,7 +223,7 @@ fn resolve_hook_binary_cli_flag_outranks_env_override() {
 fn resolve_hook_binary_no_overrides_uses_locate() {
     let located = abs_fixture("/located/hook", r"C:\located\hook");
     let expect = located.clone();
-    let got = resolve_hook_binary_from(&CLAUDE, None, None, || Ok(located));
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, None, || Ok(located));
     assert_eq!(got.unwrap(), (expect, false));
 }
 
@@ -253,7 +265,7 @@ fn is_drive_relative_only_matches_prefix_without_root() {
 #[test]
 fn resolve_hook_binary_rejects_a_drive_relative_explicit_path() {
     let err = resolve_hook_binary_from(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(PathBuf::from(r"C:rel\hook.exe")),
         None,
         || unreachable!("the explicit path must win"),
@@ -323,13 +335,13 @@ fn verify_target_and_has_hooks_handle_unresolvable_config_path() {
 }
 
 #[test]
-fn install_target_claude_writes_sentinel_and_backs_up() {
+fn install_target_claude_writes_the_hook_command() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     std::fs::write(&cfg, "{}\n").unwrap();
 
     install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
@@ -337,14 +349,14 @@ fn install_target_claude_writes_sentinel_and_backs_up() {
 
     let v: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-    assert!(v["hooks"]["PreToolUse"][0]["_pixtuoid"].as_bool().unwrap());
     assert!(
-        tmp.path().join("settings.json.pixtuoid.bak").exists(),
-        "a backup of the prior content was written"
+        v["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .is_some_and(|c| c.contains("pixtuoid-hook"))
     );
 
     install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
@@ -358,7 +370,7 @@ fn install_target_fails_fast_while_the_config_lock_is_held() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
@@ -366,7 +378,7 @@ fn install_target_fails_fast_while_the_config_lock_is_held() {
 
     let _guard = io::lock_config(&cfg).unwrap();
     let err = install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
@@ -379,29 +391,15 @@ fn uninstall_target_fails_fast_while_the_config_lock_is_held() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
     .unwrap();
 
     let _guard = io::lock_config(&cfg).unwrap();
-    let err = uninstall_target(&CLAUDE, Some(cfg.clone())).unwrap_err();
+    let err = uninstall_target(&CLAUDE_FILE, Some(cfg.clone())).unwrap_err();
     assert!(err.to_string().contains("could not lock"), "got: {err:#}");
-}
-
-#[test]
-fn uninstall_target_unchanged_preserves_backup() {
-    // FAKE.merge_uninstall reports changed=false → the semantic no-op branch.
-    let tmp = tempfile::TempDir::new().unwrap();
-    let cfg = tmp.path().join("config.toml");
-    std::fs::write(&cfg, "anything\n").unwrap();
-    let bak = tmp.path().join("config.toml.pixtuoid.bak");
-    std::fs::write(&bak, "backup").unwrap();
-
-    uninstall_target(&FAKE, Some(cfg.clone())).unwrap();
-
-    assert!(bak.exists(), "a no-op uninstall must NOT delete the backup");
 }
 
 #[test]
@@ -411,26 +409,31 @@ fn install_target_reports_installed_then_up_to_date() {
     std::fs::write(&cfg, "{}\n").unwrap();
 
     let r = install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
     .unwrap();
     assert!(matches!(r.outcome, InstallOutcome::Installed));
-    assert!(
-        r.backup.is_some(),
-        "first install of an existing file takes a backup"
-    );
     assert_eq!(r.config_path, cfg);
 
     let r2 = install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
     .unwrap();
     assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
-    assert!(r2.backup.is_none(), "a no-op install reports no backup");
+    // A semantic no-op never rewrites: a hand-formatted file keeps its bytes.
+    let formatted = std::fs::read_to_string(&cfg).unwrap().replace("\n", "\n\n");
+    std::fs::write(&cfg, &formatted).unwrap();
+    install_target(
+        &CLAUDE_FILE,
+        Some(cfg.clone()),
+        Some(PathBuf::from("/fake/pixtuoid-hook")),
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), formatted);
 }
 
 #[test]
@@ -440,7 +443,7 @@ fn install_target_explicit_hook_suppresses_path_warning() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     let r = install_target(
-        &CLAUDE,
+        &CLAUDE_FILE,
         Some(cfg),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
@@ -453,19 +456,14 @@ fn uninstall_target_reports_removed_then_nothing() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("config.toml");
     std::fs::write(&cfg, "model = \"x\"\n").unwrap();
-    let bak = tmp.path().join("config.toml.pixtuoid.bak");
-    std::fs::write(&bak, "backup").unwrap();
 
     let r = uninstall_target(&FAKE2, Some(cfg.clone())).unwrap();
     assert!(matches!(r.outcome, UninstallOutcome::Removed));
-    assert_eq!(r.removed_backup.as_deref(), Some(bak.as_path()));
-    assert!(!bak.exists());
 
     // An absent config is decided BEFORE locking, so there are no side effects.
     let missing = tmp.path().join("missing").join("settings.json");
-    let r2 = uninstall_target(&CLAUDE, Some(missing.clone())).unwrap();
+    let r2 = uninstall_target(&CLAUDE_FILE, Some(missing.clone())).unwrap();
     assert!(matches!(r2.outcome, UninstallOutcome::NothingToRemove));
-    assert!(r2.removed_backup.is_none());
     assert!(
         !missing.parent().unwrap().exists(),
         "a no-op uninstall leaves no dirs"
@@ -485,39 +483,41 @@ fn install_target_round_trips_every_registered_target() {
             ("DSH_HOME", Some(dsh_home.path())),
         ],
         || {
-            for t in target::TARGETS {
-                let tmp = tempfile::TempDir::new().unwrap();
-                let cfg = tmp.path().join("cfg");
-                let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
+            with_fake_claude(|_| {
+                for t in target::TARGETS {
+                    let tmp = tempfile::TempDir::new().unwrap();
+                    let cfg = plugin_hooks_path(tmp.path());
+                    let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
 
-                let r = install_target(t, Some(cfg.clone()), hook()).unwrap();
-                assert!(
-                    matches!(r.outcome, InstallOutcome::Installed),
-                    "{}: first install must write hooks",
-                    t.name
-                );
-                assert!(cfg.exists(), "{}: install wrote a config", t.name);
+                    let r = install_target(t, Some(cfg.clone()), hook()).unwrap();
+                    assert!(
+                        matches!(r.outcome, InstallOutcome::Installed),
+                        "{}: first install must write hooks",
+                        t.name
+                    );
+                    assert!(cfg.exists(), "{}: install wrote a config", t.name);
 
-                let r2 = install_target(t, Some(cfg.clone()), hook()).unwrap();
-                assert!(
-                    matches!(r2.outcome, InstallOutcome::AlreadyUpToDate),
-                    "{}: re-install must be a no-op (sentinel idempotency)",
-                    t.name
-                );
+                    let r2 = install_target(t, Some(cfg.clone()), hook()).unwrap();
+                    assert!(
+                        matches!(r2.outcome, InstallOutcome::AlreadyUpToDate),
+                        "{}: re-install must be a no-op (sentinel idempotency)",
+                        t.name
+                    );
 
-                let u = uninstall_target(t, Some(cfg.clone())).unwrap();
-                assert!(
-                    matches!(u.outcome, UninstallOutcome::Removed),
-                    "{}: uninstall must remove the managed entries",
-                    t.name
-                );
-                let u2 = uninstall_target(t, Some(cfg.clone())).unwrap();
-                assert!(
-                    matches!(u2.outcome, UninstallOutcome::NothingToRemove),
-                    "{}: re-uninstall must find nothing to remove",
-                    t.name
-                );
-            }
+                    let u = uninstall_target(t, Some(cfg.clone())).unwrap();
+                    assert!(
+                        matches!(u.outcome, UninstallOutcome::Removed),
+                        "{}: uninstall must remove the managed entries",
+                        t.name
+                    );
+                    let u2 = uninstall_target(t, Some(cfg.clone())).unwrap();
+                    assert!(
+                        matches!(u2.outcome, UninstallOutcome::NothingToRemove),
+                        "{}: re-uninstall must find nothing to remove",
+                        t.name
+                    );
+                }
+            });
         },
     );
 }
@@ -528,8 +528,9 @@ fn install_target_round_trips_every_registered_target() {
 #[test]
 fn config_present_target_file_is_absent_before_then_present_after_install() {
     use crate::install::target::config_present;
-    // CLAUDE + CODEX are the only `presence_probe: None` (config_present) targets.
-    for t in [&CLAUDE, &CODEX] {
+    // CODEX is the one shipped `presence_probe: None` (config_present) target;
+    // CLAUDE_FILE is CLAUDE with its probe and host stripped.
+    for t in [&CLAUDE_FILE, &CODEX] {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("cfg");
         assert!(
@@ -616,10 +617,10 @@ fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
 }
 
 #[test]
-fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
+fn install_on_a_malformed_config_errors_without_rewriting() {
     for (t, malformed) in [
         (&CODEX, "this is = = not valid toml [[["),
-        (&CLAUDE, "{ not valid json,,, "),
+        (&crate::install::target::CURSOR, "{ not valid json,,, "),
     ] {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("cfg");
@@ -645,14 +646,6 @@ fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
             std::fs::read_to_string(&cfg).unwrap(),
             before,
             "{}: a malformed config must NOT be rewritten/truncated",
-            t.name
-        );
-        // The .lock sidecar may exist (the lock is taken before the read by
-        // design); the BACKUP must not.
-        let bak = tmp.path().join(format!("cfg.{BACKUP_SUFFIX}"));
-        assert!(
-            !bak.exists(),
-            "{}: a failed install must NOT mint a {BACKUP_SUFFIX} backup",
             t.name
         );
     }
@@ -707,18 +700,20 @@ fn verify_target_is_sound_after_a_real_install_for_every_target() {
         ],
         || {
             let exe = std::env::current_exe().unwrap(); // a real, executable file
-            for &t in target::TARGETS {
-                let tmp = tempfile::TempDir::new().unwrap();
-                let cfg = tmp.path().join("cfg");
-                install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-                let v = verify_target(t, Some(cfg));
-                assert!(
-                    v.is_sound(),
-                    "{}: a fresh install must verify sound, got issues {:?}",
-                    t.name,
-                    v.issues
-                );
-            }
+            with_fake_claude(|_| {
+                for &t in target::TARGETS {
+                    let tmp = tempfile::TempDir::new().unwrap();
+                    let cfg = plugin_hooks_path(tmp.path());
+                    install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                    let v = verify_target(t, Some(cfg));
+                    assert!(
+                        v.is_sound(),
+                        "{}: a fresh install must verify sound, got issues {:?}",
+                        t.name,
+                        v.issues
+                    );
+                }
+            });
         },
     );
 }
@@ -728,8 +723,8 @@ fn verify_target_flags_a_missing_shim_binary() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     let ghost = tmp.path().join("ghost-pixtuoid-hook");
-    install_target(&CLAUDE, Some(cfg.clone()), Some(ghost)).unwrap();
-    let v = verify_target(&CLAUDE, Some(cfg));
+    install_target(&CLAUDE_FILE, Some(cfg.clone()), Some(ghost)).unwrap();
+    let v = verify_target(&CLAUDE_FILE, Some(cfg));
     assert!(!v.is_sound());
     assert!(
         v.issues.iter().any(|i| i.contains("shim binary missing")),
@@ -743,7 +738,7 @@ fn verify_target_flags_an_empty_config_as_not_installed() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     std::fs::write(&cfg, "   \n").unwrap();
-    let v = verify_target(&CLAUDE, Some(cfg));
+    let v = verify_target(&CLAUDE_FILE, Some(cfg));
     assert!(!v.is_sound());
     assert!(
         v.issues.iter().any(|i| i.contains("config is empty")),
@@ -758,7 +753,7 @@ fn verify_target_flags_an_unreadable_config() {
     let tmp = tempfile::TempDir::new().unwrap();
     let dir = tmp.path().join("cfgdir");
     std::fs::create_dir_all(&dir).unwrap();
-    let v = verify_target(&CLAUDE, Some(dir));
+    let v = verify_target(&CLAUDE_FILE, Some(dir));
     assert!(!v.is_sound());
     assert!(
         v.issues.iter().any(|i| i.contains("config unreadable")),
@@ -1128,12 +1123,12 @@ fn verify_target_flags_a_missing_event() {
     let exe = std::env::current_exe().unwrap();
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    install_target(&CLAUDE, Some(cfg.clone()), Some(exe)).unwrap();
+    install_target(&CLAUDE_FILE, Some(cfg.clone()), Some(exe)).unwrap();
     let mut v: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
     v["hooks"].as_object_mut().unwrap().remove("SessionEnd");
     std::fs::write(&cfg, serde_json::to_string_pretty(&v).unwrap()).unwrap();
-    let res = verify_target(&CLAUDE, Some(cfg));
+    let res = verify_target(&CLAUDE_FILE, Some(cfg));
     assert!(!res.is_sound());
     assert!(
         res.issues
@@ -1151,15 +1146,15 @@ fn a_disconnected_source_is_gated_out_of_the_broken_check() {
     let exe = std::env::current_exe().unwrap();
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    install_target(&CLAUDE, Some(cfg.clone()), Some(exe)).unwrap();
-    uninstall_target(&CLAUDE, Some(cfg.clone())).unwrap();
+    install_target(&CLAUDE_FILE, Some(cfg.clone()), Some(exe)).unwrap();
+    uninstall_target(&CLAUDE_FILE, Some(cfg.clone())).unwrap();
     let content = io::read_config(&cfg).unwrap();
     assert!(
         !(CLAUDE.merge_uninstall)(&content).unwrap().changed,
         "uninstalled config must report no managed hooks (the has_hooks gate)"
     );
     assert!(
-        !verify_target(&CLAUDE, Some(cfg)).is_sound(),
+        !verify_target(&CLAUDE_FILE, Some(cfg)).is_sound(),
         "ungated verify of an uninstalled config is broken — the gate is what protects it"
     );
 }
@@ -1190,8 +1185,8 @@ fn json_value_equality_ignores_key_order_under_preserve_order() {
     // `preserve_order` swaps serde_json's `Map` to IndexMap so a merge re-emits the
     // user's key order. `Value: PartialEq` must therefore stay order-INDEPENDENT:
     // every target's `changed` flag is a semantic diff, so order-SENSITIVE equality
-    // would report `changed` for a mere re-order — rewriting the file, taking a
-    // backup, and flipping `has_hooks` on every single connect.
+    // would report `changed` for a mere re-order — rewriting the file and
+    // flipping `has_hooks` on every single connect.
     let a: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":{"y":2,"x":3}}"#).unwrap();
     let b: serde_json::Value = serde_json::from_str(r#"{"a":{"x":3,"y":2},"b":1}"#).unwrap();
     assert_eq!(a, b, "object equality must not depend on key order");
@@ -1262,24 +1257,26 @@ fn every_target_that_writes_a_config_names_us_in_it() {
             let tmpdir = tempfile::TempDir::new().unwrap();
             let hook = tmpdir.path().join("pixtuoid-hook");
             std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
-            for t in crate::install::TARGETS {
-                let tmp = tempfile::TempDir::new().unwrap();
-                let cfg = tmp.path().join(format!("{}-cfg", t.name));
-                install_target(t, Some(cfg.clone()), Some(hook.clone()))
-                    .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
-                let content = std::fs::read_to_string(&cfg)
-                    .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
-                assert!(
-                    super::config_mentions_us(&content),
-                    "{}: a config we wrote must satisfy the PRODUCTION fallback predicate",
-                    t.name
-                );
-                assert!(
-                    has_hooks(t, Some(cfg)),
-                    "{}: has_hooks must see the install it just wrote",
-                    t.name
-                );
-            }
+            with_fake_claude(|_| {
+                for t in crate::install::TARGETS {
+                    let tmp = tempfile::TempDir::new().unwrap();
+                    let cfg = plugin_hooks_path(tmp.path());
+                    install_target(t, Some(cfg.clone()), Some(hook.clone()))
+                        .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
+                    let content = std::fs::read_to_string(&cfg)
+                        .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
+                    assert!(
+                        super::config_mentions_us(&content),
+                        "{}: a config we wrote must satisfy the PRODUCTION fallback predicate",
+                        t.name
+                    );
+                    assert!(
+                        has_hooks(t, Some(cfg)),
+                        "{}: has_hooks must see the install it just wrote",
+                        t.name
+                    );
+                }
+            });
         },
     );
 }
@@ -1313,4 +1310,287 @@ fn kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe() {
         super::config_mentions_us(&content),
         "the fallback must recognise the UPPERCASE marker"
     );
+}
+
+/// A fake `claude` first on PATH and a temp `CLAUDE_CONFIG_DIR`, so no test reaches
+/// the developer's Claude Code. It logs its argv to `calls.log` beside it and keeps
+/// the two listings in files the way the real CLI's state behaves.
+pub(crate) fn with_fake_claude<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
+    with_fake_claude_failing(None, f)
+}
+
+/// [`with_fake_claude`], whose `claude` exits 1 on the exact argument line `fail`.
+fn with_fake_claude_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Path) -> R) -> R {
+    let dir = tempfile::TempDir::new().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, FAKE_CLAUDE_SH).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    #[cfg(windows)]
+    std::fs::write(dir.path().join("claude.cmd"), FAKE_CLAUDE_CMD).unwrap();
+    let path = std::env::join_paths(std::iter::once(dir.path().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let config = dir.path().join("claude-config");
+    std::fs::create_dir_all(&config).unwrap();
+    temp_env::with_vars(
+        [
+            ("PATH", Some(path.as_os_str())),
+            ("CLAUDE_CONFIG_DIR", Some(config.as_os_str())),
+            ("FAKE_CLAUDE_FAIL", fail.map(std::ffi::OsStr::new)),
+        ],
+        || f(dir.path()),
+    )
+}
+
+#[cfg(unix)]
+const FAKE_CLAUDE_SH: &str = r#"#!/bin/sh
+d=$(dirname "$0")
+echo "$*" >> "$d/calls.log"
+[ "$*" = "${FAKE_CLAUDE_FAIL-}" ] && exit 1
+case "$*" in
+"plugin marketplace add "*) echo '[{"name":"pixtuoid"}]' > "$d/marketplaces.json" ;;
+"plugin install pixtuoid@pixtuoid") [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || echo '{"enabledPlugins":{"pixtuoid@pixtuoid":true}}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
+"plugin marketplace remove pixtuoid") echo '[]' > "$d/marketplaces.json" ;;
+"plugin marketplace list --json") cat "$d/marketplaces.json" 2>/dev/null || echo '[]' ;;
+esac
+"#;
+
+#[cfg(windows)]
+const FAKE_CLAUDE_CMD: &str = "@echo off\r
+set \"d=%~dp0\"\r
+>>\"%d%calls.log\" echo %~1 %~2 %~3 %~4\r
+if defined FAKE_CLAUDE_FAIL if \"%*\"==\"%FAKE_CLAUDE_FAIL%\" exit /b 1\r
+if \"%1 %2 %3\"==\"plugin marketplace add\" (>\"%d%marketplaces.json\" echo [{\"name\":\"pixtuoid\"}]& exit /b 0)\r
+if \"%1 %2\"==\"plugin install\" (if not exist \"%CLAUDE_CONFIG_DIR%\\settings.json\" (>\"%CLAUDE_CONFIG_DIR%\\settings.json\" echo {\"enabledPlugins\":{\"pixtuoid@pixtuoid\":true}})& exit /b 0)\r
+if \"%1 %2 %3\"==\"plugin marketplace remove\" (>\"%d%marketplaces.json\" echo []& exit /b 0)\r
+if \"%1 %2 %3\"==\"plugin marketplace list\" (if exist \"%d%marketplaces.json\" (type \"%d%marketplaces.json\") else (echo []))& exit /b 0\r
+exit /b 0\r
+";
+
+/// The settings.json Claude Code reads, under the fake's `CLAUDE_CONFIG_DIR`.
+fn cc_settings() -> PathBuf {
+    PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("inside with_fake_claude"))
+        .join("settings.json")
+}
+
+/// A hooks file `<marketplace>/<plugin>/hooks/hooks.json` deep inside `tmp`, so a
+/// host target's manifests land in the test's own dir.
+fn plugin_hooks_path(tmp: &std::path::Path) -> PathBuf {
+    tmp.join("marketplace")
+        .join("plugin")
+        .join("hooks")
+        .join("hooks.json")
+}
+
+#[test]
+fn claude_install_registers_the_plugin() {
+    with_fake_claude(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        // An executable that exists, so verify has only the plugin to judge.
+        let hook = Some(std::env::current_exe().unwrap());
+        let r = install_target(&CLAUDE, Some(hooks.clone()), hook.clone()).unwrap();
+        assert!(matches!(r.outcome, InstallOutcome::Installed));
+
+        let root = tmp.path().join("marketplace");
+        assert!(root.join(".claude-plugin/marketplace.json").is_file());
+        assert!(root.join("plugin/.claude-plugin/plugin.json").is_file());
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert!(
+            calls.contains(&format!("plugin marketplace add {}", root.display()))
+                && calls.contains("plugin install pixtuoid@pixtuoid"),
+            "calls: {calls}"
+        );
+        assert!(has_hooks(&CLAUDE, Some(hooks.clone())));
+        // What `claude plugin install` records at user scope.
+        std::fs::write(
+            cc_settings(),
+            r#"{"theme":"dark","enabledPlugins":{"pixtuoid@pixtuoid":true}}"#,
+        )
+        .unwrap();
+        let v = verify_target(&CLAUDE, Some(hooks.clone()));
+        assert!(v.is_sound(), "{:?}", v.issues);
+
+        // A re-install with nothing to change still re-registers, which heals a
+        // plugin the user removed in Claude Code.
+        let r2 = install_target(&CLAUDE, Some(hooks), hook).unwrap();
+        assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert_eq!(
+            calls.matches("plugin install pixtuoid@pixtuoid").count(),
+            2,
+            "calls: {calls}"
+        );
+    });
+}
+
+#[test]
+fn claude_verify_flags_an_unregistered_plugin() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target(
+            &CLAUDE,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        // No `enabledPlugins` entry, as if the user disabled it.
+        std::fs::write(cc_settings(), "{}").unwrap();
+        let v = verify_target(&CLAUDE, Some(hooks));
+        assert!(
+            v.issues
+                .iter()
+                .any(|i| i.contains("not installed and enabled")),
+            "{:?}",
+            v.issues
+        );
+    });
+}
+
+#[test]
+fn claude_uninstall_removes_the_marketplace_only_when_listed() {
+    with_fake_claude(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target(
+            &CLAUDE,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let u = uninstall_target(&CLAUDE, Some(hooks.clone())).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert_eq!(
+            calls.matches("plugin marketplace remove pixtuoid").count(),
+            1
+        );
+        assert!(
+            !tmp.path().join("marketplace").exists(),
+            "the files register wrote go with the plugin"
+        );
+
+        // Nothing registered now: a second uninstall lists and stops.
+        let u2 = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+        assert!(matches!(u2.outcome, UninstallOutcome::NothingToRemove));
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert_eq!(
+            calls.matches("plugin marketplace remove pixtuoid").count(),
+            1,
+            "calls: {calls}"
+        );
+    });
+}
+
+#[test]
+fn a_disconnect_that_deregisters_a_stranded_plugin_reports_a_removal() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target(
+            &CLAUDE,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        // An earlier disconnect already emptied every hooks file but left the
+        // plugin registered (no `claude` then).
+        uninstall_target(&CLAUDE_FILE, Some(hooks.clone())).unwrap();
+        let u = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        assert!(!u.plugin_left_registered);
+    });
+}
+
+#[test]
+fn a_custom_config_never_deletes_a_marketplace_that_is_not_ours() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let manifest = tmp
+            .path()
+            .join("marketplace/.claude-plugin/marketplace.json");
+        std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        std::fs::write(&manifest, r#"{"name":"someone-else"}"#).unwrap();
+        uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+        assert!(manifest.exists());
+    });
+}
+
+#[test]
+fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
+    let empty = tempfile::TempDir::new().unwrap();
+    let config = empty.path().join("claude-config");
+    std::fs::create_dir_all(&config).unwrap();
+    temp_env::with_vars(
+        [
+            ("PATH", Some(empty.path().as_os_str())),
+            ("CLAUDE_CONFIG_DIR", Some(config.as_os_str())),
+        ],
+        || {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let hooks = plugin_hooks_path(tmp.path());
+            let settings = config.join("settings.json");
+            // No settings.json reads as never registered.
+            assert!(
+                !uninstall_target(&CLAUDE, Some(hooks.clone()))
+                    .unwrap()
+                    .plugin_left_registered
+            );
+            std::fs::write(&settings, "{}").unwrap();
+            assert!(
+                !uninstall_target(&CLAUDE, Some(hooks.clone()))
+                    .unwrap()
+                    .plugin_left_registered
+            );
+            std::fs::write(
+                &settings,
+                r#"{"enabledPlugins":{"pixtuoid@pixtuoid":true}}"#,
+            )
+            .unwrap();
+            assert!(
+                uninstall_target(&CLAUDE, Some(hooks.clone()))
+                    .unwrap()
+                    .plugin_left_registered
+            );
+            // Disabled in Claude Code is still installed: its marketplace stays.
+            std::fs::write(
+                &settings,
+                r#"{"enabledPlugins":{"pixtuoid@pixtuoid":false}}"#,
+            )
+            .unwrap();
+            assert!(
+                uninstall_target(&CLAUDE, Some(hooks))
+                    .unwrap()
+                    .plugin_left_registered
+            );
+        },
+    );
+}
+
+#[test]
+fn claude_install_fails_when_registering_fails() {
+    with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        assert!(install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook).is_err());
+    });
+}
+
+#[test]
+fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
+    with_fake_claude_failing(Some("plugin marketplace list --json"), |_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        install_target(&CLAUDE, Some(hooks.clone()), hook).unwrap();
+        assert!(uninstall_target(&CLAUDE, Some(hooks.clone())).is_err());
+        assert!(!has_hooks(&CLAUDE, Some(hooks)), "the plugin is left inert");
+    });
 }

@@ -531,7 +531,7 @@ pub(crate) fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonI
         .bytes()
         .chain(std::iter::once(b'@'))
         .chain(instance.as_str().bytes())
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64))
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)))
 }
 
 /// How long one mascot may be held at the elevator before its walk-in starts.
@@ -676,7 +676,7 @@ mod tests {
                 stride as f32 / (ticks * FULL_TICK_MS) as f32,
                 "{anim} cruises off its {ticks}-tick cadence"
             );
-            let cadence = stride as u64 * PAINTS as u64 * PAINT_MS / (ticks * FULL_TICK_MS);
+            let cadence = u64::from(stride) * PAINTS as u64 * PAINT_MS / (ticks * FULL_TICK_MS);
             let mut walked = 0;
             for seed in 0..4 {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
