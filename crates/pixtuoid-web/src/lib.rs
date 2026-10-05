@@ -145,12 +145,11 @@ pub struct Office {
 
 #[wasm_bindgen]
 impl Office {
-    /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the bundled sprite pack fails to parse.
+    /// Build an office seeded with `seed` (drives the layout variant).
     ///
     /// # Errors
     ///
-    /// If the bundled sprite pack fails to load.
+    /// If the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
