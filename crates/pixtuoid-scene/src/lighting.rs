@@ -59,8 +59,10 @@ const MONITOR_HALO_INTENSITY: f32 = 0.8;
 /// The share of it the halo's centre gets.
 const MONITOR_HALO_SHARE: f32 = 0.4;
 /// The halo's column offset from the desk: the middle of the screen's glass.
-const MONITOR_HALO_DX: u16 =
-    (*crate::layout::SCREEN_GLASS_COLS.start() + *crate::layout::SCREEN_GLASS_COLS.end()) / 2;
+const MONITOR_HALO_DX: u16 = u16::midpoint(
+    *crate::layout::SCREEN_GLASS_COLS.start(),
+    *crate::layout::SCREEN_GLASS_COLS.end(),
+);
 /// The halo's footprint.
 const MONITOR_HALO_W: u16 = 5;
 const MONITOR_HALO_H: u16 = 2;

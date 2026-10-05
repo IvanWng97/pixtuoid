@@ -219,6 +219,10 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
 /// Load the compiled-in default pack, with `source`'s custom pack merged over
 /// it. Reads nothing but the path `source` names, so a test, a benchmark or a
 /// committed snapshot draws the same art on every machine.
+///
+/// # Errors
+///
+/// If the bundled pack fails to load, or `source` is `Explicit` and its directory is not a loadable pack (`Discovered` falls back to the bundled pack instead).
 #[cfg(feature = "native")]
 pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
     let base = load_bundled_pack()?;
@@ -268,6 +272,10 @@ pub(crate) fn test_default_pack() -> Pack {
 const BUNDLED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/bundled_pack.toml"));
 
 /// The compiled-in default pack alone: all a build without `native` can load.
+///
+/// # Errors
+///
+/// If the embedded manifest or a bundled sprite source fails to parse or validate.
 pub fn load_bundled_pack() -> Result<Pack, PackError> {
     load_pack_from_strings(BUNDLED_PACK_TOML, &bundled_sprite_srcs())
 }

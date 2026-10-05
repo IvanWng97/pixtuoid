@@ -310,8 +310,8 @@ mod tests {
         );
     }
 
-    /// The pixel-art rule: a falloff is a few flat tones, dithered, never a
-    /// soft blend with a tone per pixel.
+    /// A falloff is a few flat tones, dithered, never a soft blend with a tone
+    /// per pixel.
     #[test]
     fn a_halo_paints_no_more_tones_than_its_ramp_has() {
         let (buf, look) = lit_wall(NeonLevels::ALERT);

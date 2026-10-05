@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::geometry::CellArea;
 use crate::tui::hit_test::SceneHit;
 use pixtuoid_scene::display::HoverTarget;
 
@@ -11,7 +12,7 @@ fn furniture_hit_test_resolves_against_rendered_layout() {
     let desk = layout.home_desks[0];
     let hit = crate::tui::hit_test::hit_test_furniture(
         layout,
-        crate::tui::geometry::CellArea::half_block(desk.x + 4, desk.y / 2 + 1),
+        CellArea::half_block(desk.x + 4, CellArea::row_of(desk.y) + 1),
     );
     assert_eq!(
         hit,
@@ -33,16 +34,13 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
         .find(|w| w.kind == WaypointKind::Pantry)
         .expect("a 140×48 office must lay out a pantry");
     let cx = pantry.pos.x;
-    let cy = pantry.pos.y / 2;
+    let cy = CellArea::row_of(pantry.pos.y);
     let mut found = false;
     for dx in -14i32..=14 {
         for dy in -4i32..=4 {
             let mx = (i32::from(cx) + dx).max(0) as u16;
             let my = (i32::from(cy) + dy).max(0) as u16;
-            if crate::tui::hit_test::hit_test_coffee_machine(
-                layout,
-                crate::tui::geometry::CellArea::half_block(mx, my),
-            ) {
+            if crate::tui::hit_test::hit_test_coffee_machine(layout, CellArea::half_block(mx, my)) {
                 found = true;
             }
         }
@@ -61,7 +59,7 @@ fn pet_hit_test_resolves_at_pet_position() {
     let PetHover { centre: pos, .. } = r.drawn_pet().expect("pet placed");
     assert!(
         matches!(
-            r.scene_hit_at(pos.x, pos.y / 2),
+            r.scene_hit_at(pos.x, CellArea::row_of(pos.y)),
             Some(SceneHit::Figure(HoverTarget::Pet(_)))
         ),
         "clicking the pet's own position should hit it"
@@ -100,7 +98,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     );
     let (dx, dy) = (
         seat.x + pixtuoid_scene::layout::CHARACTER_SPRITE_W / 2,
-        (seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2) / 2,
+        CellArea::row_of(seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2),
     );
     assert_eq!(r.hit_test_agent_at(dx, dy), Some(id));
 
@@ -110,7 +108,10 @@ fn click_hit_test_follows_a_walking_sprite() {
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, pack(), walk_now).unwrap();
     let drawn = drawn(&r, &scene, id, walk_now).top_left;
-    assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
+    assert_eq!(
+        r.hit_test_agent_at(drawn.x, CellArea::row_of(drawn.y)),
+        Some(id)
+    );
     assert_eq!(
         r.hit_test_agent_at(dx, dy),
         None,
@@ -164,11 +165,7 @@ fn drawn(r: &TuiRenderer<TestBackend>, scene: &SceneState, id: AgentId, now: Sys
 
 /// Whether the half-block cell `(col, row)` shows a pixel of `sprite`.
 fn cell_shows(sprite: Sprite, col: u16, row: u16) -> bool {
-    crate::tui::geometry::CellArea::half_block(col, row).overlaps(
-        sprite.top_left,
-        sprite.w,
-        sprite.h,
-    )
+    CellArea::half_block(col, row).overlaps(sprite.top_left, sprite.w, sprite.h)
 }
 
 /// Cells swept past each edge of the sprite, so the sweep sees its misses too.
@@ -208,7 +205,9 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
     };
 
     let mut moved = None;
-    for row in (seat.y / 2).saturating_sub(SWEEP_MARGIN)..=(seat.y + drawn.h) / 2 + SWEEP_MARGIN {
+    for row in CellArea::row_of(seat.y).saturating_sub(SWEEP_MARGIN)
+        ..=CellArea::row_of(seat.y + drawn.h) + SWEEP_MARGIN
+    {
         for col in seat.x.saturating_sub(SWEEP_MARGIN)..seat.x + drawn.w + SWEEP_MARGIN {
             let shows = cell_shows(drawn, col, row);
             assert_eq!(
@@ -287,8 +286,8 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
         a.agent_id.min(b.agent_id),
         "premise: the agent on top is not the first by AgentId"
     );
-    assert_eq!(both.hit_test_agent_at(x, y / 2), Some(top));
-    both.set_mouse_pos(Some((x, y / 2)));
+    assert_eq!(both.hit_test_agent_at(x, CellArea::row_of(y)), Some(top));
+    both.set_mouse_pos(Some((x, CellArea::row_of(y))));
     both.render(&scene, pack(), now).unwrap();
     let hovered = scene.agents[&top].label.clone();
     assert!(
@@ -299,7 +298,6 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
 
 #[test]
 fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
-    use crate::tui::geometry::CellArea;
     let now = t0() + Duration::from_secs(20);
     let mut scene = scene_with(
         (0..6)
@@ -339,7 +337,8 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
             out.layout.as_deref().expect("drawn"),
             out.geometry.expect("drawn"),
         );
-        let hits = |at: CellArea| crate::tui::hit_test::scene_hit(&out.hovers, layout, at);
+        let hits =
+            |at: CellArea| crate::tui::hit_test::scene_hit(&out.hovers, out.star, layout, at);
         let mut seen = [false; 5];
         for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
             let half_block = hits(CellArea::half_block(col, row));
@@ -379,7 +378,7 @@ fn hover_a_cat_petted_at(
         kind: PetKind::Cat,
         floor_idx: 0,
     }));
-    r.set_mouse_pos(Some((at.x, at.y / 2)));
+    r.set_mouse_pos(Some((at.x, CellArea::row_of(at.y))));
     r.render(scene, pack(), now).unwrap();
     frame_text(r.frame_buffer())
 }
@@ -564,7 +563,7 @@ pub(super) fn the_tooltip_names_what_a_click_acts_on<B>(
                 (2, format!("OpenClaw:{} gateway", key.instance().as_str()))
             }
             Some(SceneHit::Coffee) => (3, "Buy Ivan a coffee".to_string()),
-            Some(SceneHit::Furniture(_)) | None => continue,
+            Some(SceneHit::Star | SceneHit::Furniture(_)) | None => continue,
         };
         seen[kind] = true;
         named.push(((col, row), says));

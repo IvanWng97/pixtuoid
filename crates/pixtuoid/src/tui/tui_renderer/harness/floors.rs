@@ -577,11 +577,14 @@ fn every_painter_shows_the_one_board_of_a_floor() {
     };
 
     let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
-    let floating = crate::floating::offscreen::OfficeRenderer::new(std::sync::Arc::new(
-        pack().clone(),
-    ))
-    .board(&one_floor, Motion::Full, now);
-    assert_eq!(tui(&one_floor, 0), floating);
+    let floating = pixtuoid_scene::board::wall_board(
+        &one_floor,
+        pixtuoid_scene::board::office_gateway(&one_floor),
+        None,
+        Motion::Full,
+        now,
+    );
+    assert_eq!(tui(&one_floor, 0), floating, "the floating window's place");
 
     let upper = tui(&with_gateway(two_floor_scene()), 1);
     let context: Vec<_> = upper.context.iter().map(|s| s.text.trim()).collect();

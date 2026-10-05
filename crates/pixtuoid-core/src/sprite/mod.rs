@@ -188,7 +188,7 @@ impl Rgb {
                 let (mut min, mut max) = (0.0, current.chroma);
                 let mut min_in_gamut = true;
                 while max - min > GAMUT_EPSILON {
-                    current.chroma = (min + max) / 2.0;
+                    current.chroma = f32::midpoint(min, max);
                     if min_in_gamut && lin(current).is_within_bounds() {
                         min = current.chroma;
                         continue;
