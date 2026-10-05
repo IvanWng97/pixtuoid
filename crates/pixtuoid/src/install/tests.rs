@@ -1581,6 +1581,17 @@ fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
             )
             .unwrap();
             assert!(
+                uninstall_target(&CLAUDE, Some(hooks.clone()))
+                    .unwrap()
+                    .plugin_left_registered
+            );
+            // Disabled in Claude Code is still installed: its marketplace stays.
+            std::fs::write(
+                &settings,
+                r#"{"enabledPlugins":{"pixtuoid@pixtuoid":false}}"#,
+            )
+            .unwrap();
+            assert!(
                 uninstall_target(&CLAUDE, Some(hooks))
                     .unwrap()
                     .plugin_left_registered

@@ -43,11 +43,7 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
-    file_has_hooks(t, &path)
-}
-
-fn file_has_hooks(t: &Target, path: &std::path::Path) -> bool {
-    match io::read_config(path) {
+    match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
         // A merge that ERRS means "we could not tell" — never "installed".
         Ok(c) => (t.merge_uninstall)(&c)

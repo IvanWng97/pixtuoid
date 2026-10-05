@@ -29,9 +29,6 @@ pub(crate) fn windows_short_path(long: &str) -> Option<String> {
 pub(crate) const SOURCE_FLAG: &str = " --source ";
 pub(crate) const EVENT_FLAG: &str = " --event ";
 
-/// The env var the Unix shell form stamps the source into, as the shim reads it.
-pub(crate) const SOURCE_ENV: &str = "PIXTUOID_SOURCE";
-
 /// The OS-correct hook `command` string for a shell-running CLI — the single OS
 /// fork for that strategy.
 ///
@@ -56,7 +53,7 @@ pub(crate) fn shell_hook_command(path: &str, source: &str) -> Result<String> {
             anyhow::bail!("internal: hook source {source:?} has a shell-unsafe character {bad:?}");
         }
         Ok(format!(
-            "{SOURCE_ENV}={source} {}",
+            "PIXTUOID_SOURCE={source} {}",
             unix::shell_single_quote(path)
         ))
     }

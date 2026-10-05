@@ -128,7 +128,8 @@ fn register(config: &Path) -> Result<()> {
 /// a marketplace it doesn't know, hence the list first.
 fn unregister(config: &Path) -> Result<Unregistered> {
     if claude_cli().is_none() {
-        if is_registered()? {
+        // Disabled is still installed: its marketplace must outlive it.
+        if plugin_entry()?.is_some() {
             tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
             return Ok(Unregistered::Unreachable);
         }
@@ -178,14 +179,19 @@ fn remove_marketplace(config: &Path) -> Result<()> {
 /// (code.claude.com/docs/en/plugins/install#choose-an-install-scope) — the settings
 /// file, not `claude plugin list`, which costs a CLI start per check.
 fn is_registered() -> Result<bool> {
+    Ok(plugin_entry()? == Some(true))
+}
+
+/// The plugin's `enabledPlugins` value: `Some(false)` is installed but disabled.
+fn plugin_entry() -> Result<Option<bool>> {
     let settings = settings_path()?;
     let content = io::read_config(&settings)?;
     if content.trim().is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let doc: Value = serde_json::from_str(&content)
         .with_context(|| format!("parsing {}", settings.display()))?;
-    Ok(doc["enabledPlugins"][plugin_id()].as_bool() == Some(true))
+    Ok(doc["enabledPlugins"][plugin_id()].as_bool())
 }
 
 fn marketplace_listed(json_out: &str) -> Result<bool> {
@@ -310,17 +316,14 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
 }
 
 fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
-    hook_shim_ref(
-        entry
-            .get("hooks")
-            .and_then(|h| h.as_array())
-            .and_then(|a| a.first()),
-    )
-}
-
-fn hook_shim_ref(hook: Option<&Value>) -> crate::install::verify::ShimRef {
     use crate::install::verify::ShimRef;
-    match hook.and_then(|h| h.get("command")).and_then(|c| c.as_str()) {
+    let cmd = entry
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .and_then(|a| a.first())
+        .and_then(|h| h.get("command"))
+        .and_then(|c| c.as_str());
+    match cmd {
         None => ShimRef::Unknown,
         // The SHELL form is `shell_shim_ref`'s own wire format, so it parses it —
         // including any future ` --event` suffix, which a private copy here would
