@@ -341,9 +341,26 @@ fn pet_tooltip_on_hover() {
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
-        text.contains("Cat") || text.contains("purr"),
-        "hovering the cat shows its tooltip"
+        text.contains("Pet me!"),
+        "hovering the cat, sitting at home, shows its tooltip"
     );
+}
+
+/// Renders `r` until its pet walks, where its tooltip names it: the pet and
+/// that frame's time.
+fn until_the_pet_walks(
+    r: &mut TuiRenderer<TestBackend>,
+    scene: &SceneState,
+) -> (PetHover, SystemTime) {
+    (0..2 * pixtuoid_scene::PET_LONGEST_REST_MS / 250)
+        .map(|step| t0() + Duration::from_millis(step * 250))
+        .find_map(|now| {
+            r.render(scene, pack(), now).unwrap();
+            r.drawn_pet()
+                .filter(|p| p.anim == p.kind.walk_anim())
+                .map(|p| (p, now))
+        })
+        .expect("the pet sets off")
 }
 
 #[test]
@@ -354,10 +371,9 @@ fn pet_tooltip_shows_custom_name() {
         name: "Luna".to_string(),
     };
     let mut r = build_pets(140, 48, vec![cat]);
-    r.render(&scene, pack(), t0()).unwrap();
-    let PetHover { centre: pos, .. } = r.drawn_pet().expect("cat placed");
+    let (PetHover { centre: pos, .. }, now) = until_the_pet_walks(&mut r, &scene);
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-    r.render(&scene, pack(), t0()).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Luna"),
@@ -373,10 +389,9 @@ fn pet_tooltip_shows_custom_name() {
 fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
-    r.render(&scene, pack(), t0()).unwrap();
-    let PetHover { centre: pos, .. } = r.drawn_pet().expect("cat placed");
+    let (PetHover { centre: pos, .. }, now) = until_the_pet_walks(&mut r, &scene);
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-    r.render(&scene, pack(), t0()).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Office Cat"),

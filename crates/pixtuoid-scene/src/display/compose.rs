@@ -237,7 +237,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             flip,
             false,
             &p.effects,
-            p.target(),
+            Some(p.target()),
         )
     });
     let mascots = frame.mascots.iter().map(|m| {

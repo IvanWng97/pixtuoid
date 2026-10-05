@@ -25,7 +25,18 @@ pub(crate) fn scene_hit<'a>(
     layout: &SceneLayout,
     cell: CellArea,
 ) -> Option<SceneHit<'a>> {
-    if let Some(target) = hovers.at(cell.bounds()) {
+    figure_or_fixture(hovers.at(cell.bounds()), star, layout, cell)
+}
+
+/// `figure`, the topmost hover at `cell`, else the board's `star`, else the
+/// coffee machine, else a labelled fixture of `layout`.
+fn figure_or_fixture<'a>(
+    figure: Option<&'a HoverTarget>,
+    star: Option<Bounds>,
+    layout: &SceneLayout,
+    cell: CellArea,
+) -> Option<SceneHit<'a>> {
+    if let Some(target) = figure {
         Some(SceneHit::Figure(target))
     } else if star.is_some_and(|b| cell.overlaps(Point { x: b.x, y: b.y }, b.width, b.height)) {
         Some(SceneHit::Star)
