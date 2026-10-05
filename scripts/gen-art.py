@@ -1395,10 +1395,14 @@ def desk_marks(base, lift):
     """An `@Nx` desk's prop marks at its `DESK_ARRANGEMENT` columns, `lift`
     rows taller above."""
     cols = DESK_ARRANGEMENT[base]
-    return [(prop, cols[prop] * S, (DESK_BEZEL_RAISE + lift) * S + row) for prop, row in DESK_PROP_ROWS.items()]
+    return [(prop, cols[prop] * S, (DESK_BEZEL_RAISE + lift) * S + row)
+            for prop, row in DESK_PROP_ROWS.items()]
 
 
-DESK_MARKS = {"desk": desk_marks("desk", 0), "desk_north": desk_marks("desk_north", DESK_NORTH_LIFT)}
+DESK_MARKS = {
+    "desk": desk_marks("desk", 0),
+    "desk_north": desk_marks("desk_north", DESK_NORTH_LIFT),
+}
 # The `@Nx` tower's reams fill its frame, `S` times the 1x tier's rows: the
 # bottom ream gives up the outline's two rows.
 TOKEN_REAM_ROWS = TOKEN_ROWS_PER_TIER_1X * S
@@ -3671,7 +3675,10 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + LIFT)],
                     )
-    classic_marks = {"desk": desk_marks_1x(0, "desk"), "desk_north": desk_marks_1x(DESK_NORTH_LIFT, "desk_north")}
+    classic_marks = {
+        "desk": desk_marks_1x(0, "desk"),
+        "desk_north": desk_marks_1x(DESK_NORTH_LIFT, "desk_north"),
+    }
     sprites |= {
         f"{base}.sprite": render_sprite(
             header, grounded(frames), marks=classic_marks.get(base, ())
