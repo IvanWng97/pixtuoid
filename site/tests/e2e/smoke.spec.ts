@@ -1619,9 +1619,8 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     ['./config', 768],
     ['./architecture', 375],
     ['./contributing', 375],
-    ['./parallel-delivery', 320], // the #503 repro: wide ASCII pre + long links
-    ['./parallel-delivery', 375],
-    ['./parallel-delivery', 768],
+    ['./architecture', 320], // the #503 class: wide ASCII pre + long links
+    ['./architecture', 768],
   ] as const) {
     const context = await browser.newContext({
       viewport: { width, height: 820 },

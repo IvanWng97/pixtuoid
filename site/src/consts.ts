@@ -74,7 +74,6 @@ export interface DocPage {
 export const DOCS = [
   { id: 'config', route: 'config', label: 'Configuration' },
   { id: 'architecture', route: 'architecture', label: 'Architecture' },
-  { id: 'parallel-delivery', route: 'parallel-delivery', label: 'Parallel delivery' },
   { id: 'contributing', route: 'contributing', label: 'Contributing' },
 ] as const satisfies readonly DocPage[];
 export type DocId = (typeof DOCS)[number]['id'];

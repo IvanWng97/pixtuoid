@@ -4,8 +4,7 @@ The **Raycast extension**: a self-contained **TypeScript / Node** project (NOT
 Rust) and a thin presenter over the `pixtuoid … --json` CLI contract. It ships
 two commands — `Manage Sources` (connect/disconnect over `pixtuoid
 sources|connect|disconnect --json`) and `Start Floating`. Parent guide: the
-workspace [`../../AGENTS.md`](../../AGENTS.md). The cross-area development model
-this consumer sits in: [`../../docs/PARALLEL-DELIVERY.md`](../../docs/PARALLEL-DELIVERY.md).
+workspace [`../../AGENTS.md`](../../AGENTS.md).
 
 > **You are in the TS consumer, not the Rust producer.** The workspace
 > `AGENTS.md` still loads above this file — but its Rust house rules
@@ -36,8 +35,7 @@ struct↔schema golden tests (`just test`), the schema↔TS-type freshness check
 TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus` or
 `OutcomeRow`, run `just gen-contract`** (re-emits the schemas + the TS types)
 and commit all of it. `src/contract.ts` / `src/contract-outcome.ts` are
-generated — eslint/prettier-ignored, never hand-edit them. This is
-`PARALLEL-DELIVERY.md`'s "codegen-from-one-source" applied to pixtuoid itself.
+generated — eslint/prettier-ignored, never hand-edit them.
 (The `source_status_json_shape` / `outcome_row_json_shape` byte tests pin the
 exact wire JSON; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
 owns its shape and the published-wire rule.)
