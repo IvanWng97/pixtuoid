@@ -354,10 +354,6 @@ fn install_target_claude_writes_sentinel_and_backs_up() {
             .as_str()
             .is_some_and(|c| c.contains("pixtuoid-hook"))
     );
-    assert!(
-        tmp.path().join("settings.json.pixtuoid.bak").exists(),
-        "a backup of the prior content was written"
-    );
 
     install_target(
         &CLAUDE_FILE,
@@ -407,20 +403,6 @@ fn uninstall_target_fails_fast_while_the_config_lock_is_held() {
 }
 
 #[test]
-fn uninstall_target_unchanged_preserves_backup() {
-    // FAKE.merge_uninstall reports changed=false → the semantic no-op branch.
-    let tmp = tempfile::TempDir::new().unwrap();
-    let cfg = tmp.path().join("config.toml");
-    std::fs::write(&cfg, "anything\n").unwrap();
-    let bak = tmp.path().join("config.toml.pixtuoid.bak");
-    std::fs::write(&bak, "backup").unwrap();
-
-    uninstall_target(&FAKE, Some(cfg.clone())).unwrap();
-
-    assert!(bak.exists(), "a no-op uninstall must NOT delete the backup");
-}
-
-#[test]
 fn install_target_reports_installed_then_up_to_date() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
@@ -433,10 +415,6 @@ fn install_target_reports_installed_then_up_to_date() {
     )
     .unwrap();
     assert!(matches!(r.outcome, InstallOutcome::Installed));
-    assert!(
-        !r.backups.is_empty(),
-        "first install of an existing file takes a backup"
-    );
     assert_eq!(r.config_path, cfg);
 
     let r2 = install_target(
@@ -446,7 +424,16 @@ fn install_target_reports_installed_then_up_to_date() {
     )
     .unwrap();
     assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
-    assert!(r2.backups.is_empty(), "a no-op install reports no backup");
+    // A semantic no-op never rewrites: a hand-formatted file keeps its bytes.
+    let formatted = std::fs::read_to_string(&cfg).unwrap().replace("\n", "\n\n");
+    std::fs::write(&cfg, &formatted).unwrap();
+    install_target(
+        &CLAUDE_FILE,
+        Some(cfg.clone()),
+        Some(PathBuf::from("/fake/pixtuoid-hook")),
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), formatted);
 }
 
 #[test]
@@ -469,19 +456,14 @@ fn uninstall_target_reports_removed_then_nothing() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("config.toml");
     std::fs::write(&cfg, "model = \"x\"\n").unwrap();
-    let bak = tmp.path().join("config.toml.pixtuoid.bak");
-    std::fs::write(&bak, "backup").unwrap();
 
     let r = uninstall_target(&FAKE2, Some(cfg.clone())).unwrap();
     assert!(matches!(r.outcome, UninstallOutcome::Removed));
-    assert_eq!(r.removed_backups, std::slice::from_ref(&bak));
-    assert!(!bak.exists());
 
     // An absent config is decided BEFORE locking, so there are no side effects.
     let missing = tmp.path().join("missing").join("settings.json");
     let r2 = uninstall_target(&CLAUDE_FILE, Some(missing.clone())).unwrap();
     assert!(matches!(r2.outcome, UninstallOutcome::NothingToRemove));
-    assert!(r2.removed_backups.is_empty());
     assert!(
         !missing.parent().unwrap().exists(),
         "a no-op uninstall leaves no dirs"
@@ -664,14 +646,6 @@ fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
             std::fs::read_to_string(&cfg).unwrap(),
             before,
             "{}: a malformed config must NOT be rewritten/truncated",
-            t.name
-        );
-        // The .lock sidecar may exist (the lock is taken before the read by
-        // design); the BACKUP must not.
-        let bak = tmp.path().join(format!("cfg.{BACKUP_SUFFIX}"));
-        assert!(
-            !bak.exists(),
-            "{}: a failed install must NOT mint a {BACKUP_SUFFIX} backup",
             t.name
         );
     }
@@ -1211,8 +1185,8 @@ fn json_value_equality_ignores_key_order_under_preserve_order() {
     // `preserve_order` swaps serde_json's `Map` to IndexMap so a merge re-emits the
     // user's key order. `Value: PartialEq` must therefore stay order-INDEPENDENT:
     // every target's `changed` flag is a semantic diff, so order-SENSITIVE equality
-    // would report `changed` for a mere re-order — rewriting the file, taking a
-    // backup, and flipping `has_hooks` on every single connect.
+    // would report `changed` for a mere re-order — rewriting the file and
+    // flipping `has_hooks` on every single connect.
     let a: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":{"y":2,"x":3}}"#).unwrap();
     let b: serde_json::Value = serde_json::from_str(r#"{"a":{"x":3,"y":2},"b":1}"#).unwrap();
     assert_eq!(a, b, "object equality must not depend on key order");

@@ -25,7 +25,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use target::{BACKUP_SUFFIX, BinaryStrategy, Target};
+use target::{BinaryStrategy, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
 /// config-file targets key install/uninstall/detect on this, not the command shape.
@@ -346,9 +346,6 @@ pub enum InstallOutcome {
 pub struct InstallReport {
     pub outcome: InstallOutcome,
     pub config_path: PathBuf,
-    /// The config's backup taken this round. Empty on a no-op, or when one
-    /// already exists.
-    pub backups: Vec<PathBuf>,
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook).
     pub path_warning: bool,
@@ -358,9 +355,9 @@ pub struct InstallReport {
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report. The ConfigLock
-/// round (read→merge→backup→write) is the load-bearing write authority (invariant #4) and
+/// round (read→merge→write) is the load-bearing write authority (invariant #4) and
 /// stays intact here; it serializes pixtuoid only against pixtuoid, since the agent CLI
-/// itself cannot honor this lock. Reads and backups go through the guard's PINNED
+/// itself cannot honor this lock. Reads and writes go through the guard's PINNED
 /// resolution — re-resolving `path` splits the round across two files on a symlink retarget.
 pub(crate) fn install_target(
     t: &Target,
@@ -388,9 +385,7 @@ pub(crate) fn install_target(
     let path_warning = t.binary_strategy == BinaryStrategy::BareNameOnPath
         && !explicit_hook
         && !io::hook_on_path();
-    let mut backups = Vec::new();
     if outcome.changed {
-        backups.extend(lock.backup_once(BACKUP_SUFFIX)?);
         lock.write_atomic(&outcome.content)?;
     }
     drop(lock);
@@ -405,7 +400,6 @@ pub(crate) fn install_target(
             InstallOutcome::AlreadyUpToDate
         },
         config_path: path,
-        backups,
         path_warning,
         post_install_hint: t.post_install_hint,
     })
@@ -473,28 +467,19 @@ pub enum UninstallOutcome {
 pub struct UninstallReport {
     pub outcome: UninstallOutcome,
     pub config_path: PathBuf,
-    /// The backups deleted on a successful removal (no longer needed once the hooks
-    /// are gone).
-    pub removed_backups: Vec<PathBuf>,
     /// The CLI couldn't be reached to deregister a host target's plugin, which
     /// stays registered with no hooks.
     pub plugin_left_registered: bool,
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. Same
-/// lock scope as `install_target`, plus the load-bearing "never rewrite or delete
-/// the backup on a semantic no-op" rule.
+/// lock scope as `install_target`, and never rewrites on a semantic no-op.
 pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
     let mut removed = strip_managed(t.merge_uninstall, &path)?;
-    // On a SEMANTIC no-op the backup stays: it is the user's only recovery.
-    let mut removed_backups = Vec::new();
-    if removed {
-        removed_backups.extend(remove_backup(&path)?);
-    }
-    // Last, since neither strip needs the CLI: a failing deregister leaves a
+    // Last, since the strip needs no CLI: a failing deregister leaves a
     // registered plugin with no hooks, never hooks that still fire.
     let plugin_left_registered = match t.host {
         Some(host) => match (host.unregister)(&path)? {
@@ -514,16 +499,8 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
             UninstallOutcome::NothingToRemove
         },
         config_path: path,
-        removed_backups,
         plugin_left_registered,
     })
-}
-
-fn remove_backup(config: &std::path::Path) -> Result<Option<PathBuf>> {
-    if !target::config_present(config) {
-        return Ok(None);
-    }
-    io::lock_config(config)?.remove_backup(BACKUP_SUFFIX)
 }
 
 /// Deleting a registered event ships GREEN — cargo-mutants does not mutate slice
