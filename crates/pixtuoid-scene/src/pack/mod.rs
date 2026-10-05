@@ -566,9 +566,9 @@ mod tests {
     /// the painters read: a rename here fails until the guide follows.
     #[test]
     fn the_guide_names_the_desk_contract() {
-        // Read at runtime: `include_str!` of a path outside the crate breaks
-        // `cargo publish`'s verify, and the extracted crate has no workspace
-        // to read the guide from.
+        // Read at runtime: `include_str!` of a path outside the crate fails
+        // `cargo test` on the extracted crate, which has no workspace to read
+        // the guide from.
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         if !root.join("Cargo.toml").exists() {
             return;
