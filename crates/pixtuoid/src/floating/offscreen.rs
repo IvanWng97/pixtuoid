@@ -68,7 +68,8 @@ impl OfficeRenderer {
         self.session.badges()
     }
 
-    /// The board's lines of the LAST rendered frame (call right after `render`).
+    /// The board's lines and the floor indicator of the LAST rendered frame
+    /// (call right after `render`).
     pub fn signs(&self) -> &[TextRun] {
         self.session.signs()
     }
