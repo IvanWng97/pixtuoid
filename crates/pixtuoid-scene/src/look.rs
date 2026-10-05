@@ -195,15 +195,6 @@ impl Raster {
         }
     }
 
-    /// The text the last frame drawn sets, in either look; `None` before the
-    /// first.
-    pub fn texts(&self) -> Option<&[crate::display::TextRun]> {
-        match self.shown? {
-            Look::Classic => self.classic.as_ref().map(|c| c.hits.texts.as_slice()),
-            Look::Cutaway { .. } => self.cutaway.as_ref()?.texts(),
-        }
-    }
-
     /// Drop the classic's recolored sprites of agents no longer in `scene`.
     pub(crate) fn evict_missing(&mut self, scene: &pixtuoid_core::SceneState) {
         if let Some(classic) = &mut self.classic {

@@ -103,7 +103,6 @@ struct Shown {
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
     hovers: Hovers,
-    texts: Vec<crate::display::TextRun>,
     /// The cells of the star it drew, if it drew one.
     star: Option<Bounds>,
 }
@@ -170,7 +169,6 @@ impl CutawayCanvas {
             epoch,
             footprints,
             hovers: list.hovers().clone(),
-            texts: list.texts().cloned().collect(),
             star: list
                 .texts()
                 .find(|run| run.role == crate::display::TextRole::Star)
@@ -195,11 +193,6 @@ impl CutawayCanvas {
     /// What the last frame answers a pointer with; `None` before the first.
     pub(crate) fn hovers(&self) -> Option<&Hovers> {
         self.shown.as_ref().map(|shown| &shown.hovers)
-    }
-
-    /// The text the last frame sets, in paint order; `None` before the first.
-    pub(crate) fn texts(&self) -> Option<&[crate::display::TextRun]> {
-        self.shown.as_ref().map(|shown| shown.texts.as_slice())
     }
 
     /// The cells of the star the last frame drew; `None` before the first or
