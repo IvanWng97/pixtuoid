@@ -4,10 +4,14 @@
 //! classic badge's terminal column. The rasterizer's font draws into these
 //! cells.
 
+use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::{AgentId, AgentSlot};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::display::pen::ArtPx;
+use crate::layout::Point;
+use crate::theme::Theme;
 
 /// A hand-drawn glyph's width in art pixels.
 pub(crate) const GLYPH_W: u16 = 3;
@@ -79,6 +83,187 @@ pub(crate) fn take(text: &str, budget: u16) -> &str {
 /// [`columns`] past all of `text`: where the run after it starts.
 pub(crate) fn advance(text: &str) -> ArtPx {
     columns(cells(text))
+}
+
+/// Logical rows between a badge's anchor and the line it sits on.
+pub(crate) const LABEL_GAP: u16 = 2;
+
+/// One line of text a frame shows: its spans laid end to end, on `plate` if it
+/// has one. Its inks are resolved, so a painter reads no theme for it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextRun {
+    /// The logical point it is placed by, as `align` says.
+    pub at: Point,
+    /// Where `at` lies on its line.
+    pub align: Align,
+    /// Its spans, in reading order.
+    pub spans: Vec<TextSpan>,
+    /// The fill behind it, if any.
+    pub plate: Option<Rgb>,
+    /// What it labels.
+    pub role: TextRole,
+}
+
+/// A stretch of a [`TextRun`] in one ink.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextSpan {
+    /// What it reads.
+    pub text: String,
+    /// Its colour.
+    pub ink: Rgb,
+}
+
+/// An agent's name badge: [`BADGE_MARKER`](crate::overlay::BADGE_MARKER) in
+/// the source's hue, then its name in its tone, on the badge plate, centred
+/// `LABEL_GAP` rows over `at`. Its parts are fields, so a painter reads them
+/// instead of a run's spans by position.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Badge {
+    /// Whose badge it is.
+    pub agent: AgentId,
+    /// The point it hangs over, its sprite's top-centre.
+    pub at: Point,
+    /// The marker's ink.
+    pub marker: Rgb,
+    /// The name, in its ink.
+    pub name: TextSpan,
+    /// The fill behind it.
+    pub plate: Rgb,
+}
+
+impl Badge {
+    /// `agent`'s badge over `anchor`.
+    pub(crate) fn new(
+        anchor: Point,
+        agent: &AgentSlot,
+        namesakes: &crate::overlay::Namesakes<'_>,
+        theme: &Theme,
+    ) -> Self {
+        let text = namesakes.text(agent);
+        let ink = crate::overlay::badge_ink(&text, crate::overlay::tone_of(agent), theme);
+        Self {
+            agent: agent.agent_id,
+            at: anchor,
+            marker: ink.marker,
+            name: TextSpan {
+                text,
+                ink: ink.name,
+            },
+            plate: crate::overlay::badge_plate(theme),
+        }
+    }
+
+    /// It as a run, for a painter that draws every run alike.
+    pub(crate) fn run(&self) -> TextRun {
+        TextRun {
+            at: self.at,
+            align: Align::Over,
+            spans: vec![
+                TextSpan {
+                    text: crate::overlay::BADGE_MARKER.to_string(),
+                    ink: self.marker,
+                },
+                self.name.clone(),
+            ],
+            plate: Some(self.plate),
+            role: TextRole::Badge(self.agent),
+        }
+    }
+
+    /// The logical cells a line `w` cells wide takes over its anchor:
+    /// [`TextRun::place`] for its run.
+    pub fn place(&self, w: u16) -> crate::layout::Bounds {
+        place(self.at, Align::Over, w)
+    }
+}
+
+/// Where a [`TextRun`]'s `at` lies on its line, a cell row tall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Align {
+    /// Centred over it, `LABEL_GAP` rows above: a badge over a head.
+    Over,
+    /// At its top-left.
+    Left,
+    /// At its top-right.
+    Right,
+    /// At its top-centre.
+    Centre,
+}
+
+/// What a [`TextRun`] labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextRole {
+    /// An agent's name badge.
+    Badge(AgentId),
+    /// The wall board's brand.
+    Brand,
+    /// The wall board's star: a link to the repo.
+    Star,
+    /// A line of the wall board's mood or context.
+    Board,
+    /// The floor indicator over the elevator.
+    Indicator,
+}
+
+impl TextRun {
+    /// The floor indicator naming floor `floor` (one-based) over the elevator
+    /// at `door`: centred on the door, in the cell over it, on the badge plate.
+    pub(crate) fn indicator(door: Point, floor: usize, theme: &Theme) -> Self {
+        Self {
+            at: Point {
+                x: door.x + crate::layout::ELEVATOR_W / 2,
+                y: crate::layout::floor_indicator_rows(door.y).start,
+            },
+            align: Align::Centre,
+            spans: vec![TextSpan {
+                text: crate::layout::floor_indicator_text(floor),
+                ink: theme.ui.neon_brand,
+            }],
+            plate: Some(crate::overlay::badge_plate(theme)),
+            role: TextRole::Indicator,
+        }
+    }
+
+    /// Its spans' text, end to end.
+    pub(crate) fn text(&self) -> String {
+        self.spans.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    /// The star's hit area: the logical cells its line covers on the
+    /// terminal's cell grid, one per cell of its text, where the classic
+    /// writes it.
+    pub(crate) fn hit_box(&self) -> crate::layout::Bounds {
+        self.place(cells(&self.text()))
+    }
+
+    /// The logical cells a line `w` cells wide takes where its align puts it:
+    /// the one placement the hit test and every terminal painter read. It
+    /// fills the cell row its anchor's row lies in, `LABEL_GAP` rows up for
+    /// [`Align::Over`].
+    pub fn place(&self, w: u16) -> crate::layout::Bounds {
+        place(self.at, self.align, w)
+    }
+}
+
+/// The logical cells a line `w` cells wide takes, placed by `at` as `align`
+/// says.
+fn place(at: Point, align: Align, w: u16) -> crate::layout::Bounds {
+    let h = crate::layout::CELL_ROWS;
+    let x = match align {
+        Align::Left => at.x,
+        Align::Right => at.x.saturating_sub(w),
+        Align::Over | Align::Centre => at.x.saturating_sub(w / 2),
+    };
+    let row = match align {
+        Align::Over => at.y.saturating_sub(LABEL_GAP),
+        Align::Left | Align::Right | Align::Centre => at.y,
+    };
+    crate::layout::Bounds {
+        x,
+        y: row / h * h,
+        width: w,
+        height: h,
+    }
 }
 
 #[cfg(test)]
