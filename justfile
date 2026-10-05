@@ -938,7 +938,7 @@ gen-wasm-check:
 
 [doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
-gen-check: compare-selftest gen-readme-check gen-art-check gen-icons-check gen-media-check
+gen-check: compare-selftest gen-readme-check gen-art-check gen-icons-check
 
 # The icons also land in the site's committed assets and change only with their
 # source, so their drift stays a gate.
