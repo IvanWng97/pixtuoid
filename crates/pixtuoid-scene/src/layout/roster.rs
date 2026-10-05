@@ -752,7 +752,7 @@ impl SceneLayout {
     pub(crate) fn clock_pos(&self) -> Option<Point> {
         let middle = self.buf_w / 2;
         super::window_posts(self.buf_w)
-            .map(|post| (post.start + post.end) / 2)
+            .map(|post| u16::midpoint(post.start, post.end))
             .filter(|&centre| centre - CLOCK.w / 2 >= NEON_PANEL.x + NEON_PANEL.width)
             .min_by_key(|centre| centre.abs_diff(middle))
             .map(|centre| Point {
@@ -793,7 +793,7 @@ impl SceneLayout {
             .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)?;
         let mut mat = centred(
             Point {
-                x: (dw.start.x + dw.end.x) / 2,
+                x: u16::midpoint(dw.start.x, dw.end.x),
                 y: dw.start.y + super::WALL_THICK_H + 1 + ENTRY_MAT.h / 2,
             },
             ENTRY_MAT,

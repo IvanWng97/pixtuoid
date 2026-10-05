@@ -16,8 +16,7 @@ mod native;
 #[cfg(feature = "native")]
 pub use native::{ClaudeCodeSource, cc_watcher, live_cc_session_ids};
 
-/// homebrew-core contract: their formula's `test do` asserts this exact id, so
-/// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
+/// The Claude Code source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "claude-code";
 
 /// The label the attachment decoder synthesizes for the `ultra_effort_exit`
@@ -197,6 +196,10 @@ fn fresh_spend(message: &serde_json::Map<String, Value>) -> u64 {
 /// There is deliberately NO user-content arm: content is user-controllable and a
 /// message QUOTING the slash-command wrapper would false-positive, so lifecycle
 /// is the SessionEnd hook + the idle sweep.
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &cc_id_from_path(Path::new(transcript_path)));
     let Some(obj) = v.as_object() else {

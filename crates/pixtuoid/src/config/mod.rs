@@ -139,7 +139,7 @@ pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
     // f32→f64 writes float noise (0.949999988079071) into a hand-edited file.
     let percent = (volume * 100.0).round() / 100.0;
     update_config(path, |doc| {
-        doc["audio"]["volume"] = toml_edit::value(percent as f64);
+        doc["audio"]["volume"] = toml_edit::value(f64::from(percent));
     })
 }
 
@@ -181,7 +181,7 @@ fn pack_source(
 /// The directory `pixtuoid/` config lives under: a set `XDG_CONFIG_HOME`, else
 /// `$HOME/.config`. Empty or relative `XDG_CONFIG_HOME` is invalid (XDG spec),
 /// so `nonempty_abs_env` falls through rather than resolving against the CWD.
-fn config_base() -> Option<PathBuf> {
+pub(crate) fn config_base() -> Option<PathBuf> {
     crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME")
         .or_else(|| pixtuoid_core::platform::user_home_opt().map(|h| h.join(".config")))
 }
@@ -298,7 +298,6 @@ where
         doc
     };
     mutate(&mut doc);
-    lock.backup_once(crate::install::target::BACKUP_SUFFIX)?;
     lock.write_atomic(&doc.to_string())
 }
 
@@ -351,15 +350,15 @@ pub(crate) fn save_floating(
     y: Option<i32>,
 ) -> Result<()> {
     update_config(path, |doc| {
-        doc["floating"]["width"] = toml_edit::value(width as i64);
-        doc["floating"]["height"] = toml_edit::value(height as i64);
+        doc["floating"]["width"] = toml_edit::value(i64::from(width));
+        doc["floating"]["height"] = toml_edit::value(i64::from(height));
         // Set-or-CLEAR x/y: a `None` means the OS couldn't report the position
         // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords
         // would restore a stale/offscreen spot next launch, so drop the keys and
         // let the OS place the window.
         for (key, val) in [("x", x), ("y", y)] {
             match val {
-                Some(v) => doc["floating"][key] = toml_edit::value(v as i64),
+                Some(v) => doc["floating"][key] = toml_edit::value(i64::from(v)),
                 // `as_table_like_mut`, not `as_table_mut`: `floating` serializes as
                 // an INLINE table, for which the standard-table accessor returns
                 // None and the key would never drop.
@@ -419,8 +418,12 @@ pub fn resolve_desk_cap(
 
 /// Resolve CLI + config into the one `&'static Theme` the runtime uses
 /// (CLI > config > `NORMAL`). The asymmetry is deliberate: a `--theme` typo is
-/// explicit user intent and hard-errors (listing valid names), while a config
-/// typo soft-warns and falls back so a stale config file never bricks startup.
+/// explicit user intent and hard-errors, while a config typo soft-warns and
+/// falls back so a stale config file never bricks startup.
+///
+/// # Errors
+///
+/// If `cli_theme` names no theme; the message lists the valid names.
 pub fn resolve_theme(
     config: &AppConfig,
     cli_theme: Option<&str>,

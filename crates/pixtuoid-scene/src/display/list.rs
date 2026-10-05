@@ -5,7 +5,7 @@ use pixtuoid_core::sprite::format::Pack;
 use super::Span;
 use crate::atmosphere::Carpet;
 use crate::dither::Dithered;
-use crate::layout::{Bounds, Point};
+use crate::layout::Bounds;
 use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -19,7 +19,7 @@ const STANDBY_STOPS: u8 = 2;
 const STANDBY_LEVEL_PER_STOP: i8 = -2;
 
 /// What a desk's screen shows. A screen is its own light: whatever the room's
-/// lights do, they leave its glass alone ([`paint_list`](crate::cutaway::paint::paint_list)).
+/// lights do, they leave its glass alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Screen {
     /// Dark glass.
@@ -62,21 +62,6 @@ impl Screen {
     }
 }
 
-/// One agent's name badge, painted in the canvas so no terminal text shares a
-/// cell with the image: `overlay`'s text and
-/// [`BadgeInk`](crate::overlay::BadgeInk) on its
-/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body:
-/// `overlay::build_overlay`'s anchors hang off the classic-drawn sprite, which
-/// for a sitter is elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Badge {
-    /// Its bottom centre, in logical units: the sprite's centre, clear above
-    /// its head and any raised monitor behind it.
-    pub(crate) at: Point,
-    pub(crate) text: String,
-    pub(crate) tone: crate::overlay::LabelTone,
-}
-
 /// One frame's pieces — the windows, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
@@ -85,16 +70,15 @@ pub(crate) struct Badge {
 /// occlusion pass.
 pub(crate) struct DisplayList<'a> {
     pub(super) pieces: Vec<Piece>,
-    /// The room's own lights, which paint over every piece at once
-    /// ([`paint_list`](crate::cutaway::paint::paint_list)).
+    /// The room's own lights, which light every piece at once.
     pub(super) lights: Vec<LightPiece>,
     /// How dark the room is: every non-emissive pixel is painted under it, so a
     /// change repaints the whole frame.
-    pub(super) ambient: crate::cutaway::light::Ambient,
+    pub(super) ambient: crate::display::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
     pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
-    pub(super) flash: crate::cutaway::light::Flash,
+    pub(super) flash: crate::display::light::Flash,
     /// The figures' hovers, in `pieces`' order.
     pub(super) hovers: super::Hovers,
     // What it was built with, so painting it cannot use anything else: a
@@ -143,10 +127,10 @@ impl Piece {
 
 /// One of the room's lights: what it lifts, over which cells. A change repaints
 /// its span from every light that meets it, which alone light a rect as the
-/// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
+/// whole frame does.
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
-    pub(crate) view: crate::cutaway::light::LightView,
+    pub(crate) view: crate::display::light::LightView,
     pub(crate) fingerprint: u64,
 }
 
@@ -186,7 +170,7 @@ impl<'a> DisplayList<'a> {
         &self.lights
     }
 
-    pub(crate) fn ambient(&self) -> crate::cutaway::light::Ambient {
+    pub(crate) fn ambient(&self) -> crate::display::light::Ambient {
         self.ambient
     }
 
@@ -194,7 +178,7 @@ impl<'a> DisplayList<'a> {
         self.carpet
     }
 
-    pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {
+    pub(crate) fn flash(&self) -> crate::display::light::Flash {
         self.flash
     }
 
@@ -214,11 +198,19 @@ impl<'a> DisplayList<'a> {
         &self.hovers
     }
 
-    /// Each drawn agent's badge, in draw order.
-    #[cfg(test)]
-    pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
+    /// Each text run, in draw order.
+    pub(crate) fn texts(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Badge { badge } => Some(badge),
+            PieceKind::Text { run } => Some(run),
+            _ => None,
+        })
+    }
+
+    /// Each agent's badge, in draw order.
+    #[cfg(test)]
+    pub(crate) fn badges(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Text { run } if matches!(run.role, super::TextRole::Badge(_)) => Some(run),
             _ => None,
         })
     }
@@ -269,9 +261,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             chair,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
-        PieceKind::Badge { ref badge } => badge.hash(&mut h),
-        PieceKind::Board { ref board } => board.hash(&mut h),
-        PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
+        PieceKind::Text { ref run } => run.hash(&mut h),
         PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
@@ -317,9 +307,7 @@ impl PieceKind {
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
-            | PieceKind::Badge { .. }
-            | PieceKind::Board { .. }
-            | PieceKind::Indicator { .. } => false,
+            | PieceKind::Text { .. } => false,
         }
     }
 }
@@ -417,18 +405,10 @@ pub(crate) enum PieceKind {
         body: Span,
     },
     /// An effect riding on the figure pushed beside it.
-    Effect(crate::cutaway::effects::Riding),
-    Badge {
-        badge: Badge,
-    },
-    /// The wall board's text, over the neon sign's interior.
-    Board {
-        board: crate::board::BoardModel,
-    },
-    /// The floor indicator over the elevator at `door`.
-    Indicator {
-        door: Point,
-        floor: usize,
+    Effect(crate::display::effects::Riding),
+    /// A line of text over everything it meets.
+    Text {
+        run: super::TextRun,
     },
 }
 

@@ -28,17 +28,6 @@ use pixtuoid_scene::look::Rendered;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pathfind::Router;
 
-/// Floors `a` and `b`, which differ, borrowed together.
-fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
-    if a < b {
-        let (lo, hi) = floors.split_at_mut(b);
-        (&mut lo[a], &mut hi[0])
-    } else {
-        let (lo, hi) = floors.split_at_mut(a);
-        (&mut hi[0], &mut lo[b])
-    }
-}
-
 fn floor_info_for(
     current_idx: usize,
     nf: usize,
@@ -78,6 +67,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     mouse_pos: Option<(u16, u16)>,
     cached_layout: Option<Arc<SceneLayout>>,
     last_hovers: Hovers,
+    last_star: Option<pixtuoid_scene::layout::Bounds>,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
@@ -238,6 +228,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             mouse_pos: None,
             cached_layout: None,
             last_hovers: Hovers::default(),
+            last_star: None,
             last_geometry: None,
             office: PerOffice::new(),
             debug_walkable: false,
@@ -372,16 +363,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cached_layout.as_deref()
     }
 
-    /// Whether the last frame set the wall board's star as text, the one place a
-    /// click opens the repo: only a half-block frame does, not a too-small one or
-    /// a floor slide; the cutaway paints its board into the image.
-    pub(crate) fn star_clickable(&self) -> bool {
-        matches!(
-            self.last_geometry,
-            Some(crate::tui::geometry::SceneGeometry::HalfBlock { .. })
-        )
-    }
-
     /// The pixels cell `(col, row)` showed in the last frame drawn.
     pub(crate) fn scene_area_at(
         &self,
@@ -398,7 +379,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         row: u16,
     ) -> Option<crate::tui::hit_test::SceneHit<'_>> {
         let layout = self.cached_layout.as_deref()?;
-        crate::tui::hit_test::scene_hit(&self.last_hovers, layout, self.scene_area_at(col, row)?)
+        crate::tui::hit_test::scene_hit(
+            &self.last_hovers,
+            self.last_star,
+            layout,
+            self.scene_area_at(col, row)?,
+        )
     }
 
     /// The agent topmost at cell `(col, row)` in the last frame drawn.
@@ -615,7 +601,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = self.version_popup_scale(now);
         let onboarding_dim = self.chrome.onboarding.dim;
 
-        let (from, to) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let Ok([from, to]) = self.floors.get_disjoint_mut([from_floor, to_floor]) else {
+            tracing::warn!(
+                from_floor,
+                to_floor,
+                "a slide between floors it cannot borrow"
+            );
+            self.cancel_transition();
+            return Ok(());
+        };
 
         // Transitions hide *text* overlays (tooltips, bubbles, labels) but keep
         // every pixel-level visual, so the slide reads as a continuous scene.
@@ -684,6 +678,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     fn forget_drawn(&mut self) {
         self.cached_layout = None;
         self.last_hovers = Hovers::default();
+        self.last_star = None;
         self.last_geometry = None;
     }
 
@@ -705,6 +700,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         now: SystemTime,
     ) {
         self.last_hovers = out.hovers;
+        self.last_star = out.star;
         self.last_geometry = out.geometry;
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
         // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
@@ -731,6 +727,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// Draw one frame of `scene`, then follow a terminal resize.
+    ///
+    /// # Errors
+    ///
+    /// If querying the terminal size or drawing the frame to the backend fails.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         self.draw_frame(scene, pack, now)?;
         self.follow_resize();
@@ -886,7 +887,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .slide_world(&from_scene, pack, now, from_floor, nf);
         let to_world = self.chrome.slide_world(&to_scene, pack, now, to_floor, nf);
-        let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let Ok([leaving, arriving]) = self.floors.get_disjoint_mut([from_floor, to_floor]) else {
+            tracing::warn!(
+                from_floor,
+                to_floor,
+                "a slide between floors it cannot borrow"
+            );
+            self.cancel_transition();
+            return Ok(());
+        };
         let mut transition_chitchat = std::collections::HashMap::new();
         let look = Look::Cutaway {
             scale: fitted.fit.render_scale(),
@@ -1012,14 +1021,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return drawn;
         };
         cutaway.paint(fitted, self.current_floor, pixels, dirty, now);
-        let hovers = self.floors[self.current_floor]
-            .raster
-            .hovers()
-            .cloned()
-            .unwrap_or_default();
+        let raster = &self.floors[self.current_floor].raster;
+        let hovers = raster.hovers().cloned().unwrap_or_default();
+        let star = raster.star();
         let geometry = fitted.geometry();
         let mouse = self.mouse_pos.and_then(|(mx, my)| {
-            let hit = scene_hit(&hovers, &frame_layout, geometry.area_at(mx, my)?)?;
+            let hit = scene_hit(&hovers, star, &frame_layout, geometry.area_at(mx, my)?)?;
             Some((mx, my, hit))
         });
         cutaway.before_flush(now);
@@ -1046,6 +1053,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             DrawOut {
                 layout: Some(frame_layout),
                 hovers,
+                star,
                 occupied_waypoints,
                 geometry: Some(geometry),
             },

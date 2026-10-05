@@ -59,11 +59,12 @@ pub fn keystroke(rng: &mut NoiseStream) -> Vec<f32> {
 
     let total = n_samples(up_at) + nu + 8;
     let mut buf = vec![0.0f32; total];
-    for i in 0..n {
+    let layers = click.iter().zip(&body).zip(&spice);
+    for (i, (b, ((click, body), spice))) in buf.iter_mut().zip(layers).enumerate() {
         let t = i as f32 / SR;
-        buf[i] = click[i] * (-t * 330.0).exp()
-            + body[i] * (-t * 280.0).exp() * 1.1
-            + spice[i] * (-t * 500.0).exp() * 0.18;
+        *b = click * (-t * 330.0).exp()
+            + body * (-t * 280.0).exp() * 1.1
+            + spice * (-t * 500.0).exp() * 0.18;
     }
     let up_scaled: Vec<f32> = up
         .iter()
@@ -113,13 +114,13 @@ pub fn printer_whir(rng: &mut NoiseStream) -> Vec<f32> {
     let texture = bandpass(&raw, 400.0, 2600.0);
     let tau = std::f32::consts::TAU;
     let mut phase = 0.0f32;
-    for i in 0..n {
+    for (i, (b, texture)) in buf.iter_mut().zip(&texture).enumerate() {
         let t = i as f32 / SR;
         let f =
             80.0 + 50.0 * (t / 0.25).clamp(0.0, 1.0) - 30.0 * ((t - 1.15) / 0.35).clamp(0.0, 1.0);
         phase += tau * f / SR;
         let motor = phase.sin() + 0.45 * (2.0 * phase).sin() + 0.2 * (3.0 * phase).sin();
-        buf[i] = motor * env(i) * 0.5 + texture[i] * env_tex(i) * 0.16;
+        *b = motor * env(i) * 0.5 + texture * env_tex(i) * 0.16;
     }
     let mut at = 0.28f32;
     while at < 1.05 {
@@ -165,10 +166,12 @@ pub fn vending_drop(rng: &mut NoiseStream) -> Vec<f32> {
         let dn = n_samples(0.12);
         let raw: Vec<f32> = (0..dn).map(|_| rng.norm()).collect();
         let rattle = bandpass(&raw, 300.0, 900.0);
-        (0..dn)
-            .map(|i| {
+        rattle
+            .iter()
+            .enumerate()
+            .map(|(i, rattle)| {
                 let t = i as f32 / SR;
-                (tau * 170.0 * t).sin() * (-t * 70.0).exp() + rattle[i] * (-t * 150.0).exp() * 0.4
+                (tau * 170.0 * t).sin() * (-t * 70.0).exp() + rattle * (-t * 150.0).exp() * 0.4
             })
             .collect()
     };
@@ -224,12 +227,14 @@ pub fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
     let splash = bandpass(&raw, spl_lo, spl_hi);
     let tau = std::f32::consts::TAU;
     let mut phase = 0.0f32;
-    let mut buf: Vec<f32> = (0..n)
-        .map(|i| {
+    let mut buf: Vec<f32> = splash
+        .iter()
+        .enumerate()
+        .map(|(i, splash)| {
             let t = i as f32 / SR;
             let f = f0 * (1.0 + 0.12 * t / d); // the rising Minnaert chirp
             phase += tau * f / SR;
-            phase.sin() * (-t * decay).exp() + splash[i] * (-t * 180.0).exp() * spl_gain
+            phase.sin() * (-t * decay).exp() + splash * (-t * 180.0).exp() * spl_gain
         })
         .collect();
     normalize(&mut buf, 1.0);
@@ -248,11 +253,13 @@ pub fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
     let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
     let hiss = lowpass(&raw, 3800.0);
     let tau = std::f32::consts::TAU;
-    let mut buf: Vec<f32> = (0..n)
-        .map(|i| {
+    let mut buf: Vec<f32> = hiss
+        .iter()
+        .enumerate()
+        .map(|(i, hiss)| {
             let t = i as f32 / SR;
             let room = (tau * 90.0 * t).sin() * (1.0 + 0.2 * (tau * 0.4 * t).sin()) * 0.006;
-            hiss[i] * 0.010 + room
+            hiss * 0.010 + room
         })
         .collect();
     let n_pops = (n as f32 / SR * CRACKLE_POPS_PER_SEC) as usize;
@@ -307,7 +314,7 @@ fn master(buf: &[f32], drive: f32, peak: f32) -> Vec<f32> {
 /// the day and night voices differ on.
 fn ep_pluck_h2(midi: u8, dur_s: f32, vel: f32, h2: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     (0..n)
         .map(|i| {
@@ -350,11 +357,13 @@ fn snare(rng: &mut NoiseStream) -> Vec<f32> {
     let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
     let noise = bandpass(&raw, 400.0, 3200.0);
     let tau = std::f32::consts::TAU;
-    (0..n)
-        .map(|i| {
+    noise
+        .iter()
+        .enumerate()
+        .map(|(i, noise)| {
             let t = i as f32 / SR;
             let tone = (tau * 185.0 * t).sin() * (-t * 25.0).exp() * 0.5;
-            (noise[i] * (-t * 22.0).exp() + tone) * 0.8
+            (noise * (-t * 22.0).exp() + tone) * 0.8
         })
         .collect()
 }
@@ -364,8 +373,9 @@ fn hat(rng: &mut NoiseStream, open: bool) -> Vec<f32> {
     let n = n_samples(dur);
     let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
     let hp = crate::audio::dsp::highpass(&raw, 6000.0);
-    (0..n)
-        .map(|i| hp[i] * (-(i as f32 / SR) * decay).exp() * 0.5)
+    hp.iter()
+        .enumerate()
+        .map(|(i, hp)| hp * (-(i as f32 / SR) * decay).exp() * 0.5)
         .collect()
 }
 
@@ -381,7 +391,7 @@ pub fn stem_pad() -> Vec<f32> {
         let nd = n_samples(dur);
         let mut chord_sig = vec![0.0f32; nd];
         for (i, &m) in chord.iter().enumerate() {
-            let f = midi_freq(m as f32);
+            let f = midi_freq(f32::from(m));
             let env = env_ar(nd, 0.25 + 0.08 * i as f32, 1.2);
             for (j, slot) in chord_sig.iter_mut().enumerate() {
                 let t = j as f32 / SR;
@@ -456,13 +466,13 @@ fn ep_pluck_vel(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// The plucked-string lead voice ("nylon" family).
 fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     let h2 = 0.30 + 0.30 * vel;
     // decay follows pitch (higher strings die faster) and breathes per note; the
     // velocity BITS are the jitter source, not an rng, so identical inputs still
     // render identical buffers (the purity contract)
-    let pitch_k = 1.0 + (midi as f32 - 72.0) * 0.02;
+    let pitch_k = 1.0 + (f32::from(midi) - 72.0) * 0.02;
     let breath = 0.85 + 0.30 * (vel * 137.5).fract();
     let d = 3.4 * pitch_k * breath;
     let mut buf: Vec<f32> = (0..n)
@@ -477,7 +487,7 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         })
         .collect();
     let pn = n_samples(0.006);
-    let mut prng = NoiseStream::new(((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let mut prng = NoiseStream::new((u64::from(midi) << 32) ^ u64::from(vel.to_bits()));
     let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
     let pick_noise = bandpass(&raw, 2000.0, 5000.0);
     for (i, &v) in pick_noise.iter().enumerate() {
@@ -492,7 +502,7 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// keeps the transient, held-note plateau envelope.
 fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     // half-note release: a sub tail crossing into the next root reads as mud
     let env = env_ar(n, 0.03, dur_s * 0.5);
@@ -513,11 +523,11 @@ fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// 1 : 5.9 : 16.5, fast-dying overtones, a resonator-body thump.
 fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     // higher tines die faster; the vel BITS jitter decay per note, not an rng,
     // so identical inputs still render identical buffers (the purity contract)
-    let pitch_k = (1.0 + (midi as f32 - 72.0) * 0.025).max(0.2); // d stays positive below midi 32
+    let pitch_k = (1.0 + (f32::from(midi) - 72.0) * 0.025).max(0.2); // d stays positive below midi 32
     let breath = 0.9 + 0.2 * (vel * 91.7).fract();
     let d = 2.6 * pitch_k * breath;
     let mut buf: Vec<f32> = (0..n)
@@ -531,7 +541,8 @@ fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         })
         .collect();
     let pn = n_samples(0.010);
-    let mut prng = NoiseStream::new(0x4B41_4C49 ^ ((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let mut prng =
+        NoiseStream::new(0x4B41_4C49 ^ (u64::from(midi) << 32) ^ u64::from(vel.to_bits()));
     let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
     let thump = bandpass(&raw, 120.0, 700.0);
     for (i, &v) in thump.iter().enumerate() {
@@ -546,9 +557,9 @@ fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// long ring, the rotating-fan tremolo baked in.
 fn vibe_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
-    let pitch_k = 1.0 + (midi as f32 - 69.0) * 0.015;
+    let pitch_k = 1.0 + (f32::from(midi) - 69.0) * 0.015;
     let d = 1.3 * pitch_k;
     // the vel BITS detune the fan rate per note (purity contract, as above)
     let trem_hz = 4.2 + 0.8 * (vel * 53.1).fract();
@@ -564,7 +575,8 @@ fn vibe_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         })
         .collect();
     let pn = n_samples(0.008);
-    let mut prng = NoiseStream::new(0x5649_4245 ^ ((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let mut prng =
+        NoiseStream::new(0x5649_4245 ^ (u64::from(midi) << 32) ^ u64::from(vel.to_bits()));
     let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
     let mallet = bandpass(&raw, 600.0, 1800.0);
     for (i, &v) in mallet.iter().enumerate() {
@@ -608,13 +620,12 @@ fn night_pad_core(
 ) -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     let mut buf = vec![0.0f32; n_samples(bar_s * loop_bars as f32)];
-    for bar in 0..loop_bars {
-        let chord = chords[bar % chords.len()];
+    for (bar, &chord) in chords.iter().cycle().take(loop_bars).enumerate() {
         let dur = bar_s + 1.2;
         let nd = n_samples(dur);
         let mut sig = vec![0.0f32; nd];
         for (i, &m) in chord.iter().enumerate() {
-            let f = midi_freq(m as f32);
+            let f = midi_freq(f32::from(m));
             let env = env_ar(nd, 0.5 + 0.1 * i as f32, 1.8);
             for (j, slot) in sig.iter_mut().enumerate() {
                 let t = j as f32 / SR;
@@ -625,7 +636,7 @@ fn night_pad_core(
             }
         }
         if let Some((bass_roots, sub_gain)) = sub {
-            let fb = midi_freq(bass_roots[bar % bass_roots.len()] as f32);
+            let fb = midi_freq(f32::from(bass_roots[bar % bass_roots.len()]));
             for half in 0..2 {
                 let hdur = bar_s / 2.0 + 0.4;
                 let hn = n_samples(hdur);
@@ -762,11 +773,13 @@ fn night_texture_core(loop_secs: f32, kick_times: &[f32], rng: &mut NoiseStream)
     let raw: Vec<f32> = (0..total).map(|_| rng.norm()).collect();
     let hiss = lowpass(&raw, 3800.0);
     let tau = std::f32::consts::TAU;
-    let mut buf: Vec<f32> = (0..total)
-        .map(|i| {
+    let mut buf: Vec<f32> = hiss
+        .iter()
+        .enumerate()
+        .map(|(i, hiss)| {
             let t = i as f32 / SR;
             let room = (tau * 90.0 * t).sin() * (1.0 + 0.2 * (tau * 0.4 * t).sin()) * 0.006;
-            hiss[i] * 0.010 + room
+            hiss * 0.010 + room
         })
         .collect();
     let n_pops = (n as f32 / SR * CRACKLE_POPS_PER_SEC) as usize;
@@ -811,13 +824,12 @@ pub(super) fn day_take_pad(take: &score::DayTake) -> Vec<f32> {
 fn day_pad_core(chords: &[[u8; 4]], bar_s: f32, loop_bars: usize) -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     let mut buf = vec![0.0f32; n_samples(bar_s * loop_bars as f32)];
-    for bar in 0..loop_bars {
-        let chord = chords[bar % chords.len()];
+    for (bar, &chord) in chords.iter().cycle().take(loop_bars).enumerate() {
         let dur = bar_s + 0.9;
         let nd = n_samples(dur);
         let mut chord_sig = vec![0.0f32; nd];
         for (i, &m) in chord.iter().enumerate() {
-            let f = midi_freq(m as f32);
+            let f = midi_freq(f32::from(m));
             let env = env_ar(nd, 0.25 + 0.08 * i as f32, 1.2);
             for (j, slot) in chord_sig.iter_mut().enumerate() {
                 let t = j as f32 / SR;

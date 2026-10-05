@@ -43,12 +43,12 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
     let mag_trim = theme.furniture.magazine_trim;
     // Dims come from the one furniture table, which the hover box reads too.
     let size = crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable).visual;
-    let (w, h) = (size.w as i32, size.h as i32);
+    let (w, h) = (i32::from(size.w), i32::from(size.h));
     for dy in 0..h {
         for dx in 0..w {
-            let px = cx as i32 - w / 2 + dx;
-            let py = cy as i32 - h / 2 + dy;
-            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
+            let px = i32::from(cx) - w / 2 + dx;
+            let py = i32::from(cy) - h / 2 + dy;
+            if px < 0 || py < 0 || px >= i32::from(buf.width()) || py >= i32::from(buf.height()) {
                 continue;
             }
             let on_bottom = dy == h - 1;
@@ -64,8 +64,8 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
         ((1, 0), mag_trim),
     ];
     for ((dx, dy), c) in mag_pixels {
-        let px = cx as i32 + dx;
-        let py = cy as i32 + dy;
+        let px = i32::from(cx) + dx;
+        let py = i32::from(cy) + dy;
         if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, *c);
         }
@@ -86,16 +86,16 @@ pub(super) fn paint_kitchen_island(
     let shade = theme.furniture.chair_trim;
     let accents = theme.appliance.vending_drinks;
     let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
-    let (w, h) = (vis.w as i32, vis.h as i32);
+    let (w, h) = (i32::from(vis.w), i32::from(vis.h));
     for dy in 0..h {
         for dx in 0..w {
             let on_corner = (dx == 0 || dx == w - 1) && (dy == 0 || dy == h - 1);
             if on_corner {
                 continue;
             }
-            let px = cx as i32 - w / 2 + dx;
-            let py = cy as i32 - h / 2 + dy;
-            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
+            let px = i32::from(cx) - w / 2 + dx;
+            let py = i32::from(cy) - h / 2 + dy;
+            if px < 0 || py < 0 || px >= i32::from(buf.width()) || py >= i32::from(buf.height()) {
                 continue;
             }
             // Rows 2+ inset 1px per side so the countertop reads as overhanging.
@@ -114,8 +114,8 @@ pub(super) fn paint_kitchen_island(
     }
     // Front detail: door seams + handles so the body reads as cabinetry, not a slab.
     let putxy = |buf: &mut RgbBuffer, dx: i32, dy: i32, c: Rgb| {
-        let px = cx as i32 - w / 2 + dx;
-        let py = cy as i32 - h / 2 + dy;
+        let px = i32::from(cx) - w / 2 + dx;
+        let py = i32::from(cy) - h / 2 + dy;
         if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, c);
         }
@@ -319,7 +319,7 @@ pub(super) fn paint_fish_tank(
     const FISH_ALT_STEP_MS: u64 = 4 * FULL_TICK_MS;
     const FISH_ALT_PHASE_STEPS: u64 = 7;
     const BUBBLE_RISE_STEP_MS: u64 = 2 * FULL_TICK_MS;
-    let span = (w - 5) as u64;
+    let span = u64::from(w - 5);
     let mut fish = |lane_dy: u16, color: Rgb, step_ms: u64, phase: u64| {
         let cycle = span * 2;
         let step = ((t / step_ms) + phase) % cycle;
@@ -334,7 +334,7 @@ pub(super) fn paint_fish_tank(
     };
     fish(3, fc.tank_fish, FISH_STEP_MS, 0);
     fish(5, fc.tank_fish_alt, FISH_ALT_STEP_MS, FISH_ALT_PHASE_STEPS);
-    let bubble_dy = (h - 5) - ((t / BUBBLE_RISE_STEP_MS) % (h as u64 - 6)) as u16;
+    let bubble_dy = (h - 5) - ((t / BUBBLE_RISE_STEP_MS) % (u64::from(h) - 6)) as u16;
     put(w - 3, bubble_dy, fc.tank_water_line);
     // Plant sprig last so the fish swim behind it.
     put(2, 5, fc.tank_plant);

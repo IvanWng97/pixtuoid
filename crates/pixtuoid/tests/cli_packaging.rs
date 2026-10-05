@@ -211,6 +211,9 @@ fn artifact_commands_exit_0_when_their_reader_leaves() {
 #[test]
 fn home_reading_commands_exit_0_when_their_reader_leaves() {
     let home = tempfile::TempDir::new().expect("tempdir");
+    // Claude Code counts as detected by its `~/.claude` dir alone, and only a
+    // detected CLI reaches `setup --yes`'s apply-loop rows.
+    std::fs::create_dir_all(home.path().join(".claude")).expect("seed ~/.claude");
     for args in [
         &["sources", "--json"][..],
         &["sources"],
@@ -219,8 +222,6 @@ fn home_reading_commands_exit_0_when_their_reader_leaves() {
         &["connect", "claude-code", "--json"],
         &["disconnect", "claude-code"],
         &["sources", "set", "claude-code"],
-        // After `connect`: its config is what `setup` detects, and only a
-        // detected CLI reaches the apply loop's rows.
         &["setup", "--yes"],
     ] {
         let out = common::isolated(args, home.path())

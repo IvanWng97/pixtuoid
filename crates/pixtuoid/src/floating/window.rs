@@ -174,7 +174,10 @@ impl FloatingApp {
             },
             theme: self.theme,
             size: Size { w: buf_w, h: buf_h },
-            place: Place::default(),
+            place: Place {
+                gateway: pixtuoid_scene::board::office_gateway(&scene),
+                floor: None,
+            },
             debug_walkable: false,
         });
         let Some(surface) = self.surface.as_mut() else {
@@ -194,14 +197,15 @@ impl FloatingApp {
             return;
         };
         surf.fill_upscaled(office, scale);
-        let labels = self.renderer.labels(&scene);
-        super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
-        let board = self.renderer.board(&scene, floor_meta.motion, now);
+        super::offscreen::paint_labels_into_surface(
+            &mut surf,
+            self.renderer.badges(),
+            scale as i32,
+        );
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,
-            &board,
+            self.renderer.signs(),
             scale as i32,
-            self.theme,
         );
         let budget = super::offscreen::footer_budget(win_w);
         let footer = self
@@ -234,12 +238,12 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_inner_size(LogicalSize::new(
-                self.cfg.width as f64,
-                self.cfg.height as f64,
+                f64::from(self.cfg.width),
+                f64::from(self.cfg.height),
             ))
             .with_min_inner_size(LogicalSize::new(
-                config::FLOATING_MIN_W as f64,
-                config::FLOATING_MIN_H as f64,
+                f64::from(config::FLOATING_MIN_W),
+                f64::from(config::FLOATING_MIN_H),
             ));
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)

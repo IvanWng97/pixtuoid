@@ -16,14 +16,7 @@ const ENTRY: &str = "look";
 /// Each model file or directory still naming a rasterizer, how many paths do,
 /// and the PR that removes the edge. A fix deletes its entry; a new edge under a
 /// listed path changes its count.
-const KNOWN_EDGES: &[(&str, usize, &str)] = &[
-    ("display/", 26, "text, light and effects: #1270"),
-    (
-        "overlay.rs",
-        6,
-        "cutaway::text widths and AgentFrame: #1270",
-    ),
-];
+const KNOWN_EDGES: &[(&str, usize, &str)] = &[];
 
 fn is_rasterizer(ident: &syn::Ident) -> bool {
     RASTERIZERS.iter().any(|r| ident == r)
