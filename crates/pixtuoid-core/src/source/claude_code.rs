@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
 use crate::source::decoder::{
@@ -46,7 +46,6 @@ pub fn cc_id_from_path(path: &Path) -> String {
 /// registration: a Workflow-tool fleet's subagents carry no `Agent` `tool_use` and no
 /// end marker, so without `SubagentStop` they hold desks until the stale sweep.
 pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
         return Ok(None); // shared path reports the malformed payload
     };
@@ -63,12 +62,12 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
         .get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("{event} missing/empty session_id"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, "session_id"))?;
     let wire_agent_id = obj
         .get("agent_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("{event} missing/empty agent_id"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, "agent_id"))?;
     // The wire's `agent_id` is BARE hex while the watcher's id space is
     // `agent-<id>`; the CC docs' example shows one already prefixed.
     let prefixed = if wire_agent_id.starts_with("agent-") {

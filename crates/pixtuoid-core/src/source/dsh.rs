@@ -76,7 +76,7 @@ fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v s
 /// # Errors
 ///
 /// Never: the `Result` is the [`HookCustom::ClaimsAll`](crate::source::registry::HookCustom::ClaimsAll) decoder signature, and a malformed payload decodes to `vec![]`.
-pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
+pub fn decode_dsh_payload(v: &Value) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
     };

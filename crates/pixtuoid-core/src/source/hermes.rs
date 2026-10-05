@@ -29,7 +29,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Result, anyhow, bail};
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
 use crate::AgentId;
@@ -107,11 +107,11 @@ fn resolve_hermes_home(
 pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("hermes hook payload must be an object"))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("hermes payload missing hook_event_name"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "hook_event_name"))?;
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
@@ -123,7 +123,7 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .or(cwd)
-        .ok_or_else(|| anyhow!("hermes payload has no session_id or cwd"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id|cwd"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd = cwd.unwrap_or("");
 
@@ -222,10 +222,7 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         ]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!(
-                "unsupported hermes hook event: {}",
-                crate::source::decoder::display_safe(other)
-            )
+            Err(DecodeError::unsupported(SOURCE_NAME, other))
         }
     };
     let mut evs = decoded?;

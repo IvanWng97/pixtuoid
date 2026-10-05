@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 use std::path::Path;
 

@@ -31,7 +31,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Result, anyhow};
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::{Map, Value};
 
 use crate::AgentId;
@@ -53,7 +53,7 @@ pub const SOURCE_NAME: &str = "kimi";
 pub(crate) fn decode_kimi_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("kimi hook payload must be an object"))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     match obj.get("hook_event_name").and_then(|s| s.as_str()) {
         Some("PostToolUseFailure") => {
             let session_id = kimi_session_id(obj)?;
@@ -105,7 +105,7 @@ fn kimi_session_id(obj: &Map<String, Value>) -> Result<String> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from)
-        .ok_or_else(|| anyhow!("kimi failure-hook payload missing/empty session_id"))
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "failure-hook", "session_id"))
 }
 
 #[cfg(test)]

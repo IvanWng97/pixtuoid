@@ -4,7 +4,7 @@
 //! its value is not the datum but the QUESTION a struct literal forces, after a
 //! checklist bullet let three sources ship an unverified resolver (#880/#343/#342/#195).
 
-use anyhow::Result;
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 
 use crate::source::decoder::{

@@ -5,9 +5,8 @@
 //!
 //! Determinism: a FIXED `--t0-ms` (or `--hour`, which maps onto a FIXED
 //! reference calendar date rather than "now") plus a fixed `--advance-ms` give
-//! the same bytes every run, so `gen-check` pixel-gates the committed poster
-//! like every still. Run under TZ=UTC, which `scripts/gen-media.py` pins
-//! process-wide.
+//! the same bytes every run. Run under TZ=UTC, which `scripts/gen-media.py`
+//! pins process-wide.
 //!
 //! Driven by the `wasm-still` job kind in `scripts/media.json`; not part of the
 //! shipped wasm artifact (an example, native-only).
