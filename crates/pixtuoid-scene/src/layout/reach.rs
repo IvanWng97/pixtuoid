@@ -58,8 +58,9 @@ impl ReachSet {
     /// Is the coarse cell containing pixel `p` in the reachable component?
     /// Out-of-bounds or blocked → `false`.
     ///
-    /// **Conservative at cell boundaries** (a lone walkable px inside a
-    /// <50%-walkable coarse cell reads unreachable), but NEVER a false positive:
+    /// **Conservative at cell boundaries** (a walkable px in a coarse cell whose
+    /// largest `walk_piece` is under the walkable minimum reads unreachable), but
+    /// NEVER a false positive:
     /// `reaches(p) ⇒ A* can route to p`, so `approach_point` can safely drop any
     /// side `reaches` rejects.
     pub fn reaches(&self, p: Point) -> bool {
