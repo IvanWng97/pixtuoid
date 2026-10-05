@@ -29,6 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FONTS = ROOT / "crates/pixtuoid-scene/fonts"
 OUT = FONTS / "fallback.bin"
 
+FETCH_TIMEOUT_S = 30
+
 FUSION_TAG = "2026.09.25"
 FUSION_URL = (
     "https://github.com/TakWolf/fusion-pixel-font/releases/download/"
@@ -66,7 +68,7 @@ RANGES = [
 
 
 def fetch(url, sha256):
-    with urllib.request.urlopen(url) as r:
+    with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as r:
         data = r.read()
     got = hashlib.sha256(data).hexdigest()
     if got != sha256:

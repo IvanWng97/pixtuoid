@@ -75,6 +75,7 @@ pub fn display_path(p: &std::path::Path) -> String {
 /// completes its side effects and exits with its own verdict, where `println!`
 /// would panic. Any other write error still fails.
 #[doc(hidden)]
+#[derive(Debug)]
 pub struct CliOut<W> {
     inner: W,
     closed: bool,

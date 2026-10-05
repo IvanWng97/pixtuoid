@@ -159,6 +159,7 @@ pub const DRIVEN_DESKS: usize = 64;
 const SEED_CWD: &str = "/pixtuoid/harness";
 
 /// The decode-and-fold pipeline for one source's bytes.
+#[derive(Debug)]
 pub struct Drive {
     transport: Transport,
     decode: Decode,
@@ -168,6 +169,7 @@ pub struct Drive {
 
 /// Private so the decoder↔transport pairing stays a constructor's job, never a
 /// caller's.
+#[derive(Debug)]
 enum Decode {
     Transcript {
         decode: LineDecoder,
