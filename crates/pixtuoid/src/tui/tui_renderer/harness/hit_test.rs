@@ -12,7 +12,7 @@ fn furniture_hit_test_resolves_against_rendered_layout() {
     let desk = layout.home_desks[0];
     let hit = crate::tui::hit_test::hit_test_furniture(
         layout,
-        CellArea::half_block(desk.x + 4, desk.y / 2 + 1),
+        CellArea::half_block(desk.x + 4, CellArea::row_of(desk.y) + 1),
     );
     assert_eq!(
         hit,
@@ -34,7 +34,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
         .find(|w| w.kind == WaypointKind::Pantry)
         .expect("a 140×48 office must lay out a pantry");
     let cx = pantry.pos.x;
-    let cy = pantry.pos.y / 2;
+    let cy = CellArea::row_of(pantry.pos.y);
     let mut found = false;
     for dx in -14i32..=14 {
         for dy in -4i32..=4 {
@@ -59,7 +59,7 @@ fn pet_hit_test_resolves_at_pet_position() {
     let PetHover { centre: pos, .. } = r.drawn_pet().expect("pet placed");
     assert!(
         matches!(
-            r.scene_hit_at(pos.x, pos.y / 2),
+            r.scene_hit_at(pos.x, CellArea::row_of(pos.y)),
             Some(SceneHit::Figure(HoverTarget::Pet(_)))
         ),
         "clicking the pet's own position should hit it"
@@ -108,7 +108,10 @@ fn click_hit_test_follows_a_walking_sprite() {
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, pack(), walk_now).unwrap();
     let drawn = drawn(&r, &scene, id, walk_now).top_left;
-    assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
+    assert_eq!(
+        r.hit_test_agent_at(drawn.x, CellArea::row_of(drawn.y)),
+        Some(id)
+    );
     assert_eq!(
         r.hit_test_agent_at(dx, dy),
         None,
@@ -283,8 +286,8 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
         a.agent_id.min(b.agent_id),
         "premise: the agent on top is not the first by AgentId"
     );
-    assert_eq!(both.hit_test_agent_at(x, y / 2), Some(top));
-    both.set_mouse_pos(Some((x, y / 2)));
+    assert_eq!(both.hit_test_agent_at(x, CellArea::row_of(y)), Some(top));
+    both.set_mouse_pos(Some((x, CellArea::row_of(y))));
     both.render(&scene, pack(), now).unwrap();
     let hovered = scene.agents[&top].label.clone();
     assert!(
@@ -374,7 +377,7 @@ fn hover_a_cat_petted_at(
         kind: PetKind::Cat,
         floor_idx: 0,
     }));
-    r.set_mouse_pos(Some((at.x, at.y / 2)));
+    r.set_mouse_pos(Some((at.x, CellArea::row_of(at.y))));
     r.render(scene, pack(), now).unwrap();
     frame_text(r.frame_buffer())
 }

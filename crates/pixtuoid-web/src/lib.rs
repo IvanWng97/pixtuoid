@@ -382,14 +382,13 @@ impl Office {
         let Some(now) = self.last_now else {
             return SILENT.to_string();
         };
-        // The shared observer composes the whole AudioFrame, single-sourced with
-        // the desktop painters. Single-floor hero → floor 0.
-        let frame = self
-            .session
-            .audio_frame(&self.scene, self.floor_meta(), now);
+        let meta = self.floor_meta();
         let Some(audio) = self.audio.as_mut().filter(|a| a.is_ready()) else {
             return SILENT.to_string();
         };
+        // The shared observer composes the whole AudioFrame, single-sourced with
+        // the desktop painters. Single-floor hero → floor 0.
+        let frame = self.session.audio_frame(&self.scene, meta, now);
         audio::commands_json(&audio.tick(now_ms, frame))
     }
 
