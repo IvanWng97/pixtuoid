@@ -1123,8 +1123,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Look
 pub struct pixtuoid_scene::look::ClassicDrawn<'a>
 pub pixtuoid_scene::look::ClassicDrawn::agents: &'a [pixtuoid_scene::pixel_painter::AgentFrame]
 pub pixtuoid_scene::look::ClassicDrawn::bubbles: &'a [pixtuoid_scene::chitchat::ChitchatBubble]
-pub pixtuoid_scene::look::ClassicDrawn::mascots: &'a [pixtuoid_scene::pixel_painter::MascotFrame]
-pub pixtuoid_scene::look::ClassicDrawn::pet: core::option::Option<pixtuoid_scene::pet::PetFrame>
+pub pixtuoid_scene::look::ClassicDrawn::hovers: &'a crate::display::Hovers
 pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a mut pixtuoid_core::sprite::RgbBuffer
 impl<'a> core::fmt::Debug for pixtuoid_scene::look::ClassicDrawn<'a>
 pub fn pixtuoid_scene::look::ClassicDrawn<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -1169,7 +1168,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Place
 pub struct pixtuoid_scene::look::Raster
 impl pixtuoid_scene::look::Raster
 pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::Option<pixtuoid_scene::look::ClassicDrawn<'_>>
-pub fn pixtuoid_scene::look::Raster::hover_at(&self, pixtuoid_scene::layout::Bounds) -> core::option::Option<pixtuoid_core::id::AgentId>
+pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
 impl core::fmt::Debug for pixtuoid_scene::look::Raster
@@ -1280,7 +1279,6 @@ impl pixtuoid_scene::pet::PetKind
 pub const pixtuoid_scene::pet::PetKind::ALL: &'static [pixtuoid_scene::pet::PetKind]
 pub fn pixtuoid_scene::pet::PetKind::default_name(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::from_config_name(&str) -> core::option::Option<Self>
-pub fn pixtuoid_scene::pet::PetKind::hitbox(self, &str) -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::pet::PetKind::sit_anim(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::sleep_anim(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::sleeps_near_idle(self) -> bool
@@ -1323,22 +1321,6 @@ impl core::marker::Unpin for pixtuoid_scene::pet::Pet
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pet::Pet
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pet::Pet
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pet::Pet
-pub struct pixtuoid_scene::pet::PetFrame
-pub pixtuoid_scene::pet::PetFrame::anim: &'static str
-pub pixtuoid_scene::pet::PetFrame::kind: pixtuoid_scene::pet::PetKind
-pub pixtuoid_scene::pet::PetFrame::pos: pixtuoid_scene::layout::Point
-impl core::clone::Clone for pixtuoid_scene::pet::PetFrame
-pub fn pixtuoid_scene::pet::PetFrame::clone(&self) -> pixtuoid_scene::pet::PetFrame
-impl core::fmt::Debug for pixtuoid_scene::pet::PetFrame
-pub fn pixtuoid_scene::pet::PetFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pet::PetFrame
-impl core::marker::Freeze for pixtuoid_scene::pet::PetFrame
-impl core::marker::Send for pixtuoid_scene::pet::PetFrame
-impl core::marker::Sync for pixtuoid_scene::pet::PetFrame
-impl core::marker::Unpin for pixtuoid_scene::pet::PetFrame
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pet::PetFrame
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pet::PetFrame
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pet::PetFrame
 pub struct pixtuoid_scene::pet::PetState
 pub pixtuoid_scene::pet::PetState::floor_idx: usize
 pub pixtuoid_scene::pet::PetState::kind: pixtuoid_scene::pet::PetKind
@@ -1420,10 +1402,7 @@ pub fn pixtuoid_scene::physics::walk_progress(&pixtuoid_scene::physics::WalkProf
 pub mod pixtuoid_scene::pixel_painter
 pub struct pixtuoid_scene::pixel_painter::AgentFrame
 pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::pixel_painter::AgentFrame::h: u16
 pub pixtuoid_scene::pixel_painter::AgentFrame::label_anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::AgentFrame::top_left: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::AgentFrame::w: u16
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
 pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
 impl core::cmp::Eq for pixtuoid_scene::pixel_painter::AgentFrame
@@ -1440,26 +1419,6 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
-pub struct pixtuoid_scene::pixel_painter::MascotFrame
-pub pixtuoid_scene::pixel_painter::MascotFrame::active_sessions: u32
-pub pixtuoid_scene::pixel_painter::MascotFrame::busy: bool
-pub pixtuoid_scene::pixel_painter::MascotFrame::degraded: bool
-pub pixtuoid_scene::pixel_painter::MascotFrame::h: u16
-pub pixtuoid_scene::pixel_painter::MascotFrame::instance: core::option::Option<alloc::string::String>
-pub pixtuoid_scene::pixel_painter::MascotFrame::name: &'static str
-pub pixtuoid_scene::pixel_painter::MascotFrame::pos: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::MascotFrame::w: u16
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::MascotFrame
-pub fn pixtuoid_scene::pixel_painter::MascotFrame::clone(&self) -> pixtuoid_scene::pixel_painter::MascotFrame
-impl core::fmt::Debug for pixtuoid_scene::pixel_painter::MascotFrame
-pub fn pixtuoid_scene::pixel_painter::MascotFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Send for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::MascotFrame
 pub mod pixtuoid_scene::pose
 pub enum pixtuoid_scene::pose::Pose
 pub pixtuoid_scene::pose::Pose::AimlessAt
