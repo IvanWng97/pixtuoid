@@ -385,7 +385,8 @@ fn enqueue_gateway_mascots<'a>(
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
             hover: pack_frame_size(pack, m.anim_name, m.frame_idx)
-                .map(|size| Hover::figure(Pivot::Center, m.pos, size, m.target())),
+                .zip(m.target())
+                .map(|(size, target)| Hover::figure(Pivot::Center, m.pos, size, target)),
             kind: DrawableKind::GatewayMascot {
                 pos: m.pos,
                 anim_name: m.anim_name,

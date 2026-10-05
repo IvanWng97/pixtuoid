@@ -4224,6 +4224,7 @@ mod tests {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded: false,
+            on_roster: true,
             effects: crate::effects::mascot_bubbles(
                 lobster,
                 12,
@@ -4261,10 +4262,12 @@ mod tests {
             .pieces()
             .iter()
             .filter_map(|p| match &p.kind {
-                PieceKind::Creature { who, .. } => Some(crate::display::Hover {
-                    at: p.span.bounds(),
-                    target: who.clone(),
-                }),
+                PieceKind::Creature { who, .. } => {
+                    who.clone().map(|target| crate::display::Hover {
+                        at: p.span.bounds(),
+                        target,
+                    })
+                }
                 _ => None,
             })
             .collect();
@@ -4273,7 +4276,7 @@ mod tests {
                 frame
                     .mascots
                     .iter()
-                    .map(crate::sim::MascotPlacement::target),
+                    .filter_map(crate::sim::MascotPlacement::target),
             )
             .collect();
         assert_eq!(
@@ -4285,6 +4288,26 @@ mod tests {
             "premise: the cat, then each gateway"
         );
         assert_eq!(list.hovers().listed(), creatures);
+
+        // one walking out past the roster still paints, and hovers as nothing
+        let mut frame = frame;
+        frame.mascots[0].on_roster = false;
+        let left = frame.mascots[0].key.clone();
+        let list = list_at(&frame, office, 12);
+        assert_eq!(
+            list.pieces()
+                .iter()
+                .filter(|p| matches!(p.kind, PieceKind::Creature { .. }))
+                .count(),
+            creatures.len()
+        );
+        assert!(
+            !list
+                .hovers()
+                .listed()
+                .iter()
+                .any(|h| h.target == crate::display::HoverTarget::Mascot(left.clone()))
+        );
     }
 
     /// A pet whose feet sort south of an agent's paints over them, so where
