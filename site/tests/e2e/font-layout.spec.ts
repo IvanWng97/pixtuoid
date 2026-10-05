@@ -24,7 +24,7 @@ self.webVitals.onCLS(
 `);
 }
 
-for (const route of ['architecture/', 'parallel-delivery/']) {
+for (const route of ['architecture/']) {
   test(`${route} stays stable when web fonts miss first paint`, async ({ page }) => {
     await page.setViewportSize(LIGHTHOUSE_VIEWPORT);
     await page.route(`**/${route}`, async (request) => {

@@ -223,9 +223,6 @@ crate IS.
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
-One change spanning the Rust lib + the site + the Raycast extension:
-[`PARALLEL-DELIVERY.md`](PARALLEL-DELIVERY.md).
-
 The e2e tiers live under `scripts/lib/`; none runs in CI. Cheapest first:
 `just openclaw-e2e` (hermetic envelopes, free) · `just replay <fixture>` (a
 captured rollout through the full headless path) · `just openclaw-multi-e2e`
