@@ -12,7 +12,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
+use pixtuoid::tui::renderer::{DrawCtx, DrawOut, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
@@ -319,6 +319,32 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
             Ok((ms, floor))
         })
         .collect()
+}
+
+/// The centre of the pixels a pointer finds the first mascot on.
+fn mascot_centre(drawn: &DrawOut) -> Option<pixtuoid_scene::layout::Point> {
+    use pixtuoid_scene::display::HoverTarget;
+    use pixtuoid_scene::layout::{Bounds, Point};
+    let layout = drawn.layout.as_deref()?;
+    let at = |(x, y)| {
+        drawn.hovers.at(Bounds {
+            x,
+            y,
+            width: 1,
+            height: 1,
+        })
+    };
+    let pixels = || (0..layout.buf_h).flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)));
+    let mascot = pixels().find_map(|p| at(p).filter(|t| matches!(t, HoverTarget::Mascot(_))))?;
+    let (x0, y0, x1, y1) = pixels()
+        .filter(|&p| at(p) == Some(mascot))
+        .fold((u16::MAX, u16::MAX, 0, 0), |(x0, y0, x1, y1), (x, y)| {
+            (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+        });
+    Some(Point {
+        x: x0.midpoint(x1),
+        y: y0.midpoint(y1),
+    })
 }
 
 fn main() -> Result<()> {
@@ -724,11 +750,8 @@ fn main() -> Result<()> {
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
         // the renderer actually resolved, not a precomputed layout point.
-        let m = drawn
-            .mascots
-            .first()
-            .context("--crop-mascot needs a visible mascot")?;
-        Some(centered_crop(m.pos, cols, rows))
+        let at = mascot_centre(&drawn).context("--crop-mascot needs a visible mascot")?;
+        Some(centered_crop(at, cols, rows))
     } else {
         compute_crop_rect(&args, &scene, &floor.ctx.history, cols, rows, now)?
     };

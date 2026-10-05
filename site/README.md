@@ -27,7 +27,7 @@ ready; stop it before `just site-e2e` (dev and preview share port 4321).
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs → audit
+npm run verify     # format:check → lint → check → knip → test:unit → test:demos → build → check:docs → audit
 npm run lighthouse # three-run a11y / SEO / performance budgets (in-repo runner)
 ```
 
@@ -82,7 +82,8 @@ keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
 
 ## Demo art
 
-`public/demos/*` is **generated**, never hand-placed — `just gen-media` from
+`public/demos/*` is **generated** and gitignored, never hand-placed:
+`just site-demos` renders it when absent or its manifests change (`just gen-media --only site` re-renders a look change) from
 the repo root (`scripts/gen-media.py` + `scripts/media.json`, rendering
 through the real TuiRenderer; clips re-encode to `.mp4` + `.webm` + poster).
 Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer
@@ -93,16 +94,16 @@ would resize/blur it.
 Manifest-driven (`Showcase` → `ChannelStage`), defined in
 **`src/showcase.json`** alongside `src/themes.json`, `src/weather.json`,
 `src/features.json`, `src/install.json`. Channel kinds: **`clip`** (mp4 +
-webm + poster from `just gen-media`), **`variant-set`** (screenshot grid via
+webm + poster from `just gen-media --only site`), **`variant-set`** (screenshot grid via
 `variantsRef`/`variants`), **`soon`** (placeholder). `astro.config.mjs`
 enforces the invariants at build time (one default live channel, unique ids,
 assets present, features↔showcase bijection).
 
-**Adding a demo channel**: one `showcase.json` entry + `just gen-media`
+**Adding a demo channel**: one `showcase.json` entry + `just gen-media --only site`
 assets (a `clip` channel also adds its render + `encode_clip` block in
 `scripts/gen-media.py`). No component edits.
 
-**Adding a theme**: one row in `src/themes.json` + `just gen-media`. Chips,
+**Adding a theme**: one row in `src/themes.json` + `just gen-media --only site`. Chips,
 counts, retint, and renders all pick it up automatically.
 
 ## Custom domain & deploy

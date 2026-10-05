@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use crate::layout::{Point, Size};
+use crate::layout::Point;
 
 /// Duration (ms) the pet stays frozen in place after being petted.
 pub const PET_DURATION_MS: u64 = 2000;
@@ -37,18 +37,7 @@ impl PetState {
     }
 }
 
-/// The pet's resolved render frame for one tick (position + anim + kind).
-#[derive(Debug, Clone, Copy)]
-pub struct PetFrame {
-    /// Buffer-pixel position of the pet this tick.
-    pub pos: Point,
-    /// Resolved sprite/animation name (walk/sit/sleep).
-    pub anim: &'static str,
-    /// Which pet this frame renders.
-    pub kind: PetKind,
-}
-
-/// The kind of office pet — selects sprites, hitbox, and idle-sleep behavior.
+/// The kind of office pet — selects sprites and idle-sleep behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PetKind {
     /// The office cat.
@@ -108,17 +97,6 @@ impl PetKind {
         match self {
             PetKind::Cat => true,
             PetKind::Dog => false,
-        }
-    }
-
-    /// Click hit-test box for the given anim name (walk widest, sleep shortest).
-    pub fn hitbox(self, anim_name: &str) -> Size {
-        if anim_name == self.walk_anim() {
-            Size { w: 8, h: 6 }
-        } else if anim_name == self.sleep_anim() {
-            Size { w: 6, h: 4 }
-        } else {
-            Size { w: 6, h: 6 }
         }
     }
 }
@@ -236,30 +214,6 @@ mod tests {
     fn dog_does_not_sleep_near_idle() {
         assert!(!PetKind::Dog.sleeps_near_idle());
         assert!(PetKind::Cat.sleeps_near_idle());
-    }
-
-    #[test]
-    fn hitbox_walk_larger_than_sit() {
-        for &kind in PetKind::ALL {
-            let ww = kind.hitbox(kind.walk_anim()).w;
-            let sw = kind.hitbox(kind.sit_anim()).w;
-            assert!(ww > sw, "{:?} walk should be wider than sit", kind);
-        }
-    }
-
-    #[test]
-    fn hitbox_sleep_shorter_than_sit() {
-        for &kind in PetKind::ALL {
-            let sh = kind.hitbox(kind.sit_anim()).h;
-            let slh = kind.hitbox(kind.sleep_anim()).h;
-            assert!(slh < sh, "{:?} sleep should be shorter than sit", kind);
-        }
-    }
-
-    #[test]
-    fn hitbox_unknown_anim_returns_default() {
-        assert_eq!(PetKind::Cat.hitbox("unknown"), Size { w: 6, h: 6 });
-        assert_eq!(PetKind::Dog.hitbox("unknown"), Size { w: 6, h: 6 });
     }
 
     #[test]

@@ -8,63 +8,30 @@ use std::collections::HashMap;
 
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::DaemonState;
 use pixtuoid_core::{AgentSlot, SceneState};
 
+use crate::display::{Hover, HoverTarget, Hovers};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
 use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
-use crate::pet::PetFrame;
+use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
 
-/// The gateway mascot's screen frame — enough to hover-identify it. Recaptured
-/// each render, since the wandering position is recomputed every frame.
-#[derive(Debug, Clone)]
-pub struct MascotFrame {
-    /// The mascot's centre screen position this tick.
-    pub pos: Point,
-    /// The painted sprite's pixel width, read from the pack's real frame so
-    /// the binary's `hit_test_mascot` click box derives from what's drawn.
-    pub w: u16,
-    /// The painted sprite's pixel height (paired with `w`).
-    pub h: u16,
-    /// Human-readable gateway name (e.g. "OpenClaw").
-    pub name: &'static str,
-    /// WHICH instance of that gateway this mascot is, so a hover over one of
-    /// two concurrent lobsters names the one under the cursor. `None` when the
-    /// source runs a single instance whose id means nothing to the user.
-    pub instance: Option<String>,
-    /// An agent run is in flight. Keyed on the run state, NOT the session count
-    /// — a single-user gateway holds one persistent session even at rest.
-    pub busy: bool,
-    /// Gateway up but its model backend is failing every run.
-    pub degraded: bool,
-    /// Number of sessions the gateway currently holds (tooltip detail).
-    pub active_sessions: u32,
-}
-
-/// Where a character's sprite was drawn.
+/// Where a drawn character's badge goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentFrame {
     /// Whose sprite it is.
     pub agent_id: pixtuoid_core::AgentId,
-    /// The sprite's top-left, in buffer pixels.
-    pub top_left: Point,
-    /// The painted frame's pixel width.
-    pub w: u16,
-    /// The painted frame's pixel height.
-    pub h: u16,
     /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
     pub label_anchor: Point,
 }
 
-/// What [`paint_frame`] drew that hover can name.
+/// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Debug, Default)]
-pub(crate) struct Hoverables {
-    pub(crate) pet_pos: Option<PetFrame>,
-    pub(crate) mascots: Vec<MascotFrame>,
+pub(crate) struct Drawn {
     pub(crate) agents: Vec<AgentFrame>,
+    pub(crate) hovers: Hovers,
 }
 
 /// The classic's raster state for one floor, kept across frames.
@@ -146,7 +113,7 @@ use background::{
     paint_ground_and_walls, paint_ground_wash, paint_light, paint_neon_halo, paint_shadows,
     paint_windows,
 };
-use drawable::{Drawable, DrawableKind, Drawn, Layer, enqueue_room_walls, paint_drawable};
+use drawable::{Drawable, DrawableKind, Layer, enqueue_room_walls, paint_drawable};
 
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
 /// `&mut`s are the pixel buffer and the paint-local caches; the sim stores are
@@ -219,7 +186,7 @@ impl<'a> PaintCtx<'a> {
 /// The PAINT half of the frame: blit the world the sim already advanced. Every
 /// positional/lifecycle decision was made in `sim_step` — this pass only
 /// resolves presentation (theme colors, sprite pixels) and composites.
-pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
+pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
@@ -295,33 +262,37 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverable
     // Every entity gets a `sort_row` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
-    let pet_pos = frame
-        .pet
-        .as_ref()
-        .map(|pet| enqueue_pet(ctx, pet, &mut drawables));
-    enqueue_gateway_mascots(&frame.mascots, &mut drawables);
+    if let Some(pet) = &frame.pet {
+        enqueue_pet(ctx, pet, &mut drawables);
+    }
+    enqueue_gateway_mascots(ctx.pack, &frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
-    let mut hover = Hoverables {
-        pet_pos,
-        mascots: Vec::new(),
+    let mut drawn = Drawn {
         agents: Vec::new(),
+        hovers: Hovers::default(),
     };
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
-    for d in &drawables {
-        match paint_drawable(&d.kind, &mut ctx.drawable_ctx()) {
-            Some(Drawn::Agent(agent)) => hover.agents.push(agent),
-            Some(Drawn::Mascot { mascot_idx, w, h }) => {
-                hover
-                    .mascots
-                    .push(MascotFrame::of(&frame.mascots[mascot_idx], w, h));
-            }
-            None => {}
+    for d in drawables {
+        paint_drawable(&d.kind, &mut ctx.drawable_ctx());
+        let Some(hover) = d.hover else { continue };
+        // Badged where hoverable: both need its frame drawn.
+        if let DrawableKind::Character {
+            agent,
+            label_anchor,
+            ..
+        } = d.kind
+        {
+            drawn.agents.push(AgentFrame {
+                agent_id: agent.agent_id,
+                label_anchor,
+            });
         }
+        drawn.hovers.push(hover);
     }
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
@@ -340,7 +311,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverable
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.walks);
     }
 
-    hover
+    drawn
 }
 
 /// Map the sim's resolved [`crate::sim::CharacterPlacement`]s 1:1 onto y-sorted
@@ -353,12 +324,21 @@ fn enqueue_characters<'a>(
 ) {
     for p in &frame.characters {
         let agent = &frame.agents[p.agent_idx];
+        let pose = crate::character::SpritePose::of(p, agent, ctx.theme);
         drawables.push(Drawable {
             sort_row: p.sort_row,
             layer: Layer::Figure,
+            hover: pack_frame_size(ctx.pack, pose.anim_name, pose.frame_idx).map(|size| {
+                Hover::figure(
+                    Pivot::TopLeft,
+                    p.top_left,
+                    size,
+                    HoverTarget::Agent(agent.agent_id),
+                )
+            }),
             kind: DrawableKind::Character {
                 agent,
-                pose: crate::character::SpritePose::of(p, agent, ctx.theme),
+                pose,
                 top_left: p.top_left,
                 label_anchor: p.label_anchor,
                 effects: &p.effects,
@@ -373,18 +353,17 @@ fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: &'a crate::sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
-) -> PetFrame {
+) {
     let pos = pet.pos;
-    let pet_h = crate::sim::frame_size(
-        ctx.pack,
-        pet.anim_name,
-        pet.frame_idx,
-        crate::sim::PET_FALLBACK,
-    )
-    .h;
+    let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
     drawables.push(Drawable {
-        sort_row: sort_row_at(Pivot::Center, pos, pet_h),
+        sort_row: sort_row_at(
+            Pivot::Center,
+            pos,
+            size.unwrap_or(crate::sim::PET_FALLBACK).h,
+        ),
         layer: Layer::Figure,
+        hover: size.map(|size| Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
             pos,
             flip: pet.flip,
@@ -393,46 +372,28 @@ fn enqueue_pet<'a>(
             effects: &pet.effects,
         },
     });
-    PetFrame {
-        pos,
-        anim: pet.anim_name,
-        kind: pet.kind,
-    }
 }
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
+    pack: &Pack,
     mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
-    for (mascot_idx, m) in mascots.iter().enumerate() {
+    for m in mascots {
         drawables.push(Drawable {
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
+            hover: pack_frame_size(pack, m.anim_name, m.frame_idx)
+                .map(|size| Hover::figure(Pivot::Center, m.pos, size, m.target())),
             kind: DrawableKind::GatewayMascot {
-                mascot_idx,
                 pos: m.pos,
                 anim_name: m.anim_name,
                 frame_idx: m.frame_idx,
                 effects: &m.effects,
-                degraded: m.state == DaemonState::Degraded,
+                degraded: m.degraded,
             },
         });
-    }
-}
-
-impl MascotFrame {
-    fn of(m: &crate::sim::MascotPlacement, w: u16, h: u16) -> Self {
-        Self {
-            pos: m.pos,
-            w,
-            h,
-            name: m.name,
-            instance: m.instance.clone(),
-            busy: m.state == DaemonState::Busy,
-            degraded: m.state == DaemonState::Degraded,
-            active_sessions: m.active_sessions,
-        }
     }
 }
 
@@ -600,6 +561,7 @@ fn queue_fixtures<'a>(
             Depth::Sorted { row, tie } => out.sorted.push(Drawable {
                 sort_row: row,
                 layer: tie.into(),
+                hover: None,
                 kind,
             }),
         }
