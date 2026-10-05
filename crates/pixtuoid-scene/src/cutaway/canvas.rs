@@ -755,9 +755,8 @@ mod tests {
                     office,
                     crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
                 );
-                // Known by its text: the sitter's badge reads otherwise.
                 list.pieces().iter().find(|p| {
-                    matches!(&p.kind, crate::display::PieceKind::Text { run } if run.spans[1].text == NEIGHBOUR)
+                    matches!(&p.kind, crate::display::PieceKind::Text { run } if run.role == crate::display::TextRole::Badge(b.agent_id))
                 })
                     .map(|p| p.span)
                     .expect("the neighbour's plate")
