@@ -54,11 +54,12 @@
     the action parses only its space-separated form. Any other flag, action input
     or settings key can add a rule, a tool, a hook or a directory, so all three
     are allowlists; other values stay free. `allowed_bots` admits the merge
-    queue's app alone, never `*`, which would let any App's push trigger it.
+    queue's app and media-regen.yml's own app (its PR touches only docs/images),
+    never `*`, which would let any App's push trigger it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and ((.[0].with.allowed_bots // "") == "mergify[bot]")
+      and ((.[0].with.allowed_bots // "") == "mergify[bot],pixtuoid-bot[bot]")
       and ((.[0].with | keys) - [
             "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
