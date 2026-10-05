@@ -32,6 +32,17 @@ pub struct SourceManager {
     sources: Vec<Box<dyn DynSource>>,
 }
 
+impl std::fmt::Debug for SourceManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceManager")
+            .field(
+                "sources",
+                &self.sources.iter().map(|s| s.name()).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
 impl SourceManager {
     /// An empty `SourceManager` — register sources with `with_source`, then `spawn`.
     pub fn new() -> Self {

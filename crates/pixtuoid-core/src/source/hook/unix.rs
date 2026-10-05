@@ -208,6 +208,7 @@ fn binds_via_temp(tmp: &Path) -> bool {
     tmp.as_os_str().len() < SUN_PATH_CAP
 }
 
+#[derive(Debug)]
 pub(super) struct Listener {
     listener: UnixListener,
     // Never unlocked: the kernel releases it however abruptly the process dies, so

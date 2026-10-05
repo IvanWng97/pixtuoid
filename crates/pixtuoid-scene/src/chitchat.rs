@@ -94,6 +94,7 @@ pub enum VenueKey {
 }
 
 /// A live conversation among the agents currently at a venue.
+#[derive(Debug)]
 pub struct ActiveChitchat {
     /// The venue this conversation belongs to.
     pub venue: VenueKey,
