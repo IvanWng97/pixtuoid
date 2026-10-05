@@ -84,7 +84,9 @@ opens, never as a draft, once its branch is ready to merge (preflight green,
 local rows run); until a slot frees, the branch stays pushed with no PR. A PR
 that stops being ready closes with its branch kept and never force-pushed,
 since a force-pushed branch can't reopen; a stacked one is retargeted to
-`main` first, because merging its base deletes that branch.
+`main` first, because merging its base deletes that branch. Closing leaves its
+runs queued, and a plain cancel still runs the `always()` gate jobs, so they
+are [force-cancelled](https://docs.github.com/en/rest/actions/workflow-runs#force-cancel-a-workflow-run).
 
 Repo skills (committed): `local-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
