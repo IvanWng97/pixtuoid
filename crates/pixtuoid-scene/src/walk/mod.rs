@@ -203,6 +203,7 @@ impl Default for WalkState {
 
 impl WalkState {
     /// The agent's wander timeline.
+    #[doc(hidden)]
     pub fn wander(&self) -> &WanderState {
         &self.wander
     }
@@ -210,11 +211,13 @@ impl WalkState {
 
 impl WanderState {
     /// When the current phase began.
+    #[doc(hidden)]
     pub fn phase_started_at(&self) -> SystemTime {
         self.phase_started_at
     }
 
     /// The last `now` at which the timeline transitioned.
+    #[doc(hidden)]
     pub fn last_advanced_at(&self) -> SystemTime {
         self.last_advanced_at
     }

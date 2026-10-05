@@ -478,8 +478,14 @@ fn an_unborrowable_cutaway_slide_cancels() {
     let scene = two_floor_scene();
     r.render(&scene, pack(), t0()).expect("render");
     r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
-    r.render(&scene, pack(), t0()).expect("render");
+    let logged = crate::test_capture::capture(|| {
+        r.render(&scene, pack(), t0()).expect("render");
+    });
     assert!(r.transition().is_none());
+    assert!(
+        logged.contains("a slide between floors it cannot borrow"),
+        "the borrow arm, not another exit, ended it: {logged}"
+    );
 }
 
 #[test]

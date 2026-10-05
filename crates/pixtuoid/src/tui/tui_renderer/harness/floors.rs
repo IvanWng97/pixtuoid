@@ -113,8 +113,14 @@ fn an_unborrowable_slide_cancels() {
     let now = t0();
     r.render(&scene, p, now).unwrap();
     r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, now));
-    r.render(&scene, p, now).unwrap();
+    let logged = crate::test_capture::capture(|| {
+        r.render(&scene, p, now).unwrap();
+    });
     assert!(r.transition().is_none());
+    assert!(
+        logged.contains("a slide between floors it cannot borrow"),
+        "the borrow arm, not another exit, ended it: {logged}"
+    );
 }
 
 #[test]

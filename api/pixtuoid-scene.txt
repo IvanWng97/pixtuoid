@@ -2005,8 +2005,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::walk::WalkPathSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::walk::WalkPathSnapshot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::walk::WalkPathSnapshot
 pub struct pixtuoid_scene::walk::WalkState
-impl pixtuoid_scene::walk::WalkState
-pub fn pixtuoid_scene::walk::WalkState::wander(&self) -> &pixtuoid_scene::walk::WanderState
 impl core::clone::Clone for pixtuoid_scene::walk::WalkState
 pub fn pixtuoid_scene::walk::WalkState::clone(&self) -> pixtuoid_scene::walk::WalkState
 impl core::default::Default for pixtuoid_scene::walk::WalkState
@@ -2039,9 +2037,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::walk::WanderFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::walk::WanderFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::walk::WanderFrame
 pub struct pixtuoid_scene::walk::WanderState
-impl pixtuoid_scene::walk::WanderState
-pub fn pixtuoid_scene::walk::WanderState::last_advanced_at(&self) -> std::time::SystemTime
-pub fn pixtuoid_scene::walk::WanderState::phase_started_at(&self) -> std::time::SystemTime
 impl core::clone::Clone for pixtuoid_scene::walk::WanderState
 pub fn pixtuoid_scene::walk::WanderState::clone(&self) -> pixtuoid_scene::walk::WanderState
 impl core::fmt::Debug for pixtuoid_scene::walk::WanderState
