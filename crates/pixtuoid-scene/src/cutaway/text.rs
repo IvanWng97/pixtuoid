@@ -412,7 +412,7 @@ mod tests {
     }
 
     /// Project names in CJK, Cyrillic and accented Latin draw real glyphs,
-    /// each as wide as the cells `unicode-width` gives it.
+    /// each as wide as its [`cells`](crate::display::text::cells).
     #[cfg(feature = "cutaway-assets")]
     #[test]
     fn names_beyond_ascii_draw_glyphs_as_wide_as_their_cells() {
