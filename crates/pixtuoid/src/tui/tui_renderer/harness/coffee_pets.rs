@@ -158,7 +158,7 @@ fn no_pet_when_pets_disabled() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
-    assert!(r.cached_pet_pos().is_none(), "no pet when none enabled");
+    assert!(r.drawn_pet().is_none(), "no pet when none enabled");
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn pet_present_when_enabled() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    assert!(r.cached_pet_pos().is_some(), "a cat should be placed");
+    assert!(r.drawn_pet().is_some(), "a cat should be placed");
 }
 
 #[test]
@@ -177,7 +177,10 @@ fn pet_position_varies_over_its_roam() {
     for step in 0..(pixtuoid_scene::PET_LONGEST_REST_MS + 10_000) / 500 {
         r.render(&scene, pack(), t0() + Duration::from_millis(step * 500))
             .unwrap();
-        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
+        if let Some(PetHover {
+            centre: pos, anim, ..
+        }) = r.drawn_pet()
+        {
             seen.insert((pos.x, pos.y, anim));
         }
     }
@@ -193,7 +196,9 @@ fn petting_freezes_pet_position() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, kind, .. } = r.cached_pet_pos().expect("pet placed");
+    let PetHover {
+        centre: pos, kind, ..
+    } = r.drawn_pet().expect("pet placed");
     r.set_active_pet(Some(PetState {
         petted_at: t0(),
         kind,
@@ -201,7 +206,7 @@ fn petting_freezes_pet_position() {
     }));
     r.render(&scene, pack(), t0() + Duration::from_millis(500))
         .unwrap();
-    let PetFrame { pos: pos2, .. } = r.cached_pet_pos().expect("pet still placed");
+    let PetHover { centre: pos2, .. } = r.drawn_pet().expect("pet still placed");
     assert_eq!(pos, pos2, "a petted pet holds its position");
 }
 
@@ -215,8 +220,8 @@ fn pet_walk_is_frame_stable() {
         r1.render(&scene, pack(), now).unwrap();
         r2.render(&scene, pack(), now).unwrap();
         assert_eq!(
-            r1.cached_pet_pos().map(|f| (f.pos.x, f.pos.y, f.anim)),
-            r2.cached_pet_pos().map(|f| (f.pos.x, f.pos.y, f.anim)),
+            r1.drawn_pet().map(|f| (f.centre.x, f.centre.y, f.anim)),
+            r2.drawn_pet().map(|f| (f.centre.x, f.centre.y, f.anim)),
             "identical frames must give an identical pet (no flash), step {step}"
         );
     }
@@ -232,7 +237,10 @@ fn pet_walks_routed_ground_and_rests_on_walkable_floor() {
     for step in 0..3 * pixtuoid_scene::PET_LONGEST_REST_MS / 400 {
         r.render(&scene, pack(), t0() + Duration::from_millis(step * 400))
             .unwrap();
-        let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() else {
+        let Some(PetHover {
+            centre: pos, anim, ..
+        }) = r.drawn_pet()
+        else {
             continue;
         };
         if anim == PetKind::Cat.walk_anim() {
@@ -271,10 +279,10 @@ fn pet_leg_boundary_no_pop() {
     let mut r = build(160, 80, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0() + Duration::from_millis(39_600))
         .unwrap();
-    let before = r.cached_pet_pos().map(|f| (f.pos.x, f.pos.y));
+    let before = r.drawn_pet().map(|f| (f.centre.x, f.centre.y));
     r.render(&scene, pack(), t0() + Duration::from_millis(40_040))
         .unwrap();
-    let after = r.cached_pet_pos().map(|f| (f.pos.x, f.pos.y));
+    let after = r.drawn_pet().map(|f| (f.centre.x, f.centre.y));
     if let (Some((x0, y0)), Some((x1, y1))) = (before, after) {
         let gap = (x0 as i32 - x1 as i32).unsigned_abs() + (y0 as i32 - y1 as i32).unsigned_abs();
         assert!(
@@ -290,7 +298,7 @@ fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
         let scene = scene_with(vec![active("/ck/0.jsonl", 0, "Edit", t0())], 16);
         let mut r = build(140, 48, vec![kind]);
         r.render(&scene, pack(), t0()).unwrap();
-        let PetFrame { pos, .. } = r.cached_pet_pos().expect("pet placed");
+        let PetHover { centre: pos, .. } = r.drawn_pet().expect("pet placed");
         r.set_active_pet(Some(PetState {
             petted_at: t0(),
             kind,
@@ -319,7 +327,9 @@ fn pet_tooltip_shows_sleeping_when_all_idle() {
     for i in 0..40u64 {
         let now = t0() + Duration::from_secs(i);
         r.render(&scene, pack(), now).unwrap();
-        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos()
+        if let Some(PetHover {
+            centre: pos, anim, ..
+        }) = r.drawn_pet()
             && anim == PetKind::Cat.sleep_anim()
         {
             hit = Some((pos, now));

@@ -182,8 +182,8 @@ fn two_gateways_render_two_independent_mascots() {
 
 #[test]
 fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
-    // The PAINTER owns this decision (`MascotFrame.instance`) and the only way to
-    // observe it is the hover text.
+    // `GatewayCard::of` owns this decision (`GatewayCard.instance`) and the only
+    // way to observe it is the hover text.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let gateway_tooltips = |ports: &[&str]| -> Vec<String> {
         let scene = gateway_scene_at(ports, entered, seen);
@@ -191,9 +191,9 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         let cells: Vec<_> = p.cells(&scene, t0()).into_iter().collect();
         assert!(!cells.is_empty(), "the gateways must paint lobsters");
         let mut out = Vec::new();
-        // A stride, not every cell: the hitbox is the painted lobster frame
-        // (`MascotFrame.w`), so it still lands inside BOTH mascots without
-        // paying a full render per pixel.
+        // A stride, not every cell: the hover is the painted lobster frame, so
+        // it still lands inside BOTH mascots without paying a full render per
+        // pixel.
         for &(x, y) in cells.iter().step_by(5) {
             p.r.set_mouse_pos(Some((x, y / 2)));
             p.r.render(&scene, pack(), t0()).unwrap();
@@ -458,8 +458,8 @@ fn gateway_mascot_tooltip_on_hover() {
     let (x0, y0, x1, y1) = p.bbox(&scene, t0()).expect("lobster on screen");
     let cx = (x0 + x1) / 2;
     let cy_px = (y0 + y1) / 2;
-    // The hitbox is the painted frame (`MascotFrame.w`), which tolerates the
-    // approximate center; half-block ⇒ /2.
+    // The hover is the painted frame, which tolerates the approximate
+    // center; half-block ⇒ /2.
     p.r.set_mouse_pos(Some((cx, cy_px / 2)));
     p.r.render(&scene, pack(), t0()).unwrap();
 

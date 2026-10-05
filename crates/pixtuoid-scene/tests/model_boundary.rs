@@ -17,13 +17,12 @@ const ENTRY: &str = "look";
 /// and the PR that removes the edge. A fix deletes its entry; a new edge under a
 /// listed path changes its count.
 const KNOWN_EDGES: &[(&str, usize, &str)] = &[
-    ("display/", 29, "pen: #1253; text, light and effects: #1270"),
+    ("display/", 26, "text, light and effects: #1270"),
     (
         "overlay.rs",
         6,
         "cutaway::text widths and AgentFrame: #1270",
     ),
-    ("wall.rs", 2, "cutaway::pen: #1253"),
 ];
 
 fn is_rasterizer(ident: &syn::Ident) -> bool {

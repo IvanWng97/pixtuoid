@@ -21,8 +21,8 @@ use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 use crate::anim::{Beat, Timing};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{
-    CreatureKey, CreatureWalk, Ground, Roam, Stance, gateway_mascot_def, mascot_elevator,
-    mascot_enter_delay, mascot_seed, naps_here,
+    CreatureKey, CreatureWalk, GatewayCard, Ground, Roam, Stance, gateway_mascot_def,
+    mascot_elevator, mascot_enter_delay, mascot_seed, naps_here,
 };
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
@@ -125,6 +125,17 @@ pub(crate) struct PetPlacement {
     pub(crate) effects: Vec<Effect>,
 }
 
+impl PetPlacement {
+    /// Who its hover names.
+    pub(crate) fn target(&self) -> crate::display::HoverTarget {
+        crate::display::HoverTarget::Pet(crate::display::PetHover {
+            kind: self.kind,
+            centre: self.pos,
+            anim: self.anim_name,
+        })
+    }
+}
+
 /// One gateway mascot this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct MascotPlacement {
@@ -136,16 +147,20 @@ pub(crate) struct MascotPlacement {
     pub(crate) anim_name: &'static str,
     /// The frame within `anim_name`.
     pub(crate) frame_idx: usize,
-    /// The gateway's display name.
-    pub(crate) name: &'static str,
-    /// The instance id, when its source runs more than one.
-    pub(crate) instance: Option<String>,
-    /// Its presence's [`display_state`](pixtuoid_core::state::DaemonPresence::display_state).
-    pub(crate) state: DaemonState,
+    /// Which gateway instance it is.
+    pub(crate) key: DaemonInstanceKey,
+    /// Its gateway's backend fails every run ([`GatewayCard::degraded`]), so
+    /// it greys.
+    pub(crate) degraded: bool,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
-    /// Sessions the gateway holds.
-    pub(crate) active_sessions: u32,
+}
+
+impl MascotPlacement {
+    /// Who its hover names.
+    pub(crate) fn target(&self) -> crate::display::HoverTarget {
+        crate::display::HoverTarget::Mascot(self.key.clone())
+    }
 }
 
 /// A coffee on a desk.
@@ -528,11 +543,10 @@ pub(crate) fn pet_effects(
 struct DrawnMascot {
     key: DaemonInstanceKey,
     stance: Stance,
-    state: DaemonState,
+    /// [`GatewayCard::degraded`]; false once its gateway left the roster.
+    degraded: bool,
     /// Its gateway's runs in flight.
     runs: u32,
-    /// Its gateway's sessions.
-    active_sessions: u32,
 }
 
 /// Every gateway mascot in the scene's daemon roster, walking the people's
@@ -588,11 +602,10 @@ fn mascot_placements(
         }
         if let Some(stance) = walk.step(roam, ground, timing) {
             drawn.push(DrawnMascot {
+                degraded: GatewayCard::of(scene, &key).is_some_and(|card| card.degraded),
                 key,
                 stance,
-                state,
                 runs: presence.in_flight_runs.len() as u32,
-                active_sessions: presence.active_sessions,
             });
         }
     }
@@ -625,22 +638,20 @@ fn mascot_placements(
             drawn.push(DrawnMascot {
                 key,
                 stance,
-                state: DaemonState::Down,
+                degraded: false,
                 runs: 0,
-                active_sessions: 0,
             });
         }
     }
     creatures.retain(|key, walk| !matches!(key, CreatureKey::Mascot(_)) || !walk.gone());
     drawn
-        .iter()
+        .into_iter()
         .filter_map(
             |DrawnMascot {
                  key,
                  stance: Stance { at, walking },
-                 state,
+                 degraded,
                  runs,
-                 active_sessions,
              }| {
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
@@ -655,37 +666,21 @@ fn mascot_placements(
                     ),
                 };
                 let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
-                let pos = on_canvas(ground.layout, Pivot::Center, *at, size);
+                let pos = on_canvas(ground.layout, Pivot::Center, at, size);
                 Some(MascotPlacement {
                     pos,
                     size,
                     anim_name,
                     frame_idx,
-                    name: def.display_name,
-                    // Only worth showing when there is something to disambiguate, and
-                    // that is per SOURCE: two gateways of ONE daemon need their ports,
-                    // while two daemon sources already read apart by name and sprite.
-                    // The roster's, whether or not a sibling has walked in yet, and
-                    // one still walking out past its entry.
-                    instance: (scene.daemons().filter(|(s, ..)| *s == key.source()).count()
-                        + drawn
-                            .iter()
-                            .filter(|d| {
-                                d.key.source() == key.source()
-                                    && scene.daemon(d.key.source(), d.key.instance()).is_none()
-                            })
-                            .count()
-                        > 1)
-                    .then(|| key.instance().as_str().to_string()),
-                    state: *state,
+                    key,
+                    degraded,
                     // The busy tell keys on in-flight RUNS, not the (persistent,
                     // single-user) session count, which sticks at 1 at rest.
-                    effects: if *runs > 0 {
-                        effects::mascot_bubbles(pos, size.h, *runs, beat).collect()
+                    effects: if runs > 0 {
+                        effects::mascot_bubbles(pos, size.h, runs, beat).collect()
                     } else {
                         Vec::new()
                     },
-                    active_sessions: *active_sessions,
                 })
             },
         )

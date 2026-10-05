@@ -38,7 +38,7 @@ the Raycast extension. The cross-area contract is `pixtuoid … --json`
 (`SourceStatus` / `OutcomeRow`): `schemars` derives emit committed JSON
 Schemas, the Raycast extension generates its TS types from them (CI-checked
 fresh), and where no schema tool fits, golden/snapshot tests make a contract
-change a reviewable PR diff (`gen-check`). Per-area gates verify
+change a reviewable PR diff. Per-area gates verify
 independently — `just preflight full` + the
 [CI-only gates](CONTRIBUTING.md#ci-gates) (Rust),
 `just site-check` (site), `tsc` + `eslint` (Raycast) — and each area's house

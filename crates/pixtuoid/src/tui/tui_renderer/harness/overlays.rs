@@ -336,7 +336,7 @@ fn pet_tooltip_on_hover() {
     let scene = scene_with(vec![active("/tt/p.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.drawn_pet().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -351,12 +351,12 @@ fn pet_tooltip_on_hover() {
 fn until_the_pet_walks(
     r: &mut TuiRenderer<TestBackend>,
     scene: &SceneState,
-) -> (PetFrame, SystemTime) {
+) -> (PetHover, SystemTime) {
     (0..2 * pixtuoid_scene::PET_LONGEST_REST_MS / 250)
         .map(|step| t0() + Duration::from_millis(step * 250))
         .find_map(|now| {
             r.render(scene, pack(), now).unwrap();
-            r.cached_pet_pos()
+            r.drawn_pet()
                 .filter(|p| p.anim == p.kind.walk_anim())
                 .map(|p| (p, now))
         })
@@ -371,7 +371,7 @@ fn pet_tooltip_shows_custom_name() {
         name: "Luna".to_string(),
     };
     let mut r = build_pets(140, 48, vec![cat]);
-    let (PetFrame { pos, .. }, now) = until_the_pet_walks(&mut r, &scene);
+    let (PetHover { centre: pos, .. }, now) = until_the_pet_walks(&mut r, &scene);
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), now).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -389,7 +389,7 @@ fn pet_tooltip_shows_custom_name() {
 fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
-    let (PetFrame { pos, .. }, now) = until_the_pet_walks(&mut r, &scene);
+    let (PetHover { centre: pos, .. }, now) = until_the_pet_walks(&mut r, &scene);
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), now).unwrap();
     let text = frame_text(r.frame_buffer());
