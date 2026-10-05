@@ -111,12 +111,53 @@ struct Mass {
     widest: f32,
 }
 
+/// A mass as its deck draws it, before the deck is whole: what it takes to
+/// place it there ([`Mass::deck`]).
+struct Shape {
+    layer: Layer,
+    lobes: Vec<Lobe>,
+    base: f32,
+    seed: u64,
+}
+
+/// The west and east reach of `lobes`, in units.
+fn reach(lobes: &[Lobe]) -> (f32, f32) {
+    lobes.iter().fold((f32::MAX, f32::MIN), |(w, e), l| {
+        (w.min(l.x - l.r), e.max(l.x + l.r))
+    })
+}
+
 impl Mass {
+    /// `weather`'s deck of `shapes`, each knowing its place in it, its anchor
+    /// and the deck's widest width, undrifted.
+    fn deck(weather: Weather, shapes: Vec<Shape>) -> Vec<Mass> {
+        let widest = shapes
+            .iter()
+            .map(|s| {
+                let (west, east) = reach(&s.lobes);
+                east - west
+            })
+            .fold(0.0, f32::max);
+        shapes
+            .into_iter()
+            .enumerate()
+            .map(|(id, s)| Mass {
+                anchor: reach(&s.lobes).0,
+                layer: s.layer,
+                lobes: s.lobes,
+                base: s.base,
+                weather,
+                seed: s.seed,
+                id,
+                off: 0.0,
+                widest,
+            })
+            .collect()
+    }
+
     /// Its west and east reach, in units.
     fn reach(&self) -> (f32, f32) {
-        self.lobes.iter().fold((f32::MAX, f32::MIN), |(w, e), l| {
-            (w.min(l.x - l.r), e.max(l.x + l.r))
-        })
+        reach(&self.lobes)
     }
 
     /// Its top row, in units.
@@ -407,16 +448,11 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
             let base = glass_h * base_h + r.between(-2.0, 2.0);
             let height = r.between(h0, h1);
             let seed = (r.u() * 1e6) as u64;
-            out.push(Mass {
+            out.push(Shape {
                 layer,
                 lobes: cauliflower(cumulus(r, x, base, width, height), seed),
                 base,
-                weather,
                 seed,
-                id: 0,
-                anchor: 0.0,
-                off: 0.0,
-                widest: 0.0,
             });
         }
     };
@@ -442,24 +478,15 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
             let base = glass_h * 0.34;
             let width = r.between(20.0, 26.0);
             let seed = (r.u() * 1e6) as u64;
-            out.push(Mass {
+            out.push(Shape {
                 layer: Layer::Near,
                 lobes: cauliflower(tower(&mut r, x, base, width, glass_h), seed),
                 base,
-                weather,
                 seed,
-                id: 0,
-                anchor: 0.0,
-                off: 0.0,
-                widest: 0.0,
             });
         }
     }
-    for (id, m) in out.iter_mut().enumerate() {
-        m.id = id;
-        m.anchor = m.reach().0;
-    }
-    out
+    Mass::deck(weather, out)
 }
 
 /// The kind of deck a weather hangs.
@@ -739,7 +766,7 @@ fn dequantize(k: u8, steps: f32) -> f32 {
 /// [`CloudCache::CAPACITY`] of them: drawing a mass's bands is most of a
 /// cloudy frame's cost, and a drifting mass's bands don't change.
 #[derive(Debug, Default)]
-pub(crate) struct CloudCache {
+pub struct CloudCache {
     entries: std::collections::VecDeque<(RasterKey, std::sync::Arc<MassRaster>)>,
 }
 
@@ -850,17 +877,8 @@ impl Clouds {
             strike: None,
         };
         for (w, share) in weather.parts(Element::Cloud) {
-            let full = deck(w, span_f, glass_h_f);
-            let widest = full
-                .iter()
-                .map(|m| {
-                    let (west, east) = m.reach();
-                    east - west
-                })
-                .fold(0.0, f32::max);
             let share = quantize(ease(share), SHARE_STEPS);
-            for m in full {
-                let m = Mass { widest, ..m };
+            for m in deck(w, span_f, glass_h_f) {
                 let mass = m.grown(dequantize(share, SHARE_STEPS), m.drift_at(secs, span_f));
                 let key = RasterKey {
                     weather: w,

@@ -313,7 +313,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                office.raster,
+                (&mut office.raster.cutaway, &mut office.raster.clouds),
             );
             (buf, if switched { Dirty::All } else { dirty })
         }

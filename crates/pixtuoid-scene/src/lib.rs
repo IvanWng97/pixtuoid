@@ -40,6 +40,8 @@ pub(crate) mod celestial;
 pub(crate) mod character;
 pub mod chitchat;
 pub(crate) mod clouds;
+#[doc(hidden)]
+pub use clouds::CloudCache;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
