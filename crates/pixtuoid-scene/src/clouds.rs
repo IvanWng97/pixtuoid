@@ -41,8 +41,7 @@ impl Rng {
 /// `0..1` value noise along `x`, one lattice point per unit, smoothstepped.
 fn noise(seed: u64, x: f32) -> f32 {
     let i = x.floor();
-    let f = x - i;
-    let f = f * f * (3.0 - 2.0 * f);
+    let f = crate::anim::Easing::Smoothstep.apply(x - i);
     let at = |k: f32| (crate::splitmix_draw(seed, k as i64 as u64) % 1000) as f32 / 1000.0;
     at(i) + (at(i + 1.0) - at(i)) * f
 }
@@ -1434,8 +1433,7 @@ fn drifted_west(x0: f32, travelled: f64, span: f32, widest: f32) -> f32 {
 
 /// A share eased in and out: a mass forms slowly, then fills, then settles.
 fn ease(share: f32) -> f32 {
-    let s = share.clamp(0.0, 1.0);
-    s * s * (3.0 - 2.0 * s)
+    crate::anim::Easing::Smoothstep.apply(share)
 }
 
 /// A strike's bolt from `(x, base)`: a zig-zag trunk a quarter to two-fifths
