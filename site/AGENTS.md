@@ -88,7 +88,8 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
 - **Lighthouse** (`npm run lighthouse`, in-repo runner
   `config/lighthouse-runner.mjs`, lighthouse 13 programmatic API, median of
   `lighthouserc.json`'s `numberOfRuns` serial runs; runner-semantics pinned by
-  its test — a renamed audit FAILS instead of passing vacuously). **A category score is a budget, not a
+  its test — a renamed audit FAILS instead of passing vacuously).
+  **A category score is a budget, not a
   contract**: `color-contrast` is a small weight in the a11y category, so a total
   contrast failure still clears the category budget — anything that must never regress gets
   its own per-audit assertion with `aggregationMethod: pessimistic` (median
