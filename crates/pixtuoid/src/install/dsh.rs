@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_subscribes_only_verified_emit_channels_and_never_awaits() {
+    fn the_plugin_subscribes_only_verified_channels_and_never_awaits() {
         // Allowlist, not denylist: upstream carries ~21 non-emit (waterfall/
         // serial/parallel) events and the set churns, so naming bad ones can
         // only sample the invariant. The enforceable form: every `ctx.on`

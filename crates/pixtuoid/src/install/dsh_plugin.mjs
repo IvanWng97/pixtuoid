@@ -15,9 +15,9 @@ import { spawn } from "node:child_process"
 export const name = "pixtuoid"
 export const inject = ["agents"]
 
-// Every subscription below is an EMIT listener — never a waterfall/serial —
-// so dsh never blocks on us and this plugin structurally cannot stall a tool
-// call, a prompt, or shutdown.
+// Every listener is synchronous, returns nothing and never throws: the one
+// serial channel (`agent/created`) waits only for a spawn, and the rest are
+// emits, so this plugin cannot stall a tool call, a prompt, or shutdown.
 export function apply(ctx) {
   const send = (payload) => {
     try {
