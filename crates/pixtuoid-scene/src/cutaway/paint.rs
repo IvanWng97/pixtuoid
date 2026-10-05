@@ -5322,17 +5322,17 @@ mod tests {
                     "hover box {body:?} belongs to a piece that paints nothing"
                 );
             }
-            // Each drawn agent's badge, known by its text.
-            let namesakes = crate::overlay::Namesakes::of(&frame.agents);
-            let mut badged: Vec<_> = list.badges().map(|run| run.spans[1].text.clone()).collect();
-            let mut drawn: Vec<_> = hovers
+            // Each drawn agent's badge, known by whose it is.
+            let badged: Vec<_> = list.badges().map(|run| run.role).collect();
+            let drawn: std::collections::HashSet<_> = hovers
                 .iter()
-                .filter_map(|&(id, _)| frame.agents.iter().find(|a| a.agent_id == id))
-                .map(|a| namesakes.text(a))
+                .map(|&(id, _)| crate::display::TextRole::Badge(id))
                 .collect();
-            badged.sort();
-            drawn.sort();
-            assert_eq!(badged, drawn);
+            assert_eq!(badged.len(), drawn.len());
+            assert_eq!(
+                badged.into_iter().collect::<std::collections::HashSet<_>>(),
+                drawn
+            );
         }
     }
 
