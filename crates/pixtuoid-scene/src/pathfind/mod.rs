@@ -362,7 +362,7 @@ fn reconstruct(
     let mut turned = Vec::with_capacity(pts.len() * 2);
     for leg in pts.windows(2) {
         turned.push(leg[0]);
-        turned.extend(detour(mask, leg[0], leg[1]));
+        turned.extend(leg_corners(mask, leg[0], leg[1]));
     }
     turned.push(to);
     simplify_polyline(mask, turned)
@@ -370,8 +370,8 @@ fn reconstruct(
 
 /// The corners a leg from `a` to `b` turns on to stay on open floor: none
 /// when the straight leg does, an [`elbow`] when an L does, else a
-/// [`pixel_detour`]. A leg no detour clears stays straight.
-fn detour(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
+/// [`pixel_detour`]. A leg neither clears stays straight.
+fn leg_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
     if leg_clear(mask, a, b) {
         return Vec::new();
     }
@@ -443,7 +443,7 @@ fn pixel_detour(mask: &WalkableMask, a: Point, b: Point) -> Option<Vec<Point>> {
     Some(corners)
 }
 
-/// The corner an axis-aligned detour from `a` to `b` turns on, when the
+/// The corner an axis-aligned L from `a` to `b` turns on, when the
 /// straight leg crosses blocked floor and one of the two L-shaped ones doesn't.
 /// Two adjacent routing cells are walkable at half open, so the straight leg
 /// between their anchors can clip the corner of a wall standing in either.

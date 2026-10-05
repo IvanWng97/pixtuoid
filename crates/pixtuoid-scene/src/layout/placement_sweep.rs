@@ -711,11 +711,10 @@ fn no_route_on_a_short_floor_passes_through_a_wall() {
                     panic!("{w}x{h} seed {seed}: refused above the floor");
                 };
                 v.extend(corner_routes_through_walls(w, h, seed, &l));
-                v.extend(wander_legs(&l).into_iter().filter_map(|(origin, a, path)| {
-                    let (p, wall) = route_through_wall(&l, &path?)?;
+                v.extend(wander_legs(&l).into_iter().filter_map(|leg| {
+                    let (p, wall) = route_through_wall(&l, leg.path.as_ref()?)?;
                     Some(format!(
-                        "{w}x{h} seed {seed}: the leg {origin:?}->{a:?} passes {p:?} \
-                                 inside {:?}",
+                        "{w}x{h} seed {seed}: {leg} passes {p:?} inside {:?}",
                         wall.footprint()
                     ))
                 }));
@@ -791,13 +790,13 @@ fn the_spawn_threshold_stands_on_the_floor_not_the_wall_apron() {
 #[test]
 fn every_wander_destination_is_routable_from_its_desk() {
     sweep(|w, h, seed, l| {
-        for (origin, a, path) in wander_legs(l) {
-            let path = path.unwrap_or_else(|| {
-                panic!("{w}x{h} seed {seed}: approach {a:?} unroutable from leg origin {origin:?}")
-            });
-            if let Some((p, wall)) = route_through_wall(l, &path) {
+        for leg in wander_legs(l) {
+            let Some(path) = &leg.path else {
+                panic!("{w}x{h} seed {seed}: {leg} is unroutable");
+            };
+            if let Some((p, wall)) = route_through_wall(l, path) {
                 panic!(
-                    "{w}x{h} seed {seed}: the leg {origin:?}->{a:?} passes {p:?} inside {:?}",
+                    "{w}x{h} seed {seed}: {leg} passes {p:?} inside {:?}",
                     wall.footprint()
                 );
             }
@@ -805,9 +804,35 @@ fn every_wander_destination_is_routable_from_its_desk() {
     });
 }
 
+/// A production wander-out leg, named by the desk and waypoint it serves.
+struct WanderLeg {
+    desk: Point,
+    kind: super::WaypointKind,
+    origin: Point,
+    approach: Point,
+    /// `None` when unroutable.
+    path: Option<Vec<Point>>,
+}
+
+impl std::fmt::Display for WanderLeg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            desk,
+            kind,
+            origin,
+            approach,
+            ..
+        } = self;
+        write!(
+            f,
+            "desk {desk:?}'s leg {origin:?}->{kind:?} approach {approach:?}"
+        )
+    }
+}
+
 /// Each production wander-out leg, from a desk's leg origin to a waypoint's
-/// approach, with its route (`None` when unroutable).
-fn wander_legs(l: &SceneLayout) -> Vec<(Point, Point, Option<Vec<Point>>)> {
+/// approach.
+fn wander_legs(l: &SceneLayout) -> Vec<WanderLeg> {
     use crate::pathfind::find_path;
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     // Deduped: the desk loop otherwise re-routes one `(origin, approach)` pair
@@ -831,7 +856,13 @@ fn wander_legs(l: &SceneLayout) -> Vec<(Point, Point, Option<Vec<Point>>)> {
             if a == wp.pos || !seen.insert((origin, a)) {
                 continue;
             }
-            legs.push((origin, a, find_path(&l.walkable, &overlay, None, origin, a)));
+            legs.push(WanderLeg {
+                desk,
+                kind: wp.kind,
+                origin,
+                approach: a,
+                path: find_path(&l.walkable, &overlay, None, origin, a),
+            });
         }
     }
     legs
