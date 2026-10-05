@@ -993,7 +993,7 @@ pub(crate) fn base_size(pack: &Pack, name: &str) -> (u16, u16) {
 }
 
 /// A REAL office's display list, checked against every pairwise "must be
-/// behind" fact its own geometry states — what a sort key cannot give you.
+/// behind" fact its own geometry states.
 #[test]
 fn a_real_offices_display_list_satisfies_every_ordering_constraint() {
     let pack = test_default_pack();
