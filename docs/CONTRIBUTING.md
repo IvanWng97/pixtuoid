@@ -215,8 +215,7 @@ crate IS.
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once you need a PR number | open it as a draft: the light tier runs, and the billed review bots wait |
-| once the draft's light tier is green | mark it ready: the review bots start; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
+| once the branch is ready to merge and [a PR slot](../AGENTS.md#workflow) is free | open the PR ready: the light tier and the review bots run; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
 | when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
@@ -295,7 +294,8 @@ already touches, adding no local row — so it is fixed in #N; a defect in
 another session's tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
-`FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one. A
+`FOLLOW-UP → #N: …`, where #N is a PR other than this one: open, merged, or
+closed under [the open-PR cap](../AGENTS.md#workflow) with the fix on its branch. A
 re-flag of an already-dispositioned finding replies with the original's
 disposition (link it). "Acknowledged" and "surfaced" are not states. Sweep at
 the FINAL merge head; check WHICH commit a bot re-flag was raised against
