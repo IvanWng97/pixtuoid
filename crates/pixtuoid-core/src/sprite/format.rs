@@ -2154,14 +2154,19 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         })
         .collect();
 
-    for &(piece, wanted) in marks {
-        let densities = variants.iter().filter(|v| v.2 == piece).map(|v| (v.0, v.1));
-        for (name, sprite) in pack
-            .animation(piece)
+    // A piece's art at its base and at each of its density variants.
+    let at_each_density = |piece: &'static str| {
+        let densities = variants
+            .iter()
+            .filter(move |v| v.2 == piece)
+            .map(|v| (v.0, v.1));
+        pack.animation(piece)
             .map(|s| (piece, s))
             .into_iter()
             .chain(densities)
-        {
+    };
+    for &(piece, wanted) in marks {
+        for (name, sprite) in at_each_density(piece) {
             for &mark in wanted {
                 if !sprite.marks(0).iter().any(|m| m.name() == mark) {
                     report.missing_marks.push(MissingMark {
@@ -2174,13 +2179,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
     }
 
     for &(piece, key) in keys {
-        let densities = variants.iter().filter(|v| v.2 == piece).map(|v| (v.0, v.1));
-        for (name, sprite) in pack
-            .animation(piece)
-            .map(|s| (piece, s))
-            .into_iter()
-            .chain(densities)
-        {
+        for (name, sprite) in at_each_density(piece) {
             let draws = sprite
                 .recolorable(0)
                 .is_some_and(|f| f.drawn_in(&[key]).contains(&true));
