@@ -4462,7 +4462,9 @@ def creature_cell(cells, _bx, _by):
 
 # Per frame, the master rows its bob lifts it: a 1x cell is `S` rows, so the
 # 1x reads the frame settled back, or the bob would jump it a whole cell.
-CREATURE_BOB = {"cat_walk_2": 1, "cat_walk_6": 1} | {f"dog_walk_{i}": b for i, b in enumerate((0, 1, 2, 1, 0, 1, 2, 1)) if b}
+CREATURE_BOB = {"cat_walk_2": 1, "cat_walk_6": 1} | {
+    f"dog_walk_{i}": b for i, b in enumerate((0, 1, 2, 1, 0, 1, 2, 1)) if b
+}
 # Per frame, the 1x cells set by hand where the reading misses: `(x, y, key)`.
 CREATURE_FIXES = {
     # the ears, too slim to read, at the head's corners: side by side they
@@ -4492,10 +4494,15 @@ CREATURE_FIXES = {
     # joins into one bar, apart on the contacts and crossed on the passes
     **{
         f"dog_walk_{i}": [(5, 0, TAN), (4, 1, BROWN)] + [(x, 5, T) for x in gap]
-        for i, gap in enumerate(((2, 3, 4), (2, 3, 4), (1, 3, 5), (1, 3, 5), (2, 3, 4), (2, 3), (1, 5), (1, 3, 5)))
+        for i, gap in enumerate((
+            (2, 3, 4), (2, 3, 4), (1, 3, 5), (1, 3, 5), (2, 3, 4), (2, 3), (1, 5), (1, 3, 5),
+        ))
     },
     # each claw's pincer gap, too slim to read: whole, a claw is a block
-    **{f"lobster_{pose}_{i}": [(2, 1, T), (11, 1, T)] for pose in ("rest", "walk") for i in range(4)},
+    **{
+        f"lobster_{pose}_{i}": [(2, 1, T), (11, 1, T)]
+        for pose in ("rest", "walk") for i in range(4)
+    },
 }
 
 
@@ -4531,8 +4538,12 @@ CREATURES = {
     "cat_sleep": ("The cat asleep, curled up: breathing.", CAT_SLEEP),
     "dog_sit": ("The dog sitting: breathing.", DOG_SIT),
     "dog_sleep": ("The dog asleep, chin on its paws: breathing.", DOG_SLEEP),
-    "lobster_rest": ("The OpenClaw lobster at rest, top-down: its claws snapping in turn.", LOBSTER_REST),
-    "lobster_walk": ("The OpenClaw lobster walking, top-down: its legs stepping in turn.", LOBSTER_WALK),
+    "lobster_rest": (
+        "The OpenClaw lobster at rest, top-down: its claws snapping in turn.", LOBSTER_REST
+    ),
+    "lobster_walk": (
+        "The OpenClaw lobster walking, top-down: its legs stepping in turn.", LOBSTER_WALK
+    ),
 }
 
 
