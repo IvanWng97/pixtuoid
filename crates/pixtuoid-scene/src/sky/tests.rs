@@ -378,8 +378,8 @@ fn no_strike_flashes_at_rest() {
 }
 
 /// The one pin on the clock-to-flash path through [`Sky::at`], and on the
-/// flash being the storm's alone; painter tests inject the flash with
-/// [`Sky::with_flash`].
+/// flash being the storm's alone; painter tests inject the strike with
+/// [`Sky::with_strike`].
 #[test]
 fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
     for bucket in 0..24u64 {

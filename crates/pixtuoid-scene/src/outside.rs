@@ -226,7 +226,8 @@ impl Origin {
 }
 
 /// A wall's windows: the band they're cut in, `buf_w` by `band_h`, and the
-/// bays its painter draws, which [`Outside::views`] alone hands back.
+/// bays its painter draws: a strike lands on their panes, and
+/// [`Outside::views`] paints exactly these.
 pub(crate) struct Wall {
     pub(crate) size: (u16, u16),
     pub(crate) bays: Vec<WindowBay>,
