@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
-use pixtuoid_scene::display::TextRun;
+use pixtuoid_scene::display::{Badge, TextRun};
 use pixtuoid_scene::floor::{FloorInputs, FloorSession};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::look::{Look, RenderInputs};
@@ -61,10 +61,14 @@ impl OfficeRenderer {
         self.session.buf()
     }
 
-    /// The text runs of the LAST rendered frame, badges then the board's (call
-    /// right after `render`).
-    pub fn texts(&self) -> &[TextRun] {
-        self.session.texts()
+    /// The badges of the LAST rendered frame (call right after `render`).
+    pub fn badges(&self) -> &[Badge] {
+        self.session.badges()
+    }
+
+    /// The board's lines of the LAST rendered frame (call right after `render`).
+    pub fn signs(&self) -> &[TextRun] {
+        self.session.signs()
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -268,32 +272,34 @@ impl<'a> XrgbSurface<'a> {
     }
 }
 
-/// Paint the name badges among `runs` into the upscaled [`XrgbSurface`]. Each
-/// run's `at` is office-buffer space → multiply by `scale` for screen space; the
-/// badge is centered horizontally over it and sits just above the head. Drawn at
-/// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
-pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], scale: i32) {
-    for run in runs {
-        if !matches!(run.role, pixtuoid_scene::display::TextRole::Badge(_)) {
-            continue;
-        }
-        let tw = crate::aa_text::text_width(&run.text(), LABEL_FONT_PX);
+/// Paint `badges` into the upscaled [`XrgbSurface`]. Each badge's `at` is
+/// office-buffer space → multiply by `scale` for screen space; the badge is
+/// centered horizontally over it and sits just above the head. Drawn at native
+/// surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
+pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[Badge], scale: i32) {
+    let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
+    let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
+    for Badge {
+        at,
+        marker: ink,
+        name,
+        plate,
+        ..
+    } in badges
+    {
+        let tw = mw + crate::aa_text::text_width(&name.text, LABEL_FONT_PX);
         const BADGE_LIFT_PX: i32 = 12;
-        let mut x = i32::from(run.at.x) * scale - tw / 2;
-        let cy = i32::from(run.at.y) * scale - BADGE_LIFT_PX;
-        if let Some(plate) = run.plate {
-            let pad = BADGE_PLATE_PAD_PX;
-            let h = LABEL_FONT_PX.ceil() as i32;
-            sb.fill(
-                (x - pad, cy - pad),
-                (tw + 2 * pad, h + 2 * pad),
-                pack_xrgb(plate),
-            );
-        }
-        for span in &run.spans {
-            sb.draw_shadowed_text(&span.text, x, cy, LABEL_FONT_PX, pack_xrgb(span.ink));
-            x += crate::aa_text::text_width(&span.text, LABEL_FONT_PX);
-        }
+        let cx = i32::from(at.x) * scale - tw / 2;
+        let cy = i32::from(at.y) * scale - BADGE_LIFT_PX;
+        let pad = BADGE_PLATE_PAD_PX;
+        let h = LABEL_FONT_PX.ceil() as i32;
+        sb.fill(
+            (cx - pad, cy - pad),
+            (tw + 2 * pad, h + 2 * pad),
+            pack_xrgb(*plate),
+        );
+        sb.draw_shadowed_text(&marker, cx, cy, LABEL_FONT_PX, pack_xrgb(*ink));
+        sb.draw_shadowed_text(&name.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(name.ink));
     }
 }
 
@@ -373,23 +379,17 @@ mod tests {
         name: &str,
         tone: pixtuoid_scene::badge::BadgeTone,
         theme: &Theme,
-    ) -> TextRun {
+    ) -> Badge {
         let ink = pixtuoid_scene::badge::badge_ink(name, tone, theme);
-        let span = |text: &str, ink| pixtuoid_scene::display::TextSpan {
-            text: text.into(),
-            ink,
-        };
-        TextRun {
+        Badge {
+            agent: pixtuoid_core::AgentId::from_transcript_path("/badge/0.jsonl"),
             at,
-            align: pixtuoid_scene::display::Align::Over,
-            spans: vec![
-                span(&pixtuoid_scene::badge::BADGE_MARKER.to_string(), ink.marker),
-                span(name, ink.name),
-            ],
-            plate: None,
-            role: pixtuoid_scene::display::TextRole::Badge(
-                pixtuoid_core::AgentId::from_transcript_path("/badge/0.jsonl"),
-            ),
+            marker: ink.marker,
+            name: pixtuoid_scene::display::TextSpan {
+                text: name.into(),
+                ink: ink.name,
+            },
+            plate: theme.ui.tooltip_bg,
         }
     }
     use pixtuoid_scene::layout::Size;
@@ -694,8 +694,8 @@ mod tests {
         use pixtuoid_scene::layout::Point;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let plate = Rgb { r: 1, g: 2, b: 3 };
-        let run = TextRun {
-            plate: Some(plate),
+        let badge = Badge {
+            plate,
             ..badge(
                 Point { x: 40, y: 30 },
                 "cc\u{b7}api",
@@ -707,7 +707,7 @@ mod tests {
         let mut sb = vec![0x00FF_FFFFu32; w * h];
         paint_labels_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[run],
+            &[badge],
             2,
         );
         assert!(
@@ -774,33 +774,6 @@ mod tests {
         assert!(
             ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
             "ink spans {left}..={right}, centred off the anchor's {centre}"
-        );
-    }
-
-    /// A badge draws every span it holds, each in its own ink, whatever their
-    /// count: a third span finds its pixels too.
-    #[test]
-    fn a_badge_draws_every_span_it_holds() {
-        use pixtuoid_scene::badge::BadgeTone;
-        use pixtuoid_scene::layout::Point;
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let (w, h, scale) = (240usize, 60usize, 3i32);
-        let ground = 0x0080_8080u32;
-        let third = pixtuoid_core::sprite::Rgb { r: 255, g: 0, b: 0 };
-        let mut run = badge(Point { x: 40, y: 15 }, "idle-x", BadgeTone::Idle, theme);
-        run.spans.push(pixtuoid_scene::display::TextSpan {
-            text: "MW".into(),
-            ink: third,
-        });
-        let mut sb = vec![ground; w * h];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[run],
-            scale,
-        );
-        assert!(
-            sb.contains(&pack_xrgb(third)),
-            "the third span drew no pixel in its ink"
         );
     }
 
@@ -1192,8 +1165,10 @@ mod tests {
         );
     }
 
+    /// Every badge the frame drew paints into the surface: its marker and its
+    /// name, each in its own ink, inside the box it is centred in.
     #[test]
-    fn labels_is_empty_before_render_then_builds_a_positioned_badge_for_a_seeded_agent() {
+    fn every_badge_the_frame_drew_paints_into_the_surface() {
         use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::{AgentId, Reducer, Transport};
         let pack = std::sync::Arc::new(
@@ -1206,21 +1181,27 @@ mod tests {
         // Seeded the production way: a SessionStart through the reducer assigns the desk.
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let mut reducer = Reducer::new();
-        reducer.apply(
-            &mut scene,
-            AgentEvent::SessionStart {
-                agent_id: AgentId::from_parts("claude-code", "offscreen-labels-test"),
-                source: "claude-code".to_string(),
-                session_id: "offscreen-labels-test".to_string(),
-                cwd: std::path::PathBuf::from("/home/user/demo-project"),
-                parent_id: None,
-            },
-            now,
-            Transport::Jsonl,
-        );
+        for (session, cwd) in [
+            ("offscreen-a", "/home/user/demo"),
+            ("offscreen-b", "/srv/api"),
+        ] {
+            reducer.apply(
+                &mut scene,
+                AgentEvent::SessionStart {
+                    agent_id: AgentId::from_parts("claude-code", session),
+                    source: "claude-code".to_string(),
+                    session_id: session.to_string(),
+                    cwd: std::path::PathBuf::from(cwd),
+                    parent_id: None,
+                },
+                now,
+                Transport::Jsonl,
+            );
+        }
 
         // No frame rendered yet → no drawn sprites → no badges.
-        assert!(renderer.texts().is_empty());
+        assert!(renderer.badges().is_empty());
+        let (w, h, scale) = (160u16, 96u16, 3i32);
         renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
@@ -1230,20 +1211,43 @@ mod tests {
                 pets: PetInputs::default(),
             },
             theme,
-            size: Size { w: 160, h: 96 },
+            size: Size { w, h },
             place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
-        let badges: Vec<_> = renderer
-            .texts()
-            .iter()
-            .filter(|run| matches!(run.role, pixtuoid_scene::display::TextRole::Badge(_)))
-            .collect();
-        assert_eq!(badges.len(), 1, "one seeded agent → one name badge");
-        let anchor = badges[0].at;
-        assert!(
-            (0..160).contains(&i32::from(anchor.x)) && (0..96).contains(&i32::from(anchor.y)),
-            "badge anchor {anchor:?} lands inside the rendered office buffer"
+        let badges = renderer.badges();
+        assert_eq!(badges.len(), 2, "two seeded agents → two name badges");
+        let (sw, sh) = (usize::from(w) * 3, usize::from(h) * 3);
+        let ground = 0x0080_8080u32;
+        let mut sb = vec![ground; sw * sh];
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, sw, sh).expect("sized"),
+            badges,
+            scale,
         );
+        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
+        for badge in badges {
+            let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
+            let tw = mw + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);
+            let left = i32::from(badge.at.x) * scale - tw / 2;
+            let top = i32::from(badge.at.y) * scale - crate::aa_text::line_height(LABEL_FONT_PX);
+            let inks: std::collections::HashSet<u32> = sb
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| {
+                    let (x, y) = ((i % sw) as i32, (i / sw) as i32);
+                    (left..left + tw).contains(&x)
+                        && (top..i32::from(badge.at.y) * scale).contains(&y)
+                })
+                .map(|(_, &p)| p)
+                .collect();
+            for ink in [badge.marker, badge.name.ink] {
+                assert!(
+                    inks.contains(&pack_xrgb(ink)),
+                    "{:?}'s badge lacks {ink:?}",
+                    badge.name.text
+                );
+            }
+        }
     }
 }

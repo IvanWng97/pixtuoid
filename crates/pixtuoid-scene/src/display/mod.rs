@@ -27,4 +27,4 @@ pub(crate) use list::{CUP_KEY, CUP_SHADE_KEY, PAPER_KEY, PAPER_SHADE_KEY};
 #[cfg(test)]
 pub(crate) use order::check_order;
 pub(crate) use order::{Layer, Span, depth_sort};
-pub use text::{Align, TextRole, TextRun, TextSpan};
+pub use text::{Align, Badge, TextRole, TextRun, TextSpan};

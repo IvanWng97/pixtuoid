@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::display::{Hover, HoverTarget, Hovers, TextRun};
+use crate::display::{Badge, Hover, HoverTarget, Hovers, TextRun};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
@@ -21,10 +21,10 @@ use crate::walk::WalkState;
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Debug, Default)]
 pub(crate) struct Drawn {
-    /// Each drawn agent's badge, in paint order, then each chitchat bubble;
-    /// `look::render` appends the board's runs and the floor indicator after
-    /// them.
-    pub(crate) texts: Vec<TextRun>,
+    /// Each drawn agent's badge, in paint order.
+    pub(crate) badges: Vec<Badge>,
+    /// Each chitchat bubble, over its speaker's badge.
+    pub(crate) bubbles: Vec<TextRun>,
     pub(crate) hovers: Hovers,
 }
 
@@ -280,17 +280,19 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
             && let Some(agent) = ctx.scene.agents.get(&agent.agent_id)
         {
             drawn
-                .texts
-                .push(TextRun::badge(label_anchor, agent, &namesakes, ctx.theme));
+                .badges
+                .push(Badge::new(label_anchor, agent, &namesakes, ctx.theme));
         }
         drawn.hovers.push(hover);
     }
-    let bubbles: Vec<_> = frame
+    drawn.bubbles = frame
         .chitchat_bubbles
         .iter()
-        .filter_map(|bubble| TextRun::bubble(bubble, &drawn.texts, ctx.theme))
+        .filter_map(|bubble| {
+            let badge = drawn.badges.iter().find(|b| b.agent == bubble.speaker)?;
+            Some(TextRun::bubble(bubble, badge.at, ctx.theme))
+        })
         .collect();
-    drawn.texts.extend(bubbles);
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
     wash_since(ctx.buf, &pre_foreground, look.object_wash);

@@ -273,33 +273,28 @@ impl Office {
         };
         let theme = self.theme;
 
-        let badges: Vec<_> = self
-            .session
-            .texts()
-            .iter()
-            .filter_map(|run| match (run.role, run.spans.as_slice()) {
-                (pixtuoid_scene::display::TextRole::Badge(_), [marker, name]) => {
-                    Some((run.at, run.text(), marker.ink, name.ink))
-                }
-                _ => None,
-            })
-            .collect();
         let board = self
             .session
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        for (i, (at, text, marker, name)) in badges.iter().enumerate() {
+        for (i, badge) in self.session.badges().iter().enumerate() {
+            let pixtuoid_scene::display::Badge {
+                at, marker, name, ..
+            } = badge;
             if i > 0 {
                 out.push(',');
             }
             out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
-            push_json_string(&mut out, text);
+            push_json_string(
+                &mut out,
+                &format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, name.text),
+            );
             // The site paints the ● in `color` and the name in `badge`.
             out.push_str(&format!(
                 ",\"color\":\"{}\",\"badge\":\"{}\"",
                 hex(*marker),
-                hex(*name)
+                hex(name.ink)
             ));
             out.push('}');
         }
@@ -943,9 +938,10 @@ mod tests {
         }
     }
 
-    /// The site centres each span on `x`, so `x` is the anchor itself.
+    /// Every badge the frame drew reaches the site, in its text and inks, and
+    /// hangs at its anchor: the site centres each span on `x`.
     #[test]
-    fn overlay_json_hangs_each_label_at_its_anchor() {
+    fn overlay_json_carries_every_badge_at_its_anchor() {
         let mut o = office();
         let mut t = 0u64;
         while t <= LOOP_MS / 2 {
@@ -954,18 +950,20 @@ mod tests {
         }
         let v: serde_json::Value =
             serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
-        let got: Vec<(u64, u64)> = v["labels"]
-            .as_array()
-            .expect("labels")
-            .iter()
-            .map(|l| (l["x"].as_u64().unwrap(), l["y"].as_u64().unwrap()))
-            .collect();
-        let want: Vec<(u64, u64)> = o
+        let got: Vec<serde_json::Value> = v["labels"].as_array().expect("labels").clone();
+        let want: Vec<serde_json::Value> = o
             .session
-            .texts()
+            .badges()
             .iter()
-            .filter(|run| matches!(run.role, pixtuoid_scene::display::TextRole::Badge(_)))
-            .map(|run| (u64::from(run.at.x), u64::from(run.at.y)))
+            .map(|b| {
+                serde_json::json!({
+                    "x": b.at.x,
+                    "y": b.at.y,
+                    "text": format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, b.name.text),
+                    "color": hex(b.marker),
+                    "badge": hex(b.name.ink),
+                })
+            })
             .collect();
         assert!(!want.is_empty(), "premise: agents are drawn");
         assert_eq!(got, want);

@@ -176,10 +176,10 @@ fn main() -> Result<()> {
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
     surf.fill_upscaled(buf, scale as usize);
     let (bw, bh) = (buf.width(), buf.height());
-    paint_labels_into_surface(&mut surf, renderer.texts(), scale as i32);
+    paint_labels_into_surface(&mut surf, renderer.badges(), scale as i32);
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
         &mut surf,
-        renderer.texts(),
+        renderer.signs(),
         scale as i32,
     );
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
