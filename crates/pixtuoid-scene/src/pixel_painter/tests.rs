@@ -6075,9 +6075,9 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
     assert!(asymmetric > 0, "a profile is not its own mirror");
 }
 
-/// Under every sky the sweep draws, a frame matches the one whose windows show
-/// its instant's no-weather sky — the same room, lit alike — everywhere but on
-/// glass no fixture paints.
+/// The classic holds to
+/// [`assert_the_outside_reaches_only_the_glass`](crate::outside::tests::assert_the_outside_reaches_only_the_glass),
+/// its fixtures being what else paints.
 #[test]
 fn the_outside_reaches_only_the_glass() {
     use crate::outside::tests::{UNPAINTED, painted_alone};
