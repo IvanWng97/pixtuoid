@@ -27,7 +27,7 @@ ready; stop it before `just site-e2e` (dev and preview share port 4321).
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs → audit
+npm run verify     # format:check → lint → check → knip → test:unit → test:demos → build → check:docs → audit
 npm run lighthouse # three-run a11y / SEO / performance budgets (in-repo runner)
 ```
 
