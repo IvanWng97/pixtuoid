@@ -442,7 +442,7 @@ fn gateway_mascot_tooltip_on_hover() {
     let cx = u16::midpoint(x0, x1);
     let cy_px = u16::midpoint(y0, y1);
     // The hover is the painted frame, which tolerates the approximate
-    // center; half-block ⇒ /2.
+    // center.
     r.set_mouse_pos(Some((cx, CellArea::row_of(cy_px))));
     r.render(&scene, pack(), t0()).unwrap();
 

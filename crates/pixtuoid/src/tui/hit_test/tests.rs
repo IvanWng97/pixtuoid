@@ -324,7 +324,7 @@ fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
         pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture::SnackShelf).visual;
     let top_y = shelf.y.saturating_sub(vis.h / 2);
     assert_eq!(top_y % 2, 1, "192x160 must keep the shelf's top edge odd");
-    // `top_y / 2` holds the shelf's top row; on an odd edge only its lower half
+    // `row_of(top_y)` holds the shelf's top row; on an odd edge only its lower half
     // shows it.
     assert_eq!(
         hit_test_furniture(
