@@ -32,6 +32,11 @@ use tokio::sync::watch;
 use super::gate;
 use super::{ConnectedSources, RunConfig, SceneRx, resolve_boot_caps, summarize};
 
+/// Boot the TUI (unless headless) and drive the source pipeline until it exits.
+///
+/// # Errors
+///
+/// If the sprite pack fails to load, the tokio runtime cannot be built, or the headless loop or TUI session fails.
 pub fn run(cfg: RunConfig) -> Result<()> {
     // Before tokio and the boot caps: the query reads the terminal while no
     // other thread does, and once the cutaway paints, the boot seed is the

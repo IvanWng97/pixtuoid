@@ -1365,6 +1365,10 @@ fn render(r: &DoctorReport) -> String {
 
 /// Returns the rendered report rather than printing it, so the WHOLE report
 /// builder is unit-testable.
+///
+/// # Errors
+///
+/// Never: building the report is infallible, and the `Result` is the shape of the sibling subcommand handlers.
 pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
     Ok(render(&collect(log_path, graphics)))
 }
