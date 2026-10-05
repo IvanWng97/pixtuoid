@@ -70,7 +70,13 @@ pub(crate) fn paint_text_runs(
         };
         let spans = match (run.role, run.plate) {
             (TextRole::Badge(id), _) if hovered == Some(id) => {
-                let name: String = run.spans.iter().skip(1).map(|s| s.text.as_str()).collect();
+                let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+                let name: String = run
+                    .spans
+                    .iter()
+                    .filter(|s| s.text != marker)
+                    .map(|s| s.text.as_str())
+                    .collect();
                 let style = Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD);
@@ -662,6 +668,41 @@ mod tests {
             }
         }
         assert_eq!(stars, 1, "the board has its star");
+    }
+
+    /// A hovered badge reads `▸name`, its marker dropped by what it is, not
+    /// where it sits, so a badge laid out marker last reads the same.
+    #[test]
+    fn a_hovered_badge_drops_its_marker_wherever_it_sits() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::LabelTone;
+        let first = badge(
+            Point { x: 20, y: 9 },
+            "repo",
+            LabelTone::Idle,
+            &theme::NORMAL,
+        );
+        let last = super::TextRun {
+            spans: first.spans.iter().rev().cloned().collect(),
+            ..first.clone()
+        };
+        let super::TextRole::Badge(id) = first.role else {
+            unreachable!("built a badge");
+        };
+        let read = |run: super::TextRun| {
+            let mut term = Terminal::new(TestBackend::new(40, 8)).unwrap();
+            term.draw(|f| super::paint_text_runs(f, &[run], Rect::new(0, 0, 40, 8), Some(id)))
+                .unwrap();
+            let buf = term.backend().buffer();
+            (0..8u16)
+                .map(|y| (0..40u16).map(|x| buf[(x, y)].symbol()).collect::<String>())
+                .find(|row| !row.trim().is_empty())
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        };
+        assert_eq!(read(first), "\u{25b8}repo");
+        assert_eq!(read(last), "\u{25b8}repo");
     }
 
     /// The floor indicator centres on its anchor by display columns, not

@@ -101,6 +101,9 @@ struct Classic {
     caches: ClassicCaches,
     /// What the last frame drew that a pointer finds or a badge hangs from.
     hits: Drawn,
+    /// How many of `hits.texts` lead as the sprites' badges, the rest being
+    /// the signs: counted where the badges are drawn, not read off the order.
+    badges: usize,
     /// The last frame's speech bubbles, which only the classic sets as text.
     bubbles: Vec<ChitchatBubble>,
 }
@@ -111,9 +114,10 @@ struct Classic {
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
-    /// Its text in paint order: each drawn agent's badge, then the wall
-    /// board's lines and the floor indicator.
-    pub texts: &'a [crate::display::TextRun],
+    /// Each drawn agent's badge, in paint order.
+    pub badges: &'a [crate::display::TextRun],
+    /// The wall board's lines and the floor indicator.
+    pub signs: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
     /// Active speech bubbles.
@@ -136,6 +140,7 @@ impl Raster {
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
             caches: ClassicCaches::new(),
             hits: Drawn::default(),
+            badges: 0,
             bubbles: Vec::new(),
         })
     }
@@ -146,9 +151,11 @@ impl Raster {
             .classic
             .as_mut()
             .filter(|_| self.shown == Some(Look::Classic))?;
+        let (badges, signs) = classic.hits.texts.split_at(classic.badges);
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
-            texts: &classic.hits.texts,
+            badges,
+            signs,
             hovers: &classic.hits.hovers,
             bubbles: &classic.bubbles,
         })
@@ -248,6 +255,7 @@ pub fn render<'r>(
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
             classic.hits = Drawn::default();
+            classic.badges = 0;
             classic.bubbles.clear();
             raster.shown = Some(look);
         }
@@ -282,6 +290,7 @@ pub fn render<'r>(
                 ),
                 &stepped.frame,
             );
+            classic.badges = classic.hits.texts.len();
             classic.hits.texts.extend(board.runs(theme));
             classic.hits.texts.push(crate::display::TextRun::indicator(
                 stepped.layout.door,

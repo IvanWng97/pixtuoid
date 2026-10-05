@@ -1121,10 +1121,11 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::look::Look
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Look
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Look
 pub struct pixtuoid_scene::look::ClassicDrawn<'a>
+pub pixtuoid_scene::look::ClassicDrawn::badges: &'a [crate::display::TextRun]
 pub pixtuoid_scene::look::ClassicDrawn::bubbles: &'a [pixtuoid_scene::chitchat::ChitchatBubble]
 pub pixtuoid_scene::look::ClassicDrawn::hovers: &'a crate::display::Hovers
 pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a mut pixtuoid_core::sprite::RgbBuffer
-pub pixtuoid_scene::look::ClassicDrawn::texts: &'a [crate::display::TextRun]
+pub pixtuoid_scene::look::ClassicDrawn::signs: &'a [crate::display::TextRun]
 impl<'a> core::fmt::Debug for pixtuoid_scene::look::ClassicDrawn<'a>
 pub fn pixtuoid_scene::look::ClassicDrawn<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Freeze for pixtuoid_scene::look::ClassicDrawn<'a>

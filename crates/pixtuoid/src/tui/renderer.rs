@@ -387,7 +387,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
     let Some(ClassicDrawn {
         pixels,
-        texts,
+        badges,
+        signs,
         hovers,
         bubbles: chitchat_bubbles,
     }) = ctx.floor.raster.classic_drawn()
@@ -398,7 +399,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let star = texts
+    let star = signs
         .iter()
         .find(|run| run.role == TextRole::Star)
         .map(TextRun::hit_box);
@@ -413,13 +414,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(pixels, ctx.onboarding.dim);
 
-    // Badges first, then a bubble over them, then the signs, which a bubble
-    // must not cover.
-    let signs = texts
-        .iter()
-        .position(|run| !matches!(run.role, TextRole::Badge(_)))
-        .unwrap_or(texts.len());
-    let (badges, signs) = texts.split_at(signs);
     let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -428,6 +422,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
+        // Badges first, then a bubble over them, then the signs, which a
+        // bubble must not cover.
         paint_text_runs(f, badges, actual_scene, hovered);
         paint_chitchat_bubbles(f, chitchat_bubbles, badges, actual_scene, theme);
         paint_text_runs(f, signs, actual_scene, None);
