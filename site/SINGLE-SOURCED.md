@@ -7,11 +7,11 @@ only carries what no gate can.
 
 ## Generated artifacts (edit the source, never the output)
 
-| Rendered output                                                 | Source of truth                                                                                                       | Regen             | Drift gate                                                                                          |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------- |
-| Root `README.md` features table + install block + tools glimpse | `src/features.json` / `src/install.json` / `src/sources.json`                                                         | `just gen-readme` | `just gen-readme-check` (CI `readme` job)                                                           |
-| `public/demos/*` stills + clips                                 | `scripts/media.json` → `gen-media.py` (real TuiRenderer; wasm `hero_still` for `hero-wide.png` / `vibing-poster.png`) | `just gen-media`  | `just gen-check` (stills pixel-diffed; clips presence-gated — encodes are non-deterministic)        |
-| `src/assets/pix-icons/*.png`                                    | sprite pack palette (`pack.toml`) → `gen-pix-icons.py`                                                                | `just gen-icons`  | `just gen-check` (decode-compared); `config/pix-icons.test.mjs` bridges `features.json` `pix` names |
+| Rendered output                                                 | Source of truth                                                                                                       | Regen             | Drift gate                                                                                                |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------- |
+| Root `README.md` features table + install block + tools glimpse | `src/features.json` / `src/install.json` / `src/sources.json`                                                         | `just gen-readme` | `just gen-readme-check` (CI `generated drift` job)                                                        |
+| `public/demos/*` stills + clips                                 | `scripts/media.json` → `gen-media.py` (real TuiRenderer; wasm `hero_still` for `hero-wide.png` / `vibing-poster.png`) | `just site-demos` | none: gitignored, rendered per CI build (`.github/actions/gen-demos`)                                     |
+| `src/assets/pix-icons/*.png`                                    | sprite pack palette (`pack.toml`) → `gen-pix-icons.py`                                                                | `just gen-icons`  | `just gen-icons-check` (decode-compared); `config/pix-icons.test.mjs` bridges `features.json` `pix` names |
 
 Notes no gate carries:
 
