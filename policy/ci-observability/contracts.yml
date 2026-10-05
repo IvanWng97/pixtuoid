@@ -53,13 +53,13 @@
     (github.com/anthropics/claude-code-action/blob/v1/base-action/src/parse-sdk-options.ts);
     the action parses only its space-separated form. Any other flag, action input
     or settings key can add a rule, a tool, a hook or a directory, so all three
-    are allowlists; other values stay free. `allowed_bots` admits the merge
-    queue's app and media-regen.yml's own app (its PR touches only docs/images),
-    never `*`, which would let any App's push trigger it.
+    are allowlists; other values stay free. `allowed_bots` admits only
+    media-regen.yml's own app (its PR touches only docs/images), never `*`,
+    which would let any App's push trigger it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and ((.[0].with.allowed_bots // "") == "mergify[bot],pixtuoid-bot[bot]")
+      and ((.[0].with.allowed_bots // "") == "pixtuoid-bot[bot]")
       and ((.[0].with | keys) - [
             "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
@@ -407,6 +407,24 @@
       .jobs.required.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .with["allow-skipped"] = "true" else . end)
 
+- id: only-the-queue-buys-the-full-tier
+  file: .github/workflows/ci.yml
+  why: >-
+    `tier` alone decides which PR runs gets the full tier's Windows, macOS and
+    release runners; a PR outside the queue, or a fork naming its branch
+    `mergify/merge-queue/…`, that claimed it would bring back the starvation
+    two-step CI removes.
+  assert: |
+    [.jobs.tier.steps[] | select(.id == "tier") | .env.FULL]
+    == ["${{ github.event_name != 'pull_request' || (startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.head.repo.full_name == github.repository) }}"]
+  break:
+    - |
+      .jobs.tier.steps |= map(if .id == "tier" then .env.FULL = "${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/merge-queue/') }}" else . end)
+    - |
+      .jobs.tier.steps |= map(if .id == "tier" then .env.FULL = "${{ github.event_name != 'pull_request' || (startsWith(github.head_ref, 'mergify/') && github.event.pull_request.head.repo.full_name == github.repository) }}" else . end)
+    - |
+      .jobs.tier.steps |= map(if .id == "tier" then .env.FULL = "true" else . end)
+
 - id: ci-gate-judges-every-group
   file: .github/workflows/ci.yml
   why: >-
@@ -439,19 +457,6 @@
     - |
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
-
-- id: queue-updates-by-merge
-  file: .mergify.yml
-  why: >-
-    The queue updates the PR's own branch, and a rebase update force-pushes it
-    (docs.mergify.com/merge-queue/rules#configuration-options): a PR stacked on
-    it loses the commits it was built on, and every local checkout of it
-    diverges, with nothing to show it until the next push.
-  assert: |
-    (.queue_rules | length > 0) and all(.queue_rules[]; .update_method == "merge")
-  break:
-    - .queue_rules[0].update_method = "rebase"
-    - '.queue_rules += [{"name": "second", "update_method": "rebase"}]'
 
 # ── Publishing
 

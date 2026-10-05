@@ -17,7 +17,6 @@ queue_rules:
   - name: default
     batch_size: 5
     merge_method: squash
-    update_method: merge
     # `auto` sizes this from unloaded runs, so a backlog of runners alone times
     # a PR out and costs a full CI rerun; this covers the backlogged full tier.
     checks_timeout: 60 min

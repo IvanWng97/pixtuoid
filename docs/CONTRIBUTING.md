@@ -256,16 +256,19 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-a queue update that only merges `main` in leaves the record standing. The
+an update that only merges `main` in leaves the record standing. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A published review passes whatever it found; a failed or missing status
 is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
-local row. The queue merges `main` into a PR that is behind and waits for CI and
-the bots at that head, so nobody merges `main` in by hand; branch protection
-still holds the merge until a re-review's new threads are resolved. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
+local row. The queue tests up to `batch_size` PRs together on a draft PR
+(`mergify/merge-queue/…`) running the full tier, then merges the PRs
+themselves; it never updates a PR's own branch
+([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
+are the ones merged"), so the bots' statuses on the PR's head are the ones its
+`queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
 bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
 generated-art record: it renders main's merged code, which each look PR's lens
 already read as evidence.
@@ -276,7 +279,7 @@ resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
 The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
-too, until the queue's own update re-runs them as Mergify.
+too, again after every Dependabot rebase.
 
 ### Dispositions
 
