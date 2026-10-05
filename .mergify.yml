@@ -31,7 +31,7 @@ queue_rules:
       # A stacked PR waits until its base lands and GitHub retargets it.
       - base = main
       - -draft
-      # The in-place update would merge main into it, which release-plz.yml's
+      # A queue update would merge main into it, which release-plz.yml's
       # release-merge refuses after the merge (docs/CONTRIBUTING.md#cutting-the-release).
       - -head ~= ^release-plz-
       - check-success = ci-gate
@@ -42,3 +42,15 @@ queue_rules:
     # The queue's draft PR, where ci-gate is the full tier.
     merge_conditions:
       - check-success = ci-gate
+
+pull_request_rules:
+  # media-regen.yml's bot PR queues itself: it renders main's merged code, which
+  # each look PR's generated-art lens already read as evidence. Every file it
+  # touches must sit under docs/images/ (the list operator matches any file).
+  - name: queue the README media regen
+    conditions:
+      - head = bot/media-regen
+      - head-repo-full-name = IvanWng97/pixtuoid
+      - -files ~= ^(?!docs/images/)
+    actions:
+      queue:

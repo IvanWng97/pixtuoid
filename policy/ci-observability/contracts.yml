@@ -287,6 +287,36 @@
     - .jobs["closed-pr"].permissions.contents = "write"
     - .jobs["closed-pr"].steps[0].uses = "actions/checkout@v7"
 
+- id: media-regen-bounds-its-token
+  file: .github/workflows/media-regen.yml
+  why: >-
+    publish holds the App's key and the write token it mints, which stay bounded
+    only while no other job can read them, publish builds and runs nothing from
+    the tree, and the one thing it commits is the README's media.
+  assert: |
+    ([.jobs.publish.steps[] | .run // ""] | join("\n")) as $publish
+    | .permissions == {}
+      and .jobs.render.permissions == {"contents": "read"}
+      and ([.jobs | to_entries[] | select(.key != "publish") | .value | tostring | test("secrets\\.")] | any | not)
+      and .jobs.publish.permissions == {}
+      and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token"]) == []
+      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
+      and ($publish | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
+      and ([$publish | scan("git\\s+(?:add|commit\\s+[^\\n]*-a)[^\\n]*")] == ["git add --all -- docs/images"])
+      and ((.on | keys) - ["push", "workflow_dispatch"]) == []
+  break:
+    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]'
+    - '.jobs.render.permissions.contents = "write"'
+    - '.jobs.publish.permissions = {"contents": "write"}'
+    - '.jobs.publish.steps += [{"run": "cargo build"}]'
+    - '.jobs.publish.steps[-1].run |= sub("git add --all -- docs/images"; "git add --all -- .")'
+    - .on.pull_request = {}
+    - '.permissions = {"contents": "write"}'
+    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]}'
+    - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
+    - '.jobs.publish.steps[0].with["persist-credentials"] = true'
+    - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
+
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
   why: >-
