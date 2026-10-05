@@ -49,6 +49,8 @@ pub mod cutaway;
 pub mod display;
 pub(crate) mod dither;
 pub(crate) mod effects;
+#[doc(hidden)]
+pub mod flash;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;

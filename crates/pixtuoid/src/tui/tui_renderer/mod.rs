@@ -75,6 +75,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// Live walkable/approach/route debug layer toggle (`w`); not persisted.
     debug_walkable: bool,
     chrome: Chrome,
+    /// The flashes the half-blocks show; the cutaway holds its own.
+    flash: pixtuoid_scene::flash::FlashHold<pixtuoid_scene::flash::Flashes, ratatui::layout::Size>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
     #[cfg(feature = "graphics")]
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
@@ -248,6 +250,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
             },
+            flash: pixtuoid_scene::flash::FlashHold::on(pixtuoid_scene::flash::monotonic()),
             #[cfg(feature = "graphics")]
             cutaway: None,
         }
@@ -618,7 +621,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // Recording the from-floor's carriers before the to-floor render can't
         // change the to-floor's pixels: an agent lives on exactly ONE floor, and
         // each projected floor scene paints only its own agents' coffee state.
-        for (floor, world) in [
+        let mut flashes = pixtuoid_scene::flash::Flashes::default();
+        for (flash, (floor, world)) in flashes.iter_mut().zip([
             (
                 &mut *from,
                 self.chrome
@@ -628,8 +632,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 &mut *to,
                 self.chrome.slide_world(&to_scene, pack, now, to_floor, nf),
             ),
-        ] {
-            pixtuoid_scene::look::render(
+        ]) {
+            *flash = pixtuoid_scene::look::render(
                 floor,
                 OfficeStores {
                     coffee: &mut self.office.coffee,
@@ -644,12 +648,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     place: Place::default(),
                     debug_walkable: self.debug_walkable,
                 },
-            );
+            )
+            .map(|frame| frame.flash)
+            .unwrap_or_default();
             // Modal backdrop: dim BOTH sliding buffers, the same multiply
             // draw_scene applies to its single buffer.
             if let Some(drawn) = floor.raster.classic_drawn() {
                 crate::tui::renderer::apply_dim(drawn.pixels, onboarding_dim);
             }
+        }
+        if self.flash.holds(flashes, term_size) {
+            return Ok(());
         }
         let (Some(from_buf), Some(to_buf)) = (from.raster.pixels(), to.raster.pixels()) else {
             return Ok(());
@@ -668,6 +677,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
             crate::tui::renderer::paint_overlays(f, &overlays, now, actual_full, theme);
         })?;
+        self.flash.shown(flashes, term_size);
 
         self.chrome.popup.last_scale = popup_scale;
         Ok(())
@@ -823,8 +833,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             dashboard: overlays.dashboard,
             connection: overlays.connection,
             onboarding: overlays.onboarding,
+            flash: Some(&mut self.flash),
         };
         let out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
+        if out.held {
+            return Ok(());
+        }
         if out.layout.is_none() {
             self.rest_floor(now);
         }
@@ -917,15 +931,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     debug_walkable: false,
                 },
             );
-            rendered.is_some()
+            rendered.map(|frame| frame.flash)
         };
-        let drawn = !too_small
-            && render(&mut *leaving, from_world, from_place)
-            && render(&mut *arriving, to_world, to_place);
-        let (Some(leaving), Some(arriving)) = (
-            drawn.then(|| leaving.raster.pixels()).flatten(),
-            arriving.raster.pixels(),
-        ) else {
+        let flashes = (!too_small)
+            .then(|| {
+                Some([
+                    render(&mut *leaving, from_world, from_place)?,
+                    render(&mut *arriving, to_world, to_place)?,
+                ])
+            })
+            .flatten();
+        let (Some(flashes), Some(leaving), Some(arriving)) =
+            (flashes, leaving.raster.pixels(), arriving.raster.pixels())
+        else {
             let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
             self.chrome.popup.last_scale = popup_scale;
             // As classic's: a slide nothing shows would otherwise run its course.
@@ -937,6 +955,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             crate::tui::cutaway::Slide {
                 leaving,
                 arriving,
+                flashes,
                 t,
                 going_down,
             },
@@ -1013,6 +1032,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             dirty,
             layout: frame_layout,
             occupied_waypoints,
+            flash,
         }) = rendered
         else {
             let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
@@ -1020,7 +1040,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.rest_floor(now);
             return drawn;
         };
-        cutaway.paint(fitted, self.current_floor, pixels, dirty, now);
+        cutaway.paint(fitted, self.current_floor, pixels, dirty, flash, now);
         let raster = &self.floors[self.current_floor].raster;
         let hovers = raster.hovers().cloned().unwrap_or_default();
         let star = raster.star();
@@ -1056,6 +1076,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 star,
                 occupied_waypoints,
                 geometry: Some(geometry),
+                // The cutaway holds its own tiles; the terminal's text draws.
+                held: false,
             },
             popup_scale,
             now,
