@@ -340,6 +340,10 @@ pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
 /// framing, so neither can reword the fold alone.
 pub const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
 
+/// How both presenters word a disconnect that couldn't reach `claude` to
+/// deregister the plugin, which keeps it registered with no hooks.
+pub const PLUGIN_LEFT_REGISTERED_PHRASE: &str = "plugin left registered (claude not on PATH)";
+
 /// A folded hook-removal failure MUST surface as `Failed` (with the reason),
 /// NEVER a clean `Disconnected` — else a caller hides stale hooks behind it.
 fn map_disconnect_outcome(o: DisconnectOutcome) -> AppliedChange {

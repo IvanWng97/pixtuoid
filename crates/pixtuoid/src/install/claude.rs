@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::{HostRegistration, MergeOutcome};
@@ -130,8 +131,11 @@ fn register(config: &Path) -> Result<()> {
 /// a marketplace it doesn't know, hence the list first.
 fn unregister() -> Result<bool> {
     if claude_cli().is_none() {
-        tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
-        return Ok(false);
+        let registered = is_registered()?;
+        if registered {
+            tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
+        }
+        return Ok(!registered);
     }
     let listed = run_claude(&[
         "plugin".as_ref(),
@@ -156,6 +160,9 @@ fn unregister() -> Result<bool> {
 fn is_registered() -> Result<bool> {
     let settings = legacy_config_path()?;
     let content = io::read_config(&settings)?;
+    if content.trim().is_empty() {
+        return Ok(false);
+    }
     let doc: Value = serde_json::from_str(&content)
         .with_context(|| format!("parsing {}", settings.display()))?;
     Ok(doc["enabledPlugins"][plugin_id()].as_bool() == Some(true))
@@ -348,12 +355,13 @@ fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
                     continue;
                 };
                 entries.retain_mut(|entry| {
+                    let sentinel = entry.get(SENTINEL_KEY).and_then(Value::as_bool) == Some(true);
                     let Some(hs) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
                         return true;
                     };
                     let before = hs.len();
                     // A user's own hook sharing the group stays.
-                    hs.retain(|h| !hook_is_ours(h));
+                    hs.retain(|h| !(hook_is_ours(h) || sentinel && is_our_exec_form(h)));
                     hs.len() == before || !hs.is_empty()
                 });
             }
@@ -385,6 +393,14 @@ fn hook_is_ours(hook: &Value) -> bool {
         }
 }
 
+/// Windows' exec form carries no source stamp and may embed a renamed shim
+/// (`--hook-path`), so inside a sentinel group its exact shape is what marks it.
+fn is_our_exec_form(hook: &Value) -> bool {
+    hook["command"]
+        .as_str()
+        .is_some_and(|c| *hook == hook_entry(c, true))
+}
+
 /// The one place Claude's nested per-event shape lives.
 fn managed_entry(hook_command: &str) -> Value {
     json!({
@@ -396,7 +412,6 @@ fn managed_entry(hook_command: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::SENTINEL_KEY;
 
     #[test]
     fn legacy_config_path_honors_claude_config_dir() {
@@ -534,15 +549,20 @@ mod tests {
         let theirs =
             json!({ "matcher": "Write", "hooks": [{ "type": "command", "command": "/mine" }] });
         let ours = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/opt/pixtuoid-hook" }] });
-        // The sentinel alone doesn't make a hook ours.
+        // The sentinel alone doesn't make a shell-form hook ours…
         let renamed = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/renamed/shim" }] });
-        let doc = json!({ "hooks": { "PreToolUse": [theirs.clone(), ours, renamed.clone()], "Stop": "not-an-array" }, "theme": "dark" });
+        // …but the exec form Windows wrote, renamed shim and all, is.
+        let windows =
+            json!({ SENTINEL_KEY: true, "hooks": [hook_entry(r"C:\tools\pxhook.exe", true)] });
+        // The same exec form outside our group is someone else's.
+        let their_exec = json!({ "hooks": [hook_entry(r"C:\tools\other.exe", true)] });
+        let doc = json!({ "hooks": { "PreToolUse": [theirs.clone(), ours, renamed.clone(), windows, their_exec.clone()], "Stop": "not-an-array" }, "theme": "dark" });
         let out = legacy_uninstall(&doc.to_string()).unwrap();
         assert!(out.changed);
         let cleaned: Value = serde_json::from_str(&out.content).unwrap();
         assert_eq!(
             cleaned,
-            json!({ "hooks": { "PreToolUse": [theirs, renamed], "Stop": "not-an-array" }, "theme": "dark" })
+            json!({ "hooks": { "PreToolUse": [theirs, renamed, their_exec], "Stop": "not-an-array" }, "theme": "dark" })
         );
         assert!(!legacy_uninstall(&out.content).unwrap().changed);
     }

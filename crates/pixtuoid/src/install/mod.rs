@@ -427,7 +427,11 @@ pub(crate) fn install_target(
     let migrated = match t.host {
         Some(host) => {
             (host.register)(&path)?;
-            let stripped = strip_managed(host.legacy_uninstall, &(host.legacy_config)()?)?;
+            let stripped = strip_managed(
+                host.legacy_uninstall,
+                &(host.legacy_config)()?,
+                Backup::Take,
+            )?;
             backups.extend(stripped.backup);
             stripped.changed
         }
@@ -446,19 +450,30 @@ pub(crate) fn install_target(
     })
 }
 
+/// Whether [`strip_managed`] snapshots the config before rewriting it.
+#[derive(Debug, Clone, Copy)]
+enum Backup {
+    /// A migration keeps pixtuoid installed, so the snapshot is the way back.
+    Take,
+    /// An uninstall deletes whatever backup exists once it has removed pixtuoid.
+    Skip,
+}
+
 /// What [`strip_managed`] did.
 #[derive(Debug, Default)]
 struct Stripped {
     changed: bool,
-    /// Taken before the rewrite; `None` when one already existed.
+    /// Taken before the rewrite; `None` under [`Backup::Skip`] or when one
+    /// already existed.
     backup: Option<PathBuf>,
 }
 
-/// Remove the entries `uninstall` recognizes from `path` under its lock, backing
-/// it up first. Never rewrites on a semantic no-op.
+/// Remove the entries `uninstall` recognizes from `path` under its lock. Never
+/// rewrites on a semantic no-op.
 fn strip_managed(
     uninstall: fn(&str) -> Result<target::MergeOutcome>,
     path: &std::path::Path,
+    backup: Backup,
 ) -> Result<Stripped> {
     // Decided BEFORE locking: `lock_config` creates the parent dir + a .lock sidecar, and
     // materializing ~/.reasonix here would flip that target's presence probe on a no-op.
@@ -472,7 +487,10 @@ fn strip_managed(
     if !outcome.changed {
         return Ok(Stripped::default());
     }
-    let backup = lock.backup_once(BACKUP_SUFFIX)?;
+    let backup = match backup {
+        Backup::Take => lock.backup_once(BACKUP_SUFFIX)?,
+        Backup::Skip => None,
+    };
     lock.write_atomic(&outcome.content)?;
     Ok(Stripped {
         changed: true,
@@ -541,7 +559,7 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     }
     let mut removed = false;
     for (uninstall, config) in &configs {
-        removed |= strip_managed(*uninstall, config)?.changed;
+        removed |= strip_managed(*uninstall, config, Backup::Skip)?.changed;
     }
     // On a SEMANTIC no-op the backups stay: they are the user's only recovery.
     let mut removed_backups = Vec::new();

@@ -1550,18 +1550,30 @@ fn claude_uninstall_without_claude_on_path_still_strips_the_legacy_hooks() {
         ],
         || {
             let tmp = tempfile::TempDir::new().unwrap();
+            let hooks = plugin_hooks_path(tmp.path());
             let legacy = config.join("settings.json");
+            // Never registered: nothing is left behind, whatever PATH holds.
             std::fs::write(
                 &legacy,
                 r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]},"theme":"dark"}"#,
             )
             .unwrap();
-            let u = uninstall_target(&CLAUDE, Some(plugin_hooks_path(tmp.path()))).unwrap();
+            let u = uninstall_target(&CLAUDE, Some(hooks.clone())).unwrap();
             assert!(matches!(u.outcome, UninstallOutcome::Removed));
-            assert!(u.plugin_left_registered);
+            assert!(!u.plugin_left_registered);
             let left: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&legacy).unwrap()).unwrap();
             assert_eq!(left, serde_json::json!({ "theme": "dark" }));
+
+            // Registered, with no `claude` to deregister it.
+            std::fs::write(&legacy, r#"{"enabledPlugins":{"pixtuoid@pixtuoid":true}}"#).unwrap();
+            let u = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+            assert!(u.plugin_left_registered);
+
+            // No settings.json at all reads as never registered.
+            std::fs::remove_file(&legacy).unwrap();
+            let u = uninstall_target(&CLAUDE, Some(plugin_hooks_path(tmp.path()))).unwrap();
+            assert!(!u.plugin_left_registered);
         },
     );
 }
@@ -1599,6 +1611,24 @@ fn claude_migration_keeps_the_backup_and_takes_one_when_absent() {
         // legacy strip itself is then a no-op.
         let u = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
         assert!(u.removed_backups.contains(&bak), "{:?}", u.removed_backups);
+        assert!(!bak.exists());
+    });
+}
+
+#[test]
+fn an_uninstall_takes_no_backup_of_its_own() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let legacy = (CLAUDE.host.unwrap().legacy_config)().unwrap();
+        let bak = legacy.with_file_name("settings.json.pixtuoid.bak");
+        std::fs::write(
+            &legacy,
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#,
+        )
+        .unwrap();
+        let u = uninstall_target(&CLAUDE, Some(plugin_hooks_path(tmp.path()))).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        assert!(u.removed_backups.is_empty(), "{:?}", u.removed_backups);
         assert!(!bak.exists());
     });
 }
