@@ -101,9 +101,8 @@ struct Classic {
     caches: ClassicCaches,
     /// What the last frame drew that a pointer finds or a badge hangs from.
     hits: Drawn,
-    /// How many of `hits.texts` lead as the sprites' badges, the rest being
-    /// the signs: counted where the badges are drawn, not read off the order.
-    badges: usize,
+    /// The last frame's wall board lines and floor indicator.
+    signs: Vec<crate::display::TextRun>,
     /// The last frame's speech bubbles, which only the classic sets as text.
     bubbles: Vec<ChitchatBubble>,
 }
@@ -115,7 +114,7 @@ pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
     /// Each drawn agent's badge, in paint order.
-    pub badges: &'a [crate::display::TextRun],
+    pub badges: &'a [crate::display::Badge],
     /// The wall board's lines and the floor indicator.
     pub signs: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
@@ -140,7 +139,7 @@ impl Raster {
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
             caches: ClassicCaches::new(),
             hits: Drawn::default(),
-            badges: 0,
+            signs: Vec::new(),
             bubbles: Vec::new(),
         })
     }
@@ -151,11 +150,10 @@ impl Raster {
             .classic
             .as_mut()
             .filter(|_| self.shown == Some(Look::Classic))?;
-        let (badges, signs) = classic.hits.texts.split_at(classic.badges);
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
-            badges,
-            signs,
+            badges: &classic.hits.badges,
+            signs: &classic.signs,
             hovers: &classic.hits.hovers,
             bubbles: &classic.bubbles,
         })
@@ -170,13 +168,23 @@ impl Raster {
         }
     }
 
-    /// The text the last classic frame set, in paint order; none in another
-    /// look.
-    pub(crate) fn classic_texts(&self) -> &[crate::display::TextRun] {
-        match (self.shown, &self.classic) {
-            (Some(Look::Classic), Some(classic)) => &classic.hits.texts,
-            _ => &[],
-        }
+    /// The badges the last classic frame set, in paint order; none in
+    /// another look.
+    pub(crate) fn classic_badges(&self) -> &[crate::display::Badge] {
+        self.shown_classic()
+            .map_or(&[], |classic| &classic.hits.badges)
+    }
+
+    /// The signs the last classic frame set; none in another look.
+    pub(crate) fn classic_signs(&self) -> &[crate::display::TextRun] {
+        self.shown_classic().map_or(&[], |classic| &classic.signs)
+    }
+
+    /// The classic, when it drew the last frame.
+    fn shown_classic(&self) -> Option<&Classic> {
+        self.classic
+            .as_ref()
+            .filter(|_| self.shown == Some(Look::Classic))
     }
 
     /// The cells of the star the last frame drew, where a pointer opens the
@@ -186,8 +194,7 @@ impl Raster {
             Look::Classic => self
                 .classic
                 .as_ref()?
-                .hits
-                .texts
+                .signs
                 .iter()
                 .find(|run| run.role == crate::display::TextRole::Star)
                 .map(crate::display::TextRun::hit_box),
@@ -246,7 +253,7 @@ pub fn render<'r>(
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
             classic.hits = Drawn::default();
-            classic.badges = 0;
+            classic.signs.clear();
             classic.bubbles.clear();
             raster.shown = Some(look);
         }
@@ -281,9 +288,9 @@ pub fn render<'r>(
                 ),
                 &stepped.frame,
             );
-            classic.badges = classic.hits.texts.len();
-            classic.hits.texts.extend(board.runs(theme));
-            classic.hits.texts.push(crate::display::TextRun::indicator(
+            classic.signs.clear();
+            classic.signs.extend(board.runs(theme));
+            classic.signs.push(crate::display::TextRun::indicator(
                 stepped.layout.door,
                 world.floor.floor_idx + 1,
                 theme,

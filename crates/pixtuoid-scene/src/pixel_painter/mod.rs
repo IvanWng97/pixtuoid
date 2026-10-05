@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::display::{Hover, HoverTarget, Hovers, TextRun};
+use crate::display::{Badge, Hover, HoverTarget, Hovers};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
@@ -21,9 +21,8 @@ use crate::walk::WalkState;
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Debug, Default)]
 pub(crate) struct Drawn {
-    /// Each drawn agent's badge, in paint order; `look::render` appends the
-    /// board's runs and the floor indicator after them.
-    pub(crate) texts: Vec<TextRun>,
+    /// Each drawn agent's badge, in paint order.
+    pub(crate) badges: Vec<Badge>,
     pub(crate) hovers: Hovers,
 }
 
@@ -280,8 +279,8 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
             && let Some(agent) = ctx.scene.agents.get(&agent.agent_id)
         {
             drawn
-                .texts
-                .push(TextRun::badge(label_anchor, agent, &namesakes, ctx.theme));
+                .badges
+                .push(Badge::new(label_anchor, agent, &namesakes, ctx.theme));
         }
         drawn.hovers.push(hover);
     }

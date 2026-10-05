@@ -1154,7 +1154,7 @@ fn push_characters(
             crate::layout::Size { w, h: h + hair },
             badge_ceiling,
         );
-        let run = TextRun::badge(anchor, agent, &namesakes, theme);
+        let run = crate::display::Badge::new(anchor, agent, &namesakes, theme).run();
         order.push((
             topmost_span(badge_plate(&run, pen), pen),
             PieceKind::Text { run },

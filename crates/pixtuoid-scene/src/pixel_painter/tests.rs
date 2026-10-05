@@ -3817,7 +3817,11 @@ fn both_looks_hang_a_badge_from_the_one_anchor() {
         for agent in &frame.agents {
             scene.agents.insert(agent.agent_id, agent.clone());
         }
-        let classic = paint_drawn(&owned, &scene, &layout, &pack, now, frame).texts;
+        let classic: Vec<_> = paint_drawn(&owned, &scene, &layout, &pack, now, frame)
+            .badges
+            .iter()
+            .map(crate::display::Badge::run)
+            .collect();
         let office = crate::display::Office {
             layout: &layout,
             pack: &pack,
@@ -5256,26 +5260,18 @@ struct Badged {
 
 /// Who `drawn` badged, in paint order.
 fn badged_ids(drawn: &Drawn) -> Vec<pixtuoid_core::AgentId> {
-    drawn
-        .texts
-        .iter()
-        .filter_map(|run| match run.role {
-            crate::display::TextRole::Badge(id) => Some(id),
-            _ => None,
-        })
-        .collect()
+    drawn.badges.iter().map(|badge| badge.agent).collect()
 }
 
 /// Each badged sprite and the box it hovers on, which is the box it is drawn
 /// in.
 fn badged(drawn: &Drawn) -> Vec<(Badged, crate::layout::Bounds)> {
     drawn
-        .texts
+        .badges
         .iter()
-        .zip(badged_ids(drawn))
-        .map(|(run, agent_id)| Badged {
-            agent_id,
-            label_anchor: run.at,
+        .map(|badge| Badged {
+            agent_id: badge.agent,
+            label_anchor: badge.at,
         })
         .map(|f| {
             let hover = drawn

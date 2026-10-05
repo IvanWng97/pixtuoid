@@ -102,7 +102,7 @@ fn branding_visible_in_wall_display() {
 #[test]
 fn chitchat_bubble_text_appears_in_buffer() {
     use pixtuoid_scene::chitchat::ChitchatBubble;
-    use pixtuoid_scene::display::{TextRole, TextRun};
+    use pixtuoid_scene::display::{Badge, TextSpan};
     use pixtuoid_scene::layout::Point;
 
     let w = 60u16;
@@ -117,12 +117,16 @@ fn chitchat_bubble_text_appears_in_buffer() {
     };
     let bubble_text = "LGTM!";
     let id = pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl");
-    let speaker = TextRun {
+    let ink = pixtuoid_core::sprite::Rgb { r: 9, g: 9, b: 9 };
+    let speaker = Badge {
+        agent: id,
         at: Point { x: 30, y: 40 },
-        align: pixtuoid_scene::display::Align::Over,
-        spans: Vec::new(),
-        plate: None,
-        role: TextRole::Badge(id),
+        marker: ink,
+        name: TextSpan {
+            text: String::new(),
+            ink,
+        },
+        plate: ink,
     };
     let bubbles = vec![ChitchatBubble {
         text: bubble_text,

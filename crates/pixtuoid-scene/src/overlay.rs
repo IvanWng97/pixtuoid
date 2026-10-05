@@ -1,6 +1,6 @@
 //! A name badge's words and colours: its agent's disambiguated, truncated
 //! name, its activity tone, its inks and its plate, which
-//! [`TextRun::badge`](crate::display::TextRun) puts together for every painter.
+//! [`Badge`](crate::display::Badge) puts together for every painter.
 
 use std::collections::HashMap;
 
