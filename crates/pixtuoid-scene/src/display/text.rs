@@ -232,7 +232,7 @@ impl TextRun {
     /// The star's hit area: the logical cells its line covers on the
     /// terminal's cell grid, one per cell of its text, where the classic
     /// writes it.
-    pub fn hit_box(&self) -> crate::layout::Bounds {
+    pub(crate) fn hit_box(&self) -> crate::layout::Bounds {
         self.place(cells(&self.text()))
     }
 

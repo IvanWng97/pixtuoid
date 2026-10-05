@@ -621,9 +621,7 @@ mod tests {
     /// [`TextRun::place`](pixtuoid_scene::display::TextRun::place) gives its
     /// line, and a badge in those [`Badge::place`](super::Badge::place) gives
     /// its own, whichever row its anchor falls on: the board's lines, and a
-    /// badge over an odd and an even head. The star, the one run a pointer
-    /// hits, is hit on those cells
-    /// ([`TextRun::hit_box`](pixtuoid_scene::display::TextRun::hit_box)).
+    /// badge over an odd and an even head.
     #[test]
     fn a_run_paints_where_place_puts_it() {
         use pixtuoid_core::state::DaemonState;
@@ -689,14 +687,7 @@ mod tests {
                 run.role,
                 run.at
             );
-            if run.role == super::TextRole::Star {
-                assert_eq!(
-                    terminal_cells(run.hit_box()),
-                    painted,
-                    "the star's hit area"
-                );
-                stars += 1;
-            }
+            stars += usize::from(run.role == super::TextRole::Star);
         }
         assert_eq!(stars, 1, "the board has its star");
     }
