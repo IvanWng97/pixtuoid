@@ -256,7 +256,8 @@ pub(crate) fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
         }
         _ => return None,
     };
-    // Howard Hinnant's days-from-civil (the standard branchless algorithm).
+    // Howard Hinnant's `days_from_civil`:
+    // https://howardhinnant.github.io/date_algorithms.html#days_from_civil
     let (y_adj, era_m) = if mo <= 2 {
         (y - 1, mo + 9)
     } else {
