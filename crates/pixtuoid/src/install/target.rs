@@ -92,10 +92,6 @@ pub struct HostRegistration {
     pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,
-    /// The config an earlier pixtuoid merged its hooks into, and the merge that
-    /// strips our entries from it on install and uninstall.
-    pub legacy_config: fn() -> Result<PathBuf>,
-    pub legacy_uninstall: fn(content: &str) -> Result<MergeOutcome>,
 }
 
 /// What [`HostRegistration::unregister`] found.

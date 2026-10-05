@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
-use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::{HostRegistration, MergeOutcome, Unregistered};
@@ -37,8 +36,6 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
     is_registered,
-    legacy_config: legacy_config_path,
-    legacy_uninstall,
 };
 
 /// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
@@ -52,8 +49,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
         .join("hooks.json"))
 }
 
-/// The settings.json earlier pixtuoid releases merged the hooks into.
-fn legacy_config_path() -> Result<PathBuf> {
+/// Claude Code's user settings, where it records the plugin as enabled.
+fn settings_path() -> Result<PathBuf> {
     if let Some(dir) = claude_config_dir() {
         return Ok(dir.join("settings.json"));
     }
@@ -63,7 +60,7 @@ fn legacy_config_path() -> Result<PathBuf> {
 /// Claude Code is present when its config dir exists; the hooks file is ours, so
 /// its absence says nothing.
 pub(crate) fn detect_installed() -> bool {
-    legacy_config_path()
+    settings_path()
         .ok()
         .and_then(|p| p.parent().map(Path::is_dir))
         .unwrap_or(false)
@@ -181,7 +178,7 @@ fn remove_marketplace(config: &Path) -> Result<()> {
 /// (code.claude.com/docs/en/plugins/install#choose-an-install-scope) — the settings
 /// file, not `claude plugin list`, which costs a CLI start per check.
 fn is_registered() -> Result<bool> {
-    let settings = legacy_config_path()?;
+    let settings = settings_path()?;
     let content = io::read_config(&settings)?;
     if content.trim().is_empty() {
         return Ok(false);
@@ -368,72 +365,6 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-/// Strips our entries from the settings.json an earlier pixtuoid merged into,
-/// keeping everything else.
-fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_uninstall(content, |mut doc| {
-        let mut emptied = Vec::new();
-        if let Some(Value::Object(hooks)) = doc.get_mut("hooks") {
-            for (event, list) in hooks.iter_mut() {
-                let Some(entries) = list.as_array_mut() else {
-                    continue;
-                };
-                let before = entries.len();
-                entries.retain_mut(|entry| {
-                    let sentinel = entry.get(SENTINEL_KEY).and_then(Value::as_bool) == Some(true);
-                    let Some(hs) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
-                        return true;
-                    };
-                    let before = hs.len();
-                    // A user's own hook sharing the group stays.
-                    hs.retain(|h| !(hook_is_ours(h) || sentinel && is_our_exec_form(h)));
-                    hs.len() == before || !hs.is_empty()
-                });
-                if entries.len() < before && entries.is_empty() {
-                    emptied.push(event.clone());
-                }
-            }
-            // Only what this strip emptied goes: a user's own empty list stays.
-            for event in &emptied {
-                hooks.remove(event);
-            }
-        }
-        if !emptied.is_empty()
-            && let Some(root) = doc.as_object_mut()
-        {
-            merge::prune_empty(root, "hooks");
-        }
-        doc
-    })
-}
-
-/// A legacy hook is ours by its source stamp or the shim it runs. The sentinel an
-/// entry carried isn't enough: Claude Code drops the unknown `_pixtuoid` key
-/// whenever it rewrites settings.json, after which each re-install appended a
-/// duplicate.
-fn hook_is_ours(hook: &Value) -> bool {
-    use crate::install::verify::ShimRef;
-    let stamp = format!(
-        "{}={}",
-        crate::install::hook_cmd::SOURCE_ENV,
-        pixtuoid_core::source::claude_code::SOURCE_NAME
-    );
-    hook["command"].as_str().is_some_and(|c| c.contains(&stamp))
-        || match hook_shim_ref(Some(hook)) {
-            ShimRef::BareName => true,
-            ShimRef::Absolute(p) => p.file_stem().is_some_and(|s| s == "pixtuoid-hook"),
-            ShimRef::Unknown => false,
-        }
-}
-
-/// Windows' exec form carries no source stamp and may embed a renamed shim
-/// (`--hook-path`), so inside a sentinel group its exact shape is what marks it.
-fn is_our_exec_form(hook: &Value) -> bool {
-    hook["command"]
-        .as_str()
-        .is_some_and(|c| *hook == hook_entry(c, true))
-}
-
 /// The one place Claude's nested per-event shape lives.
 fn managed_entry(hook_command: &str) -> Value {
     json!({
@@ -445,13 +376,14 @@ fn managed_entry(hook_command: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::install::SENTINEL_KEY;
 
     #[test]
-    fn legacy_config_path_honors_claude_config_dir() {
+    fn settings_path_honors_claude_config_dir() {
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 
         temp_env::with_var_unset("CLAUDE_CONFIG_DIR", || {
-            let unset_path = legacy_config_path().unwrap();
+            let unset_path = settings_path().unwrap();
             assert!(
                 unset_path.ends_with(&fallback_suffix),
                 "default config path must end with .claude/settings.json, got {unset_path:?}"
@@ -460,14 +392,11 @@ mod tests {
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
         temp_env::with_var("CLAUDE_CONFIG_DIR", Some(&custom_dir), || {
-            assert_eq!(
-                legacy_config_path().unwrap(),
-                custom_dir.join("settings.json")
-            );
+            assert_eq!(settings_path().unwrap(), custom_dir.join("settings.json"));
         });
 
         temp_env::with_var("CLAUDE_CONFIG_DIR", Some(""), || {
-            let empty_path = legacy_config_path().unwrap();
+            let empty_path = settings_path().unwrap();
             assert!(
                 empty_path.ends_with(&fallback_suffix),
                 "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
@@ -495,56 +424,6 @@ mod tests {
         assert!(marketplace_listed(r#"[{"name":"other"},{"name":"pixtuoid"}]"#).unwrap());
         assert!(!marketplace_listed(r#"[{"name":"other"}]"#).unwrap());
         assert!(marketplace_listed("not json").is_err());
-    }
-
-    #[test]
-    fn legacy_cleanup_finds_entries_claude_code_stripped_of_the_sentinel() {
-        // Claude Code drops `_pixtuoid` when it rewrites settings.json; three
-        // re-installs then left three copies, as one real config had.
-        let ours = json!({ "matcher": ".*", "hooks": [{ "type": "command", "command": "pixtuoid-hook" }] });
-        let prefixed = json!({ "hooks": [{ "type": "command", "command": "PIXTUOID_SOURCE=claude-code pixtuoid-hook" }] });
-        let theirs = json!({ "hooks": [{ "type": "command", "command": "/usr/bin/say done" }] });
-        let doc = json!({ "hooks": { "Stop": [ours.clone(), ours, prefixed, theirs.clone()] }, "theme": "dark" });
-        let out = legacy_uninstall(&doc.to_string()).unwrap();
-        assert!(out.changed);
-        let cleaned: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(
-            cleaned,
-            json!({ "hooks": { "Stop": [theirs] }, "theme": "dark" })
-        );
-    }
-
-    #[test]
-    fn legacy_cleanup_leaves_a_users_own_empty_hooks_alone() {
-        for doc in [
-            json!({ "hooks": { "Stop": [] }, "theme": "dark" }),
-            json!({ "hooks": {} }),
-        ] {
-            assert!(
-                !legacy_uninstall(&doc.to_string()).unwrap().changed,
-                "{doc}"
-            );
-        }
-    }
-
-    #[test]
-    fn legacy_cleanup_keeps_a_user_hook_sharing_our_group() {
-        let mine = json!({ "type": "command", "command": "/usr/bin/say done" });
-        let ours =
-            json!({ "type": "command", "command": "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'" });
-        // Also when the user hand-appended into a group that kept our sentinel.
-        for group in [
-            json!({ "matcher": ".*", "hooks": [ours.clone(), mine.clone()] }),
-            json!({ SENTINEL_KEY: true, "matcher": ".*", "hooks": [ours.clone(), mine.clone()] }),
-        ] {
-            let mut kept = group.clone();
-            kept["hooks"] = json!([mine]);
-            let out =
-                legacy_uninstall(&json!({ "hooks": { "Stop": [group] } }).to_string()).unwrap();
-            assert!(out.changed);
-            let cleaned: Value = serde_json::from_str(&out.content).unwrap();
-            assert_eq!(cleaned, json!({ "hooks": { "Stop": [kept] } }));
-        }
     }
 
     #[test]
@@ -588,29 +467,6 @@ mod tests {
         assert!(out.changed);
         assert!(!merge_uninstall(&out.content).unwrap().changed);
         assert!(!merge_uninstall("").unwrap().changed);
-    }
-
-    #[test]
-    fn legacy_cleanup_keeps_foreign_entries_and_settings() {
-        let theirs =
-            json!({ "matcher": "Write", "hooks": [{ "type": "command", "command": "/mine" }] });
-        let ours = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/opt/pixtuoid-hook" }] });
-        // The sentinel alone doesn't make a shell-form hook ours…
-        let renamed = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/renamed/shim" }] });
-        // …but the exec form Windows wrote, renamed shim and all, is.
-        let windows =
-            json!({ SENTINEL_KEY: true, "hooks": [hook_entry(r"C:\tools\pxhook.exe", true)] });
-        // The same exec form outside our group is someone else's.
-        let their_exec = json!({ "hooks": [hook_entry(r"C:\tools\other.exe", true)] });
-        let doc = json!({ "hooks": { "PreToolUse": [theirs.clone(), ours, renamed.clone(), windows, their_exec.clone()], "Stop": "not-an-array" }, "theme": "dark" });
-        let out = legacy_uninstall(&doc.to_string()).unwrap();
-        assert!(out.changed);
-        let cleaned: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(
-            cleaned,
-            json!({ "hooks": { "PreToolUse": [theirs, renamed, their_exec], "Stop": "not-an-array" }, "theme": "dark" })
-        );
-        assert!(!legacy_uninstall(&out.content).unwrap().changed);
     }
 
     #[cfg(unix)]

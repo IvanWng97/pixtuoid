@@ -43,7 +43,7 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
-    file_has_hooks(t, &path) || legacy_hooks(t).is_some()
+    file_has_hooks(t, &path)
 }
 
 fn file_has_hooks(t: &Target, path: &std::path::Path) -> bool {
@@ -55,17 +55,6 @@ fn file_has_hooks(t: &Target, path: &std::path::Path) -> bool {
             .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }
-}
-
-/// The legacy config of a host target, when it still bears our hooks — an install
-/// from before the plugin, which keeps firing until a reconnect migrates it.
-fn legacy_hooks(t: &Target) -> Option<PathBuf> {
-    let host = t.host?;
-    let legacy = (host.legacy_config)().ok()?;
-    let content = io::read_config(&legacy).ok()?;
-    (host.legacy_uninstall)(&content)
-        .is_ok_and(|o| o.changed)
-        .then_some(legacy)
 }
 
 const PLUGIN_MENTION: &str = "pixtuoid";
@@ -98,19 +87,6 @@ pub(crate) fn verify_target(
             };
         }
     };
-    if !target::config_present(&path)
-        && let Some(legacy) = legacy_hooks(t)
-    {
-        return verify::SchemaVerifyResult {
-            issues: vec![],
-            notes: vec![format!(
-                "hooks still live in {}, the install from before the {} plugin; \
-                 reconnect the source to move them into it",
-                crate::display_path(&legacy),
-                t.display_name
-            )],
-        };
-    }
     let content = match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => {
             return verify::SchemaVerifyResult {
@@ -374,8 +350,8 @@ pub enum InstallOutcome {
 pub struct InstallReport {
     pub outcome: InstallOutcome,
     pub config_path: PathBuf,
-    /// The backups taken this round: the config's, and a host target's legacy
-    /// config before its migration. Empty on a no-op, or when they already exist.
+    /// The config's backup taken this round. Empty on a no-op, or when one
+    /// already exists.
     pub backups: Vec<PathBuf>,
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook).
@@ -422,23 +398,12 @@ pub(crate) fn install_target(
         lock.write_atomic(&outcome.content)?;
     }
     drop(lock);
-    // After the hooks file is written, so the plugin never registers empty; the
-    // legacy hooks go last, so neither copy is missing in between.
-    let migrated = match t.host {
-        Some(host) => {
-            (host.register)(&path)?;
-            let stripped = strip_managed(
-                host.legacy_uninstall,
-                &(host.legacy_config)()?,
-                Backup::Take,
-            )?;
-            backups.extend(stripped.backup);
-            stripped.changed
-        }
-        None => false,
-    };
+    // After the hooks file is written, so the plugin never registers empty.
+    if let Some(host) = t.host {
+        (host.register)(&path)?;
+    }
     Ok(InstallReport {
-        outcome: if outcome.changed || migrated {
+        outcome: if outcome.changed {
             InstallOutcome::Installed
         } else {
             InstallOutcome::AlreadyUpToDate
@@ -450,52 +415,26 @@ pub(crate) fn install_target(
     })
 }
 
-/// Whether [`strip_managed`] snapshots the config before rewriting it.
-#[derive(Debug, Clone, Copy)]
-enum Backup {
-    /// A migration keeps pixtuoid installed, so the snapshot is the way back.
-    Take,
-    /// An uninstall deletes whatever backup exists once it has removed pixtuoid.
-    Skip,
-}
-
-/// What [`strip_managed`] did.
-#[derive(Debug, Default)]
-struct Stripped {
-    changed: bool,
-    /// Taken before the rewrite; `None` under [`Backup::Skip`] or when one
-    /// already existed.
-    backup: Option<PathBuf>,
-}
-
-/// Remove the entries `uninstall` recognizes from `path` under its lock. Never
-/// rewrites on a semantic no-op.
+/// Remove the entries `uninstall` recognizes from `path` under its lock; whether
+/// it rewrote. Never rewrites on a semantic no-op.
 fn strip_managed(
     uninstall: fn(&str) -> Result<target::MergeOutcome>,
     path: &std::path::Path,
-    backup: Backup,
-) -> Result<Stripped> {
+) -> Result<bool> {
     // Decided BEFORE locking: `lock_config` creates the parent dir + a .lock sidecar, and
     // materializing ~/.reasonix here would flip that target's presence probe on a no-op.
     if !target::config_present(path) {
-        return Ok(Stripped::default());
+        return Ok(false);
     }
     let lock = io::lock_config(path)?;
     let content = lock.read()?;
     let outcome = uninstall(&content).with_context(|| format!("processing {}", path.display()))?;
     // A byte compare would falsely fire on hand formatting.
     if !outcome.changed {
-        return Ok(Stripped::default());
+        return Ok(false);
     }
-    let backup = match backup {
-        Backup::Take => lock.backup_once(BACKUP_SUFFIX)?,
-        Backup::Skip => None,
-    };
     lock.write_atomic(&outcome.content)?;
-    Ok(Stripped {
-        changed: true,
-        backup,
-    })
+    Ok(true)
 }
 
 /// Render the wholly-owned artifacts a target ships beside its config. Called before the
@@ -553,20 +492,11 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let mut configs = vec![(t.merge_uninstall, path.clone())];
-    if let Some(host) = t.host {
-        configs.push((host.legacy_uninstall, (host.legacy_config)()?));
-    }
-    let mut removed = false;
-    for (uninstall, config) in &configs {
-        removed |= strip_managed(*uninstall, config, Backup::Skip)?.changed;
-    }
-    // On a SEMANTIC no-op the backups stay: they are the user's only recovery.
+    let mut removed = strip_managed(t.merge_uninstall, &path)?;
+    // On a SEMANTIC no-op the backup stays: it is the user's only recovery.
     let mut removed_backups = Vec::new();
     if removed {
-        for (_, config) in &configs {
-            removed_backups.extend(remove_backup(config)?);
-        }
+        removed_backups.extend(remove_backup(&path)?);
     }
     // Last, since neither strip needs the CLI: a failing deregister leaves a
     // registered plugin with no hooks, never hooks that still fire.
