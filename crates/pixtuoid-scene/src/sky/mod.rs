@@ -633,6 +633,33 @@ const _: () = assert!(
 /// strike, a brief dim, an after-flash, so it reads as a flicker rather than a
 /// single blink.
 const STRIKE_LEVELS: [f32; 3] = [1.0, 0.15, 0.55];
+/// Each of [`STRIKE_LEVELS`]' phases, in its order.
+const STRIKE_PHASES: [StrikePhase; STRIKE_LEVELS.len()] =
+    [StrikePhase::Primary, StrikePhase::Dim, StrikePhase::After];
+
+/// One phase of a strike's flicker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StrikePhase {
+    Primary,
+    Dim,
+    After,
+}
+
+impl StrikePhase {
+    /// The phase a flash at `level` shows: the brightest whose level it
+    /// reaches, the faintest below them all; `None` with no flash.
+    pub(crate) fn of(level: f32) -> Option<Self> {
+        if level <= 0.0 {
+            return None;
+        }
+        let phases = || STRIKE_PHASES.into_iter().zip(STRIKE_LEVELS);
+        phases()
+            .filter(|&(_, at)| at <= level)
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .or_else(|| phases().min_by(|(_, a), (_, b)| a.total_cmp(b)))
+            .map(|(phase, _)| phase)
+    }
+}
 /// How long one strike's [`lightning_envelope`] window lasts.
 const STRIKE_MS: u64 = STRIKE_LEVELS.len() as u64 * STRIKE_PHASE_MS;
 /// The least dark time between one strike's end and the next's start, so two

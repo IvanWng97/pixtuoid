@@ -101,12 +101,12 @@ struct Mass {
     seed: u64,
     /// Its place in its weather's deck.
     id: usize,
-    /// Its west reach at full share, undrifted: what its own noise keys on,
+    /// Its west extent at full share, undrifted: what its own noise keys on,
     /// so its waver and shading ride with it as it drifts.
     anchor: f32,
     /// How far east it has drifted this frame, in units.
     off: f32,
-    /// Its deck's widest mass's width: its wrap period is the run plus two.
+    /// Its deck's widest mass's width, which its wrap clears ([`drifted_west`]).
     widest: f32,
 }
 
@@ -119,8 +119,8 @@ struct Shape {
     seed: u64,
 }
 
-/// The west and east reach of `lobes`, in units.
-fn reach(lobes: &[Lobe]) -> (f32, f32) {
+/// The west and east extent of `lobes`, in units.
+fn extent(lobes: &[Lobe]) -> (f32, f32) {
     lobes.iter().fold((f32::MAX, f32::MIN), |(w, e), l| {
         (w.min(l.x - l.r), e.max(l.x + l.r))
     })
@@ -133,7 +133,7 @@ impl Mass {
         let widest = shapes
             .iter()
             .map(|s| {
-                let (west, east) = reach(&s.lobes);
+                let (west, east) = extent(&s.lobes);
                 east - west
             })
             .fold(0.0, f32::max);
@@ -141,7 +141,7 @@ impl Mass {
             .into_iter()
             .enumerate()
             .map(|(id, s)| Mass {
-                anchor: reach(&s.lobes).0,
+                anchor: extent(&s.lobes).0,
                 layer: s.layer,
                 lobes: s.lobes,
                 base: s.base,
@@ -154,9 +154,9 @@ impl Mass {
             .collect()
     }
 
-    /// Its west and east reach, in units.
-    fn reach(&self) -> (f32, f32) {
-        reach(&self.lobes)
+    /// Its west and east extent, in units.
+    fn extent(&self) -> (f32, f32) {
+        extent(&self.lobes)
     }
 
     /// Its top row, in units.
@@ -419,7 +419,7 @@ fn cauliflower(lobes: Vec<Lobe>, seed: u64) -> Vec<Lobe> {
     out
 }
 
-/// The seeds of the decks' draws and of the city glow's, the shade reach's
+/// The seeds of the decks' draws and of the city glow's, the shade climb's
 /// and the flash rings' noise: each its own stream.
 const DECK_SEED: u64 = 0x0c10_0d5e;
 const GLOW_SEED: u64 = 0x617;
@@ -934,7 +934,7 @@ impl Clouds {
     fn draw(&self, m: &Mass, glass_h: f32) -> MassRaster {
         let df = f32::from(self.d);
         let k = ((CLOSE * df).round() as i32).max(1);
-        let (west, east) = m.reach();
+        let (west, east) = m.extent();
         let x0 = ((west - SLIT) * df).floor() as i32 - k;
         let x1 = ((east + SLIT) * df).ceil() as i32 + k;
         let y0 = (m.top().min(0.0) * df).floor() as i32 - k;
@@ -997,14 +997,14 @@ impl Clouds {
             .find_map(|m| self.rasters[m].at(col - drift[m], row).map(|b| (b, m)))
     }
 
-    /// The nearest mass with a lobe within [`BOLT_REACH`] of its radius over
+    /// The nearest mass with a lobe within [`BOLT_LOBE_SHARE`] of its radius over
     /// `x`, each mass drifted by its `offs`.
     fn nearest_over(&self, x: f32, offs: &[f32]) -> Option<usize> {
         (0..self.masses.len()).rev().find(|&i| {
             self.masses[i]
                 .lobes
                 .iter()
-                .any(|l| l.r > 0.0 && (x - offs[i] - l.x).abs() < l.r * BOLT_REACH)
+                .any(|l| l.r > 0.0 && (x - offs[i] - l.x).abs() < l.r * BOLT_LOBE_SHARE)
         })
     }
 
@@ -1032,10 +1032,11 @@ impl Clouds {
         let i = self.nearest_over(x, &offs)?;
         let base = self.masses[i].base_at(x - offs[i]);
         let intra = r.u() < INTRA_SHARE;
-        let step = if flash > 0.9 {
-            2
-        } else {
-            u8::from(flash >= 0.5)
+        let phase = crate::sky::StrikePhase::of(flash)?;
+        let step = match phase {
+            crate::sky::StrikePhase::Primary => 2,
+            crate::sky::StrikePhase::After => 1,
+            crate::sky::StrikePhase::Dim => 0,
         };
         Some(Strike {
             at: (x, base - if intra { INTRA_DEPTH } else { BOLT_FLASH_DEPTH }),
@@ -1051,7 +1052,7 @@ impl Clouds {
                 bolt(&mut r, (x, base), span, glass_h)
             },
             step,
-            dim: flash < 0.5,
+            dim: phase == crate::sky::StrikePhase::Dim,
         })
     }
 
@@ -1219,13 +1220,13 @@ impl Clouds {
         let t = (m.base_at(x) - y) / (m.base - m.top()).max(1.0);
         // how far up the base's shadow climbs, by the mass's own column: two
         // octaves, never a ruled line
-        let lx = x - m.anchor;
-        let reach = SHADE_REACH
-            + SHADE_REACH_OCTAVES
+        let col = x - m.anchor;
+        let climb = SHADE_CLIMB
+            + SHADE_CLIMB_OCTAVES
                 .iter()
-                .map(|&(amp, freq, phase)| amp * noise(SHADE_SEED, lx * freq + phase))
+                .map(|&(amp, freq, phase)| amp * noise(SHADE_SEED, col * freq + phase))
                 .sum::<f32>();
-        v -= (occlude + STORM_OCCLUDE * self.storm) * (1.0 - t / reach).max(0.0);
+        v -= (occlude + STORM_OCCLUDE * self.storm) * (1.0 - t / climb).max(0.0);
         let cuts = (
             LIT_CUT.0 + LIT_CUT.1 * self.heaviness + rim,
             BODY_CUT.0 + BODY_CUT.1 * self.heaviness,
@@ -1237,14 +1238,14 @@ impl Clouds {
         } else {
             Band::Shade
         };
-        if band == Band::Shade && t >= reach {
+        if band == Band::Shade && t >= climb {
             // shade is the base's alone: a flank turned away stays body
             band = Band::Body;
         }
         if band == Band::Lit && rim > 0.01 && !self.diffuse {
-            // a rim: only within reach of the edge it faces
+            // a rim: only within its depth of the edge the light falls on
             let l = (lx * lx + ly * ly).sqrt().max(f32::EPSILON);
-            if m.inside(x + lx / l * RIM_REACH, y + ly / l * RIM_REACH) {
+            if m.inside(x + lx / l * RIM_DEPTH, y + ly / l * RIM_DEPTH) {
                 band = Band::Body;
             }
         }
@@ -1317,7 +1318,7 @@ impl Clouds {
                 && y <= m.base + VIRGA_DEPTH
                 && m.lobes
                     .iter()
-                    .any(|l| (x - off - l.x).abs() < l.r * VIRGA_REACH)
+                    .any(|l| (x - off - l.x).abs() < l.r * VIRGA_LOBE_SHARE)
         })
     }
 
@@ -1357,8 +1358,8 @@ impl Clouds {
     }
 }
 
-/// How far a low body's rim light reaches in from the edge it faces.
-const RIM_REACH: f32 = 1.5;
+/// How far in from the edge it faces a low body's rim light reaches, in units.
+const RIM_DEPTH: f32 = 1.5;
 /// How much deeper a storm's base shades.
 const STORM_OCCLUDE: f32 = 0.4;
 /// How far under a base its rain shafts fall.
@@ -1368,7 +1369,7 @@ const VIRGA_PITCH: u32 = 3;
 
 /// How far out along a lobe's radius a strike may fall: under a mass's body,
 /// where its drawn bottom reaches its base, never its fringe, which curls up.
-const BOLT_REACH: f32 = 0.5;
+const BOLT_LOBE_SHARE: f32 = 0.5;
 
 /// How far in from a pane's edges, in units, a strike may fall.
 const BOLT_PANE_MARGIN: f32 = 1.0;
@@ -1407,15 +1408,15 @@ const DIFFUSE_SIDE: f32 = 0.3;
 const DIFFUSE_FROM: (f32, f32) = (-1.0, 0.8);
 /// How far up a base its shade climbs, a share of the mass's height, with
 /// two octaves `(amplitude, frequency, phase)` of the mass's own column.
-const SHADE_REACH: f32 = 0.12;
-const SHADE_REACH_OCTAVES: [(f32, f32, f32); 2] = [(0.22, 2.3, 40.0), (0.14, 6.1, 13.0)];
+const SHADE_CLIMB: f32 = 0.12;
+const SHADE_CLIMB_OCTAVES: [(f32, f32, f32); 2] = [(0.22, 2.3, 40.0), (0.14, 6.1, 13.0)];
 /// The light above which a cell is lit, and above which it is body: each at
 /// no heaviness, and more per unit of it.
 const LIT_CUT: (f32, f32) = (0.55, 0.12);
 const BODY_CUT: (f32, f32) = (0.05, 0.1);
 /// Virga falls under a lobe within this share of its radius, at most this
 /// far toward the cloud's shade.
-const VIRGA_REACH: f32 = 0.7;
+const VIRGA_LOBE_SHARE: f32 = 0.7;
 const VIRGA_STRENGTH: f32 = 0.35;
 
 /// The sun's altitude, from the horizon's 0, above which its clouds wear
@@ -1455,7 +1456,8 @@ fn bolt(r: &mut Rng, (mut x, base): (f32, f32), span: f32, glass_h: f32) -> Vec<
     let mut fork = vec![(fx, fy)];
     for _ in 0..FORK_SEGMENTS.0 + (r.u() * FORK_SEGMENTS.1 as f32) as usize {
         fy += r.between(FORK_STEP.0, FORK_STEP.1);
-        fx = (fx - lean * r.between(FORK_SWAY.0, FORK_SWAY.1)).clamp(1.0, span - 2.0);
+        fx = (fx - lean * r.between(FORK_SWAY.0, FORK_SWAY.1))
+            .clamp(BOLT_INSET.0, span - BOLT_INSET.1);
         fork.push((fx, fy));
     }
     vec![trunk, fork]
@@ -1650,7 +1652,7 @@ mod tests {
         const STEP: f64 = 0.5;
         for weather in Weather::ALL {
             for m in deck(weather, span, f32::from(GLASS_H)) {
-                let (west, east) = m.reach();
+                let (west, east) = m.extent();
                 let slide = m.layer.pace() * STEP as f32;
                 let mut prev = m.drift_at(0.0, span);
                 for step in 1..4_000 {
@@ -1903,6 +1905,41 @@ mod tests {
             }
         }
         assert!(shafts > 0, "the sample must fall in shafts");
+    }
+
+    /// A rim lights only the edge its light falls on: no lit cell has its mass
+    /// [`RIM_DEPTH`] on toward the light.
+    #[test]
+    fn a_rim_lights_only_the_edge_its_light_falls_on() {
+        let mut rims = 0;
+        for hour in 0..24 {
+            let c = clouds(Weather::Clear, hour, 0.0);
+            if c.diffuse || c.lighting.rim <= 0.01 {
+                continue;
+            }
+            let (lx, ly) = c.lighting.dir;
+            let l = lx.hypot(ly).max(f32::EPSILON);
+            for m in &c.masses {
+                let (west, east) = m.extent();
+                let (mut x, step) = (west, 0.25);
+                while x <= east {
+                    let mut y = m.top();
+                    while y <= m.base {
+                        if m.inside(x, y) && c.band(m, x, y) == Band::Lit {
+                            rims += 1;
+                            assert!(
+                                !m.inside(x + lx / l * RIM_DEPTH, y + ly / l * RIM_DEPTH),
+                                "{hour}h mass {}: ({x}, {y}) lit with its mass on toward the light",
+                                m.id
+                            );
+                        }
+                        y += step;
+                    }
+                    x += step;
+                }
+            }
+        }
+        assert!(rims > 0, "the sample must light a rim");
     }
 
     /// A far mass leans further to the sky behind it than a near one.
