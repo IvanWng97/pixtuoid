@@ -953,7 +953,7 @@ gen-icons-check:
 # scripts/gen-media.py's docstring says what `--check` compares. The README's
 # media only: the site's demos are rendered in CI and never committed. On a PR
 # a drift here is evidence for the generated-art lens, not a gate (ci-tests.yml's
-# smoke job); main's land in a `chore(media)` PR.
+# smoke job); main's land through media-regen.yml.
 # Requires the .venv + node; it builds the examples it renders with.
 [doc("Diff the README's committed media against what gen-media renders")]
 [group('gen')]
