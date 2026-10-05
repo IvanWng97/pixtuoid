@@ -814,8 +814,8 @@ pub(crate) fn resolve_characters(
                 }
                 let pos = walking_position(from, to, t_x1000);
                 let walker_top_left = walking_top_left(pos, char_w);
-                let dx = to.x as i32 - from.x as i32;
-                let dy = to.y as i32 - from.y as i32;
+                let dx = i32::from(to.x) - i32::from(from.x);
+                let dy = i32::from(to.y) - i32::from(from.y);
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
                 // `from` rising) renders in the SEAT's view and at the SEAT's
                 // sort row, NOT the travel direction's. Without it a window-facing
@@ -928,7 +928,7 @@ pub(crate) fn desk_occupant(
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)));
     pixtuoid_core::id::splitmix64(folded)
 }
 

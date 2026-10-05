@@ -233,7 +233,7 @@ impl TileCutaway {
             self.pending = None;
             return;
         }
-        if dirty != Dirty::Rects(Vec::new()) || self.image_behind {
+        if dirty != Dirty::Unchanged || self.image_behind {
             self.image.clone_from(frame);
             self.image_behind = false;
         }

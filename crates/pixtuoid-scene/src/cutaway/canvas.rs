@@ -9,8 +9,8 @@ use std::sync::Arc;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 
-use crate::cutaway::light::Ambient;
 use crate::cutaway::paint::paint;
+use crate::display::light::Ambient;
 use crate::display::{Hovers, Office, Showing, Span, compose};
 use crate::floor::SteppedFloor;
 use crate::layout::{Bounds, SceneLayout};
@@ -44,9 +44,34 @@ pub struct CanvasFrame<'a> {
 pub enum Dirty {
     /// Anywhere.
     All,
-    /// Only inside these, in buffer pixels on whole layout cells; none at all
-    /// when the frame was not painted.
-    Rects(Vec<Bounds>),
+    /// Only inside these, in buffer pixels on whole layout cells.
+    Rects(Rects),
+    /// Nowhere: the frame was not painted.
+    Unchanged,
+}
+
+/// The rects a frame may differ inside: never none, which is
+/// [`Dirty::Unchanged`], so a consumer that skips on it skips every unchanged
+/// frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rects(Vec<Bounds>);
+
+impl Rects {
+    /// Each rect, in buffer pixels on whole layout cells.
+    pub fn as_slice(&self) -> &[Bounds] {
+        &self.0
+    }
+}
+
+impl Dirty {
+    /// Only inside `rects`: [`Self::Unchanged`] when there are none.
+    pub fn within(rects: Vec<Bounds>) -> Self {
+        if rects.is_empty() {
+            Self::Unchanged
+        } else {
+            Self::Rects(Rects(rects))
+        }
+    }
 }
 
 /// What every pixel of a frame is painted under, beyond its display list and
@@ -60,7 +85,7 @@ struct Epoch {
     scale: RenderScale,
     ambient: Ambient,
     carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
-    flash: crate::cutaway::light::Flash,
+    flash: crate::display::light::Flash,
 }
 
 impl PartialEq for Epoch {
@@ -126,7 +151,7 @@ impl CutawayCanvas {
             .collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
-            Some(shown) if shown.epoch == epoch => Dirty::Rects(
+            Some(shown) if shown.epoch == epoch => Dirty::within(
                 changed(&shown.footprints, &footprints)
                     .into_iter()
                     .filter_map(|s| on_buffer(s, scale, size))
@@ -134,7 +159,7 @@ impl CutawayCanvas {
             ),
             _ => Dirty::All,
         };
-        if dirty != Dirty::Rects(Vec::new()) {
+        if dirty != Dirty::Unchanged {
             if (self.buf.width(), self.buf.height()) != size {
                 self.buf = RgbBuffer::filled(size.0, size.1, theme.surface.bg_fallback);
             }
@@ -336,9 +361,14 @@ mod tests {
                 let differ: Vec<usize> = (0..full.as_slice().len())
                     .filter(|&i| before.as_slice()[i] != full.as_slice()[i])
                     .collect();
-                match &shown.dirty {
-                    Dirty::All => tally.whole += 1,
-                    Dirty::Rects(rects) => {
+                let rects = match &shown.dirty {
+                    Dirty::All => None,
+                    Dirty::Rects(rects) => Some(rects.as_slice()),
+                    Dirty::Unchanged => Some(&[][..]),
+                };
+                match rects {
+                    None => tally.whole += 1,
+                    Some(rects) => {
                         if rects.is_empty() {
                             tally.skipped += 1;
                         } else {
@@ -499,11 +529,7 @@ mod tests {
                 .dirty
         };
         assert_eq!(dirty(normal(), 2), Dirty::All, "the first frame");
-        assert_eq!(
-            dirty(normal(), 2),
-            Dirty::Rects(Vec::new()),
-            "the same frame"
-        );
+        assert_eq!(dirty(normal(), 2), Dirty::Unchanged, "the same frame");
         assert_eq!(dirty(other, 2), Dirty::All, "a new theme");
         assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
     }
@@ -810,7 +836,7 @@ mod tests {
             .iter()
             .filter_map(|&s| on_buffer(s, h.scale, size))
             .collect();
-        assert_eq!(dirty, Dirty::Rects(want));
+        assert_eq!(dirty, Dirty::within(want));
         let mut waiting = seated.clone();
         waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
             reason: "permission?".into(),
@@ -869,7 +895,25 @@ mod tests {
             .into_iter()
             .filter_map(|s| on_buffer(s, h.scale, size))
             .collect();
-        assert_eq!(dirty, Dirty::Rects(want));
+        assert_eq!(dirty, Dirty::within(want));
+    }
+
+    /// No list of rects is empty: "nowhere" is only ever
+    /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
+    /// unchanged frame.
+    #[test]
+    fn an_empty_list_of_rects_is_unchanged() {
+        let b = Bounds {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(Dirty::within(Vec::new()), Dirty::Unchanged);
+        let Dirty::Rects(rects) = Dirty::within(vec![b]) else {
+            panic!("a rect is somewhere");
+        };
+        assert_eq!(rects.as_slice(), [b]);
     }
 
     /// A new layout of the same size repaints everything, even one built after

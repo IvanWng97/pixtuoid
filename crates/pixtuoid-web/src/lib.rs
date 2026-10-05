@@ -31,7 +31,7 @@ use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::sky::WeatherPolicy;
-use pixtuoid_scene::theme::{ALL_THEMES, Theme};
+use pixtuoid_scene::theme::{NORMAL, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
@@ -182,8 +182,8 @@ impl Office {
             session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
-            theme: ALL_THEMES[0],
-            seed: seed as u64,
+            theme: &NORMAL,
+            seed: u64::from(seed),
             reducer: Reducer::new(),
             beats: hero_script(),
             cursor: 0,
@@ -208,11 +208,10 @@ impl Office {
     /// `performance.now()` and NOT a `requestAnimationFrame` timestamp: those are
     /// ms-since-page-load, which pins the day/night cycle and wall clock at 1970.
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
-        // `f64 as u64` saturates (negatives/NaN → 0), so no pre-clamp is needed.
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = from_epoch_ms(now_ms);
         self.last_now = Some(now);
-        let buf_w = w.clamp(1, u16::MAX as u32) as u16;
-        let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        let buf_w = w.clamp(1, u32::from(u16::MAX)) as u16;
+        let buf_h = h.clamp(1, u32::from(u16::MAX)) as u16;
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -271,7 +270,7 @@ impl Office {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }
 
-    /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+    /// Recolor the whole office to one of the [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES) by name. Unknown
     /// name = no-op.
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
@@ -489,13 +488,19 @@ pub struct SynthTake {
     epoch: u64,
 }
 
+/// JS's UNIX-epoch milliseconds as a `SystemTime`. `f64 as u64` saturates
+/// (negatives and NaN to 0), so no input needs a pre-clamp.
+fn from_epoch_ms(ms: f64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)
+}
+
 #[wasm_bindgen]
 impl SynthTake {
     /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) — selects
     /// the same day/night + weather track the office would at that instant.
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SynthTake {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = from_epoch_ms(now_ms);
         // `floor::track_for` is the ONE track-pick authority; its TrackId payload
         // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
         let track = pixtuoid_scene::floor::track_for(now, WeatherPolicy::Clock);
@@ -839,7 +844,7 @@ mod tests {
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
-        let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
+        let cc = NORMAL.source.claude_code;
         let expect = format!("\"color\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
@@ -1100,11 +1105,11 @@ mod tests {
         assert!(board["mood"].is_array() && board["context"].is_array());
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_W as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_W)
         );
         assert_eq!(
             board["rect"]["h"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_H as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_H)
         );
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 

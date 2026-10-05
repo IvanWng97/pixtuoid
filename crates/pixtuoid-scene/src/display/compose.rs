@@ -1,6 +1,6 @@
 //! Composing a frame's [`DisplayList`], the second reader of `SimFrame`. Of the
 //! sim's effects it lists those riding on people and creatures
-//! (`cutaway::effects`); steam stays with the classic pass.
+//! ([`effects`](crate::display::effects)); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::format::Pack;
@@ -39,12 +39,12 @@ pub(crate) const PLATE_PAD: u16 = 1;
 
 /// A plate's height on the art grid: padded below only, since the line's
 /// accent rows already clear its capitals above.
-pub(crate) const PLATE_H: u16 = crate::cutaway::text::LINE_H + PLATE_PAD;
+pub(crate) const PLATE_H: u16 = crate::display::text::LINE_H + PLATE_PAD;
 
 /// A plate around `text` on the art grid, centred on column `centre`, its top
 /// at row `top`.
 fn plate_at(centre: ArtPx, top: ArtPx, text: &str) -> ArtRect {
-    let w = crate::cutaway::text::width(text)
+    let w = crate::display::text::width(text)
         .0
         .saturating_add(2 * PLATE_PAD);
     ArtRect {
@@ -88,7 +88,7 @@ pub(crate) fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
         h: ArtPx(
             pen.art(rows.end - rows.start)
                 .0
-                .max(crate::cutaway::text::LINE_H),
+                .max(crate::display::text::LINE_H),
         ),
         ..plate_at(
             pen.art(door.x + crate::layout::ELEVATOR_W / 2),
@@ -109,15 +109,15 @@ pub(crate) fn board_runs(
     let pad = pen
         .art(CELL_ROWS)
         .0
-        .saturating_sub(crate::cutaway::text::LINE_H)
+        .saturating_sub(crate::display::text::LINE_H)
         / 2;
     let at = |col: u16, line: u16| {
         (
-            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::cutaway::text::columns(col).0),
+            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::display::text::columns(col).0),
             ArtPx(pen.art(NEON_PANEL_INNER_Y + line * CELL_ROWS).0 + pad),
         )
     };
-    let cols = |s: &crate::board::BoardSegment| crate::cutaway::text::cells(&s.text);
+    let cols = |s: &crate::board::BoardSegment| crate::display::text::cells(&s.text);
     let mut runs = vec![
         (at(0, 0), &board.brand),
         (
@@ -140,12 +140,12 @@ fn board_span(board: &crate::board::BoardModel, pen: Pen) -> Span {
     let runs = board_runs(board, pen);
     let x1 = runs
         .iter()
-        .map(|((x, _), s)| x.0 + crate::cutaway::text::width(&s.text).0)
+        .map(|((x, _), s)| x.0 + crate::display::text::width(&s.text).0)
         .max()
         .unwrap_or(0);
     let y1 = runs
         .iter()
-        .map(|((_, y), _)| y.0 + crate::cutaway::text::LINE_H)
+        .map(|((_, y), _)| y.0 + crate::display::text::LINE_H)
         .max()
         .unwrap_or(0);
     let (x0, y0) = runs.first().map_or((ArtPx(0), ArtPx(0)), |&(at, _)| at);
@@ -217,7 +217,7 @@ pub(crate) fn compose_at<'a>(
     let Office {
         pack, theme, scale, ..
     } = office;
-    let ambient = crate::cutaway::light::Ambient::of(&moment.look);
+    let ambient = crate::display::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment);
     collected.extend(signs(office, floor.floor_idx, board));
     let sorted = depth_sort(
@@ -239,7 +239,7 @@ pub(crate) fn compose_at<'a>(
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
         carpet: moment.look.carpet(theme),
-        flash: crate::cutaway::light::Flash::of(&moment.sky),
+        flash: crate::display::light::Flash::of(&moment.sky),
         flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
@@ -308,7 +308,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             continue;
         };
         for &effect in effects {
-            let riding = crate::cutaway::effects::Riding {
+            let riding = crate::display::effects::Riding {
                 effect,
                 head: None,
                 pen,
@@ -326,7 +326,7 @@ fn lights(
     office: Office<'_>,
     moment: &Moment,
     floor_idx: usize,
-    ambient: crate::cutaway::light::Ambient,
+    ambient: crate::display::light::Ambient,
 ) -> Vec<LightPiece> {
     let Office {
         layout,
@@ -383,9 +383,9 @@ fn lights(
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
         .filter_map(|e| {
-            crate::cutaway::light::LightView::of(
+            crate::display::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
+                crate::display::light::tint_of(e.kind, theme, frame.neon),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -1201,7 +1201,7 @@ fn riders(
     key: &crate::character::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
-) -> Vec<crate::cutaway::effects::Riding> {
+) -> Vec<crate::display::effects::Riding> {
     let d = key.frame.density.get();
     let Some(pen) = Pen::new(scale, d) else {
         return Vec::new();
@@ -1212,12 +1212,12 @@ fn riders(
         Some(dress) => {
             let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
             let x = i32::from(dress.head.x);
-            Some(crate::cutaway::effects::ArtPoint {
+            Some(crate::display::effects::ArtPoint {
                 x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
                 y: i32::from(at.y) * d + dress.crest,
             })
         }
-        None if d == 1 => Some(crate::cutaway::effects::ArtPoint {
+        None if d == 1 => Some(crate::display::effects::ArtPoint {
             x: i32::from(at.x + w / 2),
             y: i32::from(at.y),
         }),
@@ -1225,7 +1225,7 @@ fn riders(
     };
     c.effects
         .iter()
-        .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
+        .map(|&effect| crate::display::effects::Riding { effect, head, pen })
         .collect()
 }
 
@@ -1380,7 +1380,7 @@ pub(crate) fn push_windows(
     );
     let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
-    let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
+    let bolt = crate::display::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
         let mut view = outside.through(bay);

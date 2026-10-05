@@ -28,17 +28,6 @@ use pixtuoid_scene::look::Rendered;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pathfind::Router;
 
-/// Floors `a` and `b`, which differ, borrowed together.
-fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
-    if a < b {
-        let (lo, hi) = floors.split_at_mut(b);
-        (&mut lo[a], &mut hi[0])
-    } else {
-        let (lo, hi) = floors.split_at_mut(a);
-        (&mut hi[0], &mut lo[b])
-    }
-}
-
 fn floor_info_for(
     current_idx: usize,
     nf: usize,
@@ -618,7 +607,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = self.version_popup_scale(now);
         let onboarding_dim = self.chrome.onboarding.dim;
 
-        let (from, to) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let Ok([from, to]) = self.floors.get_disjoint_mut([from_floor, to_floor]) else {
+            tracing::warn!(
+                from_floor,
+                to_floor,
+                "a slide between floors it cannot borrow"
+            );
+            self.cancel_transition();
+            return Ok(());
+        };
 
         // Transitions hide *text* overlays (tooltips, bubbles, labels) but keep
         // every pixel-level visual, so the slide reads as a continuous scene.
@@ -900,7 +897,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .slide_world(&from_scene, pack, now, from_floor, nf);
         let to_world = self.chrome.slide_world(&to_scene, pack, now, to_floor, nf);
-        let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let Ok([leaving, arriving]) = self.floors.get_disjoint_mut([from_floor, to_floor]) else {
+            tracing::warn!(
+                from_floor,
+                to_floor,
+                "a slide between floors it cannot borrow"
+            );
+            self.cancel_transition();
+            return Ok(());
+        };
         let mut transition_chitchat = std::collections::HashMap::new();
         let look = Look::Cutaway {
             scale: fitted.fit.render_scale(),
