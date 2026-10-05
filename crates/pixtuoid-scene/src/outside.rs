@@ -648,4 +648,90 @@ pub(crate) mod tests {
             "a pane {dx} columns east shows a different stretch of city"
         );
     }
+
+    /// A storm's bolt lands on the glass where its trunk starts, the run's
+    /// west end counted in, at both densities, and never over the city.
+    #[test]
+    fn a_bolt_lands_under_its_trunk_and_behind_the_city() {
+        let theme = &crate::theme::NORMAL;
+        let pack = crate::pack::test_default_pack();
+        let wall = (crate::layout::WINDOW_W * 3, 32);
+        let bays = slots(wall.0);
+        for d in [Density::ONE, pack.max_density_variant()] {
+            let mut bolts = 0;
+            for k in 0..60u64 {
+                let then = crate::localclock::at_hour(12) + std::time::Duration::from_secs(k * 15);
+                let beat = crate::anim::Motion::Full.timing(then).beat;
+                let start = crate::sky::strike_start_ms(beat) - beat.ms();
+                let now = then + std::time::Duration::from_millis(start);
+                let at = |weather| {
+                    let sky = Sky::at_with(now, weather).with_flash(1.0);
+                    Moment::resolve(sky, theme, 0.0, crate::anim::Motion::Full.timing(now))
+                };
+                let mut outside = Outside::of(
+                    &at(Weather::Storm),
+                    &pack,
+                    theme,
+                    (wall, &bays),
+                    d,
+                    // a clear pane's glass: no veil or rain over the bolt
+                    GlassWeather::of(&at(Weather::Clear)),
+                    None,
+                );
+                assert!(outside.run_x0 > 0, "a run off the wall's west edge");
+                let Some((x, y)) = outside.clouds.bolt_top() else {
+                    continue;
+                };
+                let col = x as u16 + outside.run_x0;
+                let Some(&bay) = bays.iter().find(|b| (b.x..b.x + b.w).contains(&col)) else {
+                    continue;
+                };
+                // what the bolt alone changes, its flash lifting nothing
+                outside.clouds.only_bolt(true);
+                let struck = outside.through(bay);
+                outside.clouds.only_bolt(false);
+                let bare = outside.through(bay);
+                let lit: Vec<Cell> = struck
+                    .grid()
+                    .zip(bare.grid())
+                    .filter(|((_, a), (_, b))| a != b)
+                    .map(|((cell, _), _)| cell)
+                    .collect();
+                let front = outside.city.front(outside.run_x0, outside.d);
+                for &cell in &lit {
+                    assert!(
+                        front(cell).is_none(),
+                        "d {d:?}, strike {k}: a bolt over the city"
+                    );
+                }
+                let Some(top) = lit.iter().map(|c| c.glass_offset.1).min() else {
+                    continue;
+                };
+                let df = f32::from(d.get());
+                let want = (
+                    ((x + f32::from(outside.run_x0)) * df) as u16,
+                    (y * df) as u16,
+                );
+                let starts: Vec<u16> = lit
+                    .iter()
+                    .filter(|c| c.glass_offset.1 == top)
+                    .map(|c| c.at.0)
+                    .collect();
+                assert_eq!(
+                    top, want.1,
+                    "d {d:?}, strike {k}: the bolt starts at its trunk's row"
+                );
+                assert!(
+                    starts.contains(&want.0),
+                    "d {d:?}, strike {k}: the bolt starts at {starts:?}, its trunk at {}",
+                    want.0
+                );
+                bolts += 1;
+            }
+            assert!(
+                bolts > 0,
+                "d {d:?}: the sample must strike a bolt on the glass"
+            );
+        }
+    }
 }

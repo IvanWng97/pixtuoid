@@ -1136,6 +1136,26 @@ impl Clouds {
         });
     }
 
+    /// Where the strike's bolt starts, in units from the run's west end and
+    /// the glass's top; `None` without one.
+    #[cfg(test)]
+    pub(crate) fn bolt_top(&self) -> Option<(f32, f32)> {
+        self.strike.as_ref()?.bolt.first()?.first().copied()
+    }
+
+    /// The strike's bolt alone: its flash at the first ring, which lifts
+    /// nothing; with `bolt` false, no strike at all.
+    #[cfg(test)]
+    pub(crate) fn only_bolt(&mut self, bolt: bool) {
+        if bolt {
+            if let Some(s) = &mut self.strike {
+                s.step = 0;
+            }
+        } else {
+            self.strike = None;
+        }
+    }
+
     fn tone(&self, weather: Weather, band: Band) -> Rgb {
         let t = self
             .tones
