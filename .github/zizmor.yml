@@ -17,6 +17,7 @@ rules:
         # currently the only way to use an action as an immutable release" (GitHub's
         # secure-use reference). A new one gets a row here.
         anthropics/claude-code-action: hash-pin
+        Mergifyio/gha-mergify-ci: hash-pin
         peaceiris/actions-gh-pages: hash-pin
         peter-evans/create-pull-request: hash-pin
         release-plz/action: hash-pin

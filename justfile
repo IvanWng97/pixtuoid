@@ -500,7 +500,7 @@ _doc-targets:
 
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
-[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs (needs llvm-cov + nextest)')]
+[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs on the full tier (needs llvm-cov + nextest)')]
 [group('rust')]
 coverage:
     cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
