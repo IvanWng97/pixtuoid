@@ -1126,17 +1126,17 @@ impl Pack {
         redrawn_pieces(name).find(|piece| self.animations.contains_key(*piece))
     }
 
-    /// The piece of this pack's own that the overlay `name` draws over, at its
-    /// base or at `name`'s density: the default's overlay would draw the
-    /// default's art over it.
+    /// The piece of this pack's own that the overlay `name` (or one of its
+    /// density variants) draws over, at any density: the default's overlay at
+    /// any density would draw the default's art over it, since a painter falls
+    /// back from a density the pack lacks to one it has.
     fn own_overlaid_piece(&self, name: &str) -> Option<&'static str> {
-        let (base, density) =
-            split_density_variant(name).map_or((name, None), |(b, d)| (b, Some(d)));
+        let base = split_density_variant(name).map_or(name, |(b, _)| b);
         let piece = overlaid_piece(base)?;
-        let at_density = density.map(|d| density_variant_name(piece, d));
-        (self.animations.contains_key(piece)
-            || at_density.is_some_and(|v| self.animations.contains_key(&v)))
-        .then_some(piece)
+        self.animations
+            .keys()
+            .any(|own| split_density_variant(own).map_or(own.as_str(), |(b, _)| b) == piece)
+            .then_some(piece)
     }
 }
 
@@ -2583,10 +2583,12 @@ mod validation_floor_tests {
                 "[animations.{own}]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
             ));
             custom.merge_from(&base);
-            assert!(
-                custom.animation("desk_front@4x").is_none(),
-                "over its own {own}, no 4x front"
-            );
+            for front in ["desk_front", "desk_front@4x"] {
+                assert!(
+                    custom.animation(front).is_none(),
+                    "over its own {own}, no {front}"
+                );
+            }
         }
         let mut desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         desk.merge_from(&base);
