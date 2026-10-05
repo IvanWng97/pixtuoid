@@ -80,7 +80,6 @@ jobs:
         with:
           file: lcov.info
           flag: ${{ matrix.flag }}
-          report_type: coverage
       - name: Upload test results to Mergify CI Insights
         if: ${{ !cancelled() && env.HAS_MERGIFY_TOKEN == 'true' }}
         uses: Mergifyio/gha-mergify-ci@ce0d6bef01217d90fb9e908e6966b0f6f4ea26d5 # v26

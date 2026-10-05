@@ -57,6 +57,8 @@ jobs:
           publish_branch: star-history
           publish_dir: ${{ runner.temp }}/chart
           force_orphan: true
+          # The branch holds the chart alone, as before; it is not a Pages site.
+          disable_nojekyll: true
           user_name: github-actions[bot]
           user_email: 41898282+github-actions[bot]@users.noreply.github.com
           full_commit_message: "chart: star history as of ${{ steps.day.outputs.date }}"
