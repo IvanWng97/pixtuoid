@@ -93,8 +93,8 @@
   },
   "shipped": {
     "dsh.plugin_events": [
+      "agent/created",
       "agent/disposed",
-      "agent/session-start",
       "approval/asked",
       "approval/decided",
       "assistant/message",
