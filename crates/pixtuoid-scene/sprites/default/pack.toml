@@ -383,12 +383,20 @@ frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
 frame_ms = 250
 
 [animations.cat_sit]
-frames   = ["cat_sit.sprite"]
-frame_ms = 600
+frames   = ["cat_sit_0.sprite", "cat_sit_1.sprite", "cat_sit_2.sprite", "cat_sit_3.sprite"]
+frame_ms = 500
+
+[animations."cat_sit@4x"]
+frames   = ["cat_sit_0@4x.sprite", "cat_sit_1@4x.sprite", "cat_sit_2@4x.sprite", "cat_sit_3@4x.sprite"]
+frame_ms = 500
 
 [animations.cat_sleep]
-frames   = ["cat_sleep.sprite"]
-frame_ms = 600
+frames   = ["cat_sleep_0.sprite", "cat_sleep_1.sprite", "cat_sleep_2.sprite", "cat_sleep_3.sprite"]
+frame_ms = 750
+
+[animations."cat_sleep@4x"]
+frames   = ["cat_sleep_0@4x.sprite", "cat_sleep_1@4x.sprite", "cat_sleep_2@4x.sprite", "cat_sleep_3@4x.sprite"]
+frame_ms = 750
 
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
@@ -400,12 +408,20 @@ frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
 frame_ms = 250
 
 [animations.dog_sit]
-frames   = ["dog_sit.sprite"]
-frame_ms = 600
+frames   = ["dog_sit_0.sprite", "dog_sit_1.sprite", "dog_sit_2.sprite", "dog_sit_3.sprite"]
+frame_ms = 500
+
+[animations."dog_sit@4x"]
+frames   = ["dog_sit_0@4x.sprite", "dog_sit_1@4x.sprite", "dog_sit_2@4x.sprite", "dog_sit_3@4x.sprite"]
+frame_ms = 500
 
 [animations.dog_sleep]
-frames   = ["dog_sleep.sprite"]
-frame_ms = 600
+frames   = ["dog_sleep_0.sprite", "dog_sleep_1.sprite", "dog_sleep_2.sprite", "dog_sleep_3.sprite"]
+frame_ms = 750
+
+[animations."dog_sleep@4x"]
+frames   = ["dog_sleep_0@4x.sprite", "dog_sleep_1@4x.sprite", "dog_sleep_2@4x.sprite", "dog_sleep_3@4x.sprite"]
+frame_ms = 750
 
 [animations.lobster_walk]
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]

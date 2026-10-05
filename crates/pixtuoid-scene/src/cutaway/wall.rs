@@ -8,22 +8,21 @@ use std::ops::Range;
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::display::pen::{ArtRect, Pen};
-use crate::glass::Glass;
+use crate::glass::{Glass, WallTrim};
 use crate::layout::WallPiece;
-use crate::theme::Theme;
 
 /// Paint the logical `rows` of one room wall: its glass over what is already
 /// drawn behind them, then the jamb posts where a doorway cuts it. The glass is
 /// laid from the wall's own top, so its rhythm runs on across the bands.
 pub(crate) fn paint_wall(
     buf: &mut RgbBuffer,
-    theme: &Theme,
+    trim: WallTrim,
     piece: WallPiece,
     rows: Range<u16>,
     pen: Pen,
 ) {
     let (at, size) = piece.visual();
-    let mut glass = Glass::of(theme, piece, pen.art(1).0);
+    let mut glass = Glass::of(trim, piece, pen.art(1).0);
     let band = ArtRect {
         x: pen.art(at.x),
         y: pen.art(rows.start),
@@ -41,7 +40,7 @@ pub(crate) fn paint_wall(
                 w: pen.art(s.w),
                 h: pen.art(to - from),
             };
-            pen.fill(buf, r, theme.office.room_wall_trim_dark);
+            pen.fill(buf, r, trim.dark);
         }
     }
 }
