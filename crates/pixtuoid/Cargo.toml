@@ -101,10 +101,9 @@ portable = ["graphics"]
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 # Terminal image-protocol detection. Gates the DEPENDENCY, not a runtime switch:
-# `ratatui-image` pulls icy_sixel -> quantette -> rayon unconditionally (no
-# feature of its own drops the sixel backend), so a work-stealing thread pool
-# enters a tokio binary, and on Windows a SECOND binding family (`windows 0.58`
-# beside the existing 0.62) with its proc-macro crates. Every one of those
+# `ratatui-image` (no feature of its own drops the sixel backend) brings, on
+# Windows, a SECOND binding family (`windows 0.58` beside the existing 0.62)
+# with its proc-macro crates. Every one of those
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
