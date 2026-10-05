@@ -36,6 +36,9 @@ TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus` or
 `OutcomeRow`, run `just gen-contract`** (re-emits the schemas + the TS types)
 and commit all of it. `src/contract.ts` / `src/contract-outcome.ts` are
 generated — eslint/prettier-ignored, never hand-edit them.
+At runtime `src/conforms.ts` checks every CLI row against the same committed
+schemas and fails closed on drift (`npm test`), so a stale schema there breaks
+the extension, not only the types.
 (The `source_status_json_shape` / `outcome_row_json_shape` byte tests pin the
 exact wire JSON; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
 owns its shape and the published-wire rule.)
