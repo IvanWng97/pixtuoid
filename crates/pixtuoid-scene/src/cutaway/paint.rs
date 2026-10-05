@@ -95,15 +95,10 @@ pub fn render_cutaway(
     frame: &SimFrame,
     office: Office<'_>,
     showing: Showing<'_>,
-    cache: &mut CutawayCache,
+    (cache, clouds): (&mut CutawayCache, &mut crate::clouds::CloudCache),
     buf: &mut RgbBuffer,
 ) {
-    let list = compose(
-        frame,
-        office,
-        showing,
-        &mut crate::clouds::CloudCache::default(),
-    );
+    let list = compose(frame, office, showing, clouds);
     paint(office.layout, &list, cache, buf);
 }
 
@@ -2651,7 +2646,7 @@ mod tests {
                     crate::floor::FloorMeta::ground(),
                     crate::localclock::at_hour(hour),
                 ),
-                &mut cache,
+                (&mut cache, &mut crate::clouds::CloudCache::default()),
                 &mut buf,
             );
             buf.as_slice()
@@ -3415,7 +3410,7 @@ mod tests {
                 crate::floor::FloorMeta::ground(),
                 std::time::SystemTime::UNIX_EPOCH,
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf

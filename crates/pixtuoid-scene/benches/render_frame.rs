@@ -274,6 +274,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
             theme.surface.bg_fallback,
         );
         let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
+        let mut clouds = pixtuoid_scene::CloudCache::default();
         let mut i = 0;
         group.bench_function(&name, |b| {
             b.iter(|| {
@@ -284,7 +285,13 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     now: *now,
                     board,
                 };
-                render_cutaway(frame, office(layout), showing, &mut cache, &mut buf)
+                render_cutaway(
+                    frame,
+                    office(layout),
+                    showing,
+                    (&mut cache, &mut clouds),
+                    &mut buf,
+                )
             });
         });
         if busy {

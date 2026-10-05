@@ -724,6 +724,7 @@ pub(crate) struct MassRaster {
 }
 
 impl MassRaster {
+    #[cfg(test)]
     fn at(&self, col: i32, row: i32) -> Option<Band> {
         let (x, y) = (
             usize::try_from(col - self.x0).ok()?,
@@ -732,6 +733,35 @@ impl MassRaster {
         (x < self.w && y < self.h)
             .then(|| self.bands[y * self.w + x])
             .flatten()
+    }
+
+    /// Lays its bands, as mass `m`'s, over `px`, a grid `cols` wide whose
+    /// first column is its own column `west`, covering what is there.
+    fn lay(&self, m: usize, west: i32, px: &mut [Option<(Band, usize)>], cols: usize) {
+        let rows = px.len() / cols.max(1);
+        // its cells `0..n` that land in `0..end` when shifted by `from`
+        let clip = |from: i32, n: usize, end: usize| {
+            let (from, n, end) = (i64::from(from), n as i64, end as i64);
+            let (lo, hi) = ((-from).clamp(0, n), (end - from).clamp(0, n));
+            lo as usize..hi.max(lo) as usize
+        };
+        let (xs, ys) = (
+            clip(self.x0 - west, self.w, cols),
+            clip(self.y0, self.h, rows),
+        );
+        if xs.is_empty() {
+            return;
+        }
+        for y in ys {
+            let row = (self.y0 + y as i32) as usize * cols;
+            let src = &self.bands[y * self.w..][xs.clone()];
+            let col0 = (self.x0 - west + xs.start as i32) as usize;
+            for (dst, band) in px[row + col0..].iter_mut().zip(src) {
+                if let Some(b) = band {
+                    *dst = Some((*b, m));
+                }
+            }
+        }
     }
 }
 
@@ -979,6 +1009,7 @@ impl Clouds {
     }
 
     /// Each mass's drift this frame, in whole cells of its grid.
+    #[cfg(test)]
     fn cell_drifts(&self) -> Vec<i32> {
         self.masses.iter().map(|m| self.cell_drift(m)).collect()
     }
@@ -988,8 +1019,20 @@ impl Clouds {
         (m.off * f32::from(self.d)).round() as i32
     }
 
+    /// The nearest mass's band at each cell of a grid `cols` by `rows` whose
+    /// first column is the run's `west`, each mass at its drift, and which
+    /// mass: the far laid first, so the nearest covers.
+    fn bands(&self, west: i32, (cols, rows): (usize, usize)) -> Vec<Option<(Band, usize)>> {
+        let mut px = vec![None; cols * rows];
+        for (m, (mass, raster)) in self.masses.iter().zip(&self.rasters).enumerate() {
+            raster.lay(m, west - self.cell_drift(mass), &mut px, cols);
+        }
+        px
+    }
+
     /// The nearest mass's band at `(col, row)` cells from the run's west end
     /// and the glass's top, each mass drifted by its `drift`, and which mass.
+    #[cfg(test)]
     fn band_at(&self, drift: &[i32], col: i32, row: i32) -> Option<(Band, usize)> {
         (0..self.masses.len())
             .rev()
@@ -1081,28 +1124,23 @@ impl Clouds {
         }
         // the glass's west edge's column on the run's grid
         let west = i32::from(view.glass_origin().0) - i32::from(run_x0 * d);
-        let drift = self.cell_drifts();
-        let mut px: Vec<Option<(Band, usize)>> = (0..rows * cols)
-            .map(|i| self.band_at(&drift, west + (i % cols) as i32, (i / cols) as i32))
-            .collect();
+        let mut px = self.bands(west, (cols, rows));
         if d == 1 {
             despeckle(&mut px, cols, rows);
         } else {
             close_thin_runs(&mut px, cols, rows, usize::from(d));
         }
+        // only a row a mass covers mixes its sky in
+        let clouded: Vec<bool> = px
+            .chunks(cols)
+            .map(|row| row.iter().any(Option::is_some))
+            .collect();
         let mut row_sky = vec![(0u32, [0u32; 3]); rows];
-        // The window resolved no sky behind `front`, so its cells are neither
-        // averaged into a row's sky nor clouded.
-        let mut hidden = vec![false; rows * cols];
         view.paint(|cell, c| {
-            let (gx, gy) = (
-                usize::from(cell.glass_offset.0),
-                usize::from(cell.glass_offset.1),
-            );
-            if front(cell).is_some() {
-                if let Some(h) = hidden.get_mut(gy * cols + gx) {
-                    *h = true;
-                }
+            let gy = usize::from(cell.glass_offset.1);
+            // The window resolved no sky behind `front`, so its cells are
+            // neither averaged into a row's sky nor clouded.
+            if !clouded.get(gy).copied().unwrap_or(false) || front(cell).is_some() {
                 return c;
             }
             if let Some(acc) = row_sky.get_mut(gy) {
@@ -1124,16 +1162,21 @@ impl Clouds {
             })
             .collect();
         let bolt = self.bolt_cells(run_x0);
+        // no rain to shaft and no bolt: a cell no mass covers keeps its sky
+        let bare = self.rain <= 0.0 && bolt.is_empty();
+        // a run of cells mixes one tone into one row's sky: mix it once
+        let mut last_mix: Option<((Rgb, Rgb, Layer), Rgb)> = None;
         view.paint(|cell, c| {
             let (gx, gy) = (
                 usize::from(cell.glass_offset.0),
                 usize::from(cell.glass_offset.1),
             );
-            if hidden.get(gy * cols + gx).copied().unwrap_or(false) {
+            let here = px.get(gy * cols + gx).copied().flatten();
+            if (bare && here.is_none()) || front(cell).is_some() {
                 return c;
             }
             let (x, y) = unit(cell);
-            let mut c = match px.get(gy * cols + gx).copied().flatten() {
+            let mut c = match here {
                 Some((band, m)) => {
                     let mass = &self.masses[m];
                     let mut tone = self.tone(mass.weather, band);
@@ -1147,7 +1190,15 @@ impl Clouds {
                         tone = tone.mix(FLASH_TINT, lift);
                     }
                     let sky = row_sky.get(gy).copied().flatten().unwrap_or(c);
-                    tone.mix(sky, mass.layer.sky_mix())
+                    let key = (tone, sky, mass.layer);
+                    match last_mix {
+                        Some((k, mixed)) if k == key => mixed,
+                        _ => {
+                            let mixed = tone.mix(sky, mass.layer.sky_mix());
+                            last_mix = Some((key, mixed));
+                            mixed
+                        }
+                    }
                 }
                 None => self.virga(cell, (x, y), c),
             };
@@ -1307,7 +1358,7 @@ impl Clouds {
 
     /// The mid or near mass whose virga falls at `(x, y)` units: under its
     /// base, within [`VIRGA_DEPTH`], near a lobe; the nearest such, at its
-    /// drawn drift, as [`band_at`](Self::band_at) draws the masses.
+    /// drawn drift, as [`bands`](Self::bands) lays the masses.
     fn virga_mass(&self, x: f32, y: f32) -> Option<&Mass> {
         self.masses.iter().rev().find(|m| {
             let off = self.cell_drift(m) as f32 / f32::from(self.d);
@@ -1506,7 +1557,9 @@ fn despeckle(px: &mut [Option<(Band, usize)>], cols: usize, rows: usize) {
             continue;
         };
         let (x, y) = (i % cols, i / cols);
-        let nb: Vec<Band> = [
+        // how many of its mass's 4-neighbours have each band
+        let mut nb = [0usize; 3];
+        [
             (x.wrapping_sub(1), y),
             (x + 1, y),
             (x, y.wrapping_sub(1)),
@@ -1516,12 +1569,11 @@ fn despeckle(px: &mut [Option<(Band, usize)>], cols: usize, rows: usize) {
         .filter(|&(nx, ny)| nx < cols && ny < rows)
         .filter_map(|(nx, ny)| snapshot[ny * cols + nx])
         .filter(|&(_, nm)| nm == m)
-        .map(|(b, _)| b)
-        .collect();
-        if nb.len() >= 3 && !nb.contains(&band) {
+        .for_each(|(b, _)| nb[b as usize] += 1);
+        if nb.iter().sum::<usize>() >= 3 && nb[band as usize] == 0 {
             let most = [Band::Lit, Band::Body, Band::Shade]
                 .into_iter()
-                .max_by_key(|b| nb.iter().filter(|&&n| n == *b).count())
+                .max_by_key(|&b| nb[b as usize])
                 .unwrap_or(band);
             px[i] = Some((most, m));
         }
@@ -1604,6 +1656,34 @@ mod tests {
             CloudCache::CAPACITY >= 2 * 2 * fullest,
             "{fullest} masses a deck"
         );
+    }
+
+    /// Laying the masses far to near leaves each cell the band the nearest
+    /// mass over it shows, wherever the glass's west edge falls on the run.
+    #[test]
+    fn the_laid_bands_are_the_nearest_masses() {
+        for weather in Weather::ALL {
+            for (d, hour) in [(1u16, 12), (4, 12), (1, 23), (4, 18)] {
+                let now = crate::localclock::at_hour(hour);
+                let sky = Sky::at_with(now, weather);
+                let moment =
+                    Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
+                let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, &mut CloudCache::default());
+                let drift = c.cell_drifts();
+                let (cols, rows) = (usize::from(SPAN * d) / 2, usize::from(GLASS_H * d));
+                for west in [-3, 0, i32::from(SPAN * d) / 3, i32::from(SPAN * d) - 2] {
+                    let laid = c.bands(west, (cols, rows));
+                    for (i, &got) in laid.iter().enumerate() {
+                        let (col, row) = (west + (i % cols) as i32, (i / cols) as i32);
+                        assert_eq!(
+                            got,
+                            c.band_at(&drift, col, row),
+                            "{weather:?} d {d} hour {hour} west {west}: cell ({col}, {row})"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// At a real clock's time each mass drifts its layer's pace every beat:

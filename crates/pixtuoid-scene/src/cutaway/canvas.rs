@@ -307,7 +307,7 @@ mod tests {
             frame,
             office,
             crate::display::compose::tests::showing(floor, now),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf

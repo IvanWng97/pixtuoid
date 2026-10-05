@@ -766,7 +766,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         let list = crate::display::compose(
@@ -927,7 +927,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1082,7 +1082,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
