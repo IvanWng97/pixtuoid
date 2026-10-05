@@ -12,3 +12,12 @@ rules:
       # missing refs and audits their freshness and version consistency.
       policies:
         "*": ref-pin
+        # A third-party action handed a write token or secret runs at a commit SHA:
+        # a tag can move, and "Pinning an action to a full-length commit SHA is
+        # currently the only way to use an action as an immutable release" (GitHub's
+        # secure-use reference). A new one gets a row here.
+        anthropics/claude-code-action: hash-pin
+        peaceiris/actions-gh-pages: hash-pin
+        peter-evans/create-pull-request: hash-pin
+        release-plz/action: hash-pin
+        softprops/action-gh-release: hash-pin

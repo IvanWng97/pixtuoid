@@ -51,7 +51,7 @@ jobs:
       - id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - name: Publish to the star-history branch
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           github_token: ${{ github.token }}
           publish_branch: star-history
