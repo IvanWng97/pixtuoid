@@ -107,8 +107,9 @@ pub(crate) fn spread(hash: u64, len: usize) -> usize {
 
 #[cfg(test)]
 mod spread_tests {
-    /// The modulo is the hash's own, high bits included, so a 32-bit target
-    /// picks what a 64-bit one does; nothing spreads over an empty range.
+    /// The modulo is the hash's own, high bits included; nothing spreads over an
+    /// empty range. A 64-bit host can't see a 32-bit truncation, so the call
+    /// sites' `#[deny(clippy::cast_possible_truncation)]` is that guard.
     #[test]
     fn spread_keeps_the_high_bits_and_an_empty_range_is_zero() {
         let hash = (1u64 << 40) | 5;

@@ -368,6 +368,11 @@ pub(crate) fn net_pass(
         let art_row = usize::from(by / k - rect.y.0) * w;
         for bx in bx0..bx1 {
             let a = art_row + usize::from(bx / k - rect.x.0);
+            // A miss is a pen-arithmetic bug: loud in tests, a skipped pixel in release.
+            debug_assert!(
+                a < lift.len() && a < tint.len(),
+                "art pixel {a} outside the rect"
+            );
             let (Some(&lift), Some(&tint)) = (lift.get(a), tint.get(a)) else {
                 continue;
             };
@@ -375,6 +380,7 @@ pub(crate) fn net_pass(
                 continue;
             }
             let i = usize::from(by) * bw + usize::from(bx);
+            debug_assert!(i < pixels.len(), "buffer pixel {i} outside the frame");
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
             if let Some(px) = pixels.get_mut(i) {
                 *px = memo.of(*px, glow, lift, tint, (ambient, flash));
