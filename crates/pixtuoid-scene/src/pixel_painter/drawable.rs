@@ -487,16 +487,18 @@ fn paint_desk_props(
     let Some(top) = stand(buf, TOKEN_TOWER_SPRITE, tier, at) else {
         return;
     };
-    // The sheet lands as the pile's next sheet: at its full fall it is gone.
-    if let Some(rest) = props
+    // The sheet lands as the pile's next sheet: at its full fall it is gone,
+    // and one still above the canvas's top is not drawn.
+    if let Some(foot) = props
         .sheet_fall
         .and_then(|fallen| crate::token_meter::SHEET_FALL_PX.checked_sub(fallen))
         .filter(|&rest| rest > 0)
+        .and_then(|rest| top.checked_sub(rest - 1))
     {
         let at = crate::pack::PropMark {
             at: Point {
                 x: at.at.x,
-                y: top - (rest - 1),
+                y: foot,
             },
             ..at
         };
@@ -820,6 +822,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A sheet that would fall from above the canvas's top is not drawn: a
+    /// desk at the top of the buffer paints its tower as it would without one.
+    #[test]
+    fn a_sheet_above_the_canvas_is_not_drawn() {
+        let (pack, th) = (test_pack(), theme());
+        let paper = |sheet_fall| {
+            let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
+            let d = desk_cubicle_drawable(Point { x: 40, y: 1 }, 1, sheet_fall);
+            paint_drawable(
+                &d.kind,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut FrameCache::new(),
+                    timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
+                    theme: th,
+                },
+            );
+            paper_pixel_count(&buf, th)
+        };
+        assert_eq!(paper(Some(1)), paper(None));
     }
 
     #[test]
