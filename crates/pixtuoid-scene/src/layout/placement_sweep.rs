@@ -731,7 +731,7 @@ fn no_route_on_a_short_floor_passes_through_a_wall() {
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     let v: Vec<String> = std::thread::scope(|s| {
         floors
-            .chunks(floors.len().div_ceil(cores))
+            .chunks(floors.len().div_ceil(cores).max(1))
             .map(|chunk| s.spawn(move || chunk.iter().flat_map(check).collect::<Vec<_>>()))
             .collect::<Vec<_>>()
             .into_iter()
