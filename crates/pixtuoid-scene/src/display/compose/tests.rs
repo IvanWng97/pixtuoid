@@ -4,17 +4,18 @@ use crate::pack::test_default_pack;
 
 /// The wall board of an empty office, which no clock moves: for frames
 /// whose board a test does not read.
-pub(crate) fn quiet_board() -> &'static crate::board::BoardModel {
-    static BOARD: std::sync::LazyLock<crate::board::BoardModel> = std::sync::LazyLock::new(|| {
-        crate::board::build_board(
-            crate::board::StateCounts::default(),
-            0,
-            None,
-            None,
-            crate::anim::Motion::Full,
-            std::time::UNIX_EPOCH,
-        )
-    });
+pub(crate) fn quiet_board() -> &'static crate::neon_sign::BoardModel {
+    static BOARD: std::sync::LazyLock<crate::neon_sign::BoardModel> =
+        std::sync::LazyLock::new(|| {
+            crate::neon_sign::build_board(
+                crate::tally::StateCounts::default(),
+                0,
+                None,
+                None,
+                crate::anim::Motion::Full,
+                std::time::UNIX_EPOCH,
+            )
+        });
     &BOARD
 }
 
@@ -770,7 +771,7 @@ fn the_board_writes_inside_the_signs_interior() {
     };
     let pack = test_default_pack();
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
-    let counts = crate::board::StateCounts {
+    let counts = crate::tally::StateCounts {
         waiting: 12,
         active: 34,
         idle: 56,
@@ -780,7 +781,7 @@ fn the_board_writes_inside_the_signs_interior() {
     let gateway = Some(pixtuoid_core::state::DaemonState::Degraded);
     for ms in (0..16_000).step_by(100) {
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-        let board = crate::board::build_board(
+        let board = crate::neon_sign::build_board(
             counts,
             99 * 3_600,
             Some((12, 12)),

@@ -176,7 +176,7 @@ impl FloatingApp {
                 theme: self.theme,
                 size: Size { w: buf_w, h: buf_h },
                 place: Place {
-                    gateway: pixtuoid_scene::board::office_gateway(&scene),
+                    gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
                 debug_walkable: false,
