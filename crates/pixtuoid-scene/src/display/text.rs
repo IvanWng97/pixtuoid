@@ -158,7 +158,7 @@ impl Badge {
     }
 
     /// It as a run, for a painter that draws every run alike.
-    pub fn run(&self) -> TextRun {
+    pub(crate) fn run(&self) -> TextRun {
         TextRun {
             at: self.at,
             align: Align::Over,
