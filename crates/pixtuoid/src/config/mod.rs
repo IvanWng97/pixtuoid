@@ -139,7 +139,7 @@ pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
     // f32→f64 writes float noise (0.949999988079071) into a hand-edited file.
     let percent = (volume * 100.0).round() / 100.0;
     update_config(path, |doc| {
-        doc["audio"]["volume"] = toml_edit::value(percent as f64);
+        doc["audio"]["volume"] = toml_edit::value(f64::from(percent));
     })
 }
 
@@ -351,15 +351,15 @@ pub(crate) fn save_floating(
     y: Option<i32>,
 ) -> Result<()> {
     update_config(path, |doc| {
-        doc["floating"]["width"] = toml_edit::value(width as i64);
-        doc["floating"]["height"] = toml_edit::value(height as i64);
+        doc["floating"]["width"] = toml_edit::value(i64::from(width));
+        doc["floating"]["height"] = toml_edit::value(i64::from(height));
         // Set-or-CLEAR x/y: a `None` means the OS couldn't report the position
         // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords
         // would restore a stale/offscreen spot next launch, so drop the keys and
         // let the OS place the window.
         for (key, val) in [("x", x), ("y", y)] {
             match val {
-                Some(v) => doc["floating"][key] = toml_edit::value(v as i64),
+                Some(v) => doc["floating"][key] = toml_edit::value(i64::from(v)),
                 // `as_table_like_mut`, not `as_table_mut`: `floating` serializes as
                 // an INLINE table, for which the standard-table accessor returns
                 // None and the key would never drop.

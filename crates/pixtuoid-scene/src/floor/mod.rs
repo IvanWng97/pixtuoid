@@ -1113,9 +1113,10 @@ pub fn build_floor_scene(scene: &SceneState, floor_idx: usize) -> Vec<ProjectedS
 
 /// Build a self-contained `SceneState` for one floor: a `uniform(cap)` scene, so
 /// floor arithmetic stays self-consistent with the remapped desk indices in
-/// `[0..cap)`.
+/// `[0..cap)`. A floor past the building's is an empty one.
 pub fn project_floor_scene(scene: &SceneState, floor_idx: usize) -> SceneState {
-    let mut s = SceneState::uniform(scene.floor_capacities[floor_idx]);
+    let cap = scene.floor_capacities.get(floor_idx).copied().unwrap_or(0);
+    let mut s = SceneState::uniform(cap);
     for p in build_floor_scene(scene, floor_idx) {
         let mut slot = p.slot;
         // The RE-HOST, not a space mix-up: this `uniform(cap)` single-floor

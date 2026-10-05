@@ -312,7 +312,7 @@ mod liveness_tests {
         write_entry(
             dir.path(),
             "self.json",
-            std::process::id() as i64,
+            i64::from(std::process::id()),
             "alive-session",
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
@@ -332,7 +332,7 @@ mod liveness_tests {
     fn drops_entry_whose_pid_is_dead() {
         // Spawn-and-reap a real child: its pid is dead once wait() returns.
         let mut child = std::process::Command::new("true").spawn().unwrap();
-        let dead_pid = child.id() as i64;
+        let dead_pid = i64::from(child.id());
         child.wait().unwrap();
 
         let dir = tempfile::tempdir().unwrap();
@@ -340,7 +340,7 @@ mod liveness_tests {
         write_entry(
             dir.path(),
             "alive.json",
-            std::process::id() as i64,
+            i64::from(std::process::id()),
             "alive-session",
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
@@ -358,7 +358,7 @@ mod liveness_tests {
     #[test]
     fn malformed_and_incomplete_entries_are_ignored() {
         let dir = tempfile::tempdir().unwrap();
-        let own_pid = std::process::id() as i64;
+        let own_pid = i64::from(std::process::id());
         std::fs::write(dir.path().join("garbage.json"), "not json {{{").unwrap();
         std::fs::write(
             dir.path().join("nosid.json"),
@@ -390,7 +390,7 @@ mod liveness_tests {
         write_entry(
             dir.path(),
             "valid.json",
-            std::process::id() as i64,
+            i64::from(std::process::id()),
             "valid-session",
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
@@ -416,7 +416,7 @@ mod liveness_tests {
         write_entry(
             dir.path(),
             "valid.json",
-            std::process::id() as i64,
+            i64::from(std::process::id()),
             "valid-session",
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
@@ -520,7 +520,7 @@ mod liveness_tests {
         std::fs::write(
             dir.path().join("padded.json"),
             serde_json::json!({
-                "pid": std::process::id() as i64,
+                "pid": i64::from(std::process::id()),
                 "sessionId": "padded-session",
                 "future_upstream_key": "y".repeat(8 * 1024),
             })
@@ -672,7 +672,7 @@ mod liveness_tests {
         write_entry(
             dir.path(),
             "valid.json",
-            std::process::id() as i64,
+            i64::from(std::process::id()),
             "valid-session",
         );
         let live = live_cc_session_ids(dir.path()).expect("readable dir is a healthy probe");
@@ -752,7 +752,7 @@ mod liveness_tests {
         write_entry(
             dir.path(),
             "legacy.json",
-            std::process::id() as i64,
+            i64::from(std::process::id()),
             "legacy-session",
         );
         assert!(
@@ -806,7 +806,7 @@ mod liveness_tests {
             .arg("30")
             .spawn()
             .unwrap();
-        let (pid_a, pid_b) = (child_a.id() as i64, child_b.id() as i64);
+        let (pid_a, pid_b) = (i64::from(child_a.id()), i64::from(child_b.id()));
         let expected = pid_a.max(pid_b) as i32;
 
         // Probe inside the loop, assert only after the children are reaped —
