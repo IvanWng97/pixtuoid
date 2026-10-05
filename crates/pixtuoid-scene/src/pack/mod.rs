@@ -99,7 +99,9 @@ fn looped_animations() -> Vec<(&'static str, usize)> {
 }
 
 /// The marks every desk's first frame carries: the cup and the token tower
-/// stand there ([`display`](crate::display)'s `push_desk_props`).
+/// stand there in both looks, and the cup's steam rises there — the
+/// cutaway's `push_desk_props` reads them, the classic and the steam through
+/// [`desk_mark`].
 const DESK_MARKS: [(&str, &[&str]); 2] = [
     (lookup::DESK_SPRITE, &[CUP_MARK, TOWER_MARK]),
     (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
