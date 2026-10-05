@@ -115,7 +115,7 @@ graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs. Same 0.2 as
 # pixtuoid-core/hook — no second build.
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 # Focus-jump activation (focus/macos.rs). Pinned to the SAME objc2 stack winit
 # already pulls so the bindings don't double-compile. This MUST track winit's
@@ -139,7 +139,7 @@ x11rb = "0.13"
 # space/metacharacter-bearing install path resolves to its DOS 8.3 short form so
 # cmd.exe /C can invoke it. Same 0.61 major as pixtuoid-core — no second build.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = [
+windows-sys = { workspace = true, features = [
     "Win32_Storage_FileSystem",
     # focus/windows.rs: Toolhelp32 ancestor walk + EnumWindows/SetForegroundWindow
     "Win32_System_Diagnostics_ToolHelp",

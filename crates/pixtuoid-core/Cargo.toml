@@ -60,7 +60,7 @@ notify      = { workspace = true, optional = true }
 palette     = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 # Safe wrappers for the liveness/exit-watch syscalls the `native` probe layer
 # makes: kqueue+kevent (macOS), pidfd_open+poll+self-pipe (Linux), kill(0).
 # Unix-only like `libc`, so the wasm32 core build never sees it. libc STAYS for
@@ -73,7 +73,7 @@ rustix = { version = "1", features = ["event", "process", "pipe"] }
 [target.'cfg(windows)'.dependencies]
 # Win32_System_Threading: OpenProcess + GetProcessTimes, the `proc_start`
 # creation-FILETIME marker (the Windows half of the pid-recycle guard).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # Depending on ourselves BY PATH is how a crate turns its own non-default

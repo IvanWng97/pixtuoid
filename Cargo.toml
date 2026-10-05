@@ -111,3 +111,5 @@ criterion          = { package = "codspeed-criterion-compat", version = "5", def
 insta              = "1"
 proptest           = "1"
 tempfile           = "3"
+libc               = "0.2"
+windows-sys        = "0.61"
