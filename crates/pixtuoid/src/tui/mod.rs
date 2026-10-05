@@ -574,17 +574,8 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
-/// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.star_clickable()`, or
-/// a hit phantom-launches a browser where none is painted.
-fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
-    let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
-    widgets::star_hit_rect(scene)
-        .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
-}
-
 /// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
-/// against the full terminal bounds, not [`star_clicked`]'s scene rect. `scale` is
+/// against the full terminal bounds, not the scene rect. `scale` is
 /// the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
@@ -850,33 +841,30 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = renderer.star_clickable()
-                && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
-            if on_star {
-                let _ = open::that(widgets::REPO_URL);
-            } else {
-                match renderer.scene_hit_at(m.column, m.row) {
-                    Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
-                        let slot = scene_rx.borrow().agents.get(&id).cloned();
-                        if let Some(slot) = slot {
-                            focus(&slot);
-                        }
+            match renderer.scene_hit_at(m.column, m.row) {
+                Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
+                    let slot = scene_rx.borrow().agents.get(&id).cloned();
+                    if let Some(slot) = slot {
+                        focus(&slot);
                     }
-                    Some(SceneHit::Coffee) => {
-                        let _ = open::that("https://buymeacoffee.com/IvanWng97");
-                    }
-                    Some(SceneHit::Figure(&HoverTarget::Pet(PetHover {
-                        centre, kind, ..
-                    }))) if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) => {
-                        renderer.set_active_pet(Some(renderer::PetState {
-                            petted_at: now,
-                            pet_pos: centre,
-                            kind,
-                            floor_idx: renderer.current_floor(),
-                        }));
-                    }
-                    _ => {}
                 }
+                Some(SceneHit::Star) => {
+                    let _ = open::that(widgets::REPO_URL);
+                }
+                Some(SceneHit::Coffee) => {
+                    let _ = open::that("https://buymeacoffee.com/IvanWng97");
+                }
+                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { centre, kind, .. })))
+                    if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) =>
+                {
+                    renderer.set_active_pet(Some(renderer::PetState {
+                        petted_at: now,
+                        pet_pos: centre,
+                        kind,
+                        floor_idx: renderer.current_floor(),
+                    }));
+                }
+                _ => {}
             }
         }
         _ => {}
@@ -2347,40 +2335,6 @@ mod apply_key_action_tests {
         );
         h.apply(KeyAction::ToggleWalkableDebug);
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
-    }
-
-    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry — `star_hit_rect`
-    /// puts the star at `scene.y + 1` height 1 and `scene_rect` shrinks only HEIGHT, so both
-    /// framings agree above 2 rows.
-    #[test]
-    fn star_clicked_hits_only_the_star_span() {
-        use crate::tui::widgets::star_hit_rect;
-        let term = (120u16, 44u16);
-        let scene = super::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
-        let star = star_hit_rect(scene).expect("the star fits at 120x44");
-
-        assert!(
-            super::star_clicked(star.x, star.y, term),
-            "a click on the star's first column must hit"
-        );
-        assert!(
-            super::star_clicked(star.x + star.width - 1, star.y, term),
-            "a click on the star's last column must hit"
-        );
-        assert!(
-            !super::star_clicked(star.x - 1, star.y, term),
-            "one column LEFT of the star must miss"
-        );
-        assert!(
-            !super::star_clicked(star.x, star.y + 1, term),
-            "one row BELOW the star must miss — the rect is height 1"
-        );
-        // Too narrow to paint any of the star ⇒ no click target, no phantom
-        // browser launch.
-        assert!(
-            !super::star_clicked(1, 1, (10, 44)),
-            "a terminal too narrow for the star must never register a hit"
-        );
     }
 
     /// Ignoring `scale` would launch a browser where the popup is still animating.
