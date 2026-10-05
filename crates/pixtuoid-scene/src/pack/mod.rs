@@ -73,6 +73,20 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
+/// Every walk a walker steps by the ground it covers: a person's, each pet's
+/// and each gateway mascot's.
+fn walks() -> Vec<&'static str> {
+    crate::sim::WALKS
+        .into_iter()
+        .chain(crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim()))
+        .chain(
+            pixtuoid_core::source::registry::registered_source_names()
+                .filter_map(crate::creatures::gateway_mascot_def)
+                .map(|d| d.walk),
+        )
+        .collect()
+}
+
 /// The animations a painter loops on the beat, each with the frame its loop
 /// starts at: the looping fixtures, the appliances' busy loops
 /// ([`appliance_frame_index`](lookup::appliance_frame_index)), the typists
@@ -124,7 +138,7 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
         pack,
         &PackContract {
             art_sets: &art_sets(),
-            walks: &crate::sim::WALKS,
+            walks: &walks(),
             marks: &DESK_MARKS,
             loops: &looped_animations(),
             beat_ms: crate::anim::FULL_TICK_MS,
@@ -706,6 +720,22 @@ mod tests {
             format!("palette key `{DESK_BULB_KEY}`"),
         ] {
             assert!(guide.contains(&needle), "CONFIGURATION.md lost {needle:?}");
+        }
+    }
+
+    /// A creature's walk steps by the ground like a person's, so a pack's
+    /// without a stride slides its feet too.
+    #[test]
+    fn a_creature_walk_without_a_stride_is_flagged() {
+        for (walk, stride) in [
+            ("cat_walk", "stride   = 2\n"),
+            ("lobster_walk", "stride   = 6\n"),
+        ] {
+            let manifest = format!(
+                "[animations.{walk}]\nframes   = [\"{walk}_0.sprite\", \"{walk}_1.sprite\"]\nframe_ms = 250\n"
+            );
+            let pack = test_pack_declaring(&format!("{manifest}{stride}"), &manifest);
+            assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
         }
     }
 

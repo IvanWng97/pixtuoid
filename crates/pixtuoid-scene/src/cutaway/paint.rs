@@ -4228,6 +4228,7 @@ mod tests {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded: false,
+            on_roster: true,
             effects: crate::effects::mascot_bubbles(
                 lobster,
                 12,
@@ -4265,10 +4266,12 @@ mod tests {
             .pieces()
             .iter()
             .filter_map(|p| match &p.kind {
-                PieceKind::Creature { who, .. } => Some(crate::display::Hover {
-                    at: p.span.bounds(),
-                    target: who.clone(),
-                }),
+                PieceKind::Creature { who, .. } => {
+                    who.clone().map(|target| crate::display::Hover {
+                        at: p.span.bounds(),
+                        target,
+                    })
+                }
                 _ => None,
             })
             .collect();
@@ -4277,7 +4280,7 @@ mod tests {
                 frame
                     .mascots
                     .iter()
-                    .map(crate::sim::MascotPlacement::target),
+                    .filter_map(crate::sim::MascotPlacement::target),
             )
             .collect();
         assert_eq!(
@@ -4289,6 +4292,71 @@ mod tests {
             "premise: the cat, then each gateway"
         );
         assert_eq!(list.hovers().listed(), creatures);
+
+        // one walking out past the roster still paints, and hovers as nothing
+        let mut frame = frame;
+        frame.mascots[0].on_roster = false;
+        let left = frame.mascots[0].key.clone();
+        let list = list_at(&frame, office, 12);
+        assert_eq!(
+            list.pieces()
+                .iter()
+                .filter(|p| matches!(p.kind, PieceKind::Creature { .. }))
+                .count(),
+            creatures.len()
+        );
+        assert!(
+            !list
+                .hovers()
+                .listed()
+                .iter()
+                .any(|h| h.target == crate::display::HoverTarget::Mascot(left.clone()))
+        );
+    }
+
+    /// A pet whose feet sort south of an agent's paints over them, so where
+    /// the two overlap it is the hover.
+    #[test]
+    fn a_pet_painted_over_an_agent_is_the_hover() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let mut frame = frames.last().expect("a seated frame").clone();
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::ONE,
+        };
+        let body = list_at(&frame, office, 12)
+            .pieces()
+            .iter()
+            .find_map(|p| match p.kind {
+                PieceKind::Character { body, .. } => Some(body),
+                _ => None,
+            })
+            .expect("the sitter");
+        // centred on the sitter's bottom row, so its feet sort south of theirs
+        let at = Point {
+            x: u16::midpoint(body.x0, body.x1),
+            y: body.y1,
+        };
+        let cat = crate::sim::PetPlacement {
+            kind: crate::pet::PetKind::Cat,
+            pos: at,
+            flip: false,
+            anim_name: "cat_walk",
+            frame_idx: 0,
+            effects: Vec::new(),
+        };
+        let target = cat.target();
+        frame.pet = Some(cat);
+        let cell = Bounds {
+            x: at.x,
+            y: at.y,
+            width: 1,
+            height: 1,
+        };
+        assert_eq!(list_at(&frame, office, 12).hovers().at(cell), Some(&target));
     }
 
     /// What rides on a figure never covers it from the pointer: every cell of

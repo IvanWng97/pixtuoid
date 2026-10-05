@@ -5,91 +5,18 @@
 //! and the wasm hero. It also owns `OfficeMood`, which the sign's light reads.
 //!
 //! `scene` has no terminal/window deps (invariant #1), so the model carries a
-//! backend-agnostic `BoardTone` and `tone_rgb` is the ONE tone→theme-role map all
-//! three painters share. Also owns the per-scene activity tally the footer reads.
+//! backend-agnostic `BoardTone` and [`BoardTone::rgb`] is the ONE tone→theme-role
+//! map all three painters share. The activity tally it shows lives in
+//! [`tally`](crate::tally).
 
 use std::time::SystemTime;
 
+use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::state::{ActivityState, DaemonPresence, DaemonState, MAX_FLOORS};
-use pixtuoid_core::{AgentSlot, SceneState};
+use pixtuoid_core::state::DaemonState;
 
+use crate::tally::{StateCounts, scene_stats};
 use crate::theme::Theme;
-
-/// Per-scene tally of agent activity states, computed once per frame and shared
-/// by the footer and the board so the two surfaces can't disagree. `exiting` is a
-/// first-class bucket, NOT folded into idle, so the footer's `n/total` counts
-/// walkouts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StateCounts {
-    pub active: usize,
-    pub waiting: usize,
-    pub idle: usize,
-    pub exiting: usize,
-    pub total: usize,
-}
-
-/// Add one slot to `c` under the ONE exiting-first bucketing policy: an
-/// **exiting** agent counts as `exiting` regardless of its last activity state.
-fn bucket_slot(c: &mut StateCounts, slot: &AgentSlot) {
-    c.total += 1;
-    if slot.exiting_at.is_some() {
-        c.exiting += 1;
-        return;
-    }
-    match slot.state {
-        ActivityState::Active { .. } => c.active += 1,
-        ActivityState::Waiting { .. } => c.waiting += 1,
-        ActivityState::Idle => c.idle += 1,
-    }
-}
-
-/// Bucket every agent in `scene` — the office-wide (or current-projected-floor)
-/// tally.
-pub fn scene_stats(scene: &SceneState) -> StateCounts {
-    let mut c = StateCounts::default();
-    for slot in scene.agents.values() {
-        bucket_slot(&mut c, slot);
-    }
-    debug_assert_eq!(c.active + c.waiting + c.idle + c.exiting, c.total);
-    c
-}
-
-/// Per-floor [`StateCounts`], bucketed by `AgentSlot.floor_idx` (clamped to the
-/// last floor). Computed from the FULL scene, deliberately distinct from
-/// `scene_stats` on the projected floor — don't derive one from the other.
-pub fn per_floor_counts(scene: &SceneState) -> [StateCounts; MAX_FLOORS] {
-    let mut floors = [StateCounts::default(); MAX_FLOORS];
-    for slot in scene.agents.values() {
-        bucket_slot(&mut floors[slot.floor_idx.min(MAX_FLOORS - 1)], slot);
-    }
-    floors
-}
-
-/// The worst-of daemon-liveness rollup for the gateway chip. `None` = no daemon
-/// configured (chip suppressed), distinct from `Some(DaemonState::Down)` (a
-/// daemon was seen, then died). `DaemonState` has no `Ord`, hence the explicit
-/// severity rank.
-pub fn gateway_rollup<'a>(
-    daemons: impl Iterator<Item = &'a DaemonPresence>,
-) -> Option<DaemonState> {
-    fn severity(s: DaemonState) -> u8 {
-        match s {
-            DaemonState::Idle => 0,
-            DaemonState::Busy => 1,
-            DaemonState::Degraded => 2,
-            DaemonState::Down => 3,
-        }
-    }
-    daemons
-        .map(|p| p.display_state())
-        .max_by_key(|s| severity(*s))
-}
-
-/// The [`gateway_rollup`] over every daemon in `scene`.
-pub fn office_gateway(scene: &SceneState) -> Option<DaemonState> {
-    gateway_rollup(scene.daemons().map(|(_, _, p)| p))
-}
 
 /// The oldest in-scene agent's age in seconds — every agent still in the scene
 /// (live or walking out; swept ones are gone).
@@ -116,7 +43,7 @@ pub fn compact_hms(secs: u64) -> String {
 }
 
 /// The board text's tone — backend-agnostic. Deliberately NOT
-/// `overlay::LabelTone`: the variant sets are disjoint (labels never show
+/// `badge::BadgeTone`: the variant sets are disjoint (labels never show
 /// Brand/Star/Dim; the board never shows a per-agent Exiting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BoardTone {
@@ -134,16 +61,18 @@ pub enum BoardTone {
     Dim,
 }
 
-/// Resolve a `BoardTone` to its theme color role — the SINGLE authority the three
-/// board painters share, so a `theme.ui` role change lands in ONE place.
-pub fn tone_rgb(tone: BoardTone, theme: &Theme) -> Rgb {
-    match tone {
-        BoardTone::Brand => theme.ui.neon_brand,
-        BoardTone::Star => theme.ui.neon_star,
-        BoardTone::Active => theme.ui.label_active,
-        BoardTone::Waiting => theme.ui.label_waiting,
-        BoardTone::Idle => theme.ui.label_idle,
-        BoardTone::Dim => theme.ui.tooltip_dim,
+impl BoardTone {
+    /// This tone's theme color role — the SINGLE authority the three board
+    /// painters share, so a `theme.ui` role change lands in ONE place.
+    pub fn rgb(self, theme: &Theme) -> Rgb {
+        match self {
+            BoardTone::Brand => theme.ui.neon_brand,
+            BoardTone::Star => theme.ui.neon_star,
+            BoardTone::Active => theme.ui.label_active,
+            BoardTone::Waiting => theme.ui.label_waiting,
+            BoardTone::Idle => theme.ui.label_idle,
+            BoardTone::Dim => theme.ui.tooltip_dim,
+        }
     }
 }
 
@@ -459,7 +388,7 @@ fn board_mood_at(counts: StateCounts, now_ms: u64) -> Vec<BoardSegment> {
 }
 
 /// Assemble the whole board model. `floor` is `(current, total_floors)` — a
-/// single-floor office passes `None`; `gateway` is the [`gateway_rollup`], where
+/// single-floor office passes `None`; `gateway` is the [`gateway_rollup`](crate::tally::gateway_rollup), where
 /// `None` suppresses the chip; `now` on `motion`'s beat drives L2's flap. The
 /// context separators (`"  "`) are baked into each following segment so
 /// painters just concatenate.
@@ -497,7 +426,7 @@ pub fn build_board(
 
 /// The wall board every painter shows over `drawn`, the floor it draws: that
 /// floor's tally and uptime, and what only the office knows — its `gateway`
-/// ([`office_gateway`]) and `floor`'s place among its floors.
+/// ([`office_gateway`](crate::tally::office_gateway)) and `floor`'s place among its floors.
 pub fn wall_board(
     drawn: &SceneState,
     gateway: Option<DaemonState>,
@@ -526,7 +455,7 @@ impl BoardModel {
         };
         let span = |s: &BoardSegment| TextSpan {
             text: s.text.clone(),
-            ink: tone_rgb(s.tone, theme),
+            ink: s.tone.rgb(theme),
         };
         let line = |n: u16| crate::layout::Point {
             x: NEON_PANEL_INNER_X,
@@ -911,8 +840,8 @@ mod tests {
 
     #[test]
     fn uptime_is_the_oldest_in_scene_agent_in_whole_seconds() {
-        use pixtuoid_core::AgentId;
         use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
+        use pixtuoid_core::{AgentId, AgentSlot};
         use std::path::PathBuf;
         use std::sync::Arc;
         use std::time::Duration;
@@ -1038,8 +967,8 @@ mod tests {
             DaemonState::Down,
         ] {
             assert_eq!(
-                crate::footer::footer_tone_rgb(crate::footer::FooterTone::Gateway(st), theme),
-                tone_rgb(gateway_tone(st), theme),
+                crate::footer::FooterTone::Gateway(st).rgb(theme),
+                gateway_tone(st).rgb(theme),
                 "board and footer must resolve the same gateway color for {st:?}"
             );
         }

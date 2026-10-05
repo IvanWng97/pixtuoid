@@ -99,7 +99,8 @@ canvas: whatever of the desk stands between the viewer and its sitter's props,
 the bundled one its monitor. It comes only with the desk it covers, so a pack
 with a `desk` of its own and no `desk_front` draws its props over the desk.
 
-A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
+A walk (a person's `walking`, `walking_back` and `walking_coffee`, a pet's
+`cat_walk` and `dog_walk`, the gateway mascot's `lobster_walk`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full
 cycle of its frames. Its frames, and its `@Nx` variants', then step by the
 ground covered, not by `frame_ms`. A walk without one steps on its `frame_ms`,
