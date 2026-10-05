@@ -703,24 +703,41 @@ fn no_route_around_a_wall_corner_cuts_through_it() {
 /// sees. The discrete [`SWEEP_SIZES`] grid reaches this band at one width.
 #[test]
 fn no_route_on_a_short_floor_passes_through_a_wall() {
-    let mut v = Vec::new();
-    for h in super::compute::MIN_LAYOUT_H..=WALL_SCAN_TOP_H {
-        for w in (super::compute::MIN_LAYOUT_W..=WALL_SCAN_RIGHT_W).step_by(WALL_SCAN_W_STEP) {
-            for seed in (0..crate::floor::MAX_FLOORS).map(crate::floor::floor_seed) {
-                let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
-                    panic!("{w}x{h} seed {seed}: refused above the floor");
-                };
-                v.extend(corner_routes_through_walls(w, h, seed, &l));
-                v.extend(wander_legs(&l).into_iter().filter_map(|leg| {
-                    let (p, wall) = route_through_wall(&l, leg.path.as_ref()?)?;
-                    Some(format!(
-                        "{w}x{h} seed {seed}: {leg} passes {p:?} inside {:?}",
-                        wall.footprint()
-                    ))
-                }));
-            }
-        }
-    }
+    let floors: Vec<(u16, u16, u64)> = (super::compute::MIN_LAYOUT_H..=WALL_SCAN_TOP_H)
+        .flat_map(|h| {
+            (super::compute::MIN_LAYOUT_W..=WALL_SCAN_RIGHT_W)
+                .step_by(WALL_SCAN_W_STEP)
+                .flat_map(move |w| {
+                    (0..crate::floor::MAX_FLOORS).map(move |f| (w, h, crate::floor::floor_seed(f)))
+                })
+        })
+        .collect();
+    let check = |&(w, h, seed): &(u16, u16, u64)| {
+        let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+            panic!("{w}x{h} seed {seed}: refused above the floor");
+        };
+        let mut v = corner_routes_through_walls(w, h, seed, &l);
+        v.extend(wander_legs(&l).into_iter().filter_map(|leg| {
+            let (p, wall) = route_through_wall(&l, leg.path.as_ref()?)?;
+            Some(format!(
+                "{w}x{h} seed {seed}: {leg} passes {p:?} inside {:?}",
+                wall.footprint()
+            ))
+        }));
+        v
+    };
+    // the floors are independent: one chunk a core, which nextest reserves
+    // for it (`threads-required` in .config/nextest.toml)
+    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let v: Vec<String> = std::thread::scope(|s| {
+        floors
+            .chunks(floors.len().div_ceil(cores).max(1))
+            .map(|chunk| s.spawn(move || chunk.iter().flat_map(check).collect::<Vec<_>>()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(|h| h.join().expect("a sweep thread panicked"))
+            .collect()
+    });
     assert_no_violations("short-floor-route-through-wall", v);
 }
 
