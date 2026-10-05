@@ -349,11 +349,14 @@ impl GlassWeather {
     /// This weather on `view`'s glass: the veil, then the marks over it, so
     /// rain still reads through the murk.
     pub(crate) fn paint(&self, view: &mut WindowView) {
-        view.paint(|cell, c| {
-            self.veil
-                .at(cell.at.0, cell.at.1)
-                .map_or(c, |(v, a)| crate::composite::blend_rgb(c, v, a))
-        });
+        // A clear pane takes no veil, so it skips the pass.
+        if self.veil.as_solid() != Some(None) {
+            view.paint(|cell, c| {
+                self.veil
+                    .at(cell.at.0, cell.at.1)
+                    .map_or(c, |(v, a)| crate::composite::blend_rgb(c, v, a))
+            });
+        }
         for m in self.marks(view.idx(), view.glass_size(), view.d()) {
             view.paint_glass_at((m.x, m.y), |cell, under| m.over(under, cell.at));
         }

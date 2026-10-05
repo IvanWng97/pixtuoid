@@ -225,21 +225,11 @@ impl TextRun {
         self.spans.iter().map(|s| s.text.as_str()).collect()
     }
 
-    /// The logical cells its line covers on the terminal's cell grid, one
-    /// per cell of its text and of its [`pad`](Self::pad): what the hit test
-    /// reads and the classic writes.
-    pub fn bounds(&self) -> crate::layout::Bounds {
-        let spans = u16::try_from(self.spans.len()).unwrap_or(u16::MAX);
-        self.place(cells(&self.text()) + 2 * self.pad() * spans)
-    }
-
-    /// The cells of plate the classic writes each side of each span: the floor
-    /// indicator and a chitchat bubble sit a cell clear inside their plates.
-    pub fn pad(&self) -> u16 {
-        match (self.role, self.plate) {
-            (TextRole::Indicator | TextRole::Bubble(_), Some(_)) => 1,
-            _ => 0,
-        }
+    /// The star's hit area: the logical cells its line covers on the
+    /// terminal's cell grid, one per cell of its text, where the classic
+    /// writes it.
+    pub fn hit_box(&self) -> crate::layout::Bounds {
+        self.place(cells(&self.text()))
     }
 
     /// The logical cells a line `w` cells wide takes where its align puts it:

@@ -94,3 +94,28 @@ pub(crate) const MURMUR3_FMIX32_M1: u32 = 0x85eb_ca6b;
 pub(crate) fn splitmix_draw(seed: u64, n: u64) -> u64 {
     pixtuoid_core::id::splitmix64(seed.wrapping_add(n.wrapping_mul(GOLDEN_GAMMA)))
 }
+
+/// `hash` spread over `0..len` alike on every target: the modulo runs in
+/// `u64`, so a 32-bit `usize` (the wasm build) keeps the hash's high bits. An
+/// empty range spreads to 0.
+pub(crate) fn spread(hash: u64, len: usize) -> usize {
+    u64::try_from(len)
+        .ok()
+        .and_then(|len| hash.checked_rem(len))
+        .and_then(|i| usize::try_from(i).ok())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod spread_tests {
+    /// The modulo is the hash's own, high bits included; nothing spreads over an
+    /// empty range. A 64-bit host can't see a 32-bit truncation, so the call
+    /// sites' `#[deny(clippy::cast_possible_truncation)]` is that guard.
+    #[test]
+    fn spread_keeps_the_high_bits_and_an_empty_range_is_zero() {
+        let hash = (1u64 << 40) | 5;
+        assert_eq!(super::spread(hash, 7), usize::try_from(hash % 7).unwrap());
+        assert_ne!(super::spread(hash, 7), super::spread(5, 7));
+        assert_eq!(super::spread(hash, 0), 0);
+    }
+}

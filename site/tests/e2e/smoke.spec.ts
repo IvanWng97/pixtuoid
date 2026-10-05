@@ -559,6 +559,68 @@ test('a remembered ♩ choice never inverts a direct first click on the button',
   expect(errors()).toEqual([]);
 });
 
+test('a remembered ♩ choice waits for a gesture that grants activation, not an Escape', async ({
+  page,
+}) => {
+  // HTML's activation-triggering events exclude an Escape keydown (and a touch's
+  // pointerdown): restoring on one would "resume" audio that stays suspended.
+  // Automated Chromium reports activation from navigation on, so the page reads
+  // a stub the test flips.
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __activated: boolean };
+    w.__activated = false;
+    Object.defineProperty(navigator, 'userActivation', {
+      value: {
+        get isActive() {
+          return w.__activated;
+        },
+      },
+    });
+  });
+  await gotoLive(page);
+  await page.evaluate(() => localStorage.setItem('pix:audio', '1'));
+  await page.reload();
+  await expect(page.locator('.backdrop.is-live')).toBeAttached({ timeout: 15_000 });
+  const btn = page.locator('#office-audio');
+  await expect(btn).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await expect(btn, 'a gesture without activation restored the remembered ♩').toHaveAttribute(
+    'aria-pressed',
+    'false'
+  );
+  await page.evaluate(() => {
+    (window as unknown as { __activated: boolean }).__activated = true;
+  });
+  await page.keyboard.press('Shift');
+  await expect
+    .poll(async () => {
+      const pressed = await btn.getAttribute('aria-pressed');
+      const hidden = await btn.evaluate((el) => (el as HTMLElement).hidden);
+      return pressed === 'true' || hidden;
+    })
+    .toBe(true);
+  expect(errors()).toEqual([]);
+});
+
+test('the dracula sequence honours the keyboard-shortcut off-switch (WCAG 2.1.4)', async ({
+  page,
+}) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('pix-keys', 'off'));
+  await page.reload();
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.type('dracula');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dracula');
+  await page.evaluate(() => localStorage.setItem('pix-keys', 'on'));
+  await page.reload();
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.type('dracula');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dracula');
+});
+
 test('crisp AA captions overlay the live office (name badges + neon board)', async ({ page }) => {
   const errors = watchErrors(page);
   await gotoLive(page);
@@ -1271,13 +1333,35 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
 });
 
+test('install: the method switcher is APG tabs — one tab stop, arrows select', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const tabs = page.locator('.install__tabs[role="tablist"] [role="tab"]');
+  const n = await tabs.count();
+  expect(n).toBeGreaterThan(1);
+  await expect(page.locator('.install__tab[tabindex="0"]')).toHaveCount(1);
+  await tabs.first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tabs.nth(1)).toBeFocused();
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.nth(1)).toHaveAttribute('tabindex', '0');
+  await expect(tabs.first()).toHaveAttribute('tabindex', '-1');
+  const panel = await tabs.nth(1).getAttribute('aria-controls');
+  await expect(page.locator(`#${panel}[role="tabpanel"]`)).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.nth(n - 1)).toBeFocused(); // wraps
+  await page.keyboard.press('Home');
+  await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+});
+
 test('install: tabs swap panels and both clipboard branches deliver', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./'); // no live-office wait — tabs/copy are wasm-independent
   await page.locator('.install__tab[data-tab="cargo"]').click();
   await expect(page.locator('.install__tab[data-tab="cargo"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page.locator('#install-panel-cargo')).toBeVisible();
@@ -1307,7 +1391,7 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
   await page.goto('./#showcase-spaces');
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
   await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page.locator('[data-stage="spaces"] img.terminal__screen')).toHaveAttribute(
@@ -1322,7 +1406,7 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
   await expect(page.locator('[data-stage="dashboard"]')).toBeHidden();
   await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page).toHaveURL(/#showcase-spaces$/);
@@ -1668,11 +1752,11 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       '#showcase .section-head .lead',
       '#showcase .eyebrow',
       '.roster__body',
-      ".dial__ch:not([aria-pressed='true'])",
+      ".dial__ch:not([aria-selected='true'])",
       '.dial__desc',
       // the PRESSED row overrides its number's colour, so the `:not()` above
       // misses it; `live` is the only marker for the one interactive demo.
-      ".dial__ch[aria-pressed='true'] .dial__num",
+      ".dial__ch[aria-selected='true'] .dial__num",
       '.dial__live',
       '#how .eyebrow',
       '#tools .section-head .lead',

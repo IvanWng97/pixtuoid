@@ -38,7 +38,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let frozen_at = r
         .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .map(|walk| walk.wander.last_advanced_at)
+        .map(|walk| walk.wander().last_advanced_at())
         .expect("floor-0 walks present");
 
     // ~30 s on floor 1.
@@ -49,7 +49,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let still_frozen = r
         .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .map(|walk| walk.wander.last_advanced_at)
+        .map(|walk| walk.wander().last_advanced_at())
         .expect("floor-0 walks present");
     assert_eq!(
         frozen_at, still_frozen,
@@ -65,7 +65,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
         .and_then(|m| m.get(&a))
         .expect("floor-0 walks present");
     assert!(
-        walk.wander.phase_started_at >= back_at,
+        walk.wander().phase_started_at() >= back_at,
         "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"
     );
 }
@@ -100,6 +100,26 @@ fn floor_transition_completes_and_lands() {
     assert!(
         r.cached_layout().is_some(),
         "layout recomputed after landing"
+    );
+}
+
+/// A slide whose two floors can't be borrowed apart (one floor, twice) ends at
+/// once, rather than warning every frame for its whole duration.
+#[test]
+fn an_unborrowable_slide_cancels() {
+    let p = pack();
+    let scene = two_floor_scene();
+    let mut r = build(100, 40, vec![]);
+    let now = t0();
+    r.render(&scene, p, now).unwrap();
+    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, now));
+    let logged = crate::test_capture::capture(|| {
+        r.render(&scene, p, now).unwrap();
+    });
+    assert!(r.transition().is_none());
+    assert!(
+        logged.contains("a slide between floors it cannot borrow"),
+        "the borrow arm, not another exit, ended it: {logged}"
     );
 }
 

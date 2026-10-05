@@ -43,18 +43,31 @@ pub enum Dirty {
     /// Anywhere.
     All,
     /// Only inside these, in buffer pixels on whole layout cells.
-    Rects(Vec<Bounds>),
+    Rects(Rects),
     /// Nowhere: the frame was not painted.
     Unchanged,
 }
 
+/// The rects a frame may differ inside: never none, which is
+/// [`Dirty::Unchanged`], so a consumer that skips on it skips every unchanged
+/// frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rects(Vec<Bounds>);
+
+impl Rects {
+    /// Each rect, in buffer pixels on whole layout cells.
+    pub fn as_slice(&self) -> &[Bounds] {
+        &self.0
+    }
+}
+
 impl Dirty {
     /// Only inside `rects`: [`Self::Unchanged`] when there are none.
-    fn within(rects: Vec<Bounds>) -> Self {
+    pub fn within(rects: Vec<Bounds>) -> Self {
         if rects.is_empty() {
             Self::Unchanged
         } else {
-            Self::Rects(rects)
+            Self::Rects(Rects(rects))
         }
     }
 }
@@ -90,7 +103,6 @@ struct Shown {
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
     hovers: Hovers,
-    texts: Vec<crate::display::TextRun>,
     /// The cells of the star it drew, if it drew one.
     star: Option<Bounds>,
 }
@@ -157,7 +169,6 @@ impl CutawayCanvas {
             epoch,
             footprints,
             hovers: list.hovers().clone(),
-            texts: list.texts().cloned().collect(),
             star: list
                 .texts()
                 .find(|run| run.role == crate::display::TextRole::Star)
@@ -182,11 +193,6 @@ impl CutawayCanvas {
     /// What the last frame answers a pointer with; `None` before the first.
     pub(crate) fn hovers(&self) -> Option<&Hovers> {
         self.shown.as_ref().map(|shown| &shown.hovers)
-    }
-
-    /// The text the last frame sets, in paint order; `None` before the first.
-    pub(crate) fn texts(&self) -> Option<&[crate::display::TextRun]> {
-        self.shown.as_ref().map(|shown| shown.texts.as_slice())
     }
 
     /// The cells of the star the last frame drew; `None` before the first or
@@ -844,7 +850,7 @@ mod tests {
             .iter()
             .filter_map(|&s| on_buffer(s, h.scale, size))
             .collect();
-        assert_eq!(dirty, Dirty::Rects(want));
+        assert_eq!(dirty, Dirty::within(want));
         let mut waiting = seated.clone();
         waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
             reason: "permission?".into(),
@@ -966,7 +972,25 @@ mod tests {
             !want.is_empty(),
             "the tally changes a board line: {was:?} {now:?} {dirty:?}"
         );
-        assert_eq!(dirty, Dirty::Rects(want));
+        assert_eq!(dirty, Dirty::within(want));
+    }
+
+    /// No list of rects is empty: "nowhere" is only ever
+    /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
+    /// unchanged frame.
+    #[test]
+    fn an_empty_list_of_rects_is_unchanged() {
+        let b = Bounds {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(Dirty::within(Vec::new()), Dirty::Unchanged);
+        let Dirty::Rects(rects) = Dirty::within(vec![b]) else {
+            panic!("a rect is somewhere");
+        };
+        assert_eq!(rects.as_slice(), [b]);
     }
 
     /// A new layout of the same size repaints everything, even one built after

@@ -221,6 +221,51 @@ fn a_refused_classic_frame_names_no_one() {
     );
 }
 
+/// A classic frame hands its badges and its signs over apart, split where
+/// the badges are drawn: every badge and bubble run in `badges`, every sign in
+/// `signs`, and a refused frame leaves both empty.
+#[test]
+fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
+    use crate::display::TextRole;
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = office(t0);
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
+    render(
+        &mut floor,
+        office.stores(),
+        Look::Classic,
+        inputs(&scene, &pack, t0),
+    )
+    .expect("lays out");
+    let drawn = floor.raster.classic_drawn().expect("shown");
+    assert!(!drawn.badges.is_empty(), "the office badges its agents");
+    assert!(
+        drawn
+            .badges
+            .iter()
+            .all(|run| matches!(run.role, TextRole::Badge(_) | TextRole::Bubble(_))),
+        "{:?}",
+        drawn.badges.iter().map(|r| r.role).collect::<Vec<_>>()
+    );
+    let signs: Vec<TextRole> = drawn.signs.iter().map(|r| r.role).collect();
+    assert!(
+        signs.contains(&TextRole::Star) && signs.contains(&TextRole::Indicator),
+        "{signs:?}"
+    );
+    assert!(
+        !signs.iter().any(|r| matches!(r, TextRole::Badge(_))),
+        "{signs:?}"
+    );
+    let refused = RenderInputs {
+        size: Size { w: 1, h: 1 },
+        ..inputs(&scene, &pack, t0)
+    };
+    assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
+    let drawn = floor.raster.classic_drawn().expect("shown");
+    assert!(drawn.badges.is_empty() && drawn.signs.is_empty());
+}
+
 /// The sim and the raster draw one pack: a frame stepped with another is
 /// refused rather than drawn with art the sim never placed.
 #[test]
