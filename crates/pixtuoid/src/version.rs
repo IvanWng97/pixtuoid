@@ -1,11 +1,14 @@
+use semver::Version;
+
 fn is_newer_version(current: &str, last_seen: &str) -> bool {
-    parse_semver(current)
-        .zip(parse_semver(last_seen))
-        .is_some_and(|(c, l)| c > l)
+    matches!(
+        (Version::parse(current), Version::parse(last_seen)),
+        (Ok(c), Ok(l)) if c > l
+    )
 }
 
 fn is_valid_version(s: &str) -> bool {
-    parse_semver(s).is_some()
+    Version::parse(s).is_ok()
 }
 
 pub(crate) struct BootDecision {
@@ -28,20 +31,6 @@ pub(crate) fn boot_decision(current_ver: &str, last_seen: Option<&str>) -> BootD
         should_show_popup,
         should_persist,
     }
-}
-
-/// Parses `major.minor.patch[-prerelease]` into a tuple whose 4th component is `0`
-/// for a prerelease and `1` for a release, so `0.5.0-rc1 < 0.5.0` per semver.
-fn parse_semver(v: &str) -> Option<(u64, u64, u64, u8)> {
-    let mut parts = v.splitn(3, '.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch_str = parts.next().unwrap_or("0");
-    let (patch_num, is_release) = match patch_str.split_once('-') {
-        Some((num, _prerelease)) => (num.parse().ok()?, 0u8),
-        None => (patch_str.parse().ok()?, 1u8),
-    };
-    Some((major, minor, patch_num, is_release))
 }
 
 #[cfg(test)]
@@ -94,6 +83,12 @@ mod tests {
     fn release_newer_than_prerelease_of_same_version() {
         assert!(is_newer_version("0.5.0", "0.5.0-rc1"));
         assert!(!is_newer_version("0.5.0-rc1", "0.5.0"));
+    }
+
+    #[test]
+    fn a_later_release_candidate_is_newer() {
+        assert!(is_newer_version("0.5.0-rc.10", "0.5.0-rc.2"));
+        assert!(!is_newer_version("0.5.0-rc.2", "0.5.0-rc.10"));
     }
 
     /// Guard for #110: every hardcoded intra-workspace path-dep `version` (NOT

@@ -23,8 +23,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments
 
 # ── variables ─────────────────────────────────────────────────────
-# just evaluates these globally regardless of position; kept at the top (the
-# idiom) so the file's config lives in one place.
+# just evaluates these globally regardless of position; kept at the top so the
+# file's config lives in one place.
 
 # The published API surface: the ONLY two crates whose public API is a contract
 # (the binary lib target is not). Single-sourced here so both gates over it —

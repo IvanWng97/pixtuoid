@@ -12,7 +12,7 @@ set -uo pipefail
 # its entry now, but this suite also runs directly, and `submodule foreach`
 # exports GIT_DIR with no hook involved. It has to happen HERE, before anything
 # builds a repo; the suite's own GIT_* exports come later and are unaffected.
-# shellcheck disable=SC2046  # githooks(5)'s own idiom — the list must word-split
+# shellcheck disable=SC2046  # https://git-scm.com/docs/githooks's form — the list must word-split
 unset $(git rev-parse --local-env-vars)
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -146,9 +146,7 @@ hook_hands_just() {
     # shellcheck disable=SC2016  # the stub's own script text, not expansion
     printf '#!/usr/bin/env bash\nfor v in $(git rev-parse --local-env-vars); do [ -n "${!v:-}" ] && printf "%%s " "$v"; done >"%s/seen"\nexit 0\n' "$s" >"$s/bin/just"
     chmod +x "$s/bin/just"
-    # SKIP_PREFLIGHT is cleared so an operator's exported bypass cannot send the
-    # hook down its early exit during the test — that path never reaches `exec`.
-    (cd "$s/repo" && env -u SKIP_PREFLIGHT PATH="$s/bin:$PATH" GIT_DIR="$s/repo/.git" \
+    (cd "$s/repo" && PATH="$s/bin:$PATH" GIT_DIR="$s/repo/.git" \
         GIT_INDEX_FILE="$s/repo/.git/index" GIT_WORK_TREE="$s/repo" \
         bash "$hook" origin y </dev/null) >/dev/null 2>&1
     # Two channels: stdout is the leak list; the exit status (cat's own) says
