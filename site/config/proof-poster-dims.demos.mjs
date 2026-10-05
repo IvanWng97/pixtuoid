@@ -6,13 +6,13 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const component = readFileSync(
-  new URL('../../src/components/ProofSplit.astro', import.meta.url),
+  new URL('../src/components/ProofSplit.astro', import.meta.url),
   'utf8'
 );
 
 function pngSize(name) {
   // IHDR: width and height are the two big-endian u32s at byte 16.
-  const png = readFileSync(new URL(`../../public/demos/${name}`, import.meta.url));
+  const png = readFileSync(new URL(`../public/demos/${name}`, import.meta.url));
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
