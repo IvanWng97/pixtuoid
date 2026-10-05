@@ -215,19 +215,15 @@ fn a_refused_classic_frame_names_no_one() {
         ..inputs(&scene, &pack, t0)
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
-    assert!(floor.raster.classic_signs().is_empty());
+    let drawn = floor.raster.classic_drawn().expect("shown");
     assert!(
-        floor
-            .raster
-            .classic_drawn()
-            .expect("shown")
-            .bubbles
-            .is_empty()
+        drawn.badges.is_empty() && drawn.bubbles.is_empty() && drawn.signs.is_empty(),
+        "no badge, bubble or sign"
     );
 }
 
-/// A classic frame hands its badges and its signs over apart, and a refused
-/// frame leaves both empty.
+/// A classic frame hands its badges, its bubbles and its signs over apart,
+/// and a refused frame leaves them empty.
 #[test]
 fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     use crate::display::TextRole;
@@ -259,7 +255,7 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
     let drawn = floor.raster.classic_drawn().expect("shown");
-    assert!(drawn.badges.is_empty() && drawn.signs.is_empty());
+    assert!(drawn.badges.is_empty() && drawn.bubbles.is_empty() && drawn.signs.is_empty());
 }
 
 /// The sim and the raster draw one pack: a frame stepped with another is

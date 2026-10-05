@@ -546,13 +546,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
         let t = ((phase_t - seated_end) * 1000 / span) as u16;
-        Pose::Walking {
-            from: desk,
-            to: dest,
-            t_x1000: t,
-            travelled: travelled_on(desk, dest, t),
-            carrying_coffee: false,
-        }
+        Pose::walking(desk, dest, t, false)
     } else if phase_t < at_wp_end {
         at_dest_pose
     } else {
@@ -561,14 +555,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         let span = cycle_ms - at_wp_end;
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
         let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
-        let carrying_coffee = target.kind.carries_coffee();
-        Pose::Walking {
-            from: dest,
-            to: desk,
-            t_x1000: t,
-            travelled: travelled_on(dest, desk, t),
-            carrying_coffee,
-        }
+        Pose::walking(dest, desk, t, target.kind.carries_coffee())
     }
 }
 

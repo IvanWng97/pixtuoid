@@ -396,7 +396,7 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
 
 #[test]
 fn frame_wider_than_u16_max_errors_instead_of_truncating() {
-    // The width half of `rows_to_frame`'s u16 guard.
+    // The width half of `push_row`'s u16 guard.
     let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
     src.push_str("@frame 0\n");
     for _ in 0..=u16::MAX as usize {
@@ -413,7 +413,7 @@ fn frame_wider_than_u16_max_errors_instead_of_truncating() {
 
 #[test]
 fn frame_taller_than_u16_max_errors_instead_of_truncating() {
-    // Same contract for the row count: 65536 rows wrap height to 0.
+    // Its row-count half.
     let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
     src.push_str("@frame 0\n");
     for _ in 0..=u16::MAX as usize {

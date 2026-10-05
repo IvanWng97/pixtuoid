@@ -2865,7 +2865,7 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
     let empty = SceneState::uniform(16);
     let coffee = std::collections::HashMap::new();
     let mut owned = OwnedSimStores::new();
-    let frame = Duration::from_millis(33);
+    let frame = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
     let mut now = now0;
     let mut run = |scene: &SceneState, ms: u64| {
         let mut last = None;
@@ -2918,8 +2918,9 @@ fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16
     Some(hi? - lo? + 1)
 }
 
-// The bundled 8-wide pack cannot tell char_w apart from the const, so the
-// differential against a wide (10px) fixture pack is what gives this teeth.
+// The bundled pack's figures are `CHARACTER_SPRITE_W` wide, so it cannot tell
+// char_w apart from the const; the differential against a wide (10px) fixture
+// pack is what gives this teeth.
 #[test]
 fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     use crate::layout::TEST_DEFAULT_DESKS;
@@ -3834,6 +3835,57 @@ fn both_looks_hang_a_badge_from_the_one_anchor() {
         assert!(!classic.is_empty(), "premise: the walker wears a badge");
         assert_eq!(cutaway, classic);
     }
+}
+
+/// A chitchat bubble hangs over its speaker's badge, and both looks draw the
+/// same one.
+#[test]
+fn a_bubble_hangs_over_its_speakers_badge_in_both_looks() {
+    use crate::display::{TextRole, TextRun};
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let speaker = frame.agents[0].agent_id;
+    frame.chitchat_bubbles = vec![crate::chitchat::ChitchatBubble {
+        text: "LGTM!",
+        speaker,
+    }];
+    let mut scene = SceneState::uniform(16);
+    for agent in &frame.agents {
+        scene.agents.insert(agent.agent_id, agent.clone());
+    }
+    let now = SystemTime::UNIX_EPOCH;
+    let classic = paint_drawn(&OwnedSimStores::new(), &scene, &layout, &pack, now, &frame);
+    let find = |texts: &[TextRun], role| texts.iter().find(|run| run.role == role).cloned();
+    let badge = classic
+        .badges
+        .iter()
+        .find(|badge| badge.agent == speaker)
+        .expect("the speaker's badge");
+    let bubble = find(&classic.bubbles, TextRole::Bubble(speaker)).expect("the classic's bubble");
+    assert_eq!(bubble.text(), "LGTM!");
+    assert_eq!(bubble.at.x, badge.at.x, "centred over the badge");
+    assert_eq!(
+        badge.at.y - bubble.at.y,
+        2 * crate::layout::CELL_ROWS,
+        "two cell rows up, a row clear of the badge"
+    );
+    let office = crate::display::Office {
+        layout: &layout,
+        pack: &pack,
+        theme,
+        scale: crate::render_scale::RenderScale::ONE,
+    };
+    let cutaway: Vec<_> = crate::display::compose::tests::list_at(&frame, office, 12)
+        .texts()
+        .cloned()
+        .collect();
+    assert_eq!(
+        find(&cutaway, TextRole::Bubble(speaker)),
+        Some(bubble),
+        "the same bubble"
+    );
 }
 
 /// Two gateways of one source are two hovers, each naming its own instance,
@@ -6189,4 +6241,76 @@ fn the_outside_reaches_only_the_glass() {
             "no {kind} hangs over a window, so none was compared there"
         );
     }
+}
+
+/// The neon halo lifts the window glass it falls on in the frame itself, as
+/// the cutaway's glass takes the sign's glow: the frame lit by the tube differs
+/// from the one with the tube off on glass the sign does not cover.
+#[test]
+fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
+    let (scene, _, _, now0, pack) = sim_rig();
+    let layout = SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+        .expect("192x160 fits");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let night = crate::localclock::at_hour(23);
+    let paint = |neon| {
+        let frame = SimFrame {
+            neon,
+            ..frame.clone()
+        };
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+        paint_frame(
+            &mut PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                timing: Motion::Full.timing(night),
+                sky: crate::sky::Sky::at_with(night, crate::sky::Weather::Clear),
+                outside: None,
+                buf: &mut buf,
+                cache: &mut FrameCache::new(),
+                base_fill: &mut BaseFillCache::new(),
+                shadows: &mut crate::ground::DepthsCache::default(),
+                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+                floor: crate::floor::FloorMeta::ground(),
+                walks: &owned.route.walks,
+                debug_walkable: false,
+            },
+            &frame,
+        );
+        buf
+    };
+    let (lit, dark) = (
+        paint(crate::floor::NeonLevels::FLASH),
+        paint(crate::floor::NeonLevels::EMPTY),
+    );
+    let sign = layout
+        .fixtures()
+        .find(|f| f.kind == FixtureKind::NeonSign)
+        .expect("the office hangs its sign")
+        .visual;
+    let under_sign = |x: u16, y: u16| {
+        (sign.x..sign.x + sign.width).contains(&x) && (sign.y..sign.y + sign.height).contains(&y)
+    };
+    let lifted = (0..layout.buf_h)
+        .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+        .filter(|&(x, y)| layout.glass_at(x, y) && !under_sign(x, y))
+        .filter(|&(x, y)| lit.get(x, y) != dark.get(x, y))
+        .count();
+    assert!(lifted > 0, "the sign's glow reaches no window glass");
 }
