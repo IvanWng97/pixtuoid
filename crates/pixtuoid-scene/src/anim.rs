@@ -82,6 +82,8 @@ pub const CALM_TICK_MS: u64 = 500;
 /// it, on every tier: the sampling rate the walks' strides are sized for
 /// (`a_walking_person_never_slides`).
 pub const PAINT_FPS: u32 = 30;
+/// One [`PAINT_FPS`] frame, in whole ms: the step a test samples a painter at.
+pub const PAINT_FRAME_MS: u64 = 1000 / PAINT_FPS as u64;
 
 /// The least any phase of a flash — a strike's level, a starved neon's catch,
 /// the dark between — lasts in loop time: the project's own floor, beside
@@ -472,5 +474,29 @@ mod tests {
             eased > 0.8,
             "expected ease-out to be past 80% at midpoint; got {eased}"
         );
+    }
+
+    /// The site's backdrop runs the wasm office on its own frame gate.
+    #[test]
+    fn the_site_backdrop_paints_at_paint_fps() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../site/src/components/OfficeBackdrop.astro"
+        );
+        // crates.io-packaged test runs don't ship the repo's site/ tree.
+        let site = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site");
+        if !std::path::Path::new(site).is_dir() {
+            return;
+        }
+        let astro =
+            std::fs::read_to_string(path).expect("OfficeBackdrop.astro moved or was renamed");
+        let frame_ms: u64 = astro
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("const FRAME_MS = "))
+            .and_then(|v| v.strip_suffix(';'))
+            .expect("OfficeBackdrop.astro's `const FRAME_MS = <ms>;` moved or was renamed")
+            .parse()
+            .expect("FRAME_MS is a whole ms literal");
+        assert_eq!(frame_ms, PAINT_FRAME_MS, "OfficeBackdrop.astro's FRAME_MS");
     }
 }

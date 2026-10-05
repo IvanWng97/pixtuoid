@@ -16,7 +16,7 @@ pub(crate) enum EffectKind {
     SleepZ,
     /// The waiting-for-you mark over a figure; still.
     WaitingMark,
-    /// The puff a walker's stride kicks up; the stride's frame.
+    /// The puff a walker's stride kicks up; its walk's frame.
     WalkingDust,
     /// The flame crowning a burning head; which of its two frames shows.
     FlameCrown,
