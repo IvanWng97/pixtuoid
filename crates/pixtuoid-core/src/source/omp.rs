@@ -649,6 +649,10 @@ pub(crate) fn omp_head_title(v: &Value) -> Option<String> {
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let path = Path::new(transcript_path);
     let acting = AgentId::from_parts(source, &omp_id_from_path(path));
@@ -863,6 +867,10 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// stamps pids onto Identity events only, and the focus stamp must arm from
 /// BIRTH to cover a bridge-only (never-persisted) session — the exit watch
 /// needs no help, `SessionStart` is already a bind target.
+///
+/// # Errors
+///
+/// Never: a malformed or unknown payload decodes to `vec![]`; the `Result` is the hook-decoder signature.
 pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);

@@ -63,11 +63,6 @@ deltas; the two differ only when two monotonic reads land on the same instant,
 which no deterministic test can arrange. The non-boundary prune/dedupe behaviour
 *is* pinned by unclaim.rs's unit tests.
 
-**`hook/unix.rs` — `>` vs `>=` in `Listener::bind`.** The `tmp.len() > 100` picks
-between two bind strategies (temp-rename vs direct+chmod) whose end states are
-byte-identical. The boundary is `sun_path` headroom, distinguishable only by which
-syscall sequence ran — invisible to any external observation.
-
 **`cc_probe.rs` — `pid_start_time_secs`.** A cfg-twin pair (macOS `proc_pidinfo` /
 non-macOS `None`): on any host the other platform's variant is compiled out, so its
 mutants always survive as cross-compile noise. Both variants are pinned by cfg-twin

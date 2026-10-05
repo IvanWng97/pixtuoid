@@ -141,6 +141,9 @@ invariant-breaking sequence against:
    layer](docs/CONTRIBUTING.md#convergence-contract). A mechanism the diff
    extends is judged as if new against AGENTS.md's [upkeep
    rule](AGENTS.md#conventions); one that fails it draws "delete it".
+   A hand-rolled mechanism for a need a maintained library, the platform or
+   the upstream tool already meets (AGENTS.md's reuse rule) draws "reuse X",
+   naming X and the source checked.
    Documented load-bearing defense (shim exit-0, config-never-wipe, liveness
    ladders) stays.
 6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
@@ -154,6 +157,10 @@ invariant-breaking sequence against:
    - **Concise**: the shortest name that stays clear, in the domain's existing
      word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
      never a placeholder.
+7. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
+   rule. A missing or contradicting source is `issue (non-blocking)`, blocking
+   only under [Severity](#severity)'s rule: verified against the code as a
+   correctness, security or invariant breach.
 
 ## Escalation
 

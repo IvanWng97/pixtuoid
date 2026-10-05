@@ -61,7 +61,7 @@ impl RenderScale {
         let n = u64::from(natural);
         let below = n / d * d;
         // A multiple past `u16::MAX` is no scale at all, so it is no candidate.
-        let above = Some(below + d).filter(|&a| a <= u64::from(u16::MAX));
+        let above = Some(below + d).filter(|&a| u16::try_from(a).is_ok());
         let nearest = match above {
             // `n/below < above/n` ⇔ `n² < below·above`, compared exactly in
             // integers; adjacent multiples `kd` and `(k+1)d` never tie, since

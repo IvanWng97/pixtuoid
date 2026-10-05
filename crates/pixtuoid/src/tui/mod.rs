@@ -14,17 +14,19 @@ use std::io::{Stdout, stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use futures_util::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use tokio::time::MissedTickBehavior;
 
 use tui_renderer::TuiRenderer;
 
@@ -450,6 +452,10 @@ pub type Term = Terminal<CrosstermBackend<Stdout>>;
 /// Enters raw mode + the alternate screen ATOMICALLY: a failure after raw mode is on rolls
 /// the terminal all the way back, or the error path strands the user's shell echo-less
 /// and/or on the alt screen. `Terminal::new`'s `.size()` query can fail too.
+///
+/// # Errors
+///
+/// If the Windows console lacks VT support, or enabling raw mode, the alternate screen or mouse capture fails, or the terminal size query fails.
 pub fn setup_terminal() -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
@@ -483,6 +489,10 @@ pub fn setup_terminal() -> Result<Term> {
 /// DisableMouseCapture must run while raw mode is still ON: on Windows it restores the
 /// input mode snapshotted at Enable time (raw-era), so after `disable_raw_mode` it re-raws
 /// the console. Either slip strands the user's shell echo-less.
+///
+/// # Errors
+///
+/// If writing the graphics unwind, the mouse-capture and alternate-screen escapes, or `disable_raw` fails; every step still runs.
 pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
@@ -490,8 +500,8 @@ pub fn unwind_terminal_modes<W: std::io::Write>(
     unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
 }
 
-/// [`unwind_terminal_modes`] with the graphics' own unwind as `prelude`: the
-/// images go while the alt screen that holds them is still up.
+/// Writes `prelude`, then [`unwind_terminal_modes`]' sequence, so the images
+/// go while the alt screen that holds them is still up.
 fn unwind_after<W: std::io::Write>(
     prelude: &[u8],
     out: &mut W,
@@ -506,6 +516,11 @@ fn unwind_after<W: std::io::Write>(
     Ok(())
 }
 
+/// Restore the terminal modes and cursor that [`setup_terminal`] changed.
+///
+/// # Errors
+///
+/// If restoring the terminal modes or showing the cursor fails.
 pub fn teardown_terminal(term: &mut Term) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
@@ -559,17 +574,8 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
-/// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.star_clickable()`, or
-/// a hit phantom-launches a browser where none is painted.
-fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
-    let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
-    widgets::star_hit_rect(scene)
-        .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
-}
-
 /// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
-/// against the full terminal bounds, not [`star_clicked`]'s scene rect. `scale` is
+/// against the full terminal bounds, not the scene rect. `scale` is
 /// the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
@@ -835,32 +841,29 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = renderer.star_clickable()
-                && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
-            if on_star {
-                let _ = open::that(widgets::REPO_URL);
-            } else {
-                match renderer.scene_hit_at(m.column, m.row) {
-                    Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
-                        let slot = scene_rx.borrow().agents.get(&id).cloned();
-                        if let Some(slot) = slot {
-                            focus(&slot);
-                        }
+            match renderer.scene_hit_at(m.column, m.row) {
+                Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
+                    let slot = scene_rx.borrow().agents.get(&id).cloned();
+                    if let Some(slot) = slot {
+                        focus(&slot);
                     }
-                    Some(SceneHit::Coffee) => {
-                        let _ = open::that("https://buymeacoffee.com/IvanWng97");
-                    }
-                    Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, .. })))
-                        if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) =>
-                    {
-                        renderer.set_active_pet(Some(renderer::PetState {
-                            petted_at: now,
-                            kind,
-                            floor_idx: renderer.current_floor(),
-                        }));
-                    }
-                    _ => {}
                 }
+                Some(SceneHit::Star) => {
+                    let _ = open::that(widgets::REPO_URL);
+                }
+                Some(SceneHit::Coffee) => {
+                    let _ = open::that("https://buymeacoffee.com/IvanWng97");
+                }
+                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, .. })))
+                    if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) =>
+                {
+                    renderer.set_active_pet(Some(renderer::PetState {
+                        petted_at: now,
+                        kind,
+                        floor_idx: renderer.current_floor(),
+                    }));
+                }
+                _ => {}
             }
         }
         _ => {}
@@ -987,27 +990,29 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
+        let mut frames = frame_clock(tick);
+        let mut events = EventStream::new();
+        let mut snapshot = scene_rx.borrow().clone();
+        let mut now = ui.now();
         loop {
-            let now = ui.now();
-            let snapshot = scene_rx.borrow_and_update().clone();
-            renderer.evict_missing(&snapshot);
-            let health = source_health.borrow_and_update().clone();
-            ui.build_frames(now, &snapshot, &health)
-                .apply_to(&mut renderer, now);
-            let audio_now = std::time::Instant::now();
-            audio_ctl.tick(audio_now);
-            renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
-            renderer.render(&snapshot, &pack, now)?;
+            tokio::select! {
+                _ = frames.tick() => {
+                    now = ui.now();
+                    snapshot = scene_rx.borrow_and_update().clone();
+                    renderer.evict_missing(&snapshot);
+                    let health = source_health.borrow_and_update().clone();
+                    ui.build_frames(now, &snapshot, &health)
+                        .apply_to(&mut renderer, now);
+                    let audio_now = std::time::Instant::now();
+                    audio_ctl.tick(audio_now);
+                    renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
+                    renderer.render(&snapshot, &pack, now)?;
 
-            if let Some(layout) = renderer.cached_layout() {
-                cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
-            }
-
-            let start = Instant::now();
-            let mut polled = event::poll(tick)?;
-            let mut quit = false;
-            while polled {
-                match event::read()? {
+                    if let Some(layout) = renderer.cached_layout() {
+                        cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
+                    }
+                }
+                event = events.next() => match event.context("terminal input closed")?? {
                     Event::Key(k) if should_dispatch_key(k.kind) => {
                         let floor = FloorNav {
                             n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
@@ -1015,7 +1020,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             in_transition: renderer.transition().is_some(),
                         };
                         let action = dispatch_key(k.code, k.modifiers, ui.modal(), floor);
-                        quit |= apply_key_action(
+                        let quit = apply_key_action(
                             action,
                             &mut KeyCtx {
                                 ui: &mut ui,
@@ -1029,6 +1034,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 respawn: crate::audio::respawn,
                             },
                         );
+                        if quit {
+                            if ui.theme_picker.is_some() {
+                                renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
+                            }
+                            break;
+                        }
                     }
                     Event::Mouse(m) => handle_mouse_event(
                         m,
@@ -1039,20 +1050,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         now,
                     ),
                     _ => {}
-                }
-                polled = event::poll(Duration::from_millis(0))?;
-            }
-            if quit {
-                if ui.theme_picker.is_some() {
-                    renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
-                }
-                break;
-            }
-            // The frame-pacing sleep doubles as the signal-listen window: the crossterm
-            // poll above is synchronous, so this is the loop's only await point.
-            let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
-            tokio::select! {
-                _ = tokio::time::sleep(rem) => {}
+                },
                 res = &mut ctrl_c => match res {
                     Ok(()) => break,
                     Err(e) => {
@@ -1073,6 +1071,42 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     teardown_terminal(&mut renderer.terminal)?;
     result
+}
+
+/// The TUI loop's frame clock, one tick per `period`. A frame that overran
+/// paints at once and the next back on the grid, neither a burst to catch up
+/// nor a re-anchor that lets every late wake stretch the rate
+/// ([`MissedTickBehavior::Skip`]).
+pub(crate) fn frame_clock(period: Duration) -> tokio::time::Interval {
+    let mut frames = tokio::time::interval(period);
+    frames.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    frames
+}
+
+#[cfg(test)]
+mod frame_clock_tests {
+    use super::frame_clock;
+    use std::time::Duration;
+    use tokio::time::{Instant, advance};
+
+    // Whole milliseconds: tokio's timer rounds a deadline up to one.
+    const PERIOD: Duration = Duration::from_millis(30);
+
+    /// A render that overran by a non-whole number of periods: the next frame
+    /// at once, then back on the start's grid — neither a burst nor a whole
+    /// period from the late frame.
+    #[tokio::test(start_paused = true)]
+    async fn an_overrun_paints_at_once_then_falls_back_on_the_grid() {
+        let mut frames = frame_clock(PERIOD);
+        let start = Instant::now();
+        frames.tick().await;
+        advance(PERIOD * 5 / 2).await;
+        let late = Instant::now();
+        frames.tick().await;
+        assert_eq!(Instant::now(), late, "the late frame paints at once");
+        frames.tick().await;
+        assert_eq!(Instant::now(), start + 3 * PERIOD);
+    }
 }
 
 #[cfg(test)]
@@ -2300,40 +2334,6 @@ mod apply_key_action_tests {
         );
         h.apply(KeyAction::ToggleWalkableDebug);
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
-    }
-
-    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry — `star_hit_rect`
-    /// puts the star at `scene.y + 1` height 1 and `scene_rect` shrinks only HEIGHT, so both
-    /// framings agree above 2 rows.
-    #[test]
-    fn star_clicked_hits_only_the_star_span() {
-        use crate::tui::widgets::star_hit_rect;
-        let term = (120u16, 44u16);
-        let scene = super::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
-        let star = star_hit_rect(scene).expect("the star fits at 120x44");
-
-        assert!(
-            super::star_clicked(star.x, star.y, term),
-            "a click on the star's first column must hit"
-        );
-        assert!(
-            super::star_clicked(star.x + star.width - 1, star.y, term),
-            "a click on the star's last column must hit"
-        );
-        assert!(
-            !super::star_clicked(star.x - 1, star.y, term),
-            "one column LEFT of the star must miss"
-        );
-        assert!(
-            !super::star_clicked(star.x, star.y + 1, term),
-            "one row BELOW the star must miss — the rect is height 1"
-        );
-        // Too narrow to paint any of the star ⇒ no click target, no phantom
-        // browser launch.
-        assert!(
-            !super::star_clicked(1, 1, (10, 44)),
-            "a terminal too narrow for the star must never register a hit"
-        );
     }
 
     /// Ignoring `scale` would launch a browser where the popup is still animating.
