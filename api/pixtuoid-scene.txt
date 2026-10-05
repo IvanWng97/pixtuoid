@@ -1061,6 +1061,7 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Waypoint
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Waypoint
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Waypoint
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Waypoint
+pub const pixtuoid_scene::layout::CELL_ROWS: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_H: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_W: u16
 pub const pixtuoid_scene::layout::CLASSIC_OFFICE_DESKS: usize
