@@ -986,9 +986,9 @@ mod tests {
         assert_eq!(rects.as_slice(), [b]);
     }
 
-    /// A new layout of the same size shows whole: the epoch compares the
-    /// backdrop by value, so no address the allocator hands back can pass a
-    /// new layout off as the last.
+    /// A new layout of the same size shows whole, and the same one laid out
+    /// again shows nothing new: the epoch compares the backdrop by value, so
+    /// no address the allocator hands back decides either.
     #[test]
     fn a_new_layout_repaints_everything() {
         let pack = Arc::new(test_default_pack());
@@ -1010,6 +1010,18 @@ mod tests {
             scale,
             crate::display::compose::tests::showing(floor, now),
             &mut cache,
+        );
+        let again = canvas.frame(
+            &stepped(0),
+            normal(),
+            scale,
+            crate::display::compose::tests::showing(floor, now),
+            &mut cache,
+        );
+        assert_eq!(
+            again.dirty,
+            Dirty::Unchanged,
+            "the same layout, laid out again"
         );
         let b = stepped(1);
         let shown = canvas.frame(

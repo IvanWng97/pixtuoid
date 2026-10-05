@@ -11,7 +11,7 @@ use crate::theme::Theme;
 
 /// The ground, the north wall band and the floor coverings: none of it moves
 /// within a layout and theme.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Backdrop {
     /// The office's size, in layout cells.
     pub(crate) size: Size,
@@ -30,7 +30,7 @@ pub(crate) struct Backdrop {
 }
 
 /// The theme's tones the backdrop is laid in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct BackdropTones {
     /// What a buffer holds before its first frame.
     pub(crate) bg: Rgb,
@@ -40,7 +40,7 @@ pub(crate) struct BackdropTones {
 }
 
 /// A fixture flat on the ground, laid with the backdrop under every shadow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Covering {
     Rug { trim: Rgb, accent: Rgb, field: Rgb },
     Runner { base: Rgb, stripe: Rgb, edge: Rgb },
