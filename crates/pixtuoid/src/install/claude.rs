@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
-use crate::install::target::{HostRegistration, MergeOutcome};
+use crate::install::target::{HostRegistration, MergeOutcome, Unregistered};
 
 pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
@@ -129,13 +129,14 @@ fn register(config: &Path) -> Result<()> {
 
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
-fn unregister() -> Result<bool> {
+fn unregister(config: &Path) -> Result<Unregistered> {
     if claude_cli().is_none() {
-        let registered = is_registered()?;
-        if registered {
+        if is_registered()? {
             tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
+            return Ok(Unregistered::Unreachable);
         }
-        return Ok(!registered);
+        remove_marketplace(config)?;
+        return Ok(Unregistered::Absent);
     }
     let listed = run_claude(&[
         "plugin".as_ref(),
@@ -143,7 +144,8 @@ fn unregister() -> Result<bool> {
         "list".as_ref(),
         "--json".as_ref(),
     ])?;
-    if marketplace_listed(&listed)? {
+    let found = marketplace_listed(&listed)?;
+    if found {
         run_claude(&[
             "plugin".as_ref(),
             "marketplace".as_ref(),
@@ -151,7 +153,28 @@ fn unregister() -> Result<bool> {
             PLUGIN_NAME.as_ref(),
         ])?;
     }
-    Ok(true)
+    remove_marketplace(config)?;
+    Ok(if found {
+        Unregistered::Removed
+    } else {
+        Unregistered::Absent
+    })
+}
+
+/// Delete the marketplace `register` wrote around `config`, only when its
+/// manifest is ours: a custom `config` path must not take a stranger's dir.
+fn remove_marketplace(config: &Path) -> Result<()> {
+    let (_, root) = plugin_layout(config)?;
+    let manifest = root.join(".claude-plugin").join("marketplace.json");
+    let Ok(text) = std::fs::read_to_string(&manifest) else {
+        return Ok(());
+    };
+    let ours =
+        serde_json::from_str::<Value>(&text).is_ok_and(|m| m["name"].as_str() == Some(PLUGIN_NAME));
+    if ours {
+        std::fs::remove_dir_all(root).with_context(|| format!("removing {}", root.display()))?;
+    }
+    Ok(())
 }
 
 /// Read where Claude Code records a user-scope install as enabled

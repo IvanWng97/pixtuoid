@@ -87,15 +87,26 @@ pub struct HostRegistration {
     /// the plugin. Idempotent, and run on every install so a deregistered plugin
     /// heals.
     pub register: fn(config: &Path) -> Result<()>,
-    /// Deregister the plugin; a no-op when it isn't registered. `false` when the
-    /// CLI can't be reached, leaving the plugin registered.
-    pub unregister: fn() -> Result<bool>,
+    /// Deregister the plugin and delete the files `register` wrote beside the
+    /// hooks file `config`.
+    pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,
     /// The config an earlier pixtuoid merged its hooks into, and the merge that
     /// strips our entries from it on install and uninstall.
     pub legacy_config: fn() -> Result<PathBuf>,
     pub legacy_uninstall: fn(content: &str) -> Result<MergeOutcome>,
+}
+
+/// What [`HostRegistration::unregister`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unregistered {
+    /// The CLI had the plugin, and it is gone.
+    Removed,
+    /// The CLI had nothing to deregister.
+    Absent,
+    /// The CLI couldn't be reached, so the plugin stays registered.
+    Unreachable,
 }
 
 pub(crate) const BACKUP_SUFFIX: &str = "pixtuoid.bak";

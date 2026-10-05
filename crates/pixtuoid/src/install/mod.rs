@@ -571,7 +571,14 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     // Last, since neither strip needs the CLI: a failing deregister leaves a
     // registered plugin with no hooks, never hooks that still fire.
     let plugin_left_registered = match t.host {
-        Some(host) => !(host.unregister)()?,
+        Some(host) => match (host.unregister)(&path)? {
+            target::Unregistered::Removed => {
+                removed = true;
+                false
+            }
+            target::Unregistered::Absent => false,
+            target::Unregistered::Unreachable => true,
+        },
         None => false,
     };
     Ok(UninstallReport {

@@ -1526,6 +1526,10 @@ fn claude_uninstall_removes_the_marketplace_only_when_listed() {
             calls.matches("plugin marketplace remove pixtuoid").count(),
             1
         );
+        assert!(
+            !tmp.path().join("marketplace").exists(),
+            "the files register wrote go with the plugin"
+        );
 
         // Nothing registered now: a second uninstall lists and stops.
         let u2 = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
@@ -1536,6 +1540,41 @@ fn claude_uninstall_removes_the_marketplace_only_when_listed() {
             1,
             "calls: {calls}"
         );
+    });
+}
+
+#[test]
+fn a_disconnect_that_deregisters_a_stranded_plugin_reports_a_removal() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target(
+            &CLAUDE,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        // An earlier disconnect already emptied every hooks file but left the
+        // plugin registered (no `claude` then).
+        uninstall_target(&CLAUDE_FILE, Some(hooks.clone())).unwrap();
+        let u = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        assert!(!u.plugin_left_registered);
+    });
+}
+
+#[test]
+fn a_custom_config_never_deletes_a_marketplace_that_is_not_ours() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let manifest = tmp
+            .path()
+            .join("marketplace/.claude-plugin/marketplace.json");
+        std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        std::fs::write(&manifest, r#"{"name":"someone-else"}"#).unwrap();
+        uninstall_target(&CLAUDE, Some(hooks)).unwrap();
+        assert!(manifest.exists());
     });
 }
 
