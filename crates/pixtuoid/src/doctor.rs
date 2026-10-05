@@ -2459,16 +2459,16 @@ mod tests {
         // root, or the broken verdict is unreachable hermetically.
         use crate::install::{install_target, target::CLAUDE};
         let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("settings.json");
-        std::fs::write(&cfg, "{}\n").unwrap();
-        install_target(
-            &CLAUDE,
-            Some(cfg.clone()),
-            Some(std::path::PathBuf::from("/nonexistent/pixtuoid-hook")),
-        )
-        .unwrap();
-
-        let d = diagnose(CLAUDE.core_source, "", Some(cfg));
+        let cfg = tmp.path().join("m/pixtuoid/hooks/hooks.json");
+        let d = crate::install::tests::with_fake_claude(|_| {
+            install_target(
+                &CLAUDE,
+                Some(cfg.clone()),
+                Some(std::path::PathBuf::from("/nonexistent/pixtuoid-hook")),
+            )
+            .unwrap();
+            diagnose(CLAUDE.core_source, "", Some(cfg))
+        });
         assert!(
             d.is_broken(),
             "a sentinel'd install with a missing shim must read broken through the injected root"

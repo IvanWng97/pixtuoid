@@ -55,7 +55,7 @@ fn plot_sleep_z(
     let Some((alpha, t)) = sleep_z_fade(phase_ms) else {
         return;
     };
-    let rise = (t * SLEEP_Z_MAX_RISE as f32) as u16;
+    let rise = (t * f32::from(SLEEP_Z_MAX_RISE)) as u16;
     let z_x = at.x + 5;
     let z_y = at.y.saturating_sub(rise + 3);
     const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];

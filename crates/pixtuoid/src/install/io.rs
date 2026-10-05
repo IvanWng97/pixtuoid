@@ -89,12 +89,18 @@ pub fn tighten_to_owner_only(f: &File) {
 }
 
 fn checked_home_join(home: Option<PathBuf>, rel: &str) -> Result<PathBuf> {
-    home.map(|h| h.join(rel)).ok_or_else(|| {
-        anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>")
-    })
+    home.map(|h| h.join(rel))
+        .ok_or_else(|| home_unset("the home directory", "HOME/USERPROFILE"))
 }
 
 pub(crate) const HOOK_OVERRIDE_ENV: &str = "PIXTUOID_HOOK";
+
+/// The error for "no home resolves", shared by every home-anchored target.
+/// `vars` is what that target's resolver reads, so the remedy always follows
+/// the list it refers to.
+pub(crate) fn home_unset(what: &str, vars: &str) -> anyhow::Error {
+    anyhow!("cannot resolve {what} ({vars} unset); set one and reconnect")
+}
 
 /// The remedy sentence for "the shim isn't where we looked", shared by every site
 /// that offers one. It names `PIXTUOID_HOOK` and nothing else: the `--hook-path`
@@ -348,14 +354,6 @@ impl ConfigLock {
         read_resolved(&self.target)
     }
 
-    pub(crate) fn backup_once(&self, suffix: &str) -> Result<Option<PathBuf>> {
-        backup_once_resolved(&self.target, suffix)
-    }
-
-    pub(crate) fn remove_backup(&self, suffix: &str) -> Result<Option<PathBuf>> {
-        remove_backup_resolved(&self.target, suffix)
-    }
-
     /// Atomic write to the locked target: temp file beside it, fsync, then
     /// rename onto it. Writing through the guard (instead of re-calling
     /// `write_config_atomic`) is what avoids the same-process flock
@@ -400,55 +398,9 @@ pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
     lock_config(path)?.write_atomic(contents)
 }
 
-#[cfg(test)]
-fn backup_once(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
-    backup_once_resolved(&resolve_symlink(path), suffix)
-}
-
-/// Take a ONE-TIME backup of the resolved target to `<target><suffix>` (skipped
-/// if it already exists — the take-once latch trusts those bytes forever). Temp +
-/// fsync + rename, NOT `fs::copy`: the .bak is the user's only recovery path, so a
-/// crash mid-copy must leave it complete or absent, never a latched truncated
-/// fragment.
-fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> {
-    if !target.exists() {
-        return Ok(None);
-    }
-    let bak = sibling(target, suffix);
-    if bak.exists() {
-        return Ok(Some(bak));
-    }
-    let tmp = sibling(&bak, "tmp");
-    let mut dst = create_hardened_tmp(&tmp)?;
-    if let Ok(m) = std::fs::metadata(target) {
-        let _ = dst.set_permissions(m.permissions());
-    }
-    std::io::copy(&mut File::open(target)?, &mut dst)?;
-    // Fsync the owned write handle, not a read-only re-open — Windows'
-    // FlushFileBuffers rejects that; the rename is the atomicity.
-    dst.sync_all()?;
-    rename_with_retry(&tmp, &bak)?;
-    sync_parent_after_rename(&bak);
-    Ok(Some(bak))
-}
-
-#[cfg(test)]
-fn remove_backup(path: &Path, suffix: &str) -> Result<Option<PathBuf>> {
-    remove_backup_resolved(&resolve_symlink(path), suffix)
-}
-
-fn remove_backup_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> {
-    let bak = sibling(target, suffix);
-    if !bak.exists() {
-        return Ok(None);
-    }
-    std::fs::remove_file(&bak)?;
-    Ok(Some(bak))
-}
-
-/// Whether the bare `pixtuoid-hook` name resolves on PATH: settings.json stores
-/// the bare name for portability and Claude Code spawns hooks via PATH, so if
-/// this is false the installed hooks silently never fire.
+/// Whether the bare `pixtuoid-hook` name resolves on PATH: a bare-name target's
+/// hook config stores the name for portability and the CLI spawns hooks via PATH,
+/// so if this is false the installed hooks silently never fire.
 pub(crate) fn hook_on_path() -> bool {
     which::which("pixtuoid-hook").is_ok()
 }
@@ -854,31 +806,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn backup_refuses_a_symlink_planted_at_the_bak_tmp() {
-        let dir = TempDir::new().unwrap();
-        let target = dir.path().join("settings.json");
-        std::fs::write(&target, "REAL").unwrap();
-        let victim = dir.path().join("victim");
-        std::fs::write(&victim, "PRECIOUS").unwrap();
-        let bak = sibling(&target, "bak");
-        std::os::unix::fs::symlink(&victim, sibling(&bak, "tmp")).unwrap();
-
-        backup_once(&target, "bak").unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(&victim).unwrap(),
-            "PRECIOUS",
-            "the planted .bak.tmp symlink must not be followed — victim untouched"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&bak).unwrap(),
-            "REAL",
-            "the backup still captures the target's content"
-        );
-    }
-
     #[test]
     fn lock_config_excludes_a_second_locker_until_dropped() {
         let dir = TempDir::new().unwrap();
@@ -927,7 +854,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn config_lock_read_and_backup_pin_the_lock_time_resolution() {
+    fn config_lock_read_pins_the_lock_time_resolution() {
         let dir = TempDir::new().unwrap();
         let old = dir.path().join("old.json");
         std::fs::write(&old, "old-content").unwrap();
@@ -946,22 +873,14 @@ mod tests {
             "old-content",
             "the read is pinned to the lock-time target"
         );
-        let bak = guard.backup_once("pixtuoid.bak").unwrap().unwrap();
-        assert_eq!(
-            bak,
-            dir.path().join("old.json.pixtuoid.bak"),
-            "the backup lands beside the lock-time target"
-        );
-        assert_eq!(std::fs::read_to_string(&bak).unwrap(), "old-content");
-        assert_eq!(guard.remove_backup("pixtuoid.bak").unwrap(), Some(bak));
     }
 
     #[test]
     fn checked_home_join_errors_without_home() {
         let err = checked_home_join(None, ".reasonix/settings.json").unwrap_err();
-        assert!(
-            err.to_string().contains("--config"),
-            "must point at the workaround: {err}"
+        assert_eq!(
+            err.to_string(),
+            "cannot resolve the home directory (HOME/USERPROFILE unset); set one and reconnect"
         );
     }
 
@@ -1008,47 +927,10 @@ mod tests {
     }
 
     #[test]
-    fn backup_and_lock_and_tmp_names_use_string_append() {
-        let dir = TempDir::new().unwrap();
-        let p = dir.path().join("config.local.toml");
-        std::fs::write(&p, "x = 1\n").unwrap();
-        let bak = backup_once(&p, "pixtuoid.bak").unwrap().unwrap();
-        assert_eq!(bak.file_name().unwrap(), "config.local.toml.pixtuoid.bak");
-    }
-
-    #[test]
-    fn backup_once_writes_via_temp_rename_and_survives_a_stale_tmp() {
-        let dir = TempDir::new().unwrap();
-        let p = dir.path().join("settings.json");
-        std::fs::write(&p, "{\"user\": \"content\"}").unwrap();
-        // A stale tmp sidecar from a crashed earlier run must not poison the copy.
-        let stale_tmp = dir.path().join("settings.json.pixtuoid.bak.tmp");
-        std::fs::write(&stale_tmp, "torn garbage").unwrap();
-
-        let bak = backup_once(&p, "pixtuoid.bak").unwrap().unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&bak).unwrap(),
-            "{\"user\": \"content\"}",
-            "the latched backup is the complete snapshot"
-        );
-        assert!(
-            !stale_tmp.exists(),
-            "the tmp sidecar is consumed by the atomic rename"
-        );
-    }
-
-    #[test]
-    fn backup_once_idempotent_and_remove() {
-        let dir = TempDir::new().unwrap();
-        let p = dir.path().join("settings.json");
-        std::fs::write(&p, "{}").unwrap();
-        let b1 = backup_once(&p, "pixtuoid.bak").unwrap().unwrap();
-        assert_eq!(b1.file_name().unwrap(), "settings.json.pixtuoid.bak");
-        let b2 = backup_once(&p, "pixtuoid.bak").unwrap().unwrap();
-        assert_eq!(b1, b2);
-        assert_eq!(remove_backup(&p, "pixtuoid.bak").unwrap(), Some(b1.clone()));
-        assert!(!b1.exists());
-        assert_eq!(remove_backup(&p, "pixtuoid.bak").unwrap(), None);
+    fn lock_and_tmp_names_use_string_append() {
+        let p = Path::new("config.local.toml");
+        assert_eq!(sibling(p, "lock"), Path::new("config.local.toml.lock"));
+        assert_eq!(sibling(p, "tmp"), Path::new("config.local.toml.tmp"));
     }
 
     #[test]
