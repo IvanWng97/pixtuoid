@@ -9,8 +9,8 @@ use pixtuoid_core::sprite::Rgb;
 use crate::display::Span;
 use crate::display::pen::Pen;
 use crate::effects::look::{
-    FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_MAX_RISE, plot_effect, sleep_z_fade,
-    walking_dust_foot,
+    FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_1X, SLEEP_Z_MAX_RISE, WAITING_MARK_1X,
+    plot_effect, sleep_z_fade, walking_dust_foot,
 };
 use crate::effects::{Effect, EffectKind};
 use crate::theme::Theme;
@@ -151,19 +151,6 @@ const DUST: &[&str] = &[
     "#.#.#.#", //
 ];
 
-/// The base art's sleep z: the classic's glyph.
-const SLEEP_Z_1X: &[&str] = &[
-    "##", //
-    ".#", //
-    "##", //
-];
-/// The base art's waiting mark: the classic's glyph.
-const WAITING_MARK_1X: &[&str] = &[
-    "###", //
-    "..#", //
-    ".#.", //
-    ".#.", //
-];
 /// Columns from the base art's head to the west edge of what floats beside it:
 /// past the head, and the badge centred over it.
 const BESIDE_DX_1X: i32 = 5;
@@ -272,18 +259,13 @@ fn stamp(
     emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
     ink: impl Fn(char) -> Option<(Rgb, f32)>,
 ) {
-    for (dy, row) in glyph.iter().enumerate() {
-        for (dx, ch) in row.chars().enumerate() {
-            if ch == '.' {
-                continue;
-            }
-            if let Some((c, coverage)) = ink(ch) {
-                let at = ArtPoint {
-                    x: x + dx as i32,
-                    y: y + dy as i32,
-                };
-                emit(at, 1, c, coverage);
-            }
+    for (dx, dy, ch) in crate::effects::look::inked(glyph) {
+        if let Some((c, coverage)) = ink(ch) {
+            let at = ArtPoint {
+                x: x + i32::from(dx),
+                y: y + i32::from(dy),
+            };
+            emit(at, 1, c, coverage);
         }
     }
 }
@@ -296,7 +278,15 @@ mod tests {
     /// count, so a ragged row would sit it off its mark.
     #[test]
     fn every_look_is_a_rectangle() {
-        for glyph in [SLEEP_Z, WAITING_MARK, DUST, FLAME_CROWN[0], FLAME_CROWN[1]] {
+        for glyph in [
+            SLEEP_Z,
+            WAITING_MARK,
+            SLEEP_Z_1X,
+            WAITING_MARK_1X,
+            DUST,
+            FLAME_CROWN[0],
+            FLAME_CROWN[1],
+        ] {
             assert!(
                 glyph.iter().all(|row| row.len() == glyph[0].len()),
                 "{glyph:?}"

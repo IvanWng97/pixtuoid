@@ -185,6 +185,7 @@ impl SceneLayout {
 
     /// Whether cell `(x, y)` is a window's glass, where the outside shows
     /// rather than the room: inside a bay and off its [`window_frame`].
+    #[cfg(test)]
     pub(crate) fn glass_at(&self, x: u16, y: u16) -> bool {
         let rows = window_rows(self.wall_band_h());
         let h = rows.end - rows.start;

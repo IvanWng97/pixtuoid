@@ -51,8 +51,11 @@ impl<T> Grid<T> {
         &mut self.data
     }
 
-    /// Build from an existing row-major `Vec<T>`. Panics unless
-    /// `data.len() == width * height`.
+    /// Build from an existing row-major `Vec<T>`.
+    ///
+    /// # Panics
+    ///
+    /// If `data.len()` is not `width * height`.
     pub fn from_vec(width: u16, height: u16, data: Vec<T>) -> Self {
         assert_eq!(
             data.len(),

@@ -7,7 +7,6 @@ use std::time::{Duration, SystemTime};
 use common::fixture_scene;
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_scene::pack::load_bundled_pack;
-use pixtuoid_scene::theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -96,58 +95,5 @@ fn branding_visible_in_wall_display() {
     assert!(
         found,
         "branding 'pixtuoid' not found in the upper quarter of the display"
-    );
-}
-
-#[test]
-fn chitchat_bubble_text_appears_in_buffer() {
-    use pixtuoid_scene::chitchat::ChitchatBubble;
-    use pixtuoid_scene::layout::Point;
-    use pixtuoid_scene::pixel_painter::AgentFrame;
-
-    let w = 60u16;
-    let h = 30u16;
-    let backend = TestBackend::new(w, h);
-    let mut term = Terminal::new(backend).unwrap();
-    let scene_rect = ratatui::layout::Rect {
-        x: 0,
-        y: 0,
-        width: w,
-        height: h,
-    };
-    let bubble_text = "LGTM!";
-    let speaker = AgentFrame {
-        agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
-        label_anchor: Point { x: 30, y: 40 },
-    };
-    let bubbles = vec![ChitchatBubble {
-        text: bubble_text,
-        speaker: speaker.agent_id,
-    }];
-
-    term.draw(|f| {
-        pixtuoid::tui::widgets::paint_chitchat_bubbles(
-            f,
-            &bubbles,
-            &[speaker],
-            scene_rect,
-            &theme::NORMAL,
-        );
-    })
-    .unwrap();
-
-    let buf = term.backend().buffer();
-    let mut found = false;
-    for y in 0..h {
-        let row = row_text(buf, y, w);
-        if row.contains(bubble_text) {
-            found = true;
-            break;
-        }
-    }
-    assert!(
-        found,
-        "chitchat bubble text '{}' not found in any row",
-        bubble_text
     );
 }

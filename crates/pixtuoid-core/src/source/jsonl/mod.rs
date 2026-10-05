@@ -362,6 +362,10 @@ impl JsonlWatcher {
     /// Consume the watcher and drive the watch loop — initial seed, a `RESCAN_DELAY`
     /// rescan, the `DEFAULT_POLL_INTERVAL` poll backstop, and notify events — feeding each decoded
     /// event to `tx`.
+    ///
+    /// # Errors
+    ///
+    /// If the file-watch backend cannot be created, or the watch root cannot be stat'ed or watched.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_sessions: Arc<Mutex<HashMap<PathBuf, bool>>> =

@@ -681,7 +681,7 @@ fn hovered_then_removed_agent_is_a_safe_noop() {
     r.render(&scene, pack(), t0()).unwrap();
     super::hover_agent(&mut r, id);
     let empty = SceneState::uniform(16);
-    r.render(&empty, pack(), t0() + Duration::from_millis(33))
+    r.render(&empty, pack(), t0() + Duration::from_millis(PAINT_FRAME_MS))
         .expect("render must not panic when the hovered agent vanished");
 }
 
