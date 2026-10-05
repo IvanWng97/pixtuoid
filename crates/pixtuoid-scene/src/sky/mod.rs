@@ -622,20 +622,17 @@ const _: () = {
         i += 1;
     }
 };
-/// How long each of [`STRIKE_LEVELS`] holds: a whole Full beat, so the beat
+/// How long each of [`STRIKE`]'s phases holds: a whole Full beat, so the beat
 /// neither skips one nor stretches it.
 const STRIKE_PHASE_MS: u64 = crate::anim::FULL_TICK_MS;
 const _: () = assert!(
     STRIKE_PHASE_MS >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
         && STRIKE_GAP_MS >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
 );
-/// A strike's levels in order, each held [`STRIKE_PHASE_MS`]: the primary
+/// A strike's phases in order, each held [`STRIKE_PHASE_MS`]: the primary
 /// strike, a brief dim, an after-flash, so it reads as a flicker rather than a
 /// single blink.
-const STRIKE_LEVELS: [f32; 3] = [1.0, 0.15, 0.55];
-/// Each of [`STRIKE_LEVELS`]' phases, in its order.
-const STRIKE_PHASES: [StrikePhase; STRIKE_LEVELS.len()] =
-    [StrikePhase::Primary, StrikePhase::Dim, StrikePhase::After];
+const STRIKE: [StrikePhase; 3] = [StrikePhase::Primary, StrikePhase::Dim, StrikePhase::After];
 
 /// One phase of a strike's flicker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -646,33 +643,34 @@ pub(crate) enum StrikePhase {
 }
 
 impl StrikePhase {
-    /// The phase a flash at `level` shows: the brightest whose level it
-    /// reaches, the faintest below them all; `None` with no flash.
-    pub(crate) fn of(level: f32) -> Option<Self> {
-        if level <= 0.0 {
-            return None;
+    /// The flash it lights the sky with.
+    pub(crate) const fn level(self) -> f32 {
+        match self {
+            StrikePhase::Primary => 1.0,
+            StrikePhase::Dim => 0.15,
+            StrikePhase::After => 0.55,
         }
-        let phases = || STRIKE_PHASES.into_iter().zip(STRIKE_LEVELS);
-        phases()
-            .filter(|&(_, at)| at <= level)
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .or_else(|| phases().min_by(|(_, a), (_, b)| a.total_cmp(b)))
-            .map(|(phase, _)| phase)
     }
 }
 /// How long one strike's [`lightning_envelope`] window lasts.
-const STRIKE_MS: u64 = STRIKE_LEVELS.len() as u64 * STRIKE_PHASE_MS;
+const STRIKE_MS: u64 = STRIKE.len() as u64 * STRIKE_PHASE_MS;
 /// The least dark time between one strike's end and the next's start, so two
 /// strikes never put more than three flashes in a second.
 const STRIKE_GAP_MS: u64 = 1000;
 
-/// Intensity envelope (0..1) of a lightning flash given ms since the strike
-/// began: its [`STRIKE_LEVELS`] in turn, then 0.
-fn lightning_envelope(since_strike_ms: u64) -> f32 {
+/// The phase of a strike `since_strike_ms` after it began: [`STRIKE`]'s in
+/// turn, then none.
+fn strike_phase(since_strike_ms: u64) -> Option<StrikePhase> {
     usize::try_from(since_strike_ms / STRIKE_PHASE_MS)
         .ok()
-        .and_then(|i| STRIKE_LEVELS.get(i).copied())
-        .unwrap_or(0.0)
+        .and_then(|i| STRIKE.get(i).copied())
+}
+
+/// Intensity envelope (0..1) of a lightning flash given ms since the strike
+/// began: its phases' levels in turn, then 0.
+#[cfg(test)]
+fn lightning_envelope(since_strike_ms: u64) -> f32 {
+    strike_phase(since_strike_ms).map_or(0.0, StrikePhase::level)
 }
 
 /// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
@@ -704,31 +702,26 @@ pub(crate) fn strike_start_ms(beat: crate::anim::Beat) -> u64 {
     bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket)
 }
 
-/// [`lightning_envelope`] on `beat` under `policy`, or 0 when not mid-strike
-/// or at rest.
-fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
+/// The phase of the strike `beat` falls in under `policy`, or `None` when not
+/// mid-strike or at rest.
+fn strike_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> Option<StrikePhase> {
     if beat.is_rest() {
-        return 0.0;
+        return None;
     }
     let elapsed_ms = beat.ms();
     let bucket = strike_bucket(beat);
     let strike_ms = strike_start_ms(beat);
-    let Some(since) = elapsed_ms
+    let since = elapsed_ms
         .checked_sub(strike_ms)
-        .filter(|&since| since < STRIKE_MS)
-    else {
-        return 0.0;
-    };
+        .filter(|&since| since < STRIKE_MS)?;
     // The storm's share at the strike's start: the share moving mid-strike
     // would otherwise cut its phases short of `STRIKE_PHASE_MS`.
     let storm = policy
         .weather_at_ms(beat.wall_ms(strike_ms))
         .share(Element::Lightning, Weather::Storm);
-    if strikes(bucket, storm) {
-        lightning_envelope(since)
-    } else {
-        0.0
-    }
+    strikes(bucket, storm)
+        .then(|| strike_phase(since))
+        .flatten()
 }
 
 /// The light the sky lets into the office: the interior illuminance and what
@@ -751,6 +744,7 @@ pub(crate) struct Sky {
     moon_waxing: bool,
     nightfall: f32,
     flash: f32,
+    strike: Option<StrikePhase>,
 }
 
 impl Sky {
@@ -759,6 +753,7 @@ impl Sky {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
+        let strike = strike_at(timing.beat, policy);
         Self {
             policy,
             weather: policy.weather_at(now),
@@ -766,7 +761,8 @@ impl Sky {
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            flash: flash_level_at(timing.beat, policy),
+            flash: strike.map_or(0.0, StrikePhase::level),
+            strike,
         }
     }
 
@@ -783,10 +779,16 @@ impl Sky {
     }
 
     /// This sky with the lightning envelope at `flash` — a painter test's
-    /// strike without the clock arithmetic that places one.
+    /// strike without the clock arithmetic that places one, in the phase
+    /// whose level it is, if any.
     #[cfg(test)]
     pub(crate) fn with_flash(self, flash: f32) -> Self {
-        Self { flash, ..self }
+        let strike = STRIKE.into_iter().find(|p| p.level() == flash);
+        Self {
+            flash,
+            strike,
+            ..self
+        }
     }
 
     /// This sky under `weather` — a painter test's transition without the
@@ -838,9 +840,14 @@ impl Sky {
         self.nightfall
     }
 
-    /// [`flash_level_at`] at this instant.
+    /// The lightning envelope at this instant: its strike's level, or 0.
     pub(crate) fn flash(&self) -> f32 {
         self.flash
+    }
+
+    /// The phase of the strike at this instant, if one is under way.
+    pub(crate) fn strike(&self) -> Option<StrikePhase> {
+        self.strike
     }
 
     /// [`rain_level`] under this sky's weather.

@@ -14,7 +14,7 @@ use pixtuoid_core::sprite::Rgb;
 use crate::atmosphere::Moment;
 use crate::outside::{Cell, WindowView};
 
-use crate::sky::{Element, Weather};
+use crate::sky::{Element, StrikePhase, Weather};
 
 /// A deterministic stream of `0..1` draws: [`crate::splitmix_draw`]'s.
 struct Rng {
@@ -915,12 +915,11 @@ impl Clouds {
         // far to near, each mass beside its own bands: the nearest wins
         drawn.sort_by_key(|(m, _)| m.layer);
         (clouds.masses, clouds.rasters) = drawn.into_iter().unzip();
-        let flash = moment.sky.flash();
-        if flash > 0.0 {
+        if let Some(phase) = moment.sky.strike() {
             let beat = moment.timing.beat;
             clouds.strike = clouds.strike_at(
                 crate::sky::strike_bucket(beat),
-                flash,
+                phase,
                 (span_f, glass_h_f),
                 crate::sky::strike_start_ms(beat) as f64 / 1000.0,
                 panes,
@@ -1008,14 +1007,14 @@ impl Clouds {
         })
     }
 
-    /// Bucket `bucket`'s strike at `flash` over a run `(span, glass_h)`, its
+    /// Bucket `bucket`'s strike in `phase` over a run `(span, glass_h)`, its
     /// cloud the one over a column of one of `panes` as the masses stood
     /// `start` seconds into the beat, when it struck: so neither the drift
     /// nor the joinery hides it partway through.
     fn strike_at(
         &self,
         bucket: u64,
-        flash: f32,
+        phase: StrikePhase,
         (span, glass_h): (f32, f32),
         start: f64,
         panes: &[Range<u16>],
@@ -1032,11 +1031,10 @@ impl Clouds {
         let i = self.nearest_over(x, &offs)?;
         let base = self.masses[i].base_at(x - offs[i]);
         let intra = r.u() < INTRA_SHARE;
-        let phase = crate::sky::StrikePhase::of(flash)?;
         let step = match phase {
-            crate::sky::StrikePhase::Primary => 2,
-            crate::sky::StrikePhase::After => 1,
-            crate::sky::StrikePhase::Dim => 0,
+            StrikePhase::Primary => 2,
+            StrikePhase::After => 1,
+            StrikePhase::Dim => 0,
         };
         Some(Strike {
             at: (x, base - if intra { INTRA_DEPTH } else { BOLT_FLASH_DEPTH }),
@@ -1052,7 +1050,7 @@ impl Clouds {
                 bolt(&mut r, (x, base), span, glass_h)
             },
             step,
-            dim: phase == crate::sky::StrikePhase::Dim,
+            dim: phase == StrikePhase::Dim,
         })
     }
 
@@ -1784,7 +1782,7 @@ mod tests {
         let run = (f32::from(SPAN), f32::from(GLASS_H));
         let mut seen = std::collections::HashSet::new();
         for bucket in 0..200 {
-            let Some(s) = c.strike_at(bucket, 1.0, run, 0.0, &panes) else {
+            let Some(s) = c.strike_at(bucket, StrikePhase::Primary, run, 0.0, &panes) else {
                 continue;
             };
             let pane = panes
@@ -1967,31 +1965,65 @@ mod tests {
     }
 
     /// The photosensitive floor: a strike changes the clouds' light only as
-    /// the flash's phase changes, never within one.
+    /// A strike lights the deck by the phase the sky's own envelope is in,
+    /// walked through real strikes: one look through each phase, the primary
+    /// and the dim apart, and nothing once it is over.
     #[test]
     fn a_strike_lights_the_deck_only_by_its_phase() {
-        // a noon instant whose bucket's strike finds a cloud
-        let struck = (0..60u64)
-            .map(|k| crate::localclock::at_hour(12) + Duration::from_secs(k * 15))
-            .find(|&now| clouds_at(now, Weather::Storm, 1.0).strike.is_some())
-            .expect("a storm strikes");
-        let lifts = |flash: f32| {
-            let c = clouds_at(struck, Weather::Storm, flash);
-            (0..SPAN * 4)
-                .flat_map(|x| (0..GLASS_H * 4).map(move |y| (x, y)))
-                .map(|(x, y)| {
-                    (0..c.masses.len())
-                        .map(|m| {
+        let tick = crate::anim::FULL_TICK_MS;
+        let mut walked = 0;
+        for k in 0..60u64 {
+            let then = crate::localclock::at_hour(12) + Duration::from_secs(k * 15);
+            let beat = Motion::Full.timing(then).beat;
+            let start = then + Duration::from_millis(crate::sky::strike_start_ms(beat) - beat.ms());
+            let at = |ms: u64| {
+                let now = start + Duration::from_millis(ms);
+                let sky = Sky::at_with(now, Weather::Storm);
+                let moment =
+                    Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
+                let c = Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default());
+                let lifts: Vec<Option<u32>> = (0..SPAN * 4)
+                    .flat_map(|x| (0..GLASS_H * 4).map(move |y| (x, y)))
+                    .flat_map(|(x, y)| {
+                        let c = &c;
+                        (0..c.masses.len()).map(move |m| {
                             c.flash_lift(m, f32::from(x) / 4.0, f32::from(y) / 4.0)
                                 .map(f32::to_bits)
                         })
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(lifts(0.6), lifts(0.85), "one phase, two looks");
-        assert_eq!(lifts(0.1), lifts(0.4), "one faint phase, two looks");
-        assert_ne!(lifts(0.0), lifts(1.0), "a peak must light the deck");
+                    })
+                    .collect();
+                (sky.strike(), c.strike.is_some(), lifts)
+            };
+            let (phase, struck, _) = at(0);
+            if phase.is_none() || !struck {
+                continue;
+            }
+            walked += 1;
+            let mut looks = Vec::new();
+            for i in 0.. {
+                let (phase, _, early) = at(i * tick);
+                let Some(phase) = phase else {
+                    assert!(
+                        early.iter().all(Option::is_none),
+                        "strike {k}: lit after its end"
+                    );
+                    break;
+                };
+                let (_, _, late) = at(i * tick + tick / 2);
+                assert_eq!(
+                    early, late,
+                    "strike {k}: {phase:?} changed its look within itself"
+                );
+                looks.push((phase, early));
+            }
+            let look = |p| looks.iter().find(|(q, _)| *q == p).map(|(_, l)| l);
+            assert_ne!(
+                look(StrikePhase::Primary),
+                look(StrikePhase::Dim),
+                "strike {k}: the primary and the dim look alike"
+            );
+        }
+        assert!(walked > 0, "the sample must strike a cloud");
     }
 
     /// Clouds drift on the beat: at rest they hold still.
