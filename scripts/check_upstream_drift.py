@@ -217,6 +217,25 @@ CORE_BIN_FRAGMENT = "crates/pixtuoid/drift-surface.json"
 
 CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
 CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
+CC_PLUGIN_COMPONENTS_URL = "https://code.claude.com/docs/en/plugins/components.md"
+CC_PLUGIN_INSTALL_URL = "https://code.claude.com/docs/en/plugins/install.md"
+CC_PLUGIN_LOADING_URL = "https://code.claude.com/docs/en/plugins/loading.md"
+
+# The plugin contract install/claude.rs registers our hooks through; a marker
+# VANISHING is review-class drift: the docs reshaped what the installer relies on.
+CC_PLUGIN_DOC_MARKERS = {
+    CC_PLUGIN_COMPONENTS_URL: {
+        "same shape as the `hooks` object in `settings.json`": "hooks/hooks.json's shape",
+    },
+    CC_PLUGIN_INSTALL_URL: {
+        "enabledPlugins": "where a user-scope install is recorded (is_registered)",
+        "claude plugin install": "the shell install command (register)",
+        "When you remove a marketplace, Claude Code uninstalls every plugin": "unregister by marketplace removal",
+    },
+    CC_PLUGIN_LOADING_URL: {
+        "loads in place": "a local-path marketplace's in-place load (no reinstall on update)",
+    },
+}
 
 # Documented hooks.md surfaces the burn-tier decoder DEPENDS on: a string
 # VANISHING here is review-class drift (the docs renamed a surface we read). No
@@ -347,6 +366,9 @@ ANCHORS: dict[str, Anchor] = {
     OMP_DIRS_URL: Anchor(r"export function getAgentDir", "`getAgentDir`"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
     CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
+    CC_PLUGIN_COMPONENTS_URL: Anchor(r"(?m)^# Add components to a plugin", "the plugin-components page"),
+    CC_PLUGIN_INSTALL_URL: Anchor(r"(?m)^# Install and manage plugins", "the plugin-install page"),
+    CC_PLUGIN_LOADING_URL: Anchor(r"(?m)^# Plugin loading reference", "the plugin-loading page"),
     CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
     KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
     REASONIX_HOOK_URL: Anchor(r"Event\s*=\s*\"", "the Event consts"),
@@ -723,6 +745,16 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
 
     walk(root)
     return names or None
+
+
+def cc_plugin_marker_findings(url: str, doc: str) -> list[str]:
+    """The markers of CC_PLUGIN_DOC_MARKERS[url] that `doc` no longer carries."""
+    return [
+        f"CC {url.rsplit('/', 1)[-1]} no longer says `{marker}` — {what} may have "
+        f"changed; re-verify install/claude.rs's plugin registration."
+        for marker, what in sorted(CC_PLUGIN_DOC_MARKERS[url].items())
+        if marker not in doc
+    ]
 
 
 def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
@@ -1465,6 +1497,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
+
+    if ours.cc is not None:
+        for url in CC_PLUGIN_DOC_MARKERS:
+            doc = fetch_anchored(url, "CC plugin doc", report)
+            if doc is not None:
+                for finding in cc_plugin_marker_findings(url, doc):
+                    report.add_review(finding)
 
 
     if ours.reasonix is not None:

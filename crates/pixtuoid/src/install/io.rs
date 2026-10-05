@@ -415,9 +415,9 @@ fn remove_backup_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>
     Ok(Some(bak))
 }
 
-/// Whether the bare `pixtuoid-hook` name resolves on PATH: settings.json stores
-/// the bare name for portability and Claude Code spawns hooks via PATH, so if
-/// this is false the installed hooks silently never fire.
+/// Whether the bare `pixtuoid-hook` name resolves on PATH: a bare-name target's
+/// hook config stores the name for portability and the CLI spawns hooks via PATH,
+/// so if this is false the installed hooks silently never fire.
 pub(crate) fn hook_on_path() -> bool {
     which::which("pixtuoid-hook").is_ok()
 }

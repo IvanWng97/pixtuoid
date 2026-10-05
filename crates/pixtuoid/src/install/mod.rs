@@ -428,7 +428,11 @@ pub(crate) fn install_target(
     let migrated = match t.host {
         Some(host) => {
             (host.register)(&path)?;
-            strip_managed(host.legacy_uninstall, &(host.legacy_config)()?)?
+            strip_managed(
+                host.legacy_uninstall,
+                &(host.legacy_config)()?,
+                Backup::Keep,
+            )?
         }
         None => false,
     };
@@ -445,12 +449,21 @@ pub(crate) fn install_target(
     })
 }
 
+/// What [`strip_managed`] does with the config's backup when it rewrites.
+#[derive(Debug, Clone, Copy)]
+enum Backup {
+    /// A migration: snapshot first if none exists, and keep any snapshot.
+    Keep,
+    /// An uninstall: the hooks are gone, so the backup is no longer needed.
+    Remove,
+}
+
 /// Remove the entries `uninstall` recognizes from `path` under its lock; whether
-/// it changed. Never rewrites on a semantic no-op, and drops the backup once the
-/// hooks are gone.
+/// it changed. Never rewrites on a semantic no-op.
 fn strip_managed(
     uninstall: fn(&str) -> Result<target::MergeOutcome>,
     path: &std::path::Path,
+    backup: Backup,
 ) -> Result<bool> {
     if !target::config_present(path) {
         return Ok(false);
@@ -461,8 +474,16 @@ fn strip_managed(
     if !outcome.changed {
         return Ok(false);
     }
-    lock.write_atomic(&outcome.content)?;
-    lock.remove_backup(BACKUP_SUFFIX)?;
+    match backup {
+        Backup::Keep => {
+            lock.backup_once(BACKUP_SUFFIX)?;
+            lock.write_atomic(&outcome.content)?;
+        }
+        Backup::Remove => {
+            lock.write_atomic(&outcome.content)?;
+            lock.remove_backup(BACKUP_SUFFIX)?;
+        }
+    }
     Ok(true)
 }
 
@@ -518,10 +539,17 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
+    // The legacy strip needs no CLI, so it runs first and a failing deregister
+    // can't strand hooks that still fire.
     let legacy_removed = match t.host {
         Some(host) => {
+            let removed = strip_managed(
+                host.legacy_uninstall,
+                &(host.legacy_config)()?,
+                Backup::Remove,
+            )?;
             (host.unregister)()?;
-            strip_managed(host.legacy_uninstall, &(host.legacy_config)()?)?
+            removed
         }
         None => false,
     };

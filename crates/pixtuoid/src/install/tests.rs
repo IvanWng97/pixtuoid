@@ -1529,3 +1529,59 @@ fn claude_uninstall_removes_the_marketplace_only_when_listed() {
         );
     });
 }
+
+#[test]
+fn claude_uninstall_without_claude_on_path_still_strips_the_legacy_hooks() {
+    let empty = tempfile::TempDir::new().unwrap();
+    let config = empty.path().join("claude-config");
+    std::fs::create_dir_all(&config).unwrap();
+    temp_env::with_vars(
+        [
+            ("PATH", Some(empty.path().as_os_str())),
+            ("CLAUDE_CONFIG_DIR", Some(config.as_os_str())),
+        ],
+        || {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let legacy = config.join("settings.json");
+            std::fs::write(
+                &legacy,
+                r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]},"theme":"dark"}"#,
+            )
+            .unwrap();
+            let u = uninstall_target(&CLAUDE, Some(plugin_hooks_path(tmp.path()))).unwrap();
+            assert!(matches!(u.outcome, UninstallOutcome::Removed));
+            let left: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&legacy).unwrap()).unwrap();
+            assert_eq!(left, serde_json::json!({ "theme": "dark" }));
+        },
+    );
+}
+
+#[test]
+fn claude_migration_keeps_the_backup_and_takes_one_when_absent() {
+    with_fake_claude(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hook = Some(std::env::current_exe().unwrap());
+        let legacy = (CLAUDE.host.unwrap().legacy_config)().unwrap();
+        let bak = legacy.with_file_name("settings.json.pixtuoid.bak");
+        let before =
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#;
+        std::fs::write(&legacy, before).unwrap();
+
+        install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook.clone()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            before,
+            "a fresh snapshot before the strip"
+        );
+
+        // An existing snapshot (the user's pre-pixtuoid state) survives a migration.
+        std::fs::write(&bak, "the user's original").unwrap();
+        std::fs::write(&legacy, before).unwrap();
+        install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            "the user's original"
+        );
+    });
+}

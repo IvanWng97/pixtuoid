@@ -130,6 +130,12 @@ fn register(config: &Path) -> Result<()> {
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
 fn unregister() -> Result<()> {
+    if claude_cli().is_none() {
+        tracing::warn!(
+            "claude not on PATH; leaving the pixtuoid plugin registered, its hooks file emptied"
+        );
+        return Ok(());
+    }
     let listed = run_claude(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
@@ -167,9 +173,14 @@ fn marketplace_listed(json_out: &str) -> Result<bool> {
 }
 
 /// `which` applies PATHEXT, so an npm install's `claude.cmd` resolves on Windows.
+/// `None` when no `claude` is on PATH: an uninstall then has nothing to deregister.
+fn claude_cli() -> Option<PathBuf> {
+    which::which("claude").ok()
+}
+
 fn run_claude(args: &[&std::ffi::OsStr]) -> Result<String> {
-    let cli = which::which("claude").context(
-        "Claude Code's `claude` command is not on PATH; pixtuoid installs its hooks as a Claude Code plugin through it",
+    let cli = claude_cli().context(
+        "Claude Code's `claude` command is not on PATH; pixtuoid installs its hooks as a Claude Code plugin through it — put it on PATH and reconnect",
     )?;
     // The real CLI would register and remove plugins in the developer's own Claude
     // Code — a test run once did.
@@ -275,14 +286,17 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
 }
 
 fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
+    hook_shim_ref(
+        entry
+            .get("hooks")
+            .and_then(|h| h.as_array())
+            .and_then(|a| a.first()),
+    )
+}
+
+fn hook_shim_ref(hook: Option<&Value>) -> crate::install::verify::ShimRef {
     use crate::install::verify::ShimRef;
-    let cmd = entry
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .and_then(|a| a.first())
-        .and_then(|h| h.get("command"))
-        .and_then(|c| c.as_str());
-    match cmd {
+    match hook.and_then(|h| h.get("command")).and_then(|c| c.as_str()) {
         None => ShimRef::Unknown,
         // The SHELL form is `shell_shim_ref`'s own wire format, so it parses it —
         // including any future ` --event` suffix, which a private copy here would
@@ -330,36 +344,51 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 /// Strips our entries from the settings.json an earlier pixtuoid merged into,
 /// keeping everything else.
 fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_uninstall(content, |doc| {
-        merge::flat_json_merge_uninstall_by(doc, is_ours)
+    merge::flat_json_merge_outcome_uninstall(content, |mut doc| {
+        if let Some(Value::Object(hooks)) = doc.get_mut("hooks") {
+            for list in hooks.values_mut() {
+                let Some(entries) = list.as_array_mut() else {
+                    continue;
+                };
+                entries.retain_mut(|entry| {
+                    if is_managed_entry(entry) {
+                        return false;
+                    }
+                    let Some(hs) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+                        return true;
+                    };
+                    let before = hs.len();
+                    // A user's own hook sharing the group stays.
+                    hs.retain(|h| !hook_is_ours(h));
+                    hs.len() == before || !hs.is_empty()
+                });
+            }
+            hooks.retain(|_, list| list.as_array().is_none_or(|a| !a.is_empty()));
+        }
+        if let Some(root) = doc.as_object_mut() {
+            merge::prune_empty(root, "hooks");
+        }
+        doc
     })
 }
 
-/// A legacy entry is ours by its sentinel, its source stamp, or the shim it runs.
-/// The sentinel alone isn't enough: Claude Code drops the unknown `_pixtuoid` key
+/// A legacy hook is ours by its source stamp or the shim it runs. The sentinel an
+/// entry carried isn't enough: Claude Code drops the unknown `_pixtuoid` key
 /// whenever it rewrites settings.json, after which each re-install appended a
 /// duplicate.
-fn is_ours(entry: &Value) -> bool {
+fn hook_is_ours(hook: &Value) -> bool {
+    use crate::install::verify::ShimRef;
     let stamp = format!(
         "{}={}",
         crate::install::hook_cmd::SOURCE_ENV,
         pixtuoid_core::source::claude_code::SOURCE_NAME
     );
-    is_managed_entry(entry)
-        || entry["hooks"].as_array().is_some_and(|hs| {
-            hs.iter()
-                .any(|h| h["command"].as_str().is_some_and(|c| c.contains(&stamp)))
-        })
-        || runs_our_shim(entry)
-}
-
-fn runs_our_shim(entry: &Value) -> bool {
-    use crate::install::verify::ShimRef;
-    match claude_shim_ref(entry) {
-        ShimRef::BareName => true,
-        ShimRef::Absolute(p) => p.file_stem().is_some_and(|s| s == "pixtuoid-hook"),
-        ShimRef::Unknown => false,
-    }
+    hook["command"].as_str().is_some_and(|c| c.contains(&stamp))
+        || match hook_shim_ref(Some(hook)) {
+            ShimRef::BareName => true,
+            ShimRef::Absolute(p) => p.file_stem().is_some_and(|s| s == "pixtuoid-hook"),
+            ShimRef::Unknown => false,
+        }
 }
 
 // A foreign hook entry — another tool's, or one carrying an unrecognized legacy
@@ -447,6 +476,22 @@ mod tests {
         assert_eq!(
             cleaned,
             json!({ "hooks": { "Stop": [theirs] }, "theme": "dark" })
+        );
+    }
+
+    #[test]
+    fn legacy_cleanup_keeps_a_user_hook_sharing_our_group() {
+        let mine = json!({ "type": "command", "command": "/usr/bin/say done" });
+        let ours =
+            json!({ "type": "command", "command": "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'" });
+        let doc =
+            json!({ "hooks": { "Stop": [{ "matcher": ".*", "hooks": [ours, mine.clone()] }] } });
+        let out = legacy_uninstall(&doc.to_string()).unwrap();
+        assert!(out.changed);
+        let cleaned: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(
+            cleaned,
+            json!({ "hooks": { "Stop": [{ "matcher": ".*", "hooks": [mine] }] } })
         );
     }
 
