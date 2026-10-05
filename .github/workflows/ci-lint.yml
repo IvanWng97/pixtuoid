@@ -170,20 +170,42 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just npm-check
 
-  readme:
-    name: readme drift
+  # Generated-file freshness is formatter-class, so every PR push runs it
+  # (docs.mergify.com/merge-queue/two-step: the preliminary step runs
+  # "linters, formatters, unit tests, basic compile checks").
+  generated:
+    name: generated drift
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Here rather than in site.yml, which a draft PR skips.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: ./.github/actions/setup-just
-      - run: just gen-readme-check
+      - name: Cache pip downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+      - name: Set up Python virtual environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: Generated sprites and icons, README sections, the comparator
+        run: just gen-readme-check gen-art-check gen-icons-check compare-selftest
+      # gen-icons-check's overlays; smoke uploads the media ones as gen-check-diffs.
+      - name: Upload drift overlays
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-drift-diffs
+          path: target/gen-check-diff/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # cargo-public-api complements release-plz's semver check: that one classifies
   # compatibility on the release PR, this golden shows the exact public surface
@@ -227,7 +249,7 @@ jobs:
     # This explicit manifest prevents a nested job deletion or rename from
     # silently shrinking the single protected ci-gate.
     if: ${{ always() }}
-    needs: [fmt, clippy, deny, machete, hygiene, msrv, npm-gen, readme, api-surface, docs]
+    needs: [fmt, clippy, deny, machete, hygiene, msrv, npm-gen, generated, api-surface, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

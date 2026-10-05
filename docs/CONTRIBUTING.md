@@ -40,29 +40,34 @@ runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
 green PR.
 
-A draft PR runs only the **light tier**, every job without
-`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
-both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
-so read its light-tier verdict from the individual job checks. If a ready PR's
-`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
-run. The jobs:
+A PR's pushes run only the **light tier** (every job without
+`if: inputs.full`: linters, formatters, unit tests on every platform and
+compile checks), and its `ci-gate` judges that tier. Both tiers run on the
+merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
+merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
+a push to `main` or a manual dispatch
+([two-step CI](https://docs.mergify.com/merge-queue/two-step/)). CodeQL and
+CodSpeed skip drafts. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
   the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
   nextest skips.
-- **smoke · readme drift (`just gen-readme-check`) · npm package generator
-  (`just npm-check`)** — generated sprites and README freshness, and the npm
-  package generator + OpenClaw plugin contract. The README's media drift
-  (`just gen-media-check`) is reported there as evidence, not a gate.
+- **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
+  compare-selftest`) — generated sprites, icons and README freshness, and the
+  image comparator.
+- **smoke · npm package generator (`just npm-check`)** — the release
+  binaries and the hook shim's silent exit, and the npm package generator +
+  OpenClaw plugin contract. The README's media drift (`just gen-media-check`)
+  is reported in smoke as evidence, not a gate.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
   the other-unix arms.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
-- **site** — `site.yml`: the site's static checks, then e2e and
+- **site** — `site.yml`: format, lint, types, knip and unit tests on every push; the demo-reading test, e2e and
   Lighthouse on a build with freshly built wasm, so a Rust change that breaks
   a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
@@ -210,8 +215,8 @@ crate IS.
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
-| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
+| once you need a PR number | open it as a draft: the light tier runs, and the billed review bots wait |
+| once the draft's light tier is green | mark it ready: the review bots start; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
 | when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
@@ -251,16 +256,22 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-a queue update that only merges `main` in leaves the record standing. The
+an update that only merges `main` in leaves the record standing. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A published review passes whatever it found; a failed or missing status
 is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
-local row. The queue merges `main` into a PR that is behind and waits for CI and
-the bots at that head, so nobody merges `main` in by hand; branch protection
-still holds the merge until a re-review's new threads are resolved.
+local row. The queue tests up to `batch_size` PRs together on a draft PR
+(`mergify/merge-queue/…`) running the full tier, then merges the PRs
+themselves; it never updates a PR's own branch
+([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
+are the ones merged"), so the bots' statuses on the PR's head are the ones its
+`queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
+bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
+generated-art record: it renders main's merged code, which each look PR's lens
+already read as evidence.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can
@@ -268,7 +279,7 @@ resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
 The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
-too, until the queue's own update re-runs them as Mergify.
+too, again after every Dependabot rebase.
 
 ### Dispositions
 
