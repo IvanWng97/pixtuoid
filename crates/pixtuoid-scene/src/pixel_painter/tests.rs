@@ -31,7 +31,7 @@ fn paint_whole_wall(
     let (at, size) = piece.visual();
     paint_wall(
         buf,
-        theme,
+        crate::glass::WallTrim::of(theme),
         piece,
         at.y..at.y + size.h,
         crate::display::pen::Pen::UNIT,

@@ -11,11 +11,10 @@ use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::paint::paint;
 use crate::display::light::Ambient;
-use crate::display::{Hovers, Office, Showing, Span, compose};
+use crate::display::{Backdrop, Hovers, Office, Recolours, Showing, Span, compose};
 use crate::floor::SteppedFloor;
-use crate::layout::{Bounds, SceneLayout};
+use crate::layout::Bounds;
 use crate::render_scale::RenderScale;
-use crate::theme::Theme;
 
 /// A cutaway painter's frame buffer and what it shows, for one pack.
 #[derive(Debug)]
@@ -74,29 +73,16 @@ impl Dirty {
     }
 }
 
-/// What every pixel of a frame is painted under, beyond its display list and
-/// the canvas's pack.
-#[derive(Debug)]
+/// What every pixel of a frame is painted under, beyond its pieces and the
+/// canvas's pack.
+#[derive(Debug, PartialEq)]
 struct Epoch {
-    // Held, so a later layout cannot reuse its address.
-    layout: Arc<SceneLayout>,
-    // A static, so its address is its identity.
-    theme: &'static Theme,
+    backdrop: Backdrop,
+    recolours: Recolours,
     scale: RenderScale,
     ambient: Ambient,
     carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
     flash: crate::display::light::Flash,
-}
-
-impl PartialEq for Epoch {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.layout, &other.layout)
-            && std::ptr::eq(self.theme, other.theme)
-            && self.scale == other.scale
-            && self.ambient == other.ambient
-            && self.carpet == other.carpet
-            && self.flash == other.flash
-    }
 }
 
 #[derive(Debug)]
@@ -124,7 +110,7 @@ impl CutawayCanvas {
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
-        theme: &'static Theme,
+        theme: &crate::theme::Theme,
         scale: RenderScale,
         showing: Showing<'_>,
         (cache, clouds): (
@@ -141,8 +127,8 @@ impl CutawayCanvas {
         };
         let list = compose(&stepped.frame, office, showing, clouds);
         let epoch = Epoch {
-            layout: Arc::clone(layout),
-            theme,
+            backdrop: list.backdrop().clone(),
+            recolours: list.recolours().clone(),
             scale,
             ambient: list.ambient(),
             carpet: list.carpet(),
@@ -166,9 +152,9 @@ impl CutawayCanvas {
         };
         if dirty != Dirty::Unchanged {
             if (self.buf.width(), self.buf.height()) != size {
-                self.buf = RgbBuffer::filled(size.0, size.1, theme.surface.bg_fallback);
+                self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
             }
-            paint(layout, &list, cache, &mut self.buf);
+            paint(&list, cache, &mut self.buf);
         }
         self.shown = Some(Shown {
             epoch,
@@ -256,8 +242,10 @@ mod tests {
     use crate::display::compose::tests::{empty_frame, lively_office, sit_down};
     use crate::display::{HoverTarget, PieceKind};
     use crate::floor::FloorMeta;
+    use crate::layout::SceneLayout;
     use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
+    use crate::theme::Theme;
 
     /// The ground floor under a clear sky: rain or snow on the glass moves
     /// every tick, so the clock's weather would decide what a tick repaints.
@@ -1033,8 +1021,9 @@ mod tests {
         assert_eq!(rects.as_slice(), [b]);
     }
 
-    /// A new layout of the same size repaints everything, even one built after
-    /// the last was dropped, where the allocator may hand back its address.
+    /// A new layout of the same size shows whole, and the same one laid out
+    /// again shows nothing new: the epoch compares the backdrop by value, so
+    /// no address the allocator hands back decides either.
     #[test]
     fn a_new_layout_repaints_everything() {
         let pack = Arc::new(test_default_pack());
@@ -1059,6 +1048,18 @@ mod tests {
             scale,
             crate::display::compose::tests::showing(floor, now),
             (&mut cache, &mut clouds),
+        );
+        let again = canvas.frame(
+            &stepped(0),
+            normal(),
+            scale,
+            crate::display::compose::tests::showing(floor, now),
+            (&mut cache, &mut clouds),
+        );
+        assert_eq!(
+            again.dirty,
+            Dirty::Unchanged,
+            "the same layout, laid out again"
         );
         let b = stepped(1);
         let shown = canvas.frame(
