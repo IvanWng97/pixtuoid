@@ -161,7 +161,9 @@ our release never builds. Two consequences:
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
-  `crates/pixtuoid-core/src/source/claude_code.rs`.
+  `crates/pixtuoid-core/src/source/codex.rs`. Change homebrew-core's `test do`
+  first, against the released version, so the next autobump stays green; the
+  packaging-build action replays the block, so it changes in the same PR.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the

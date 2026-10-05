@@ -30,7 +30,7 @@ wasm-bindgen   = "0.2"
 # Feature-unions `wasmbind` into scene's chrono so that on wasm32
 # `chrono::Local` resolves the REAL browser timezone via js-sys; without it the
 # office's day/night cycle silently falls back to UTC for most visitors.
-chrono         = { version = "0.4", default-features = false, features = ["wasmbind"] }
+chrono         = { workspace = true, features = ["wasmbind"] }
 
 # The lib has no direct `use chrono` — it's here solely for the feature-union
 # above, which machete can't see.
@@ -39,5 +39,5 @@ ignored = ["chrono"]
 
 [dev-dependencies]
 # hero_still example only: PNG encode for the committed wide poster.
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { workspace = true }
 serde_json = { workspace = true }
