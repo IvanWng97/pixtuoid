@@ -626,15 +626,36 @@ fn a_sitters_depth_holds_through_their_breath() {
     );
 }
 
-/// The badge follows the CUTAWAY's body, not the classic one:
-/// `overlay::build_overlay` hangs off the classic-drawn sprite, which for a
-/// seated agent is not where the cutaway draws them.
+/// A badge `text` hanging from `anchor`.
+fn badge_at(anchor: crate::layout::Point) -> TextRun {
+    TextRun {
+        at: anchor,
+        align: Align::Over,
+        spans: vec![crate::display::TextSpan {
+            text: "cc".into(),
+            ink: pixtuoid_core::sprite::Rgb { r: 9, g: 9, b: 9 },
+        }],
+        plate: None,
+        role: crate::display::TextRole::Badge(pixtuoid_core::AgentId::from_transcript_path(
+            "/badge.jsonl",
+        )),
+    }
+}
+
+/// The row a badge's plate ends above.
+fn plate_bottom(anchor: crate::layout::Point) -> u16 {
+    let plate = badge_plate(&badge_at(anchor), Pen::UNIT);
+    plate.y.0 + plate.h.0
+}
+
+/// A badge centres over the sprite, [`LABEL_GAP`] rows clear of its head.
 #[test]
-fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
+fn a_badge_sits_above_the_head_and_centred_on_the_sprite() {
     let at = crate::layout::Point { x: 10, y: 20 };
-    let anchor = label_anchor(at, 8, None);
+    let size = crate::layout::Size { w: 8, h: 12 };
+    let anchor = crate::sim::anchors::badge_anchor(at, size, None);
     assert_eq!(anchor.x, at.x + 4, "centred on the sprite");
-    assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
+    assert_eq!(at.y - plate_bottom(anchor), LABEL_GAP, "clear of the head");
 }
 
 /// The floor indicator's plate stays in the cell the classic writes it
@@ -655,7 +676,8 @@ fn the_floor_indicator_stays_in_its_cell() {
         let pen = Pen::new(RenderScale::new(d.get()).expect("nonzero"), d.get())
             .expect("d divides itself");
         for floor in [1, 12, 99] {
-            let plate = indicator_plate(door, floor, pen);
+            let run = TextRun::indicator(door, floor, &crate::theme::NORMAL);
+            let plate = run_rect(&run, pen);
             let span = topmost_span(plate, pen);
             assert!(
                 rows.contains(&span.y0) && rows.contains(&span.y1),
@@ -664,6 +686,76 @@ fn the_floor_indicator_stays_in_its_cell() {
                 span.y1
             );
             assert!(plate.h.0 >= LINE_H, "{d:?}: the text fits");
+        }
+    }
+}
+
+/// The board's star ends at the sign's interior's right edge at every scale
+/// the pack draws, measured on the art grid, not in text cells.
+#[test]
+fn the_star_sits_flush_with_the_interior_at_every_scale() {
+    use crate::layout::{NEON_PANEL_INNER_W, NEON_PANEL_INNER_X};
+    let pack = test_default_pack();
+    for s in [1, pack.max_density_variant().get()] {
+        let pen = Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
+        let star = quiet_board()
+            .runs(&crate::theme::NORMAL)
+            .into_iter()
+            .find(|run| run.role == crate::display::TextRole::Star)
+            .expect("the star");
+        assert_eq!(
+            run_rect(&star, pen).x.0 + crate::display::text::advance(&star.text()).0,
+            pen.art(NEON_PANEL_INNER_X + NEON_PANEL_INNER_W).0,
+            "at scale {s}"
+        );
+    }
+}
+
+/// At every scale, no sign run overprints another on its line: where the
+/// pixel font is too wide for the sign's interior (the base art's grid), the
+/// star yields to the brand rather than writing over it.
+#[test]
+fn no_run_overprints_another_on_its_line() {
+    let pack = test_default_pack();
+    let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
+    let d = pack.max_density_variant().get();
+    for s in [1, d, 2 * d] {
+        let scale = RenderScale::new(s).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme: &crate::theme::NORMAL,
+            scale,
+        };
+        let pen = Pen::for_pack(scale, &pack);
+        let rects: Vec<(crate::display::TextRole, u16, ArtRect)> = signs(office, 0, quiet_board())
+            .into_iter()
+            .filter_map(|(_, kind)| match kind {
+                PieceKind::Text { run } => Some((run.role, run.at.y, run_rect(&run, pen))),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            rects
+                .iter()
+                .any(|(r, ..)| *r == crate::display::TextRole::Brand),
+            "at scale {s} the brand is drawn"
+        );
+        // Without the density art every scale is the base art's grid.
+        assert_eq!(
+            rects
+                .iter()
+                .any(|(r, ..)| *r == crate::display::TextRole::Star),
+            cfg!(feature = "cutaway-assets") && s.is_multiple_of(d),
+            "at scale {s} the star is drawn exactly where the pack's density divides it"
+        );
+        for (i, (a, ya, ra)) in rects.iter().enumerate() {
+            for (b, yb, rb) in &rects[i + 1..] {
+                assert!(
+                    ya != yb || !meets(*ra, *rb),
+                    "at scale {s} {a:?} {ra:?} overprints {b:?} {rb:?}"
+                );
+            }
         }
     }
 }
@@ -696,31 +788,37 @@ fn the_board_writes_inside_the_signs_interior() {
             crate::anim::Motion::Full,
             now,
         );
-        let span = board_span(&board, Pen::for_pack(scale, &pack));
-        assert!(
-            span.x0 >= NEON_PANEL_INNER_X
-                && span.x1 < NEON_PANEL_INNER_X + NEON_PANEL_INNER_W
-                && span.y0 >= NEON_PANEL_INNER_Y
-                && span.y1 < NEON_PANEL_INNER_Y + NEON_PANEL_INNER_H,
-            "{span:?} at +{ms}ms"
-        );
+        let pen = Pen::for_pack(scale, &pack);
+        for run in board.runs(&crate::theme::NORMAL) {
+            let span = topmost_span(run_rect(&run, pen), pen);
+            assert!(
+                span.x0 >= NEON_PANEL_INNER_X
+                    && span.x1 < NEON_PANEL_INNER_X + NEON_PANEL_INNER_W
+                    && span.y0 >= NEON_PANEL_INNER_Y
+                    && span.y1 < NEON_PANEL_INNER_Y + NEON_PANEL_INNER_H,
+                "{:?} {span:?} at +{ms}ms",
+                run.role
+            );
+        }
     }
 }
 
 /// A ceiling ABOVE the head lifts the badge clear of it; one below the head
 /// changes nothing.
 #[test]
-fn a_label_anchor_clears_a_ceiling_above_the_head() {
+fn a_badge_clears_a_ceiling_above_the_head() {
+    use crate::sim::anchors::badge_anchor;
     let at = crate::layout::Point { x: 10, y: 20 };
-    let free = label_anchor(at, 8, None);
-    let raised = label_anchor(at, 8, Some(at.y - 4));
+    let size = crate::layout::Size { w: 8, h: 12 };
+    let free = badge_anchor(at, size, None);
+    let raised = badge_anchor(at, size, Some(at.y - 4));
     assert_eq!(
-        raised.y,
+        plate_bottom(raised),
         at.y - 4 - LABEL_GAP,
         "the badge clears the monitor top by the same gap it clears a head by"
     );
     assert_eq!(raised.x, free.x);
-    assert_eq!(label_anchor(at, 8, Some(at.y + 4)), free);
+    assert_eq!(badge_anchor(at, size, Some(at.y + 4)), free);
 }
 
 /// A figure standing casts its own shadow; sitting, the chair they carry
@@ -946,11 +1044,9 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
         PieceKind::Window { .. } => "window",
         PieceKind::Hung { .. } => "hung decor",
         PieceKind::Effect(_) => "effect",
-        PieceKind::Badge { .. } => "badge",
+        PieceKind::Text { .. } => "text",
         PieceKind::DeskProp(_) => "desk prop",
         PieceKind::Creature { .. } => "creature",
-        PieceKind::Board { .. } => "board",
-        PieceKind::Indicator { .. } => "indicator",
     }
 }
 

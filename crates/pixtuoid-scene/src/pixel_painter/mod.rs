@@ -10,27 +10,21 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::display::{Hover, HoverTarget, Hovers};
+use crate::display::{Badge, Hover, HoverTarget, Hovers, TextRun};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station, sort_row_at};
 use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
-
-/// Where a drawn character's badge goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentFrame {
-    /// Whose sprite it is.
-    pub agent_id: pixtuoid_core::AgentId,
-    /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
-    pub label_anchor: Point,
-}
 
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Debug, Default)]
 pub(crate) struct Drawn {
-    pub(crate) agents: Vec<AgentFrame>,
+    /// Each drawn agent's badge, in paint order.
+    pub(crate) badges: Vec<Badge>,
+    /// Each chitchat bubble, over its speaker's badge.
+    pub(crate) bubbles: Vec<TextRun>,
     pub(crate) hovers: Hovers,
 }
 
@@ -110,8 +104,7 @@ pub(crate) use furniture::paint_area_rug;
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{
-    paint_ground_and_walls, paint_ground_wash, paint_light, paint_neon_halo, paint_shadows,
-    paint_windows,
+    paint_ground_and_walls, paint_ground_wash, paint_light, paint_shadows, paint_windows,
 };
 use drawable::{Drawable, DrawableKind, Layer, enqueue_room_walls, paint_drawable};
 
@@ -274,10 +267,8 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
-    let mut drawn = Drawn {
-        agents: Vec::new(),
-        hovers: Hovers::default(),
-    };
+    let mut drawn = Drawn::default();
+    let namesakes = crate::overlay::Namesakes::of(ctx.scene.agents.values());
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
@@ -291,14 +282,22 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
             label_anchor,
             ..
         } = d.kind
+            && let Some(agent) = ctx.scene.agents.get(&agent.agent_id)
         {
-            drawn.agents.push(AgentFrame {
-                agent_id: agent.agent_id,
-                label_anchor,
-            });
+            drawn
+                .badges
+                .push(Badge::new(label_anchor, agent, &namesakes, ctx.theme));
         }
         drawn.hovers.push(hover);
     }
+    drawn.bubbles = frame
+        .chitchat_bubbles
+        .iter()
+        .filter_map(|bubble| {
+            let badge = drawn.badges.iter().find(|b| b.agent == bubble.speaker)?;
+            Some(TextRun::bubble(bubble, badge.at, ctx.theme))
+        })
+        .collect();
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
     wash_since(ctx.buf, &pre_foreground, look.object_wash);
@@ -306,7 +305,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     // LATE, so the light lands ON the shelf and the clock instead of hiding
     // behind them; after the wash, since the sign is an emitter and its light
     // isn't dimmed with the room it falls on.
-    paint_neon_halo(ctx.buf, ctx.layout, &lights.neon, neon.halo);
+    paint_light(ctx.buf, &lights.neon, neon.halo);
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.
@@ -379,7 +378,6 @@ fn enqueue_pet<'a>(
     });
 }
 
-/// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
     pack: &Pack,
     mascots: &'a [crate::sim::MascotPlacement],

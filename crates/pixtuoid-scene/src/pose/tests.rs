@@ -1,4 +1,5 @@
 use super::*;
+use crate::anim::PAINT_FRAME_MS;
 use crate::physics::walk_profile;
 use crate::walk::{octile_path_len, settle_len};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
@@ -85,7 +86,7 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
     };
     let mid_a = Point {
         x: door.x,
-        y: (door.y + desk_target.y) / 2,
+        y: u16::midpoint(door.y, desk_target.y),
     };
     let mid_b = Point {
         x: desk_target.x,
@@ -262,11 +263,11 @@ fn snap_back_origin_is_frozen_across_frames() {
     rig.history
         .record(slot.agent_id, prev0, now0 - Duration::from_millis(50));
 
-    // 8 × 33 ms stays well inside the 900 ms window; re-derive each frame so
+    // Eight frames stay well inside `SNAP_BACK_MS`; re-derive each frame so
     // route_walking_pose advances history like the real render loop does.
     let mut origins = Vec::new();
     for i in 0..8u64 {
-        let t = now0 + Duration::from_millis(i * 33);
+        let t = now0 + Duration::from_millis(i * PAINT_FRAME_MS);
         match derive_with_routing(&slot, t, &l, &mut rig.rctx()) {
             Some(Pose::Walking { from, .. }) => origins.push((i, from)),
             other => panic!("frame {i}: expected Walking pose mid snap-back, got {other:?}"),
@@ -310,7 +311,7 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
         rest: vec![prev0, corner_b, snap_target],
     });
 
-    // State flipped 100ms ago — inside the 900ms snap-back window on both frames.
+    // State flipped 100ms ago — inside `SNAP_BACK_MS` on both frames.
     let slot = active_slot(
         now - Duration::from_millis(100),
         now - Duration::from_secs(60),
@@ -373,7 +374,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
 
     let mut arrived_frame: Option<u64> = None;
     for i in 0..60u64 {
-        let t = now0 + Duration::from_millis(i * 33);
+        let t = now0 + Duration::from_millis(i * PAINT_FRAME_MS);
         let p0 = derive_with_routing(&slot, t, &l, &mut rig.rctx());
         let h0 = rig.history.recent(slot.agent_id, 300, t);
         if arrived_frame.is_none()
@@ -423,7 +424,7 @@ fn wander_derive_is_idempotent_within_a_frame() {
     rig.router.set_preferred_zone(l.corridor);
 
     for i in 0..200u64 {
-        let t = now0 + Duration::from_millis(i * 33);
+        let t = now0 + Duration::from_millis(i * PAINT_FRAME_MS);
         let a0 = character_top_left(&slot, &l, t, &mut rig.rctx());
         for k in 1..4 {
             let ak = character_top_left(&slot, &l, t, &mut rig.rctx());
@@ -441,7 +442,7 @@ fn snap_back_long_distance_renders_past_window_by_physics() {
     let l = layout();
     let slot = active_slot(now0, now0 - Duration::from_secs(60));
     let desk = l.home_desks[0];
-    // Far prev → SnapBack physics duration well over the 900ms arm window.
+    // Far prev → SnapBack physics duration well over the `SNAP_BACK_MS` arm window.
     let prev = Point {
         x: desk.x + 50,
         y: desk.y + 30,
@@ -452,9 +453,11 @@ fn snap_back_long_distance_renders_past_window_by_physics() {
 
     let (mut walking_after_window, mut arrived) = (false, false);
     for i in 0..90u64 {
-        let t = now0 + Duration::from_millis(i * 33);
+        let t = now0 + Duration::from_millis(i * PAINT_FRAME_MS);
         match derive_with_routing(&slot, t, &l, &mut rig.rctx()) {
-            Some(Pose::Walking { .. }) if i * 33 > SNAP_BACK_MS => walking_after_window = true,
+            Some(Pose::Walking { .. }) if i * PAINT_FRAME_MS > SNAP_BACK_MS => {
+                walking_after_window = true
+            }
             Some(Pose::Walking { .. }) => {}
             Some(Pose::SeatedTyping | Pose::SeatedIdle | Pose::SeatedThinking)
                 if walking_after_window =>
@@ -546,12 +549,11 @@ fn snap_back_skipped_when_prev_within_min_distance() {
 }
 
 #[test]
-fn snap_back_skipped_after_900ms_window() {
+fn snap_back_skipped_past_its_window() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    // state_started_at is 1.5 s ago — past SNAP_BACK_MS=900.
     let slot = active_slot(
-        now - Duration::from_millis(1_500),
+        now - Duration::from_millis(2 * SNAP_BACK_MS),
         now - Duration::from_secs(60),
     );
     let desk = l.home_desks[0];
@@ -590,8 +592,8 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
     let door = l.door_threshold;
     let desk = l.home_desks[0];
     let mid = Point {
-        x: (door.x + desk.x) / 2,
-        y: (door.y + desk.y) / 2,
+        x: u16::midpoint(door.x, desk.x),
+        y: u16::midpoint(door.y, desk.y),
     };
     let mut rig = RouteRig::new(StubRouter::corners(vec![door, mid, desk]));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
@@ -713,8 +715,8 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         "profile duration must be > 0 for a non-trivial distance"
     );
 
-    // Record history 50 ms before `quarter_now` so it stays inside the 300 ms
-    // freshness gate.
+    // Record history 50 ms before `quarter_now` so it stays inside the
+    // `HISTORY_RECENT_MS` freshness gate.
     let slot_q = active_slot(now, now - Duration::from_secs(60));
     let quarter_now = now + Duration::from_millis(dur_ms / 4);
     rig.history = PoseHistory::new();
@@ -1043,9 +1045,8 @@ fn exit_far_completes_before_grace_window_no_vanish() {
         y: mid1.y.saturating_add(80),
     };
     let mut rig = RouteRig::new(StubRouter::corners(vec![from, mid1, mid2, door]));
-    // Exit started 4300ms ago — just inside the 4500ms grace window.
     let slot = exiting_slot(
-        now - Duration::from_millis(4300),
+        now - (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW - Duration::from_millis(200)),
         now - Duration::from_secs(60),
     );
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
@@ -1096,14 +1097,14 @@ fn exit_uses_commute_speed_faster_than_wander() {
     );
 }
 
-/// One frame's max per-axis (Chebyshev) top-left jump. Cruise is ≤ ~15 px/frame and
-/// pose-type boundaries add ≤ ~5 px, while a real teleport on this layout
-/// (desk↔waypoint ≈ 30–70 px) blows past it.
+/// One frame's max per-axis (Chebyshev) top-left jump: above a cruise step plus a
+/// pose-type boundary, under any desk↔waypoint teleport on this layout.
 const MAX_FRAME_STEP_PX: i32 = 20;
 
-/// Step `slot` for `frames` frames at 33 ms, sampling `character_top_left` against a
-/// real `AStarRouter`. Returns `(max_chebyshev_step, walking_frame_count)`. `churn`
-/// toggles an interior obstacle every other frame to force A* cache invalidation.
+/// Step `slot` for `frames` frames of [`PAINT_FRAME_MS`], sampling
+/// `character_top_left` against a real `AStarRouter`. Returns
+/// `(max_chebyshev_step, walking_frame_count)`. `churn` toggles an interior
+/// obstacle every other frame to force A* cache invalidation.
 fn max_top_left_step(
     slot: &AgentSlot,
     l: &SceneLayout,
@@ -1129,7 +1130,7 @@ fn max_top_left_step(
     let mut max_step = 0i32;
     let mut walking = 0usize;
     for i in 0..frames {
-        let now = start + Duration::from_millis(i * 33);
+        let now = start + Duration::from_millis(i * PAINT_FRAME_MS);
         if churn {
             rig.overlay.clear();
             if i % 2 == 0 {
@@ -1293,7 +1294,7 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     let (mut saw_out, mut saw_back) = (false, false);
     let mut seen_ends: Vec<(Point, Point)> = Vec::new();
     for i in 0..6000u64 {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         let _ = derive_with_routing(&slot, t, &l, &mut rig.rctx());
         let Some(snap) = rig
             .walks
@@ -1453,7 +1454,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
     let mut last_pos = seated;
     let mut flip_frame = None;
     for i in 0..1500u64 {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         if let Some(a) = character_top_left(&idle, &l, t, &mut rig.rctx()) {
             let d = (i32::from(a.x) - i32::from(seated.x))
                 .abs()
@@ -1473,13 +1474,13 @@ fn wander_interrupted_by_active_does_not_teleport() {
             detail: Some(Arc::from("Edit")),
             kind: ToolKind::Edit,
         },
-        state_started_at: now + Duration::from_millis(flip_frame * 33),
+        state_started_at: now + Duration::from_millis(flip_frame * PAINT_FRAME_MS),
         ..idle.clone()
     };
     let mut prev = last_pos;
     let mut max_step = 0i32;
     for i in (flip_frame + 1)..(flip_frame + 46) {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         if let Some(a) = character_top_left(&active, &l, t, &mut rig.rctx()) {
             let step = (i32::from(a.x) - i32::from(prev.x))
                 .abs()
@@ -1516,7 +1517,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
     rig.router.set_preferred_zone(l.corridor);
 
     for i in 0..60u64 {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         let _ = character_top_left(&slot, &l, t, &mut rig.rctx());
     }
 
@@ -1524,7 +1525,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
     let mut prev: Option<Point> = None;
     let mut max_step = 0i32;
     for i in 1000..1120u64 {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         if let Some(a) = character_top_left(&slot, &l, t, &mut rig.rctx()) {
             if let Some(p) = prev {
                 let step = (i32::from(a.x) - i32::from(p.x))
@@ -1573,10 +1574,10 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
 
     let mut last = seat;
     let mut away_frame = None;
-    // 3000 frames (~100s) spans several wander cycles, so one near-desk cycle
+    // Several wander cycles' worth of frames, so one near-desk cycle
     // pick can't starve the away-detection.
     for i in 0..3000u64 {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         if let Some(a) = character_top_left(&idle, &l, t, &mut rig.rctx()) {
             last = a;
             let d = (i32::from(a.x) - i32::from(seat.x))
@@ -1594,12 +1595,12 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     }
     let away_frame = away_frame.expect("agent should walk away from desk within 100 s");
 
-    let exit_at = now + Duration::from_millis(away_frame * 33);
+    let exit_at = now + Duration::from_millis(away_frame * PAINT_FRAME_MS);
     let exiting = AgentSlot {
         exiting_at: Some(exit_at),
         ..idle.clone()
     };
-    let t_next = exit_at + Duration::from_millis(33);
+    let t_next = exit_at + Duration::from_millis(PAINT_FRAME_MS);
     let first_exit = character_top_left(&exiting, &l, t_next, &mut rig.rctx()).expect("exit pose");
     let jump = (i32::from(first_exit.x) - i32::from(last.x))
         .abs()
@@ -1612,7 +1613,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     let mut prev = first_exit;
     let mut max_step = 0i32;
     for i in 2..200u64 {
-        let t = exit_at + Duration::from_millis(i * 33);
+        let t = exit_at + Duration::from_millis(i * PAINT_FRAME_MS);
         match character_top_left(&exiting, &l, t, &mut rig.rctx()) {
             Some(a) => {
                 let step = (i32::from(a.x) - i32::from(prev.x))
@@ -1729,7 +1730,7 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
     // ~40% of the frozen entry duration — mid-walk, where A and B diverge most.
     let entry_id = entry_slot(now).agent_id;
     let dur = walk_profile(octile_path_len(&a).max(1), WalkIntent::Entry, entry_id).duration_ms;
-    let flip_frame = ((dur * 2 / 5) / 33).max(2);
+    let flip_frame = ((dur * 2 / 5) / PAINT_FRAME_MS).max(2);
 
     let mut rig = RouteRig::new(FlipRouter {
         flipped: false,
@@ -1744,7 +1745,7 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
             rig.router.flipped = true;
         }
         let slot = entry_slot(now - Duration::from_millis(200));
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         if let Some(Pose::Walking {
             from, to, t_x1000, ..
         }) = derive_with_routing(&slot, t, &l, &mut rig.rctx())
@@ -1793,7 +1794,7 @@ fn multiple_agents_share_overlay_without_teleport() {
     let mut max_step = 0i32;
 
     for i in 0..700u64 {
-        let t = now + Duration::from_millis(i * 33);
+        let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
         // Rebuild the shared overlay as the pixel pass does — this is the churn
         // that re-routes the other walkers.
         rig.overlay.clear();

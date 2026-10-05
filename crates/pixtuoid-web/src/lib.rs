@@ -168,8 +168,11 @@ pub struct Office {
 
 #[wasm_bindgen]
 impl Office {
-    /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the bundled sprite pack fails to parse.
+    /// Build an office seeded with `seed` (drives the layout variant).
+    ///
+    /// # Errors
+    ///
+    /// If the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
@@ -305,30 +308,28 @@ impl Office {
         };
         let theme = self.theme;
 
-        let labels = self.session.overlay(&self.scene, None);
         let board = self
             .session
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        for (i, el) in labels.iter().enumerate() {
+        for (i, badge) in self.session.badges().iter().enumerate() {
+            let pixtuoid_scene::display::Badge {
+                at, marker, name, ..
+            } = badge;
             if i > 0 {
                 out.push(',');
             }
-            out.push_str(&format!(
-                "{{\"x\":{},\"y\":{},\"text\":",
-                el.anchor_px.x, el.anchor_px.y
-            ));
+            out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
             push_json_string(
                 &mut out,
-                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
+                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, name.text),
             );
             // The site paints the ● in `color` and the name in `badge`.
-            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
             out.push_str(&format!(
                 ",\"color\":\"{}\",\"badge\":\"{}\"",
-                hex(ink.marker),
-                hex(ink.name)
+                hex(*marker),
+                hex(name.ink)
             ));
             out.push('}');
         }
@@ -406,23 +407,18 @@ impl Office {
     /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
+        const SILENT: &str = r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#;
         let Some(now) = self.last_now else {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+            return SILENT.to_string();
         };
-        if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
-        }
+        let meta = self.floor_meta();
+        let Some(audio) = self.audio.as_mut().filter(|a| a.is_ready()) else {
+            return SILENT.to_string();
+        };
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
-        let frame = self
-            .session
-            .audio_frame(&self.scene, self.floor_meta(), now);
-        let cmd = self
-            .audio
-            .as_mut()
-            .expect("audio ready checked above")
-            .tick(now_ms, frame);
-        audio::commands_json(&cmd)
+        let frame = self.session.audio_frame(&self.scene, meta, now);
+        audio::commands_json(&audio.tick(now_ms, frame))
     }
 
     /// Stage a handoff for the worker's spawn-time track. A stale epoch at click
@@ -1122,9 +1118,10 @@ mod tests {
         }
     }
 
-    /// The site centres each span on `x`, so `x` is the anchor itself.
+    /// Every badge the frame drew reaches the site, in its text and inks, and
+    /// hangs at its anchor: the site centres each span on `x`.
     #[test]
-    fn overlay_json_hangs_each_label_at_its_anchor() {
+    fn overlay_json_carries_every_badge_at_its_anchor() {
         let mut o = office();
         let mut t = 0u64;
         while t <= LOOP_MS / 2 {
@@ -1133,17 +1130,20 @@ mod tests {
         }
         let v: serde_json::Value =
             serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
-        let got: Vec<(u64, u64)> = v["labels"]
-            .as_array()
-            .expect("labels")
-            .iter()
-            .map(|l| (l["x"].as_u64().unwrap(), l["y"].as_u64().unwrap()))
-            .collect();
-        let want: Vec<(u64, u64)> = o
+        let got: Vec<serde_json::Value> = v["labels"].as_array().expect("labels").clone();
+        let want: Vec<serde_json::Value> = o
             .session
-            .overlay(&o.scene, None)
+            .badges()
             .iter()
-            .map(|e| (u64::from(e.anchor_px.x), u64::from(e.anchor_px.y)))
+            .map(|b| {
+                serde_json::json!({
+                    "x": b.at.x,
+                    "y": b.at.y,
+                    "text": format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, b.name.text),
+                    "color": hex(b.marker),
+                    "badge": hex(b.name.ink),
+                })
+            })
             .collect();
         assert!(!want.is_empty(), "premise: agents are drawn");
         assert_eq!(got, want);

@@ -5,7 +5,7 @@ use pixtuoid_core::sprite::format::Pack;
 use super::Span;
 use crate::atmosphere::Carpet;
 use crate::dither::Dithered;
-use crate::layout::{Bounds, Point};
+use crate::layout::Bounds;
 use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -60,21 +60,6 @@ impl Screen {
                 .ramp(lacking * STANDBY_LEVEL_PER_STOP),
         )
     }
-}
-
-/// One agent's name badge, painted in the canvas so no terminal text shares a
-/// cell with the image: `overlay`'s text and
-/// [`BadgeInk`](crate::overlay::BadgeInk) on its
-/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body:
-/// `overlay::build_overlay`'s anchors hang off the classic-drawn sprite, which
-/// for a sitter is elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Badge {
-    /// Its bottom centre, in logical units: the sprite's centre, clear above
-    /// its head and any raised monitor behind it.
-    pub(crate) at: Point,
-    pub(crate) text: String,
-    pub(crate) tone: crate::overlay::LabelTone,
 }
 
 /// One frame's pieces — the windows, the decor hung on the wall and
@@ -219,11 +204,19 @@ impl<'a> DisplayList<'a> {
         &self.hovers
     }
 
-    /// Each drawn agent's badge, in draw order.
-    #[cfg(test)]
-    pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
+    /// Each text run, in draw order.
+    pub(crate) fn texts(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Badge { badge } => Some(badge),
+            PieceKind::Text { run } => Some(run),
+            _ => None,
+        })
+    }
+
+    /// Each agent's badge, in draw order.
+    #[cfg(test)]
+    pub(crate) fn badges(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Text { run } if matches!(run.role, super::TextRole::Badge(_)) => Some(run),
             _ => None,
         })
     }
@@ -274,9 +267,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             chair,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
-        PieceKind::Badge { ref badge } => badge.hash(&mut h),
-        PieceKind::Board { ref board } => board.hash(&mut h),
-        PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
+        PieceKind::Text { ref run } => run.hash(&mut h),
         PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
@@ -284,7 +275,51 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
+/// How a piece takes the room's light, which the cutaway's emission pass
+/// reads. The classic paints its lights over everything they fall on, the
+/// glass included, so the two looks light a window alike
+/// (`the_neon_halo_lifts_the_window_glass_it_falls_on`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Emits<'a> {
+    /// A window. What its glass shows ([`WindowView::shows`]) is its own light,
+    /// which the room's lights still lift, so a light that falls on the glass
+    /// glows on it. Its joinery is lit.
+    Pane(&'a WindowView),
+    /// Its own light, as painted: a sign, or text that keeps the contrast its
+    /// theme pins at every hour.
+    Emissive,
+    /// Each pixel as its art marks it: a screen that glows, a bulb.
+    ByArt,
+    /// Darkened with the room, lifted by its lights: most of it.
+    Lit,
+}
+
 impl PieceKind {
+    /// How it takes the room's light.
+    pub(crate) fn emits(&self) -> Emits<'_> {
+        match self {
+            PieceKind::Window { view, .. } => Emits::Pane(view),
+            PieceKind::Neon { .. } | PieceKind::Text { .. } => Emits::Emissive,
+            PieceKind::Effect(r) if r.effect.kind == crate::effects::EffectKind::FlameCrown => {
+                Emits::Emissive
+            }
+            PieceKind::Desk { .. }
+            | PieceKind::Prop { .. }
+            | PieceKind::Animated { .. }
+            | PieceKind::Hung { .. }
+            | PieceKind::Door { .. } => Emits::ByArt,
+            PieceKind::WallSeg { .. }
+            | PieceKind::Chair { .. }
+            | PieceKind::DeskProp(_)
+            | PieceKind::Creature { .. }
+            | PieceKind::PropBand { .. }
+            | PieceKind::Table { .. }
+            | PieceKind::Character { .. }
+            | PieceKind::Effect(_)
+            | PieceKind::Clock { .. } => Emits::Lit,
+        }
+    }
+
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
     /// ([`PieceKind::Window`]).
@@ -322,9 +357,7 @@ impl PieceKind {
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
-            | PieceKind::Badge { .. }
-            | PieceKind::Board { .. }
-            | PieceKind::Indicator { .. } => false,
+            | PieceKind::Text { .. } => false,
         }
     }
 }
@@ -423,17 +456,9 @@ pub(crate) enum PieceKind {
     },
     /// An effect riding on the figure pushed beside it.
     Effect(crate::display::effects::Riding),
-    Badge {
-        badge: Badge,
-    },
-    /// The wall board's text, over the neon sign's interior.
-    Board {
-        board: crate::board::BoardModel,
-    },
-    /// The floor indicator over the elevator at `door`.
-    Indicator {
-        door: Point,
-        floor: usize,
+    /// A line of text over everything it meets.
+    Text {
+        run: super::TextRun,
     },
 }
 

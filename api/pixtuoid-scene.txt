@@ -181,14 +181,15 @@ pub pixtuoid_scene::floor::FloorSession::floor: pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::FloorSession::office: pixtuoid_scene::floor::PerOffice
 impl pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> AudioFrame
+pub fn pixtuoid_scene::floor::FloorSession::badges(&self) -> &[crate::display::Badge]
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::board::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::flash(&self) -> crate::flash::FlashPhase
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self
-pub fn pixtuoid_scene::floor::FloorSession::overlay(&self, &pixtuoid_core::state::SceneState, core::option::Option<pixtuoid_core::id::AgentId>) -> alloc::vec::Vec<crate::overlay::LabelElement>
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
+pub fn pixtuoid_scene::floor::FloorSession::signs(&self) -> &[crate::display::TextRun]
 pub fn pixtuoid_scene::floor::FloorSession::step(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 impl core::fmt::Debug for pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -1059,6 +1060,7 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Waypoint
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Waypoint
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Waypoint
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Waypoint
+pub const pixtuoid_scene::layout::CELL_ROWS: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_H: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_W: u16
 pub const pixtuoid_scene::layout::CLASSIC_OFFICE_DESKS: usize
@@ -1119,10 +1121,11 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::look::Look
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Look
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Look
 pub struct pixtuoid_scene::look::ClassicDrawn<'a>
-pub pixtuoid_scene::look::ClassicDrawn::agents: &'a [pixtuoid_scene::pixel_painter::AgentFrame]
-pub pixtuoid_scene::look::ClassicDrawn::bubbles: &'a [pixtuoid_scene::chitchat::ChitchatBubble]
+pub pixtuoid_scene::look::ClassicDrawn::badges: &'a [crate::display::Badge]
+pub pixtuoid_scene::look::ClassicDrawn::bubbles: &'a [crate::display::TextRun]
 pub pixtuoid_scene::look::ClassicDrawn::hovers: &'a crate::display::Hovers
 pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a mut pixtuoid_core::sprite::RgbBuffer
+pub pixtuoid_scene::look::ClassicDrawn::signs: &'a [crate::display::TextRun]
 impl<'a> core::fmt::Debug for pixtuoid_scene::look::ClassicDrawn<'a>
 pub fn pixtuoid_scene::look::ClassicDrawn<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Freeze for pixtuoid_scene::look::ClassicDrawn<'a>
@@ -1169,6 +1172,7 @@ pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::O
 pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
+pub fn pixtuoid_scene::look::Raster::star(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::fmt::Debug for pixtuoid_scene::look::Raster
 pub fn pixtuoid_scene::look::Raster::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::look::Raster
@@ -1399,25 +1403,6 @@ pub fn pixtuoid_scene::physics::walk_arrived(&pixtuoid_scene::physics::WalkProfi
 pub fn pixtuoid_scene::physics::walk_profile(u32, pixtuoid_scene::physics::WalkIntent, pixtuoid_core::id::AgentId) -> pixtuoid_scene::physics::WalkProfile
 pub fn pixtuoid_scene::physics::walk_progress(&pixtuoid_scene::physics::WalkProfile, u64) -> u16
 pub mod pixtuoid_scene::pixel_painter
-pub struct pixtuoid_scene::pixel_painter::AgentFrame
-pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::pixel_painter::AgentFrame::label_anchor: pixtuoid_scene::layout::Point
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
-pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
-impl core::cmp::Eq for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::AgentFrame
-pub fn pixtuoid_scene::pixel_painter::AgentFrame::eq(&self, &pixtuoid_scene::pixel_painter::AgentFrame) -> bool
-impl core::fmt::Debug for pixtuoid_scene::pixel_painter::AgentFrame
-pub fn pixtuoid_scene::pixel_painter::AgentFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::marker::Send for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
 pub mod pixtuoid_scene::pose
 pub enum pixtuoid_scene::pose::Pose
 pub pixtuoid_scene::pose::Pose::AimlessAt
