@@ -61,7 +61,8 @@ The components that handle untrusted or privileged input, and how they're bounde
    plugin registered with `claude plugin`, so Claude Code writes its own settings
    — and otherwise edits the CLI's config through a single advisory-locked,
    `fsync` + atomic-rename writer that **preserves the file's permissions,
-   follows stow symlinks, and takes a one-time backup** before the first change.
+   follows stow symlinks, and changes only pixtuoid's own entries**, keeping
+   the owner's comments and formatting.
    Installs are idempotent and reversible (*disconnect* removes the plugin or the
    hook entries). pixtuoid never writes another tool's config except on an
    explicit connect/disconnect.

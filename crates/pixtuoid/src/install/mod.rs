@@ -25,7 +25,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use target::{BACKUP_SUFFIX, BinaryStrategy, Target};
+use target::{BinaryStrategy, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
 /// config-file targets key install/uninstall/detect on this, not the command shape.
@@ -374,9 +374,6 @@ pub enum InstallOutcome {
 pub struct InstallReport {
     pub outcome: InstallOutcome,
     pub config_path: PathBuf,
-    /// The backups taken this round: the config's, and a host target's legacy
-    /// config before its migration. Empty on a no-op, or when they already exist.
-    pub backups: Vec<PathBuf>,
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook).
     pub path_warning: bool,
@@ -386,9 +383,9 @@ pub struct InstallReport {
 }
 
 /// Install pixtuoid hooks into `t`'s config, returning a structured report. The ConfigLock
-/// round (read→merge→backup→write) is the load-bearing write authority (invariant #4) and
+/// round (read→merge→write) is the load-bearing write authority (invariant #4) and
 /// stays intact here; it serializes pixtuoid only against pixtuoid, since the agent CLI
-/// itself cannot honor this lock. Reads and backups go through the guard's PINNED
+/// itself cannot honor this lock. Reads and writes go through the guard's PINNED
 /// resolution — re-resolving `path` splits the round across two files on a symlink retarget.
 pub(crate) fn install_target(
     t: &Target,
@@ -416,9 +413,7 @@ pub(crate) fn install_target(
     let path_warning = t.binary_strategy == BinaryStrategy::BareNameOnPath
         && !explicit_hook
         && !io::hook_on_path();
-    let mut backups = Vec::new();
     if outcome.changed {
-        backups.extend(lock.backup_once(BACKUP_SUFFIX)?);
         lock.write_atomic(&outcome.content)?;
     }
     drop(lock);
@@ -427,13 +422,7 @@ pub(crate) fn install_target(
     let migrated = match t.host {
         Some(host) => {
             (host.register)(&path)?;
-            let stripped = strip_managed(
-                host.legacy_uninstall,
-                &(host.legacy_config)()?,
-                Backup::Take,
-            )?;
-            backups.extend(stripped.backup);
-            stripped.changed
+            strip_managed(host.legacy_uninstall, &(host.legacy_config)()?)?
         }
         None => false,
     };
@@ -444,58 +433,31 @@ pub(crate) fn install_target(
             InstallOutcome::AlreadyUpToDate
         },
         config_path: path,
-        backups,
         path_warning,
         post_install_hint: t.post_install_hint,
     })
 }
 
-/// Whether [`strip_managed`] snapshots the config before rewriting it.
-#[derive(Debug, Clone, Copy)]
-enum Backup {
-    /// A migration keeps pixtuoid installed, so the snapshot is the way back.
-    Take,
-    /// An uninstall deletes whatever backup exists once it has removed pixtuoid.
-    Skip,
-}
-
-/// What [`strip_managed`] did.
-#[derive(Debug, Default)]
-struct Stripped {
-    changed: bool,
-    /// Taken before the rewrite; `None` under [`Backup::Skip`] or when one
-    /// already existed.
-    backup: Option<PathBuf>,
-}
-
-/// Remove the entries `uninstall` recognizes from `path` under its lock. Never
-/// rewrites on a semantic no-op.
+/// Remove the entries `uninstall` recognizes from `path` under its lock; whether
+/// it rewrote. Never rewrites on a semantic no-op.
 fn strip_managed(
     uninstall: fn(&str) -> Result<target::MergeOutcome>,
     path: &std::path::Path,
-    backup: Backup,
-) -> Result<Stripped> {
+) -> Result<bool> {
     // Decided BEFORE locking: `lock_config` creates the parent dir + a .lock sidecar, and
     // materializing ~/.reasonix here would flip that target's presence probe on a no-op.
     if !target::config_present(path) {
-        return Ok(Stripped::default());
+        return Ok(false);
     }
     let lock = io::lock_config(path)?;
     let content = lock.read()?;
     let outcome = uninstall(&content).with_context(|| format!("processing {}", path.display()))?;
     // A byte compare would falsely fire on hand formatting.
     if !outcome.changed {
-        return Ok(Stripped::default());
+        return Ok(false);
     }
-    let backup = match backup {
-        Backup::Take => lock.backup_once(BACKUP_SUFFIX)?,
-        Backup::Skip => None,
-    };
     lock.write_atomic(&outcome.content)?;
-    Ok(Stripped {
-        changed: true,
-        backup,
-    })
+    Ok(true)
 }
 
 /// Render the wholly-owned artifacts a target ships beside its config. Called before the
@@ -538,17 +500,13 @@ pub enum UninstallOutcome {
 pub struct UninstallReport {
     pub outcome: UninstallOutcome,
     pub config_path: PathBuf,
-    /// The backups deleted on a successful removal (no longer needed once the hooks
-    /// are gone).
-    pub removed_backups: Vec<PathBuf>,
     /// The CLI couldn't be reached to deregister a host target's plugin, which
     /// stays registered with no hooks.
     pub plugin_left_registered: bool,
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. Same
-/// lock scope as `install_target`, plus the load-bearing "never rewrite or delete
-/// the backup on a semantic no-op" rule.
+/// lock scope as `install_target`, and never rewrites on a semantic no-op.
 pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<UninstallReport> {
     let path = config
         .map(Ok)
@@ -559,14 +517,7 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     }
     let mut removed = false;
     for (uninstall, config) in &configs {
-        removed |= strip_managed(*uninstall, config, Backup::Skip)?.changed;
-    }
-    // On a SEMANTIC no-op the backups stay: they are the user's only recovery.
-    let mut removed_backups = Vec::new();
-    if removed {
-        for (_, config) in &configs {
-            removed_backups.extend(remove_backup(config)?);
-        }
+        removed |= strip_managed(*uninstall, config)?;
     }
     // Last, since neither strip needs the CLI: a failing deregister leaves a
     // registered plugin with no hooks, never hooks that still fire.
@@ -581,16 +532,8 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
             UninstallOutcome::NothingToRemove
         },
         config_path: path,
-        removed_backups,
         plugin_left_registered,
     })
-}
-
-fn remove_backup(config: &std::path::Path) -> Result<Option<PathBuf>> {
-    if !target::config_present(config) {
-        return Ok(None);
-    }
-    io::lock_config(config)?.remove_backup(BACKUP_SUFFIX)
 }
 
 /// Deleting a registered event ships GREEN — cargo-mutants does not mutate slice
