@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use toml::value::Table;
 
 use crate::install::SENTINEL_KEY;
@@ -93,10 +93,9 @@ fn resolve_config_path(
         (Some(h), _) => h,
         (None, Some(home)) => home.join(".codewhale"),
         (None, None) => {
-            return Err(anyhow!(
-                "cannot resolve CodeWhale's home (CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/\
-                 CODEWHALE_HOME/HOME/USERPROFILE unset); {}",
-                io::HOME_UNSET_REMEDY
+            return Err(io::home_unset(
+                "CodeWhale's home",
+                "CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/CODEWHALE_HOME/HOME/USERPROFILE",
             ));
         }
     };
@@ -347,7 +346,7 @@ mod tests {
     fn config_path_errors_when_no_home_and_no_override() {
         let err = resolve_config_path(None, None, None, None, |_| false).unwrap_err();
         assert!(
-            err.to_string().contains(io::HOME_UNSET_REMEDY),
+            err.to_string().ends_with("unset); set one and reconnect"),
             "no home + no override must surface the actionable error: {err}"
         );
     }

@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
@@ -51,12 +51,7 @@ fn config_dir_from(oc: Option<&Path>, xdg: Option<&Path>, home: Option<&Path>) -
         return Ok(xdg.join("opencode"));
     }
     home.map(|h| h.join(".config").join("opencode"))
-        .ok_or_else(|| {
-            anyhow!(
-                "cannot resolve the home directory (HOME/USERPROFILE unset); {}",
-                io::HOME_UNSET_REMEDY
-            )
-        })
+        .ok_or_else(|| io::home_unset("the home directory", "HOME/USERPROFILE"))
 }
 
 /// The dir is `plugins` (PLURAL): canonical opencode auto-discovers only

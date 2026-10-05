@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use toml::value::Table;
 
 use crate::install::io;
@@ -74,12 +74,7 @@ fn resolve_config_dir(
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     kimi_config_dir()
         .map(|d| d.join("config.toml"))
-        .ok_or_else(|| {
-            anyhow!(
-                "cannot resolve the home directory (HOME/USERPROFILE unset); {}",
-                io::HOME_UNSET_REMEDY
-            )
-        })
+        .ok_or_else(|| io::home_unset("the home directory", "HOME/USERPROFILE"))
 }
 
 /// Presence probe for auto-detection. Kimi may not create `config.toml` until the

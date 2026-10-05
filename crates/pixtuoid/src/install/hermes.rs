@@ -53,12 +53,7 @@ const HOOK_TIMEOUT_SECS: i64 = 5;
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     pixtuoid_core::source::hermes::hermes_home()
         .map(|d| d.join("config.yaml"))
-        .ok_or_else(|| {
-            anyhow!(
-                "cannot resolve the Hermes home (HERMES_HOME/HOME unset); {}",
-                io::HOME_UNSET_REMEDY
-            )
-        })
+        .ok_or_else(|| io::home_unset("the Hermes home", "HERMES_HOME/HOME"))
 }
 
 /// Probes the home DIR, not config.yaml: Hermes creates the home on first run but may

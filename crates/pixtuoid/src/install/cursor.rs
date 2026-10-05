@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde_json::{Map, Value, json};
 
 use crate::install::SENTINEL_KEY;
@@ -41,12 +41,7 @@ pub(crate) const CURSOR_EVENTS: &[&str] = &[
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     cursor_config_dir()
         .map(|d| d.join("hooks.json"))
-        .ok_or_else(|| {
-            anyhow!(
-                "cannot resolve the home directory (HOME/USERPROFILE unset); {}",
-                io::HOME_UNSET_REMEDY
-            )
-        })
+        .ok_or_else(|| io::home_unset("the home directory", "HOME/USERPROFILE"))
 }
 
 fn cursor_config_dir() -> Option<PathBuf> {
