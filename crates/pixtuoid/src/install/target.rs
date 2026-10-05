@@ -66,7 +66,7 @@ pub struct Target {
     /// **Rewritten verbatim on every (re)install**, even when the config merge is
     /// a semantic no-op — the deliberate refresh that repairs a tampered or stale
     /// plugin file. The returned dir comes from the CLI's OWN state resolver, not
-    /// the `--config` override a test isolates itself with, so a test must
+    /// the `config` override a test isolates itself with, so a test must
     /// redirect that resolver too or it writes the developer's real plugin.
     pub extra_artifacts: Option<ExtraArtifactsFn>,
 
