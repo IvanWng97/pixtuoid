@@ -65,7 +65,10 @@ export function apply(ctx) {
     } catch {}
   }
 
-  ctx.on("agent/session-start", ({ agent }) => sendStart(agent))
+  // `agent/created` is @mode serial: dsh holds creation until it returns, and a throw fails the
+  // agent's creation, so the listener only reads its payload inside sendStart's
+  // try and returns nothing.
+  ctx.on("agent/created", (payload) => sendStart(payload?.agent))
   ctx.on("agent/disposed", ({ agent }) => sendEnd(agent))
 
   // approval/decided carries only {id, outcome}; the asked side owns
