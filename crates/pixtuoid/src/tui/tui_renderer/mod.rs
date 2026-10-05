@@ -727,6 +727,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// Draw one frame of `scene`, then follow a terminal resize.
+    ///
+    /// # Errors
+    ///
+    /// If querying the terminal size or drawing the frame to the backend fails.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         self.draw_frame(scene, pack, now)?;
         self.follow_resize();

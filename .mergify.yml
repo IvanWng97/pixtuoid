@@ -16,6 +16,9 @@ merge_queue:
 queue_rules:
   - name: default
     batch_size: 5
+    # A batch takes only the PRs already queued (docs.mergify.com/merge-queue/batches),
+    # and PRs arm one by one after review; the 30-second default batches one.
+    batch_max_wait_time: 10 min
     merge_method: squash
     # `auto` sizes this from unloaded runs, so a backlog of runners alone times
     # a PR out and costs a full CI rerun; this covers the backlogged full tier.
