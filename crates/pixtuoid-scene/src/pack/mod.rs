@@ -66,10 +66,24 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
+/// Every walk a walker steps by the ground it covers: a person's, each pet's
+/// and each gateway mascot's.
+fn walks() -> Vec<&'static str> {
+    crate::sim::WALKS
+        .into_iter()
+        .chain(crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim()))
+        .chain(
+            pixtuoid_core::source::registry::registered_source_names()
+                .filter_map(crate::creatures::gateway_mascot_def)
+                .map(|d| d.walk),
+        )
+        .collect()
+}
+
 /// [`validate_pack_animations`], against this crate's painters' art sets and
 /// walks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets(), &crate::sim::WALKS)
+    validate_pack_animations(pack, &art_sets(), &walks())
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -465,6 +479,22 @@ mod tests {
         // `StandIn::DefaultPack` promises the default draws what a custom pack
         // leaves out.
         assert_eq!(report.warning_count(), 0, "{report:?}");
+    }
+
+    /// A creature's walk steps by the ground like a person's, so a pack's
+    /// without a stride slides its feet too.
+    #[test]
+    fn a_creature_walk_without_a_stride_is_flagged() {
+        for (walk, stride) in [
+            ("cat_walk", "stride   = 2\n"),
+            ("lobster_walk", "stride   = 6\n"),
+        ] {
+            let manifest = format!(
+                "[animations.{walk}]\nframes   = [\"{walk}_0.sprite\", \"{walk}_1.sprite\"]\nframe_ms = 250\n"
+            );
+            let pack = test_pack_declaring(&format!("{manifest}{stride}"), &manifest);
+            assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
+        }
     }
 
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,

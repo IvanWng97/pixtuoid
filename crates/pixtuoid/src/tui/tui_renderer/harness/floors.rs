@@ -1,5 +1,4 @@
 use super::*;
-use pixtuoid_scene::layout::Point;
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
@@ -447,7 +446,6 @@ fn already_expired_active_pet_clears_on_render() {
     let mut r = build(100, 40, vec![PetKind::Cat]);
     r.set_active_pet(Some(PetState {
         petted_at: t0() - Duration::from_secs(3600), // long expired
-        pet_pos: Point { x: 10, y: 10 },
         kind: PetKind::Cat,
         floor_idx: 0,
     }));
@@ -573,13 +571,13 @@ fn every_painter_shows_the_one_board_of_a_floor() {
             .chrome
             .frame(scene, &drawn, pack(), now, floor, num_floors(scene))
             .footer;
-        pixtuoid_scene::board::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
+        pixtuoid_scene::neon_sign::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
     };
 
     let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
-    let floating = pixtuoid_scene::board::wall_board(
+    let floating = pixtuoid_scene::neon_sign::wall_board(
         &one_floor,
-        pixtuoid_scene::board::office_gateway(&one_floor),
+        pixtuoid_scene::tally::office_gateway(&one_floor),
         None,
         Motion::Full,
         now,

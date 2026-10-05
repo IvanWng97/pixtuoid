@@ -854,12 +854,11 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 Some(SceneHit::Coffee) => {
                     let _ = open::that("https://buymeacoffee.com/IvanWng97");
                 }
-                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { centre, kind, .. })))
+                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, .. })))
                     if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) =>
                 {
                     renderer.set_active_pet(Some(renderer::PetState {
                         petted_at: now,
-                        pet_pos: centre,
                         kind,
                         floor_idx: renderer.current_floor(),
                     }));
@@ -934,6 +933,11 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     }
 }
 
+/// The least time between two of the event loop's frames.
+pub(crate) fn frame_tick() -> Duration {
+    Duration::from_secs(1) / pixtuoid_scene::anim::PAINT_FPS
+}
+
 /// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
 /// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
 /// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
@@ -983,7 +987,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut cap_sweep = FloorCapacitySweep::new();
 
-    let tick = Duration::from_secs(1) / pixtuoid_scene::anim::PAINT_FPS;
+    let tick = frame_tick();
     let result: Result<()> = (async {
         let mut ctrl_c = pin_ctrl_c();
         #[cfg(unix)]

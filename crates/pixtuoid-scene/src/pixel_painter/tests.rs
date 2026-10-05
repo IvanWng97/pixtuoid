@@ -1725,6 +1725,7 @@ fn empty_frame(layout: &SceneLayout) -> SimFrame {
         characters: Vec::new(),
         indoor_scale: 0.0,
         neon: crate::floor::NeonLevels::EMPTY,
+        neon_stutter: false,
         chitchat_bubbles: Vec::new(),
         new_coffee_carriers: Vec::new(),
         occupied_waypoints: Default::default(),
@@ -2809,6 +2810,8 @@ struct OwnedSimStores {
     vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
+    creatures:
+        std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
 }
 
 impl OwnedSimStores {
@@ -2818,6 +2821,7 @@ impl OwnedSimStores {
             vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
+            creatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2830,6 +2834,7 @@ impl OwnedSimStores {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
+            creatures: &mut self.creatures,
         }
     }
 }
@@ -3136,7 +3141,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
 }
 
 #[test]
-fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_stands() {
     let (scene, layout, _, now0, pack) = sim_rig();
     let coffee = HashMap::new();
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
@@ -3181,10 +3186,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         "a roaming cat is not being petted"
     );
 
-    let clicked = Point { x: 40, y: 50 };
     let petting = crate::pet::PetState {
         petted_at: now0,
-        pet_pos: clicked,
         kind: pet.kind,
         floor_idx: floor.floor_idx,
     };
@@ -3193,31 +3196,15 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&petting),
     })
     .expect("the petted cat");
-    assert_eq!(held.pos, clicked);
+    assert_eq!(
+        held.pos, roaming.pos,
+        "held where it stands, not where the click landed"
+    );
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(
         hearts(&held),
         [0],
         "petted just now: its first heart leaves"
-    );
-
-    // Held in the canvas's corner, its frame is fitted back on.
-    let in_corner = crate::pet::PetState {
-        pet_pos: Point { x: 0, y: 0 },
-        ..petting
-    };
-    let cornered = step(PetInputs {
-        pet: Some(&pet),
-        petting: Some(&in_corner),
-    })
-    .expect("the petted cat");
-    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
-    assert_eq!(
-        cornered.pos,
-        Point {
-            x: size.w / 2,
-            y: size.h / 2
-        }
     );
 
     let upstairs = crate::pet::PetState {
@@ -3278,6 +3265,7 @@ fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded,
+            on_roster: true,
             effects: Vec::new(),
         };
         let mut drawables = Vec::new();
@@ -5035,6 +5023,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
     let mut escapes: Vec<String> = Vec::new();
+    let mut walking = 0;
     for port in 18900..18924u32 {
         // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
         // id — vary both, or the pet half of the sweep rides one trajectory.
@@ -5050,11 +5039,12 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
             boot,
         );
-        // Past the enter stagger + walk-in, then across several wander cycles so
-        // both the walking legs and the resting cells get sampled.
-        for step in 0..24u64 {
+        // One office's stores across the sweep: the creatures walk on state
+        // they keep. Past the enter stagger + walk-in, then across several roams,
+        // so both the walking legs and the resting cells get sampled.
+        let mut owned = OwnedSimStores::new();
+        for step in 0..48u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
-            let mut owned = OwnedSimStores::new();
             let frame = sim_step(
                 &mut owned.stores(),
                 SimInputs {
@@ -5073,6 +5063,17 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     door_anim_max_ms: 0,
                 },
             );
+            walking += frame
+                .mascots
+                .iter()
+                .filter(|m| m.anim_name.contains("walk"))
+                .count()
+                + usize::from(
+                    frame
+                        .pet
+                        .as_ref()
+                        .is_some_and(|p| p.anim_name.contains("walk")),
+                );
             for m in &frame.mascots {
                 let Size { w, h } = m.size;
                 if m.pos.x < w / 2
@@ -5107,6 +5108,10 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     assert!(
         escapes.is_empty(),
         "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+    assert!(
+        walking > 100,
+        "the sweep must catch them roaming, saw {walking}"
     );
 }
 
@@ -6076,11 +6081,12 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
     assert!(asymmetric > 0, "a profile is not its own mirror");
 }
 
-/// Under every sky the sweep draws, a frame matches the one whose windows show
-/// its instant's no-weather sky — the same room, lit alike — everywhere but on
-/// glass no fixture paints.
+/// The classic holds to
+/// [`assert_the_outside_reaches_only_the_glass`](crate::outside::tests::assert_the_outside_reaches_only_the_glass),
+/// its fixtures being what else paints.
 #[test]
 fn the_outside_reaches_only_the_glass() {
+    use crate::outside::tests::{UNPAINTED, painted_alone};
     let (scene, _, _, now0, pack) = sim_rig();
     // Wide enough for meeting rooms, whose notice boards hang on the panes.
     let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("240x144 lays out");
@@ -6101,49 +6107,18 @@ fn the_outside_reaches_only_the_glass() {
             door_anim_max_ms: 0,
         },
     );
-    const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
     let (w, h) = (layout.buf_w, layout.buf_h);
-    let mut hung_on_glass = std::collections::HashSet::new();
-    let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
-    for weathered in crate::outside::tests::every_sky() {
-        let name = &weathered.name;
-        let timing = Motion::Full.timing(weathered.now);
-        let paint = |outside| {
-            let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
-            paint_frame(
-                &mut PaintCtx {
-                    scene: &scene,
-                    layout: &layout,
-                    pack: &pack,
-                    timing,
-                    sky: weathered.sky,
-                    outside,
-                    buf: &mut buf,
-                    cache: &mut FrameCache::new(),
-                    base_fill: &mut BaseFillCache::new(),
-                    shadows: &mut crate::ground::DepthsCache::default(),
-                    theme,
-                    floor: crate::floor::FloorMeta::ground(),
-                    walks: &owned.route.walks,
-                    debug_walkable: false,
-                },
-                &frame,
-            );
-            buf
-        };
-        let (shown, bare) = (paint(None), paint(Some(weathered.bare)));
-        // Every pixel a fixture paints, each painted alone: one set an instant.
-        if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
-            let mut over = RgbBuffer::filled(w, h, UNPAINTED);
-            let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
-            let fctx = PaintCtx {
+    let paint = |weathered: &crate::outside::tests::Weathered, outside| {
+        let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
+        paint_frame(
+            &mut PaintCtx {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                timing,
+                timing: Motion::Full.timing(weathered.now),
                 sky: weathered.sky,
-                outside: None,
-                buf: &mut scratch,
+                outside,
+                buf: &mut buf,
                 cache: &mut FrameCache::new(),
                 base_fill: &mut BaseFillCache::new(),
                 shadows: &mut crate::ground::DepthsCache::default(),
@@ -6151,76 +6126,81 @@ fn the_outside_reaches_only_the_glass() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
-            };
-            let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
-            let lights = Lights::of(
-                &layout,
-                &moment.look,
-                &LightInputs {
-                    agents: &frame.agents,
-                    seated: &frame.seated_agents,
-                    floor_idx: 0,
-                    indoor_scale: frame.indoor_scale,
-                    neon: frame.neon,
-                    beat: timing.beat,
-                },
-            );
-            let neon = crate::floor::neon_look(frame.neon, theme);
-            let Furnishings { backdrop, sorted } =
-                queue_fixtures(&fctx, &frame, &lights.desks, neon);
-            let kinds = backdrop
-                .iter()
-                .map(|(_, k)| k)
-                .chain(sorted.iter().map(|d| &d.kind));
-            let mut painted = vec![false; usize::from(w) * usize::from(h)];
-            let mut cache = FrameCache::new();
-            for kind in kinds {
-                let epoch = over.begin_writes();
+            },
+            &frame,
+        );
+        buf
+    };
+    // Every pixel a fixture paints, each painted alone.
+    let covered = |weathered: &crate::outside::tests::Weathered| {
+        let timing = Motion::Full.timing(weathered.now);
+        let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
+        let fctx = PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            timing,
+            sky: weathered.sky,
+            outside: None,
+            buf: &mut scratch,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme,
+            floor: crate::floor::FloorMeta::ground(),
+            walks: &owned.route.walks,
+            debug_walkable: false,
+        };
+        let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
+        let lights = Lights::of(
+            &layout,
+            &moment.look,
+            &LightInputs {
+                agents: &frame.agents,
+                seated: &frame.seated_agents,
+                floor_idx: 0,
+                indoor_scale: frame.indoor_scale,
+                neon: frame.neon,
+                beat: timing.beat,
+            },
+        );
+        let neon = crate::floor::neon_look(frame.neon, theme);
+        let Furnishings { backdrop, sorted } = queue_fixtures(&fctx, &frame, &lights.desks, neon);
+        let kinds = backdrop
+            .iter()
+            .map(|(_, k)| k)
+            .chain(sorted.iter().map(|d| &d.kind));
+        let mut cache = FrameCache::new();
+        painted_alone(
+            (w, h),
+            kinds,
+            |_| (0..w, 0..h),
+            |kind, over| {
                 paint_drawable(
                     kind,
                     &mut drawable::DrawableCtx {
-                        buf: &mut over,
+                        buf: over,
                         pack: &pack,
                         cache: &mut cache,
                         timing,
                         theme,
                     },
                 );
-                for y in 0..h {
-                    for x in 0..w {
-                        if over.written_in(x, y, epoch) {
-                            painted[usize::from(y) * usize::from(w) + usize::from(x)] = true;
-                        }
-                    }
-                }
-            }
-            over.end_writes();
-            covered = Some((weathered.now, painted));
-        }
-        let covered = &covered.as_ref().expect("filled above").1;
-        let mut glass = 0;
-        for y in 0..h {
-            for x in 0..w {
-                let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
-                if hung && layout.glass_at(x, y) {
-                    hung_on_glass.insert((x, y));
-                }
-                if shown.get(x, y) == bare.get(x, y) {
-                    continue;
-                }
-                assert!(
-                    layout.glass_at(x, y) && !hung,
-                    "{name}: the outside reached ({x}, {y}), off the glass"
-                );
-                glass += 1;
-            }
-        }
-        assert_eq!(
-            glass > 0,
-            weathered.changes_glass,
-            "{name}: {glass} glass pixels"
-        );
-    }
+            },
+        )
+    };
+    let hung_on_glass = crate::outside::tests::assert_the_outside_reaches_only_the_glass(
+        "classic",
+        (w, h),
+        |x, y| layout.glass_at(x, y),
+        |weathered| {
+            [
+                paint(weathered, None),
+                paint(weathered, Some(weathered.bare)),
+            ]
+        },
+        covered,
+    );
     for kind in ["neon sign", "notice board"] {
         let over_glass = layout.fixtures().any(|f| {
             let named = match f.kind {

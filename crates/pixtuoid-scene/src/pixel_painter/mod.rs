@@ -164,6 +164,11 @@ impl<'a> PaintCtx<'a> {
         }
     }
 
+    /// What of `frame` flashes under the sky this pass paints it in.
+    pub(crate) fn flash(&self, frame: &SimFrame) -> crate::flash::FlashPhase {
+        crate::flash::FlashPhase::of(&self.sky, frame)
+    }
+
     /// The subset of the pass a [`Drawable`] paints with.
     fn drawable_ctx(&mut self) -> drawable::DrawableCtx<'_> {
         drawable::DrawableCtx {
@@ -263,7 +268,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
     let mut drawn = Drawn::default();
-    let namesakes = crate::overlay::Namesakes::of(ctx.scene.agents.values());
+    let namesakes = crate::badge::Namesakes::of(ctx.scene.agents.values());
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
@@ -383,7 +388,8 @@ fn enqueue_gateway_mascots<'a>(
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
             hover: pack_frame_size(pack, m.anim_name, m.frame_idx)
-                .map(|size| Hover::figure(Pivot::Center, m.pos, size, m.target())),
+                .zip(m.target())
+                .map(|(size, target)| Hover::figure(Pivot::Center, m.pos, size, target)),
             kind: DrawableKind::GatewayMascot {
                 pos: m.pos,
                 anim_name: m.anim_name,

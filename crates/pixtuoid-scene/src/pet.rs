@@ -1,7 +1,5 @@
 use std::time::SystemTime;
 
-use crate::layout::Point;
-
 /// Duration (ms) the pet stays frozen in place after being petted.
 pub const PET_DURATION_MS: u64 = 2000;
 
@@ -11,8 +9,6 @@ pub const PET_DURATION_MS: u64 = 2000;
 pub struct PetState {
     /// When the pet was last clicked — anchors the `PET_DURATION_MS` freeze.
     pub petted_at: SystemTime,
-    /// Buffer-pixel position of the petted animal (hearts anchor).
-    pub pet_pos: Point,
     /// Which pet was petted.
     pub kind: PetKind,
     /// Index of the floor the petted animal is on.
@@ -222,7 +218,6 @@ mod tests {
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let pet = PetState {
             petted_at: t0,
-            pet_pos: Point { x: 10, y: 10 },
             kind: PetKind::Cat,
             floor_idx: 0,
         };
