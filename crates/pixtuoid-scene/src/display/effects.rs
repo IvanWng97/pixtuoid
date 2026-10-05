@@ -259,18 +259,13 @@ fn stamp(
     emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
     ink: impl Fn(char) -> Option<(Rgb, f32)>,
 ) {
-    for (dy, row) in glyph.iter().enumerate() {
-        for (dx, ch) in row.chars().enumerate() {
-            if ch == '.' {
-                continue;
-            }
-            if let Some((c, coverage)) = ink(ch) {
-                let at = ArtPoint {
-                    x: x + dx as i32,
-                    y: y + dy as i32,
-                };
-                emit(at, 1, c, coverage);
-            }
+    for (dx, dy, ch) in crate::effects::look::inked(glyph) {
+        if let Some((c, coverage)) = ink(ch) {
+            let at = ArtPoint {
+                x: x + i32::from(dx),
+                y: y + i32::from(dy),
+            };
+            emit(at, 1, c, coverage);
         }
     }
 }

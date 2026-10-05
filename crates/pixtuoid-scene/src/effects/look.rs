@@ -73,7 +73,7 @@ fn plot_sleep_z(
     };
     let rise = (t * SLEEP_Z_MAX_RISE as f32) as u16;
     let z_y = at.y.saturating_sub(rise + 3);
-    for (dx, dy) in inked(SLEEP_Z_1X) {
+    for (dx, dy, _) in inked(SLEEP_Z_1X) {
         plot(at.x + 5 + dx, z_y + dy, z_color, alpha);
     }
 }
@@ -158,18 +158,20 @@ fn plot_mascot_bubble(plot: &mut impl FnMut(u16, u16, Rgb, f32), at: Point, rise
 fn plot_waiting_mark(plot: &mut impl FnMut(u16, u16, Rgb, f32), top_left: Point, theme: &Theme) {
     let fg = theme.effects.waiting_bubble;
     let by = top_left.y.saturating_sub(5) & !1u16;
-    for (dx, dy) in inked(WAITING_MARK_1X) {
+    for (dx, dy, _) in inked(WAITING_MARK_1X) {
         plot(top_left.x + 2 + dx, by + dy, fg, 1.0);
     }
 }
 
-/// `glyph`'s inked cells, as offsets from its top-left.
-fn inked(glyph: &'static [&'static str]) -> impl Iterator<Item = (u16, u16)> {
+/// `glyph`'s inked cells, every one but a `.`, as offsets from its top-left
+/// with the character that inks it: the one transparency rule every look's
+/// glyph is drawn by.
+pub(crate) fn inked<'a>(glyph: &'a [&'a str]) -> impl Iterator<Item = (u16, u16, char)> + 'a {
     (0u16..).zip(glyph).flat_map(|(dy, row)| {
         (0u16..)
-            .zip(row.bytes())
-            .filter(|&(_, b)| b != b'.')
-            .map(move |(dx, _)| (dx, dy))
+            .zip(row.chars())
+            .filter(|&(_, c)| c != '.')
+            .map(move |(dx, c)| (dx, dy, c))
     })
 }
 

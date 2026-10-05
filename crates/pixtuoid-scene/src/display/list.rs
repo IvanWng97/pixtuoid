@@ -270,13 +270,15 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// How a piece takes the room's light: one rule both looks follow.
+/// How a piece takes the room's light, which the cutaway's emission pass
+/// reads. The classic paints its lights over everything they fall on, the
+/// glass included, so the two looks light a window alike
+/// (`the_neon_halo_lifts_the_window_glass_it_falls_on`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Emits<'a> {
     /// A window. What its glass shows ([`WindowView::shows`]) is its own light,
     /// which the room's lights still lift, so a light that falls on the glass
-    /// glows on it (#1164's spared glass is gone, one rule for both looks). Its
-    /// joinery is lit.
+    /// glows on it. Its joinery is lit.
     Pane(&'a WindowView),
     /// Its own light, as painted: a sign, or text that keeps the contrast its
     /// theme pins at every hour.
