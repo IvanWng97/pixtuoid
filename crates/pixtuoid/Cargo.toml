@@ -42,7 +42,7 @@ ratatui-image      = { version = "11", default-features = false, features = ["cr
 base64-simd        = { version = "0.8", optional = true }
 # iTerm2's PNG and kitty's zlib: what ratatui-image's `image` already builds.
 png                = { version = "0.18", optional = true }
-miniz_oxide        = { version = "0.8", optional = true }
+miniz_oxide        = { version = "0.9", optional = true }
 crossterm          = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
@@ -162,7 +162,7 @@ schemars = "1"
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 # A decoder our SIXEL encoder's tests did not write: ratatui-image's own.
-icy_sixel = "0.5"
+icy_sixel = "0.7"
 insta    = "1"
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }

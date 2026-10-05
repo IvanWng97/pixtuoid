@@ -52,7 +52,7 @@ serde_json = { workspace = true }
 proptest   = "1"
 tempfile   = "3"
 # tests/model_boundary.rs parses the source, so comments and strings never count.
-syn         = { version = "2", default-features = false, features = ["full", "parsing", "visit"] }
+syn         = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1", default-features = false }
 # build_support/density_art.rs, which the tests compile too.
 toml_edit  = { workspace = true }
