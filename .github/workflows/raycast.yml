@@ -1,9 +1,7 @@
 name: raycast
 
 on:
-  # PR-only gate for the self-contained Raycast extension. The full `ray build`/
-  # `ray lint` needs the macOS Raycast app, so it runs locally before publishing
-  # rather than here.
+  # PR-only gate for the self-contained Raycast extension.
   pull_request:
     paths: ['integrations/raycast/**', '.github/workflows/raycast.yml']
 

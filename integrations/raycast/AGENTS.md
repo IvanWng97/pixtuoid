@@ -87,5 +87,6 @@ the manifest, icons and metadata and runs the Prettier pass. See the
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
   Preferences` action bound to `⌘,` (Raycast's own `OpenPreferences`) shipped
-  dead. Nothing else sees it: `tsc` types the chord fine. Its sibling `@raycast/prefer-common-shortcut` stays a warning — style
-  advice a routine version bump could turn into a surprise red.
+  dead: `tsc` types the chord fine, and `ray lint` exits 0 on a warning too.
+  Its sibling `@raycast/prefer-common-shortcut` stays a warning — style advice
+  a routine version bump could turn into a surprise red.
