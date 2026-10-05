@@ -1200,7 +1200,7 @@ fn assert_each_appliance_lands_where_its_aisle_fits(w: u16, h: u16, seed: u64, l
     }
     if let [a, b] = machines[..] {
         assert!(
-            a.x + a.width <= b.x || b.x + b.width <= a.x,
+            !a.shares_columns(b),
             "{w}x{h} seed {seed}: the machines {a:?} and {b:?} share columns"
         );
     }
@@ -1678,8 +1678,7 @@ fn no_two_adjacent_aisle_slots_share_a_kind() {
 
 /// The seed PACKING, frozen by value. Every other seat/plant test asserts a
 /// property that survives any uniform seed — a swapped packing passes all of
-/// them while moving every chair and pot away from the committed art, which only
-/// the CI-only `gen-check` pixel diff would notice, and only as an opaque delta.
+/// them while moving every chair and pot, which no other gate notices.
 #[test]
 fn point_seed_packing_is_frozen() {
     assert_eq!(

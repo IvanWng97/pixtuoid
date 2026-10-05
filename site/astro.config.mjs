@@ -42,12 +42,12 @@ if (scDefaults.length !== 1 || scDefaults[0].status !== 'live') {
   );
 }
 const scIds = new Set();
+/** @type {{ file: string, owner: string }[]} */
+const requiredDemos = [];
 for (const c of showcase) {
   if (scIds.has(c.id)) throw new Error(`astro.config: showcase.json duplicate id "${c.id}"`);
   scIds.add(c.id);
   if (c.status === 'soon') continue;
-  const demo = /** @param {string} f */ (f) =>
-    existsSync(fileURLToPath(new URL(`./public/demos/${f}`, import.meta.url)));
   if (c.variantsRef)
     throw new Error(
       `astro.config: showcase.json "${c.id}" has a channel-level variantsRef, retired in #468 — variant-set channels use inline "variants", live channels use variantGroups`
@@ -57,13 +57,8 @@ for (const c of showcase) {
       throw new Error(
         `astro.config: showcase.json live clip "${c.id}" is missing the required "asset" field`
       );
-    const missing = [`${c.asset}.webm`, `${c.asset}.mp4`, `${c.asset}-poster.png`].filter(
-      (f) => !demo(f)
-    );
-    if (missing.length)
-      throw new Error(
-        `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run just gen-media`
-      );
+    for (const file of [`${c.asset}.webm`, `${c.asset}.mp4`, `${c.asset}-poster.png`])
+      requiredDemos.push({ file, owner: `live clip "${c.id}"` });
     if (!Number.isFinite(c.w) || !Number.isFinite(c.h))
       throw new Error(
         `astro.config: showcase.json live clip "${c.id}" needs numeric "w"/"h" (intrinsic video dims, for CLS)`
@@ -72,10 +67,7 @@ for (const c of showcase) {
     if (!(c.variants && c.variants.length))
       throw new Error(`astro.config: showcase.json variant-set "${c.id}" has no "variants"`);
     for (const v of c.variants)
-      if (!demo(v.src))
-        throw new Error(
-          `astro.config: showcase.json "${c.id}" variant "${v.id}" missing public/demos/${v.src}`
-        );
+      requiredDemos.push({ file: v.src, owner: `"${c.id}" variant "${v.id}"` });
   } else if (c.kind === 'live') {
     // A `live` channel is rendered by the wasm office canvas, not static demo
     // assets — no asset/w/h required, but the fallback poster IS.
@@ -83,10 +75,7 @@ for (const c of showcase) {
       throw new Error(
         `astro.config: showcase.json live channel "${c.id}" needs a "poster" — the no-JS/no-wasm/reduced-motion fallback image`
       );
-    if (!demo(c.poster))
-      throw new Error(
-        `astro.config: showcase.json live channel "${c.id}" missing public/demos/${c.poster}`
-      );
+    requiredDemos.push({ file: c.poster, owner: `live channel "${c.id}"` });
     for (const g of c.variantGroups ?? [])
       if (g.variantsRef !== 'themes' && g.variantsRef !== 'weather')
         throw new Error(
@@ -190,6 +179,25 @@ function cspInlineHashes() {
   };
 }
 
+// The demos render apart from the site (CI per build, `just site-demos` locally),
+// so their absence fails a build or dev server, not the config load `astro check`
+// and knip share.
+function demoAssets() {
+  const assertRendered = () => {
+    const missing = requiredDemos.filter(
+      ({ file }) => !existsSync(fileURLToPath(new URL(`./public/demos/${file}`, import.meta.url)))
+    );
+    if (missing.length)
+      throw new Error(
+        `astro.config: showcase.json demos missing from public/demos/: ${missing.map(({ file, owner }) => `${file} (${owner})`).join(', ')} — run just site-demos (just gen-media --only site after a look change)`
+      );
+  };
+  return {
+    name: 'demo-assets',
+    hooks: { 'astro:build:start': assertRendered, 'astro:server:setup': assertRendered },
+  };
+}
+
 // The custom domain lives in the repo's Settings → Pages, not in the artifact —
 // Actions deploys need no CNAME file.
 export default defineConfig({
@@ -216,7 +224,7 @@ export default defineConfig({
       ],
     }),
   },
-  integrations: [sitemap(), cspInlineHashes()],
+  integrations: [sitemap(), cspInlineHashes(), demoAssets()],
   // script-src carries NO 'unsafe-inline' — cspInlineHashes() above supplies the
   // is:inline hashes instead; 'wasm-unsafe-eval' permits WebAssembly.instantiate
   // for the live-office hero (wasm compilation ONLY, not JS eval). style-src

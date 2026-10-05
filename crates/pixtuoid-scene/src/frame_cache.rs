@@ -14,7 +14,7 @@ use pixtuoid_core::{AgentId, SceneState};
 
 /// Cache identity for one recolored frame — every input that changes the output
 /// pixels is part of the key.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FrameKey {
     pub agent_id: AgentId,
     pub anim_name: &'static str,
@@ -29,7 +29,7 @@ pub struct FrameKey {
     pub density: pixtuoid_core::sprite::format::Density,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct FrameCache {
     entries: HashMap<FrameKey, Frame>,
     /// Last-seen outfit-determining seed per agent.
