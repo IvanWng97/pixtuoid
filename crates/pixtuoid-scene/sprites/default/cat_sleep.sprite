@@ -1,7 +1,0 @@
-# 6x4 orange tabby cat sleeping — curled up, tail wrapped around body.
-# Used when all agents are idle or when cat rests at a desk.
-@frame 0
-. u t u . .
-. t t t t .
-. t t t t .
-. . u u . .
