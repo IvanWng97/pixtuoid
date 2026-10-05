@@ -397,10 +397,11 @@ fn dashboard_closed_paints_no_popup() {
 
 /// The popup's content lines, so substring assertions don't false-match the
 /// office sprite labels behind it. The popup is borderless (no `│` to key on),
-/// so find its rect by its `tooltip_bg` fill: a run of it wider than a badge's
-/// plate, [`BADGE_CELLS`](pixtuoid_scene::overlay::BADGE_CELLS), is the
-/// popup's. Every cell inside the rect is read, whatever its background, so a
-/// popup row a cell of another colour splits is read whole.
+/// so find its rect by its `tooltip_bg` fill: the span most rows' runs wider
+/// than a badge's plate, [`BADGE_CELLS`](pixtuoid_scene::overlay::BADGE_CELLS),
+/// share, which no bubble on the same fill can. Every cell inside the rect is
+/// read, whatever its background, so a popup row a cell of another colour
+/// splits is read whole.
 fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     let tb = pixtuoid_scene::theme::NORMAL.ui.tooltip_bg;
     let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
@@ -423,14 +424,22 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
             }
         }
     }
-    let (Some(top), Some(bottom)) = (
-        wide.iter().map(|w| w.0).min(),
-        wide.iter().map(|w| w.0).max(),
-    ) else {
+    // The popup is a rectangle: its rows share one span, which a bubble or a
+    // badge plate on the same fill does not.
+    let mut spans: std::collections::HashMap<(u16, u16), usize> = std::collections::HashMap::new();
+    for &(_, x0, x1) in &wide {
+        *spans.entry((x0, x1)).or_default() += 1;
+    }
+    let Some((&(left, right), _)) = spans.iter().max_by_key(|&(span, n)| (*n, *span)) else {
         return String::new();
     };
-    let left = wide.iter().map(|w| w.1).min().unwrap_or(area.x);
-    let right = wide.iter().map(|w| w.2).max().unwrap_or(left);
+    let rows = wide
+        .iter()
+        .filter(|w| (w.1, w.2) == (left, right))
+        .map(|w| w.0);
+    let (Some(top), Some(bottom)) = (rows.clone().min(), rows.max()) else {
+        return String::new();
+    };
     (top..=bottom)
         .map(|y| {
             (left..=right)
@@ -440,6 +449,33 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
         .filter(|row| !row.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// [`dash_popup`] reads the popup's rect and nothing beside it: not a bubble
+/// on the same fill wider than a badge's plate, nor office text, while a popup
+/// row a cell of another colour splits is read whole.
+#[test]
+fn dash_popup_reads_the_popup_rect_alone() {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    let tb = pixtuoid_scene::theme::NORMAL.ui.tooltip_bg;
+    let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 60, 12));
+    let fill = |buf: &mut Buffer, y: u16, x: std::ops::Range<u16>, text: &str| {
+        for (x, c) in x.zip(text.chars().chain(std::iter::repeat(' '))) {
+            buf[(x, y)].set_char(c).set_bg(bg);
+        }
+    };
+    for y in 4..8 {
+        fill(&mut buf, y, 10..40, &format!("popup row {y}"));
+    }
+    buf[(25, 6)].set_bg(ratatui::style::Color::Reset);
+    fill(&mut buf, 1, 30..50, " a wide bubble quip ");
+    buf.set_string(0, 10, "office label", ratatui::style::Style::default());
+    let popup = dash_popup(&buf);
+    assert!(popup.contains("popup row 6"), "{popup}");
+    assert!(!popup.contains("bubble"), "{popup}");
+    assert!(!popup.contains("office"), "{popup}");
 }
 
 #[test]
