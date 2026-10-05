@@ -83,11 +83,36 @@ pub(crate) struct DisplayList<'a> {
     pub(super) flash_phase: crate::flash::FlashPhase,
     /// The figures' hovers, in `pieces`' order.
     pub(super) hovers: super::Hovers,
+    /// What lies under every piece.
+    pub(super) backdrop: super::Backdrop,
+    pub(super) recolours: Recolours,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pub(super) pack: &'a Pack,
-    pub(super) theme: &'a Theme,
     pub(super) scale: RenderScale,
+}
+
+/// The pack keys art takes from the theme, resolved once a frame, so painting
+/// reads no theme.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Recolours {
+    /// The appliances' and fixtures' keys.
+    pub(crate) art: Vec<(char, pixtuoid_core::sprite::Pixel)>,
+    /// The desk props' cup and paper.
+    pub(crate) desk_props: [(char, pixtuoid_core::sprite::Pixel); 4],
+}
+
+impl Recolours {
+    /// `theme`'s colours for the keys art takes from it.
+    pub(crate) fn of(theme: &Theme) -> Self {
+        Self {
+            art: crate::pack::appliance_overrides(&theme.appliance)
+                .into_iter()
+                .chain(crate::pack::fixture_overrides(theme))
+                .collect(),
+            desk_props: crate::pack::desk_prop_overrides(theme),
+        }
+    }
 }
 
 /// One entry of a [`DisplayList`].
@@ -192,8 +217,12 @@ impl<'a> DisplayList<'a> {
         self.pack
     }
 
-    pub(crate) fn theme(&self) -> &'a Theme {
-        self.theme
+    pub(crate) fn backdrop(&self) -> &super::Backdrop {
+        &self.backdrop
+    }
+
+    pub(crate) fn recolours(&self) -> &Recolours {
+        &self.recolours
     }
 
     pub(crate) fn scale(&self) -> RenderScale {
@@ -235,7 +264,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
-        PieceKind::WallSeg { piece, rows } => (piece, rows).hash(&mut h),
+        PieceKind::WallSeg { piece, rows, trim } => (piece, rows, trim).hash(&mut h),
         PieceKind::Desk { at, art, screen } | PieceKind::DeskFront { at, art, screen } => {
             (at, art, screen).hash(&mut h);
         }
@@ -257,7 +286,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             hue,
             interior,
         } => (at, tube, hue, interior).hash(&mut h),
-        PieceKind::Clock { at, reading } => (at, reading).hash(&mut h),
+        PieceKind::Clock { at, reading, hand } => (at, reading, hand).hash(&mut h),
         // The body follows from `at` and `key`.
         PieceKind::Character {
             figure:
@@ -392,6 +421,7 @@ pub(crate) enum PieceKind {
         /// The logical rows of `piece` this segment paints, top inclusive and
         /// bottom exclusive.
         rows: (u16, u16),
+        trim: crate::glass::WallTrim,
     },
     Desk {
         at: crate::layout::Point,
@@ -448,6 +478,8 @@ pub(crate) enum PieceKind {
     Clock {
         at: crate::layout::Point,
         reading: crate::sky::ClockReading,
+        /// The theme's hand colour.
+        hand: pixtuoid_core::sprite::Rgb,
     },
     /// A prop the model stands on a desk (`push_desk_props`).
     DeskProp(StoodProp),

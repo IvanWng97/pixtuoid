@@ -9,11 +9,10 @@ use pixtuoid_core::sprite::Rgb;
 use crate::display::Span;
 use crate::display::pen::Pen;
 use crate::effects::look::{
-    FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_1X, SLEEP_Z_MAX_RISE, WAITING_MARK_1X,
-    plot_effect, sleep_z_fade, walking_dust_foot,
+    FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, Inks, SLEEP_Z_1X, SLEEP_Z_MAX_RISE,
+    WAITING_MARK_1X, plot_effect, sleep_z_fade, walking_dust_foot,
 };
 use crate::effects::{Effect, EffectKind};
-use crate::theme::Theme;
 
 /// The density this module's own looks are drawn at.
 const LOOK_DENSITY: u16 = 4;
@@ -35,15 +34,17 @@ pub(crate) struct Riding {
     pub(crate) head: Option<ArtPoint>,
     /// The figure's own grid.
     pub(crate) pen: Pen,
+    /// The theme's colours its look is drawn in.
+    pub(crate) inks: Inks,
 }
 
 impl Riding {
     /// The logical cells it paints, sorted with the figure it rides on at
     /// `depth`; `None` when it paints nothing this frame.
-    pub(crate) fn span(&self, theme: &Theme, depth: u16) -> Option<Span> {
+    pub(crate) fn span(&self, depth: u16) -> Option<Span> {
         let d = i32::from(self.pen.art(1).0);
         let mut cells: Option<(i32, i32, i32, i32)> = None;
-        self.look(theme, &mut |at, size, _, _| {
+        self.look(&mut |at, size, _, _| {
             let (x1, y1) = (at.x + size - 1, at.y + size - 1);
             cells = Some(cells.map_or((at.x, at.y, x1, y1), |(a, b, c, e)| {
                 (a.min(at.x), b.min(at.y), c.max(x1), e.max(y1))
@@ -64,16 +65,16 @@ impl Riding {
 
     /// Its look, as squares of art pixels: each top-left, side, colour and the
     /// share of it covered.
-    pub(crate) fn look(&self, theme: &Theme, emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32)) {
-        let e = self.effect;
+    pub(crate) fn look(&self, emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32)) {
+        let (e, inks) = (self.effect, &self.inks);
         let d = self.pen.art(1).0;
         match self.head {
-            Some(head) if d == LOOK_DENSITY => return dense_look(e, head, theme, emit),
-            Some(head) if d == 1 && base_look(e, head, theme, emit) => return,
+            Some(head) if d == LOOK_DENSITY => return dense_look(e, head, inks, emit),
+            Some(head) if d == 1 && base_look(e, head, inks, emit) => return,
             _ => {}
         }
         let d = i32::from(d);
-        plot_effect(&e, theme, &mut |x, y, c, alpha| {
+        plot_effect(&e, inks, &mut |x, y, c, alpha| {
             let at = ArtPoint {
                 x: i32::from(x) * d,
                 y: i32::from(y) * d,
@@ -162,7 +163,7 @@ const BESIDE_DY_1X: i32 = 1;
 fn base_look(
     e: Effect,
     head: ArtPoint,
-    theme: &Theme,
+    inks: &Inks,
     emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
 ) -> bool {
     match e.kind {
@@ -172,7 +173,7 @@ fn base_look(
                 let top = head.y + BESIDE_DY_1X - glyph_h(SLEEP_Z_1X) - rise;
                 let coverage = (alpha / LOOK_SOLID).min(1.0);
                 stamp(SLEEP_Z_1X, head.x + BESIDE_DX_1X, top, emit, |_| {
-                    Some((theme.effects.sleep_z, coverage))
+                    Some((inks.sleep_z, coverage))
                 });
             }
             true
@@ -180,7 +181,7 @@ fn base_look(
         EffectKind::WaitingMark => {
             let top = head.y + BESIDE_DY_1X - glyph_h(WAITING_MARK_1X);
             stamp(WAITING_MARK_1X, head.x + BESIDE_DX_1X, top, emit, |_| {
-                Some((theme.effects.waiting_bubble, 1.0))
+                Some((inks.waiting, 1.0))
             });
             true
         }
@@ -192,7 +193,7 @@ fn base_look(
 fn dense_look(
     e: Effect,
     head: ArtPoint,
-    theme: &Theme,
+    inks: &Inks,
     emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
 ) {
     let d = i32::from(LOOK_DENSITY);
@@ -206,14 +207,12 @@ fn dense_look(
             let x = head.x + BESIDE_DX + rise / SLEEP_Z_DRIFT;
             let top = head.y + BESIDE_DY - glyph_h(SLEEP_Z) - rise;
             let coverage = (alpha / LOOK_SOLID).min(1.0);
-            stamp(SLEEP_Z, x, top, emit, |_| {
-                Some((theme.effects.sleep_z, coverage))
-            });
+            stamp(SLEEP_Z, x, top, emit, |_| Some((inks.sleep_z, coverage)));
         }
         EffectKind::WaitingMark => {
             let top = head.y + BESIDE_DY - glyph_h(WAITING_MARK);
             stamp(WAITING_MARK, head.x + BESIDE_DX, top, emit, |_| {
-                Some((theme.effects.waiting_bubble, 1.0))
+                Some((inks.waiting, 1.0))
             });
         }
         EffectKind::FlameCrown => {
@@ -233,9 +232,7 @@ fn dense_look(
             let foot = walking_dust_foot(e.at, e.phase);
             let x = i32::from(foot.x) * d + d / 2 - glyph_w(DUST) / 2;
             let y = i32::from(foot.y) * d - 1;
-            stamp(DUST, x, y, emit, |_| {
-                Some((theme.effects.walking_dust, 1.0))
-            });
+            stamp(DUST, x, y, emit, |_| Some((inks.dust, 1.0)));
         }
         // A creature's riders have no head, so `look` plots them as the classic
         // does; steam isn't drawn here.

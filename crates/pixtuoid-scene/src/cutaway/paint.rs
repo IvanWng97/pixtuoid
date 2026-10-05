@@ -10,16 +10,15 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, BufferPx, Pen};
 use crate::display::{
-    Align, Art, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
-    StoodProp, TextRun, compose, desk_span, face_rows, run_rect,
+    Align, Art, Backdrop, Covering, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind,
+    Recolours, Screen, Showing, StoodProp, TextRun, compose, desk_span, face_rows, run_rect,
 };
 use crate::dither::Dithered;
-use crate::layout::{Bounds, FixtureKind, Point, SceneLayout};
+use crate::layout::{Bounds, Point};
 use crate::outside::WindowView;
 use crate::pack::{CLOCK_SPRITE, DOOR_SPRITE, drawn_in};
 use crate::render_scale::RenderScale;
 use crate::sim::SimFrame;
-use crate::theme::Theme;
 
 /// How far the key light reaches down the room before the ground falls off.
 ///
@@ -99,40 +98,39 @@ pub fn render_cutaway(
     buf: &mut RgbBuffer,
 ) {
     let list = compose(frame, office, showing);
-    paint(office.layout, &list, cache, buf);
+    paint(&list, cache, buf);
 }
 
-/// Paint `list` whole: `layout`'s backdrop, then the list over it.
-pub(crate) fn paint(
-    layout: &SceneLayout,
-    list: &DisplayList<'_>,
-    cache: &mut CutawayCache,
-    buf: &mut RgbBuffer,
-) {
+/// Paint `list` whole: its backdrop, then its pieces over it.
+pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let pen = Pen::for_pack(list.scale(), list.pack());
-    paint_backdrop(layout, list.theme(), list.carpet(), list.scale(), pen, buf);
+    paint_backdrop(list.backdrop(), list.carpet(), list.scale(), pen, buf);
     paint_list(list, cache, buf);
 }
 
-/// Everything under the list's pieces, none of which moves within a layout,
-/// theme, carpet, pack and scale.
+/// Everything under the list's pieces, none of which moves within a
+/// backdrop, carpet, pack and scale.
 fn paint_backdrop(
-    layout: &SceneLayout,
-    theme: &Theme,
+    backdrop: &Backdrop,
     carpet: Dithered<Carpet>,
     scale: RenderScale,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    paint_carpet(layout, carpet, pen, buf);
-    for fixture in layout.fixtures() {
-        match covering(fixture.kind) {
-            Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
-            Some(Covering::Runner) => paint_runner(fixture.visual, theme, pen, buf),
-            None => {}
+    paint_carpet(backdrop, carpet, pen, buf);
+    for &(at, covering) in &backdrop.coverings {
+        match covering {
+            Covering::Rug {
+                trim,
+                accent,
+                field,
+            } => paint_rug(at, [trim, accent, field], pen, buf),
+            Covering::Runner { base, stripe, edge } => {
+                paint_runner(at, [base, stripe, edge], pen, buf);
+            }
         }
     }
-    paint_wall(layout, theme, scale, pen, buf);
+    paint_wall(backdrop, scale, pen, buf);
 }
 
 /// Paint `list` over the backdrop `buf` holds: every piece's shadow
@@ -192,7 +190,7 @@ fn paint_pieces(
         paint_piece(
             &piece.kind,
             list.pack(),
-            list.theme(),
+            list.recolours(),
             list.scale(),
             cache,
             buf,
@@ -475,51 +473,11 @@ fn paint_ground_shadows(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Covering {
-    Rug,
-    Runner,
-}
-
-/// Whether `kind` is a floor covering the backdrop lays ([`paint_backdrop`]):
-/// flat on the ground, so it lies under the shadows cast on it, and never moves.
-fn covering(kind: FixtureKind) -> Option<Covering> {
-    use FixtureKind as K;
-    match kind {
-        K::MeetingRug { .. } | K::LoungeRug | K::Doormat { .. } | K::PantryMat | K::IslandMat => {
-            Some(Covering::Rug)
-        }
-        K::Runner => Some(Covering::Runner),
-        K::Desk(_)
-        | K::FilingCabinet(_)
-        | K::DeskChair(_)
-        | K::Station { .. }
-        | K::Plant { .. }
-        | K::Pod { .. }
-        | K::Wall { .. }
-        | K::MeetingSofa { .. }
-        | K::MeetingTable { .. }
-        | K::MeetingChair { .. }
-        | K::CoatRack { .. }
-        | K::NoticeBoard { .. }
-        | K::LoungeCouch
-        | K::SideTable
-        | K::FloorLamp
-        | K::FishTank
-        | K::KitchenIsland
-        | K::WaterCooler
-        | K::TrashBin
-        | K::Door
-        | K::NeonSign
-        | K::Clock => None,
-    }
-}
-
 /// Paint one piece of the display list.
 fn paint_piece(
     kind: &PieceKind,
     pack: &Pack,
-    theme: &Theme,
+    recolours: &Recolours,
     scale: RenderScale,
     cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
@@ -532,13 +490,15 @@ fn paint_piece(
             paint_desk_front(at, art, screen, (pack, scale), &mut cache.art, buf);
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
-        PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
+        PieceKind::DeskProp(prop) => {
+            paint_desk_prop(prop, pack, &recolours.desk_props, scale, buf);
+        }
         PieceKind::Creature {
             at, art, degraded, ..
         } => {
             paint_creature(at, art, degraded, pack, scale, buf);
         }
-        PieceKind::Effect(ref riding) => riding.paint(theme, buf),
+        PieceKind::Effect(ref riding) => riding.paint(buf),
         PieceKind::Character {
             ref figure, chair, ..
         } => {
@@ -550,7 +510,7 @@ fn paint_piece(
             }
         }
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-            paint_art(at, art, pack, theme, scale, buf)
+            paint_art(at, art, pack, &recolours.art, scale, buf)
         }
         PieceKind::PropBand { at, sprite, rows } => {
             paint_prop_band(at, sprite, rows, pack, scale, buf);
@@ -563,13 +523,14 @@ fn paint_piece(
             hue,
             interior,
         } => paint_neon(at, [tube, hue, interior], Pen::for_pack(scale, pack), buf),
-        PieceKind::Clock { at, reading } => paint_clock(at, reading, pack, theme, scale, buf),
+        PieceKind::Clock { at, reading, hand } => {
+            paint_clock(at, reading, hand, pack, &recolours.art, scale, buf);
+        }
         PieceKind::WallSeg {
             piece,
             rows: (y0, y1),
-        } => {
-            crate::cutaway::wall::paint_wall(buf, theme, piece, y0..y1, Pen::for_pack(scale, pack))
-        }
+            trim,
+        } => crate::cutaway::wall::paint_wall(buf, trim, piece, y0..y1, Pen::for_pack(scale, pack)),
         PieceKind::Window { ref view, frame } => {
             paint_window(view, frame, Pen::for_pack(scale, pack), buf);
         }
@@ -608,9 +569,9 @@ const NOON_DARKNESS: f32 = 0.0;
 pub(crate) fn assert_variant_desk_foot(
     variant: &[pixtuoid_core::sprite::Rgb],
     base: &[pixtuoid_core::sprite::Rgb],
-    layout: &SceneLayout,
+    layout: &crate::layout::SceneLayout,
     base_pack: &Pack,
-    theme: &Theme,
+    theme: &crate::theme::Theme,
     scale: RenderScale,
     now: std::time::SystemTime,
 ) {
@@ -623,7 +584,7 @@ pub(crate) fn assert_variant_desk_foot(
         theme.surface.bg_fallback,
     );
     paint_carpet(
-        layout,
+        &Backdrop::of(layout, theme),
         tones.carpet(theme),
         Pen::for_pack(scale, base_pack),
         &mut ground,
@@ -707,42 +668,37 @@ impl Flip {
 /// trim. The windows are list pieces
 /// ([`push_windows`](crate::display::compose::push_windows)).
 ///
-/// Its height is [`SceneLayout::wall_band_h`], not `top_margin`: the rows between
-/// are floor the agents walk on, so a band drawn to `top_margin` would paint
-/// over them.
-fn paint_wall(
-    layout: &SceneLayout,
-    theme: &Theme,
-    scale: RenderScale,
-    pen: Pen,
-    buf: &mut RgbBuffer,
-) {
-    let band_h = layout.wall_band_h();
+/// Its height is the backdrop's `wall_band_h`, not `top_margin`: the rows
+/// between are floor the agents walk on, so a band drawn to `top_margin` would
+/// paint over them.
+fn paint_wall(backdrop: &Backdrop, scale: RenderScale, pen: Pen, buf: &mut RgbBuffer) {
+    let band_h = backdrop.wall_band_h;
     if band_h == 0 {
         return;
     }
+    let tones = backdrop.tones;
     let s = scale.get();
-    let w = scale.to_buffer(layout.buf_w);
-    let wall = Ramp::from_base(theme.surface.wall);
+    let w = scale.to_buffer(backdrop.size.w);
+    let wall = Ramp::from_base(tones.wall);
     slab(buf, 0, 0, w, scale.to_buffer(band_h), &wall, scale);
-    let rows = crate::layout::window_rows(band_h);
+    let rows = backdrop.window_rows.clone();
     let window_h = rows.end - rows.start;
-    for post in crate::layout::window_posts(layout.buf_w) {
+    for post in &backdrop.posts {
         let cell = ArtRect {
             x: pen.art(post.start),
             y: pen.art(rows.start),
             w: pen.art(post.end - post.start),
             h: pen.art(window_h),
         };
-        pen.fill(buf, cell, theme.surface.window_frame);
+        pen.fill(buf, cell, tones.window_frame);
     }
     fill(
         buf,
         0,
-        scale.to_buffer(crate::layout::wall_trim_row(band_h)),
+        scale.to_buffer(backdrop.trim_row),
         w,
         s,
-        theme.surface.wall_trim,
+        tones.wall_trim,
     );
     // The wall's contact line: the ground under it, a shade step down.
     let mut contact = crate::dither::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
@@ -751,7 +707,7 @@ fn paint_wall(
         ArtRect {
             x: ArtPx(0),
             y: pen.art(band_h),
-            w: pen.art(layout.buf_w),
+            w: pen.art(backdrop.size.w),
             h: pen.art(1),
         },
         |_, _, under| contact.of(under),
@@ -778,25 +734,25 @@ fn paint_window(
 
 /// The carpet [`paint_carpet_tones`] lays, each art pixel in the tones
 /// `carpet` dithers it to.
-fn paint_carpet(layout: &SceneLayout, carpet: Dithered<Carpet>, pen: Pen, buf: &mut RgbBuffer) {
+fn paint_carpet(backdrop: &Backdrop, carpet: Dithered<Carpet>, pen: Pen, buf: &mut RgbBuffer) {
     if let Some(tones) = carpet.as_solid() {
-        return paint_carpet_tones(layout, tones, pen, buf);
+        return paint_carpet_tones(backdrop, tones, pen, buf);
     }
     let [from, to] = carpet.ends();
-    paint_carpet_tones(layout, from, pen, buf);
+    paint_carpet_tones(backdrop, from, pen, buf);
     let mut incoming = buf.clone();
-    paint_carpet_tones(layout, to, pen, &mut incoming);
+    paint_carpet_tones(backdrop, to, pen, &mut incoming);
     pen.take_where(buf, &incoming, |x, y| carpet.takes_to(x.0, y.0));
 }
 
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
 /// the art grid: every edge, dither step and seam lands on an art pixel,
 /// whatever the scale.
-fn paint_carpet_tones(layout: &SceneLayout, carpet: Carpet, pen: Pen, buf: &mut RgbBuffer) {
+fn paint_carpet_tones(backdrop: &Backdrop, carpet: Carpet, pen: Pen, buf: &mut RgbBuffer) {
     let Carpet { lit, base, dark } = carpet;
 
-    let h = pen.art(layout.buf_h);
-    let w = pen.art(layout.buf_w);
+    let h = pen.art(backdrop.size.h);
+    let w = pen.art(backdrop.size.w);
     let band = |y0: u16, rows: u16| ArtRect {
         x: ArtPx(0),
         y: ArtPx(y0),
@@ -808,7 +764,7 @@ fn paint_carpet_tones(layout: &SceneLayout, carpet: Carpet, pen: Pen, buf: &mut 
     // Anchored at the wall's foot, where the ground begins, not buffer row 0: the
     // wall band paints over the top of the buffer, so a lit zone anchored there
     // would start behind it.
-    let ground_top = pen.art(layout.wall_band_h()).0;
+    let ground_top = pen.art(backdrop.wall_band_h).0;
     let ground_h = h.0.saturating_sub(ground_top);
 
     // The lit share of the ground: its first half solid, dithering to base by its
@@ -832,8 +788,12 @@ fn paint_carpet_tones(layout: &SceneLayout, carpet: Carpet, pen: Pen, buf: &mut 
 
 /// A rug on the art grid: the classic's trim, accent line and field, then a
 /// woven lattice and fringe at its short ends wherever the density has room.
-fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let f = &theme.furniture;
+fn paint_rug(
+    rug: crate::layout::Bounds,
+    [rug_trim, rug_accent, rug_field]: [pixtuoid_core::sprite::Rgb; 3],
+    pen: Pen,
+    buf: &mut RgbBuffer,
+) {
     let d = pen.art(1).0;
     let (x0, y0, w, h) = (
         pen.art(rug.x).0,
@@ -857,15 +817,15 @@ fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbB
     };
     // Half a logical unit wide, so at 1x this is the classic's rug, cell for cell.
     let trim = (d / 2).max(1);
-    pen.fill(buf, inset(0), f.rug_trim);
-    pen.fill(buf, inset(trim), f.rug_accent);
-    pen.fill(buf, inset(trim + 1), f.rug_field);
+    pen.fill(buf, inset(0), rug_trim);
+    pen.fill(buf, inset(trim), rug_accent);
+    pen.fill(buf, inset(trim + 1), rug_field);
     if d == 1 {
         return;
     }
 
     // Mirrored about the rug's centre column, so it sits square in the field.
-    let motif = f.rug_field.ramp(RUG_MOTIF_LEVEL);
+    let motif = rug_field.ramp(RUG_MOTIF_LEVEL);
     let lattice = inset(trim + 3);
     for y in lattice.y.0..lattice.y.0 + lattice.h.0 {
         for x in lattice.x.0..lattice.x.0 + lattice.w.0 {
@@ -878,7 +838,7 @@ fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbB
         }
     }
     // A tassel every other pixel along each short end, as long as the trim.
-    let tassel = f.rug_trim.ramp(RUG_FRINGE_LEVEL);
+    let tassel = rug_trim.ramp(RUG_FRINGE_LEVEL);
     if w >= h {
         for y in (y0 + 1..y0 + h - 1).step_by(2) {
             pen.fill(buf, rect(x0.saturating_sub(trim), y, trim, 1), tassel);
@@ -1158,19 +1118,20 @@ fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
     );
 }
 
-/// Blit `art` centred on `at`, in the theme's colours ([`theme_overrides`]).
+/// Blit `art` centred on `at`, in the theme's colours
+/// ([`Recolours::art`](crate::display::Recolours)).
 fn paint_art(
     at: Point,
     art: Art,
     pack: &Pack,
-    theme: &Theme,
+    recolours: &[(char, pixtuoid_core::sprite::Pixel)],
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
     let Some(dense) = crate::pack::densest_frame(pack, art.sprite, art.frame, scale) else {
         return;
     };
-    let themed = dense.recolorable.recolored(&theme_overrides(theme));
+    let themed = dense.recolorable.recolored(recolours);
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
 }
@@ -1202,16 +1163,14 @@ fn paint_creature(
 fn paint_desk_prop(
     prop: StoodProp,
     pack: &Pack,
-    theme: &Theme,
+    recolours: &[(char, pixtuoid_core::sprite::Pixel)],
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
     let Some(f) = crate::pack::densest_frame(pack, prop.sprite, prop.frame, scale) else {
         return;
     };
-    let f_themed = f
-        .recolorable
-        .recolored(&crate::pack::desk_prop_overrides(theme));
+    let f_themed = f.recolorable.recolored(recolours);
     blit_frame_scaled(
         &prop.flip.turn(f_themed),
         prop.at.0,
@@ -1219,14 +1178,6 @@ fn paint_desk_prop(
         f.blit_at,
         buf,
     );
-}
-
-/// The pack keys art takes from the theme.
-fn theme_overrides(theme: &Theme) -> Vec<(char, pixtuoid_core::sprite::Pixel)> {
-    crate::pack::appliance_overrides(&theme.appliance)
-        .into_iter()
-        .chain(crate::pack::fixture_overrides(theme))
-        .collect()
 }
 
 fn paint_door(at: Point, frame: usize, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
@@ -1294,20 +1245,20 @@ fn paint_neon(
 fn paint_clock(
     at: Point,
     reading: crate::sky::ClockReading,
+    hand: pixtuoid_core::sprite::Rgb,
     pack: &Pack,
-    theme: &Theme,
+    recolours: &[(char, pixtuoid_core::sprite::Pixel)],
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
     let Some(dial) = crate::pack::densest_frame(pack, CLOCK_SPRITE, 0, scale) else {
         return;
     };
-    let themed = dial.recolorable.recolored(&theme_overrides(theme));
+    let themed = dial.recolorable.recolored(recolours);
     let (bx, by) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
     blit_frame_scaled(&themed, bx, by, dial.blit_at, buf);
     let pen = Pen::for_pack(scale, pack);
     let (ax, ay) = (pen.art(at.x).0, pen.art(at.y).0);
-    let hand = theme.office.clock_hand;
     let dot = |buf: &mut RgbBuffer, x: i32, y: i32| {
         if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) {
             pen.fill(
@@ -1382,8 +1333,12 @@ const CLOCK_HOUR_HAND_SHARE: f32 = 0.5;
 const CLOCK_MINUTE_HAND_SHARE: f32 = 0.85;
 
 /// The classic's corridor runner on the art grid, its lines one art pixel wide.
-fn paint_runner(b: Bounds, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let o = &theme.office;
+fn paint_runner(
+    b: Bounds,
+    [runner_base, runner_stripe, runner_edge]: [pixtuoid_core::sprite::Rgb; 3],
+    pen: Pen,
+    buf: &mut RgbBuffer,
+) {
     let (x0, y0, w, h) = (
         pen.art(b.x).0,
         pen.art(b.y).0,
@@ -1411,19 +1366,19 @@ fn paint_runner(b: Bounds, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
             w: ArtPx(w),
             h: ArtPx(h),
         },
-        o.runner_base,
+        runner_base,
     );
     for dy in 1..h.saturating_sub(1) {
         for dx in 0..w {
             let (i, j) = (i32::from(dx), i32::from(dy));
             if (i + j) % pitch == 0 || (i - j).rem_euclid(pitch) == 0 {
-                px(buf, x0 + dx, y0 + dy, o.runner_stripe);
+                px(buf, x0 + dx, y0 + dy, runner_stripe);
             }
         }
     }
     for dx in 0..w {
-        px(buf, x0 + dx, y0, o.runner_edge);
-        px(buf, x0 + dx, y0 + h - 1, o.runner_edge);
+        px(buf, x0 + dx, y0, runner_edge);
+        px(buf, x0 + dx, y0 + h - 1, runner_edge);
     }
 }
 
@@ -1499,6 +1454,14 @@ mod tests {
     use crate::display::compose::{compose_at, ground_shadow, push_windows};
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
+    use crate::layout::{FixtureKind, SceneLayout};
+    use crate::theme::Theme;
+
+    /// `theme`'s rug tones, as a covering carries them.
+    fn rug_tones(theme: &Theme) -> [pixtuoid_core::sprite::Rgb; 3] {
+        let f = &theme.furniture;
+        [f.rug_trim, f.rug_accent, f.rug_field]
+    }
     use crate::pack::{MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, test_default_pack};
 
     /// Relighting recolors the screen KEYS and nothing else — not even a pixel
@@ -1678,7 +1641,7 @@ mod tests {
                         scale.to_buffer(layout.buf_h),
                         theme.surface.bg_fallback,
                     );
-                    paint(&layout, &list, &mut CutawayCache::default(), &mut buf);
+                    paint(&list, &mut CutawayCache::default(), &mut buf);
                     let monitors: Vec<(u16, u16)> = list
                         .pieces()
                         .iter()
@@ -1919,7 +1882,12 @@ mod tests {
             scale.to_buffer(layout.buf_h),
             pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
         );
-        paint_carpet(layout, Carpet::plain(&crate::theme::NORMAL), pen, &mut buf);
+        paint_carpet(
+            &Backdrop::of(layout, &crate::theme::NORMAL),
+            Carpet::plain(&crate::theme::NORMAL),
+            pen,
+            &mut buf,
+        );
         (pen, buf)
     }
 
@@ -1946,8 +1914,7 @@ mod tests {
                     pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
                 );
                 paint_backdrop(
-                    &layout,
-                    theme,
+                    &Backdrop::of(&layout, theme),
                     Carpet::plain(theme),
                     scale,
                     Pen::for_pack(scale, &pack),
@@ -1994,7 +1961,7 @@ mod tests {
             let blank =
                 || RgbBuffer::filled(32, 32, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
             let (mut cutaway, mut classic) = (blank(), blank());
-            paint_rug(rug, theme, pen, &mut cutaway);
+            paint_rug(rug, rug_tones(theme), pen, &mut cutaway);
             crate::pixel_painter::paint_area_rug(&mut classic, rug, theme);
             assert!(
                 cutaway.as_slice() == classic.as_slice(),
@@ -2206,7 +2173,13 @@ mod tests {
                 scale.to_buffer(layout.buf_h),
                 theme.surface.bg_fallback,
             );
-            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
+            paint_backdrop(
+                &Backdrop::of(&layout, theme),
+                Carpet::plain(theme),
+                scale,
+                pen,
+                &mut buf,
+            );
             let mut order = Vec::new();
             push_windows(office, &moment, &GlassWeather::of(&moment), &mut order);
             let mut again = Vec::new();
@@ -2275,7 +2248,13 @@ mod tests {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
+        paint_backdrop(
+            &Backdrop::of(&layout, theme),
+            Carpet::plain(theme),
+            scale,
+            pen,
+            &mut buf,
+        );
         let k = scale.get() / pen.art(1).0;
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let mut posts = 0;
@@ -2356,7 +2335,7 @@ mod tests {
                 effect: crate::effects::Effect { phase, ..z.effect },
                 ..z
             };
-            let Some(s) = r.span(theme, 0) else {
+            let Some(s) = r.span(0) else {
                 continue;
             };
             assert!(
@@ -2414,7 +2393,7 @@ mod tests {
                     scale.to_buffer(layout.buf_h),
                     theme.surface.bg_fallback,
                 );
-                paint(&layout, &list, &mut CutawayCache::default(), &mut buf);
+                paint(&list, &mut CutawayCache::default(), &mut buf);
                 let glass: Vec<Span> = list
                     .pieces()
                     .iter()
@@ -2479,7 +2458,13 @@ mod tests {
                     .iter()
                     .find(|p| want(&p.kind))
                     .expect("the piece");
-                let [a, b] = painted_over_two_fills(&piece.kind, &layout, &pack, theme, scale);
+                let [a, b] = painted_over_two_fills(
+                    &piece.kind,
+                    &layout,
+                    &pack,
+                    &Recolours::of(theme),
+                    scale,
+                );
                 let painted: Vec<u16> = (0..a.height())
                     .filter(|&y| {
                         (0..a.width()).any(|x| a.get(x, y) != UNDER[0] || b.get(x, y) != UNDER[1])
@@ -2573,17 +2558,10 @@ mod tests {
         let mut buf = RgbBuffer::filled(
             list.scale().to_buffer(layout.buf_w),
             list.scale().to_buffer(layout.buf_h),
-            list.theme().surface.bg_fallback,
+            list.backdrop().tones.bg,
         );
         let pen = Pen::for_pack(list.scale(), list.pack());
-        paint_backdrop(
-            layout,
-            list.theme(),
-            list.carpet(),
-            list.scale(),
-            pen,
-            &mut buf,
-        );
+        paint_backdrop(list.backdrop(), list.carpet(), list.scale(), pen, &mut buf);
         paint_ground_shadows(
             list.pieces().iter().filter_map(|p| p.shadow),
             crate::ground::shadow_strength(list.ambient().darkness()),
@@ -2618,8 +2596,7 @@ mod tests {
         let mut cache = CutawayCache::default();
         let mut night = RgbBuffer::filled(day.width(), day.height(), theme.surface.bg_fallback);
         paint_backdrop(
-            &layout,
-            theme,
+            &Backdrop::of(&layout, theme),
             list.carpet(),
             scale,
             Pen::for_pack(scale, &pack),
@@ -2722,8 +2699,13 @@ mod tests {
     ) -> usize {
         let mut repeats = 0;
         for piece in list.pieces().iter().filter(|p| keep(p)) {
-            let pixels =
-                painted_alone(&piece.kind, layout, list.pack(), list.theme(), list.scale());
+            let pixels = painted_alone(
+                &piece.kind,
+                layout,
+                list.pack(),
+                list.recolours(),
+                list.scale(),
+            );
             let s = list.scale().get();
             match painted.entry((s, piece.span, piece.fingerprint)) {
                 std::collections::hash_map::Entry::Occupied(seen) => {
@@ -2760,7 +2742,7 @@ mod tests {
         kind: &PieceKind,
         layout: &SceneLayout,
         pack: &Pack,
-        theme: &Theme,
+        recolours: &Recolours,
         scale: RenderScale,
     ) -> [RgbBuffer; 2] {
         let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
@@ -2769,7 +2751,7 @@ mod tests {
             paint_piece(
                 kind,
                 pack,
-                theme,
+                recolours,
                 scale,
                 &mut CutawayCache::default(),
                 &mut buf,
@@ -2783,12 +2765,12 @@ mod tests {
         kind: &PieceKind,
         layout: &SceneLayout,
         pack: &Pack,
-        theme: &Theme,
+        recolours: &Recolours,
         scale: RenderScale,
     ) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::hash::DefaultHasher::new();
-        for buf in painted_over_two_fills(kind, layout, pack, theme, scale) {
+        for buf in painted_over_two_fills(kind, layout, pack, recolours, scale) {
             buf.as_slice().hash(&mut hasher);
         }
         hasher.finish()
@@ -2804,7 +2786,7 @@ mod tests {
         scale: RenderScale,
     ) -> Option<(u16, u16)> {
         let w = scale.to_buffer(layout.buf_w);
-        let [a, b] = painted_over_two_fills(kind, layout, pack, theme, scale);
+        let [a, b] = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
         // A pixel that is neither the same over both fills nor left alone is a
         // recolouring of what lay under it.
         let recoloured = a
@@ -2849,8 +2831,19 @@ mod tests {
             )
         };
         let (mut ground, mut laid) = (blank(), blank());
-        paint_carpet(&layout, Carpet::plain(theme), pen, &mut ground);
-        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut laid);
+        paint_carpet(
+            &Backdrop::of(&layout, theme),
+            Carpet::plain(theme),
+            pen,
+            &mut ground,
+        );
+        paint_backdrop(
+            &Backdrop::of(&layout, theme),
+            Carpet::plain(theme),
+            scale,
+            pen,
+            &mut laid,
+        );
         let row = scale.to_buffer(layout.wall_band_h());
         for x in 0..ground.width() {
             assert_eq!(
@@ -2880,7 +2873,7 @@ mod tests {
             scale.to_buffer(rug.y * 2 + rug.height),
         );
         let mut buf = RgbBuffer::filled(w, h, UNDER[0]);
-        paint_rug(rug, theme, pen, &mut buf);
+        paint_rug(rug, rug_tones(theme), pen, &mut buf);
         for y in 0..h {
             for x in 0..w {
                 assert_eq!(buf.get(x, y), buf.get(w - 1 - x, y), "({x}, {y})");
@@ -2896,7 +2889,7 @@ mod tests {
         scale: RenderScale,
     ) -> Option<u16> {
         let w = usize::from(scale.to_buffer(layout.buf_w));
-        let [a, b] = painted_over_two_fills(kind, layout, pack, theme, scale);
+        let [a, b] = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
         a.as_slice()
             .iter()
             .zip(b.as_slice())
@@ -2930,7 +2923,7 @@ mod tests {
                 .iter()
                 .find(|(_, k)| matches!(k, PieceKind::Table { .. }))
                 .expect("a meeting trio");
-            let [a, b] = painted_over_two_fills(kind, &layout, &pack, theme, scale);
+            let [a, b] = painted_over_two_fills(kind, &layout, &pack, &Recolours::of(theme), scale);
             let bottom = (0..a.height())
                 .rev()
                 .find(|&y| {
@@ -3045,11 +3038,30 @@ mod tests {
         };
         let (mut night, mut raw) = (blank(), blank());
         let mut cache = CutawayCache::default();
-        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut night);
+        paint_backdrop(
+            &Backdrop::of(&layout, theme),
+            Carpet::plain(theme),
+            scale,
+            pen,
+            &mut night,
+        );
         paint_list(&list, &mut cache, &mut night);
-        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut raw);
+        paint_backdrop(
+            &Backdrop::of(&layout, theme),
+            Carpet::plain(theme),
+            scale,
+            pen,
+            &mut raw,
+        );
         for p in list.pieces() {
-            paint_piece(&p.kind, &pack, theme, scale, &mut cache, &mut raw);
+            paint_piece(
+                &p.kind,
+                &pack,
+                list.recolours(),
+                scale,
+                &mut cache,
+                &mut raw,
+            );
         }
         assert_ne!(
             night.as_slice(),
@@ -3146,9 +3158,15 @@ mod tests {
         let mut cache = CutawayCache::default();
         let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
             let mut buf = blank();
-            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
+            paint_backdrop(
+                &Backdrop::of(&layout, theme),
+                Carpet::plain(theme),
+                scale,
+                pen,
+                &mut buf,
+            );
             for p in list.pieces().iter().filter(|p| keep(&p.kind)) {
-                paint_piece(&p.kind, &pack, theme, scale, cache, &mut buf);
+                paint_piece(&p.kind, &pack, list.recolours(), scale, cache, &mut buf);
             }
             buf
         };
@@ -3156,7 +3174,13 @@ mod tests {
         let glass = painted(&|k| matches!(k, PieceKind::Window { .. }), &mut cache);
         let all = painted(&|_| true, &mut cache);
         let mut night = blank();
-        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut night);
+        paint_backdrop(
+            &Backdrop::of(&layout, theme),
+            Carpet::plain(theme),
+            scale,
+            pen,
+            &mut night,
+        );
         paint_list(&list, &mut cache, &mut night);
         let luma = pixtuoid_core::sprite::Rgb::lightness;
         let (mut kept, mut lifted) = (0, 0);
@@ -3208,7 +3232,7 @@ mod tests {
         };
         let mut bare = blank();
         blit_frame_scaled(
-            &dial.recolorable.recolored(&theme_overrides(theme)),
+            &dial.recolorable.recolored(&Recolours::of(theme).art),
             scale.to_buffer(at.x),
             scale.to_buffer(at.y),
             dial.blit_at,
@@ -3221,7 +3245,15 @@ mod tests {
                 minute: minutes % 60,
             };
             let mut buf = blank();
-            paint_clock(at, reading, &pack, theme, scale, &mut buf);
+            paint_clock(
+                at,
+                reading,
+                theme.office.clock_hand,
+                &pack,
+                &Recolours::of(theme).art,
+                scale,
+                &mut buf,
+            );
             for y in 0..buf.height() {
                 for x in 0..buf.width() {
                     if buf.get(x, y) != bare.get(x, y) {
@@ -3256,11 +3288,22 @@ mod tests {
                 )
             };
             let (mut bare, mut laid) = (blank(), blank());
-            paint_carpet(&layout, Carpet::plain(theme), pen, &mut bare);
-            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut laid);
+            paint_carpet(
+                &Backdrop::of(&layout, theme),
+                Carpet::plain(theme),
+                pen,
+                &mut bare,
+            );
+            paint_backdrop(
+                &Backdrop::of(&layout, theme),
+                Carpet::plain(theme),
+                scale,
+                pen,
+                &mut laid,
+            );
             for fixture in layout.fixtures() {
                 met.insert(crate::layout::roster::tests::kind_key(fixture.kind));
-                if covering(fixture.kind).is_some() {
+                if Covering::of(fixture.kind, theme).is_some() {
                     let b = fixture.visual;
                     let (x0, y0) = (scale.to_buffer(b.x), scale.to_buffer(b.y));
                     let (x1, y1) = (
@@ -3293,7 +3336,7 @@ mod tests {
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
-                let grounded = covering(fixture.kind).is_none()
+                let grounded = Covering::of(fixture.kind, &crate::theme::NORMAL).is_none()
                     && queued(&layout, &pack, scale, &[], |k| k == fixture.kind)
                         .iter()
                         .any(|(span, kind)| ground_shadow(*span, kind, &pack).is_some());
@@ -3326,7 +3369,7 @@ mod tests {
                 sofa,
                 Art::still(MEETING_SOFA_NORTH_SPRITE),
                 &pack,
-                &crate::theme::NORMAL,
+                &Recolours::of(&crate::theme::NORMAL).art,
                 scale,
                 &mut whole,
             );
@@ -3420,14 +3463,28 @@ mod tests {
 
         let mut buf = blank();
         let theme = &crate::theme::NORMAL;
-        paint_art(at, Art::still("plant"), &pack, theme, scale, &mut buf);
+        paint_art(
+            at,
+            Art::still("plant"),
+            &pack,
+            &Recolours::of(theme).art,
+            scale,
+            &mut buf,
+        );
         assert_eq!(drawn(&buf), variant, "prop");
         let mut buf = blank();
         let flipped = Art {
             flip: Flip::Vertical,
             ..Art::still("plant")
         };
-        paint_art(at, flipped, &pack, theme, scale, &mut buf);
+        paint_art(
+            at,
+            flipped,
+            &pack,
+            &Recolours::of(theme).art,
+            scale,
+            &mut buf,
+        );
         assert_eq!(drawn(&buf), variant, "mirrored prop");
         let mut buf = blank();
         paint_wall_decor(at, "whiteboard", &pack, scale, &mut buf);
@@ -3759,7 +3816,7 @@ mod tests {
             let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
             let painted = |list: &DisplayList<'_>| {
                 let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
-                paint(layout, list, &mut CutawayCache::default(), &mut buf);
+                paint(list, &mut CutawayCache::default(), &mut buf);
                 buf
             };
             let moment = |weathered: &crate::outside::tests::Weathered, sky| {
@@ -3808,7 +3865,16 @@ mod tests {
                             scale.to_buffer(piece.span.y0)..scale.to_buffer(piece.span.y1 + 1),
                         )
                     },
-                    |piece, over| paint_piece(&piece.kind, &pack, theme, scale, &mut cache, over),
+                    |piece, over| {
+                        paint_piece(
+                            &piece.kind,
+                            &pack,
+                            list.recolours(),
+                            scale,
+                            &mut cache,
+                            over,
+                        )
+                    },
                 )
             };
             let hung_over_glass = assert_the_outside_reaches_only_the_glass(
@@ -4498,9 +4564,10 @@ mod tests {
                 degraded,
                 who: frame.mascots[0].target(),
             };
+            let recolours = Recolours::of(theme);
             assert_ne!(
-                painted_alone(&lobster_kind(true), &layout, &pack, theme, scale),
-                painted_alone(&lobster_kind(false), &layout, &pack, theme, scale),
+                painted_alone(&lobster_kind(true), &layout, &pack, &recolours, scale),
+                painted_alone(&lobster_kind(false), &layout, &pack, &recolours, scale),
                 "at scale {s} a degraded gateway looks as a healthy one"
             );
         }
@@ -4582,9 +4649,9 @@ mod tests {
             buf
         };
         let [going, coming, mid] = [
-            lay(&|buf| paint_carpet_tones(&layout, from, pen, buf)),
-            lay(&|buf| paint_carpet_tones(&layout, to, pen, buf)),
-            lay(&|buf| paint_carpet(&layout, carpet, pen, buf)),
+            lay(&|buf| paint_carpet_tones(&Backdrop::of(&layout, theme), from, pen, buf)),
+            lay(&|buf| paint_carpet_tones(&Backdrop::of(&layout, theme), to, pen, buf)),
+            lay(&|buf| paint_carpet(&Backdrop::of(&layout, theme), carpet, pen, buf)),
         ];
         let mut took = [0; 2];
         for y in 0..mid.height() {
@@ -4833,7 +4900,7 @@ mod tests {
             list.scale().to_buffer(layout.buf_w),
             list.scale().to_buffer(layout.buf_h),
         );
-        let mut buf = RgbBuffer::filled(w, h, list.theme().surface.bg_fallback);
+        let mut buf = RgbBuffer::filled(w, h, list.backdrop().tones.bg);
         let pen = Pen::for_pack(list.scale(), list.pack());
         let lights: Vec<&crate::display::light::LightView> =
             list.lights().iter().map(|l| &l.view).collect();
@@ -5451,8 +5518,13 @@ mod tests {
                         && body.y1 <= span.y1,
                     "hover box {body:?} leaves its piece's span {span:?}"
                 );
-                let [a, b] =
-                    painted_over_two_fills(&piece.kind, &layout, &pack, theme, RenderScale::ONE);
+                let [a, b] = painted_over_two_fills(
+                    &piece.kind,
+                    &layout,
+                    &pack,
+                    &Recolours::of(theme),
+                    RenderScale::ONE,
+                );
                 assert!(
                     a.as_slice()
                         .iter()
