@@ -3263,6 +3263,7 @@ fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded,
+            on_roster: true,
             effects: Vec::new(),
         };
         let mut drawables = Vec::new();
