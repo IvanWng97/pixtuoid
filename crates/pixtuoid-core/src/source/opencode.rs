@@ -47,7 +47,7 @@ pub const SOURCE_NAME: &str = "opencode";
 const SUBAGENT_TOOLS: &[&str] = &["task"];
 
 /// Decode one opencode plugin envelope (already identified by
-/// `_pixtuoid_source == "opencode"`). `type` is the base `EventV2` name; the data
+/// `_pixtuoid_source == "opencode"`). `type` is the base EventV2 name; the data
 /// is under `properties`.
 ///
 /// An unmapped `type` is a benign skip (`Ok(vec![])`), not an error: the

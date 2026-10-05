@@ -23,7 +23,7 @@ pub(crate) fn admits_transcript(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("transcript_full.jsonl")
 }
 
-/// Decode one Antigravity CLI transcript line into `AgentEvent`s (the `step_index` / `tool_calls` JSONL schema).
+/// Decode one Antigravity CLI transcript line into `AgentEvent`s (the step_index / tool_calls JSONL schema).
 ///
 /// # Errors
 ///

@@ -184,12 +184,7 @@ fn fresh_spend(message: &serde_json::Map<String, Value>) -> u64 {
     let Some(usage) = message.get("usage").and_then(|u| u.as_object()) else {
         return 0;
     };
-    let field = |k: &str| {
-        usage
-            .get(k)
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0)
-    };
+    let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
     field("input_tokens")
         .saturating_add(field("cache_creation_input_tokens"))
         .saturating_add(field("output_tokens"))

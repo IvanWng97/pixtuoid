@@ -425,7 +425,7 @@ fn hook_effort(agent_id: AgentId, obj: &serde_json::Map<String, Value>) -> Optio
 /// Decode one hook payload into the event sequence the reducer applies.
 ///
 /// The tool/permission arms (PreToolUse / PostToolUse / Notification /
-/// `PermissionRequest`) lead with an [`AgentEvent::Identity`] carrying the payload's
+/// PermissionRequest) lead with an [`AgentEvent::Identity`] carrying the payload's
 /// source/session_id/cwd (#221), so the reducer's proof-of-life registration for an
 /// unknown id lands with REAL identity instead of a blank `#N` slot. The
 /// session-lifecycle and custom Subagent arms deliberately do NOT: SessionStart
