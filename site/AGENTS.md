@@ -30,7 +30,10 @@ build:
   edit), `lighthouserc.json`, and the smoke viewport table.
 
 `public/wasm/` is gitignored `just gen-wasm` output; without it the office
-silently stays on its poster.
+silently stays on its poster. `public/demos/` is gitignored too:
+`just gen-media --only site` renders it locally (before a build or dev server,
+which `astro.config.mjs`'s `demoAssets()` fails on a missing demo, and before
+`test:demos`), and CI renders it per build.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is
@@ -76,7 +79,7 @@ moves there so the gzip proxy can take the audited port.
 ## Gates
 
 `just site-check` = `npm run verify` (format:check → lint → check → knip →
-test:unit → build → check:docs → audit). `just site-e2e` = Playwright vs the
+test:unit → test:demos → build → check:docs → audit). `just site-e2e` = Playwright vs the
 PRODUCTION build — the runtime-contract tier (`__pixLights`/`pix:onair`/
 `data-lit` seams, scrollspy keys, docs-nav variant, reduced-motion, console
 watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
