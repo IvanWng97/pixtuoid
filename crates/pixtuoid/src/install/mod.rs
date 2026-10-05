@@ -27,8 +27,10 @@ use anyhow::{Context, Result, bail};
 
 use target::{BinaryStrategy, Target};
 
-/// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
-/// config-file targets key install/uninstall/detect on this, not the command shape.
+/// The idempotency sentinel stamped on every hook entry pixtuoid merges into a
+/// shared config — those targets key install/uninstall/detect on this, not the
+/// command shape. A plugin's own hooks file (Claude Code's) is ours whole and
+/// carries none.
 pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 
 /// Whether `t`'s config currently bears pixtuoid hooks — the load-bearing gate for
