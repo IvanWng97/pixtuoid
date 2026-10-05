@@ -160,26 +160,29 @@ impl FloatingApp {
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
-        let office = self.renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &self.pack,
-                now,
-                floor: floor_meta,
-                pets: PetInputs {
-                    pet: floor_pet,
-                    // Click-to-pet needs window pointer hit-testing (deferred).
-                    petting: None,
+        let office = self.renderer.render_live(
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs {
+                        pet: floor_pet,
+                        // Click-to-pet needs window pointer hit-testing (deferred).
+                        petting: None,
+                    },
                 },
+                theme: self.theme,
+                size: Size { w: buf_w, h: buf_h },
+                place: Place {
+                    gateway: pixtuoid_scene::tally::office_gateway(&scene),
+                    floor: None,
+                },
+                debug_walkable: false,
             },
-            theme: self.theme,
-            size: Size { w: buf_w, h: buf_h },
-            place: Place {
-                gateway: pixtuoid_scene::board::office_gateway(&scene),
-                floor: None,
-            },
-            debug_walkable: false,
-        });
+            (win_w, win_h),
+        );
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -191,7 +194,7 @@ impl FloatingApp {
         };
         let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
         let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
-            return; // nothing rendered — skip this frame
+            return; // nothing rendered, or held: the window keeps the last frame
         };
         let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
@@ -213,7 +216,9 @@ impl FloatingApp {
             .footer(&scene, budget, audio_audible, volume_flash);
         super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
         window.pre_present_notify();
-        let _ = sb.present();
+        if sb.present().is_ok() {
+            self.renderer.presented();
+        }
     }
 }
 

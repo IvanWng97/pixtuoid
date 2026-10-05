@@ -9,10 +9,9 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::display::{Badge, TextRun};
+use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, FloorSession};
-use pixtuoid_scene::footer::{
-    FooterContext, FooterInputs, FooterModel, build_footer, footer_tone_rgb,
-};
+use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::look::{Look, RenderInputs};
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;
@@ -33,6 +32,11 @@ pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
+    /// The flash the window shows.
+    flash: FlashHold<FlashPhase, (u32, u32)>,
+    /// The flash the last [`render_live`](Self::render_live) handed out, and
+    /// the window it was for.
+    rendered: (FlashPhase, (u32, u32)),
 }
 
 impl OfficeRenderer {
@@ -41,6 +45,8 @@ impl OfficeRenderer {
         Self {
             session: FloorSession::new(pack),
             audio: crate::audio::AudioHandle::disabled(),
+            flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
+            rendered: (FlashPhase::default(), (0, 0)),
         }
     }
 
@@ -66,6 +72,30 @@ impl OfficeRenderer {
         self.audio
             .frame(self.session.audio_frame(scene, floor, now));
         self.session.buf()
+    }
+
+    /// [`render`](Self::render) for the window on screen, `window` physical
+    /// pixels: `None` also when the flash hold keeps the frame back, so the
+    /// window keeps the last. A frame handed out is
+    /// [`presented`](Self::presented) once it shows.
+    pub fn render_live(
+        &mut self,
+        inputs: RenderInputs<'_>,
+        window: (u32, u32),
+    ) -> Option<&RgbBuffer> {
+        self.render(inputs);
+        let flash = self.session.flash();
+        if self.flash.holds(flash, window) {
+            return None;
+        }
+        self.rendered = (flash, window);
+        self.session.buf()
+    }
+
+    /// The frame [`render_live`](Self::render_live) last handed out finished
+    /// presenting just now.
+    pub fn presented(&mut self) {
+        self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
     /// The badges of the LAST rendered frame (call right after `render`).
@@ -286,7 +316,7 @@ impl<'a> XrgbSurface<'a> {
 /// office-buffer space → multiply by `scale` for screen space; the badge is
 /// centered horizontally over it and sits just above the head.
 pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[Badge], scale: i32) {
-    let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+    let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
     let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
     for Badge {
         at,
@@ -370,7 +400,7 @@ pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, 
     let y = (sb.h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FOOTER_MARGIN_PX).max(0);
     let mut x = FOOTER_MARGIN_PX;
     for seg in &model.segments {
-        let color = pack_xrgb(footer_tone_rgb(seg.tone, theme));
+        let color = pack_xrgb(seg.tone.rgb(theme));
         sb.draw_shadowed_text(&seg.text, x, y, LABEL_FONT_PX, color);
         x += crate::aa_text::text_width(&seg.text, LABEL_FONT_PX);
     }
@@ -378,6 +408,8 @@ pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, 
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use super::*;
     use pixtuoid_scene::floor::{FloorMeta, PetInputs};
 
@@ -385,10 +417,10 @@ mod tests {
     fn badge(
         at: pixtuoid_scene::layout::Point,
         name: &str,
-        tone: pixtuoid_scene::overlay::LabelTone,
+        tone: pixtuoid_scene::badge::BadgeTone,
         theme: &Theme,
     ) -> Badge {
-        let ink = pixtuoid_scene::overlay::badge_ink(name, tone, theme);
+        let ink = pixtuoid_scene::badge::badge_ink(name, tone, theme);
         Badge {
             agent: pixtuoid_core::AgentId::from_transcript_path("/badge/0.jsonl"),
             at,
@@ -401,6 +433,7 @@ mod tests {
         }
     }
     use pixtuoid_scene::layout::Size;
+    use std::time::Duration;
     use winit::dpi::LogicalSize;
 
     #[test]
@@ -485,6 +518,190 @@ mod tests {
                 .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the painter draws office content beyond the cleared background"
         );
+    }
+
+    /// An empty office's window, under `weather`, moving fully, its flashes
+    /// held on a screen clock the test moves.
+    struct Window {
+        renderer: OfficeRenderer,
+        scene: SceneState,
+        floor: FloorMeta,
+        screen: pixtuoid_scene::flash::ManualClock,
+        /// How long a present takes on the screen clock.
+        present_takes: Duration,
+        /// What the window shows.
+        shown: RgbBuffer,
+        /// The window's physical pixels.
+        px: (u32, u32),
+    }
+
+    impl Window {
+        fn new(weather: pixtuoid_scene::sky::WeatherPolicy) -> Self {
+            let screen = pixtuoid_scene::flash::ManualClock::default();
+            let mut renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
+            renderer.flash = FlashHold::on(screen.clock());
+            Self {
+                renderer,
+                scene: SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]),
+                floor: FloorMeta::ground()
+                    .with_weather(weather)
+                    .with_motion(pixtuoid_scene::anim::Motion::Full),
+                screen,
+                present_takes: Duration::ZERO,
+                shown: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+                px: (160, 96),
+            }
+        }
+
+        /// What the window shows after its redraw at `now`, as `window.rs`
+        /// presents it.
+        fn present(&mut self, now: SystemTime) -> RgbBuffer {
+            let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
+            self.screen.at(now);
+            let frame = self.renderer.render_live(
+                RenderInputs {
+                    world: FloorInputs {
+                        scene: &self.scene,
+                        pack: crate::test_flash::pack(),
+                        now,
+                        floor: self.floor,
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w: 160, h: 96 },
+                    place: pixtuoid_scene::look::Place::default(),
+                    debug_walkable: false,
+                },
+                self.px,
+            );
+            if let Some(frame) = frame {
+                self.shown = frame.clone();
+                self.screen.advance(self.present_takes);
+                self.renderer.presented();
+            }
+            self.shown.clone()
+        }
+    }
+
+    /// A window resized under a hold gets its frame at once: a screen of a new
+    /// shape shows nothing to hold. The same frame unresized is held.
+    #[test]
+    fn a_resized_window_is_never_held() {
+        use crate::test_flash::{held_frames, storm_strike};
+        let strike = storm_strike();
+        let [dark, late, held, _] = held_frames(&strike);
+        for resized in [false, true] {
+            let mut window = Window::new(strike.weather);
+            window.present(dark);
+            let before = window.present(late);
+            if resized {
+                window.px = (window.px.0 * 2, window.px.1 * 2);
+            }
+            let after = window.present(held);
+            assert_eq!(after.as_slice() != before.as_slice(), resized);
+        }
+    }
+
+    /// A phase holds the floor from when its present lands, not from when its
+    /// redraw began: after a slow present, the next phase waits for the floor
+    /// to pass on the screen clock, though its frame's own clock says it has.
+    #[test]
+    fn a_slow_presents_phase_holds_the_floor_from_when_it_lands() {
+        use crate::test_flash::storm_strike;
+        const SLOW: Duration = Duration::from_millis(60);
+        let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+        let strike = storm_strike();
+        let [first, second] = [strike.changes[0], strike.changes[1]];
+        let mut window = Window::new(strike.weather);
+        window.present(first - 2 * floor);
+        window.present_takes = SLOW;
+        let shown = window.present(first);
+        let landed = window.screen.now();
+        window.present_takes = Duration::ZERO;
+        assert!(
+            second.duration_since(first).expect("in order") >= floor,
+            "the frame clock says the floor has passed"
+        );
+        assert!(
+            window.present(second).as_slice() == shown.as_slice(),
+            "held until the slow present's phase shows the floor"
+        );
+        let after = std::time::UNIX_EPOCH + landed + floor;
+        assert!(
+            window.present(after).as_slice() != shown.as_slice(),
+            "shown once it has"
+        );
+    }
+
+    /// Each phase of a strike stays on screen at least the photosensitive
+    /// floor in the window, at its active cadence and each frame grid: from
+    /// the frame that first shows it to the one that replaces it. A strike
+    /// lifts the whole room, so a frame that changes most of the office's
+    /// pixels is a change of phase.
+    #[test]
+    fn each_strike_phase_holds_the_floor_on_screen_in_the_window() {
+        use crate::test_flash::{
+            assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike,
+        };
+        let strike = storm_strike();
+        for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
+            let mut window = Window::new(strike.weather);
+            let now = strike.start - lead(frame) + offset;
+            let mut shown = window.present(now);
+            let mut changed = Vec::new();
+            for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
+                let presented = window.present(now);
+                let differ = presented
+                    .as_slice()
+                    .iter()
+                    .zip(shown.as_slice())
+                    .filter(|(a, b)| a != b)
+                    .count();
+                if 2 * differ > presented.as_slice().len() {
+                    changed.push(now);
+                }
+                shown = presented;
+            }
+            let at = format!("a frame each {frame:?} from +{offset:?}");
+            assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
+        }
+    }
+
+    /// A starved neon's every catch, and every dark between, stays on screen
+    /// at least the photosensitive floor in the window, at its active cadence
+    /// and each frame grid. The pixels by the tube's west side change only
+    /// with it.
+    #[test]
+    fn each_stutter_phase_holds_the_floor_on_screen_in_the_window() {
+        use crate::test_flash::{
+            assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
+        };
+        let stutter = starved_stutter();
+        let tube = |buf: &RgbBuffer| -> Vec<Rgb> {
+            (0..buf.height())
+                .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+                .filter(|&(x, y)| neon_tube(x, y))
+                .map(|(x, y)| buf.get(x, y))
+                .collect()
+        };
+        for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
+            let mut window = Window::new(stutter.weather);
+            for at in stutter.setup {
+                window.present(at);
+            }
+            let now = stutter.start - lead(frame) + offset;
+            let mut shown = tube(&window.present(now));
+            let mut changed = Vec::new();
+            for now in crate::test_flash::frames_after(now, frame, stutter.end + lead(frame)) {
+                let presented = tube(&window.present(now));
+                if presented != shown {
+                    changed.push(now);
+                }
+                shown = presented;
+            }
+            let at = format!("a frame each {frame:?} from +{offset:?}");
+            assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+        }
     }
 
     #[test]
@@ -699,8 +916,8 @@ mod tests {
     /// the text draws over it.
     #[test]
     fn a_badge_sits_on_its_plate_in_the_window() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let plate = Rgb { r: 1, g: 2, b: 3 };
         let badge = Badge {
@@ -708,7 +925,7 @@ mod tests {
             ..badge(
                 Point { x: 40, y: 30 },
                 "cc\u{b7}api",
-                LabelTone::Idle,
+                BadgeTone::Idle,
                 theme,
             )
         };
@@ -720,7 +937,7 @@ mod tests {
             scale,
         );
         // The text's box, as `paint_labels_into_surface` lays it.
-        let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
         let tw = crate::aa_text::text_width(&marker, LABEL_FONT_PX)
             + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);
         let (cx, cy) = (
@@ -752,8 +969,8 @@ mod tests {
 
     #[test]
     fn paint_labels_uses_the_right_color_per_tone() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let as_u32 = |c: Rgb| u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b);
         let badge_dot = |tone| {
@@ -761,10 +978,10 @@ mod tests {
             vec![badge(Point { x: 20, y: 20 }, "\u{25cf}cc", tone, theme)]
         };
         for (tone, expected) in [
-            (LabelTone::Active, theme.ui.label_active),
-            (LabelTone::Waiting, theme.ui.label_waiting),
-            (LabelTone::Idle, theme.ui.label_idle),
-            (LabelTone::Exiting, theme.ui.label_exiting),
+            (BadgeTone::Active, theme.ui.label_active),
+            (BadgeTone::Waiting, theme.ui.label_waiting),
+            (BadgeTone::Idle, theme.ui.label_idle),
+            (BadgeTone::Exiting, theme.ui.label_exiting),
         ] {
             let mut sb = vec![0u32; 100 * 100];
             paint_labels_into_surface(
@@ -783,8 +1000,8 @@ mod tests {
     /// is already the sprite's top-centre, so any extra offset walks it off the sprite.
     #[test]
     fn a_badge_centres_its_ink_on_the_scaled_anchor() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let (w, h, scale) = (240usize, 60usize, 3i32);
         let ground = 0x0080_8080u32;
@@ -792,7 +1009,7 @@ mod tests {
         let anchor = Point { x: 40, y: 15 };
         paint_labels_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge(anchor, "idle-x", LabelTone::Idle, theme)],
+            &[badge(anchor, "idle-x", BadgeTone::Idle, theme)],
             scale,
         );
         let cols: Vec<i32> = (0..w)
@@ -814,17 +1031,17 @@ mod tests {
     #[test]
     fn paint_labels_ink_the_marker_and_the_name_as_the_model_says() {
         // A registered prefix (`cc·`), so the marker's ink differs from the name's.
+        use pixtuoid_scene::badge::{BADGE_MARKER, BadgeTone, badge_ink};
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{BADGE_MARKER, LabelTone, badge_ink};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let text = "cc\u{b7}api";
-        let ink = badge_ink(text, LabelTone::Idle, theme);
+        let ink = badge_ink(text, BadgeTone::Idle, theme);
         assert_ne!(ink.marker, ink.name, "premise: the two parts differ");
         let (w, h, scale, anchor) = (120usize, 120usize, 2, Point { x: 20, y: 20 });
         let mut sb = vec![0u32; w * h];
         paint_labels_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge(anchor, text, LabelTone::Idle, theme)],
+            &[badge(anchor, text, BadgeTone::Idle, theme)],
             scale,
         );
         // The marker's columns, then the name's, as `paint_labels_into_surface`
@@ -854,8 +1071,8 @@ mod tests {
 
     #[test]
     fn paint_labels_render_antialiased_partial_coverage_not_binary_pixels() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         // A WHITE ground: AA edges land STRICTLY between the ground and any fully-lit ink.
         let white = 0x00FF_FFFFu32;
@@ -863,7 +1080,7 @@ mod tests {
         let active = vec![badge(
             Point { x: 20, y: 20 },
             "active",
-            LabelTone::Active,
+            BadgeTone::Active,
             theme,
         )];
         paint_labels_into_surface(
@@ -888,14 +1105,14 @@ mod tests {
     fn wall_board_paints_brand_and_mood_tones_into_the_panel() {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         // A generous scale, so full-coverage stroke interiors reach the exact tone colors.
-        let counts = pixtuoid_scene::board::StateCounts {
+        let counts = pixtuoid_scene::tally::StateCounts {
             active: 2,
             waiting: 1,
             idle: 1,
             exiting: 0,
             total: 4,
         };
-        let board = pixtuoid_scene::board::build_board(
+        let board = pixtuoid_scene::neon_sign::build_board(
             counts,
             90,
             None,
@@ -1013,7 +1230,7 @@ mod tests {
         assert!(!frames.is_empty(), "an enabled handle receives frames");
         let stems = frames.last().unwrap().stems;
         let moderate = pixtuoid_scene::audio::stem_levels(
-            &pixtuoid_scene::board::StateCounts {
+            &pixtuoid_scene::tally::StateCounts {
                 active: 1,
                 waiting: 0,
                 idle: 0,
@@ -1059,10 +1276,7 @@ mod tests {
             "the footer stays in the bottom band"
         );
         assert!(
-            sb.contains(&pack_xrgb(footer_tone_rgb(
-                FooterTone::Rung(RungKind::Active),
-                theme
-            ))),
+            sb.contains(&pack_xrgb(FooterTone::Rung(RungKind::Active).rgb(theme))),
             "the ●A rung paints the shared label_active hue"
         );
     }
@@ -1262,7 +1476,7 @@ mod tests {
             badges,
             scale,
         );
-        let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
         for badge in badges {
             let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
             let tw = mw + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);

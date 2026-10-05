@@ -14,6 +14,7 @@ use ratatui::style::Color;
 use std::sync::Arc;
 
 use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
+use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
@@ -51,6 +52,9 @@ pub struct DrawCtx<'a> {
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
     pub connection: &'a crate::tui::connection::ConnectionFrame,
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
+    /// The flashes the terminal shows, for a live painter; a still has none
+    /// to hold.
+    pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -94,6 +98,7 @@ impl<'a> DrawCtx<'a> {
             dashboard: &CLOSED_DASHBOARD,
             connection: &CLOSED_CONNECTION,
             onboarding: &CLOSED_ONBOARDING,
+            flash: None,
         }
     }
 }
@@ -110,6 +115,9 @@ pub struct DrawOut {
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
+    /// The flash hold kept the frame off the terminal, which still shows the
+    /// last one and its hit targets.
+    pub held: bool,
 }
 
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
@@ -384,12 +392,24 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let Some(Rendered {
         layout,
         occupied_waypoints,
+        flash,
         ..
     }) = rendered
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
+    let flashes = [flash; 2];
+    if ctx
+        .flash
+        .as_ref()
+        .is_some_and(|f| f.holds(flashes, term_size))
+    {
+        return Ok(DrawOut {
+            held: true,
+            ..DrawOut::default()
+        });
+    }
     let star = ctx.floor.raster.star();
     let Some(ClassicDrawn {
         pixels,
@@ -439,12 +459,16 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
+    if let Some(flash) = ctx.flash.as_deref_mut() {
+        flash.shown(flashes, term_size);
+    }
     Ok(DrawOut {
         layout: Some(layout),
         hovers: hovers.clone(),
         star,
         occupied_waypoints,
         geometry: Some(geometry),
+        held: false,
     })
 }
 

@@ -571,13 +571,13 @@ fn every_painter_shows_the_one_board_of_a_floor() {
             .chrome
             .frame(scene, &drawn, pack(), now, floor, num_floors(scene))
             .footer;
-        pixtuoid_scene::board::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
+        pixtuoid_scene::neon_sign::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
     };
 
     let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
-    let floating = pixtuoid_scene::board::wall_board(
+    let floating = pixtuoid_scene::neon_sign::wall_board(
         &one_floor,
-        pixtuoid_scene::board::office_gateway(&one_floor),
+        pixtuoid_scene::tally::office_gateway(&one_floor),
         None,
         Motion::Full,
         now,

@@ -195,12 +195,9 @@ fn connection_line(
                     '\u{25cf}',
                     format!(
                         "{instances} gateway{plural} \u{00b7} {}",
-                        pixtuoid_scene::board::gateway_label(rolled)
+                        pixtuoid_scene::neon_sign::gateway_label(rolled)
                     ),
-                    pixtuoid_scene::board::tone_rgb(
-                        pixtuoid_scene::board::gateway_tone(rolled),
-                        theme,
-                    ),
+                    pixtuoid_scene::neon_sign::gateway_tone(rolled).rgb(theme),
                 )
             }
         }
@@ -390,9 +387,9 @@ mod tests {
             "a zero-instance daemon must report no count: {stopped}"
         );
         for live_word in [
-            pixtuoid_scene::board::gateway_label(DaemonState::Busy),
-            pixtuoid_scene::board::gateway_label(DaemonState::Degraded),
-            pixtuoid_scene::board::gateway_label(DaemonState::Down),
+            pixtuoid_scene::neon_sign::gateway_label(DaemonState::Busy),
+            pixtuoid_scene::neon_sign::gateway_label(DaemonState::Degraded),
+            pixtuoid_scene::neon_sign::gateway_label(DaemonState::Down),
         ] {
             assert!(
                 !stopped.contains(live_word),
@@ -403,7 +400,7 @@ mod tests {
         let busy = cell(daemon_facet(2, DaemonState::Busy));
         assert!(busy.contains("2 gateways"), "{busy}");
         assert!(
-            busy.contains(pixtuoid_scene::board::gateway_label(DaemonState::Busy)),
+            busy.contains(pixtuoid_scene::neon_sign::gateway_label(DaemonState::Busy)),
             "the state word must be the shared board vocabulary: {busy}"
         );
 
@@ -413,7 +410,9 @@ mod tests {
             "singular, no 's': {one}"
         );
         assert!(
-            one.contains(pixtuoid_scene::board::gateway_label(DaemonState::Degraded)),
+            one.contains(pixtuoid_scene::neon_sign::gateway_label(
+                DaemonState::Degraded
+            )),
             "{one}"
         );
     }

@@ -658,7 +658,7 @@ test('the neon board keeps one monospace column per char, through a flap roll', 
   // Only a multi-segment row exercises `.ov-brow`'s `pre` (WHY on the rule).
   const mood = page.locator('#office-overlay .ov-board .ov-brow').nth(1);
   await expect.poll(() => mood.locator('span').count(), { timeout: 15_000 }).toBeGreaterThan(1);
-  // scene `board.rs` FLAP_HALF_MS — one half always crosses a roll; the
+  // scene `neon_sign.rs` FLAP_HALF_MS — one half always crosses a roll; the
   // "crossed a roll" assert below reds if the half grows.
   const samples = await mood.evaluate(async (row) => {
     const HALF_MS = 4_000;
@@ -1619,9 +1619,9 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     ['./config', 768],
     ['./architecture', 375],
     ['./contributing', 375],
-    ['./parallel-delivery', 320], // the #503 repro: wide ASCII pre + long links
-    ['./parallel-delivery', 375],
-    ['./parallel-delivery', 768],
+    ['./architecture', 320], // #503's wide ASCII pre
+    ['./architecture', 768],
+    ['./contributing', 320], // #503's long link: `crates/pixtuoid-core/tests/AGENTS.md`
   ] as const) {
     const context = await browser.newContext({
       viewport: { width, height: 820 },
