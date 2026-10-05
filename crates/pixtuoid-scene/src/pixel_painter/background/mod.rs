@@ -156,12 +156,15 @@ pub(super) fn paint_windows(
     theme: &Theme,
     clouds: Option<&mut crate::clouds::CloudCache>,
 ) {
-    let bays: Vec<WindowBay> = bays.into_iter().collect();
+    let wall = crate::outside::Wall {
+        size: (buf.width(), top_wall_h),
+        bays: bays.into_iter().collect(),
+    };
     let outside = Outside::of(
         moment,
         pack,
         theme,
-        ((buf.width(), top_wall_h), &bays),
+        wall,
         pixtuoid_core::sprite::format::Density::ONE,
         GlassWeather::of(moment),
         clouds,
@@ -169,8 +172,7 @@ pub(super) fn paint_windows(
     // The bolt, the strike's source, lights the glass in lockstep with
     // `paint_lightning_flash`, over all it shows.
     let bolt = BOLT_ALPHA * moment.sky.flash();
-    for &bay in &bays {
-        let mut view = outside.through(bay);
+    for (_, mut view) in outside.views() {
         if bolt > 0.0 {
             view.paint(|_, c| blend_rgb(c, WHITE, bolt));
         }

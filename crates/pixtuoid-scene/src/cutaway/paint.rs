@@ -2213,12 +2213,15 @@ mod tests {
             }
             let density = pixtuoid_core::sprite::format::Density::new(d).expect("nonzero");
             let band = (layout.buf_w, layout.wall_band_h());
-            let bays: Vec<_> = layout.window_bays().collect();
+            let wall = crate::outside::Wall {
+                size: band,
+                bays: layout.window_bays().collect(),
+            };
             let outside = crate::outside::Outside::of(
                 &moment,
                 &pack,
                 theme,
-                (band, &bays),
+                wall,
                 density,
                 GlassWeather::of(&moment),
                 None,
@@ -2237,9 +2240,8 @@ mod tests {
             );
             let at = |(ax, ay): (u16, u16)| buf.get(ax * k, ay * k);
             let (mut glass, mut buildings) = (0, 0);
-            for bay in layout.window_bays() {
+            for (bay, view) in outside.views() {
                 let here = format!("{day}/{hour}h bay {}", bay.idx);
-                let view = outside.through(bay);
                 for cell in view.joinery() {
                     assert_eq!(
                         at(cell),

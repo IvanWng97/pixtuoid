@@ -225,6 +225,13 @@ impl Origin {
     }
 }
 
+/// A wall's windows: the band they're cut in, `buf_w` by `band_h`, and the
+/// bays its painter draws, which [`Outside::views`] alone hands back.
+pub(crate) struct Wall {
+    pub(crate) size: (u16, u16),
+    pub(crate) bays: Vec<WindowBay>,
+}
+
 /// Everything one frame's windows look out on, the same through every one,
 /// on one painter's grid.
 pub(crate) struct Outside {
@@ -236,22 +243,26 @@ pub(crate) struct Outside {
     weather: GlassWeather,
     rows: Range<u16>,
     d: u16,
+    bays: Vec<WindowBay>,
 }
 
 impl Outside {
-    /// The outside at `moment` of a wall `buf_w` wide and `band_h` tall under
-    /// `weather`, at `density`, seen through `bays`, the windows the caller
-    /// paints, so a strike lands only on glass; `clouds` keeps the clouds'
-    /// masses across frames, `None` draws them afresh.
+    /// The outside at `moment` of `wall` under `weather`, at `density`, a
+    /// strike landing only on the glass of its bays; `clouds` keeps the
+    /// clouds' masses across frames, `None` draws them afresh.
     pub(crate) fn of(
         moment: &Moment,
         pack: &Pack,
         theme: &Theme,
-        ((buf_w, band_h), bays): ((u16, u16), &[WindowBay]),
+        wall: Wall,
         density: Density,
         weather: GlassWeather,
         clouds: Option<&mut crate::clouds::CloudCache>,
     ) -> Self {
+        let Wall {
+            size: (buf_w, band_h),
+            bays,
+        } = wall;
         let rows = window_rows(band_h);
         let run = window_run(buf_w);
         let glass_h = crate::layout::glass_rows(rows.end - rows.start);
@@ -275,12 +286,18 @@ impl Outside {
             weather,
             rows,
             d: density.get(),
+            bays,
         }
+    }
+
+    /// Each of the wall's bays, and what its glass shows.
+    pub(crate) fn views(&self) -> impl Iterator<Item = (WindowBay, WindowView)> + '_ {
+        self.bays.iter().map(|&bay| (bay, self.through(bay)))
     }
 
     /// What `bay`'s glass shows: each part of the outside, back to front, in
     /// the one order every painter draws it in.
-    pub(crate) fn through(&self, bay: WindowBay) -> WindowView {
+    fn through(&self, bay: WindowBay) -> WindowView {
         let front = self.city.front(self.run_x0, self.d);
         let mut view = self.sky.window(bay, self.rows.clone(), self.d, &front);
         self.clouds.paint(&mut view, self.run_x0, &front);
@@ -427,7 +444,10 @@ pub(crate) mod tests {
                     &moment,
                     &pack,
                     theme,
-                    (wall, &slots(wall.0)),
+                    Wall {
+                        size: wall,
+                        bays: slots(wall.0),
+                    },
                     d,
                     GlassWeather::of(&moment),
                     None,
@@ -471,7 +491,10 @@ pub(crate) mod tests {
                 moment,
                 &pack,
                 theme,
-                (wall, &slots(wall.0)),
+                Wall {
+                    size: wall,
+                    bays: slots(wall.0),
+                },
                 d,
                 GlassWeather::of(moment),
                 cache,
@@ -619,10 +642,10 @@ pub(crate) mod tests {
             &moment,
             &crate::pack::test_default_pack(),
             theme,
-            (
-                (crate::layout::WINDOW_W * 3, 32),
-                &slots(crate::layout::WINDOW_W * 3),
-            ),
+            Wall {
+                size: (crate::layout::WINDOW_W * 3, 32),
+                bays: slots(crate::layout::WINDOW_W * 3),
+            },
             Density::ONE,
             GlassWeather::of(&moment),
             None,
@@ -672,7 +695,10 @@ pub(crate) mod tests {
                     &at(Weather::Storm),
                     &pack,
                     theme,
-                    (wall, &bays),
+                    Wall {
+                        size: wall,
+                        bays: bays.clone(),
+                    },
                     d,
                     // a clear pane's glass: no veil or rain over the bolt
                     GlassWeather::of(&at(Weather::Clear)),

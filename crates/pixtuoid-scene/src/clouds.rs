@@ -959,11 +959,12 @@ impl Clouds {
 
     /// Each mass's drift this frame, in whole cells of its grid.
     fn cell_drifts(&self) -> Vec<i32> {
-        let df = f32::from(self.d);
-        self.masses
-            .iter()
-            .map(|m| (m.off * df).round() as i32)
-            .collect()
+        self.masses.iter().map(|m| self.cell_drift(m)).collect()
+    }
+
+    /// `m`'s drift this frame in whole cells of its grid: where it is drawn.
+    fn cell_drift(&self, m: &Mass) -> i32 {
+        (m.off * f32::from(self.d)).round() as i32
     }
 
     /// The nearest mass's band at `(col, row)` cells from the run's west end
@@ -1266,14 +1267,7 @@ impl Clouds {
         if self.rain <= 0.0 {
             return c;
         }
-        let Some(m) = self.masses.iter().find(|m| {
-            m.layer >= Layer::Mid
-                && m.base < y
-                && y <= m.base + VIRGA_DEPTH
-                && m.lobes
-                    .iter()
-                    .any(|l| (x - m.off - l.x).abs() < l.r * VIRGA_REACH)
-        }) else {
+        let Some(m) = self.virga_mass(x, y) else {
             return c;
         };
         let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
@@ -1288,6 +1282,21 @@ impl Clouds {
         } else {
             c
         }
+    }
+
+    /// The mid or near mass whose virga falls at `(x, y)` units: under its
+    /// base, within [`VIRGA_DEPTH`], near a lobe; the nearest such, at its
+    /// drawn drift, as [`band_at`](Self::band_at) draws the masses.
+    fn virga_mass(&self, x: f32, y: f32) -> Option<&Mass> {
+        self.masses.iter().rev().find(|m| {
+            let off = self.cell_drift(m) as f32 / f32::from(self.d);
+            m.layer >= Layer::Mid
+                && m.base < y
+                && y <= m.base + VIRGA_DEPTH
+                && m.lobes
+                    .iter()
+                    .any(|l| (x - off - l.x).abs() < l.r * VIRGA_REACH)
+        })
     }
 
     /// The cells the bolt's core covers on its grid, as each cell's grid
@@ -1777,15 +1786,7 @@ mod tests {
                     if shade == 0 {
                         continue;
                     }
-                    let m = c.masses.iter().find(|m| {
-                        m.layer >= Layer::Mid
-                            && m.base < y
-                            && y <= m.base + VIRGA_DEPTH
-                            && m.lobes
-                                .iter()
-                                .any(|l| (x - m.off - l.x).abs() < l.r * VIRGA_REACH)
-                    });
-                    let m = m.unwrap_or_else(|| {
+                    let m = c.virga_mass(x, y).unwrap_or_else(|| {
                         panic!("({col}, {row}) shaded under no mid or near base")
                     });
                     by_depth[(y - m.base) as usize] += shade;
@@ -1814,6 +1815,55 @@ mod tests {
             shaded(&far).iter().all(|&n| n == 0),
             "none under a far mass"
         );
+    }
+
+    /// Where two masses hang over one shaft, it falls from the nearer, as
+    /// `band_at` draws the nearer over the farther.
+    #[test]
+    fn virga_falls_from_the_nearer_of_two_masses() {
+        let rain = clouds(Weather::Rain, 12, 0.0);
+        let mid = rain
+            .masses
+            .iter()
+            .find(|m| m.layer == Layer::Mid)
+            .expect("a rain deck has a mid mass")
+            .clone();
+        // the same mass nearer, in another weather's tones
+        let near = Mass {
+            layer: Layer::Near,
+            weather: Weather::Storm,
+            ..mid.clone()
+        };
+        assert_ne!(
+            rain.tone(mid.weather, Band::Shade),
+            rain.tone(near.weather, Band::Shade),
+            "the two must tell apart"
+        );
+        let with = |masses: Vec<Mass>| {
+            let mut c = clouds(Weather::Rain, 12, 0.0);
+            c.masses = masses;
+            c
+        };
+        let (both, nearer) = (with(vec![mid.clone(), near.clone()]), with(vec![near]));
+        let sky = Rgb {
+            r: 90,
+            g: 130,
+            b: 200,
+        };
+        let mut shafts = 0;
+        for col in 0..SPAN {
+            for row in 0..GLASS_H {
+                let cell = Cell {
+                    at: (col, row),
+                    glass_offset: (col, row),
+                };
+                let at = (f32::from(col) + 0.5, f32::from(row) + 0.5);
+                let shaft = nearer.virga(cell, at, sky);
+                shafts += usize::from(shaft != sky);
+                assert_eq!(both.virga(cell, at, sky), shaft, "({col}, {row})");
+            }
+        }
+        assert!(shafts > 0, "the sample must fall in shafts");
     }
 
     /// A far mass leans further to the sky behind it than a near one.
