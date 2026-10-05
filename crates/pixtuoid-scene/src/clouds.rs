@@ -16,13 +16,21 @@ use crate::outside::{Cell, WindowView};
 
 use crate::sky::{Element, Weather};
 
-/// A deterministic stream of `0..1` draws.
-struct Rng(u64);
+/// A deterministic stream of `0..1` draws: [`crate::splitmix_draw`]'s.
+struct Rng {
+    seed: u64,
+    n: u64,
+}
 
 impl Rng {
+    fn new(seed: u64) -> Self {
+        Self { seed, n: 0 }
+    }
+
     fn u(&mut self) -> f32 {
-        self.0 = self.0.wrapping_add(crate::GOLDEN_GAMMA);
-        (pixtuoid_core::id::splitmix64(self.0) >> 40) as f32 / (1u64 << 24) as f32
+        self.n += 1;
+        let draw = crate::splitmix_draw(self.seed, self.n);
+        (draw >> (u64::BITS - f32::MANTISSA_DIGITS)) as f32 / (1u64 << f32::MANTISSA_DIGITS) as f32
     }
 
     fn between(&mut self, a: f32, b: f32) -> f32 {
@@ -35,11 +43,7 @@ fn noise(seed: u64, x: f32) -> f32 {
     let i = x.floor();
     let f = x - i;
     let f = f * f * (3.0 - 2.0 * f);
-    let at = |k: f32| {
-        (pixtuoid_core::id::splitmix64(seed ^ (k as i64 as u64).wrapping_mul(crate::GOLDEN_GAMMA))
-            % 1000) as f32
-            / 1000.0
-    };
+    let at = |k: f32| (crate::splitmix_draw(seed, k as i64 as u64) % 1000) as f32 / 1000.0;
     at(i) + (at(i + 1.0) - at(i)) * f
 }
 
@@ -358,7 +362,7 @@ const BUMP_INSET: f32 = 0.4;
 /// Every big lobe's arc broken by two or three smaller bumps on its upper rim,
 /// so no silhouette is one clean circle.
 fn cauliflower(lobes: Vec<Lobe>, seed: u64) -> Vec<Lobe> {
-    let mut r = Rng(seed);
+    let mut r = Rng::new(seed);
     let mut out = lobes.clone();
     for l in lobes.iter().filter(|l| l.r >= BUMP_FROM) {
         for _ in 0..2 + usize::from(r.u() < BUMP_THIRD) {
@@ -385,7 +389,7 @@ const RING_SEED: u64 = 0xf1a5;
 /// The deck a weather hangs over a run `span` units wide and glass `glass_h`
 /// tall, far first: every mass at its full share, undrifted.
 fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
-    let mut r = Rng(DECK_SEED ^ weather as u64);
+    let mut r = Rng::new(DECK_SEED ^ weather as u64);
     let mut out = Vec::new();
     let mut row = |r: &mut Rng,
                    layer: Layer,
@@ -994,7 +998,7 @@ impl Clouds {
         start: f64,
         panes: &[Range<u16>],
     ) -> Option<Strike> {
-        let mut r = Rng(bucket.wrapping_mul(31).wrapping_add(7));
+        let mut r = Rng::new(bucket.wrapping_mul(31).wrapping_add(7));
         let pane = panes.get((r.u() * panes.len() as f32) as usize)?;
         let (west, east) = (f32::from(pane.start), f32::from(pane.end));
         let x = r.between(west + BOLT_PANE_MARGIN, (east - BOLT_PANE_MARGIN).max(west));
