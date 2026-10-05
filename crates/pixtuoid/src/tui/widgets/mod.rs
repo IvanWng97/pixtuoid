@@ -49,19 +49,16 @@ pub(crate) fn display_width(s: &str) -> usize {
     usize::from(pixtuoid_scene::display::text::cells(s))
 }
 
-pub(crate) use pixtuoid_scene::board::compact_hms;
+pub(crate) use pixtuoid_scene::neon_sign::compact_hms;
 
 pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
 
 /// A [`StateKind`]'s themed ratatui hue — the binary shim over the shared
-/// [`footer_tone_rgb`](pixtuoid_scene::footer::footer_tone_rgb) authority, so the
+/// [`FooterTone::rgb`](pixtuoid_scene::footer::FooterTone::rgb) authority, so the
 /// footer/tooltip/dashboard state colours can't drift from the footer model's. It can't
 /// be an inherent method: it returns a ratatui `Color` on the foreign `RungKind`.
 pub(crate) fn state_color(kind: StateKind, theme: &Theme) -> Color {
-    to_color(pixtuoid_scene::footer::footer_tone_rgb(
-        pixtuoid_scene::footer::FooterTone::Rung(kind),
-        theme,
-    ))
+    to_color(pixtuoid_scene::footer::FooterTone::Rung(kind).rgb(theme))
 }
 
 /// The drop shadow's single uniform darkening factor (0 = black, 1 = unchanged).

@@ -27,7 +27,6 @@ use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
-use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
 use pixtuoid_scene::cutaway::paint::render_cutaway;
 use pixtuoid_scene::display::{Office, Showing};
@@ -37,6 +36,7 @@ use pixtuoid_scene::floor::{
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
+use pixtuoid_scene::neon_sign::BoardModel;
 use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::sky::{Weather, WeatherPolicy, hour_is_day};
 

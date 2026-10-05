@@ -2812,6 +2812,8 @@ struct OwnedSimStores {
     vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
+    creatures:
+        std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
 }
 
 impl OwnedSimStores {
@@ -2821,6 +2823,7 @@ impl OwnedSimStores {
             vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
+            creatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2833,6 +2836,7 @@ impl OwnedSimStores {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
+            creatures: &mut self.creatures,
         }
     }
 }
@@ -3139,7 +3143,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
 }
 
 #[test]
-fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_stands() {
     let (scene, layout, _, now0, pack) = sim_rig();
     let coffee = HashMap::new();
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
@@ -3184,10 +3188,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         "a roaming cat is not being petted"
     );
 
-    let clicked = Point { x: 40, y: 50 };
     let petting = crate::pet::PetState {
         petted_at: now0,
-        pet_pos: clicked,
         kind: pet.kind,
         floor_idx: floor.floor_idx,
     };
@@ -3196,31 +3198,15 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&petting),
     })
     .expect("the petted cat");
-    assert_eq!(held.pos, clicked);
+    assert_eq!(
+        held.pos, roaming.pos,
+        "held where it stands, not where the click landed"
+    );
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(
         hearts(&held),
         [0],
         "petted just now: its first heart leaves"
-    );
-
-    // Held in the canvas's corner, its frame is fitted back on.
-    let in_corner = crate::pet::PetState {
-        pet_pos: Point { x: 0, y: 0 },
-        ..petting
-    };
-    let cornered = step(PetInputs {
-        pet: Some(&pet),
-        petting: Some(&in_corner),
-    })
-    .expect("the petted cat");
-    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
-    assert_eq!(
-        cornered.pos,
-        Point {
-            x: size.w / 2,
-            y: size.h / 2
-        }
     );
 
     let upstairs = crate::pet::PetState {
@@ -3281,6 +3267,7 @@ fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded,
+            on_roster: true,
             effects: Vec::new(),
         };
         let mut drawables = Vec::new();
@@ -5040,6 +5027,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
     let mut escapes: Vec<String> = Vec::new();
+    let mut walking = 0;
     for port in 18900..18924u32 {
         // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
         // id — vary both, or the pet half of the sweep rides one trajectory.
@@ -5055,11 +5043,12 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
             boot,
         );
-        // Past the enter stagger + walk-in, then across several wander cycles so
-        // both the walking legs and the resting cells get sampled.
-        for step in 0..24u64 {
+        // One office's stores across the sweep: the creatures walk on state
+        // they keep. Past the enter stagger + walk-in, then across several roams,
+        // so both the walking legs and the resting cells get sampled.
+        let mut owned = OwnedSimStores::new();
+        for step in 0..48u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
-            let mut owned = OwnedSimStores::new();
             let frame = sim_step(
                 &mut owned.stores(),
                 SimInputs {
@@ -5078,6 +5067,17 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     door_anim_max_ms: 0,
                 },
             );
+            walking += frame
+                .mascots
+                .iter()
+                .filter(|m| m.anim_name.contains("walk"))
+                .count()
+                + usize::from(
+                    frame
+                        .pet
+                        .as_ref()
+                        .is_some_and(|p| p.anim_name.contains("walk")),
+                );
             for m in &frame.mascots {
                 let Size { w, h } = m.size;
                 if m.pos.x < w / 2
@@ -5112,6 +5112,10 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     assert!(
         escapes.is_empty(),
         "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+    assert!(
+        walking > 100,
+        "the sweep must catch them roaming, saw {walking}"
     );
 }
 

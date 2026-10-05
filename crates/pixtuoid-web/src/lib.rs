@@ -323,7 +323,7 @@ impl Office {
             out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
             push_json_string(
                 &mut out,
-                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, name.text),
+                &format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, name.text),
             );
             // The site paints the ● in `color` and the name in `badge`.
             out.push_str(&format!(
@@ -687,8 +687,8 @@ fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
-fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
-    hex(pixtuoid_scene::board::tone_rgb(tone, theme))
+fn board_hex(theme: &Theme, tone: pixtuoid_scene::neon_sign::BoardTone) -> String {
+    hex(tone.rgb(theme))
 }
 
 /// Append `s` as a JSON string literal (quotes + escapes) to `out`. Agent labels
@@ -713,7 +713,7 @@ fn push_json_string(out: &mut String, s: &str) {
 fn push_board_segment(
     out: &mut String,
     key: &str,
-    seg: &pixtuoid_scene::board::BoardSegment,
+    seg: &pixtuoid_scene::neon_sign::BoardSegment,
     theme: &Theme,
 ) {
     out.push_str(&format!("\"{key}\":{{\"text\":"));
@@ -723,7 +723,7 @@ fn push_board_segment(
 
 fn push_board_segments(
     out: &mut String,
-    segs: &[pixtuoid_scene::board::BoardSegment],
+    segs: &[pixtuoid_scene::neon_sign::BoardSegment],
     theme: &Theme,
 ) {
     out.push('[');
@@ -1095,7 +1095,7 @@ mod tests {
         let board = &v["board"];
         assert_eq!(
             board["brand"]["text"].as_str().unwrap(),
-            pixtuoid_scene::board::BOARD_BRAND
+            pixtuoid_scene::neon_sign::BOARD_BRAND
         );
         assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
         assert!(board["mood"].is_array() && board["context"].is_array());
@@ -1139,7 +1139,7 @@ mod tests {
                 serde_json::json!({
                     "x": b.at.x,
                     "y": b.at.y,
-                    "text": format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, b.name.text),
+                    "text": format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, b.name.text),
                     "color": hex(b.marker),
                     "badge": hex(b.name.ink),
                 })
