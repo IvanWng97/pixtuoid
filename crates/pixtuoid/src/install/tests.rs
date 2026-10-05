@@ -546,7 +546,8 @@ fn install_target_round_trips_every_registered_target() {
 #[test]
 fn config_present_target_file_is_absent_before_then_present_after_install() {
     use crate::install::target::config_present;
-    // CLAUDE + CODEX are the only `presence_probe: None` (config_present) targets.
+    // CODEX is the one shipped `presence_probe: None` (config_present) target;
+    // CLAUDE_FILE is CLAUDE with its probe and host stripped.
     for t in [&CLAUDE_FILE, &CODEX] {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("cfg");
