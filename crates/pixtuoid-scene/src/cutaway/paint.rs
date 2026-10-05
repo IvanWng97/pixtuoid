@@ -825,11 +825,8 @@ fn paint_window(
         w: ArtPx(1),
         h: ArtPx(1),
     };
-    for (at, c) in view.cells() {
-        pen.fill(buf, cell(at), c);
-    }
-    for at in view.joinery() {
-        pen.fill(buf, cell(at), frame);
+    for (at, c) in view.every() {
+        pen.fill(buf, cell(at), c.unwrap_or(frame));
     }
 }
 

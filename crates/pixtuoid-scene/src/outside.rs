@@ -143,6 +143,7 @@ impl WindowView {
     }
 
     /// Each glass cell's place on the grid, and what it shows.
+    #[cfg(test)]
     pub(crate) fn cells(&self) -> impl Iterator<Item = ((u16, u16), Rgb)> + '_ {
         self.grid()
             .filter_map(|(cell, px)| px.map(|c| (cell.at, c)))
@@ -155,6 +156,7 @@ impl WindowView {
     }
 
     /// Each joinery cell's place on the grid.
+    #[cfg(test)]
     pub(crate) fn joinery(&self) -> impl Iterator<Item = (u16, u16)> + '_ {
         self.grid()
             .filter(|(_, px)| px.is_none())
