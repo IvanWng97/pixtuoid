@@ -1,4 +1,4 @@
-//! The [effects](crate::effects) riding on the cutaway's figures, drawn on the
+//! The [effects](crate::effects) riding on the display list's figures, drawn on the
 //! figure's own art grid: a look authored at [`LOOK_DENSITY`] where the figure
 //! is drawn there with a head to stand it on, the base art's z and waiting
 //! mark beside its head, else its [shared look](crate::effects::look), a

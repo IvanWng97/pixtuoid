@@ -258,10 +258,9 @@ impl OfficeMood {
 /// present state. Exiting agents are absent by design: a walkout isn't the mood.
 ///
 /// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
-/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
-/// equals the terminal display width — no `unicode-width` dep in `scene` (pinned
-/// where the width authority lives: the TUI's
-/// `every_l2_face_is_one_terminal_column_per_char`).
+/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so
+/// [`cells`](crate::display::text::cells) equals `chars().count()` here (pinned by
+/// the TUI's `every_l2_face_is_one_terminal_column_per_char`).
 pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
