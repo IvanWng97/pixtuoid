@@ -2222,8 +2222,9 @@ mod tests {
                         "frame {here} {cell:?}"
                     );
                 }
-                for ((cell, c), (_, open)) in
-                    view.cells().zip(sky.window(bay, rows.clone(), d).cells())
+                for ((cell, c), (_, open)) in view
+                    .cells()
+                    .zip(sky.window(bay, rows.clone(), d, |_| None).cells())
                 {
                     glass += 1;
                     buildings += usize::from(c != open);
