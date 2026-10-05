@@ -27,6 +27,22 @@ pub(crate) fn plot_effect(e: &Effect, theme: &Theme, plot: &mut impl FnMut(u16, 
     }
 }
 
+/// The sleep z on the base art, a layout cell per art cell: the classic's and
+/// the cutaway's at 1x.
+pub(crate) const SLEEP_Z_1X: &[&str] = &[
+    "##", //
+    ".#", //
+    "##", //
+];
+
+/// The waiting mark on the base art, as [`SLEEP_Z_1X`] is.
+pub(crate) const WAITING_MARK_1X: &[&str] = &[
+    "###", //
+    "..#", //
+    ".#.", //
+    ".#.", //
+];
+
 /// Layout rows a sleep z rises over its life.
 pub(crate) const SLEEP_Z_MAX_RISE: u16 = 4;
 
@@ -56,11 +72,9 @@ fn plot_sleep_z(
         return;
     };
     let rise = (t * f32::from(SLEEP_Z_MAX_RISE)) as u16;
-    let z_x = at.x + 5;
     let z_y = at.y.saturating_sub(rise + 3);
-    const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
-    for (dx, dy) in GLYPH {
-        plot(z_x + dx, z_y + dy, z_color, alpha);
+    for (dx, dy, _) in inked(SLEEP_Z_1X) {
+        plot(at.x + 5 + dx, z_y + dy, z_color, alpha);
     }
 }
 
@@ -143,17 +157,22 @@ fn plot_mascot_bubble(plot: &mut impl FnMut(u16, u16, Rgb, f32), at: Point, rise
 
 fn plot_waiting_mark(plot: &mut impl FnMut(u16, u16, Rgb, f32), top_left: Point, theme: &Theme) {
     let fg = theme.effects.waiting_bubble;
-    const GLYPH: &[&[u8]] = &[b".YYY.", b"...Y.", b"..Y..", b"..Y.."];
-    let bx = top_left.x + 1;
     let by = top_left.y.saturating_sub(5) & !1u16;
-    for (dy, row) in GLYPH.iter().enumerate() {
-        for (dx, byte) in row.iter().enumerate() {
-            if *byte != b'Y' {
-                continue;
-            }
-            plot(bx + dx as u16, by + dy as u16, fg, 1.0);
-        }
+    for (dx, dy, _) in inked(WAITING_MARK_1X) {
+        plot(top_left.x + 2 + dx, by + dy, fg, 1.0);
     }
+}
+
+/// `glyph`'s inked cells, every one but a `.`, as offsets from its top-left
+/// with the character that inks it: the one transparency rule every look's
+/// glyph is drawn by.
+pub(crate) fn inked<'a>(glyph: &'a [&'a str]) -> impl Iterator<Item = (u16, u16, char)> + 'a {
+    (0u16..).zip(glyph).flat_map(|(dy, row)| {
+        (0u16..)
+            .zip(row.chars())
+            .filter(|&(_, c)| c != '.')
+            .map(move |(dx, c)| (dx, dy, c))
+    })
 }
 
 /// The flame gradient's deep-ember base, which a burning agent's hair also

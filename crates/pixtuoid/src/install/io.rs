@@ -188,6 +188,35 @@ fn sibling(target: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(format!("{}.{}", target.display(), suffix))
 }
 
+/// Make a rename onto `path` durable: [fsync(2)] on the file "does not
+/// necessarily ensure that the entry in the directory containing the file has
+/// also reached disk", so the parent is synced too. Windows has no directory
+/// handle to flush here.
+///
+/// [fsync(2)]: https://man7.org/linux/man-pages/man2/fsync.2.html
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// [`sync_parent`] after a rename that already put the new bytes in place: a
+/// filesystem that refuses a directory fsync (some network and FUSE mounts)
+/// must not turn a write that happened into a reported failure.
+fn sync_parent_after_rename(path: &Path) {
+    if let Err(e) = sync_parent(path) {
+        tracing::warn!(error = %e, path = ?path, "written, but its directory could not be synced");
+    }
+}
+
 /// Read raw config content, following symlinks; "" for a missing file. For a
 /// locked read→merge→write round use [`ConfigLock::read`] instead, so the read
 /// shares the guard's pinned resolution.
@@ -351,6 +380,7 @@ impl ConfigLock {
             f.sync_all()?;
         }
         rename_with_retry(&tmp, &self.target)?;
+        sync_parent_after_rename(&self.target);
         Ok(())
     }
 }
@@ -402,6 +432,17 @@ pub(crate) fn resolve_symlink(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_parent_opens_the_real_parent() {
+        let tmp = TempDir::new().unwrap();
+        sync_parent(&tmp.path().join("settings.json")).unwrap();
+        assert!(
+            sync_parent(&tmp.path().join("gone").join("settings.json")).is_err(),
+            "a missing parent must fail the sync, not skip it"
+        );
+    }
 
     #[test]
     fn a_windows_path_hit_must_be_a_real_pe_not_a_pathext_shim() {

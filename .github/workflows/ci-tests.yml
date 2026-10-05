@@ -7,6 +7,9 @@ on:
         description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
         type: boolean
         required: true
+    secrets:
+      MERGIFY_TOKEN:
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,8 +30,8 @@ jobs:
             flag: unit
             timeout: 25
           # Track windows-latest deliberately: this gate catches hosted-image
-          # changes. Its coverage sees the Windows pipes and atomic-write
-          # retries the Linux entry compiles out.
+          # changes. It runs the Windows pipes and atomic-write retries the Linux
+          # entry compiles out, and the full tier measures their coverage.
           - platform: windows
             runner: windows-latest
             flag: windows
@@ -45,6 +48,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      # A fork's PR gets no secrets; its results simply aren't uploaded.
+      HAS_MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -52,26 +58,37 @@ jobs:
       - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
         with:
-          components: llvm-tools-preview
+          components: ${{ inputs.full && 'llvm-tools-preview' || '' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
+      # Coverage instruments the whole build, so it is the full tier's: a PR's
+      # pushes run the plain suite, and the queue and main measure coverage.
+      - name: Unit tests + JUnit XML
+        id: tests
+        if: ${{ !inputs.full }}
+        run: cargo nextest run --workspace --profile ci
       - name: Install cargo-llvm-cov
+        if: ${{ inputs.full }}
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage + JUnit XML (single instrumented test run)
+        id: coverage
+        if: ${{ inputs.full }}
         run: just coverage
       - name: Upload coverage to Codecov
+        if: ${{ inputs.full }}
         uses: ./.github/actions/upload-codecov
         with:
           file: lcov.info
           flag: ${{ matrix.flag }}
-          report_type: coverage
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/upload-codecov
+      - name: Upload test results to Mergify CI Insights
+        if: ${{ !cancelled() && env.HAS_MERGIFY_TOKEN == 'true' }}
+        uses: Mergifyio/gha-mergify-ci@ce0d6bef01217d90fb9e908e6966b0f6f4ea26d5 # v26
         with:
-          file: target/nextest/ci/junit.xml
-          flag: ${{ matrix.flag }}
-          report_type: test_results
+          action: junit-process
+          token: ${{ secrets.MERGIFY_TOKEN }}
+          report_path: target/nextest/ci/junit.xml
+          job_name: ${{ matrix.platform }}-test
+          test_step_outcome: ${{ inputs.full && steps.coverage.outcome || steps.tests.outcome }}
 
   snapshots:
     name: snapshot hygiene
@@ -118,12 +135,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Cache pip downloads
-        uses: actions/cache@v6
+      - uses: actions/setup-python@v7
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
-          restore-keys: pip-${{ runner.os }}-
+          python-version: "3.x"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
       - name: Set up Python virtual environment
         run: |
           python3 -m venv .venv

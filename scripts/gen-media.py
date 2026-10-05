@@ -202,8 +202,8 @@ def run_matrix(job, out_dirs, work, intermediates):
                  hour=job["hour"], **kwargs)
 
 
-# H.264 and VP9 both require even width/height. `neighbor`: the pixel-art rule
-# (no smoothing), where swscale's default is bicubic. Set in `flags`, which
+# H.264 and VP9 both require even width/height. `neighbor` keeps the art's hard
+# pixel edges, where swscale's default is bicubic. Set in `flags`, which
 # ffmpeg-scaler deprecates for `scaler`: that option exists only from FFmpeg
 # 9.0 (3503b19711), and the apt ffmpeg a CI runner has is older.
 SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor"

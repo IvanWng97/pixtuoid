@@ -399,16 +399,25 @@ async fn listener_handles_concurrent_connections() {
 #[tokio::test]
 async fn long_path_fallback_binds_owner_only() {
     use std::os::unix::fs::PermissionsExt;
+    // Read off the struct as the listener does, so the fixture tracks the platform.
+    let cap = std::mem::size_of::<libc::sockaddr_un>()
+        - std::mem::offset_of!(libc::sockaddr_un, sun_path);
     let dir = TempDir::new().unwrap();
-    // 97 bytes: ≤100 for the final name (and under sun_path 104), while the
-    // temp twin `.{pid}.tmp` adds ≥6 → >100 → the fallback branch.
+    // Two under the cap: the final path binds directly with room for its NUL,
+    // while its twin, at least `.0.tmp` longer, cannot whatever the pid.
+    let len = cap - 2;
     let base = dir.path().to_string_lossy().len();
-    let pad = 97usize
+    let pad = len
         .checked_sub(base + 1 + ".sock".len())
-        .expect("tempdir path too long to stage a 97-byte socket path");
+        .expect("tempdir path too long to stage the socket path");
     let name = format!("{}{}", "x".repeat(pad), ".sock");
     let path = dir.path().join(name);
-    assert_eq!(path.as_os_str().len(), 97, "fixture: final path length");
+    assert_eq!(path.as_os_str().len(), len, "fixture: final path length");
+    let twin = format!(".{}.tmp", std::process::id()).len();
+    assert!(
+        len + twin >= cap,
+        "fixture: the temp twin must overflow sun_path"
+    );
 
     let listener = HookSocketListener::bind(path.clone()).await.unwrap();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;

@@ -4,6 +4,11 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use pixtuoid_core::sprite::format::PACK_MANIFEST;
 
+/// Write the skeleton sprite pack into `dest`.
+///
+/// # Errors
+///
+/// If `dest` is a file, or a non-empty directory without `force`, or a pack file or stdout cannot be written.
 pub fn init_pack(dest: &Path, force: bool) -> Result<()> {
     if dest.exists() && !force {
         if !dest.is_dir() {

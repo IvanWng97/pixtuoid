@@ -53,6 +53,12 @@ const SUBAGENT_TOOLS: &[&str] = &["task"];
 /// An unmapped `type` is a benign skip (`Ok(vec![])`), not an error: the
 /// plugin's forward filter lives in JS, so the Rust decoder can't assert 1:1.
 /// Upstream drift is caught by `check_upstream_drift.py`, not a bail here.
+///
+/// # Errors
+///
+/// If the payload is not an object or lacks `type`, a `session.created` or
+/// `session.deleted` lacks `info` or a non-empty `info.id`, or a
+/// `message.part.updated` or permission event lacks `sessionID`.
 pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

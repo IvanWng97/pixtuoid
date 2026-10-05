@@ -54,6 +54,10 @@ pub const SOURCE_NAME: &str = "cursor";
 /// is HOOK-ONLY: a slot the reducer's proof-of-life pre-pass synthesizes
 /// mid-turn has no JSONL back-fill path, so without the attached identity it
 /// would stay a blank `#N` ghost.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `hook_event_name`, carries none of `session_id`, `cwd` or `workspace_roots`, or names an unregistered event.
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
