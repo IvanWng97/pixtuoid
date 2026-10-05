@@ -177,7 +177,7 @@ jobs:
       - name: Run read-only Claude review
         if: steps.pr.outputs.reviewable == 'true'
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@cab360f6565aa35a51d6ce9e43f1f4287c0a32ea # v1.0.241
         with:
           github_token: ${{ github.token }}
           # The action refuses any bot not named here: media-regen.yml's bot PR.

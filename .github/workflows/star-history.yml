@@ -48,21 +48,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/star-history.py "$GITHUB_REPOSITORY" "$RUNNER_TEMP/chart"
 
+      - id: day
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - name: Publish to the star-history branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-        working-directory: ${{ runner.temp }}/chart
-        run: |
-          set -euo pipefail
-          git init --quiet --initial-branch=star-history
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit --quiet -m "chart: star history as of $(date -u +%F)"
-          # Auth as actions/checkout does (src/git-auth-helper.ts: the
-          # http.<origin>/.extraheader basic credential), but via git's
-          # env-config so the token lands in neither argv nor a file.
-          GIT_CONFIG_COUNT=1 \
-            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-            git push --force --quiet "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/star-history
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ github.token }}
+          publish_branch: star-history
+          publish_dir: ${{ runner.temp }}/chart
+          force_orphan: true
+          # The branch holds the chart alone, as before; it is not a Pages site.
+          disable_nojekyll: true
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          full_commit_message: "chart: star history as of ${{ steps.day.outputs.date }}"

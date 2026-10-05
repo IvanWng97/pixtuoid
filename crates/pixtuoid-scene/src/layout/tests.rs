@@ -153,7 +153,7 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
     );
     assert_eq!(
         smr.height,
-        (smr.height + spr.height) / 2,
+        u16::midpoint(smr.height, spr.height),
         "below the floor the half-split stands"
     );
 }

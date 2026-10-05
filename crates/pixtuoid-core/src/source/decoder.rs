@@ -430,6 +430,10 @@ fn hook_effort(agent_id: AgentId, obj: &serde_json::Map<String, Value>) -> Optio
 /// unknown id lands with REAL identity instead of a blank `#N` slot. The
 /// session-lifecycle and custom Subagent arms deliberately do NOT: SessionStart
 /// already carries identity, and an end for an unknown agent proves nothing.
+///
+/// # Errors
+///
+/// If the payload is not an object, a source-owned decoder rejects it, `hook_event_name` or `session_id` is missing or empty, or the event is unsupported.
 pub fn decode_hook_payload(v: Value) -> DecodeResult<Vec<AgentEvent>> {
     let obj = v
         .as_object()
