@@ -209,31 +209,34 @@ frame_ms = 600
 frames   = ["standing@4x.sprite"]
 frame_ms = 600
 
+# All three person walks share this stride (base-grid pixels per cycle,
+# docs/CONFIGURATION.md). Seen front or back a foot never shows its travel, so it
+# sets only the cadence: about one cycle a second at a wander's pace.
 [animations.walking]
-frames   = ["walking_0.sprite", "walking_1.sprite"]
+frames   = ["walking_0.sprite", "walking_1.sprite", "walking_2.sprite", "walking_3.sprite", "walking_4.sprite", "walking_5.sprite", "walking_6.sprite", "walking_7.sprite"]
 frame_ms = 220
-stride   = 11
+stride   = 24
 
 [animations."walking@4x"]
-frames   = ["walking_0@4x.sprite", "walking_1@4x.sprite"]
+frames   = ["walking_0@4x.sprite", "walking_1@4x.sprite", "walking_2@4x.sprite", "walking_3@4x.sprite", "walking_4@4x.sprite", "walking_5@4x.sprite", "walking_6@4x.sprite", "walking_7@4x.sprite"]
 frame_ms = 220
 
 [animations.walking_back]
-frames   = ["walking_back_0.sprite", "walking_back_1.sprite"]
+frames   = ["walking_back_0.sprite", "walking_back_1.sprite", "walking_back_2.sprite", "walking_back_3.sprite", "walking_back_4.sprite", "walking_back_5.sprite", "walking_back_6.sprite", "walking_back_7.sprite"]
 frame_ms = 220
-stride   = 11
+stride   = 24
 
 [animations."walking_back@4x"]
-frames   = ["walking_back_0@4x.sprite", "walking_back_1@4x.sprite"]
+frames   = ["walking_back_0@4x.sprite", "walking_back_1@4x.sprite", "walking_back_2@4x.sprite", "walking_back_3@4x.sprite", "walking_back_4@4x.sprite", "walking_back_5@4x.sprite", "walking_back_6@4x.sprite", "walking_back_7@4x.sprite"]
 frame_ms = 220
 
 [animations.walking_coffee]
-frames   = ["walking_coffee_0.sprite", "walking_coffee_1.sprite"]
+frames   = ["walking_coffee_0.sprite", "walking_coffee_1.sprite", "walking_coffee_2.sprite", "walking_coffee_3.sprite", "walking_coffee_4.sprite", "walking_coffee_5.sprite", "walking_coffee_6.sprite", "walking_coffee_7.sprite"]
 frame_ms = 220
-stride   = 11
+stride   = 24
 
 [animations."walking_coffee@4x"]
-frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite"]
+frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite", "walking_coffee_2@4x.sprite", "walking_coffee_3@4x.sprite", "walking_coffee_4@4x.sprite", "walking_coffee_5@4x.sprite", "walking_coffee_6@4x.sprite", "walking_coffee_7@4x.sprite"]
 frame_ms = 220
 
 # BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
