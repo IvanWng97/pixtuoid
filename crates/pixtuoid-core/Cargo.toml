@@ -68,8 +68,6 @@ libc = { workspace = true }
 # cc_probe, the fd→path table in fd_probe).
 rustix = { version = "1", features = ["event", "process", "pipe"] }
 
-# 0.61 to match the major tokio already pulls (via mio) for this target —
-# a second windows-sys major would double-compile the bindings.
 [target.'cfg(windows)'.dependencies]
 # Win32_System_Threading: OpenProcess + GetProcessTimes, the `proc_start`
 # creation-FILETIME marker (the Windows half of the pid-recycle guard).

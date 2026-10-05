@@ -112,8 +112,7 @@ audio = ["dep:rodio"]
 graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
-# O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs. Same 0.2 as
-# pixtuoid-core/hook — no second build.
+# O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
@@ -137,7 +136,7 @@ x11rb = "0.13"
 
 # GetShortPathNameW for the Codex/Reasonix Windows hook path: a
 # space/metacharacter-bearing install path resolves to its DOS 8.3 short form so
-# cmd.exe /C can invoke it. Same 0.61 major as pixtuoid-core — no second build.
+# cmd.exe /C can invoke it.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
     "Win32_Storage_FileSystem",
