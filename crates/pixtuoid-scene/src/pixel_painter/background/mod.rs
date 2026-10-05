@@ -171,11 +171,8 @@ pub(super) fn paint_windows(
         if bolt > 0.0 {
             view.paint(|_, c| blend_rgb(c, WHITE, bolt));
         }
-        for ((x, y), c) in view.cells() {
-            buf.put_checked(x, y, c);
-        }
-        for (x, y) in view.joinery() {
-            buf.put_checked(x, y, theme.surface.window_frame);
+        for ((x, y), c) in view.every() {
+            buf.put_checked(x, y, c.unwrap_or(theme.surface.window_frame));
         }
     }
 }

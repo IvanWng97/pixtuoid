@@ -272,8 +272,15 @@ impl SkyView {
     }
 
     /// `bay`'s window over `rows`, on a grid of `d` cells to the unit, its
-    /// glass showing this sky under the golden hour's cast.
-    pub(crate) fn window(&self, bay: WindowBay, rows: std::ops::Range<u16>, d: u16) -> WindowView {
+    /// glass showing this sky under the golden hour's cast wherever `front`
+    /// stands nothing before it. A cell `front` fills never resolves the sky.
+    pub(crate) fn window(
+        &self,
+        bay: WindowBay,
+        rows: std::ops::Range<u16>,
+        d: u16,
+        front: impl Fn(crate::outside::Cell) -> Option<Rgb>,
+    ) -> WindowView {
         let pane = self.pane(
             bay.x,
             bay.w,
@@ -281,8 +288,10 @@ impl SkyView {
             d,
         );
         WindowView::new(bay, rows, d, |cell| {
-            let open = pane.colour(cell.at, cell.glass_offset.1);
-            self.blaze.map_or(open, |b| b.over(open))
+            front(cell).unwrap_or_else(|| {
+                let open = pane.colour(cell.at, cell.glass_offset.1);
+                self.blaze.map_or(open, |b| b.over(open))
+            })
         })
     }
 
@@ -471,7 +480,7 @@ mod tests {
         let rows = 1..33;
         for d in [1, 4] {
             let pane = v.pane(bay.x, bay.w, glass_rows(rows.end - rows.start), d);
-            let window = v.window(bay, rows.clone(), d);
+            let window = v.window(bay, rows.clone(), d, |_| None);
             let mut cells = 0;
             for (at, c) in window.cells() {
                 let ay = at.1 - rows.start * d;

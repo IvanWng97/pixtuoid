@@ -58,24 +58,33 @@ impl WindowView {
             px: Vec::new(),
         };
         let size = Size { w: bay.w, h };
-        let d = view.d;
-        view.px = (0..usize::from(view.cols()) * usize::from(view.rows()))
-            .map(|i| {
-                let (ax, ay) = view.offset(i);
-                let glass = !window_frame(ax / d, ay / d, size);
-                glass.then(|| base(view.cell(ax, ay)))
-            })
-            .collect();
+        let (d, origin) = (view.d, view.origin());
+        // A unit at a time, its d×d cells all glass or all joinery.
+        let mut px = Vec::with_capacity(usize::from(view.cols()) * usize::from(view.rows()));
+        for uy in 0..h {
+            for sy in 0..d {
+                let ay = uy * d + sy;
+                for ux in 0..bay.w {
+                    let joinery = window_frame(ux, uy, size);
+                    for sx in 0..d {
+                        let ax = ux * d + sx;
+                        px.push((!joinery).then(|| base(origin.cell(ax, ay))));
+                    }
+                }
+            }
+        }
+        view.px = px;
         view
     }
 
     /// Recolour every glass cell: `f` takes the cell and what it shows.
     pub(crate) fn paint(&mut self, mut f: impl FnMut(Cell, Rgb) -> Rgb) {
-        for i in 0..self.px.len() {
-            let (ax, ay) = self.offset(i);
-            let cell = self.cell(ax, ay);
-            if let Some(c) = &mut self.px[i] {
-                *c = f(cell, *c);
+        let (cols, origin) = (usize::from(self.cols()).max(1), self.origin());
+        for (ay, row) in (0u16..).zip(self.px.chunks_mut(cols)) {
+            for (ax, px) in (0u16..).zip(row) {
+                if let Some(c) = px {
+                    *c = f(origin.cell(ax, ay), *c);
+                }
             }
         }
     }
@@ -87,7 +96,7 @@ impl WindowView {
         glass_offset: (u16, u16),
         f: impl FnOnce(Cell, Rgb) -> Rgb,
     ) {
-        let (ix, iy) = self.inset();
+        let (ix, iy) = self.origin().inset;
         let (ax, ay) = (
             glass_offset.0.saturating_add(ix),
             glass_offset.1.saturating_add(iy),
@@ -95,7 +104,7 @@ impl WindowView {
         if ax >= self.cols() || ay >= self.rows() {
             return;
         }
-        let cell = self.cell(ax, ay);
+        let cell = self.origin().cell(ax, ay);
         let i = usize::from(ay) * usize::from(self.cols()) + usize::from(ax);
         if let Some(Some(c)) = self.px.get_mut(i) {
             *c = f(cell, *c);
@@ -134,20 +143,35 @@ impl WindowView {
     }
 
     /// Each glass cell's place on the grid, and what it shows.
+    #[cfg(test)]
     pub(crate) fn cells(&self) -> impl Iterator<Item = ((u16, u16), Rgb)> + '_ {
-        (0..self.px.len()).filter_map(|i| {
-            let (ax, ay) = self.offset(i);
-            self.px[i].map(|c| (self.cell(ax, ay).at, c))
-        })
+        self.grid()
+            .filter_map(|(cell, px)| px.map(|c| (cell.at, c)))
+    }
+
+    /// Each cell's place on the grid, and what its glass shows: `None` on the
+    /// joinery.
+    pub(crate) fn every(&self) -> impl Iterator<Item = ((u16, u16), Option<Rgb>)> + '_ {
+        self.grid().map(|(cell, px)| (cell.at, px))
     }
 
     /// Each joinery cell's place on the grid.
+    #[cfg(test)]
     pub(crate) fn joinery(&self) -> impl Iterator<Item = (u16, u16)> + '_ {
-        (0..self.px.len())
-            .filter(|&i| self.px[i].is_none())
-            .map(|i| {
-                let (ax, ay) = self.offset(i);
-                self.cell(ax, ay).at
+        self.grid()
+            .filter(|(_, px)| px.is_none())
+            .map(|(cell, _)| cell.at)
+    }
+
+    /// Each cell of [`px`](Self::px), row by row, with what its glass shows.
+    fn grid(&self) -> impl Iterator<Item = (Cell, Option<Rgb>)> + '_ {
+        let (cols, origin) = (usize::from(self.cols()).max(1), self.origin());
+        (0u16..)
+            .zip(self.px.chunks(cols))
+            .flat_map(move |(ay, row)| {
+                (0u16..)
+                    .zip(row)
+                    .map(move |(ax, &px)| (origin.cell(ax, ay), px))
             })
     }
 
@@ -159,31 +183,36 @@ impl WindowView {
         self.h.saturating_mul(self.d)
     }
 
-    /// The glass's top-left, in cells from the window's.
-    fn inset(&self) -> (u16, u16) {
+    fn origin(&self) -> Origin {
         let d = self.d;
-        (
-            (self.glass_box.x - self.bay.x).saturating_mul(d),
-            (self.glass_box.y - self.top).saturating_mul(d),
-        )
-    }
-
-    /// Cell `i` of [`px`](Self::px), from the window's top-left.
-    fn offset(&self, i: usize) -> (u16, u16) {
-        let cols = usize::from(self.cols()).max(1);
-        // Both below the window's extent, a u16.
-        ((i % cols) as u16, (i / cols) as u16)
-    }
-
-    fn cell(&self, ax: u16, ay: u16) -> Cell {
-        let d = self.d;
-        let (ix, iy) = self.inset();
-        Cell {
-            at: (
-                self.bay.x.saturating_mul(d).saturating_add(ax),
-                self.top.saturating_mul(d).saturating_add(ay),
+        Origin {
+            at: (self.bay.x.saturating_mul(d), self.top.saturating_mul(d)),
+            inset: (
+                (self.glass_box.x - self.bay.x).saturating_mul(d),
+                (self.glass_box.y - self.top).saturating_mul(d),
             ),
-            glass_offset: (ax.saturating_sub(ix), ay.saturating_sub(iy)),
+        }
+    }
+}
+
+/// Where a window's cells stand on a painter's grid: the window's top-left,
+/// and its glass's top-left in cells from there. `Copy`, so
+/// [`WindowView::paint`] reads it while it borrows the view's cells.
+#[derive(Debug, Clone, Copy)]
+struct Origin {
+    at: (u16, u16),
+    inset: (u16, u16),
+}
+
+impl Origin {
+    /// The cell `(ax, ay)` cells from the window's top-left.
+    fn cell(self, ax: u16, ay: u16) -> Cell {
+        Cell {
+            at: (self.at.0.saturating_add(ax), self.at.1.saturating_add(ay)),
+            glass_offset: (
+                ax.saturating_sub(self.inset.0),
+                ay.saturating_sub(self.inset.1),
+            ),
         }
     }
 }
@@ -227,8 +256,8 @@ impl Outside {
     /// What `bay`'s glass shows: each part of the outside, back to front, in
     /// the one order every painter draws it in.
     pub(crate) fn through(&self, bay: WindowBay) -> WindowView {
-        let mut view = self.sky.window(bay, self.rows.clone(), self.d);
-        self.city.paint(&mut view, self.run_x0);
+        let front = self.city.front(self.run_x0, self.d);
+        let mut view = self.sky.window(bay, self.rows.clone(), self.d, front);
         self.weather.paint(&mut view);
         view
     }
