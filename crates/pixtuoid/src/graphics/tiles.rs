@@ -106,10 +106,11 @@ impl Tiles {
         match dirty {
             Dirty::All => self.owed.extend(0..self.sent.len() as u32),
             Dirty::Rects(rects) => {
-                for &r in rects {
+                for &r in rects.as_slice() {
                     self.owed.extend(self.reached(r));
                 }
             }
+            Dirty::Unchanged => {}
         }
         let mut owed = std::mem::take(&mut self.owed);
         let mut changed = Vec::new();
@@ -352,7 +353,7 @@ mod tests {
     }
 
     fn rect(x: u16, y: u16, width: u16, height: u16) -> Dirty {
-        Dirty::Rects(vec![Bounds {
+        Dirty::within(vec![Bounds {
             x,
             y,
             width,
@@ -420,7 +421,7 @@ mod tests {
         assert_eq!(emit(&mut t, &buf, &Dirty::All), []);
         assert_eq!(emit(&mut t, &buf, &rect(0, 0, 13, 7)), []);
         poke(&mut buf, 0, 0);
-        assert_eq!(emit(&mut t, &buf, &Dirty::Rects(vec![])), []);
+        assert_eq!(emit(&mut t, &buf, &Dirty::Unchanged), []);
     }
 
     /// A rect re-sends the tiles it overlaps once their pixels changed, and
@@ -449,9 +450,9 @@ mod tests {
         poke(&mut buf, 0, 0);
         let unsent = t.changed(&buf, &rect(0, 0, 1, 1));
         assert_eq!(unsent.len(), 1);
-        assert_eq!(t.changed(&buf, &Dirty::Rects(vec![])), unsent);
+        assert_eq!(t.changed(&buf, &Dirty::Unchanged), unsent);
         t.sent(&unsent);
-        assert_eq!(t.changed(&buf, &Dirty::Rects(vec![])), []);
+        assert_eq!(t.changed(&buf, &Dirty::Unchanged), []);
     }
 
     /// A buffer of a new size is a new grid: every tile is re-sent, even when
@@ -463,7 +464,7 @@ mod tests {
         let new = t.changed(&buffer(14, 7), &rect(0, 0, 1, 1));
         assert_eq!(new.len(), 6);
         t.sent(&old);
-        assert_eq!(t.changed(&buffer(14, 7), &Dirty::Rects(vec![])), new);
+        assert_eq!(t.changed(&buffer(14, 7), &Dirty::Unchanged), new);
     }
 
     /// The hash reads art pixels, before the upscale, which is k² fewer: it is

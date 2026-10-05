@@ -52,7 +52,7 @@ fn pantry_steam_dx(anim: &str) -> i16 {
 /// `anim`.
 pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
     Point {
-        x: (pos.x as i32 + pantry_steam_dx(anim) as i32).max(0) as u16,
+        x: (i32::from(pos.x) + i32::from(pantry_steam_dx(anim))).max(0) as u16,
         y: pos.y.saturating_sub(2),
     }
 }
@@ -409,7 +409,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             paint_effects(buf, *effects, theme);
         }
         DrawableKind::RoomWall { piece, rows } => {
-            crate::wall::paint_wall(
+            crate::cutaway::wall::paint_wall(
                 buf,
                 theme,
                 *piece,
@@ -780,7 +780,7 @@ mod tests {
                     "tier {tier} base row col {xoff}"
                 );
             }
-            let top_y = base_y - (tier as u16 * STACK_PX_PER_TIER - 1);
+            let top_y = base_y - (u16::from(tier) * STACK_PX_PER_TIER - 1);
             let above = buf.get(tower.x, top_y - 1);
             assert!(
                 above != th.furniture.paper && above != th.furniture.paper_shade,

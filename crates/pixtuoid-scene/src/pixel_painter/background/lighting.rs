@@ -154,8 +154,8 @@ pub(in crate::pixel_painter) fn paint_clock(
     let (hour_turns, min_turns) = clock_reading(now).turns();
 
     let put = |buf: &mut RgbBuffer, ox: i32, oy: i32, color: Rgb| {
-        let px = x as i32 + 3 + ox;
-        let py = y as i32 + 3 + oy;
+        let px = i32::from(x) + 3 + ox;
+        let py = i32::from(y) + 3 + oy;
         if px >= 0 && py >= 0 && (px as u16) < buf.width() && (py as u16) < buf.height() {
             buf.put(px as u16, py as u16, color);
         }
@@ -191,8 +191,8 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     for y in rect.y..max_y {
         for x in rect.x..max_x {
             let is_edge = y == rect.y || y + 1 == max_y;
-            let dy = (y - rect.y) as i32;
-            let dx = (x - rect.x) as i32;
+            let dy = i32::from(y - rect.y);
+            let dx = i32::from(x - rect.x);
             let diamond = ((dx + dy) % RUNNER_LATTICE_STRIDE == 0)
                 || ((dx - dy).rem_euclid(RUNNER_LATTICE_STRIDE) == 0);
             let color = if is_edge {

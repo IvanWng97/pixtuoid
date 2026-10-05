@@ -7,7 +7,8 @@ const config = JSON.parse(
 ).ci;
 
 test('performance budgets use stable samples and hard failures', () => {
-  assert.ok(config.collect.numberOfRuns >= 3);
+  // "The median Lighthouse score of 5 runs is twice as stable as 1 run" (docs/variability.md)
+  assert.ok(config.collect.numberOfRuns >= 5);
   for (const [audit, assertion] of Object.entries(config.assert.assertions)) {
     assert.equal(assertion[0], 'error', `${audit} must fail CI`);
   }

@@ -171,13 +171,13 @@ pub const PROGRESS_SCALE: u16 = 1000;
 /// `t_x1000` (0..=[`PROGRESS_SCALE`]).
 pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
     let (t, scale) = (i32::from(t_x1000), i32::from(PROGRESS_SCALE));
-    let dx = to.x as i32 - from.x as i32;
-    let dy = to.y as i32 - from.y as i32;
+    let dx = i32::from(to.x) - i32::from(from.x);
+    let dy = i32::from(to.y) - i32::from(from.y);
     // Left-walking agents cross through negative x if the interpolation
     // overshoots, and a bare `as u16` wraps to ~65k — blitting off-screen.
     Point {
-        x: (from.x as i32 + dx * t / scale).clamp(0, u16::MAX as i32) as u16,
-        y: (from.y as i32 + dy * t / scale).clamp(0, u16::MAX as i32) as u16,
+        x: (i32::from(from.x) + dx * t / scale).clamp(0, i32::from(u16::MAX)) as u16,
+        y: (i32::from(from.y) + dy * t / scale).clamp(0, i32::from(u16::MAX)) as u16,
     }
 }
 
@@ -251,7 +251,7 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     // The early return above prevents reaching here at t ≥ t_total, but f32
     // rounding can still nudge s slightly outside [0, L] at phase boundaries.
     let s_clamped = s.max(0.0).min(l);
-    (PROGRESS_SCALE as f32 * s_clamped / l).round() as u16
+    (f32::from(PROGRESS_SCALE) * s_clamped / l).round() as u16
 }
 
 /// Returns `true` when the full walk **and** its arrival pause have elapsed —
@@ -500,12 +500,12 @@ mod tests {
             .collect();
         let deltas: Vec<i32> = samples
             .windows(2)
-            .map(|w| w[1] as i32 - w[0] as i32)
+            .map(|w| i32::from(w[1]) - i32::from(w[0]))
             .collect();
         let first = deltas[0];
         for (i, d) in deltas.iter().enumerate() {
             assert!(
-                (d - first).abs() <= EPS as i32,
+                (d - first).abs() <= i32::from(EPS),
                 "cruise Δ[{i}]={d} differs from Δ[0]={first} by more than {EPS} — not constant velocity"
             );
         }

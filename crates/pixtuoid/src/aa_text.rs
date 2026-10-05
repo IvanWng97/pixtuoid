@@ -72,7 +72,7 @@ fn px_per_unit(px: f32) -> f32 {
 /// each re-clamp.
 pub fn blend_channel(bg: u8, fg: u8, cov: f32) -> u8 {
     let a = cov.clamp(0.0, 1.0);
-    (bg as f32 + (fg as f32 - bg as f32) * a).round() as u8
+    (f32::from(bg) + (f32::from(fg) - f32::from(bg)) * a).round() as u8
 }
 
 /// The face's glyph for `ch`, falling back to `.notdef` on a cmap miss — so an

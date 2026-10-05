@@ -75,7 +75,7 @@ fn paint_mask(buf: &mut RgbBuffer, layout: &SceneLayout) {
     for y in 0..layout.buf_h {
         for x in 0..layout.buf_w {
             if !layout.is_walkable(x, y) {
-                tint(buf, x as i32, y as i32, BLOCKED, 0.38);
+                tint(buf, i32::from(x), i32::from(y), BLOCKED, 0.38);
             }
         }
     }
@@ -92,7 +92,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
     for wp in &layout.waypoints {
         let def = furniture_def(wp.kind.furniture());
         if def.occupies_pos {
-            blob(buf, wp.pos.x as i32, wp.pos.y as i32, SEAT, 0.7);
+            blob(buf, i32::from(wp.pos.x), i32::from(wp.pos.y), SEAT, 0.7);
             // A* routes to an APPROACH POINT off an allowed side, distinct from
             // the seat — so the viewer can confirm the agent enters from its
             // natural side, not the backrest.
@@ -101,7 +101,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
                     continue;
                 }
                 if let Some(c) = first_reachable_on_side(layout, wp.pos, dx, dy) {
-                    blob(buf, c.x as i32, c.y as i32, APPROACH, 0.7);
+                    blob(buf, i32::from(c.x), i32::from(c.y), APPROACH, 0.7);
                 }
             }
             continue;
@@ -115,13 +115,13 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
         let Some(Size { w, h }) = fp else {
             continue;
         };
-        let (hx, hy) = ((w / 2) as i32, (h / 2) as i32);
+        let (hx, hy) = (i32::from(w / 2), i32::from(h / 2));
         for (dx, dy) in DIRS {
             if def.approach.allows(wp.facing, (dx, dy)) {
                 blob(
                     buf,
-                    wp.pos.x as i32 + dx * (hx + 1),
-                    wp.pos.y as i32 + dy * (hy + 1),
+                    i32::from(wp.pos.x) + dx * (hx + 1),
+                    i32::from(wp.pos.y) + dy * (hy + 1),
                     APPROACH,
                     0.7,
                 );
@@ -144,10 +144,10 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
                 continue;
             }
             if let Some(c) = first_reachable_on_side(layout, chair, dx, dy) {
-                blob(buf, c.x as i32, c.y as i32, APPROACH, 0.7);
+                blob(buf, i32::from(c.x), i32::from(c.y), APPROACH, 0.7);
             }
         }
-        blob(buf, chair.x as i32, chair.y as i32, SEAT, 0.7);
+        blob(buf, i32::from(chair.x), i32::from(chair.y), SEAT, 0.7);
     }
 }
 
@@ -167,8 +167,8 @@ fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, walks: &HashMap<AgentId
 
 /// Integer Bresenham line between two pixel points.
 fn line(buf: &mut RgbBuffer, a: Point, b: Point, c: Rgb) {
-    let (mut x0, mut y0) = (a.x as i32, a.y as i32);
-    let (x1, y1) = (b.x as i32, b.y as i32);
+    let (mut x0, mut y0) = (i32::from(a.x), i32::from(a.y));
+    let (x1, y1) = (i32::from(b.x), i32::from(b.y));
     let dx = (x1 - x0).abs();
     let dy = -(y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
@@ -307,14 +307,16 @@ mod tests {
             scene.agents.insert(id, slot(id));
         }
         let mut walks: HashMap<AgentId, WalkState> = HashMap::new();
-        let mut ms_path = WalkState::new(id_path);
-        ms_path.walk_path = Some(WalkPathSnapshot {
-            from: Point { x: 5, y: 5 },
-            to: Point { x: 80, y: 80 },
-            path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
-        });
+        let ms_path = WalkState {
+            walk_path: Some(WalkPathSnapshot {
+                from: Point { x: 5, y: 5 },
+                to: Point { x: 80, y: 80 },
+                path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
+            }),
+            ..WalkState::default()
+        };
         walks.insert(id_path, ms_path);
-        walks.insert(id_nopath, WalkState::new(id_nopath));
+        walks.insert(id_nopath, WalkState::default());
         // id_absent is intentionally NOT in the walks map.
 
         let bg = Rgb { r: 0, g: 0, b: 0 };
