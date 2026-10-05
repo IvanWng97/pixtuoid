@@ -510,8 +510,8 @@ mod tests {
     #[test]
     fn the_boot_seed_tracks_the_physical_window_not_the_logical_config() {
         let logical = LogicalSize::new(
-            crate::config::FLOATING_DEFAULT_W as f64,
-            crate::config::FLOATING_DEFAULT_H as f64,
+            f64::from(crate::config::FLOATING_DEFAULT_W),
+            f64::from(crate::config::FLOATING_DEFAULT_H),
         );
         // The logical size read as physical — the defect.
         let as_if_physical = boot_capacities_for_window(PhysicalSize::new(
@@ -535,7 +535,7 @@ mod tests {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
             let (_scale, buf_w, buf_h) = window_buffer_geometry(physical);
             assert_eq!(
-                (buf_w as u32, buf_h as u32),
+                (u32::from(buf_w), u32::from(buf_h)),
                 want_buf,
                 "office buffer at {sf}× of {logical:?}"
             );
@@ -675,7 +675,7 @@ mod tests {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
+        let as_u32 = |c: Rgb| u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b);
         let badge_dot = |tone| {
             vec![LabelElement {
                 anchor_px: Point { x: 20, y: 20 },
@@ -770,7 +770,7 @@ mod tests {
         let marker = BADGE_MARKER.to_string();
         let tw = crate::aa_text::text_width(&format!("{marker}{text}"), LABEL_FONT_PX);
         let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
-        let left = anchor.x as i32 * scale - tw / 2;
+        let left = i32::from(anchor.x) * scale - tw / 2;
         let colours = |cols: std::ops::Range<i32>| -> std::collections::HashSet<u32> {
             sb.iter()
                 .enumerate()
@@ -1188,7 +1188,7 @@ mod tests {
         assert_eq!(labels.len(), 1, "one seeded agent → one name badge");
         let anchor = labels[0].anchor_px;
         assert!(
-            (0..160).contains(&(anchor.x as i32)) && (0..96).contains(&(anchor.y as i32)),
+            (0..160).contains(&i32::from(anchor.x)) && (0..96).contains(&i32::from(anchor.y)),
             "badge anchor {anchor:?} lands inside the rendered office buffer"
         );
     }

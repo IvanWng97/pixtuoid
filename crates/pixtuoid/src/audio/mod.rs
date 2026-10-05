@@ -1075,10 +1075,10 @@ mod listen_gate {
         let step_n = (step_s * dsp::SAMPLE_RATE as f32) as usize;
         let mut fired = vec![false; events_at.len()];
         let mut now_s = 0.0f64;
-        while now_s < secs as f64 {
+        while now_s < f64::from(secs) {
             let mut events = Vec::new();
             for (i, (at, ev)) in events_at.iter().enumerate() {
-                if !fired[i] && now_s >= *at as f64 {
+                if !fired[i] && now_s >= f64::from(*at) {
                     fired[i] = true;
                     events.push(*ev);
                 }
@@ -1098,7 +1098,7 @@ mod listen_gate {
                 sink.play_once(bank.sample(play.pool, play.index), play.gain);
             }
             sink.advance(step_n);
-            now_s += step_s as f64;
+            now_s += f64::from(step_s);
         }
         sink.master
     }

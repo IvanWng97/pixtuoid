@@ -500,12 +500,12 @@ mod tests {
             .collect();
         let deltas: Vec<i32> = samples
             .windows(2)
-            .map(|w| w[1] as i32 - w[0] as i32)
+            .map(|w| i32::from(w[1]) - i32::from(w[0]))
             .collect();
         let first = deltas[0];
         for (i, d) in deltas.iter().enumerate() {
             assert!(
-                (d - first).abs() <= EPS as i32,
+                (d - first).abs() <= i32::from(EPS),
                 "cruise Δ[{i}]={d} differs from Δ[0]={first} by more than {EPS} — not constant velocity"
             );
         }

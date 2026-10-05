@@ -391,7 +391,7 @@ pub fn stem_pad() -> Vec<f32> {
         let nd = n_samples(dur);
         let mut chord_sig = vec![0.0f32; nd];
         for (i, &m) in chord.iter().enumerate() {
-            let f = midi_freq(m as f32);
+            let f = midi_freq(f32::from(m));
             let env = env_ar(nd, 0.25 + 0.08 * i as f32, 1.2);
             for (j, slot) in chord_sig.iter_mut().enumerate() {
                 let t = j as f32 / SR;

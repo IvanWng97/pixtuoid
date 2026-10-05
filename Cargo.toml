@@ -37,6 +37,8 @@ missing_debug_implementations = "warn"
 allow_attributes                = "warn"
 allow_attributes_without_reason = "warn"
 undocumented_unsafe_blocks      = "warn"
+# A widening cast as `T::from`, which can't go silently lossy if a type changes.
+cast_lossless                   = "warn"
 
 # Rustdoc lints only fire during a doc build, so they're invisible to
 # `cargo build`/`clippy`; CI's `docs` job runs `cargo doc` to execute them.

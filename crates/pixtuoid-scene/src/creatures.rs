@@ -647,7 +647,7 @@ mod tests {
         );
 
         let t = (0.125_f32 / PET_WALK_SHARE).clamp(0.0, 1.0);
-        let lerp = |a: u16, b: u16| (a as f32 + (b as f32 - a as f32) * t) as u16;
+        let lerp = |a: u16, b: u16| (f32::from(a) + (f32::from(b) - f32::from(a)) * t) as u16;
         let expected = Point {
             x: lerp(src_anchor.x, dst_anchor.x),
             y: lerp(src_anchor.y, dst_anchor.y),

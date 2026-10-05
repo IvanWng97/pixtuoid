@@ -255,7 +255,7 @@ pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
     let (re, im, n, hz_per_bin) = forward_spectrum(buf);
     let (mut band, mut total) = (0.0f64, 0.0f64);
     for k in 1..=n / 2 {
-        let p = (re[k] * re[k] + im[k] * im[k]) as f64;
+        let p = f64::from(re[k] * re[k] + im[k] * im[k]);
         let f = k as f32 * hz_per_bin;
         total += p;
         if f >= lo_hz && f < hi_hz {

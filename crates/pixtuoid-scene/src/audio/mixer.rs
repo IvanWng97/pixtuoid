@@ -311,14 +311,14 @@ mod tests {
         let mut t = TypingScheduler::new(1);
         let mut total = 0;
         for i in 0..600 {
-            total += t.tick(i as f64 * 0.1, 0.0);
+            total += t.tick(f64::from(i) * 0.1, 0.0);
         }
         assert_eq!(total, 0, "level 0 must never type");
         let first = t.tick(60.05, 0.5);
         assert!(first <= 1, "no backlog replay, got {first}");
         let mut typed = 0;
         for i in 0..1200 {
-            typed += t.tick(60.1 + i as f64 * 0.05, 0.5);
+            typed += t.tick(60.1 + f64::from(i) * 0.05, 0.5);
         }
         assert!(
             (60..=400).contains(&typed),
@@ -331,7 +331,7 @@ mod tests {
         let mut d = DropScheduler::new(2);
         let mut drops = 0;
         for i in 0..600 {
-            drops += d.tick(i as f64 * 0.1, 0.55);
+            drops += d.tick(f64::from(i) * 0.1, 0.55);
         }
         assert!(
             (30..=110).contains(&drops),

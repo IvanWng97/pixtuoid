@@ -818,7 +818,7 @@ mod tests {
                     "tier {tier} base row col {xoff}"
                 );
             }
-            let top_y = base_y - (tier as u16 * STACK_PX_PER_TIER - 1);
+            let top_y = base_y - (u16::from(tier) * STACK_PX_PER_TIER - 1);
             let above = buf.get(desk.x + STACK_X_OFF, top_y - 1);
             assert!(
                 above != th.furniture.paper && above != th.furniture.paper_shade,

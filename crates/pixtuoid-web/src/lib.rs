@@ -923,11 +923,11 @@ mod tests {
         assert!(board["mood"].is_array() && board["context"].is_array());
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_W as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_W)
         );
         assert_eq!(
             board["rect"]["h"].as_u64().unwrap(),
-            pixtuoid_scene::layout::NEON_PANEL_INNER_H as u64
+            u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_H)
         );
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 

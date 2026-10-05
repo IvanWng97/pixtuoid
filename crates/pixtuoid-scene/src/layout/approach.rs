@@ -415,8 +415,8 @@ mod tests {
                             "{bw}x{bh} seed {seed}: {:?} stand {s:?} not coarse-reachable",
                             wp.kind
                         );
-                        let dx = s.x as i32 - wp.pos.x as i32;
-                        let dy = s.y as i32 - wp.pos.y as i32;
+                        let dx = i32::from(s.x) - i32::from(wp.pos.x);
+                        let dy = i32::from(s.y) - i32::from(wp.pos.y);
                         let dir = if dx.abs() >= dy.abs() {
                             (dx.signum(), 0)
                         } else {
@@ -439,12 +439,12 @@ mod tests {
                             def.visual
                         };
                         let (half, off) = if dx != 0 {
-                            (visual.w as i32 / 2, dx.abs())
+                            (i32::from(visual.w) / 2, dx.abs())
                         } else {
-                            (visual.h as i32 / 2, dy.abs())
+                            (i32::from(visual.h) / 2, dy.abs())
                         };
                         assert!(
-                            off >= half + STAND_CLEARANCE as i32,
+                            off >= half + i32::from(STAND_CLEARANCE),
                             "{bw}x{bh} seed {seed}: {:?} stand {s:?} sits INSIDE its visual \
                              (off {off} < half {half} + clearance {STAND_CLEARANCE})",
                             wp.kind
@@ -602,8 +602,8 @@ mod tests {
                         if a == wp.pos {
                             continue; // skip sentinel
                         }
-                        let dx = a.x as i32 - wp.pos.x as i32;
-                        let dy = a.y as i32 - wp.pos.y as i32;
+                        let dx = i32::from(a.x) - i32::from(wp.pos.x);
+                        let dy = i32::from(a.y) - i32::from(wp.pos.y);
                         let dir = if dx.abs() >= dy.abs() {
                             (dx.signum(), 0)
                         } else {
