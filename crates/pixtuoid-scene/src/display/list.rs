@@ -19,7 +19,7 @@ const STANDBY_STOPS: u8 = 2;
 const STANDBY_LEVEL_PER_STOP: i8 = -2;
 
 /// What a desk's screen shows. A screen is its own light: whatever the room's
-/// lights do, they leave its glass alone ([`paint_list`](crate::cutaway::paint::paint_list)).
+/// lights do, they leave its glass alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Screen {
     /// Dark glass.
@@ -85,8 +85,7 @@ pub(crate) struct Badge {
 /// occlusion pass.
 pub(crate) struct DisplayList<'a> {
     pub(super) pieces: Vec<Piece>,
-    /// The room's own lights, which paint over every piece at once
-    /// ([`paint_list`](crate::cutaway::paint::paint_list)).
+    /// The room's own lights, which light every piece at once.
     pub(super) lights: Vec<LightPiece>,
     /// How dark the room is: every non-emissive pixel is painted under it, so a
     /// change repaints the whole frame.
@@ -143,7 +142,7 @@ impl Piece {
 
 /// One of the room's lights: what it lifts, over which cells. A change repaints
 /// its span from every light that meets it, which alone light a rect as the
-/// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
+/// whole frame does.
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
     pub(crate) view: crate::display::light::LightView,
