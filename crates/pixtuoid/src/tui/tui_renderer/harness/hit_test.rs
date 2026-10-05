@@ -1,5 +1,6 @@
 use super::*;
-use pixtuoid_scene::pixel_painter::AgentFrame;
+use crate::tui::hit_test::SceneHit;
+use pixtuoid_scene::display::HoverTarget;
 
 #[test]
 fn furniture_hit_test_resolves_against_rendered_layout() {
@@ -57,13 +58,11 @@ fn pet_hit_test_resolves_at_pet_position() {
     let scene = scene_with(vec![active("/ph/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(120, 44, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, anim, kind } = r.cached_pet_pos().expect("pet placed");
+    let PetHover { centre: pos, .. } = r.drawn_pet().expect("pet placed");
     assert!(
-        crate::tui::hit_test::hit_test_pet(
-            kind,
-            pos,
-            anim,
-            crate::tui::geometry::CellArea::half_block(pos.x, pos.y / 2)
+        matches!(
+            r.scene_hit_at(pos.x, pos.y / 2),
+            Some(SceneHit::Figure(HoverTarget::Pet(_)))
         ),
         "clicking the pet's own position should hit it"
     );
@@ -119,13 +118,16 @@ fn click_hit_test_follows_a_walking_sprite() {
     );
 }
 
+/// A sprite's top-left and its frame's size, in logical pixels.
+#[derive(Debug, Clone, Copy)]
+struct Sprite {
+    top_left: pixtuoid_scene::layout::Point,
+    w: u16,
+    h: u16,
+}
+
 /// Where the painter blits `id`'s sprite at `now`, sized by the pack's frame.
-fn drawn(
-    r: &TuiRenderer<TestBackend>,
-    scene: &SceneState,
-    id: AgentId,
-    now: SystemTime,
-) -> AgentFrame {
+fn drawn(r: &TuiRenderer<TestBackend>, scene: &SceneState, id: AgentId, now: SystemTime) -> Sprite {
     let layout = r.cached_layout().expect("rendered layout");
     let stepped = pixtuoid_scene::floor::FloorSession::new(std::sync::Arc::new(pack().clone()))
         .step(
@@ -153,17 +155,15 @@ fn drawn(
         .and_then(|a| a.frames().get(c.frame_idx))
         .map(|f| (f.width(), f.height()))
         .expect("the pack draws the placement");
-    AgentFrame {
-        agent_id: id,
+    Sprite {
         top_left: c.top_left,
         w: art.0,
         h: art.1,
-        label_anchor: c.label_anchor,
     }
 }
 
 /// Whether the half-block cell `(col, row)` shows a pixel of `sprite`.
-fn cell_shows(sprite: AgentFrame, col: u16, row: u16) -> bool {
+fn cell_shows(sprite: Sprite, col: u16, row: u16) -> bool {
     crate::tui::geometry::CellArea::half_block(col, row).overlaps(
         sprite.top_left,
         sprite.w,
@@ -202,7 +202,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
         .find(|&(_, drawn)| drawn.top_left != seat)
         .expect("within one breath cycle the sitter bobs off its seat top-left");
     r.render(&scene, pack(), now).unwrap();
-    let seated = AgentFrame {
+    let seated = Sprite {
         top_left: seat,
         ..drawn
     };
@@ -300,10 +300,6 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
 #[test]
 fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
     use crate::tui::geometry::CellArea;
-    use crate::tui::hit_test::{
-        hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet,
-        topmost_mascot_at,
-    };
     let now = t0() + Duration::from_secs(20);
     let mut scene = scene_with(
         (0..6)
@@ -343,31 +339,21 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
             out.layout.as_deref().expect("drawn"),
             out.geometry.expect("drawn"),
         );
-        let hits = |at: CellArea| {
-            (
-                hit_test_agent(&out.agents, at),
-                hit_test_coffee_machine(layout, at),
-                out.pet_pos
-                    .is_some_and(|p| hit_test_pet(p.kind, p.pos, p.anim, at)),
-                topmost_mascot_at(&out.mascots, at).map(|m| m.pos),
-                hit_test_furniture(layout, at),
-            )
-        };
+        let hits = |at: CellArea| crate::tui::hit_test::scene_hit(&out.hovers, layout, at);
         let mut seen = [false; 5];
         for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
-            let old = hits(CellArea::half_block(col, row));
+            let half_block = hits(CellArea::half_block(col, row));
             assert_eq!(
                 geometry.area_at(col, row).map(hits),
-                Some(old),
+                Some(half_block),
                 "{cols}x{rows} cell ({col},{row})"
             );
-            let (agent, coffee, pet, mascot, furniture) = old;
             for (seen, hit) in seen.iter_mut().zip([
-                agent.is_some(),
-                coffee,
-                pet,
-                mascot.is_some(),
-                furniture.is_some(),
+                matches!(half_block, Some(SceneHit::Figure(HoverTarget::Agent(_)))),
+                half_block == Some(SceneHit::Coffee),
+                matches!(half_block, Some(SceneHit::Figure(HoverTarget::Pet(_)))),
+                matches!(half_block, Some(SceneHit::Figure(HoverTarget::Mascot(_)))),
+                matches!(half_block, Some(SceneHit::Furniture(_))),
             ]) {
                 *seen |= hit;
             }
@@ -375,6 +361,165 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
         assert_eq!(
             seen, [true; 5],
             "{cols}x{rows}: every kind is hit somewhere"
+        );
+    }
+}
+
+/// A click on an agent focuses it and a click on the pet pets it, through the
+/// mouse handler itself.
+#[test]
+fn a_click_focuses_an_agent_and_pets_the_pet() {
+    a_click_acts_on_what_it_hits(&mut build(140, 48, vec![PetKind::Cat]));
+}
+
+/// [`a_click_focuses_an_agent_and_pets_the_pet`] on `r`, a renderer with a cat.
+pub(super) fn a_click_acts_on_what_it_hits<B>(r: &mut TuiRenderer<B>)
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let now = t0() + Duration::from_secs(20);
+    let id = AgentId::from_transcript_path("/click/0.jsonl");
+    let scene = scene_with(vec![active("/click/0.jsonl", 0, "Edit", t0())], 16);
+    r.render(&scene, pack(), now).unwrap();
+    let (_tx, scene_rx) = tokio::sync::watch::channel(Arc::new(scene));
+    let mut ui = crate::tui::ui_state::UiState::new(
+        normal_theme(),
+        crate::tui::welcome::WelcomeUi::from_detected(&[]),
+        false,
+        std::path::PathBuf::from("/tmp/sock"),
+        None,
+    );
+    let cell = |r: &TuiRenderer<B>, hits: &dyn Fn(&SceneHit<'_>) -> bool| {
+        r.frame_buffer()
+            .area()
+            .positions()
+            .find(|p| r.scene_hit_at(p.x, p.y).is_some_and(|h| hits(&h)))
+            .map(|p| (p.x, p.y))
+    };
+    let click = |(column, row)| MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    let on_agent = cell(r, &|h| matches!(h, SceneHit::Figure(HoverTarget::Agent(_))))
+        .expect("an agent's cell");
+    let mut focused = None;
+    crate::tui::handle_mouse_event(
+        click(on_agent),
+        &mut ui,
+        r,
+        &scene_rx,
+        |slot| focused = Some(slot.agent_id),
+        now,
+    );
+    assert_eq!(focused, Some(id), "the click focuses the agent it hits");
+    let on_pet =
+        cell(r, &|h| matches!(h, SceneHit::Figure(HoverTarget::Pet(_)))).expect("the pet's cell");
+    assert!(
+        r.active_pet_ref().is_none(),
+        "premise: nobody petted it yet"
+    );
+    let mut pet = |r: &mut TuiRenderer<B>, at| {
+        crate::tui::handle_mouse_event(
+            click(on_pet),
+            &mut ui,
+            r,
+            &scene_rx,
+            |_| panic!("the pet is no agent"),
+            at,
+        );
+        r.active_pet_ref().map(|p| p.petted_at)
+    };
+    assert_eq!(pet(r, now), Some(now), "the click pets the cat");
+    assert_eq!(
+        pet(r, now + Duration::from_millis(1)),
+        Some(now),
+        "a second click while it purrs pets nothing new"
+    );
+}
+
+/// The click handler acts on `scene_hit_at`, so wherever it names a figure or
+/// the coffee machine, the tooltip there names the same thing.
+#[test]
+fn what_the_tooltip_names_is_what_a_click_acts_on() {
+    let (cols, rows) = (140, 48);
+    the_tooltip_names_what_a_click_acts_on(&mut build(cols, rows, vec![PetKind::Cat]), |a| {
+        format!("\u{25b8}{}", a.label)
+    });
+}
+
+/// [`what_the_tooltip_names_is_what_a_click_acts_on`] on `r`, a renderer with
+/// a cat, where a hovered agent shows `agent_says`.
+pub(super) fn the_tooltip_names_what_a_click_acts_on<B>(
+    r: &mut TuiRenderer<B>,
+    agent_says: impl Fn(&AgentSlot) -> String,
+) where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
+    let now = t0() + Duration::from_secs(20);
+    let mut scene = scene_with(
+        (0..3)
+            .map(|i| {
+                let mut s = active(&format!("/same/{i}.jsonl"), i, "Edit", t0());
+                s.label = format!("AGENT{i}").into();
+                s
+            })
+            .collect(),
+        16,
+    );
+    for port in ["18789", "18790"] {
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new(port).expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 1,
+                last_seen: now,
+                entered_at: t0(),
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+    }
+    r.render(&scene, pack(), now).unwrap();
+    let (mut named, mut seen) = (Vec::new(), [false; 4]);
+    for (col, row) in r.frame_buffer().area().positions().map(|p| (p.x, p.y)) {
+        let (kind, says) = match r.scene_hit_at(col, row) {
+            Some(SceneHit::Figure(HoverTarget::Agent(id))) => (0, agent_says(&scene.agents[id])),
+            Some(SceneHit::Figure(HoverTarget::Pet(pet))) => (
+                1,
+                if pet.anim == PetKind::Cat.sleep_anim() {
+                    "sleeping"
+                } else if pet.anim == PetKind::Cat.sit_anim() {
+                    "Pet me!"
+                } else {
+                    "Office Cat"
+                }
+                .to_string(),
+            ),
+            Some(SceneHit::Figure(HoverTarget::Mascot(key))) => {
+                (2, format!("OpenClaw:{} gateway", key.instance().as_str()))
+            }
+            Some(SceneHit::Coffee) => (3, "Buy Ivan a coffee".to_string()),
+            Some(SceneHit::Furniture(_)) | None => continue,
+        };
+        seen[kind] = true;
+        named.push(((col, row), says));
+    }
+    assert_eq!(
+        seen, [true; 4],
+        "premise: agents, the cat, a gateway and the coffee"
+    );
+    // A stride, not every cell: each probe is a full render.
+    for ((col, row), says) in named.iter().step_by(3) {
+        r.set_mouse_pos(Some((*col, *row)));
+        r.render(&scene, pack(), now).unwrap();
+        let text = frame_text(r.frame_buffer());
+        assert!(
+            text.contains(says.as_str()),
+            "cell ({col},{row}) acts on {says:?}; frame:\n{text}"
         );
     }
 }
