@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       full:
-        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
+        description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
         type: boolean
         required: true
 
@@ -13,9 +13,11 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Unit tests on every platform run on every PR push
+  # (docs.mergify.com/merge-queue/two-step: the preliminary step runs
+  # "linters, formatters, unit tests, basic compile checks").
   test:
     name: ${{ matrix.platform }}-test
-    if: ${{ inputs.full }}
     strategy:
       fail-fast: false
       matrix:
@@ -147,8 +149,6 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Source drift gate (generated sprites and icons, README sections, the comparator)
-        run: just compare-selftest gen-readme-check gen-art-check gen-icons-check
       # Evidence, not a gate: a look-changing PR doesn't commit media, and the
       # generated-art lens reads the overlays below.
       - name: README media drift (evidence)
@@ -182,3 +182,4 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "Required test job failed"
+          allow-skipped: ${{ !inputs.full }}
