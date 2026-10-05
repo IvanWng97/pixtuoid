@@ -63,8 +63,8 @@ manual CSP step; a hand-written `public/*.js` loaded by URL rides
 `script-src 'self'`; an inline `<style>` or `style` attribute needs none
 either — each is hashed, an attribute's under `'unsafe-hashes'`, but one set
 at runtime (`setAttribute('style', …)`, `style.cssText`, markup through
-`innerHTML`) is blocked: set `el.style.<property>` instead. `astro dev` serves NO CSP; regressions surface in
-`just site-e2e`'s console watchdog.
+`innerHTML`) is blocked: set `el.style.<property>` instead. `astro dev` serves
+NO CSP; regressions surface in `just site-e2e`'s console watchdog.
 
 ## Dev server (agent-driving)
 
@@ -87,8 +87,8 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
 
 - **Lighthouse** (`npm run lighthouse`, in-repo runner
   `config/lighthouse-runner.mjs`, lighthouse 13 programmatic API, median of
-  five serial runs, docs/variability.md's stability figure; runner-semantics pinned by its test — a renamed audit
-  FAILS instead of passing vacuously). **A category score is a budget, not a
+  `lighthouserc.json`'s `numberOfRuns` serial runs; runner-semantics pinned by
+  its test — a renamed audit FAILS instead of passing vacuously). **A category score is a budget, not a
   contract**: `color-contrast` is a small weight in the a11y category, so a total
   contrast failure still clears the category budget — anything that must never regress gets
   its own per-audit assertion with `aggregationMethod: pessimistic` (median
