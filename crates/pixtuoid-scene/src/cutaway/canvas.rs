@@ -842,6 +842,52 @@ mod tests {
         assert_ne!(was.1, now.1, "its tone is in its fingerprint");
     }
 
+    /// The star a pointer opens the repo on is the cells the canvas drew it in:
+    /// its box on the pack's grid where the pack's density divides the scale,
+    /// and nothing on the base art's grid, where it yields to the brand.
+    #[test]
+    #[cfg(feature = "cutaway-assets")]
+    fn the_star_link_is_the_drawn_star() {
+        use crate::display::TextRole;
+        let pack = Arc::new(test_default_pack());
+        let now = crate::localclock::at_hour(12);
+        let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let stepped = SteppedFloor {
+            frame: empty_frame(&layout),
+            layout: Arc::new(layout),
+        };
+        let d = pack.max_density_variant().get();
+        for s in [1, d] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+            let showing = crate::display::compose::tests::showing(clear_ground(), now);
+            canvas.frame(
+                &stepped,
+                normal(),
+                scale,
+                showing,
+                &mut crate::cutaway::paint::CutawayCache::default(),
+            );
+            let office = Office {
+                layout: &stepped.layout,
+                pack: &pack,
+                theme: normal(),
+                scale,
+            };
+            let drawn = compose(&stepped.frame, office, showing)
+                .texts()
+                .find(|run| run.role == TextRole::Star)
+                .map(|run| {
+                    crate::display::compose::run_box(
+                        run,
+                        crate::display::pen::Pen::for_pack(scale, &pack),
+                    )
+                });
+            assert_eq!(drawn.is_some(), s == d, "at scale {s} the star is drawn");
+            assert_eq!(canvas.star(), drawn, "at scale {s}");
+        }
+    }
+
     /// The board's lines are pieces of their own: a new tally repaints exactly
     /// the board lines it changed, the old line's cells and the new one's.
     #[test]

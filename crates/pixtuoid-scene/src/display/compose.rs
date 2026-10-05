@@ -508,7 +508,7 @@ pub(crate) fn run_box(run: &TextRun, pen: Pen) -> Bounds {
 }
 
 /// Whether `a` and `b` share an art pixel.
-pub(crate) fn meets(a: ArtRect, b: ArtRect) -> bool {
+fn meets(a: ArtRect, b: ArtRect) -> bool {
     a.x.0 < b.x.0 + b.w.0 && b.x.0 < a.x.0 + a.w.0 && a.y.0 < b.y.0 + b.h.0 && b.y.0 < a.y.0 + a.h.0
 }
 
