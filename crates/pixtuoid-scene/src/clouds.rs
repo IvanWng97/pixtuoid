@@ -871,7 +871,7 @@ impl Clouds {
                     share,
                     light,
                 };
-                let draw = || clouds.draw(&mass, glass_h_f, d);
+                let draw = || clouds.draw(&mass, glass_h_f);
                 let raster = match cache.as_deref_mut() {
                     Some(cache) => cache.get_or_draw(key, draw),
                     None => std::sync::Arc::new(draw()),
@@ -907,11 +907,10 @@ impl Clouds {
         clouds
     }
 
-    /// Mass `m`'s bands over glass `glass_h` tall on a grid `d` to the unit,
-    /// in its own undrifted frame, closed: a notch narrower than
-    /// [`CLOSE`] fills.
-    fn draw(&self, m: &Mass, glass_h: f32, d: u16) -> MassRaster {
-        let df = f32::from(d);
+    /// Mass `m`'s bands over glass `glass_h` tall on its grid, in its own
+    /// undrifted frame, closed: a notch narrower than [`CLOSE`] fills.
+    fn draw(&self, m: &Mass, glass_h: f32) -> MassRaster {
+        let df = f32::from(self.d);
         let k = ((CLOSE * df).round() as i32).max(1);
         let (west, east) = m.reach();
         let x0 = ((west - SLIT) * df).floor() as i32 - k;
@@ -958,9 +957,9 @@ impl Clouds {
         }
     }
 
-    /// Each mass's drift this frame, in whole cells of a grid `d` to the unit.
-    fn cell_drifts(&self, d: u16) -> Vec<i32> {
-        let df = f32::from(d);
+    /// Each mass's drift this frame, in whole cells of its grid.
+    fn cell_drifts(&self) -> Vec<i32> {
+        let df = f32::from(self.d);
         self.masses
             .iter()
             .map(|m| (m.off * df).round() as i32)
@@ -1044,8 +1043,8 @@ impl Clouds {
         if self.masses.is_empty() {
             return;
         }
-        let d = view.d();
-        debug_assert_eq!(d, self.d, "the clouds were drawn for another grid");
+        let d = self.d;
+        debug_assert_eq!(view.d(), d, "the clouds were drawn for another grid");
         let df = f32::from(d);
         let unit = |cell: Cell| {
             (
@@ -1060,7 +1059,7 @@ impl Clouds {
         }
         // the glass's west edge's column on the run's grid
         let west = i32::from(view.glass_origin().0) - i32::from(run_x0 * d);
-        let drift = self.cell_drifts(d);
+        let drift = self.cell_drifts();
         let mut px: Vec<Option<(Band, usize)>> = (0..rows * cols)
             .map(|i| self.band_at(&drift, west + (i % cols) as i32, (i / cols) as i32))
             .collect();
@@ -1102,7 +1101,7 @@ impl Clouds {
                 })
             })
             .collect();
-        let bolt = self.bolt_cells(d, run_x0);
+        let bolt = self.bolt_cells(run_x0);
         view.paint(|cell, c| {
             let (gx, gy) = (
                 usize::from(cell.glass_offset.0),
@@ -1128,7 +1127,7 @@ impl Clouds {
                     let sky = row_sky.get(gy).copied().flatten().unwrap_or(c);
                     tone.mix(sky, mass.layer.sky_mix())
                 }
-                None => self.virga(cell, d, (x, y), c),
+                None => self.virga(cell, (x, y), c),
             };
             if bolt.contains(&(cell.at.0, cell.glass_offset.1)) {
                 c = c.mix(BOLT_CORE, if d > 1 { 1.0 } else { BOLT_1X });
@@ -1243,7 +1242,7 @@ impl Clouds {
     }
 
     /// Faint shafts of rain under the darkest masses, by the rain's share.
-    fn virga(&self, cell: Cell, d: u16, (x, y): (f32, f32), c: Rgb) -> Rgb {
+    fn virga(&self, cell: Cell, (x, y): (f32, f32), c: Rgb) -> Rgb {
         if self.rain <= 0.0 {
             return c;
         }
@@ -1260,7 +1259,7 @@ impl Clouds {
         let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
         let fade = 1.0 - (y - m.base) / VIRGA_DEPTH;
         // sparse, slanted streaks, half their cells
-        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(d)) == 0;
+        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d)) == 0;
         if streak && gx % 2 == gy % 2 {
             c.mix(
                 self.tone(m.weather, Band::Shade),
@@ -1271,11 +1270,12 @@ impl Clouds {
         }
     }
 
-    /// The cells the bolt's core covers on a grid `d` to the unit, as each
-    /// cell's grid column and glass row.
-    fn bolt_cells(&self, d: u16, run_x0: u16) -> std::collections::HashSet<(u16, u16)> {
+    /// The cells the bolt's core covers on its grid, as each cell's grid
+    /// column and glass row.
+    fn bolt_cells(&self, run_x0: u16) -> std::collections::HashSet<(u16, u16)> {
         let mut out = std::collections::HashSet::new();
         let Some(s) = &self.strike else { return out };
+        let d = self.d;
         let df = f32::from(d);
         for (li, line) in s.bolt.iter().enumerate() {
             // 1 cell wide on every grid; at 4x the trunk's top few segments 2
@@ -1636,38 +1636,47 @@ mod tests {
     }
 
     /// A strike's bolt hangs off a drawn cloud: a mass draws the cell its
-    /// top starts in or the one over it, at every density.
+    /// top starts in or the one over it, at every density, partway through the
+    /// strike, so the masses have drifted on since the instant it chose its
+    /// cloud at.
     #[test]
     fn the_bolt_hangs_off_a_drawn_cloud() {
-        let now = crate::localclock::at_hour(12);
-        let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
-        let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
         for d in [1u16, 4] {
-            let mut bolts = 0;
-            let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, None);
-            let drift = c.cell_drifts(d);
-            assert!(
-                drift.iter().any(|&o| o != 0),
-                "a drifted deck, so the drift counts"
-            );
-            let run = (f32::from(SPAN), f32::from(GLASS_H));
-            let now_secs = moment.timing.beat.ms() as f64 / 1000.0;
-            for bucket in 0..40 {
-                let Some(s) = c.strike_at(bucket, 1.0, run, now_secs, RUN) else {
+            let (mut bolts, mut lagged) = (0, 0);
+            for k in 0..60u64 {
+                let then = crate::localclock::at_hour(12) + Duration::from_secs(k * 15);
+                let beat = Motion::Full.timing(then).beat;
+                let start = crate::sky::strike_start_ms(beat) - beat.ms();
+                // its last phase: the furthest the drift gets from the strike's start
+                let now = then + Duration::from_millis(start + 2 * crate::anim::FULL_TICK_MS);
+                let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
+                let moment =
+                    Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
+                let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, None);
+                let Some(&(x, y)) = c
+                    .strike
+                    .as_ref()
+                    .and_then(|s| s.bolt.first())
+                    .and_then(|trunk| trunk.first())
+                else {
                     continue;
                 };
-                let Some(&(x, y)) = s.bolt.first().and_then(|trunk| trunk.first()) else {
-                    continue;
-                };
+                let drift = c.cell_drifts();
+                let struck_at = crate::sky::strike_start_ms(moment.timing.beat);
+                lagged += usize::from(moment.timing.beat.ms() > struck_at);
                 let df = f32::from(d);
                 let (col, row) = ((x * df) as i32, (y * df) as i32);
                 assert!(
                     (row - 1..=row).any(|r| c.band_at(&drift, col, r).is_some()),
-                    "d {d}, bucket {bucket}: the bolt's top at ({col}, {row}) hangs off no cloud"
+                    "d {d}, strike {k}: the bolt's top at ({col}, {row}) hangs off no cloud"
                 );
                 bolts += 1;
             }
             assert!(bolts > 0, "d {d}: the sample must strike a bolt");
+            assert_eq!(
+                lagged, bolts,
+                "d {d}: every bolt drawn after its strike began"
+            );
         }
     }
 
@@ -1718,6 +1727,73 @@ mod tests {
             seen.insert(pane);
         }
         assert_eq!(seen.len(), panes.len(), "every pane takes strikes");
+    }
+
+    /// Rain hangs in shafts under a mid or near mass's base, fading with
+    /// depth: none without rain, none under a far mass, none past
+    /// [`VIRGA_DEPTH`].
+    #[test]
+    fn virga_falls_from_a_rained_on_mid_or_near_base() {
+        const SKY: Rgb = Rgb {
+            r: 90,
+            g: 130,
+            b: 200,
+        };
+        // How much the shafts shade the sky, by whole rows below the base of
+        // the mass they hang from.
+        let shaded = |c: &Clouds| {
+            let mut by_depth = vec![0u32; VIRGA_DEPTH.ceil() as usize];
+            for col in 0..SPAN {
+                for row in 0..GLASS_H {
+                    let (x, y) = (f32::from(col) + 0.5, f32::from(row) + 0.5);
+                    let cell = Cell {
+                        at: (col, row),
+                        glass_offset: (col, row),
+                    };
+                    let out = c.virga(cell, (x, y), SKY);
+                    let shade = u32::from(SKY.r.abs_diff(out.r))
+                        + u32::from(SKY.g.abs_diff(out.g))
+                        + u32::from(SKY.b.abs_diff(out.b));
+                    if shade == 0 {
+                        continue;
+                    }
+                    let m = c.masses.iter().find(|m| {
+                        m.layer >= Layer::Mid
+                            && m.base < y
+                            && y <= m.base + VIRGA_DEPTH
+                            && m.lobes
+                                .iter()
+                                .any(|l| (x - m.off - l.x).abs() < l.r * VIRGA_REACH)
+                    });
+                    let m = m.unwrap_or_else(|| {
+                        panic!("({col}, {row}) shaded under no mid or near base")
+                    });
+                    by_depth[(y - m.base) as usize] += shade;
+                }
+            }
+            by_depth
+        };
+        let rain = clouds(Weather::Rain, 12, 0.0);
+        let fall = shaded(&rain);
+        assert!(fall[0] > 0, "rain shades under the base: {fall:?}");
+        assert!(
+            fall[0] > fall[fall.len() - 1],
+            "it fades with depth: {fall:?}"
+        );
+
+        let mut light = clouds(Weather::Rain, 12, 0.0);
+        light.rain /= 2.0;
+        let half: u32 = shaded(&light).iter().sum();
+        assert!(half < fall.iter().sum(), "lighter rain, fainter shafts");
+        light.rain = 0.0;
+        assert!(shaded(&light).iter().all(|&n| n == 0), "no rain, no shafts");
+
+        let mut far = clouds(Weather::Rain, 12, 0.0);
+        far.masses.iter_mut().for_each(|m| m.layer = Layer::Far);
+        assert!(
+            shaded(&far).iter().all(|&n| n == 0),
+            "none under a far mass"
+        );
     }
 
     /// A far mass leans further to the sky behind it than a near one.
