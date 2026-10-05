@@ -274,27 +274,26 @@ impl<'a> XrgbSurface<'a> {
 /// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
 pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], scale: i32) {
     for run in runs {
-        let (pixtuoid_scene::display::TextRole::Badge(_), [marker, name]) =
-            (run.role, run.spans.as_slice())
-        else {
+        if !matches!(run.role, pixtuoid_scene::display::TextRole::Badge(_)) {
             continue;
-        };
+        }
         let tw = crate::aa_text::text_width(&run.text(), LABEL_FONT_PX);
         const BADGE_LIFT_PX: i32 = 12;
-        let cx = i32::from(run.at.x) * scale - tw / 2;
+        let mut x = i32::from(run.at.x) * scale - tw / 2;
         let cy = i32::from(run.at.y) * scale - BADGE_LIFT_PX;
         if let Some(plate) = run.plate {
             let pad = BADGE_PLATE_PAD_PX;
             let h = LABEL_FONT_PX.ceil() as i32;
             sb.fill(
-                (cx - pad, cy - pad),
+                (x - pad, cy - pad),
                 (tw + 2 * pad, h + 2 * pad),
                 pack_xrgb(plate),
             );
         }
-        let mw = crate::aa_text::text_width(&marker.text, LABEL_FONT_PX);
-        sb.draw_shadowed_text(&marker.text, cx, cy, LABEL_FONT_PX, pack_xrgb(marker.ink));
-        sb.draw_shadowed_text(&name.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(name.ink));
+        for span in &run.spans {
+            sb.draw_shadowed_text(&span.text, x, cy, LABEL_FONT_PX, pack_xrgb(span.ink));
+            x += crate::aa_text::text_width(&span.text, LABEL_FONT_PX);
+        }
     }
 }
 
@@ -775,6 +774,33 @@ mod tests {
         assert!(
             ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
             "ink spans {left}..={right}, centred off the anchor's {centre}"
+        );
+    }
+
+    /// A badge draws every span it holds, each in its own ink, whatever their
+    /// count: a third span finds its pixels too.
+    #[test]
+    fn a_badge_draws_every_span_it_holds() {
+        use pixtuoid_scene::badge::BadgeTone;
+        use pixtuoid_scene::layout::Point;
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let (w, h, scale) = (240usize, 60usize, 3i32);
+        let ground = 0x0080_8080u32;
+        let third = pixtuoid_core::sprite::Rgb { r: 255, g: 0, b: 0 };
+        let mut run = badge(Point { x: 40, y: 15 }, "idle-x", BadgeTone::Idle, theme);
+        run.spans.push(pixtuoid_scene::display::TextSpan {
+            text: "MW".into(),
+            ink: third,
+        });
+        let mut sb = vec![ground; w * h];
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[run],
+            scale,
+        );
+        assert!(
+            sb.contains(&pack_xrgb(third)),
+            "the third span drew no pixel in its ink"
         );
     }
 
