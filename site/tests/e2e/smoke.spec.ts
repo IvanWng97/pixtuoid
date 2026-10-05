@@ -1619,8 +1619,9 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     ['./config', 768],
     ['./architecture', 375],
     ['./contributing', 375],
-    ['./architecture', 320], // the #503 class: wide ASCII pre + long links
+    ['./architecture', 320], // #503's wide ASCII pre
     ['./architecture', 768],
+    ['./contributing', 320], // #503's long link: `crates/pixtuoid-core/tests/AGENTS.md`
   ] as const) {
     const context = await browser.newContext({
       viewport: { width, height: 820 },
