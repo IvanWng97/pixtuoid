@@ -88,9 +88,9 @@ pub(crate) fn advance(text: &str) -> ArtPx {
 /// Logical rows between a badge's anchor and the line it sits on.
 pub const LABEL_GAP: u16 = 2;
 
-/// Logical rows a chitchat bubble's anchor rides over its speaker's badge's:
-/// two cell rows, a row clear of the badge.
-const BUBBLE_LIFT: u16 = 4;
+/// Logical rows a chitchat bubble's anchor rides over its speaker's badge's: a
+/// cell row clear of the badge.
+const BUBBLE_LIFT: u16 = 2 * crate::layout::CELL_ROWS;
 
 /// One line of text a frame shows: its spans laid end to end, on `plate` if it
 /// has one. Its inks are resolved, so a painter reads no theme for it.
@@ -197,7 +197,7 @@ impl TextRun {
 
     /// `bubble` over its speaker's badge among `badges`, in the tooltip's
     /// ink on its plate; `None` when its speaker wears no badge.
-    pub fn bubble(
+    pub(crate) fn bubble(
         bubble: &crate::chitchat::ChitchatBubble,
         badges: &[TextRun],
         theme: &Theme,
@@ -226,9 +226,20 @@ impl TextRun {
     }
 
     /// The logical cells its line covers on the terminal's cell grid, one
-    /// per cell of its text: what the hit test reads and the classic writes.
+    /// per cell of its text and of its [`pad`](Self::pad): what the hit test
+    /// reads and the classic writes.
     pub fn bounds(&self) -> crate::layout::Bounds {
-        self.place(cells(&self.text()))
+        let spans = u16::try_from(self.spans.len()).unwrap_or(u16::MAX);
+        self.place(cells(&self.text()) + 2 * self.pad() * spans)
+    }
+
+    /// The cells of plate the classic writes each side of each span: the floor
+    /// indicator and a chitchat bubble sit a cell clear inside their plates.
+    pub fn pad(&self) -> u16 {
+        match (self.role, self.plate) {
+            (TextRole::Indicator | TextRole::Bubble(_), Some(_)) => 1,
+            _ => 0,
+        }
     }
 
     /// The logical cells a line `w` cells wide takes where its align puts it:

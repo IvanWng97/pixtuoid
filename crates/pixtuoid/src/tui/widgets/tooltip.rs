@@ -85,11 +85,18 @@ pub(crate) fn paint_text_runs(
                 .iter()
                 .map(|s| Span::styled(s.text.clone(), on_plate(style(s.ink))))
                 .collect(),
-            (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => run
-                .spans
-                .iter()
-                .map(|s| Span::styled(format!(" {} ", s.text), style(s.ink).bg(to_color(plate))))
-                .collect(),
+            (_, Some(plate)) if run.pad() > 0 => {
+                let pad = " ".repeat(usize::from(run.pad()));
+                run.spans
+                    .iter()
+                    .map(|s| {
+                        Span::styled(
+                            format!("{pad}{}{pad}", s.text),
+                            style(s.ink).bg(to_color(plate)),
+                        )
+                    })
+                    .collect()
+            }
             _ => run
                 .spans
                 .iter()
@@ -560,7 +567,8 @@ mod tests {
     /// A run the pointer can name is painted in exactly the cells its
     /// [`TextRun::bounds`](pixtuoid_scene::display::TextRun::bounds) gives the
     /// hit test, whichever row its anchor falls on: a board line and its star
-    /// as the classic writes them, and a badge over an odd and an even head.
+    /// as the classic writes them, and a badge and a padded chitchat bubble over
+    /// an odd and an even head.
     #[test]
     fn a_run_paints_the_cells_its_bounds_hit() {
         use pixtuoid_core::state::DaemonState;
@@ -582,12 +590,29 @@ mod tests {
         );
         let mut runs = model.runs(&theme::NORMAL);
         for y in [9, 10] {
-            runs.push(badge(
+            let speaker = badge(
                 Point { x: 40, y },
                 "cc\u{b7}repo",
                 LabelTone::Idle,
                 &theme::NORMAL,
-            ));
+            );
+            let super::TextRole::Badge(id) = speaker.role else {
+                unreachable!("built a badge");
+            };
+            runs.push(super::TextRun {
+                at: Point {
+                    y: y + 10,
+                    ..speaker.at
+                },
+                align: pixtuoid_scene::display::Align::Over,
+                spans: vec![pixtuoid_scene::display::TextSpan {
+                    text: "LGTM!".into(),
+                    ink: theme::NORMAL.ui.tooltip_text,
+                }],
+                plate: Some(theme::NORMAL.ui.tooltip_bg),
+                role: super::TextRole::Bubble(id),
+            });
+            runs.push(speaker);
         }
         let area = Rect::new(0, 0, 120, 44);
         for run in runs {
@@ -759,7 +784,6 @@ mod tests {
 
     #[test]
     fn a_chitchat_bubble_centres_over_its_speakers_badge() {
-        use pixtuoid_scene::chitchat::ChitchatBubble;
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::LabelTone;
         let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
@@ -779,15 +803,19 @@ mod tests {
         let super::TextRole::Badge(id) = speaker.role else {
             unreachable!("built a badge");
         };
-        let bubble = super::TextRun::bubble(
-            &ChitchatBubble {
-                text: quip,
-                speaker: id,
+        let bubble = super::TextRun {
+            at: Point {
+                y: speaker.at.y - 4,
+                ..speaker.at
             },
-            std::slice::from_ref(&speaker),
-            &theme::NORMAL,
-        )
-        .expect("its speaker wears a badge");
+            align: pixtuoid_scene::display::Align::Over,
+            spans: vec![pixtuoid_scene::display::TextSpan {
+                text: quip.into(),
+                ink: theme::NORMAL.ui.tooltip_text,
+            }],
+            plate: Some(theme::NORMAL.ui.tooltip_bg),
+            role: super::TextRole::Bubble(id),
+        };
         term.draw(|f| super::paint_text_runs(f, &[speaker.clone(), bubble], scene_rect, None))
             .unwrap();
         let buf = term.backend().buffer();
