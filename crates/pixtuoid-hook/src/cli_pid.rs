@@ -133,6 +133,8 @@ fn parse_stat(stat: &str) -> Option<ProcRow> {
 #[cfg(target_os = "macos")]
 fn proc_row(pid: u32) -> Option<ProcRow> {
     let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>()).ok()?;
+    // SAFETY: `proc_bsdshortinfo` is a repr(C) struct of integers and byte arrays,
+    // for which all-zero is a valid value.
     let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
     // Safety: the flavor matches the out-param type, and the kernel writes at
     // most `size` bytes into the owned `info`.

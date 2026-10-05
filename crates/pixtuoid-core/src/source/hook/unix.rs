@@ -156,6 +156,7 @@ fn socket_sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
     ))
 }
 
+#[derive(Debug)]
 pub(super) struct Listener {
     listener: UnixListener,
     // Never unlocked: the kernel releases it however abruptly the process dies, so

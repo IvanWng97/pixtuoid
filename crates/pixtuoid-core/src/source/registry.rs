@@ -4,7 +4,7 @@
 //! its value is not the datum but the QUESTION a struct literal forces, after a
 //! checklist bullet let three sources ship an unverified resolver (#880/#343/#342/#195).
 
-use anyhow::Result;
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
@@ -38,7 +38,7 @@ pub enum IdKey {
 /// A source's own hook-payload decoder, dispatched ahead of the shared CC-shaped
 /// arms — TYPED by whether it may decline, so a [`Self::ClaimsAll`] fn has no
 /// `Option` to get wrong.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum HookCustom {
     /// EXTENDS the shared arms: tried first; `Ok(Some(events))` short-circuits,
     /// `Ok(None)` DECLINES and falls through to the shared arms, `Err`
@@ -79,6 +79,7 @@ impl ToolIdKey {
 }
 
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
+#[derive(Debug)]
 pub struct HookDecoding {
     /// The per-session AgentId key strategy, read by the shared arms only.
     pub id_key: IdKey,
@@ -93,7 +94,7 @@ pub struct HookDecoding {
 /// Reducer-facing capability flags — stable facts about the source's wire
 /// protocol, NOT policy names, so a future CLI picks values truthfully and the
 /// policy falls out.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCaps {
     /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook and/or
     /// a JSONL end marker — best-effort counts; "none of any kind" is the bar
@@ -129,6 +130,7 @@ impl SourceCaps {
 }
 
 /// One agent CLI's cross-source facts: `const` data with fn pointers.
+#[derive(Debug)]
 pub struct SourceDescriptor {
     /// Stable lowercase id — MUST equal the module's `SOURCE_NAME`.
     pub name: &'static str,
@@ -163,6 +165,7 @@ pub struct SourceDescriptor {
 /// The transcript half of an `Agent` row. Bundling the fns makes the
 /// all-or-nothing pairing structural: a row is either transcript-bearing (every
 /// fn) or hook-only (`transcript: None`), never half-populated.
+#[derive(Debug)]
 pub struct Transcript {
     /// JSONL line decoder.
     pub line_decoder: LineDecoder,
@@ -216,6 +219,7 @@ impl FocusChannel {
 /// The two source classes, type-isolated: the registry-driven demux and the
 /// `daemon_sources()` sweep loop dispatch on this, so a 2nd daemon needs no
 /// `handle_conn` edit and no new reducer arm.
+#[derive(Debug)]
 pub enum SourceKind {
     /// Produces `AgentEvent`s → `SceneState::agents` → a desk sprite.
     Agent {
