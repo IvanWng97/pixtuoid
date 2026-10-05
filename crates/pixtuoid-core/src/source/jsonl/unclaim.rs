@@ -31,7 +31,7 @@ const CHILD_END_UNCLAIM_TTL: Duration = crate::state::reducer::CHILD_END_RELINK_
 /// drains only the ids matching its OWN claimed paths; foreign ids stay pending
 /// for the watcher that owns them (`AgentId` is source-namespaced, so there is
 /// exactly one owner) until the TTL prunes them.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ChildEndUnclaims {
     /// `(id, pushed-at)`. `Instant` (monotonic) — a wall-clock jump must not
     /// fake or starve the TTL.

@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use pixtuoid_core::sprite::RgbBuffer;
 
-use crate::cutaway::pen::{ArtRect, Pen};
+use crate::display::pen::{ArtRect, Pen};
 use crate::glass::Glass;
 use crate::layout::WallPiece;
 use crate::theme::Theme;

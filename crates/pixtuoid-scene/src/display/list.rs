@@ -95,6 +95,8 @@ pub(crate) struct DisplayList<'a> {
     pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::cutaway::light::Flash,
+    /// The figures' hovers, in `pieces`' order.
+    pub(super) hovers: super::Hovers,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pub(super) pack: &'a Pack,
@@ -119,6 +121,24 @@ pub(crate) struct Piece {
     /// one layout, theme, pack, scale and ambient: it does not capture a change
     /// to those.
     pub(crate) fingerprint: u64,
+}
+
+impl Piece {
+    /// Its hover: a character's body, a creature's span; no other piece is
+    /// one.
+    pub(crate) fn hover(&self) -> Option<super::Hover> {
+        let (at, target) = match &self.kind {
+            PieceKind::Character { figure, body, .. } => {
+                (*body, super::HoverTarget::Agent(figure.key.frame.agent_id))
+            }
+            PieceKind::Creature { who, .. } => (self.span, who.clone()),
+            _ => return None,
+        };
+        Some(super::Hover {
+            at: at.bounds(),
+            target,
+        })
+    }
 }
 
 /// One of the room's lights: what it lifts, over which cells. A change repaints
@@ -190,29 +210,16 @@ impl<'a> DisplayList<'a> {
         self.scale
     }
 
+    pub(crate) fn hovers(&self) -> &super::Hovers {
+        &self.hovers
+    }
+
     /// Each drawn agent's badge, in draw order.
     #[cfg(test)]
     pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
             PieceKind::Badge { badge } => Some(badge),
             _ => None,
-        })
-    }
-
-    /// Each piece's hover box and the agent it shows, in draw order: a
-    /// character's `body`, every other piece's span showing none. A badge is
-    /// no hover target, as in the classic: neighbours' plates overlap, so one
-    /// would claim the body under another's
-    /// (`hovering_a_sitter_under_a_neighbours_badge_names_the_sitter`).
-    pub(crate) fn hover_spans(
-        &self,
-    ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
-        self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Character { figure, body, .. } => {
-                Some((*body, Some(figure.key.frame.agent_id)))
-            }
-            PieceKind::Badge { .. } => None,
-            _ => Some((p.span, None)),
         })
     }
 }
@@ -234,7 +241,12 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
-        PieceKind::Creature { at, art, degraded } => (at, art, degraded).hash(&mut h),
+        PieceKind::Creature {
+            at,
+            art,
+            degraded,
+            who: _,
+        } => (at, art, degraded).hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
@@ -394,6 +406,7 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
         degraded: bool,
+        who: super::HoverTarget,
     },
     Character {
         figure: Figure,
