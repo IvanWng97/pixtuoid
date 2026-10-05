@@ -1383,11 +1383,12 @@ pub(crate) fn push_windows(
     else {
         return;
     };
+    let bays: Vec<_> = layout.window_bays().collect();
     let outside = crate::outside::Outside::of(
         moment,
         pack,
         theme,
-        (layout.buf_w, layout.wall_band_h()),
+        ((layout.buf_w, layout.wall_band_h()), &bays),
         density,
         *weather,
         clouds,
@@ -1396,7 +1397,7 @@ pub(crate) fn push_windows(
     // The bolt lights the glass and all it shows, over the weather on it.
     let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
-    for bay in layout.window_bays() {
+    for &bay in &bays {
         let mut view = outside.through(bay);
         if bolt > 0 {
             view.paint(|_, c| bolt_lift.of(c));

@@ -211,13 +211,14 @@ pub(crate) struct Outside {
 
 impl Outside {
     /// The outside at `moment` of a wall `buf_w` wide and `band_h` tall under
-    /// `weather`, at `density`; `clouds` keeps the clouds' masses across
-    /// frames, `None` draws them afresh.
+    /// `weather`, at `density`, seen through `bays`, the windows the caller
+    /// paints, so a strike lands only on glass; `clouds` keeps the clouds'
+    /// masses across frames, `None` draws them afresh.
     pub(crate) fn of(
         moment: &Moment,
         pack: &Pack,
         theme: &Theme,
-        (buf_w, band_h): (u16, u16),
+        ((buf_w, band_h), bays): ((u16, u16), &[WindowBay]),
         density: Density,
         weather: GlassWeather,
         clouds: Option<&mut crate::clouds::CloudCache>,
@@ -225,7 +226,9 @@ impl Outside {
         let rows = window_rows(band_h);
         let run = window_run(buf_w);
         let glass_h = crate::layout::glass_rows(rows.end - rows.start);
-        let panes: Vec<Range<u16>> = crate::layout::shown_bays(buf_w)
+        let panes: Vec<Range<u16>> = bays
+            .iter()
+            .copied()
             .flat_map(WindowBay::panes)
             .map(|p| p.start - run.start..p.end - run.start)
             .collect();
@@ -261,6 +264,11 @@ impl Outside {
 pub(crate) mod tests {
     use super::*;
     use crate::sky::{Sky, Weather};
+
+    /// The windows a wall `buf_w` wide has.
+    fn slots(buf_w: u16) -> Vec<WindowBay> {
+        crate::layout::window_slots(buf_w).collect()
+    }
 
     /// One sky a painter's frame is drawn under, beside the no-weather sky of
     /// its instant, which its windows show in the frame it is held against.
@@ -390,7 +398,7 @@ pub(crate) mod tests {
                     &moment,
                     &pack,
                     theme,
-                    wall,
+                    (wall, &slots(wall.0)),
                     d,
                     GlassWeather::of(&moment),
                     None,
@@ -434,7 +442,7 @@ pub(crate) mod tests {
                 moment,
                 &pack,
                 theme,
-                wall,
+                (wall, &slots(wall.0)),
                 d,
                 GlassWeather::of(moment),
                 cache,
@@ -582,7 +590,10 @@ pub(crate) mod tests {
             &moment,
             &crate::pack::test_default_pack(),
             theme,
-            (crate::layout::WINDOW_W * 3, 32),
+            (
+                (crate::layout::WINDOW_W * 3, 32),
+                &slots(crate::layout::WINDOW_W * 3),
+            ),
             Density::ONE,
             GlassWeather::of(&moment),
             None,

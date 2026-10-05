@@ -2214,11 +2214,12 @@ mod tests {
             }
             let density = pixtuoid_core::sprite::format::Density::new(d).expect("nonzero");
             let band = (layout.buf_w, layout.wall_band_h());
+            let bays: Vec<_> = layout.window_bays().collect();
             let outside = crate::outside::Outside::of(
                 &moment,
                 &pack,
                 theme,
-                band,
+                (band, &bays),
                 density,
                 GlassWeather::of(&moment),
                 None,

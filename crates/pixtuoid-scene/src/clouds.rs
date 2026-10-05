@@ -77,7 +77,7 @@ impl Layer {
     }
 
     /// Its drift, in units per second of loop time: the far deck slowest.
-    fn drift(self) -> f32 {
+    fn pace(self) -> f32 {
         match self {
             Layer::Far => 0.05,
             Layer::Mid => 0.08,
@@ -131,7 +131,7 @@ impl Mass {
 
     /// How far east it has drifted `secs` into the beat over a run `span` wide.
     fn drift_at(&self, secs: f64, span: f32) -> f32 {
-        let travelled = secs * f64::from(self.layer.drift());
+        let travelled = secs * f64::from(self.layer.pace());
         drifted_west(self.anchor, travelled, span, self.widest) - self.anchor
     }
 
@@ -235,15 +235,15 @@ const RELIEF: f32 = 0.5;
 const CLOSE: f32 = 1.0;
 
 /// A cumulus's crown: the chance of a second crown lobe, each lobe's radius
-/// and its sway aside as shares of the mass's width, and how far its radius
-/// sits it below the top.
+/// and its sway aside as shares of the mass's width, and the share of its
+/// radius its centre sits below the top.
 const CROWN_SECOND: f32 = 0.5;
 const CROWN_R: (f32, f32) = (0.26, 0.36);
 const CROWN_SWAY: (f32, f32) = (-0.18, 0.18);
 const CROWN_SIT: f32 = 0.9;
 /// Its flanks, each side: up to this many more lobes than one, each lobe's
-/// radius and reach out as shares of the width, and how far its radius sinks
-/// it past the base, which cuts it flat.
+/// radius and reach out as shares of the width, and the share of its radius
+/// its centre sinks past the base, which cuts it flat.
 const FLANK_MORE: f32 = 2.0;
 const FLANK_R: (f32, f32) = (0.14, 0.24);
 const FLANK_REACH: (f32, f32) = (0.22, 0.46);
@@ -417,21 +417,21 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
         }
     };
     match deck_of(weather) {
-        Deck::Scattered => {
+        DeckKind::Scattered => {
             row(&mut r, Layer::Far, 2, 0.20, (5.0, 8.0), (2.5, 3.5), 0.6);
             row(&mut r, Layer::Near, 2, 0.36, (11.0, 16.0), (5.0, 7.0), 0.6);
         }
-        Deck::Cover => {
+        DeckKind::Cover => {
             row(&mut r, Layer::Far, 4, 0.16, (10.0, 18.0), (3.0, 4.5), 0.9);
             row(&mut r, Layer::Mid, 4, 0.26, (12.0, 18.0), (4.0, 6.0), 0.6);
             row(&mut r, Layer::Near, 3, 0.32, (14.0, 20.0), (5.0, 7.0), 0.6);
         }
-        Deck::Rain => {
+        DeckKind::Rain => {
             row(&mut r, Layer::Far, 4, 0.20, (12.0, 20.0), (3.5, 5.5), 0.9);
             row(&mut r, Layer::Mid, 5, 0.30, (14.0, 20.0), (5.0, 7.0), 0.6);
             row(&mut r, Layer::Near, 3, 0.38, (16.0, 22.0), (6.0, 8.0), 0.6);
         }
-        Deck::Storm => {
+        DeckKind::Storm => {
             row(&mut r, Layer::Far, 4, 0.22, (12.0, 20.0), (4.0, 6.0), 0.9);
             row(&mut r, Layer::Mid, 4, 0.32, (14.0, 20.0), (5.0, 7.0), 0.6);
             let x = span * r.between(0.35, 0.65);
@@ -460,19 +460,19 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
 
 /// The kind of deck a weather hangs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Deck {
+enum DeckKind {
     Scattered,
     Cover,
     Rain,
     Storm,
 }
 
-fn deck_of(weather: Weather) -> Deck {
+fn deck_of(weather: Weather) -> DeckKind {
     match weather {
-        Weather::Clear | Weather::Windy => Deck::Scattered,
-        Weather::Overcast | Weather::Snow | Weather::Fog | Weather::Smog => Deck::Cover,
-        Weather::Rain => Deck::Rain,
-        Weather::Storm => Deck::Storm,
+        Weather::Clear | Weather::Windy => DeckKind::Scattered,
+        Weather::Overcast | Weather::Snow | Weather::Fog | Weather::Smog => DeckKind::Cover,
+        Weather::Rain => DeckKind::Rain,
+        Weather::Storm => DeckKind::Storm,
     }
 }
 
@@ -723,11 +723,11 @@ const LIGHT_STEPS: f32 = 16.0;
 /// A weather's share's steps: a mass grows in or out in this many.
 const SHARE_STEPS: f32 = 32.0;
 
-fn step(v: f32, steps: f32) -> u8 {
+fn quantize(v: f32, steps: f32) -> u8 {
     (v.clamp(0.0, 1.0) * steps).round() as u8
 }
 
-fn unstep(k: u8, steps: f32) -> f32 {
+fn dequantize(k: u8, steps: f32) -> f32 {
     f32::from(k) / steps
 }
 
@@ -810,16 +810,16 @@ impl Clouds {
             crate::sky::BodyKind::Moon => 1.0,
         };
         let light = LightKey {
-            night: step(night, LIGHT_STEPS),
-            sunset: step(moment.look.golden_hour, LIGHT_STEPS),
-            heaviness: step(weather.lerp(Element::Cloud, heaviness), LIGHT_STEPS),
-            storm: step(weather.share(Element::Cloud, Weather::Storm), LIGHT_STEPS),
+            night: quantize(night, LIGHT_STEPS),
+            sunset: quantize(moment.look.golden_hour, LIGHT_STEPS),
+            heaviness: quantize(weather.lerp(Element::Cloud, heaviness), LIGHT_STEPS),
+            storm: quantize(weather.share(Element::Cloud, Weather::Storm), LIGHT_STEPS),
         };
-        let night = unstep(light.night, LIGHT_STEPS);
-        let sunset = unstep(light.sunset, LIGHT_STEPS);
+        let night = dequantize(light.night, LIGHT_STEPS);
+        let sunset = dequantize(light.sunset, LIGHT_STEPS);
         let day = (1.0 - night - sunset).max(0.0);
         let lighting = Lighting::mixed(day, sunset, night);
-        let heavy = unstep(light.heaviness, LIGHT_STEPS);
+        let heavy = dequantize(light.heaviness, LIGHT_STEPS);
         let tones = weather
             .parts(Element::Cloud)
             .map(|(w, _)| {
@@ -839,7 +839,7 @@ impl Clouds {
             tones,
             diffuse: heavy >= if night > 0.5 { 0.6 } else { 0.35 } && day < 0.5,
             heaviness: heavy,
-            storm: unstep(light.storm, LIGHT_STEPS),
+            storm: dequantize(light.storm, LIGHT_STEPS),
             night,
             rain: weather.share(Element::Precipitation, Weather::Rain)
                 + 0.8 * weather.share(Element::Precipitation, Weather::Storm),
@@ -854,10 +854,10 @@ impl Clouds {
                     east - west
                 })
                 .fold(0.0, f32::max);
-            let share = step(ease(share), SHARE_STEPS);
+            let share = quantize(ease(share), SHARE_STEPS);
             for m in full {
                 let m = Mass { widest, ..m };
-                let mass = m.grown(unstep(share, SHARE_STEPS), m.drift_at(secs, span_f));
+                let mass = m.grown(dequantize(share, SHARE_STEPS), m.drift_at(secs, span_f));
                 let key = RasterKey {
                     weather: w,
                     id: m.id,
@@ -955,7 +955,7 @@ impl Clouds {
     }
 
     /// Each mass's drift this frame, in whole cells of a grid `d` to the unit.
-    fn drift(&self, d: u16) -> Vec<i32> {
+    fn cell_drifts(&self, d: u16) -> Vec<i32> {
         let df = f32::from(d);
         self.masses
             .iter()
@@ -1050,7 +1050,7 @@ impl Clouds {
         }
         // the glass's west edge's column on the run's grid
         let west = i32::from(view.glass_origin().0) - i32::from(run_x0 * d);
-        let drift = self.drift(d);
+        let drift = self.cell_drifts(d);
         let mut px: Vec<Option<(Band, usize)>> = (0..rows * cols)
             .map(|i| self.band_at(&drift, west + (i % cols) as i32, (i / cols) as i32))
             .collect();
@@ -1553,7 +1553,7 @@ mod tests {
                 if moved.abs() >= f32::from(SPAN) {
                     continue;
                 }
-                let pace = a.layer.drift() * beat as f32 / 1000.0;
+                let pace = a.layer.pace() * beat as f32 / 1000.0;
                 assert!(
                     (moved - pace).abs() < pace / 4.0,
                     "beat {k}, mass {}: moved {moved}, its pace {pace}",
@@ -1617,10 +1617,10 @@ mod tests {
         let now = crate::localclock::at_hour(12);
         let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-        let mut bolts = 0;
         for d in [1u16, 4] {
+            let mut bolts = 0;
             let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, None);
-            let drift = c.drift(d);
+            let drift = c.cell_drifts(d);
             assert!(
                 drift.iter().any(|&o| o != 0),
                 "a drifted deck, so the drift counts"
@@ -1642,8 +1642,8 @@ mod tests {
                 );
                 bolts += 1;
             }
+            assert!(bolts > 0, "d {d}: the sample must strike a bolt");
         }
-        assert!(bolts > 0, "the sample must strike a bolt");
     }
 
     /// A strike's cloud, bolt and flash hold through all of its phases: they
