@@ -1001,7 +1001,11 @@ fn a_real_offices_display_list_satisfies_every_ordering_constraint() {
     for (w, h) in [(160u16, 96u16), (240, 144), (100, 60)] {
         let layout = SceneLayout::compute_with_seed(w, h, None, 0).expect("lays out");
         let mut order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
-        wall_segments(&layout, &mut order);
+        wall_segments(
+            &layout,
+            crate::glass::WallTrim::of(&crate::theme::NORMAL),
+            &mut order,
+        );
         assert!(order.len() > 10, "{w}x{h} produced a trivial list");
 
         let spans: Vec<Span> = order.iter().map(|(s, _)| *s).collect();
@@ -1061,7 +1065,11 @@ fn no_wall_segment_is_taller_than_the_cast() {
     let (_, body_h) = base_size(&pack, "standing");
     let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
-    wall_segments(&layout, &mut order);
+    wall_segments(
+        &layout,
+        crate::glass::WallTrim::of(&crate::theme::NORMAL),
+        &mut order,
+    );
     order.retain(|(_, k)| {
         matches!(
             k,
@@ -1267,7 +1275,11 @@ fn a_wall_band_draws_over_a_figure_at_its_row() {
     let mut walls = 0;
     for layout in many_layouts() {
         let mut order = Vec::new();
-        wall_segments(&layout, &mut order);
+        wall_segments(
+            &layout,
+            crate::glass::WallTrim::of(&crate::theme::NORMAL),
+            &mut order,
+        );
         for (span, _) in order {
             let figure = occupant_span(Span::new(span.x0, span.y0, 1, 1, 0), span.depth, None);
             let drawn = crate::display::depth_sort(vec![(span, "wall"), (figure, "figure")]);
@@ -1415,7 +1427,11 @@ fn walls_leave_every_doorway_open_and_frame_it() {
     let mut checked = 0;
     for layout in many_layouts() {
         let mut order = Vec::new();
-        wall_segments(&layout, &mut order);
+        wall_segments(
+            &layout,
+            crate::glass::WallTrim::of(&crate::theme::NORMAL),
+            &mut order,
+        );
         for d in &layout.doorways {
             let vertical = d.start.x == d.end.x;
             let (lo, hi) = if vertical {

@@ -34,6 +34,26 @@ const RIM_LIFT: [u8; 3] = [125, 135, 124];
 /// sill.
 const POST_LIFT: [u8; 3] = [18, 52, 86];
 
+/// The theme's trim a room wall is drawn in, resolved where the wall is
+/// queued, so a painter reads no theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct WallTrim {
+    /// What the glass's frame is lifted from.
+    pub(crate) light: Rgb,
+    /// The jamb posts where a doorway cuts the wall.
+    pub(crate) dark: Rgb,
+}
+
+impl WallTrim {
+    /// `theme`'s room-wall trim.
+    pub(crate) fn of(theme: &Theme) -> Self {
+        Self {
+            light: theme.office.room_wall_trim_light,
+            dark: theme.office.room_wall_trim_dark,
+        }
+    }
+}
+
 /// How a partition is seen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
@@ -60,7 +80,7 @@ pub(crate) struct Glass {
 
 impl Glass {
     /// `piece`'s glass on a grid of `per_unit` cells to a logical unit.
-    pub(crate) fn of(theme: &Theme, piece: WallPiece, per_unit: u16) -> Self {
+    pub(crate) fn of(trim: WallTrim, piece: WallPiece, per_unit: u16) -> Self {
         let per_unit = per_unit.max(1);
         let (_, size) = piece.visual();
         let (view, depth) = match piece {
@@ -73,7 +93,7 @@ impl Glass {
         let posts = (1..panes)
             .map(|k| (clear.start + len * k / panes) * per_unit)
             .collect();
-        let trim = theme.office.room_wall_trim_light;
+        let trim = trim.light;
         let lift = |[r, g, b]: [u8; 3]| Rgb {
             r: trim.r.saturating_add(r),
             g: trim.g.saturating_add(g),
@@ -142,13 +162,13 @@ mod tests {
 
     #[test]
     fn a_pane_is_what_is_behind_it_a_few_stops_lighter() {
-        let mut glass = Glass::of(&crate::theme::NORMAL, run(40), 1);
+        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 1);
         assert_eq!(glass.over(BEHIND, 3, 5), BEHIND.ramp(PANE_LIFT));
     }
 
     #[test]
     fn the_frame_is_the_themes_whatever_is_behind_it() {
-        let mut glass = Glass::of(&crate::theme::NORMAL, run(40), 1);
+        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 1);
         let other = Rgb {
             r: 10,
             g: 200,
@@ -167,8 +187,8 @@ mod tests {
     #[test]
     fn a_denser_grid_keeps_the_rhythm_in_logical_units() {
         let (mut one, mut four) = (
-            Glass::of(&crate::theme::NORMAL, run(40), 1),
-            Glass::of(&crate::theme::NORMAL, run(40), 4),
+            Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 1),
+            Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 4),
         );
         // A row below the glints, whose strokes stay one cell wide.
         let row = 10;
@@ -189,7 +209,7 @@ mod tests {
     #[test]
     fn a_face_on_pane_catches_a_glint_in_its_top_corner_at_any_density() {
         for per_unit in [1, 4] {
-            let mut glass = Glass::of(&crate::theme::NORMAL, run(40), per_unit);
+            let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), per_unit);
             let (x, y) = (GLINT_AT * per_unit - per_unit, per_unit);
             assert_eq!(glass.over(BEHIND, x, y), glass.rim, "at {per_unit}x");
             assert_eq!(
@@ -211,7 +231,7 @@ mod tests {
             jamb_north: false,
             jamb_south: false,
         };
-        let mut glass = Glass::of(&crate::theme::NORMAL, piece, 1);
+        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), piece, 1);
         let depth = piece.visual().1.w;
         for along in 0..40 {
             for across in 1..depth {
@@ -230,7 +250,7 @@ mod tests {
                     .expect("lays out");
                 for &piece in &l.wall_pieces {
                     let run = piece.clear_run();
-                    for &post in &Glass::of(&crate::theme::NORMAL, piece, 1).posts {
+                    for &post in &Glass::of(WallTrim::of(&crate::theme::NORMAL), piece, 1).posts {
                         met += 1;
                         assert!(
                             run.start + CLEAR <= post && post + CLEAR < run.end,
