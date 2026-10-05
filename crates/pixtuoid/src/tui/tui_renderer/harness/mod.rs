@@ -4,6 +4,7 @@ use super::*;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
 use pixtuoid_scene::anim::PAINT_FRAME_MS;
+use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::pet::PetKind;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;

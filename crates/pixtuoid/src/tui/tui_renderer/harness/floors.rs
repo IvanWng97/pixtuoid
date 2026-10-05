@@ -402,7 +402,7 @@ fn transition_on_too_small_terminal_clears_state_and_lands() {
     r.render(&scene, pack(), now + Duration::from_millis(100))
         .expect("transition render on a tiny terminal must not panic");
     assert!(r.cached_layout().is_none());
-    assert!(r.cached_pet_pos().is_none());
+    assert!(r.drawn_pet().is_none());
     assert_eq!(r.last_popup_scale(), 0.0);
     assert!(
         r.transition().is_none(),

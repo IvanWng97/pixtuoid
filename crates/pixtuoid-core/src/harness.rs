@@ -159,6 +159,7 @@ pub const DRIVEN_DESKS: usize = 64;
 const SEED_CWD: &str = "/pixtuoid/harness";
 
 /// The decode-and-fold pipeline for one source's bytes.
+#[derive(Debug)]
 pub struct Drive {
     transport: Transport,
     decode: Decode,
@@ -168,6 +169,7 @@ pub struct Drive {
 
 /// Private so the decoder↔transport pairing stays a constructor's job, never a
 /// caller's.
+#[derive(Debug)]
 enum Decode {
     Transcript {
         decode: LineDecoder,
@@ -328,7 +330,7 @@ impl Drive {
         d
     }
 
-    fn decode_one(&self, v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+    fn decode_one(&self, v: Value) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
         match &self.decode {
             Decode::Transcript {
                 decode,
@@ -682,8 +684,14 @@ mod tests {
 
     #[test]
     fn a_decoder_error_is_recorded_with_the_lines_shape_not_its_content() {
-        fn refuse(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
-            Err(anyhow::anyhow!("unsupported event"))
+        fn refuse(
+            _p: &str,
+            _s: &str,
+            _v: Value,
+        ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
+            Err(crate::source::decoder::DecodeError::unsupported(
+                "fixture", "event",
+            ))
         }
         let d = drive_with(refuse).lines([PROSE_LINE]);
 
@@ -691,7 +699,7 @@ mod tests {
         assert_eq!(d.decode_errors[0].line, 1);
         assert_eq!(
             d.decode_errors[0].message.as_deref(),
-            Some("unsupported event")
+            Some("unsupported fixture event: event")
         );
         let shape = &d.decode_errors[0].shape;
         assert!(
@@ -735,20 +743,33 @@ mod tests {
 
     #[test]
     fn line_failure_display_carries_position_and_shape_not_content() {
-        fn refuse(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
-            Err(anyhow::anyhow!("unsupported event"))
+        fn refuse(
+            _p: &str,
+            _s: &str,
+            _v: Value,
+        ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
+            Err(crate::source::decoder::DecodeError::unsupported(
+                "fixture", "event",
+            ))
         }
         let d = drive_with(refuse).lines([PROSE_LINE]);
         let rendered = d.decode_errors[0].to_string();
         assert!(rendered.starts_with("line 1: "), "got {rendered}");
         assert!(rendered.contains("type=\"assistant\""), "got {rendered}");
-        assert!(rendered.ends_with(": unsupported event"), "got {rendered}");
+        assert!(
+            rendered.ends_with(": unsupported fixture event: event"),
+            "got {rendered}"
+        );
         assert!(
             !rendered.contains("do not print me"),
             "Display must not echo the line's values, got {rendered}"
         );
 
-        fn boom(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+        fn boom(
+            _p: &str,
+            _s: &str,
+            _v: Value,
+        ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
             panic!("decoder blew up")
         }
         let prev = std::panic::take_hook();
@@ -765,7 +786,11 @@ mod tests {
 
     #[test]
     fn a_panicking_decoder_is_caught_and_recorded_by_shape() {
-        fn boom(_p: &str, _s: &str, _v: Value) -> anyhow::Result<Vec<AgentEvent>> {
+        fn boom(
+            _p: &str,
+            _s: &str,
+            _v: Value,
+        ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
             panic!("decoder blew up")
         }
         let prev = std::panic::take_hook();

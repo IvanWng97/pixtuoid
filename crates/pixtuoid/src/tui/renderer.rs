@@ -13,19 +13,14 @@ use ratatui::style::Color;
 
 use std::sync::Arc;
 
+use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
-use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
-#[cfg(test)]
-use crate::tui::geometry::CellArea;
 use crate::tui::geometry::SceneGeometry;
-pub(crate) use crate::tui::hit_test::{
-    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet, topmost_mascot_at,
-};
+pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
@@ -36,6 +31,7 @@ pub(super) use crate::tui::widgets::{
 
 pub use pixtuoid_scene::pet::PetState;
 
+#[derive(Debug)]
 pub struct DrawCtx<'a> {
     pub world: FloorInputs<'a>,
     /// The floor drawn: its sim stores and raster.
@@ -105,13 +101,11 @@ impl<'a> DrawCtx<'a> {
 
 /// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
 /// `Default` is a refused frame, which leaves nothing to hit-test.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct DrawOut {
     /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
-    pub pet_pos: Option<PetFrame>,
-    pub mascots: Vec<MascotFrame>,
-    pub agents: Vec<AgentFrame>,
+    pub hovers: Hovers,
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
@@ -300,6 +294,40 @@ fn paint_too_small_notice(
     }
 }
 
+/// The tooltip for what `hit` names on `world`'s frame, whichever painter
+/// drew it.
+pub(crate) fn paint_scene_tooltip(
+    f: &mut ratatui::Frame<'_>,
+    hit: &SceneHit<'_>,
+    world: &FloorInputs<'_>,
+    at: TooltipAt,
+    theme: &pixtuoid_scene::theme::Theme,
+) {
+    match *hit {
+        SceneHit::Figure(HoverTarget::Agent(id)) => {
+            paint_hover_tooltip(f, world.scene, *id, at, world.now, theme);
+        }
+        SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, anim, .. })) => {
+            let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(world.now));
+            // The hover was drawn from `pets.pet`, so the kinds agree and the
+            // `default_name` arm is not a live path.
+            let display_name = world
+                .pets
+                .pet
+                .map(|p| p.name.as_str())
+                .unwrap_or_else(|| kind.default_name());
+            paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
+        }
+        SceneHit::Figure(HoverTarget::Mascot(key)) => {
+            if let Some(card) = GatewayCard::of(world.scene, key) {
+                paint_mascot_tooltip(f, &card, at, theme);
+            }
+        }
+        SceneHit::Coffee => paint_coffee_tooltip(f, at, theme),
+        SceneHit::Furniture(label) => paint_furniture_tooltip(f, label, at, theme),
+    }
+}
+
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
@@ -356,8 +384,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let Some(ClassicDrawn {
         pixels,
         agents,
-        pet: pet_pos,
-        mascots,
+        hovers,
         bubbles: chitchat_bubbles,
     }) = ctx.floor.raster.classic_drawn()
     else {
@@ -367,7 +394,11 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let hovered = mouse_pos.and_then(|(mx, my)| hit_test_agent(agents, geometry.area_at(mx, my)?));
+    let hit = mouse_pos.and_then(|(mx, my)| scene_hit(hovers, &layout, geometry.area_at(mx, my)?));
+    let hovered = match hit {
+        Some(SceneHit::Figure(HoverTarget::Agent(id))) => Some(*id),
+        _ => None,
+    };
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
@@ -400,44 +431,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             my,
             scene_rect: actual_scene,
         });
-        if let (Some(agent_id), Some(at)) = (hovered, at) {
-            paint_hover_tooltip(f, scene, agent_id, at, now, theme);
-        }
-        if hovered.is_none()
-            && let Some(at) = at
-            && let Some(cell) = geometry.area_at(at.mx, at.my)
-        {
-            // `.filter` keeps the pet arm a single branch, so a
-            // present-but-not-hit pet falls through to the next arm.
-            // Coffee before pet here must match the click arms in
-            // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
-            // `hovered.is_none()` skips this block outright.
-            let pet_hit = pet_pos.filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
-            if hit_test_coffee_machine(&layout, cell) {
-                paint_coffee_tooltip(f, at, theme);
-            } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
-                let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(now));
-                // `pet_pos` was drawn from `pets.pet`, so the kinds agree and
-                // the `default_name` arm is not a live path.
-                let display_name = world
-                    .pets
-                    .pet
-                    .map(|p| p.name.as_str())
-                    .unwrap_or_else(|| kind.default_name());
-                paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
-            } else if let Some(m) = topmost_mascot_at(mascots, cell) {
-                paint_mascot_tooltip(f, m, at, theme);
-            } else if let Some(label) = hit_test_furniture(&layout, cell) {
-                paint_furniture_tooltip(f, label, at, theme);
-            }
+        if let (Some(hit), Some(at)) = (&hit, at) {
+            paint_scene_tooltip(f, hit, &world, at, theme);
         }
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
     Ok(DrawOut {
         layout: Some(layout),
-        pet_pos,
-        mascots: mascots.to_vec(),
-        agents: agents.to_vec(),
+        hovers: hovers.clone(),
         occupied_waypoints,
         geometry: Some(geometry),
     })
@@ -546,6 +547,7 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::geometry::CellArea;
 
     #[test]
     fn an_undimmed_frame_is_left_untouched() {
@@ -590,31 +592,6 @@ mod tests {
             pixtuoid_scene::floor::FloorMeta::ground(),
         );
         assert!(ctx.footer.gateway.is_some());
-    }
-
-    #[test]
-    fn hovering_overlapping_mascots_names_the_last_painted() {
-        use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::pixel_painter::MascotFrame;
-        let frame = |instance: &str, y: u16, h: u16| MascotFrame {
-            pos: Point { x: 40, y },
-            w: 14,
-            h,
-            name: "OpenClaw",
-            instance: Some(instance.to_string()),
-            busy: false,
-            degraded: false,
-            active_sessions: 0,
-        };
-        // The tall one's centre is north of the short one's, yet its feet are
-        // south of them, so it sorts after it.
-        let (tall, short) = (frame("tall", 50, 30), frame("short", 56, 6));
-        let cell = CellArea::half_block(40, short.pos.y / 2);
-        let hit = |paint_order: &[MascotFrame]| {
-            topmost_mascot_at(paint_order, cell).and_then(|m| m.instance.clone())
-        };
-        assert_eq!(hit(&[short.clone(), tall.clone()]).as_deref(), Some("tall"));
-        assert_eq!(hit(&[tall, short]).as_deref(), Some("short"));
     }
 
     #[test]

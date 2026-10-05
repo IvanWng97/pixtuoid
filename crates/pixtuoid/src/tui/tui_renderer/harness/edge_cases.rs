@@ -119,7 +119,7 @@ fn shrinking_under_the_minimum_drops_the_last_frames_hit_targets() {
             .flat_map(|c| (0..rows).map(move |row| (c, row)))
             .find(|&(c, row)| r.hit_test_agent_at(c, row) == Some(id))
             .expect("the drawn agent is hit-testable");
-        assert!(r.cached_pet_pos().is_some(), "the pet is drawn");
+        assert!(r.drawn_pet().is_some(), "the pet is drawn");
 
         r.terminal.backend_mut().resize(small_cols, small_rows);
         r.render(&scene, pack(), t0()).expect("render");
@@ -128,7 +128,7 @@ fn shrinking_under_the_minimum_drops_the_last_frames_hit_targets() {
             None,
             "{small_cols}x{small_rows}"
         );
-        assert!(r.cached_pet_pos().is_none(), "{small_cols}x{small_rows}");
+        assert!(r.drawn_pet().is_none(), "{small_cols}x{small_rows}");
         assert_eq!(
             r.scene_area_at(cell.0, cell.1),
             None,
@@ -398,14 +398,14 @@ fn floor_transition_clears_stale_pet_position() {
         now += Duration::from_millis(PAINT_FRAME_MS);
     }
     assert!(
-        r.cached_pet_pos().is_some(),
+        r.drawn_pet().is_some(),
         "a pet should be drawn on the normal floor-0 frame"
     );
 
     r.navigate_floor(1, now);
     r.render(&scene, pack(), now).expect("render"); // single in-flight transition frame
     assert!(
-        r.cached_pet_pos().is_none(),
+        r.drawn_pet().is_none(),
         "an in-flight floor transition must clear the stale pet position"
     );
 }

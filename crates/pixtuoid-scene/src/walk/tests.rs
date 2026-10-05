@@ -68,6 +68,7 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[derive(Debug)]
 struct Straight;
 impl Router for Straight {
     fn route(
@@ -84,6 +85,7 @@ impl Router for Straight {
 
 /// Captures every `(from, to)` route request — pins WHICH goal the profile
 /// snapshots route to.
+#[derive(Debug)]
 struct Recording {
     calls: Vec<(Point, Point)>,
 }
@@ -103,6 +105,7 @@ impl Router for Recording {
 
 /// Synthesises a horizontal path of the requested octile length starting at
 /// `from`, IGNORING `to` — gives phase-transition tests a predictable walk.
+#[derive(Debug)]
 struct FixedLen {
     octile_len: u32,
 }
