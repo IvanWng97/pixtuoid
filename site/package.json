@@ -18,10 +18,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "test:unit": "node --test \"config/**/*.test.mjs\"",
+    "test:unit": "node --test \"config/*.test.mjs\"",
+    "test:demos": "node --test \"config/demos/*.test.mjs\"",
     "check:docs": "node config/assert-docs-rendered.mjs dist",
     "audit": "npm audit --audit-level=low",
-    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs && npm run audit",
+    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run test:demos && npm run build && npm run check:docs && npm run audit",
     "lighthouse": "node config/lighthouse-runner.mjs",
     "e2e": "playwright test"
   },

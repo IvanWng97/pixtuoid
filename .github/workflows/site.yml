@@ -14,7 +14,7 @@ permissions:
 jobs:
   # The checks that need no rendered demos run on every PR push.
   lint:
-    name: format · lint
+    name: format · lint · types · unit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -27,9 +27,12 @@ jobs:
       - uses: ./.github/actions/setup-site-node
       - run: npm run format:check
       - run: npm run lint
+      - run: npm run check
+      - run: npm run knip
+      - run: npm run test:unit
 
   check:
-    name: types · build · e2e
+    name: demos · build · e2e
     if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     # A cold gen-demos (release build plus encodes) on top of a cold gen-wasm.
@@ -45,11 +48,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-site-node
-      # Before `check` and the unit tests: astro.config.mjs asserts each demo exists.
       - uses: ./.github/actions/gen-demos
-      - run: npm run check
-      - run: npm run knip
-      - run: npm run test:unit
+      - run: npm run test:demos
       - uses: ./.github/actions/gen-wasm
       - run: npm run build
         env:

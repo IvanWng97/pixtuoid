@@ -41,7 +41,8 @@ offline audits are invisible to preflight, so a green preflight does not mean a
 green PR.
 
 A PR's pushes run only the **light tier** (every job without
-`if: inputs.full`, and the Linux tests), and its `ci-gate` judges that tier. Both tiers run on the
+`if: inputs.full`: linters, formatters, unit tests on every platform and
+compile checks), and its `ci-gate` judges that tier. Both tiers run on the
 merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
 merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
 a push to `main` or a manual dispatch
@@ -66,7 +67,7 @@ CodSpeed skip drafts. The jobs:
   the other-unix arms.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
-- **site** — `site.yml`: format and lint on every push; types, unit tests, e2e and
+- **site** — `site.yml`: format, lint, types, knip and unit tests on every push; the demo-reading test, e2e and
   Lighthouse on a build with freshly built wasm, so a Rust change that breaks
   a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot

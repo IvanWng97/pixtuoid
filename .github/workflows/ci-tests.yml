@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       full:
-        description: 'False on a PR outside the merge queue: the Windows and macOS tests and the `if: inputs.full` jobs skip'
+        description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
         type: boolean
         required: true
 
@@ -13,38 +13,32 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # The test platforms, listed once; the light tier keeps Linux. The full tier
-  # adds what the Linux entry compiles out: Windows (pipes, atomic-write retries;
-  # windows-latest is tracked to catch hosted-image changes) and macos-14 (Apple
-  # Silicon, BSD CLI, launchd, config paths). A job output, not include/exclude:
-  # `include` is applied after `exclude` and re-adds what it excluded
-  # (github/docs workflow-syntax.md, jobs.<job_id>.strategy.matrix).
-  platforms:
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-    outputs:
-      include: ${{ steps.pick.outputs.include }}
-    steps:
-      - id: pick
-        env:
-          FULL: ${{ inputs.full }}
-          ALL: >-
-            [{"platform": "linux", "runner": "ubuntu-latest", "flag": "unit", "timeout": 25},
-             {"platform": "windows", "runner": "windows-latest", "flag": "windows", "timeout": 25},
-             {"platform": "macos", "runner": "macos-14", "flag": "macos", "timeout": 20}]
-        run: |
-          echo "include=$(jq -c --argjson full "$FULL" \
-            'if $full then . else map(select(.platform == "linux")) end' <<< "$ALL")" >> "$GITHUB_OUTPUT"
-
+  # Unit tests on every platform run on every PR push
+  # (docs.mergify.com/merge-queue/two-step: the preliminary step runs
+  # "linters, formatters, unit tests, basic compile checks").
   test:
     name: ${{ matrix.platform }}-test
-    needs: platforms
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.platforms.outputs.include) }}
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            flag: unit
+            timeout: 25
+          # Track windows-latest deliberately: this gate catches hosted-image
+          # changes. Its coverage sees the Windows pipes and atomic-write
+          # retries the Linux entry compiles out.
+          - platform: windows
+            runner: windows-latest
+            flag: windows
+            timeout: 25
+          # macos-14 exercises the Apple Silicon build; macOS diverges on BSD
+          # CLI, launchd, and config paths, which the Linux entry compiles out.
+          - platform: macos
+            runner: macos-14
+            flag: macos
+            timeout: 20
     runs-on: ${{ matrix.runner }}
     # nextest owns per-test hang limits.
     timeout-minutes: ${{ matrix.timeout }}
@@ -156,7 +150,7 @@ jobs:
     # single protected ci-gate silently lose coverage.
     if: ${{ always() }}
     needs:
-      [platforms, test, snapshots, smoke]
+      [test, snapshots, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
