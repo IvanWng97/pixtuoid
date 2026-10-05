@@ -3891,11 +3891,7 @@ mod tests {
                     .collect()
             };
             assert_eq!(prints(5_000), prints(5_000), "{w:?}: one key");
-            let falls = matches!(
-                w,
-                Weather::Rain | Weather::Storm | Weather::Snow | Weather::Windy
-            );
-            assert_eq!(prints(5_000) != prints(5_600), falls, "{w:?}");
+            assert_eq!(prints(5_000) != prints(5_600), w.falls(), "{w:?}");
         }
     }
 
