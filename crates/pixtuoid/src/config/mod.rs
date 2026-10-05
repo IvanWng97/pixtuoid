@@ -418,8 +418,12 @@ pub fn resolve_desk_cap(
 
 /// Resolve CLI + config into the one `&'static Theme` the runtime uses
 /// (CLI > config > `NORMAL`). The asymmetry is deliberate: a `--theme` typo is
-/// explicit user intent and hard-errors (listing valid names), while a config
-/// typo soft-warns and falls back so a stale config file never bricks startup.
+/// explicit user intent and hard-errors, while a config typo soft-warns and
+/// falls back so a stale config file never bricks startup.
+///
+/// # Errors
+///
+/// If `cli_theme` names no theme; the message lists the valid names.
 pub fn resolve_theme(
     config: &AppConfig,
     cli_theme: Option<&str>,

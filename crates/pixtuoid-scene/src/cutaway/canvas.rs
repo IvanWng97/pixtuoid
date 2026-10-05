@@ -709,7 +709,10 @@ mod tests {
             .into_iter()
             .find_map(|(_, s, agent)| Some((s, agent?)))
             .expect("the walker");
-        let area = cell(((body.x0 + body.x1) / 2, (body.y0 + body.y1) / 2));
+        let area = cell((
+            u16::midpoint(body.x0, body.x1),
+            u16::midpoint(body.y0, body.y1),
+        ));
         assert!(
             h.boxes(last)
                 .iter()

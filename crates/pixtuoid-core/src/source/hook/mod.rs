@@ -70,6 +70,10 @@ pub(crate) type PresenceSender = crate::source::daemon::PresenceSender;
 impl HookSocketListener {
     /// Bind the listener at `path`, returning [`SocketBusy`] if a live owner
     /// already holds it (the recoverable-bind case).
+    ///
+    /// # Errors
+    ///
+    /// If the socket directory is not an owner-only directory we own, or the lock or bind fails (a live owner yields [`SocketBusy`]).
     pub async fn bind(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let inner = imp::Listener::bind(&path).await?;
@@ -102,6 +106,10 @@ impl HookSocketListener {
 
     /// Accept connections forever, decoding each hook payload onto `tx` (and, if
     /// wired, the pid-watch / presence side-channel).
+    ///
+    /// # Errors
+    ///
+    /// If the connection semaphore closes unexpectedly or, on Windows, the next pipe instance cannot be created.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         self.inner.run(tx, self.pid_watch, self.presence_tx).await
     }

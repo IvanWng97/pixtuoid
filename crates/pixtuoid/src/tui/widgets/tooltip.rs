@@ -864,7 +864,7 @@ mod tests {
                 })
                 .collect();
             let (l, r) = (cells[0], cells[cells.len() - 1]);
-            (l + r) / 2
+            u16::midpoint(l, r)
         };
         assert_eq!(centre(quip), centre(name));
     }

@@ -343,8 +343,8 @@ mod tests {
         let pairs: Vec<(f32, u64)> = (0..50u8)
             .map(|n| (speed_mult(id(n)), pause_ms_for(id(n))))
             .collect();
-        let speed_mid = (SPEED_MULT_MIN + SPEED_MULT_MAX) / 2.0;
-        let pause_mid = (PAUSE_MS_MIN + PAUSE_MS_MAX) / 2;
+        let speed_mid = f32::midpoint(SPEED_MULT_MIN, SPEED_MULT_MAX);
+        let pause_mid = u64::midpoint(PAUSE_MS_MIN, PAUSE_MS_MAX);
         let cross_a = pairs
             .iter()
             .filter(|(s, p)| *s < speed_mid && *p > pause_mid)

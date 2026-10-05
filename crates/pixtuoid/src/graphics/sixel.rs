@@ -14,7 +14,7 @@ use super::tiles::TileImage;
 const PERCENT: u16 = 100;
 
 /// The colour registers a tile may define: as many as ratatui-image's own
-/// SIXEL encoder uses (icy_sixel 0.5.0 `encoder.rs:126`).
+/// SIXEL encoder uses (icy_sixel 0.5.1 `encoder.rs:144`).
 const REGISTERS: usize = 256;
 
 /// One step of the fixed colour cube a tile of more colours than

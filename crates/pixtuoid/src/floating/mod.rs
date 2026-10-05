@@ -29,6 +29,10 @@ use window::{FloatingApp, FloatingEvent};
 /// background tokio runtime (spawned, NEVER `block_on` — that would stall the window),
 /// and scene changes reach the loop via an `EventLoopProxy`. BLOCKS until the window
 /// closes; the runtime + source handles are held alive across the call.
+///
+/// # Errors
+///
+/// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, or the event loop exits with an error.
 pub fn run(cfg: RunConfig) -> Result<()> {
     let RunConfig {
         socket,

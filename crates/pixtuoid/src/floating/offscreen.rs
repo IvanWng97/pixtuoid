@@ -773,7 +773,7 @@ mod tests {
         // Glyph side bearings and the 1-px drop shadow, not an offset.
         const ROUNDING_PX: i32 = 2;
         assert!(
-            ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
+            (i32::midpoint(left, right) - centre).abs() <= ROUNDING_PX,
             "ink spans {left}..={right}, centred off the anchor's {centre}"
         );
     }
