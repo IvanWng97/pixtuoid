@@ -14,15 +14,15 @@
 //! cutaway adds on top of the shared sim — at the pack's densest art, once at
 //! noon and once at night, when the dark room recolours every pixel; an idle
 //! office both ways too, painted whole and through `CutawayCanvas`.
-//! Distinct instrument:
-//! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
-//! through the floating offscreen renderer for the 2.5D design gate.
+//! A third, `render_floor_scaling`, asks how frame cost scales with buffer
+//! pixels at the rich-graphics (Kitty/iTerm2/SIXEL) sizes: its throughput is
+//! pixels, so criterion reports each size's pixels per second.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use criterion::{Criterion, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_main};
 use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
@@ -34,7 +34,7 @@ use pixtuoid_scene::display::{Office, Showing};
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, PerFloor, PerOffice, PetInputs, SteppedFloor,
 };
-use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::localclock;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::render_scale::RenderScale;
@@ -51,6 +51,15 @@ const FRAME_STEP_MS: u64 = 100;
 /// ceiling: the TUI buffer is the terminal's own size and `office_scale`
 /// divides by HEIGHT only, so a wide window or wide terminal exceeds it.
 const FLOATING_DEFAULT: Size = Size { w: 360, h: 240 };
+/// The buffers a 192x80-cell terminal paints at 2x, 4x and 8x the half-block
+/// buffer's linear resolution, 8x being a full 8x16-pixel cell, after the
+/// default floating window they are measured against.
+const RICH_SIZES: [Size; 4] = [
+    FLOATING_DEFAULT,
+    Size { w: 384, h: 320 },
+    Size { w: 768, h: 640 },
+    Size { w: 1536, h: 1280 },
+];
 /// Crowds above the 12 the size axis fixes — a busy pod-farm and a near-full floor.
 const OCCUPANCY: [usize; 2] = [32, 64];
 /// The extent the cutaway's own paint tests lay out. Nothing ships a cutaway
@@ -130,6 +139,49 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
     s
 }
 
+/// One classic frame per call, stepping `now` through the sim window so walks
+/// and poses advance. The state lives outside criterion's per-sample closure
+/// and is rebuilt at each wrap, where `now` steps back.
+fn floor_frames<'a>(
+    pack: &'a Arc<pixtuoid_core::sprite::format::Pack>,
+    theme: &'static pixtuoid_scene::theme::Theme,
+    scene: &'a SceneState,
+    size: Size,
+    base: SystemTime,
+) -> impl FnMut() -> Arc<SceneLayout> + 'a {
+    let mut floor = PerFloor::new(Arc::clone(pack));
+    let mut office = PerOffice::new();
+    let mut i = 0u32;
+    move || {
+        if i == 0 {
+            floor = PerFloor::new(Arc::clone(pack));
+            office = PerOffice::new();
+        }
+        let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
+        i = (i + 1) % SIM_WINDOW_FRAMES;
+        pixtuoid_scene::look::render(
+            &mut floor,
+            office.stores(),
+            Look::Classic,
+            RenderInputs {
+                world: FloorInputs {
+                    scene,
+                    pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size,
+                place: Place::default(),
+                debug_walkable: false,
+            },
+        )
+        .expect("layout")
+        .layout
+    }
+}
+
 fn render_frame(c: &mut Criterion) {
     let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
@@ -171,40 +223,29 @@ fn render_frame(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_floor");
     for (name, scene, size) in cases {
-        // Hoisted past criterion's per-sample closure; rebuilt at each wrap, where `now` steps back.
-        let mut floor = PerFloor::new(Arc::clone(&pack));
-        let mut office = PerOffice::new();
-        let mut i = 0u32;
-        group.bench_function(name, |b| {
-            b.iter(|| {
-                if i == 0 {
-                    floor = PerFloor::new(Arc::clone(&pack));
-                    office = PerOffice::new();
-                }
-                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
-                i = (i + 1) % SIM_WINDOW_FRAMES;
-                pixtuoid_scene::look::render(
-                    &mut floor,
-                    office.stores(),
-                    Look::Classic,
-                    RenderInputs {
-                        world: FloorInputs {
-                            scene,
-                            pack: &pack,
-                            now,
-                            floor: FloorMeta::ground(),
-                            pets: PetInputs::default(),
-                        },
-                        theme,
-                        size,
-                        place: Place::default(),
-                        debug_walkable: false,
-                    },
-                )
-                .expect("layout")
-                .layout
-            });
-        });
+        let mut frame = floor_frames(&pack, theme, scene, size, base);
+        group.bench_function(name, |b| b.iter(&mut frame));
+    }
+    group.finish();
+}
+
+fn render_floor_scaling(c: &mut Criterion) {
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
+    let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
+    let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
+    let busy = office_scene(12, 16, base, true);
+
+    // https://bheisler.github.io/criterion.rs/book/user_guide/benchmarking_with_inputs.html
+    let mut group = c.benchmark_group("render_floor_scaling");
+    for size in RICH_SIZES {
+        let Size { w, h } = size;
+        group.throughput(Throughput::Elements(u64::from(w) * u64::from(h)));
+        let mut frame = floor_frames(&pack, theme, &busy, size, base);
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("busy12_{w}x{h}")),
+            &size,
+            |b, _| b.iter(&mut frame),
+        );
     }
     group.finish();
 }
@@ -317,7 +358,12 @@ fn render_cutaway_frame(c: &mut Criterion) {
     reason = "codspeed's `criterion_group!` reads CODSPEED_ENV and CODSPEED_CARGO_WORKSPACE_ROOT with `env::var`"
 )]
 mod group {
-    use super::{render_cutaway_frame, render_frame};
-    criterion::criterion_group!(benches, render_frame, render_cutaway_frame);
+    use super::{render_cutaway_frame, render_floor_scaling, render_frame};
+    criterion::criterion_group!(
+        benches,
+        render_frame,
+        render_floor_scaling,
+        render_cutaway_frame
+    );
 }
 criterion_main!(group::benches);
