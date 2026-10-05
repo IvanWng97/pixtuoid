@@ -43,11 +43,14 @@ fn lightning_flash_lights_the_room_mid_strike_only() {
     };
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(1.0));
+    paint_lightning_flash(
+        &mut b,
+        &Sky::at_with(now, Weather::Storm).with_strike(Some(crate::sky::StrikePhase::Primary)),
+    );
     assert!(b.get(0, 0).r > 10, "storm strike should brighten the room");
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(0.0));
+    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_strike(None));
     assert_eq!(b.get(0, 0), quiet_fill, "no flash between strikes");
 }
 #[test]
@@ -55,8 +58,8 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let now = SystemTime::UNIX_EPOCH;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (buf_w, top_wall_h) = (60, 30);
-    let render_lum = |flash: f32| -> u64 {
-        let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
+    let render_lum = |strike| -> u64 {
+        let sky = Sky::at_with(now, Weather::Storm).with_strike(strike);
         let mut buf = RgbBuffer::filled(buf_w, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_band(
             &mut buf,
@@ -72,8 +75,8 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             })
             .sum()
     };
-    let flashing = render_lum(1.0);
-    let quiet = render_lum(0.0);
+    let flashing = render_lum(Some(crate::sky::StrikePhase::Primary));
+    let quiet = render_lum(None);
     assert!(
         flashing > quiet,
         "the on-glass bolt must brighten the storm glass during the flash \
@@ -953,7 +956,8 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
 
 #[test]
 fn lightning_flash_matches_the_per_pixel_blend_reference() {
-    let sky = Sky::at_with(SystemTime::UNIX_EPOCH, Weather::Storm).with_flash(1.0);
+    let sky = Sky::at_with(SystemTime::UNIX_EPOCH, Weather::Storm)
+        .with_strike(Some(crate::sky::StrikePhase::Primary));
     let mut lcg = 0xC0FFEEu32;
     let mut next = || {
         lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);

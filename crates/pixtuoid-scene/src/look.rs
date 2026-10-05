@@ -75,7 +75,7 @@ pub struct Rendered<'r> {
 #[derive(Debug, Default)]
 pub struct OfficeRaster {
     pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
-    pub(crate) clouds: crate::clouds::CloudCache,
+    pub(crate) cloud_cache: crate::clouds::CloudCache,
 }
 
 impl OfficeRaster {
@@ -280,7 +280,7 @@ pub fn render<'r>(
                 world,
                 &stepped.layout,
                 theme,
-                (&mut classic.caches, &mut office.raster.clouds),
+                (&mut classic.caches, &mut office.raster.cloud_cache),
                 &mut classic.buf,
                 &ctx.walks,
                 debug_walkable,
@@ -309,7 +309,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                (&mut office.raster.cutaway, &mut office.raster.clouds),
+                (&mut office.raster.cutaway, &mut office.raster.cloud_cache),
             );
             (buf, if switched { Dirty::All } else { dirty }, flash)
         }

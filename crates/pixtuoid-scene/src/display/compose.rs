@@ -140,7 +140,7 @@ pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
-    clouds: &mut crate::clouds::CloudCache,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) -> DisplayList<'a> {
     let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
@@ -149,7 +149,7 @@ pub(crate) fn compose<'a>(
         floor.altitude,
         timing,
     );
-    compose_at(frame, office, &moment, floor, board, clouds)
+    compose_at(frame, office, &moment, floor, board, cloud_cache)
 }
 
 /// Compose `frame`'s [`DisplayList`] at `moment`, on `floor`. Every
@@ -161,13 +161,13 @@ pub(crate) fn compose_at<'a>(
     moment: &Moment,
     floor: crate::floor::FloorMeta,
     board: &crate::neon_sign::BoardModel,
-    clouds: &mut crate::clouds::CloudCache,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
-    let mut collected = collect_pieces(frame, office, moment, clouds);
+    let mut collected = collect_pieces(frame, office, moment, cloud_cache);
     collected.extend(signs(office, floor.floor_idx, board));
     let sorted = depth_sort(
         collected
@@ -522,7 +522,7 @@ fn collect_pieces(
     frame: &SimFrame,
     office: Office<'_>,
     moment: &Moment,
-    clouds: &mut crate::clouds::CloudCache,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let inputs = ComposeInputs {
@@ -536,7 +536,7 @@ fn collect_pieces(
         moment,
         &GlassWeather::of(moment),
         &mut order,
-        clouds,
+        cloud_cache,
     );
     let carried = push_characters(frame, office, moment.timing.now, &mut order);
     push_bubbles(frame, office, &mut order);
@@ -1388,7 +1388,7 @@ pub(crate) fn push_windows(
     moment: &Moment,
     weather: &GlassWeather,
     order: &mut Vec<(Span, PieceKind)>,
-    clouds: &mut crate::clouds::CloudCache,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) {
     let Office {
         layout,
@@ -1405,7 +1405,8 @@ pub(crate) fn push_windows(
         size: (layout.buf_w, layout.wall_band_h()),
         bays: layout.window_bays().collect(),
     };
-    let outside = crate::outside::Outside::of(moment, pack, theme, wall, density, *weather, clouds);
+    let outside =
+        crate::outside::Outside::of(moment, pack, theme, wall, density, *weather, cloud_cache);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
     let bolt = crate::display::light::bolt_steps(&moment.sky);

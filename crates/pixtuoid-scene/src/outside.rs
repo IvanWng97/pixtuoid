@@ -248,8 +248,8 @@ pub(crate) struct Outside {
 
 impl Outside {
     /// The outside at `moment` of `wall` under `weather`, at `density`, a
-    /// strike landing only on the glass of its bays; `clouds` keeps the
-    /// clouds' masses across frames, and an empty one draws them afresh.
+    /// strike landing only on the glass of its bays; `cloud_cache` keeps
+    /// the clouds' masses across frames, and an empty one draws them afresh.
     pub(crate) fn of(
         moment: &Moment,
         pack: &Pack,
@@ -257,7 +257,7 @@ impl Outside {
         wall: Wall,
         density: Density,
         weather: GlassWeather,
-        clouds: &mut crate::clouds::CloudCache,
+        cloud_cache: &mut crate::clouds::CloudCache,
     ) -> Self {
         let Wall {
             size: (buf_w, band_h),
@@ -279,7 +279,7 @@ impl Outside {
                 (run.end - run.start, glass_h),
                 density.get(),
                 &panes,
-                clouds,
+                cloud_cache,
             ),
             city: CityStrip::draw(pack, (run.end - run.start, glass_h), moment, theme, density),
             run_x0: run.start,
@@ -334,15 +334,15 @@ pub(crate) mod tests {
             let now = crate::localclock::at_hour(hour);
             for w in Weather::ALL {
                 let strikes = if w == Weather::Storm {
-                    [0.0, 1.0].as_slice()
+                    [None, Some(crate::sky::StrikePhase::Primary)].as_slice()
                 } else {
-                    &[0.0]
+                    &[None]
                 };
-                for &flash in strikes {
+                for &strike in strikes {
                     skies.push(Weathered {
-                        name: format!("{w:?} at {hour}h, flash {flash}"),
+                        name: format!("{w:?} at {hour}h, strike {strike:?}"),
                         now,
-                        sky: Sky::at_with(now, w).with_flash(flash),
+                        sky: Sky::at_with(now, w).with_strike(strike),
                         bare: Sky::at_with(now, Weather::Clear),
                         changes_glass: w != Weather::Clear,
                     });
@@ -760,7 +760,8 @@ pub(crate) mod tests {
                 let start = crate::sky::strike_start_ms(beat) - beat.ms();
                 let now = then + std::time::Duration::from_millis(start);
                 let at = |weather| {
-                    let sky = Sky::at_with(now, weather).with_flash(1.0);
+                    let sky = Sky::at_with(now, weather)
+                        .with_strike(Some(crate::sky::StrikePhase::Primary));
                     Moment::resolve(sky, theme, 0.0, crate::anim::Motion::Full.timing(now))
                 };
                 let mut outside = Outside::of(

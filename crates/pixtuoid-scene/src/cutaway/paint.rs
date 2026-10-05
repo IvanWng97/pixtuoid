@@ -94,10 +94,10 @@ pub fn render_cutaway(
     frame: &SimFrame,
     office: Office<'_>,
     showing: Showing<'_>,
-    (cache, clouds): (&mut CutawayCache, &mut crate::clouds::CloudCache),
+    (cache, cloud_cache): (&mut CutawayCache, &mut crate::clouds::CloudCache),
     buf: &mut RgbBuffer,
 ) {
-    let list = compose(frame, office, showing, clouds);
+    let list = compose(frame, office, showing, cloud_cache);
     paint(&list, cache, buf);
 }
 
@@ -2310,8 +2310,8 @@ mod tests {
                 theme,
                 scale,
             };
-            let drawn = |weather, flash| {
-                let sky = Sky::at_with(now, weather).with_flash(flash);
+            let drawn = |weather, strike| {
+                let sky = Sky::at_with(now, weather).with_strike(strike);
                 let list = compose_at(
                     &frame,
                     office,
@@ -2334,8 +2334,8 @@ mod tests {
                     .collect();
                 (buf, glass)
             };
-            let (calm, glass) = drawn(Weather::Storm, 0.0);
-            let (strike, _) = drawn(Weather::Storm, 1.0);
+            let (calm, glass) = drawn(Weather::Storm, None);
+            let (strike, _) = drawn(Weather::Storm, Some(crate::sky::StrikePhase::Primary));
             let in_glass = |x: u16, y: u16| {
                 let (lx, ly) = (x / s, y / s);
                 glass

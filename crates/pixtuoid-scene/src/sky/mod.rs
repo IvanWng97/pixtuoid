@@ -743,7 +743,6 @@ pub(crate) struct Sky {
     moon_phase: f32,
     moon_waxing: bool,
     nightfall: f32,
-    flash: f32,
     strike: Option<StrikePhase>,
 }
 
@@ -753,7 +752,6 @@ impl Sky {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
-        let strike = strike_phase_at(timing.beat, policy);
         Self {
             policy,
             weather: policy.weather_at(now),
@@ -761,8 +759,7 @@ impl Sky {
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            flash: strike.map_or(0.0, StrikePhase::level),
-            strike,
+            strike: strike_phase_at(timing.beat, policy),
         }
     }
 
@@ -778,17 +775,11 @@ impl Sky {
         Self::at(Motion::Full.timing(now), WeatherPolicy::Clock)
     }
 
-    /// This sky with the lightning envelope at `flash` — a painter test's
-    /// strike without the clock arithmetic that places one, in the phase
-    /// whose level it is, if any.
+    /// This sky mid-`strike` — a painter test's strike without the clock
+    /// arithmetic that places one.
     #[cfg(test)]
-    pub(crate) fn with_flash(self, flash: f32) -> Self {
-        let strike = STRIKE.into_iter().find(|p| p.level() == flash);
-        Self {
-            flash,
-            strike,
-            ..self
-        }
+    pub(crate) fn with_strike(self, strike: Option<StrikePhase>) -> Self {
+        Self { strike, ..self }
     }
 
     /// This sky under `weather` — a painter test's transition without the
@@ -842,7 +833,7 @@ impl Sky {
 
     /// The lightning envelope at this instant: its strike's level, or 0.
     pub(crate) fn flash(&self) -> f32 {
-        self.flash
+        self.strike.map_or(0.0, StrikePhase::level)
     }
 
     /// The phase of the strike at this instant, if one is under way.

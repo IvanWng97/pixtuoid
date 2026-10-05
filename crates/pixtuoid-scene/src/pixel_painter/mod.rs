@@ -133,17 +133,17 @@ pub(crate) struct PaintCtx<'a> {
     walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
     debug_walkable: bool,
     /// The office's cloud masses, kept across frames.
-    clouds: &'a mut crate::clouds::CloudCache,
+    cloud_cache: &'a mut crate::clouds::CloudCache,
 }
 
 impl<'a> PaintCtx<'a> {
     /// The classic pass over `world` on `layout`, painting into `buf` with the
-    /// floor's `caches` and the office's `clouds`.
+    /// floor's `caches` and the office's `cloud_cache`.
     pub(crate) fn classic(
         world: crate::floor::FloorInputs<'a>,
         layout: &'a SceneLayout,
         theme: &'a crate::theme::Theme,
-        (caches, clouds): (&'a mut ClassicCaches, &'a mut crate::clouds::CloudCache),
+        (caches, cloud_cache): (&'a mut ClassicCaches, &'a mut crate::clouds::CloudCache),
         buf: &'a mut RgbBuffer,
         walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
         debug_walkable: bool,
@@ -164,7 +164,7 @@ impl<'a> PaintCtx<'a> {
             floor: world.floor,
             walks,
             debug_walkable,
-            clouds,
+            cloud_cache,
         }
     }
 
@@ -224,7 +224,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
         outside.as_ref().unwrap_or(&moment),
         ctx.pack,
         ctx.theme,
-        ctx.clouds,
+        ctx.cloud_cache,
     );
     for spill in &lights.spills {
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);

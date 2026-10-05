@@ -1633,12 +1633,16 @@ mod tests {
     const WHOLE_RUN: Range<u16> = 0..SPAN;
     const RUN: &[Range<u16>] = std::slice::from_ref(&WHOLE_RUN);
 
-    fn clouds(weather: Weather, hour: u32, flash: f32) -> Clouds {
-        clouds_at(crate::localclock::at_hour(hour), weather, flash)
+    fn clouds(weather: Weather, hour: u32, strike: Option<StrikePhase>) -> Clouds {
+        clouds_at(crate::localclock::at_hour(hour), weather, strike)
     }
 
-    fn clouds_at(now: std::time::SystemTime, weather: Weather, flash: f32) -> Clouds {
-        let sky = Sky::at_with(now, weather).with_flash(flash);
+    fn clouds_at(
+        now: std::time::SystemTime,
+        weather: Weather,
+        strike: Option<StrikePhase>,
+    ) -> Clouds {
+        let sky = Sky::at_with(now, weather).with_strike(strike);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
         Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default())
     }
@@ -1797,7 +1801,8 @@ mod tests {
                 let start = crate::sky::strike_start_ms(beat) - beat.ms();
                 // its last phase: the furthest the drift gets from the strike's start
                 let now = then + Duration::from_millis(start + 2 * crate::anim::FULL_TICK_MS);
-                let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
+                let sky = Sky::at_with(now, Weather::Storm)
+                    .with_strike(Some(crate::sky::StrikePhase::Primary));
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
                 let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, &mut CloudCache::default());
@@ -1839,7 +1844,8 @@ mod tests {
             let start = crate::sky::strike_start_ms(beat) - beat.ms();
             let at = |phase: u64| {
                 let now = then + Duration::from_millis(start + phase * crate::anim::FULL_TICK_MS);
-                let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
+                let sky = Sky::at_with(now, Weather::Storm)
+                    .with_strike(Some(crate::sky::StrikePhase::Primary));
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
                 Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).strike
@@ -1857,7 +1863,7 @@ mod tests {
     /// its bucket picks.
     #[test]
     fn a_strike_falls_in_a_pane() {
-        let c = clouds(Weather::Storm, 12, 1.0);
+        let c = clouds(Weather::Storm, 12, Some(StrikePhase::Primary));
         let panes = [3..12, 14..23, 40..50];
         let run = (f32::from(SPAN), f32::from(GLASS_H));
         let mut seen = std::collections::HashSet::new();
@@ -1913,7 +1919,7 @@ mod tests {
             }
             by_depth
         };
-        let rain = clouds(Weather::Rain, 12, 0.0);
+        let rain = clouds(Weather::Rain, 12, None);
         let fall = shaded(&rain);
         assert!(fall[0] > 0, "rain shades under the base: {fall:?}");
         assert!(
@@ -1921,14 +1927,14 @@ mod tests {
             "it fades with depth: {fall:?}"
         );
 
-        let mut light = clouds(Weather::Rain, 12, 0.0);
+        let mut light = clouds(Weather::Rain, 12, None);
         light.rain /= 2.0;
         let half: u32 = shaded(&light).iter().sum();
         assert!(half < fall.iter().sum(), "lighter rain, fainter shafts");
         light.rain = 0.0;
         assert!(shaded(&light).iter().all(|&n| n == 0), "no rain, no shafts");
 
-        let mut far = clouds(Weather::Rain, 12, 0.0);
+        let mut far = clouds(Weather::Rain, 12, None);
         far.masses.iter_mut().for_each(|m| m.layer = Layer::Far);
         assert!(
             shaded(&far).iter().all(|&n| n == 0),
@@ -1940,7 +1946,7 @@ mod tests {
     /// `band_at` draws the nearer over the farther.
     #[test]
     fn virga_falls_from_the_nearer_of_two_masses() {
-        let rain = clouds(Weather::Rain, 12, 0.0);
+        let rain = clouds(Weather::Rain, 12, None);
         let mid = rain
             .masses
             .iter()
@@ -1959,7 +1965,7 @@ mod tests {
             "the two must tell apart"
         );
         let with = |masses: Vec<Mass>| {
-            let mut c = clouds(Weather::Rain, 12, 0.0);
+            let mut c = clouds(Weather::Rain, 12, None);
             c.masses = masses;
             c
         };
@@ -1991,7 +1997,7 @@ mod tests {
     fn a_rim_lights_only_the_edge_its_light_falls_on() {
         let mut rims = 0;
         for hour in 0..24 {
-            let c = clouds(Weather::Clear, hour, 0.0);
+            let c = clouds(Weather::Clear, hour, None);
             if c.diffuse || c.lighting.rim <= 0.01 {
                 continue;
             }
@@ -2028,7 +2034,7 @@ mod tests {
             g: 130,
             b: 200,
         };
-        let c = clouds(Weather::Overcast, 12, 0.0);
+        let c = clouds(Weather::Overcast, 12, None);
         for band in [Band::Lit, Band::Body, Band::Shade] {
             let tone = c.tone(Weather::Overcast, band);
             let off = |layer: Layer| {
