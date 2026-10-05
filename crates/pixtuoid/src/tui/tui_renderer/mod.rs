@@ -17,7 +17,7 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
-use pixtuoid_scene::display::{Hovers, TextRole};
+use pixtuoid_scene::display::Hovers;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, OfficeStores, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene,
@@ -1013,10 +1013,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         cutaway.paint(fitted, self.current_floor, pixels, dirty, now);
         let raster = &self.floors[self.current_floor].raster;
         let hovers = raster.hovers().cloned().unwrap_or_default();
-        let star = raster
-            .texts()
-            .and_then(|texts| texts.iter().find(|run| run.role == TextRole::Star))
-            .map(pixtuoid_scene::display::TextRun::bounds);
+        let star = raster.star();
         let geometry = fitted.geometry();
         let mouse = self.mouse_pos.and_then(|(mx, my)| {
             let hit = scene_hit(&hovers, star, &frame_layout, geometry.area_at(mx, my)?)?;
