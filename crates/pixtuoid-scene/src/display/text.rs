@@ -86,7 +86,7 @@ pub(crate) fn advance(text: &str) -> ArtPx {
 }
 
 /// Logical rows between a badge's anchor and the line it sits on.
-pub const LABEL_GAP: u16 = 2;
+pub(crate) const LABEL_GAP: u16 = 2;
 
 /// Logical rows a chitchat bubble's anchor rides over its speaker's badge's: a
 /// cell row clear of the badge.
@@ -119,7 +119,7 @@ pub struct TextSpan {
 
 /// An agent's name badge: [`BADGE_MARKER`](crate::badge::BADGE_MARKER) in
 /// the source's hue, then its name in its tone, on the badge plate, centred
-/// [`LABEL_GAP`] rows over `at`. Its parts are fields, so a painter reads them
+/// `LABEL_GAP` rows over `at`. Its parts are fields, so a painter reads them
 /// instead of a run's spans by position.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Badge {
@@ -184,7 +184,7 @@ impl Badge {
 /// Where a [`TextRun`]'s `at` lies on its line, a cell row tall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Align {
-    /// Centred over it, [`LABEL_GAP`] rows above: a badge over a head.
+    /// Centred over it, `LABEL_GAP` rows above: a badge over a head.
     Over,
     /// At its top-left.
     Left,
@@ -253,7 +253,7 @@ impl TextRun {
     }
 
     /// Its spans' text, end to end.
-    pub fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         self.spans.iter().map(|s| s.text.as_str()).collect()
     }
 
@@ -266,7 +266,7 @@ impl TextRun {
 
     /// The logical cells a line `w` cells wide takes where its align puts it:
     /// the one placement the hit test and every terminal painter read. It
-    /// fills the cell row its anchor's row lies in, [`LABEL_GAP`] rows up for
+    /// fills the cell row its anchor's row lies in, `LABEL_GAP` rows up for
     /// [`Align::Over`].
     pub fn place(&self, w: u16) -> crate::layout::Bounds {
         place(self.at, self.align, w)
