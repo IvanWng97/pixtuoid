@@ -185,6 +185,7 @@ pub fn pixtuoid_scene::floor::FloorSession::badges(&self) -> &[crate::display::B
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::neon_sign::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
+pub fn pixtuoid_scene::floor::FloorSession::flash(&self) -> crate::flash::FlashPhase
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
@@ -1201,6 +1202,7 @@ impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Rende
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 pub struct pixtuoid_scene::look::Rendered<'r>
 pub pixtuoid_scene::look::Rendered::dirty: crate::cutaway::canvas::Dirty
+pub pixtuoid_scene::look::Rendered::flash: crate::flash::FlashPhase
 pub pixtuoid_scene::look::Rendered::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 pub pixtuoid_scene::look::Rendered::occupied_waypoints: std::collections::hash::set::HashSet<usize>
 pub pixtuoid_scene::look::Rendered::pixels: &'r pixtuoid_core::sprite::RgbBuffer
