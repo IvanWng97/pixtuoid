@@ -1770,6 +1770,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: ctx.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(ctx.pack),
         },
     );
     queue_fixtures(
@@ -6158,6 +6159,7 @@ fn the_outside_reaches_only_the_glass() {
                 indoor_scale: frame.indoor_scale,
                 neon: frame.neon,
                 beat: timing.beat,
+                bulbs: crate::lighting::DeskBulbs::of(&pack),
             },
         );
         let neon = crate::floor::neon_look(frame.neon, theme);

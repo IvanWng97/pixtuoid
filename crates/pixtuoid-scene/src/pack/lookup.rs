@@ -12,6 +12,10 @@ pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 
 /// The pack key of a desk lamp's bulb, which glows of its own at any hour.
 pub(crate) const DESK_BULB_KEY: char = '9';
+/// The monitor's keys in the bundled desks: gen-art's casing, top and stand
+/// (`BEZEL`, `SLATE`, `SHADOW`), its glass and its text.
+#[cfg(test)]
+pub(crate) const MONITOR_KEYS: [char; 5] = ['M', '3', '4', SCREEN_GLASS_KEY, SCREEN_TEXT_KEY];
 
 /// The pack key of the wall clock's face, inside its rim.
 pub(crate) const CLOCK_FACE_KEY: char = 'ц';
@@ -23,6 +27,24 @@ pub(crate) const COOLER_WATER: Rgb = Rgb {
     g: 180,
     b: 230,
 };
+
+/// The pack keys the desk props draw their cup's body and shadow in.
+pub(super) const CUP_KEY: char = 'V';
+pub(super) const CUP_SHADE_KEY: char = '%';
+/// The pack keys the token tower and its sheet draw their paper in.
+pub(super) const PAPER_KEY: char = '¤';
+pub(super) const PAPER_SHADE_KEY: char = '!';
+
+/// The pack keys the desk props take from the theme.
+pub(crate) fn desk_prop_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 4] {
+    let f = &theme.furniture;
+    [
+        (CUP_KEY, Some(f.coffee_cup)),
+        (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
+        (PAPER_KEY, Some(f.paper)),
+        (PAPER_SHADE_KEY, Some(f.paper_shade)),
+    ]
+}
 
 /// The fixtures' [`appliance_overrides`].
 pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
@@ -76,23 +98,138 @@ pub(crate) const DESK_BEZEL_RAISE: u16 = 1;
 
 /// The base desk's pack animation, whose bottom row every desk's art keeps.
 pub(crate) const DESK_SPRITE: &str = "desk";
+/// The back-turned desk's pack animation.
+pub(crate) const DESK_NORTH_SPRITE: &str = "desk_north";
 
 /// The row a desk's art `art_h` tall blits from at `desk_y`: the bezel raise,
 /// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
 /// [`DESK_SPRITE`]'s bottom row. Both profiles blit desks from this.
 pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
-    let base_h = pack
-        .animation(DESK_SPRITE)
+    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_desk_height(pack)))
+}
+
+/// The marks a desk's art stands its cup and its token tower at.
+pub(crate) const CUP_MARK: &str = "cup";
+pub(crate) const TOWER_MARK: &str = "tower";
+
+/// Where a desk stands a prop: its mark's cell, as the cell's column and the
+/// row past the prop's foot, and whether the art stands its props mirrored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PropMark {
+    pub(crate) at: crate::layout::Point,
+    pub(crate) mirrored: bool,
+}
+
+impl PropMark {
+    /// The column a 1x prop frame `w` wide stood here starts at.
+    pub(crate) fn left(self, w: u16) -> Option<u16> {
+        prop_left(self.at.x, 1, w, self.mirrored)
+    }
+}
+
+/// The column a prop frame `w` wide starts at on a mark whose cell starts at
+/// `x` and is `cell` wide: there, or on a desk that mirrors its props, so its
+/// east edge meets the cell's; `None` past the buffer's west edge.
+pub(crate) fn prop_left(x: u16, cell: u16, w: u16, mirrored: bool) -> Option<u16> {
+    if mirrored {
+        x.checked_add(cell)?.checked_sub(w)
+    } else {
+        Some(x)
+    }
+}
+
+/// Whether desk art `art` stands its props mirrored, each on its mark's
+/// bottom-right cell: the back-turned desk is the viewer-facing one turned
+/// round, so its props turn with it.
+pub(crate) fn desk_props_mirrored(art: &str) -> bool {
+    art == DESK_NORTH_SPRITE
+}
+
+/// The pack's desk art for a seat facing `facing`: the facing's own when the
+/// pack ships it, else what [`Pack::piece_or_source`] draws in its place.
+pub(crate) fn desk_art_name(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
+    pack.piece_or_source(desk_sprite_name(facing))
+}
+
+/// The overlay drawn over the props on desk art `art`, when the pack ships
+/// one: what of that desk stands nearer the viewer than its sitter's props.
+pub(crate) fn desk_front(pack: &Pack, art: &str) -> Option<&'static str> {
+    pixtuoid_core::sprite::format::OVERLAY_PIECES
+        .iter()
+        .find(|&&(_, under)| under == art)
+        .map(|&(overlay, _)| overlay)
+        .filter(|overlay| pack.animation(overlay).is_some())
+}
+
+/// Where the 1x desk at `desk` facing `facing` stands the prop its `mark`
+/// names, on the art [`desk_art`] draws there.
+pub(crate) fn desk_mark(
+    pack: &Pack,
+    desk: crate::layout::Point,
+    facing: crate::layout::Facing,
+    mark: &str,
+) -> Option<PropMark> {
+    let name = desk_art_name(pack, facing)?;
+    let art = pack.animation(name)?;
+    let top = desk_art_top(pack, desk.y, art.frames().first()?.height());
+    let m = art.marks(0).iter().find(|m| m.name() == mark)?;
+    Some(PropMark {
+        at: crate::layout::Point {
+            x: desk.x + m.x(),
+            y: top + m.y() + 1,
+        },
+        mirrored: desk_props_mirrored(name),
+    })
+}
+
+/// Where the 1x desk facing `facing` hangs its lamp's bulb from the desk's
+/// point, the rows signed (a bulb may stand above the desk's row): the middle
+/// of its [`DESK_BULB_KEY`] cells on the art [`desk_art`] draws there; `None`
+/// for art that draws no bulb.
+pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, i16)> {
+    let name = pack.piece_or_source(desk_sprite_name(facing))?;
+    let art = super::densest_frame(pack, name, 0, crate::render_scale::RenderScale::ONE)?;
+    let (x, y) = bulb_cell(&art)?;
+    // the art's rows from the desk's: its top is `desk_art_top` off the desk
+    let above = DESK_BEZEL_RAISE + art.frame.height().saturating_sub(base_desk_height(pack));
+    Some((x, i16::try_from(i32::from(y) - i32::from(above)).ok()?))
+}
+
+/// The layout cell, from `art`'s top-left, that the middle of its
+/// [`DESK_BULB_KEY`] pixels lies in; `None` for art that draws no bulb.
+pub(crate) fn bulb_cell(art: &super::DenseFrame<'_>) -> Option<(u16, u16)> {
+    let w = usize::from(art.frame.width());
+    let (mut n, mut sx, mut sy) = (0u32, 0u32, 0u32);
+    for (i, _) in drawn_in(art, &[DESK_BULB_KEY])
+        .iter()
+        .enumerate()
+        .filter(|&(_, &bulb)| bulb)
+    {
+        n += 1;
+        sx += (i % w) as u32;
+        sy += (i / w) as u32;
+    }
+    // a pixel's middle, `(sum / n + ½) / d`, floored to its cell
+    let cell = |sum: u32| {
+        let d = u32::from(art.density.get());
+        u16::try_from((2 * sum + n) / (2 * n * d)).ok()
+    };
+    (n > 0).then(|| Some((cell(sx)?, cell(sy)?))).flatten()
+}
+
+/// The base [`DESK_SPRITE`]'s height, which every desk's art keeps at its
+/// bottom.
+fn base_desk_height(pack: &Pack) -> u16 {
+    pack.animation(DESK_SPRITE)
         .and_then(|a| a.frames().first())
-        .map_or(0, |f| f.height());
-    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
+        .map_or(0, |f| f.height())
 }
 
 /// The desk art for a seat facing `facing`. Only a back-turned seat needs its
 /// own — its occupant y-sorts in FRONT and covers the screen.
 pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
     match facing {
-        crate::layout::Facing::North => "desk_north",
+        crate::layout::Facing::North => DESK_NORTH_SPRITE,
         crate::layout::Facing::South
         | crate::layout::Facing::East
         | crate::layout::Facing::West => DESK_SPRITE,
@@ -153,15 +290,7 @@ pub(crate) const NORTH_SOFA_SEAT_ROWS: u16 = 3;
 /// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
 /// go transparent when the keys are painted so.
 pub(crate) fn drawn_in(art: &super::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
-    let without = art
-        .recolorable
-        .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
-    let (w, h) = (art.frame.width(), art.frame.height());
-    let opaque = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
-    (0..h)
-        .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .map(|(x, y)| opaque(art.frame, x, y) && !opaque(&without, x, y))
-        .collect()
+    art.recolorable.drawn_in(keys)
 }
 
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.
