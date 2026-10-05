@@ -92,7 +92,11 @@ pub enum WeatherPolicy {
 impl WeatherPolicy {
     /// The policy a CLI or page names: one of
     /// [`weather_names`], case-insensitive,
-    /// or `None` for the clock. `Err` carries the valid names.
+    /// or `None` for the clock.
+    ///
+    /// # Errors
+    ///
+    /// If `name` is `Some` but none of [`weather_names`]; the `Err` carries them.
     pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
         match name {
             None => Ok(Self::Clock),

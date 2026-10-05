@@ -72,6 +72,10 @@ fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v s
 /// approval pair maps onto the reducer's gated-wait mechanics keyed by
 /// `callId`: `asked` opens the wait naming the call it gates,
 /// `allowed-once` resumes it, anything else ends it.
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`HookCustom::ClaimsAll`](crate::source::registry::HookCustom::ClaimsAll) decoder signature, and a malformed payload decodes to `vec![]`.
 pub fn decode_dsh_payload(v: &Value) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);

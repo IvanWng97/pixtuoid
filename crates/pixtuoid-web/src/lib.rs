@@ -145,8 +145,11 @@ pub struct Office {
 
 #[wasm_bindgen]
 impl Office {
-    /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the bundled sprite pack fails to parse.
+    /// Build an office seeded with `seed` (drives the layout variant).
+    ///
+    /// # Errors
+    ///
+    /// If the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
@@ -374,23 +377,18 @@ impl Office {
     /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
+        const SILENT: &str = r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#;
         let Some(now) = self.last_now else {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+            return SILENT.to_string();
         };
-        if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
-            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
-        }
+        let meta = self.floor_meta();
+        let Some(audio) = self.audio.as_mut().filter(|a| a.is_ready()) else {
+            return SILENT.to_string();
+        };
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
-        let frame = self
-            .session
-            .audio_frame(&self.scene, self.floor_meta(), now);
-        let cmd = self
-            .audio
-            .as_mut()
-            .expect("audio ready checked above")
-            .tick(now_ms, frame);
-        audio::commands_json(&cmd)
+        let frame = self.session.audio_frame(&self.scene, meta, now);
+        audio::commands_json(&audio.tick(now_ms, frame))
     }
 
     /// Stage a handoff for the worker's spawn-time track. A stale epoch at click
