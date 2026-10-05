@@ -54,7 +54,7 @@ pub(crate) fn sheet_fall_dist(slot: &AgentSlot, now: SystemTime) -> Option<u16> 
     if elapsed >= SHEET_FALL_MS {
         return None;
     }
-    let px = SHEET_FALL_PX as u64;
+    let px = u64::from(SHEET_FALL_PX);
     Some(((px * elapsed * elapsed) / (SHEET_FALL_MS * SHEET_FALL_MS)) as u16)
 }
 
@@ -73,7 +73,7 @@ pub fn compact_tokens(tokens: u64) -> String {
 fn format_scaled(t: u64, unit: u64, suffix: char) -> String {
     // u128 intermediate: the reducer saturates tokens_used to u64::MAX on a
     // hostile transcript, so `t * 10` would overflow in the tooltip's paint path.
-    let tenths = (t as u128 * 10 / unit as u128) as u64;
+    let tenths = (u128::from(t) * 10 / u128::from(unit)) as u64;
     if tenths >= 100 {
         format!("{}{suffix}", tenths / 10)
     } else {

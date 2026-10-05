@@ -37,6 +37,8 @@ missing_debug_implementations = "warn"
 allow_attributes                = "warn"
 allow_attributes_without_reason = "warn"
 undocumented_unsafe_blocks      = "warn"
+# A widening cast as `T::from`, which can't go silently lossy if a type changes.
+cast_lossless                   = "warn"
 
 # Rustdoc lints only fire during a doc build, so they're invisible to
 # `cargo build`/`clippy`; CI's `docs` job runs `cargo doc` to execute them.
@@ -104,6 +106,16 @@ unicode-width      = "0.2"
 unicode-segmentation = "1"
 clap               = { version = "4", features = ["derive"] }
 palette            = { version = "0.7", default-features = false, features = ["std"] }
+chrono             = { version = "0.4", default-features = false }
+image              = { version = "0.25", default-features = false, features = ["png"] }
+libc               = "0.2"
+# 0.61 to match the major tokio already pulls (via mio) on Windows — a second
+# windows-sys major would double-compile the bindings.
+windows-sys        = "0.61"
+criterion          = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
+insta              = "1"
+proptest           = "1"
+tempfile           = "3"
 # Dev-only: every test that sets or unsets an env var goes through it, behind
 # one process-wide lock.
 temp-env           = "0.3"

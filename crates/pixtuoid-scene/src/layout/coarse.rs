@@ -223,14 +223,14 @@ pub(crate) fn snap(
         return Some(cell);
     }
     for r in 1..=max_radius {
-        let r_i = r as i32;
+        let r_i = i32::from(r);
         for dy in -r_i..=r_i {
             for dx in -r_i..=r_i {
                 if dx.abs() != r_i && dy.abs() != r_i {
                     continue; // ring only
                 }
-                let nx = cell.0 as i32 + dx;
-                let ny = cell.1 as i32 + dy;
+                let nx = i32::from(cell.0) + dx;
+                let ny = i32::from(cell.1) + dy;
                 if nx < 0 || ny < 0 {
                     continue;
                 }

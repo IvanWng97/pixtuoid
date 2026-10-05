@@ -68,11 +68,11 @@ impl PanelGeometry {
         let scale = scale.clamp(0.0, 1.0);
         let full_w = content_w.saturating_add(2 * PANEL_PAD_X).min(bounds.width);
         let full_h = content_rows
-            .saturating_add(title.is_some() as u16)
+            .saturating_add(u16::from(title.is_some()))
             .saturating_add(2 * PANEL_PAD_Y)
             .min(bounds.height.saturating_sub(RESERVED_FOOTER_ROWS));
-        let w = (full_w as f32 * scale).round() as u16;
-        let h = (full_h as f32 * scale).round() as u16;
+        let w = (f32::from(full_w) * scale).round() as u16;
+        let h = (f32::from(full_h) * scale).round() as u16;
         if w < PANEL_MIN_W || h < PANEL_MIN_H {
             return Self {
                 outer: None,
@@ -127,7 +127,7 @@ impl PanelGeometry {
 fn panel_inner_width(bounds: Rect, content_w: u16, scale: f32) -> Option<u16> {
     let scale = scale.clamp(0.0, 1.0);
     let full_w = content_w.saturating_add(2 * PANEL_PAD_X).min(bounds.width);
-    let w = (full_w as f32 * scale).round() as u16;
+    let w = (f32::from(full_w) * scale).round() as u16;
     if w < PANEL_MIN_W {
         return None;
     }

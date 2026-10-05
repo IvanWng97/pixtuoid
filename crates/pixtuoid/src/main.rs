@@ -152,6 +152,14 @@ fn run() -> Result<()> {
                     "{}: {e}",
                     sources::HOOK_REMOVAL_FAILED_PHRASE
                 )),
+                sources::DisconnectOutcome::Uninstalled(r) if r.plugin_left_registered => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "{i}: {}",
+                        sources::PLUGIN_LEFT_REGISTERED_PHRASE
+                    );
+                    Ok(sources::ChangeOutcome::Disconnected)
+                }
                 _ => Ok(sources::ChangeOutcome::Disconnected),
             })
         }

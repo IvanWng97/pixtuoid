@@ -23,7 +23,7 @@ use winit::dpi::PhysicalSize;
 /// color-swap the badges with no compile error. The test oracle re-derives the
 /// packing independently ON PURPOSE — don't route it through this.
 pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
-    (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32
+    u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b)
 }
 
 /// Renders the live office to a reusable `RgbBuffer`. One per window — keeping it
@@ -100,7 +100,9 @@ impl OfficeRenderer {
 /// pixel-art sprites stay chunky and legible. Min 1: never downscale-and-blur.
 pub(crate) fn office_scale(win_h: u32) -> u32 {
     const OFFICE_TARGET_H: u32 = 180;
-    (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
+    (f64::from(win_h) / f64::from(OFFICE_TARGET_H))
+        .round()
+        .max(1.0) as u32
 }
 
 /// The window→office-buffer projection for a PHYSICAL-px window: the integer
@@ -113,8 +115,8 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
 /// error instead of a silent HiDPI over-seed (#803).
 pub fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
     let scale = office_scale(size.height);
-    let buf_w = (size.width / scale).clamp(1, u16::MAX as u32) as u16;
-    let buf_h = (size.height / scale).clamp(1, u16::MAX as u32) as u16;
+    let buf_w = (size.width / scale).clamp(1, u32::from(u16::MAX)) as u16;
+    let buf_h = (size.height / scale).clamp(1, u32::from(u16::MAX)) as u16;
     (scale, buf_w, buf_h)
 }
 
@@ -281,8 +283,8 @@ pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], sca
         };
         let tw = crate::aa_text::text_width(&run.text(), LABEL_FONT_PX);
         const BADGE_LIFT_PX: i32 = 12;
-        let cx = run.at.x as i32 * scale - tw / 2;
-        let cy = run.at.y as i32 * scale - BADGE_LIFT_PX;
+        let cx = i32::from(run.at.x) * scale - tw / 2;
+        let cy = i32::from(run.at.y) * scale - BADGE_LIFT_PX;
         if let Some(plate) = run.plate {
             let pad = BADGE_PLATE_PAD_PX;
             let h = LABEL_FONT_PX.ceil() as i32;
@@ -309,7 +311,7 @@ pub fn paint_wall_board_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun],
     if scale <= 0 {
         return;
     }
-    let row_h = NEON_PANEL_INNER_H as i32 * scale / 3;
+    let row_h = i32::from(NEON_PANEL_INNER_H) * scale / 3;
     // Below this a row can't hold a legible glyph — leave the empty glowing panel.
     const MIN_ROW_PX: i32 = 4;
     if row_h < MIN_ROW_PX {
@@ -326,13 +328,13 @@ pub fn paint_wall_board_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun],
             .iter()
             .map(|s| crate::aa_text::text_width(&s.text, font_px))
             .sum();
-        let at = run.at.x as i32 * scale;
+        let at = i32::from(run.at.x) * scale;
         let mut x = match run.align {
             Align::Right => (at - width).max(0),
             Align::Over | Align::Centre => at - width / 2,
             Align::Left => at,
         };
-        let y = run.at.y as i32 * scale;
+        let y = i32::from(run.at.y) * scale;
         for span in &run.spans {
             sb.draw_shadowed_text(&span.text, x, y, font_px, pack_xrgb(span.ink));
             x += crate::aa_text::text_width(&span.text, font_px);
@@ -531,8 +533,8 @@ mod tests {
     #[test]
     fn the_boot_seed_tracks_the_physical_window_not_the_logical_config() {
         let logical = LogicalSize::new(
-            crate::config::FLOATING_DEFAULT_W as f64,
-            crate::config::FLOATING_DEFAULT_H as f64,
+            f64::from(crate::config::FLOATING_DEFAULT_W),
+            f64::from(crate::config::FLOATING_DEFAULT_H),
         );
         // The logical size read as physical — the defect.
         let as_if_physical = boot_capacities_for_window(PhysicalSize::new(
@@ -556,7 +558,7 @@ mod tests {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
             let (_scale, buf_w, buf_h) = window_buffer_geometry(physical);
             assert_eq!(
-                (buf_w as u32, buf_h as u32),
+                (u32::from(buf_w), u32::from(buf_h)),
                 want_buf,
                 "office buffer at {sf}× of {logical:?}"
             );
@@ -725,7 +727,7 @@ mod tests {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
+        let as_u32 = |c: Rgb| u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b);
         let badge_dot = |tone| {
             // A leading ● guarantees a solid full-coverage glyph.
             vec![badge(Point { x: 20, y: 20 }, "\u{25cf}cc", tone, theme)]
@@ -802,7 +804,7 @@ mod tests {
         let marker = BADGE_MARKER.to_string();
         let tw = crate::aa_text::text_width(&format!("{marker}{text}"), LABEL_FONT_PX);
         let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
-        let left = anchor.x as i32 * scale - tw / 2;
+        let left = i32::from(anchor.x) * scale - tw / 2;
         let colours = |cols: std::ops::Range<i32>| -> std::collections::HashSet<u32> {
             sb.iter()
                 .enumerate()
@@ -1222,7 +1224,7 @@ mod tests {
         assert_eq!(badges.len(), 1, "one seeded agent → one name badge");
         let anchor = badges[0].at;
         assert!(
-            (0..160).contains(&(anchor.x as i32)) && (0..96).contains(&(anchor.y as i32)),
+            (0..160).contains(&i32::from(anchor.x)) && (0..96).contains(&i32::from(anchor.y)),
             "badge anchor {anchor:?} lands inside the rendered office buffer"
         );
     }

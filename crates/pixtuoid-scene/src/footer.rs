@@ -270,8 +270,8 @@ impl<'a> FooterContext<'a> {
 }
 
 /// Column width of a footer string. The footer's own glyph vocabulary is ALL
-/// single-column (ambiguous EAW = 1 in a non-CJK terminal), so `chars().count()`
-/// equals the display width — keeping `unicode-width` OUT of `scene`. **Accepted
+/// single-column (ambiguous EAW = 1 in a non-CJK terminal), so
+/// [`cells`](crate::display::text::cells) equals `chars().count()` here. **Accepted
 /// residual**: the ONE variable-content field is the tool-tally TOKEN, and a
 /// hypothetical wide-CJK token would count short of its display width and nudge
 /// the right-flush by the excess.
