@@ -139,9 +139,10 @@ invariant-breaking sequence against:
    held by prose where a type or the one source of truth could make the
    failure impossible (#1142); a check outside [its own
    layer](docs/CONTRIBUTING.md#convergence-contract). A mechanism the diff
-   extends is judged as if new: if it can't name the failure it alone
-   prevents, the finding is to delete it. Documented load-bearing defense
-   (shim exit-0, config-never-wipe, liveness ladders) stays.
+   extends is judged as if new against AGENTS.md's [upkeep
+   rule](AGENTS.md#conventions); one that fails it draws "delete it".
+   Documented load-bearing defense (shim exit-0, config-never-wipe, liveness
+   ladders) stays.
 6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
    is faithful, clear and concise. Each finding cites what the name breaks;
    severity per [Severity](#severity), non-blocking by default.
