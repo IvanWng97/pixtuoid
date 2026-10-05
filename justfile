@@ -797,9 +797,10 @@ site-e2e: gen-wasm site-demos
 # Regenerate the committed artifacts that derive from a single source of truth,
 # and check the committed copies (each `*-check` header says against what).
 
-[doc('Regenerate the generated art (sprites + icons + README sections + docs images + site demos)')]
+# No gen-media: media renders from main in media-regen.yml, never in a PR.
+[doc('Regenerate what a look-changing PR commits (sprites + icons + README sections + cutaway golden)')]
 [group('gen')]
-gen: gen-art gen-icons gen-media gen-readme gen-cutaway-golden
+gen: gen-art gen-icons gen-readme gen-cutaway-golden
 
 [doc("Regenerate the bundled pack's generated sprites (every @Nx variant + the 1x pieces it owns) from scripts/gen-art.py")]
 [group('gen')]

@@ -59,7 +59,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - clippy doesn't warm test's build ([why](docs/CONTRIBUTING.md#build--test)) — iterate with one of them. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
-- Look-changing PR → `just gen`, commit what it rewrote except media: the site's demos render in CI, and the README's `docs/images` land in a `chore(media)` PR.
+- Look-changing PR → `just gen`, commit everything it rewrote. Media is not a PR's: the site's demos render in CI, the README's `docs/images` in `media-regen.yml` from main.
 - Real wire bytes ride ONE pipeline, `pixtuoid_core::harness::Drive` — rules in [`tests/AGENTS.md`](crates/pixtuoid-core/tests/AGENTS.md#the-one-pipeline).
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
