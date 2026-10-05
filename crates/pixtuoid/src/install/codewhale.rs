@@ -13,12 +13,11 @@
 //!   `deny_unknown_fields`, so the marker round-trips; managed-entry detection
 //!   keys on it (the per-event command's last token is the event name, not the
 //!   binary, so a Codex-style command-basename fallback wouldn't apply).
-//! - Comments/ordering are lost on the `toml::Value` round-trip (a backup is
-//!   taken).
+//! - Comments/ordering are lost on the `toml::Value` round-trip.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use toml::value::Table;
 
 use crate::install::SENTINEL_KEY;
@@ -93,9 +92,9 @@ fn resolve_config_path(
         (Some(h), _) => h,
         (None, Some(home)) => home.join(".codewhale"),
         (None, None) => {
-            return Err(anyhow!(
-                "cannot resolve CodeWhale's home (CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/\
-                 CODEWHALE_HOME/HOME/USERPROFILE unset); pass --config <path>"
+            return Err(io::home_unset(
+                "CodeWhale's home",
+                "CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/CODEWHALE_HOME/HOME/USERPROFILE",
             ));
         }
     };
@@ -346,7 +345,7 @@ mod tests {
     fn config_path_errors_when_no_home_and_no_override() {
         let err = resolve_config_path(None, None, None, None, |_| false).unwrap_err();
         assert!(
-            err.to_string().contains("pass --config"),
+            err.to_string().ends_with("unset); set one and reconnect"),
             "no home + no override must surface the actionable error: {err}"
         );
     }

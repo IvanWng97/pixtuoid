@@ -79,9 +79,9 @@ const SHADOW_OFFSET: u16 = 1;
 fn dim_rgb(c: Color, f: f32) -> Color {
     match c {
         Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * f) as u8,
-            (g as f32 * f) as u8,
-            (b as f32 * f) as u8,
+            (f32::from(r) * f) as u8,
+            (f32::from(g) * f) as u8,
+            (f32::from(b) * f) as u8,
         ),
         other => other,
     }
