@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge_color_for, paint_panel, to_color, Overflow};
+use super::{Overflow, Panel, badge_color_for, to_color};
 use crate::tui::welcome::OnboardingFrame;
 use pixtuoid_scene::theme::Theme;
 
@@ -26,9 +26,13 @@ pub(crate) fn paint_welcome(
     bounds: Rect,
     theme: &Theme,
 ) {
-    let rows = &frame.rows;
-    let selected = frame.selected;
-    let elapsed_ms = frame.elapsed_ms;
+    let &OnboardingFrame {
+        open: _,
+        ref rows,
+        selected,
+        elapsed_ms,
+        dim: _,
+    } = frame;
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
     let bright = Style::default().fg(to_color(theme.ui.neon_brand));
 
@@ -107,20 +111,17 @@ pub(crate) fn paint_welcome(
         });
     }
 
-    paint_panel(
-        f,
-        theme,
-        Some("Welcome to pixtuoid"),
-        bounds,
-        WELCOME_W,
-        1.0,
+    Panel {
+        title: Some("Welcome to pixtuoid"),
+        content_w: WELCOME_W,
         above,
         list,
         below,
-        Overflow::Follow {
+        overflow: Overflow::Follow {
             selected: Some(selected),
             scroll: 0,
             cap: None,
         },
-    );
+    }
+    .paint(f, bounds, theme);
 }

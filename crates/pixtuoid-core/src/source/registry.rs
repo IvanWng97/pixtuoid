@@ -4,16 +4,16 @@
 //! its value is not the datum but the QUESTION a struct literal forces, after a
 //! checklist bullet let three sources ship an unverified resolver (#880/#343/#342/#195).
 
-use anyhow::Result;
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    accept_all_paths, default_id_from_path, extract_top_level_cwd, CwdExtractor, IdDeriver,
-    LineDecoder, PathFilter,
+    CwdExtractor, IdDeriver, LineDecoder, PathFilter, accept_all_paths, default_id_from_path,
+    extract_top_level_cwd,
 };
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes, kimi, omp,
-    openclaw, opencode, reasonix, AgentEvent,
+    AgentEvent, antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes,
+    kimi, omp, openclaw, opencode, reasonix,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for a
@@ -38,7 +38,7 @@ pub enum IdKey {
 /// A source's own hook-payload decoder, dispatched ahead of the shared CC-shaped
 /// arms — TYPED by whether it may decline, so a [`Self::ClaimsAll`] fn has no
 /// `Option` to get wrong.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum HookCustom {
     /// EXTENDS the shared arms: tried first; `Ok(Some(events))` short-circuits,
     /// `Ok(None)` DECLINES and falls through to the shared arms, `Err`
@@ -79,6 +79,7 @@ impl ToolIdKey {
 }
 
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
+#[derive(Debug)]
 pub struct HookDecoding {
     /// The per-session AgentId key strategy, read by the shared arms only.
     pub id_key: IdKey,
@@ -93,7 +94,7 @@ pub struct HookDecoding {
 /// Reducer-facing capability flags — stable facts about the source's wire
 /// protocol, NOT policy names, so a future CLI picks values truthfully and the
 /// policy falls out.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCaps {
     /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook and/or
     /// a JSONL end marker — best-effort counts; "none of any kind" is the bar
@@ -129,6 +130,7 @@ impl SourceCaps {
 }
 
 /// One agent CLI's cross-source facts: `const` data with fn pointers.
+#[derive(Debug)]
 pub struct SourceDescriptor {
     /// Stable lowercase id — MUST equal the module's `SOURCE_NAME`.
     pub name: &'static str,
@@ -163,6 +165,7 @@ pub struct SourceDescriptor {
 /// The transcript half of an `Agent` row. Bundling the fns makes the
 /// all-or-nothing pairing structural: a row is either transcript-bearing (every
 /// fn) or hook-only (`transcript: None`), never half-populated.
+#[derive(Debug)]
 pub struct Transcript {
     /// JSONL line decoder.
     pub line_decoder: LineDecoder,
@@ -216,6 +219,7 @@ impl FocusChannel {
 /// The two source classes, type-isolated: the registry-driven demux and the
 /// `daemon_sources()` sweep loop dispatch on this, so a 2nd daemon needs no
 /// `handle_conn` edit and no new reducer arm.
+#[derive(Debug)]
 pub enum SourceKind {
     /// Produces `AgentEvent`s → `SceneState::agents` → a desk sprite.
     Agent {
@@ -1284,21 +1288,6 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn every_declared_home_env_actually_moves_that_sources_root() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-
-        // A named profile derives its own agent dir and IGNORES the override
-        // (`dirs.ts`), so an exported OMP_PROFILE/PI_PROFILE reds this gate blaming
-        // the resolver. Scrub them — we already hold TEST_ENV_LOCK.
-        let saved_profiles: Vec<_> = ["OMP_PROFILE", "PI_PROFILE"]
-            .iter()
-            .map(|k| (*k, std::env::var_os(k)))
-            .collect();
-        for (k, _) in &saved_profiles {
-            std::env::remove_var(k);
-        }
-
         let declared: Vec<_> = REGISTRY
             .iter()
             .filter_map(|d| d.home_env.map(|v| (d.name, v)))
@@ -1308,45 +1297,39 @@ mod tests {
             "a floor, so an emptied column can't make this pass vacuously: {declared:?}"
         );
 
-        // Collect rather than assert in-loop: an in-loop panic would leak the
-        // scrubbed profile vars into every later test in this process.
-        let mut failures: Vec<String> = Vec::new();
-        for (name, var) in declared {
-            // A REAL dir: upstream `find_codex_home` gates `CODEX_HOME` on the path
-            // existing, so a bare string silently falls back.
-            let tmp = tempfile::tempdir().expect("tempdir");
-            let root_env = tmp.path().to_path_buf();
-            let saved = std::env::var_os(var);
-            std::env::set_var(var, &root_env);
+        // A named profile derives its own agent dir and IGNORES the override
+        // (`dirs.ts`), so an exported OMP_PROFILE/PI_PROFILE reds this gate blaming
+        // the resolver. Scrub them.
+        let failures = temp_env::with_vars_unset(["OMP_PROFILE", "PI_PROFILE"], || {
+            // Collect rather than assert in-loop, so one run names every source
+            // that fails.
+            let mut failures: Vec<String> = Vec::new();
+            for (name, var) in declared {
+                // A REAL dir: upstream `find_codex_home` gates `CODEX_HOME` on the path
+                // existing, so a bare string silently falls back.
+                let tmp = tempfile::tempdir().expect("tempdir");
+                let root_env = tmp.path().to_path_buf();
+                let resolved = temp_env::with_var(var, Some(&root_env), || {
+                    crate::source::resolved_source_root(name)
+                });
 
-            let resolved = crate::source::resolved_source_root(name);
-
-            match saved {
-                Some(v) => std::env::set_var(var, v),
-                None => std::env::remove_var(var),
-            }
-
-            match resolved {
-                None => failures.push(format!(
-                    "{name} declares home_env={var} but `resolved_source_root` has no arm \
+                match resolved {
+                    None => failures.push(format!(
+                        "{name} declares home_env={var} but `resolved_source_root` has no arm \
                      for it — add one, or the declaration is unproven"
-                )),
-                Some(r) if !r.starts_with(&root_env) => failures.push(format!(
-                    "{name}: ${var}={} did not reach the resolved root {} — the override is \
+                    )),
+                    Some(r) if !r.starts_with(&root_env) => failures.push(format!(
+                        "{name}: ${var}={} did not reach the resolved root {} — the override is \
                      declared but does not actually relocate anything",
-                    root_env.display(),
-                    r.display(),
-                )),
-                Some(_) => {}
+                        root_env.display(),
+                        r.display(),
+                    )),
+                    Some(_) => {}
+                }
             }
-        }
+            failures
+        });
 
-        for (k, v) in &saved_profiles {
-            match v {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
-            }
-        }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
@@ -1355,26 +1338,24 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn a_source_root_does_not_wander_into_an_unset_overrides_directory() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-
-        let tmp = tempfile::tempdir().expect("tempdir");
-        for (name, root) in [
-            (
-                "claude-code",
-                crate::source::resolved_source_root("claude-code").unwrap(),
-            ),
-            (
-                "copilot",
-                crate::source::resolved_source_root("copilot").unwrap(),
-            ),
-        ] {
-            assert!(
-                !root.starts_with(tmp.path()),
-                "{name}: resolved {} under a directory nothing pointed at",
-                root.display()
-            );
-        }
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            for (name, root) in [
+                (
+                    "claude-code",
+                    crate::source::resolved_source_root("claude-code").unwrap(),
+                ),
+                (
+                    "copilot",
+                    crate::source::resolved_source_root("copilot").unwrap(),
+                ),
+            ] {
+                assert!(
+                    !root.starts_with(tmp.path()),
+                    "{name}: resolved {} under a directory nothing pointed at",
+                    root.display()
+                );
+            }
+        });
     }
 }

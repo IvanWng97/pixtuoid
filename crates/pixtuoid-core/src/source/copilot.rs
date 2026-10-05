@@ -18,12 +18,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
 mod native;
@@ -438,9 +438,10 @@ mod tests {
             !evs.iter().any(|e| matches!(e, AgentEvent::Usage { .. })),
             "zero fresh tokens must not surface a Usage, got {evs:?}"
         );
-        assert!(evs
-            .iter()
-            .any(|e| matches!(e, AgentEvent::SessionEnd { .. })));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, AgentEvent::SessionEnd { .. }))
+        );
     }
 
     const PATH: &str = "/p/session-state/65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3/events.jsonl";
@@ -510,13 +511,15 @@ mod tests {
     fn real_session_start_registers_root_with_cwd_and_session_id() {
         let line = r#"{"type":"session.start","data":{"sessionId":"65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3","version":1,"producer":"copilot-agent","copilotVersion":"unknown","startTime":"2026-05-22T05:59:45.408Z","selectedModel":"claude-haiku-4.5","context":{"cwd":"d:\\contentforge-fullstack (1)"},"alreadyInUse":false},"id":"0bc5f1ba-1abe-49c9-a303-d843bd0c3fa8","timestamp":"2026-05-22T05:59:45.488Z","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                source,
-                session_id,
-                cwd,
-                parent_id,
-            }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    source,
+                    session_id,
+                    cwd,
+                    parent_id,
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(source, "copilot");
                 assert_eq!(session_id, "65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3");
@@ -531,11 +534,13 @@ mod tests {
     fn real_tool_round_is_active_then_idle_keyed_on_tool_call_id() {
         let start = r#"{"type":"tool.execution_start","data":{"toolCallId":"tooluse_9CoqZL2lZlJUsz7TjJsSUk","toolName":"report_intent","arguments":{"intent":"Exploring project setup"}},"id":"595a6493-1763-4c80-b75a-936d4f263a11","timestamp":"2026-05-22T06:00:14.298Z","parentId":"2902a578-0304-4abc-8402-afefefff9e70"}"#;
         match &decode(start)[..] {
-            [AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id,
-                detail: Some(_),
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    detail: Some(_),
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(
                     tool_use_id.as_deref(),
@@ -546,10 +551,13 @@ mod tests {
         }
         let complete = r#"{"type":"tool.execution_complete","data":{"toolCallId":"tooluse_9CoqZL2lZlJUsz7TjJsSUk","model":"claude-haiku-4.5","interactionId":"65f25156-0095-4746-ac3e-fa52340df72b","success":true,"result":{"content":"Intent logged","detailedContent":"Exploring project setup"},"toolTelemetry":{}},"id":"cd7e82e8","timestamp":"2026-05-22T06:00:14.323Z","parentId":"d97de833"}"#;
         match &decode(complete)[..] {
-            [AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id,
-            }, ..] => {
+            [
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id,
+                },
+                ..,
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(
                     tool_use_id.as_deref(),
@@ -564,9 +572,11 @@ mod tests {
     fn real_task_tool_is_delegating() {
         let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"call_SGMJ1yjMtpgFUbZct2fEo2Hk","toolName":"task","arguments":{"description":"Incident command response","agent_type":"sisko","name":"sisko-incident-command","mode":"sync"},"turnId":"0"},"id":"a","timestamp":"t","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            }] => assert!(d.is_task(), "task tool must be Delegating, got {d:?}"),
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(d), ..
+                },
+            ] => assert!(d.is_task(), "task tool must be Delegating, got {d:?}"),
             other => panic!("expected Delegating ActivityStart, got {other:?}"),
         }
     }
@@ -575,9 +585,11 @@ mod tests {
     fn spoofed_subagent_type_arg_does_not_make_a_task() {
         let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"c1","toolName":"view","arguments":{"path":"x.rs","subagent_type":null}},"id":"a","timestamp":"t","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            }] => assert!(
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(d), ..
+                },
+            ] => assert!(
                 !d.is_task(),
                 "a spoofed subagent_type arg must stay Generic, got {d:?}"
             ),
@@ -589,10 +601,12 @@ mod tests {
     fn ordinary_tool_shows_its_own_arg_target() {
         let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"c2","toolName":"bash","arguments":{"command":"cargo test"}},"id":"a","timestamp":"t","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                detail: Some(ToolDetail::Generic { display }),
-                ..
-            }] => assert!(
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                },
+            ] => assert!(
                 display.contains("cargo test"),
                 "bash tool should show its command target, got {display:?}"
             ),
@@ -605,11 +619,14 @@ mod tests {
         let line = r#"{"type":"subagent.started","data":{"toolCallId":"call_SGMJ1yjMtpgFUbZct2fEo2Hk","agentName":"sisko","agentDisplayName":"Sisko - Incident Commander / SRE Lead","agentDescription":"Sisko"},"id":"d171d290","timestamp":"2026-05-26T14:14:22.773Z","parentId":"83d641f1","agentId":"call_SGMJ1yjMtpgFUbZct2fEo2Hk"}"#;
         let child = AgentId::from_parts(SOURCE_NAME, "call_SGMJ1yjMtpgFUbZct2fEo2Hk");
         match &decode(line)[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                parent_id,
-                ..
-            }, AgentEvent::Rename { agent_id: r, label }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    parent_id,
+                    ..
+                },
+                AgentEvent::Rename { agent_id: r, label },
+            ] => {
                 assert_eq!(*agent_id, child);
                 assert_eq!(*parent_id, Some(root()));
                 assert_eq!(*r, child);
@@ -630,7 +647,10 @@ mod tests {
         })
         .to_string();
         match &decode(&line)[..] {
-            [AgentEvent::SessionStart { .. }, AgentEvent::Rename { label, .. }] => {
+            [
+                AgentEvent::SessionStart { .. },
+                AgentEvent::Rename { label, .. },
+            ] => {
                 assert!(
                     label.chars().count() <= MAX_DECODED_FIELD_CHARS + 1,
                     "label not capped: {} chars",
@@ -757,9 +777,11 @@ mod tests {
     fn permission_requested_waits_and_completed_clears() {
         let req = r#"{"type":"permission.requested","data":{"requestId":"8c508e21-0a6c-4a06-8824-3930476499ea","permissionRequest":{"kind":"shell","toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2","fullCommandText":"cat /etc/hostname","intention":"Print /etc/hostname contents","commands":[{"identifier":"cat","readOnly":true}],"possiblePaths":["/etc/hostname"],"possibleUrls":[],"hasWriteFileRedirection":false,"canOfferSessionApproval":true},"promptRequest":{"kind":"path","accessKind":"shell","paths":["/etc/hostname"],"toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2"}},"id":"1f975691-a108-4d6f-924b-d48263d46274","timestamp":"2026-06-14T21:35:55.637Z","parentId":"e0a534c6-d548-4def-b0bd-316c83efe5fd"}"#;
         match &decode(req)[..] {
-            [AgentEvent::Waiting {
-                agent_id, reason, ..
-            }] => {
+            [
+                AgentEvent::Waiting {
+                    agent_id, reason, ..
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert!(reason.contains("shell"), "reason names the gate: {reason}");
             }
@@ -803,10 +825,13 @@ mod tests {
         // shutdown carries one (the key is inferred; see the decoder arm).
         let line = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","tokenDetails":{"input":{"tokenCount":11175},"cache_write":{"tokenCount":500},"cache_read":{"tokenCount":1664},"output":{"tokenCount":212}},"currentModel":"gpt-5-mini"},"id":"56992353","timestamp":"2026-06-14T21:38:47.162Z","parentId":"3079df1f"}"#;
         match &decode(line)[..] {
-            [AgentEvent::SessionEnd { .. }, AgentEvent::Usage {
-                agent_id,
-                fresh_tokens,
-            }] => {
+            [
+                AgentEvent::SessionEnd { .. },
+                AgentEvent::Usage {
+                    agent_id,
+                    fresh_tokens,
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(
                     *fresh_tokens, 11_887,
@@ -821,10 +846,13 @@ mod tests {
     fn real_session_shutdown_usage_summary_lands_one_final_delta() {
         let line = r#"{"type":"session.shutdown","data":{"shutdownType":"routine","tokenDetails":{"input":{"tokenCount":11175},"cache_read":{"tokenCount":1664},"output":{"tokenCount":212}},"currentModel":"gpt-5-mini"},"id":"56992353","timestamp":"2026-06-14T21:38:47.162Z","parentId":"3079df1f"}"#;
         match &decode(line)[..] {
-            [AgentEvent::SessionEnd { agent_id, as_child }, AgentEvent::Usage {
-                agent_id: u_id,
-                fresh_tokens,
-            }] => {
+            [
+                AgentEvent::SessionEnd { agent_id, as_child },
+                AgentEvent::Usage {
+                    agent_id: u_id,
+                    fresh_tokens,
+                },
+            ] => {
                 assert_eq!(*u_id, root());
                 assert_eq!(
                     *fresh_tokens, 11_387,
@@ -839,23 +867,25 @@ mod tests {
 
     #[test]
     fn ephemeral_unknown_and_malformed_lines_are_ignored_not_panicked() {
-        assert!(decode(
-            r#"{"type":"session.idle","data":{},"id":"i","timestamp":"t","parentId":null}"#
-        )
-        .is_empty());
+        assert!(
+            decode(r#"{"type":"session.idle","data":{},"id":"i","timestamp":"t","parentId":null}"#)
+                .is_empty()
+        );
         assert!(decode(r#"{"type":"assistant.message_delta","data":{},"id":"d","timestamp":"t","parentId":null}"#).is_empty());
-        assert!(decode(
-            r#"{"type":"tool.execution_start","id":"n","timestamp":"t","parentId":null}"#
-        )
-        .is_empty());
+        assert!(
+            decode(r#"{"type":"tool.execution_start","id":"n","timestamp":"t","parentId":null}"#)
+                .is_empty()
+        );
         assert!(
             decode_copilot_line(PATH, SOURCE_NAME, json!("not an object"))
                 .unwrap()
                 .is_empty()
         );
-        assert!(decode_copilot_line(PATH, SOURCE_NAME, json!(["array"]))
-            .unwrap()
-            .is_empty());
+        assert!(
+            decode_copilot_line(PATH, SOURCE_NAME, json!(["array"]))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -887,13 +917,15 @@ mod tests {
     fn session_start_without_session_id_registers_root_with_empty_id() {
         let line = r#"{"type":"session.start","data":{"version":1},"id":"x","timestamp":"t","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                source,
-                session_id,
-                cwd,
-                parent_id,
-            }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    source,
+                    session_id,
+                    cwd,
+                    parent_id,
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(source, "copilot");
                 assert_eq!(session_id, "", "missing sessionId → empty fallback");
@@ -926,11 +958,13 @@ mod tests {
     fn tool_execution_start_without_tool_name_still_emits_activity_start_keyed_on_call_id() {
         let line = r#"{"type":"tool.execution_start","data":{"toolCallId":"tc1","arguments":{}},"id":"x","timestamp":"t","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id,
-                detail: Some(d),
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    detail: Some(d),
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(tool_use_id.as_deref(), Some("tc1"));
                 assert!(!d.is_task(), "an empty tool name is NOT the task dispatch");
@@ -943,10 +977,12 @@ mod tests {
     fn session_task_complete_ends_root_activity_with_no_tool_id() {
         let line = r#"{"type":"session.task_complete","data":{},"id":"x","timestamp":"t","parentId":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id,
-            }] => {
+            [
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id,
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert!(tool_use_id.is_none(), "the root settle carries no tool id");
             }
@@ -984,40 +1020,34 @@ mod tests {
 
     #[test]
     fn copilot_home_honors_non_empty_env_override() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("COPILOT_HOME");
+        temp_env::with_var("COPILOT_HOME", Some("/custom/cp"), || {
+            assert_eq!(
+                copilot_home(),
+                PathBuf::from("/custom/cp"),
+                "a non-empty COPILOT_HOME is used verbatim"
+            );
+        });
 
-        std::env::set_var("COPILOT_HOME", "/custom/cp");
-        assert_eq!(
-            copilot_home(),
-            PathBuf::from("/custom/cp"),
-            "a non-empty COPILOT_HOME is used verbatim"
-        );
+        temp_env::with_var("COPILOT_HOME", Some(""), || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "empty COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
 
-        std::env::set_var("COPILOT_HOME", "");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "empty COPILOT_HOME → ~/.copilot fallback"
-        );
+        temp_env::with_var("COPILOT_HOME", Some("   "), || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "whitespace-only COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
 
-        std::env::set_var("COPILOT_HOME", "   ");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "whitespace-only COPILOT_HOME → ~/.copilot fallback"
-        );
-
-        std::env::remove_var("COPILOT_HOME");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "unset COPILOT_HOME → ~/.copilot fallback"
-        );
-
-        match saved {
-            Some(v) => std::env::set_var("COPILOT_HOME", v),
-            None => std::env::remove_var("COPILOT_HOME"),
-        }
+        temp_env::with_var_unset("COPILOT_HOME", || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "unset COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
     }
 
     /// Every field the decoder reads by a LITERAL key is declared here — reads
@@ -1030,10 +1060,10 @@ mod tests {
         let mut read: Vec<&str> = Vec::new();
         for m in src.match_indices("str_at(") {
             let rest = &src[m.0..];
-            if let Some(q) = rest.find('"') {
-                if let Some(end) = rest[q + 1..].find('"') {
-                    read.push(&rest[q + 1..q + 1 + end]);
-                }
+            if let Some(q) = rest.find('"')
+                && let Some(end) = rest[q + 1..].find('"')
+            {
+                read.push(&rest[q + 1..q + 1 + end]);
             }
         }
         for pat in ["\t.get(\"", ".get(\""] {

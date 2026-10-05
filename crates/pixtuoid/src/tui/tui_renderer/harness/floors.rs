@@ -3,10 +3,7 @@ use pixtuoid_scene::layout::Point;
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )
-    .expect("embedded pack");
+    let pack = pack_arc();
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
@@ -21,9 +18,9 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     scene.agents.insert(b, slot(b, 1, cap, t0));
 
     let term = Terminal::new(TestBackend::new(100, 40)).expect("test backend");
-    let mut r = TuiRenderer::new(term, theme, vec![]);
+    let mut r = TuiRenderer::new(term, theme, vec![], Arc::clone(&pack));
 
-    // Warm up floor 0 so agent A's MotionState initialises and wanders.
+    // Warm up floor 0 so agent A's WalkState initialises and wanders.
     let mut now = t0;
     for _ in 0..10 {
         r.render(&scene, &pack, now).expect("render");
@@ -31,18 +28,18 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     }
     assert_eq!(r.current_floor(), 0);
     assert!(
-        r.floor_motion(0).and_then(|m| m.get(&a)).is_some(),
-        "floor-0 agent should have a MotionState after warm-up"
+        r.floor_walks(0).and_then(|m| m.get(&a)).is_some(),
+        "floor-0 agent should have a WalkState after warm-up"
     );
 
     r.navigate_floor(1, now);
     render_until_settled(&mut r, &scene, &pack, &mut now, 1);
 
     let frozen_at = r
-        .floor_motion(0)
+        .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .map(|ms| ms.wander.last_advanced_at)
-        .expect("floor-0 motion present");
+        .map(|walk| walk.wander.last_advanced_at)
+        .expect("floor-0 walks present");
 
     // ~30 s on floor 1.
     for _ in 0..900 {
@@ -50,25 +47,25 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
         r.render(&scene, &pack, now).expect("render");
     }
     let still_frozen = r
-        .floor_motion(0)
+        .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .map(|ms| ms.wander.last_advanced_at)
-        .expect("floor-0 motion present");
+        .map(|walk| walk.wander.last_advanced_at)
+        .expect("floor-0 walks present");
     assert_eq!(
         frozen_at, still_frozen,
-        "off-screen floor 0 motion must stay frozen while floor 1 is visible"
+        "off-screen floor 0 walks must stay frozen while floor 1 is visible"
     );
 
     let back_at = now;
     r.navigate_floor(0, now);
     render_until_settled(&mut r, &scene, &pack, &mut now, 0);
 
-    let ms = r
-        .floor_motion(0)
+    let walk = r
+        .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .expect("floor-0 motion present");
+        .expect("floor-0 walks present");
     assert!(
-        ms.wander.phase_started_at >= back_at,
+        walk.wander.phase_started_at >= back_at,
         "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"
     );
 }
@@ -79,7 +76,7 @@ fn floor_transition_completes_and_lands() {
     let scene = two_floor_scene();
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&scene, &p, now).unwrap();
+    r.render(&scene, p, now).unwrap();
     assert_eq!(r.current_floor(), 0);
 
     r.navigate_floor(1, now);
@@ -89,15 +86,15 @@ fn floor_transition_completes_and_lands() {
     );
 
     now += Duration::from_millis(450);
-    r.render(&scene, &p, now).unwrap();
+    r.render(&scene, p, now).unwrap();
     assert!(r.transition().is_some(), "still transitioning mid-slide");
     assert!(
         r.cached_layout().is_none(),
         "layout is cleared during a transition"
     );
 
-    now += Duration::from_millis(600); // total 1050ms > 900ms duration
-    r.render(&scene, &p, now).unwrap();
+    now += Duration::from_millis(600); // past `FloorTransition::duration_ms`
+    r.render(&scene, p, now).unwrap();
     assert!(r.transition().is_none(), "transition complete");
     assert_eq!(r.current_floor(), 1, "landed on the target floor");
     assert!(
@@ -124,7 +121,7 @@ fn navigation_blocked_during_active_transition() {
     );
     let mut r = build(100, 40, vec![]);
     let now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.navigate_floor(1, now);
     r.navigate_floor(2, now); // must be ignored — a transition is in flight
     assert_eq!(
@@ -141,13 +138,13 @@ fn transition_cancelled_when_target_floor_disappears() {
     let mut scene = scene_with(vec![idle("/c/0.jsonl", 0, t0()), f1.clone()], cap);
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.navigate_floor(1, now);
     assert!(r.transition().is_some());
 
     scene.agents.remove(&f1.agent_id);
     now += Duration::from_millis(100);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(
         r.transition().is_none(),
         "transition to a vanished floor must cancel (no infinite slide)"
@@ -161,8 +158,8 @@ fn floor_buffers_grow_on_overflow() {
     let mut r = build(100, 40, vec![]);
     let now = t0();
     let one = scene_with(vec![idle("/g/0.jsonl", 0, t0())], cap);
-    r.render(&one, &pack(), now).unwrap();
-    assert!(r.floor_buf(1).is_none(), "only one floor allocated");
+    r.render(&one, pack(), now).unwrap();
+    assert!(r.floors.get(1).is_none(), "only one floor allocated");
 
     let two = scene_with(
         vec![
@@ -171,10 +168,10 @@ fn floor_buffers_grow_on_overflow() {
         ],
         cap,
     );
-    r.render(&two, &pack(), now).unwrap();
+    r.render(&two, pack(), now).unwrap();
     assert!(
-        r.floor_buf(1).is_some(),
-        "floor-1 buffer allocated after overflow"
+        r.floors.get(1).is_some(),
+        "floor-1 state allocated after overflow"
     );
 }
 
@@ -183,10 +180,10 @@ fn per_floor_layout_seeds_differ() {
     let scene = two_floor_scene();
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let seed0 = r.current_floor_seed();
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &scene, &pack(), &mut now, 1);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
     assert_ne!(
         seed0,
         r.current_floor_seed(),
@@ -194,8 +191,8 @@ fn per_floor_layout_seeds_differ() {
     );
 }
 
-// The only production caller is the codecov-ignored resize handler in tui/mod.rs, so
-// the loop body is otherwise never exercised.
+// Pinned directly: the resize that fires it through `follow_resize` also re-lays
+// the floor out, which can clear the cache on its own.
 #[test]
 fn invalidate_routes_clears_every_floor_router_cache() {
     // A fresh agent bootstraps Seated@now then sits 15-30s before its first walk-out,
@@ -214,7 +211,7 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     let mut r = build(120, 60, vec![]);
     let mut now = t0();
     for _ in 0..120 {
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
         if !r.floors[0].ctx.router.is_empty() {
             break;
         }
@@ -253,19 +250,20 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
         ],
         cap,
     );
-    // 30 cols: scene_rect 30×39 passes the 20×12 transition gate; buf_w=30<34
+    // 30 cols: scene_rect 30×39 passes the `MIN_SCENE_*` transition gate; buf_w=30
     // fails compute_with_seed's office minimum.
     let mut r = TuiRenderer::new(
         Terminal::new(TestBackend::new(30, 40)).expect("test backend"),
         normal_theme(),
         vec![],
+        pack_arc(),
     );
     let mut now = t0();
-    r.render(&scene, &pack(), now).expect("render at 30 cols");
+    r.render(&scene, pack(), now).expect("render at 30 cols");
     r.navigate_floor(1, now);
     assert!(r.transition().is_some(), "navigation begins a transition");
     now += Duration::from_millis(33);
-    r.render(&scene, &pack(), now)
+    r.render(&scene, pack(), now)
         .expect("transition render at a narrow terminal must not panic");
     assert!(
         r.transition().is_some(),
@@ -295,7 +293,7 @@ fn footer_shows_source_death_warning() {
     r.set_source_warning(Some(
         "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
     ));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("source died") && text.contains("restart pixtuoid"),
@@ -303,7 +301,7 @@ fn footer_shows_source_death_warning() {
         text.lines().last().unwrap_or("")
     );
     r.set_source_warning(None);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         !text.contains("source died"),
@@ -316,18 +314,18 @@ fn source_death_warning_survives_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_source_warning(Some(
         "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
     ));
     r.navigate_floor(1, now);
     now += Duration::from_millis(200); // mid-transition
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some(), "still mid-transition");
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("source died"),
-        "the warning must not vanish during the ~400ms floor slide"
+        "the warning must not vanish during the floor slide"
     );
 }
 
@@ -336,11 +334,11 @@ fn version_popup_active_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_version_popup(true, now);
     r.navigate_floor(1, now);
     now += Duration::from_millis(200); // mid-transition
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some(), "still mid-transition");
     assert!(
         r.last_popup_scale() > 0.0,
@@ -353,11 +351,11 @@ fn help_overlay_renders_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_help_open(true);
     r.navigate_floor(1, now);
     now += Duration::from_millis(200);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some());
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -367,22 +365,45 @@ fn help_overlay_renders_during_floor_transition() {
 }
 
 #[test]
+fn a_too_small_slide_footers_the_destination_floor() {
+    let cap = 16;
+    let scene = scene_with(
+        vec![
+            active("/d/0.jsonl", 0, "Grep x", t0()),
+            slot(AgentId::from_transcript_path("/d/1.jsonl"), 1, cap, t0()),
+        ],
+        cap,
+    );
+    let mut r = build(120, crate::tui::renderer::MIN_SCENE_HEIGHT, vec![]);
+    r.render(&scene, pack(), t0()).unwrap();
+    r.navigate_floor(1, t0());
+    r.render(&scene, pack(), t0() + Duration::from_millis(100))
+        .unwrap();
+    let text = frame_text(r.frame_buffer());
+    let footer = text.lines().last().expect("a footer row");
+    assert!(
+        footer.contains(" 1/2 ") && footer.contains("F2/2"),
+        "{footer}"
+    );
+    assert!(
+        !footer.contains("Grep"),
+        "floor 1 tallies floor 0's tool: {footer}"
+    );
+}
+
+#[test]
 fn transition_on_too_small_terminal_clears_state_and_lands() {
-    // A sub-20×12 terminal hits the render_transition too-small bail.
+    // Under the `MIN_SCENE_*` gate: render_transition's too-small bail.
     let scene = two_floor_scene();
     let mut r = build(18, 10, vec![PetKind::Cat]);
     let now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.navigate_floor(1, now);
-    r.render(&scene, &pack(), now + Duration::from_millis(100))
+    r.render(&scene, pack(), now + Duration::from_millis(100))
         .expect("transition render on a tiny terminal must not panic");
     assert!(r.cached_layout().is_none());
-    assert!(r.cached_pet_pos().is_none());
+    assert!(r.drawn_pet().is_none());
     assert_eq!(r.last_popup_scale(), 0.0);
-    // Landing matters: render_transition returns before ensure_size, so the floor
-    // buffer's size signature never changes and the resize detector can't fire
-    // cancel_transition — the slide would stay live on the no-draw path for its whole
-    // ~400 ms timer, freezing a stale frame.
     assert!(
         r.transition().is_none(),
         "the too-small gate should land (cancel) the stuck transition"
@@ -410,7 +431,7 @@ fn already_expired_active_pet_clears_on_render() {
         kind: PetKind::Cat,
         floor_idx: 0,
     }));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(
         r.active_pet_ref().is_none(),
         "an already-expired pet state must be cleared on render"
@@ -423,12 +444,12 @@ fn current_floor_clamps_when_floor_count_drops() {
     let two = two_floor_scene();
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&two, &pack(), now).unwrap();
+    r.render(&two, pack(), now).unwrap();
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &two, &pack(), &mut now, 1);
+    render_until_settled(&mut r, &two, pack(), &mut now, 1);
     assert_eq!(r.current_floor(), 1);
     let one = scene_with(vec![idle("/clamp/0.jsonl", 0, t0())], cap);
-    r.render(&one, &pack(), now).unwrap();
+    r.render(&one, pack(), now).unwrap();
     assert_eq!(
         r.current_floor(),
         0,
@@ -441,15 +462,112 @@ fn theme_picker_renders_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(140, 48, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_theme_picker(Some(0));
     r.navigate_floor(1, now);
     now += Duration::from_millis(200);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some(), "still mid-transition");
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("cyberpunk") || text.contains("normal"),
         "theme picker must paint over a floor transition; frame:\n{text}"
+    );
+}
+
+/// The board's context row is wired in `draw_scene` from the floor breadcrumb
+/// and the OFFICE-WIDE gateway: the projected floor scene carries daemons only
+/// on floor 0, so a board built from it would drop the `⬢gw` chip upstairs.
+#[test]
+fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
+    let pack = pack_arc();
+    let theme = pixtuoid_scene::theme::ALL_THEMES[0];
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let cap = 16;
+    let mut scene = SceneState::uniform(cap);
+    let a = AgentId::from_transcript_path("/h/board0.jsonl");
+    let b = AgentId::from_transcript_path("/h/board1.jsonl");
+    scene.agents.insert(a, slot(a, 0, 0, t0));
+    scene.agents.insert(b, slot(b, 1, cap, t0));
+    scene.insert_daemon(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 0,
+            last_seen: t0,
+            entered_at: t0,
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
+
+    let term = Terminal::new(TestBackend::new(120, 44)).expect("test backend");
+    let mut r = TuiRenderer::new(term, theme, vec![], Arc::clone(&pack));
+    let mut now = t0;
+    r.render(&scene, &pack, now).expect("render");
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, &pack, &mut now, 1);
+
+    // Above the footer row, which carries its own floor indicator.
+    let text = frame_text(r.frame_buffer());
+    let rows: Vec<&str> = text.lines().collect();
+    let office = rows[..rows.len() - usize::from(crate::tui::renderer::FOOTER_ROWS)].join("\n");
+    assert!(
+        office.contains("F2/2"),
+        "board breadcrumb names floor 2 of 2:\n{office}"
+    );
+    assert!(
+        office.contains("\u{2b22}gw"),
+        "board keeps the office-wide gateway chip upstairs:\n{office}"
+    );
+}
+
+/// Every painter's board for a floor comes out of the one builder: a one-floor
+/// office's TUI board is the floating window's, and an upper floor, whose
+/// projection carries no daemon, still shows the office's gateway.
+#[test]
+fn every_painter_shows_the_one_board_of_a_floor() {
+    use pixtuoid_scene::anim::Motion;
+    use pixtuoid_scene::floor::{num_floors, project_floor_scene};
+    let now = t0() + Duration::from_secs(90);
+    let with_gateway = |mut scene: SceneState| {
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 1,
+                last_seen: now,
+                entered_at: t0(),
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+        scene
+    };
+    let r = build(120, 40, vec![]);
+    let tui = |scene: &SceneState, floor: usize| {
+        let drawn = project_floor_scene(scene, floor);
+        let ctx = r
+            .chrome
+            .frame(scene, &drawn, pack(), now, floor, num_floors(scene))
+            .footer;
+        pixtuoid_scene::board::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
+    };
+
+    let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
+    let floating = crate::floating::offscreen::OfficeRenderer::new(std::sync::Arc::new(
+        pack().clone(),
+    ))
+    .board(&one_floor, Motion::Full, now);
+    assert_eq!(tui(&one_floor, 0), floating);
+
+    let upper = tui(&with_gateway(two_floor_scene()), 1);
+    let context: Vec<_> = upper.context.iter().map(|s| s.text.trim()).collect();
+    assert!(context.contains(&"F2/2"), "{context:?}");
+    assert!(
+        context.iter().any(|t| t.contains("gw")),
+        "floor 2 lost the office's gateway chip: {context:?}"
     );
 }

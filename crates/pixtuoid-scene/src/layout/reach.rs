@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 
-use super::{cell_walkable, snap, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
+use super::{COARSE_CELL_SIZE, CoarseGrid, Point, snap};
 use pixtuoid_core::grid::Grid;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
@@ -16,9 +16,9 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 /// pixel (a door on a wall edge, a desk) still lands in the right component.
 const SEED_SNAP_CELLS: u16 = 3;
 
-/// The set of coarse cells reachable (8-connected) from a seed — i.e. the
-/// agent's connected walkable component. Built once per layout from a known
-/// in-component seed (the door, or a home desk).
+/// The set of coarse cells reachable (by `CoarseGrid::neighbors` steps) from a
+/// seed — i.e. the agent's connected walkable component. Built once per layout
+/// from a known in-component seed (the door, or a home desk).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReachSet {
     /// Coarse-cell reachability; the grid dims are `mask` dims / `COARSE_CELL_SIZE`.
@@ -26,9 +26,9 @@ pub struct ReachSet {
 }
 
 impl ReachSet {
-    /// 8-connected coarse BFS from `seed`'s cell (snapped to the nearest walkable
-    /// cell when `seed` lands on a blocked one). An empty/degenerate mask yields
-    /// an all-unreachable set.
+    /// Coarse BFS over `CoarseGrid::neighbors` from `seed`'s cell (snapped to the
+    /// nearest walkable cell when `seed` lands on a blocked one). An
+    /// empty/degenerate mask yields an all-unreachable set.
     pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
         let cell_w = mask.width() / COARSE_CELL_SIZE;
         let cell_h = mask.height() / COARSE_CELL_SIZE;
@@ -39,21 +39,13 @@ impl ReachSet {
         let empty = OccupancyOverlay::new();
         let seed_cell = (seed.x / COARSE_CELL_SIZE, seed.y / COARSE_CELL_SIZE);
         if let Some(start) = snap(mask, &empty, seed_cell, cell_w, cell_h, SEED_SNAP_CELLS) {
+            let mut coarse = CoarseGrid::new(mask, &empty);
             let mut q = VecDeque::new();
             grid.set(start.0, start.1, true);
             q.push_back(start);
             while let Some((cx, cy)) = q.pop_front() {
-                for (dx, dy) in NEIGHBORS_8 {
-                    let nx = cx as i32 + dx;
-                    let ny = cy as i32 + dy;
-                    if nx < 0 || ny < 0 {
-                        continue;
-                    }
-                    let (nx, ny) = (nx as u16, ny as u16);
-                    if nx >= cell_w || ny >= cell_h || grid.get_or(nx, ny, false) {
-                        continue;
-                    }
-                    if cell_walkable(mask, &empty, nx, ny) {
+                for ((nx, ny), _) in coarse.neighbors((cx, cy)) {
+                    if !grid.get_or(nx, ny, false) {
                         grid.set(nx, ny, true);
                         q.push_back((nx, ny));
                     }

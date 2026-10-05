@@ -23,12 +23,12 @@
 //! with no shared key between the file name and hook payloads, a JSONL agent
 //! could never coalesce with the hook agent (guaranteed two sprites).
 
-use anyhow::{anyhow, bail, Result};
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 /// The Reasonix CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "reasonix";
@@ -52,17 +52,17 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("reasonix hook payload must be an object"))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("event")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("reasonix payload missing event"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "event"))?;
     // An empty cwd would mint a phantom agent that nothing else coalesces with.
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "cwd"))?;
     // Merged on cwd, either session's end walks the shared sprite out.
     let key = obj
         .get("sessionId")
@@ -181,10 +181,7 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!(
-                "unsupported reasonix hook event: {}",
-                crate::source::decoder::display_safe(other)
-            )
+            Err(DecodeError::unsupported(SOURCE_NAME, other))
         }
     }
 }

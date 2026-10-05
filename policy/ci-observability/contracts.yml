@@ -12,74 +12,6 @@
 
 # ── The Claude reviewers: untrusted PR text read with the base branch's credentials
 
-- id: reviewer-triggers-run-the-base
-  file:
-    - .github/workflows/claude-review.yml
-    - .github/workflows/claude-security-review.yml
-  why: >-
-    Under pull_request a fork PR runs its own copy of this workflow and its own
-    prompt; pull_request_target runs the base branch's, which every guard below
-    assumes.
-  assert: .on | has("pull_request_target") and (has("pull_request") | not)
-  break:
-    - .on.pull_request = {}
-    - del(.on.pull_request_target)
-
-- id: review-caller-guard
-  file: .github/workflows/claude-review.yml
-  why: >-
-    This condition decides who can start a review that runs with the base
-    branch's credentials. Its comment arm vets only the commenter, and leaves a
-    fork head or another base to claude-readonly-review.yml's `reviewable`
-    check.
-  expected: >-
-    (github.event_name == 'pull_request_target' &&
-    github.actor != 'dependabot[bot]' &&
-    github.event.pull_request.draft == false &&
-    github.event.pull_request.head.repo.full_name == github.repository &&
-    github.event.pull_request.base.ref == github.event.repository.default_branch) ||
-    (github.event_name == 'issue_comment' &&
-    github.event.issue.pull_request &&
-    startsWith(github.event.comment.body, '/claude-review') &&
-    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
-  assert: |
-    [.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")]
-    | length == 1
-      and (.[0].if | gsub("\r?\n[ \t]*"; " ") | sub("^\\s+"; "") | sub("\\s+$"; "")) == $expected
-  break:
-    - |
-      (.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml") | .if)
-      |= sub("github.actor != 'dependabot\\[bot\\]' &&"; "")
-    - |
-      (.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml") | .if)
-      |= sub("\"COLLABORATOR\""; "\"COLLABORATOR \"")
-    - .jobs.second = (.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml"))
-
-- id: security-review-caller-guard
-  file: .github/workflows/claude-security-review.yml
-  why: >-
-    The same trigger guard as review-caller-guard, for the security reviewer's
-    own `/security-review` command.
-  expected: >-
-    (github.event_name == 'pull_request_target' &&
-    github.actor != 'dependabot[bot]' &&
-    github.event.pull_request.draft == false &&
-    github.event.pull_request.head.repo.full_name == github.repository &&
-    github.event.pull_request.base.ref == github.event.repository.default_branch) ||
-    (github.event_name == 'issue_comment' &&
-    github.event.issue.pull_request &&
-    startsWith(github.event.comment.body, '/security-review') &&
-    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
-  assert: |
-    [.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")]
-    | length == 1
-      and (.[0].if | gsub("\r?\n[ \t]*"; " ") | sub("^\\s+"; "") | sub("\\s+$"; "")) == $expected
-  break:
-    - |
-      (.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml") | .if)
-      |= sub("github.event.pull_request.draft == false"; "true")
-    - .jobs.second = (.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml"))
-
 - id: reviewer-analyze-is-read-only
   file: .github/workflows/claude-readonly-review.yml
   why: >-
@@ -96,68 +28,104 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     Checking out the PR head here runs untrusted files beside the base branch's
-    credentials, and a persisted checkout token outlives the step that needed
-    it.
+    credentials. (A persisted checkout token is zizmor's `artipacked`.)
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@"))]
     | length == 1
       and .[0].with.ref == "${{ github.event.repository.default_branch }}"
-      and .[0].with["persist-credentials"] == false
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with.ref)
       = "${{ github.event.pull_request.head.sha }}"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with)
-      |= del(.["persist-credentials"])
     - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7"}]'
 
 - id: reviewer-model-only-reads
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     The model reads untrusted diff text and its answer is published, so any
-    reach beyond reading the checkout lets an injection act, or read a runner
-    secret such as the CLI's own environment and publish it. `--tools` leaves
-    only the built-in read tools, and dontAsk denies a read outside the working
-    directory unless an allow rule pre-approves it, which a bare `Read` rule
-    does for every path (code.claude.com/docs/en/agent-sdk/permissions). Any
-    flag or action input can add one, so the arguments and the step's inputs
-    are pinned exactly; `--json-schema` keeps the answer structured for the
-    publisher to validate.
-  expected: >-
-    --max-turns ${{ inputs.max_turns }}
-    --max-budget-usd ${{ inputs.max_budget_usd }}
-    --permission-mode dontAsk
-    --tools Read,Glob,Grep
-    --json-schema ${{ steps.schema.outputs.json }}
+    reach beyond reading the checkout lets an injection act or publish a runner
+    secret. dontAsk denies what no allow rule approves, `--tools` leaves only
+    read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
+    the checkout even when a rule allows it
+    (code.claude.com/docs/en/settings-reference). `--setting-sources user`
+    drops the checkout's `.claude/` settings, which can add a hook and which
+    the action loads by default
+    (github.com/anthropics/claude-code-action/blob/v1/base-action/src/parse-sdk-options.ts);
+    the action parses only its space-separated form. Any other flag, action input
+    or settings key can add a rule, a tool, a hook or a directory, so all three
+    are allowlists; other values stay free. `allowed_bots` admits only
+    media-regen.yml's own app (its PR touches only docs/images), never `*`,
+    which would let any App's push trigger it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and (.[0].with | keys) == [
-            "anthropic_federation_rule_id", "anthropic_organization_id",
+      and ((.[0].with.allowed_bots // "") == "pixtuoid-bot[bot]")
+      and ((.[0].with | keys) - [
+            "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
             "claude_code_oauth_token", "display_report", "github_token",
-            "include_fix_links", "prompt", "show_full_output", "track_progress"]
-      and .[0].with.claude_args == $expected
+            "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
+      and (.[0].with.claude_args as $args
+           | ([$args | scan("(?<![\\w-])-{1,2}[A-Za-z][\\w-]*")] - [
+                "--max-turns", "--max-budget-usd", "--permission-mode",
+                "--setting-sources", "--tools", "--settings", "--json-schema"] == [])
+             and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
+             and [$args | scan("--setting-sources (\\S+)")] == [["user"]]
+             and ($args | test("--setting-sources=") | not)
+             and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
+                  | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
+             and ([$args | scan("--settings")] | length == 1)
+             and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
+                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
   break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.allowed_bots)
+      = "*"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " --allowedTools Read"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --add-dir /"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --mcp-config x"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " \"--settings\" {\"permissions\":{\"allow\":[\"Read\"]}}"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("--permission-mode dontAsk"; "--permission-mode bypassPermissions")
+      |= sub(" --permission-mode dontAsk"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(" --setting-sources user"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--setting-sources user"; "--setting-sources user,project")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--setting-sources user"; "--setting-sources=user")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --setting-sources=user,project"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"acceptEdits\",")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\"permissions\":\\{"; "\"permissions\":{\"additionalDirectories\":[\"/\"],")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\\{\"permissions\""; "{\"hooks\":{},\"permissions\"")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub(" --json-schema [^ ]+"; "")
+      |= sub(" --settings '[^']+'"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
-      += {"settings": "{}"}
+      += {"additional_permissions": "actions: write"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
 
 - id: reviewer-model-auth-is-scoped
@@ -209,37 +177,42 @@
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"show_full_output": true}}]'
     - .jobs.analyze.steps |= map(select((.uses // "") | startswith("anthropics/claude-code-action@") | not))
 
-- id: review-absence-is-reported
+- id: reviewer-writers-only-comment-and-status
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    A review that never ran leaves no verdict at HEAD, and #805–#818 merged that
-    way. report_absence says so on the PR, so it must run exactly when analyze
-    fails or declines; report_absence's comment says why its `if:` needs a
-    status function.
-  assert: |
-    [.jobs[] | (.if // "") | gsub("\r?\n[ \t]*"; " ")
-     | select(contains("needs.analyze.result == 'failure'")
-              and contains("needs.analyze.outputs.reviewable == 'false'"))]
-    | length == 1
-      and (.[0] | contains("!cancelled()") or contains("always()"))
-  break:
-    - .jobs.report_absence.if |= sub("!cancelled\\(\\) && "; "")
-    - .jobs.report_absence.if |= sub(" \\|\\| needs.analyze.outputs.reviewable == 'false'"; "")
-    - .jobs.report_absence.if |= sub("needs.analyze.result == 'failure' \\|\\| "; "")
-    - .jobs.second = .jobs.report_absence
-
-- id: reviewer-publisher-only-comments
-  file: .github/workflows/claude-readonly-review.yml
-  why: >-
-    publish can comment on the PR, and any action there, a checkout included,
-    runs with that scope: an action reads `github.token` without being passed it
+    publish comments and sets the lens's status, report_absence only sets it,
+    and any action in either, a checkout included, runs with that scope: an
+    action reads `github.token` without being passed it
     (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
   assert: |
-    .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
-      and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
+    .jobs.publish.permissions == {"issues": "write", "pull-requests": "write", "statuses": "write"}
+      and .jobs.report_absence.permissions == {"statuses": "write"}
+      and ([.jobs.publish.steps[], .jobs.report_absence.steps[] | select(has("uses"))] | length == 0)
   break:
     - '.jobs.publish.steps += [{"uses": "actions/checkout@v7"}]'
+    - '.jobs.report_absence.steps += [{"uses": "actions/checkout@v7"}]'
     - .jobs.publish.permissions.contents = "write"
+    - .jobs.report_absence.permissions["pull-requests"] = "write"
+
+- id: reviewer-fork-head-needs-a-maintainer
+  file: .github/workflows/claude-review.yml
+  why: >-
+    allow_fork hands a fork's diff to a billed model, and the only approval is
+    the `if:` admitting an issue_comment from a maintainer alone; an `if:` has no
+    shell for action_behavior_test.sh to run.
+  assert: |
+    [.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")] as $jobs
+    | ($jobs | length == 1)
+      and $jobs[0].with.allow_fork == "${{ github.event_name == 'issue_comment' }}"
+      and ([($jobs[0].if // "") | gsub("\r?\n[ \t]*"; " ") | split(" || ")[]
+            | select(contains("github.event_name == 'issue_comment'"))] as $arms
+           | ($arms | length > 0)
+             and all($arms[]; contains("contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association)")))
+  break:
+    - (.jobs[] | select(has("uses")) | .with.allow_fork) = true
+    - (.jobs[] | select(has("uses")) | .if) |= sub("github.event.comment.author_association"; "github.event.comment.user.login")
+    - (.jobs[] | select(has("uses")) | .if) += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
+    - .jobs.second = (.jobs[] | select(has("uses")))
 
 # ── claude.yml: the only Claude job with contents:write
 
@@ -248,7 +221,7 @@
   why: >-
     The job checks out without a ref, and on these two events that ref is the
     PR's merge ref, so an arm without the same-repo check stages a fork's files —
-    its CLAUDE.md among them — as the agent's own instructions.
+    its AGENTS.md files among them — as the agent's own instructions.
   assert: |
     . as $workflow
     | [.jobs[] | select(any(.steps[]?; (.uses // "") | startswith("anthropics/claude-code-action@")))] as $jobs
@@ -303,28 +276,47 @@
 - id: cache-cleanup-stays-inert
   file: .github/workflows/cache-cleanup.yml
   why: >-
-    Both jobs hold actions:write and one runs on pull_request_target, which a
-    fork PR author can trigger; that stays harmless only while each job is
-    trigger-guarded, runs one inline step and no action,
-    and has no scope beyond actions:write.
+    Its jobs hold actions:write and one runs on pull_request_target, which a
+    fork PR author can trigger; that stays harmless only while no job gains a
+    wider scope or runs an action (an action reads `github.token` unasked).
   assert: |
     .permissions == {}
-      and .on.pull_request_target == {"types": ["closed"]}
-      and (.jobs | keys) == ["closed-pr", "stale-generations"]
-      and .jobs["closed-pr"].if == "github.event_name == 'pull_request_target'"
-      and .jobs["stale-generations"].if == "github.event_name == 'push'"
       and all(.jobs[]; .permissions == {"actions": "write"}
-                       and (.steps | length == 1)
-                       and (.steps[0] | has("uses") | not))
+                       and all(.steps[]; has("uses") | not))
   break:
     - '.permissions = {"actions": "write"}'
-    - '.on.pull_request_target.types = ["closed", "opened"]'
-    - .jobs.extra = .jobs["stale-generations"]
-    - .jobs["closed-pr"].if = "${{ always() }}"
-    - del(.jobs["stale-generations"].if)
     - .jobs["closed-pr"].permissions.contents = "write"
-    - '.jobs["closed-pr"].steps += [{"run": "true"}]'
     - .jobs["closed-pr"].steps[0].uses = "actions/checkout@v7"
+
+- id: media-regen-bounds-its-token
+  file: .github/workflows/media-regen.yml
+  why: >-
+    publish holds the App's key and the write token it mints, which stay bounded
+    only while no other job can read them, publish builds and runs nothing from
+    the tree, and the one thing it commits is the README's media.
+  assert: |
+    ([.jobs.publish.steps[] | .run // ""] | join("\n")) as $publish
+    | .permissions == {}
+      and .jobs.render.permissions == {"contents": "read"}
+      and ([.jobs | to_entries[] | select(.key != "publish") | .value | tostring | test("secrets\\.")] | any | not)
+      and .jobs.publish.permissions == {}
+      and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token"]) == []
+      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
+      and ($publish | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
+      and ([$publish | scan("git\\s+(?:add|commit\\s+[^\\n]*-a)[^\\n]*")] == ["git add --all -- docs/images"])
+      and ((.on | keys) - ["push", "workflow_dispatch"]) == []
+  break:
+    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]'
+    - '.jobs.render.permissions.contents = "write"'
+    - '.jobs.publish.permissions = {"contents": "write"}'
+    - '.jobs.publish.steps += [{"run": "cargo build"}]'
+    - '.jobs.publish.steps[-1].run |= sub("git add --all -- docs/images"; "git add --all -- .")'
+    - .on.pull_request = {}
+    - '.permissions = {"contents": "write"}'
+    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]}'
+    - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
+    - '.jobs.publish.steps[0].with["persist-credentials"] = true'
+    - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
@@ -357,7 +349,7 @@
   break:
     - del(.jobs.snapshots.permissions)
     - .jobs.smoke.permissions["id-token"] = "write"
-    - .jobs.coverage.steps |= map(select(.uses != "./.github/actions/upload-codecov"))
+    - .jobs.test.steps |= map(select(.uses != "./.github/actions/upload-codecov"))
 
 # ── The merge gate
 
@@ -366,6 +358,7 @@
     - .github/workflows/ci-lint.yml
     - .github/workflows/ci-builds.yml
     - .github/workflows/ci-tests.yml
+    - .github/workflows/site.yml
   why: >-
     ci.yml's gate sees a group only through the call's result, and GitHub does
     not document how a called workflow's jobs roll up into it. The `required`
@@ -395,6 +388,42 @@
     - |
       .jobs.required.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
+
+- id: only-the-light-tier-passes-skipped-jobs
+  file:
+    - .github/workflows/ci-builds.yml
+    - .github/workflows/ci-tests.yml
+    - .github/workflows/site.yml
+  why: >-
+    A PR's light tier skips its full-only jobs by design and must still pass
+    ci-gate to enter the queue; the full tier judges the same jobs on the
+    queue's draft PR, so a skip counted green there would merge an untested
+    tree.
+  assert: |
+    [.jobs.required.steps[] | select(.uses == "./.github/actions/require-jobs")]
+    | all(.with["allow-skipped"] == "${{ !inputs.full }}")
+  break:
+    - |
+      .jobs.required.steps |= map(
+        if .uses == "./.github/actions/require-jobs" then .with["allow-skipped"] = "true" else . end)
+
+- id: only-the-queue-buys-the-full-tier
+  file: .github/workflows/ci.yml
+  why: >-
+    `tier` alone decides which PR runs gets the full tier's Windows, macOS and
+    release runners; a PR outside the queue, or a fork naming its branch
+    `mergify/merge-queue/…`, that claimed it would bring back the starvation
+    two-step CI removes.
+  assert: |
+    [.jobs.tier.steps[] | select(.id == "tier") | .env.FULL]
+    == ["${{ github.event_name != 'pull_request' || (startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.head.repo.full_name == github.repository) }}"]
+  break:
+    - |
+      .jobs.tier.steps |= map(if .id == "tier" then .env.FULL = "${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/merge-queue/') }}" else . end)
+    - |
+      .jobs.tier.steps |= map(if .id == "tier" then .env.FULL = "${{ github.event_name != 'pull_request' || (startsWith(github.head_ref, 'mergify/') && github.event.pull_request.head.repo.full_name == github.repository) }}" else . end)
+    - |
+      .jobs.tier.steps |= map(if .id == "tier" then .env.FULL = "true" else . end)
 
 - id: ci-gate-judges-every-group
   file: .github/workflows/ci.yml
@@ -429,81 +458,166 @@
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
 
-# ── The scanners' own switches
-
-- id: actionlint-ignores-stay-two
-  file: .github/actionlint.yaml
-  why: >-
-    Each entry switches an actionlint check off for a file and nothing else
-    would notice a new one; these two are upstream incompatibilities, each
-    documented beside its entry.
-  assert: |
-    .paths == {
-      ".github/workflows/claude-readonly-review.yml": {"ignore": ["input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""]},
-      ".github/workflows/release.yml": {"ignore": ["unexpected key \"queue\" for \"concurrency\" section"]}
-    }
-  break:
-    - '.paths[".github/workflows/ci.yml"] = {"ignore": ["shellcheck"]}'
-    - '.paths[".github/workflows/release.yml"].ignore += [".*"]'
-
-- id: zizmor-exceptions-stay-two
-  file: .github/zizmor.yml
-  why: >-
-    One more `disable: true` here retires a zizmor audit repository-wide with
-    every gate still green, and loosening `ref-pin` to `any` accepts an unpinned
-    action the same way.
-  assert: |
-    .rules == {
-      "self-repository": {"disable": true},
-      "unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}}
-    }
-  break:
-    - '.rules["template-injection"] = {"disable": true}'
-    - '.rules["unpinned-uses"].config.policies["*"] = "any"'
-
-- id: zizmor-runs-online-in-ci
-  file: .github/workflows/ci-lint.yml
-  why: >-
-    zizmor's online-only audits (the `zizmor` recipe's header names them) run on
-    this step and nowhere else, so nothing may skip or soften it and it must
-    declare a GH_TOKEN; the recipe also refuses to run tokenless in CI, but only
-    while that check stays in the recipe. GitHub resolves env step over job over
-    workflow
-    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#env)
-    even when the nearest declaration is empty or null, which the workflow
-    parser reads as an empty string
-    (github.com/actions/languageservices/blob/main/workflow-parser/src/templates/template-reader.ts).
-  assert: |
-    (.env // {}) as $workflow_env
-    | [.jobs[] | select((has("if") or has("continue-on-error")) | not)
-       | (.env // {}) as $job_env
-       | .steps[]? | select((.run // "") | gsub("^\\s+|\\s+$"; "") == "just zizmor")
-       | select((has("if") or has("continue-on-error")) | not)
-       | [(.env // {}), $job_env, $workflow_env] | map(select(has("GH_TOKEN")))
-       | .[0].GH_TOKEN // ""]
-    | length >= 1 and all(.[]; . != "")
-  break:
-    - '(.jobs.hygiene.steps[] | select(.run == "just zizmor") | .["continue-on-error"]) = true'
-    - .jobs.hygiene.if = "false"
-    - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .run) = "just zizmor-offline"
-    - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .env.GH_TOKEN) = ""
-    - (.jobs.hygiene.steps[] | select(.run == "just zizmor")) |= del(.env)
-    - .jobs.hygiene["continue-on-error"] = true
-    - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .if) = "false"
-    - |
-      .jobs.hygiene.env.GH_TOKEN = "${{ github.token }}"
-      | (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .env.GH_TOKEN) = null
-
 # ── Publishing
+
+- id: release-publishes-after-ci-gate
+  file: .github/workflows/release-plz.yml
+  why: >-
+    The publish runs on the merge push, and the merge queue can land other PRs
+    while a release PR is open, so only a wait on that commit's own ci-gate
+    proves the published tree passed CI. A job whose need failed or timed out
+    is skipped unless its `if:` calls a status function
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds),
+    so the publish must need the wait and call none.
+  assert: |
+    .jobs as $jobs
+    | [$jobs[] | select(any(.steps[]?; ((.uses // "") | startswith("release-plz/action@"))
+                                       and .with.command == "release"))] as $publishers
+    | ($publishers | length == 1)
+      and (($publishers[0].if // "") | test("always\\(|failure\\(|cancelled\\(") | not)
+      and ([$publishers[0].needs] | flatten | any(.[]; . as $need | $jobs[$need]
+            | (has("continue-on-error") | not)
+              and any(.steps[]; .env.CHECK_NAME == "ci-gate" and .env.SHA == "${{ github.sha }}"
+                                and ((has("if") or has("continue-on-error")) | not))))
+  break:
+    - del(.jobs.release.needs)
+    - .jobs.release.if += " || always()"
+    - .jobs["ci-passed"]["continue-on-error"] = true
+    - .jobs["ci-passed"].steps[0].env.SHA = "${{ github.event.before }}"
+    - .jobs["ci-passed"].steps[0].env.CHECK_NAME = "lint"
+    - .jobs["ci-passed"].steps[0]["continue-on-error"] = true
+    - .jobs["ci-passed"].steps[0].if = "${{ false }}"
+
+- id: every-main-push-gets-its-ci-gate
+  file: .github/workflows/ci.yml
+  why: >-
+    The release waits for ci-gate on its own merge commit, and a concurrency
+    group's newer run replaces its pending one unless the group queues
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency),
+    so a release commit whose run was replaced never gets one and the publish
+    times out. A main push therefore owns its group or queues in it, and a run
+    already in progress is never cancelled.
+  expected: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  assert: |
+    .concurrency as $c
+    | (($c.group == $expected)
+        or ($c.queue == "max" and ($c["cancel-in-progress"] // false | tostring) == "false"))
+      and (($c["cancel-in-progress"] // false | tostring) as $cancel
+           | $cancel == "false" or $cancel == "${{ github.event_name == 'pull_request' }}")
+  break:
+    - .concurrency.group = "ci-${{ github.ref }}"
+    - .concurrency.group = "ci-${{ github.event_name == 'push' && github.ref || github.sha }}"
+    - .concurrency["cancel-in-progress"] = true
+    - .concurrency["cancel-in-progress"] = "${{ github.event_name != 'workflow_dispatch' }}"
+
+- id: release-wait-only-for-a-release-merge
+  file: .github/workflows/release-plz.yml
+  why: >-
+    The wait holds a runner, from the concurrency CI itself uses, for as long
+    as CI takes, and only a merged release PR has anything to publish
+    (release-plz's `should_release`), so it runs only when the detection says
+    so. The tag check is what turns a detection miss red, so it runs after
+    every push, whatever the publish did.
+  assert: |
+    .jobs as $jobs
+    | [$jobs | to_entries[] | select(any(.value.steps[]?; .env.PR_BRANCH_PREFIX != null
+                                         and ((.run // "") | contains("/commits/$SHA/pulls"))))] as $detectors
+    | [$jobs[] | select(any(.steps[]?; .env.CHECK_NAME == "ci-gate"))] as $waits
+    | [$jobs[] | select(any(.steps[]?; (.run // "") | contains("just workspace-version")))] as $tagged
+    | ($detectors | length == 1)
+      and ($waits | length == 1)
+      and $waits[0].if == "needs.\($detectors[0].key).outputs.release == 'true'"
+      and ($tagged | length == 1)
+      and (($tagged[0].if // "") | contains("!cancelled()"))
+      and (($tagged[0].if // "") | contains("outputs.release") | not)
+  break:
+    - del(.jobs["ci-passed"].if)
+    - .jobs["ci-passed"].if = "needs.release-merge.outputs.release != 'false'"
+    - del(.jobs["release-merge"].steps[0].env.PR_BRANCH_PREFIX)
+    - del(.jobs["version-tagged"].if)
+    - .jobs["version-tagged"].if = "${{ !cancelled() && needs.release-merge.outputs.release == 'true' }}"
 
 - id: release-plz-publishes-only-release-prs
   file: release-plz.toml
   why: >-
     release-plz's default releases every unpublished package on every run
-    (release-plz.dev/docs/config#the-release_always-field), and the release job
-    runs on every push to main, so without this key a version bump that lands
-    outside a release PR ships to crates.io with no human decision.
+    (release-plz.dev/docs/config#the-release_always-field), and the release
+    job's own gate is a copy of release-plz's test, so without this key a gate
+    that stopped testing would ship a version bump that lands outside a release
+    PR to crates.io with no human decision.
   assert: .workspace.release_always == false
   break:
     - del(.workspace.release_always)
     - .workspace.release_always = true
+
+- id: release-archives-stage-every-notice
+  file: .github/workflows/release.yml
+  why: >-
+    The binary embeds OFL-1.1 fonts, whose license must travel with every copy
+    (crates/*/fonts/), and the archives ship only what these steps stage; npm
+    repackages them. A missing notice fails nothing, and `just stage-notices`
+    globs every embedded font's, so each packaging step must call it.
+  assert: |
+    [.jobs.build.steps[] | select((.name // "") | startswith("Package"))]
+    | length == 2 and all(.run | contains("just stage-notices \"$DIR\""))
+  break:
+    - |
+      (.jobs.build.steps[] | select(.name == "Package (Windows)") | .run)
+      |= sub("just stage-notices \"\\$DIR\""; "cp LICENSE \"$DIR/\"")
+    - .jobs.build.steps |= map(select(.name != "Package (Unix)"))
+
+- id: debs-ship-the-license
+  file:
+    - crates/pixtuoid/Cargo.toml
+    - crates/pixtuoid-hook/Cargo.toml
+  why: >-
+    cargo-deb's generated copyright file names the license without its text,
+    which MIT requires in every copy; without this row a .deb ships none.
+  assert: |
+    .package.name as $name
+    | [.package.metadata.deb.assets[]
+       | select(.[0] == "../../LICENSE" and .[1] == "usr/share/doc/\($name)/")]
+    | length == 1
+  break:
+    - .package.metadata.deb.assets |= map(select(.[0] != "../../LICENSE"))
+    - |
+      (.package.metadata.deb.assets[] | select(.[0] == "../../LICENSE") | .[1])
+      = "usr/share/doc/"
+
+- id: deb-ships-every-font-notice
+  file: crates/pixtuoid/Cargo.toml
+  why: >-
+    The .deb is another copy of the binary, so it carries the embedded fonts'
+    notices by the same glob `just stage-notices` uses; a narrower one drops a
+    font silently.
+  assert: |
+    [.package.metadata.deb.assets[]
+     | select(.[0] == "../*/fonts/**/*.txt" and .[1] == "usr/share/doc/pixtuoid/licenses/")]
+    | length == 1
+  break:
+    - .package.metadata.deb.assets |= map(select(.[0] | startswith("target/")))
+    - |
+      (.package.metadata.deb.assets[] | select(.[0] | contains("fonts")) | .[0])
+      = "../pixtuoid/fonts/*.txt"
+
+- id: queue-restates-branch-protection
+  file: .mergify.yml
+  why: >-
+    Branch protection is not injected (the bots never review the queue's draft
+    PR), so the queue admits a PR only on the checks restated here; one missing
+    lets a PR queue without it, and the merge then stalls on GitHub's own rule.
+    The draft PR is judged on the full tier's ci-gate alone.
+  assert: |
+    all(.queue_rules[];
+      .branch_protection_injection_mode == "none"
+      and (.merge_bot_account // "" | length > 0)
+      and ((["check-success = ci-gate", "check-success = GitGuardian Security Checks",
+             "check-success = claude-review/correctness", "check-success = claude-review/design",
+             "#review-threads-unresolved = 0"] - .queue_conditions) == [])
+      and .merge_conditions == ["check-success = ci-gate"])
+  break:
+    - .queue_rules[0].queue_conditions |= map(select(. != "check-success = claude-review/design"))
+    - .queue_rules[0].queue_conditions |= map(select(. != "#review-threads-unresolved = 0"))
+    - .queue_rules[0].branch_protection_injection_mode = "queue"
+    - del(.queue_rules[0].merge_bot_account)
+    - .queue_rules[0].merge_conditions = []

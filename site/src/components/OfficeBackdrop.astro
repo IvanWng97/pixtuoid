@@ -6,11 +6,9 @@ const audioWorkerUrl = asset('audio-worker.js');
 const officeDriverUrl = asset('office-driver.js');
 ---
 
-{
-  /* The wasm office renders into #office-live; the poster is the instant
+{/* The wasm office renders into #office-live; the poster is the instant
      FALLBACK layer — reduced-motion / no-JS / no-wasm / fetch-failure all
-     simply stay on it. */
-}
+     simply stay on it. */}
 <div class="backdrop" aria-hidden="true">
   <img
     class="backdrop__poster px"
@@ -22,20 +20,16 @@ const officeDriverUrl = asset('office-driver.js');
     fetchpriority="high"
   />
   <canvas id="office-live" class="backdrop__live px"></canvas>
-  {
-    /* Crisp DOM text laid OVER the pixel office: the canvas buffer is upscaled
+  {/* Crisp DOM text laid OVER the pixel office: the canvas buffer is upscaled
        with image-rendering:pixelated, so baked AA text would nearest-neighbor
        blow up blocky. The engine exports the labels + wall-board as a model
        (Office.overlay_json) and these spans are positioned at DISPLAY
-       resolution via the object-fit:cover mapping. */
-  }
+       resolution via the object-fit:cover mapping. */}
   <div id="office-overlay" class="backdrop__overlay" aria-hidden="true"></div>
 </div>
-{
-  /* --dim-rest single-sources the resting opacity with consts DIM_RESTING — a
+{/* --dim-rest single-sources the resting opacity with consts DIM_RESTING — a
      JS↔CSS value that can't share a literal, so it rides an inline custom
-     property both #dimmer rules read. */
-}
+     property both #dimmer rules read. */}
 <div id="dimmer" aria-hidden="true" style={`--dim-rest:${DIM_RESTING}`}></div>
 <button
   id="office-pause"
@@ -55,11 +49,9 @@ const officeDriverUrl = asset('office-driver.js');
     <rect x="5" y="4" width="1" height="1"></rect>
   </svg>
 </button>
-{
-  /* The ♩ office-sound toggle starts OFF: muted-by-default + browser autoplay
+{/* The ♩ office-sound toggle starts OFF: muted-by-default + browser autoplay
      policy (no sound without a gesture). JS un-hides it once the engine is
-     live — no engine, no sound to offer. */
-}
+     live — no engine, no sound to offer. */}
 <button
   id="office-audio"
   class="office-ctl"

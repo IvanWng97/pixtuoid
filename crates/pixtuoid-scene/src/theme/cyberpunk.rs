@@ -151,11 +151,6 @@ pub static CYBERPUNK: Theme = Theme {
             g: 100,
             b: 255,
         },
-        ceiling_pool: Rgb {
-            r: 120,
-            g: 60,
-            b: 255,
-        },
         floor_lamp_halo: Rgb {
             r: 0,
             g: 200,
@@ -341,14 +336,14 @@ pub static CYBERPUNK: Theme = Theme {
             b: 180,
         },
         label_idle: Rgb {
-            r: 80,
-            g: 70,
-            b: 120,
+            r: 150,
+            g: 135,
+            b: 200,
         },
         label_exiting: Rgb {
-            r: 40,
-            g: 35,
-            b: 60,
+            r: 125,
+            g: 117,
+            b: 160,
         },
         tooltip_bg: Rgb { r: 10, g: 8, b: 20 },
         tooltip_title: Rgb {

@@ -15,7 +15,10 @@ const CMD_UNSAFE: &[char] = &[
     ' ', '\t', ';', ',', '=', '"', '&', '|', '<', '>', '(', ')', '^', '%',
 ];
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows installer calls it off test")
+)]
 fn first_cmd_unsafe_char(p: &str) -> Option<char> {
     p.chars().find(|c| CMD_UNSAFE.contains(c))
 }
@@ -31,7 +34,10 @@ pub(super) fn windows_bare_hook_command(resolved_path: &str, source: &str) -> Re
     resolve_windows_command(resolved_path, source, short_path_windows)
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows installer calls it off test")
+)]
 fn resolve_windows_command(
     path: &str,
     source: &str,
@@ -49,10 +55,10 @@ fn resolve_windows_command(
     };
     // With 8.3 generation disabled on the volume GetShortPathNameW returns the
     // long path unchanged, so the short form is re-checked before it is accepted.
-    if let Some(s) = short_path(path) {
-        if first_cmd_unsafe_char(&s).is_none() {
-            return Ok(format!("{s}{}{source}", super::SOURCE_FLAG));
-        }
+    if let Some(s) = short_path(path)
+        && first_cmd_unsafe_char(&s).is_none()
+    {
+        return Ok(format!("{s}{}{source}", super::SOURCE_FLAG));
     }
     anyhow::bail!(
         "pixtuoid-hook is at a path containing {bad:?} ({path}) that the cmd.exe /C hook \

@@ -4,23 +4,21 @@
 //! AgentEvent stream through the real Reducer — the two sides structurally cannot
 //! desync. scripts/gen-media.py (kind:"proof") encodes the frames.
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use image::{Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::source::claude_code::{
-    cc_derive_label, cc_id_from_path, decode_cc_line, SOURCE_NAME,
-};
+use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::source::AgentEvent;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::source::claude_code::{
+    SOURCE_NAME, cc_derive_label, cc_id_from_path, decode_cc_line,
+};
 use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime};
 
-use crate::encode::cells_to_rgba;
+use crate::encode::{FrameSink, Timeline, cells_to_rgba, fill_rect};
 use crate::{CELL_H, CELL_W};
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.
@@ -116,13 +114,6 @@ fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<
     lines
 }
 
-/// Sum of the AA font's per-glyph pixel-scaled advances. Summing real advances
-/// (rather than `chars * one_advance`) stays correct even for a future
-/// proportional face.
-fn aa_text_width_at(s: &str, px: f32) -> i32 {
-    pixtuoid::aa_text::text_width(s, px)
-}
-
 /// Draws `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`,
 /// alpha-composited onto the existing pixels. Returns the total advance width so
 /// the typing-cursor block needn't recompute it.
@@ -161,9 +152,11 @@ fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32)
 }
 
 fn coda_lines(canvas_w: u32) -> Vec<String> {
-    let floor = aa_text_width_at("M", CODA_FONT_PX);
+    let floor = pixtuoid::aa_text::text_width("M", CODA_FONT_PX);
     let max_w = (canvas_w as i32 - 2 * CODA_PAD as i32).max(floor);
-    wrap_text(CODA_TEXT, max_w, |s| aa_text_width_at(s, CODA_FONT_PX))
+    wrap_text(CODA_TEXT, max_w, |s| {
+        pixtuoid::aa_text::text_width(s, CODA_FONT_PX)
+    })
 }
 
 fn coda_height(canvas_w: u32) -> u32 {
@@ -308,35 +301,34 @@ pub(crate) fn build_script(fixture: &Path) -> Result<ProofScript> {
         last_ms = last_ms.max(rel);
         let ty = v.get("type").and_then(|s| s.as_str()).unwrap_or("");
         let content = v.get("message").and_then(|m| m.get("content"));
-        if ty == "user" {
-            if let Some(text) = content.and_then(|c| c.as_str()) {
-                lines.push(PanelLine {
-                    at_ms: rel,
-                    text: format!("> {text}"),
-                    prompt: true,
-                    annotation: None,
-                });
-                continue; // plain prompt: decode_cc_line emits nothing for it
-            }
+        if ty == "user"
+            && let Some(text) = content.and_then(|c| c.as_str())
+        {
+            lines.push(PanelLine {
+                at_ms: rel,
+                text: format!("> {text}"),
+                prompt: true,
+                annotation: None,
+            });
         }
-        if ty == "assistant" {
-            if let Some(blocks) = content.and_then(|c| c.as_array()) {
-                for b in blocks {
-                    if b.get("type").and_then(|s| s.as_str()) == Some("tool_use") {
-                        let name = b.get("name").and_then(|s| s.as_str()).unwrap_or("?");
-                        let annotation = Some(match tool_idx {
-                            0 => "-- that's you",
-                            1 => "monitor flips",
-                            _ => "monitor flips again",
-                        });
-                        tool_idx += 1;
-                        lines.push(PanelLine {
-                            at_ms: rel,
-                            text: format!("[{name}] {}", tool_arg(b.get("input"))),
-                            prompt: false,
-                            annotation,
-                        });
-                    }
+        if ty == "assistant"
+            && let Some(blocks) = content.and_then(|c| c.as_array())
+        {
+            for b in blocks {
+                if b.get("type").and_then(|s| s.as_str()) == Some("tool_use") {
+                    let name = b.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+                    let annotation = Some(match tool_idx {
+                        0 => "-- that's you",
+                        1 => "monitor flips",
+                        _ => "monitor flips again",
+                    });
+                    tool_idx += 1;
+                    lines.push(PanelLine {
+                        at_ms: rel,
+                        text: format!("[{name}] {}", tool_arg(b.get("input"))),
+                        prompt: false,
+                        annotation,
+                    });
                 }
             }
         }
@@ -364,14 +356,6 @@ fn put(img: &mut RgbaImage, x: i32, y: i32, c: Rgba<u8>) {
     }
 }
 
-fn fill(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, c: Rgba<u8>) {
-    for j in y..(y + h).min(img.height()) {
-        for i in x..(x + w).min(img.width()) {
-            img.put_pixel(i, j, c);
-        }
-    }
-}
-
 fn text(img: &mut RgbaImage, s: &str, x: i32, y: i32, c: Rgba<u8>) {
     aa_draw_text_at(img, s, x, y, ANNOT_FONT_PX, c);
 }
@@ -379,7 +363,7 @@ fn text(img: &mut RgbaImage, s: &str, x: i32, y: i32, c: Rgba<u8>) {
 /// A small filled disc, centered on `(cx, cy)` by its own metrics — reuses the AA
 /// face's `●` rather than a bespoke circle rasterizer.
 fn dot(img: &mut RgbaImage, cx: i32, cy: i32, px: f32, c: Rgba<u8>) {
-    let w = aa_text_width_at("\u{25CF}", px);
+    let w = pixtuoid::aa_text::text_width("\u{25CF}", px);
     let h = pixtuoid::aa_text::line_height(px);
     aa_draw_text_at(img, "\u{25CF}", cx - w / 2, cy - h / 2, px, c);
 }
@@ -399,14 +383,15 @@ const DOT_RED: Rgba<u8> = Rgba([255, 95, 86, 255]);
 const DOT_YELLOW: Rgba<u8> = Rgba([255, 189, 46, 255]);
 const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
 const CHROME_DOT_PX: f32 = 8.0;
-const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1; // dot advance + a 1px gap
+// Centre to centre, off the font size: the ● glyph's advance is narrower.
+const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1;
 const DOT_GAP_AFTER: i32 = 6;
 
 /// `is_panel` gates the traffic-light dots + the title size — only the left panel
 /// is a typed terminal window.
 fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bool) {
-    fill(img, x, y, w, HEADER_H, CHROME_BG);
-    fill(img, x, y + HEADER_H - 1, w, 1, EDGE);
+    fill_rect(img, x, y, w, HEADER_H, CHROME_BG);
+    fill_rect(img, x, y + HEADER_H - 1, w, 1, EDGE);
     if is_panel {
         let cy = (y + HEADER_H / 2) as i32;
         let mut cx = x as i32 + PAD as i32 + 4;
@@ -428,8 +413,8 @@ fn panel_body(
     script: &ProofScript,
     elapsed_ms: u64,
 ) {
-    fill(img, origin.0, origin.1, size.0, size.1, PANEL_BG);
-    let floor = aa_text_width_at("M", PROOF_FONT_PX);
+    fill_rect(img, origin.0, origin.1, size.0, size.1, PANEL_BG);
+    let floor = pixtuoid::aa_text::text_width("M", PROOF_FONT_PX);
     let max_w = (size.0 as i32 - 2 * PAD as i32).max(floor);
     let mut row = 0u32;
     for line in &script.lines {
@@ -441,7 +426,9 @@ fn panel_body(
         // Wrapped purely at render time: the typewriter reveal walks the FLAT
         // string's character stream, so a long line pushes later lines down as
         // more of it becomes visible, like a real terminal.
-        let wrapped = wrap_text(&line.text, max_w, |s| aa_text_width_at(s, PROOF_FONT_PX));
+        let wrapped = wrap_text(&line.text, max_w, |s| {
+            pixtuoid::aa_text::text_width(s, PROOF_FONT_PX)
+        });
         let color = if line.prompt { PROMPT } else { INK };
         let mut remaining = shown;
         for sub in &wrapped {
@@ -465,7 +452,7 @@ fn panel_body(
             );
             if take < sub_len {
                 let cx = origin.0 as i32 + PAD as i32 + advance;
-                fill(img, cx.max(0) as u32, y, 10, 16, INK);
+                fill_rect(img, cx.max(0) as u32, y, 10, 16, INK);
             }
             row += 1;
             remaining -= take;
@@ -510,63 +497,62 @@ pub(crate) fn compose_frame(
     // Divider between the halves; the coda strip, drawn last, trims its own bottom
     // slice back off.
     match layout {
-        ProofLayout::Wide => fill(&mut img, PANEL_W - 1, 0, 2, HEADER_H + oh, EDGE),
-        ProofLayout::Tall => fill(&mut img, 0, HEADER_H + TALL_PANEL_H, w, 1, EDGE),
+        ProofLayout::Wide => fill_rect(&mut img, PANEL_W - 1, 0, 2, HEADER_H + oh, EDGE),
+        ProofLayout::Tall => fill_rect(&mut img, 0, HEADER_H + TALL_PANEL_H, w, 1, EDGE),
     }
 
     // Anchored to the ACTUAL working sprite's desk — no hand-placed coordinates.
-    if let Some(i) = active_annotation(&script.lines, elapsed_ms) {
-        if let Some(label) = script.lines[i].annotation {
-            let desk = (
-                (office_origin.0 + desk_px.0) as i32,
-                (office_origin.1 + desk_px.1) as i32,
-            );
-            // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
-            // over a lit monitor (up to 16px above desk.1 in PNG space) with an
-            // 8px margin, so the connector/dot never sits inside the glow.
-            const GLOW_CLEARANCE: i32 = 24;
-            let anchor_y = desk.1 - GLOW_CLEARANCE;
-            match layout {
-                ProofLayout::Wide => {
-                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
-                    let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
-                    dashed_h(
-                        &mut img,
-                        (PANEL_W - PAD) as i32,
-                        desk.0 - 10,
-                        anchor_y,
-                        ANNOT,
-                    );
-                    text(
-                        &mut img,
-                        label,
-                        label_x,
-                        anchor_y - 22 + 1,
-                        Rgba([0, 0, 0, 255]),
-                    );
-                    text(&mut img, label, label_x, anchor_y - 22, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-                }
-                ProofLayout::Tall => {
-                    // No cross-panel connector line — the panel sits above, not
-                    // beside.
-                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
-                    let label_x = (desk.0 - text_w - 16).max(PAD as i32);
-                    let label_y = anchor_y - 22;
-                    text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
-                    text(&mut img, label, label_x, label_y, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-                }
+    if let Some(i) = active_annotation(&script.lines, elapsed_ms)
+        && let Some(label) = script.lines[i].annotation
+    {
+        let desk = (
+            (office_origin.0 + desk_px.0) as i32,
+            (office_origin.1 + desk_px.1) as i32,
+        );
+        // Clears the halo `paint_ceiling_halos` burns over a lit monitor, with a
+        // margin, so the connector/dot never sits inside the glow.
+        const GLOW_CLEARANCE: i32 = 24;
+        let anchor_y = desk.1 - GLOW_CLEARANCE;
+        match layout {
+            ProofLayout::Wide => {
+                let text_w = pixtuoid::aa_text::text_width(label, ANNOT_FONT_PX);
+                let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
+                dashed_h(
+                    &mut img,
+                    (PANEL_W - PAD) as i32,
+                    desk.0 - 10,
+                    anchor_y,
+                    ANNOT,
+                );
+                text(
+                    &mut img,
+                    label,
+                    label_x,
+                    anchor_y - 22 + 1,
+                    Rgba([0, 0, 0, 255]),
+                );
+                text(&mut img, label, label_x, anchor_y - 22, ANNOT);
+                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
+            }
+            ProofLayout::Tall => {
+                // No cross-panel connector line — the panel sits above, not
+                // beside.
+                let text_w = pixtuoid::aa_text::text_width(label, ANNOT_FONT_PX);
+                let label_x = (desk.0 - text_w - 16).max(PAD as i32);
+                let label_y = anchor_y - 22;
+                text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
+                text(&mut img, label, label_x, label_y, ANNOT);
+                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
             }
         }
     }
 
     let ch = coda_height(w);
     let coda_y0 = h - ch;
-    fill(&mut img, 0, coda_y0, w, ch, CODA_BG);
-    fill(&mut img, 0, coda_y0, w, 1, EDGE);
+    fill_rect(&mut img, 0, coda_y0, w, ch, CODA_BG);
+    fill_rect(&mut img, 0, coda_y0, w, 1, EDGE);
     for (i, cline) in coda_lines(w).iter().enumerate() {
-        let lw = aa_text_width_at(cline, CODA_FONT_PX);
+        let lw = pixtuoid::aa_text::text_width(cline, CODA_FONT_PX);
         let x = ((w as i32 - lw) / 2).max(0);
         let y = (coda_y0 + CODA_PAD) as i32 + i as i32 * CODA_LINE_H as i32;
         aa_draw_text_at(&mut img, cline, x, y, CODA_FONT_PX, CODA_INK);
@@ -579,12 +565,11 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) frames_dir: &'a Path,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
-    pub(crate) fps: u64,
-    pub(crate) secs: u64,
+    pub(crate) timeline: Timeline,
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
-    pub(crate) pack: &'a pixtuoid_core::sprite::format::Pack,
-    pub(crate) start: SystemTime,
+    pub(crate) pack: &'a std::sync::Arc<pixtuoid_core::sprite::format::Pack>,
+    pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }
 
 pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
@@ -592,13 +577,10 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
     let mut pending: VecDeque<(u64, AgentEvent)> = script.events.iter().cloned().collect();
 
     // Anchor the burned callout to home_desks[0] in the SAME layout draw_scene
-    // computes: buf = cols x (rows - FOOTER_ROWS)*2.
-    let buf_h = job
-        .rows
-        .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-        .saturating_mul(2);
+    // computes.
+    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(job.cols, job.rows);
     let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
-        job.cols,
+        buf_w,
         buf_h,
         Some(job.max_desks),
         0,
@@ -609,29 +591,23 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         .first()
         .copied()
         .ok_or_else(|| anyhow!("layout has no home desks"))?;
-    // half-block buffer → PNG px: 1 buf-px per cell across, 2 per cell down
     let desk_px = (desk.x as u32 * CELL_W, (desk.y as u32 / 2) * CELL_H);
 
     let backend = TestBackend::new(job.cols, job.rows);
     let mut term = Terminal::new(backend)?;
-    let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-    let mut store = pixtuoid_scene::floor::FloorCtx::new();
+    let mut floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone(job.pack));
     let mut scene = SceneState::uniform(job.max_desks);
     let mut reducer = Reducer::new();
-    let mut chitchat_state = std::collections::HashMap::new();
+    let mut office = pixtuoid_scene::floor::PerOffice::new();
 
-    let wide_dir = job.frames_dir.join("wide");
-    let tall_dir = job.frames_dir.join("tall");
-    fs::create_dir_all(&wide_dir)?;
-    fs::create_dir_all(&tall_dir)?;
+    let mut wide = FrameSink::pngs(&job.frames_dir.join("wide"))?;
+    let mut tall = FrameSink::pngs(&job.frames_dir.join("tall"))?;
 
-    let office_w = job.cols as u32 * CELL_W;
-    let office_h = job.rows as u32 * CELL_H;
-    let frames = (job.secs * job.fps) as usize;
+    let Timeline { fps, secs, .. } = job.timeline;
+    let frames = job.timeline.frame_count();
     for i in 0..frames {
-        // exact math, not accumulated frame_ms — same rationale as save_renderer_gif
-        let elapsed = i as u64 * 1000 / job.fps.max(1);
-        let now = job.start + Duration::from_millis(elapsed);
+        let elapsed = job.timeline.elapsed_ms(i);
+        let now = job.timeline.now(i);
         while pending.front().is_some_and(|(at, _)| *at <= elapsed) {
             if let Some((_, ev)) = pending.pop_front() {
                 reducer.apply(&mut scene, ev, now, Transport::Jsonl);
@@ -641,58 +617,28 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         // incoming event, so without this nothing would ever settle Active ->
         // Idle once the fixture's events are drained.
         reducer.tick(&mut scene, now);
-        let mut draw_ctx = DrawCtx {
-            buf: &mut buf,
-            store: &mut store,
-            mouse_pos: None,
-            debug_walkable: false,
-            theme: job.theme,
-            theme_picker: None,
-            floor_info: None,
-            per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does — a hardcoded `None`
-            // here keeps the `⬢gw` chip off the very clip demoing the gateway,
-            // and clips are NOT pixel-gated by `gen-check`, so nothing catches it.
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: false,
-            volume_flash: None,
-            floor: pixtuoid_scene::floor::FloorMeta::ground(),
-            active_pet: None,
-            last_pet_pos: None,
-            last_mascots: Vec::new(),
-            floor_pet: None,
-            chitchat_state: &mut chitchat_state,
-            chitchat_bubbles: Vec::new(),
-            coffee: &std::collections::HashMap::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            popup_scale: 0.0,
-            help_open: false,
-            source_warning: None,
-            dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
-            connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
-            onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
-        };
-        draw_scene(&mut term, &scene, job.pack, now, &mut draw_ctx)?;
-        let office = cells_to_rgba(
-            term.backend().buffer(),
-            job.cols,
-            job.rows,
-            office_w,
-            office_h,
+        let mut draw_ctx = DrawCtx::offscreen(
+            &mut floor,
+            office.stores(),
+            job.theme,
+            &scene,
+            job.pack,
+            now,
+            pixtuoid_scene::floor::FloorMeta::ground().with_weather(job.weather),
         );
-        for (kind, dir) in [
-            (ProofLayout::Wide, &wide_dir),
-            (ProofLayout::Tall, &tall_dir),
+        draw_scene(&mut term, &mut draw_ctx)?;
+        let office = cells_to_rgba(term.backend().buffer());
+        for (kind, sink) in [
+            (ProofLayout::Wide, &mut wide),
+            (ProofLayout::Tall, &mut tall),
         ] {
-            compose_frame(&kind, &office, &script, elapsed, desk_px)
-                .save(dir.join(format!("f{:04}.png", i + 1)))?;
+            sink.push(compose_frame(&kind, &office, &script, elapsed, desk_px))?;
         }
-        if (i + 1).is_multiple_of(job.fps as usize) {
-            eprint!("\r  proof: {}/{}s", (i + 1) / job.fps as usize, job.secs);
+        if (i + 1).is_multiple_of(fps as usize) {
+            eprint!("\r  proof: {}/{secs}s", (i + 1) / fps as usize);
         }
     }
-    eprintln!("\r  proof: {frames} frames x2 layouts @ {}fps", job.fps);
+    eprintln!("\r  proof: {frames} frames x2 layouts @ {fps}fps");
     Ok(())
 }
 

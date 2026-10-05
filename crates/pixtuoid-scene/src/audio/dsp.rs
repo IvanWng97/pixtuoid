@@ -10,6 +10,7 @@ pub const SAMPLE_RATE: u32 = 44_100;
 /// Deterministic noise stream over the canonical splitmix64 finalizer
 /// (`pixtuoid_core::id`) — seedable, so synthesized assets are reproducible
 /// run-to-run.
+#[derive(Debug)]
 pub struct NoiseStream {
     seed: u64,
     counter: u64,
@@ -22,10 +23,7 @@ impl NoiseStream {
 
     fn next_u64(&mut self) -> u64 {
         self.counter = self.counter.wrapping_add(1);
-        pixtuoid_core::id::splitmix64(
-            self.seed
-                .wrapping_add(self.counter.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
-        )
+        crate::splitmix_draw(self.seed, self.counter)
     }
 
     /// Uniform in [0, 1).

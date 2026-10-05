@@ -1,8 +1,12 @@
-//! Embed the default pack: the sprite list is generated from `sprites/default/`
-//! itself, so a sprite committed there is embedded by construction, less,
-//! without the `density-art` feature, what [`density_art::strip_density_art`]
-//! drops from both the manifest and the list.
+//! Bundle the default pack: the sprite list is generated from `sprites/default/`
+//! itself, so a sprite committed there is bundled by construction, less,
+//! without the `cutaway-assets` feature, what
+//! [`density_art::bundled_without_density_art`] drops from both the manifest
+//! and the list. Every bundled file goes in without its comments
+//! ([`comments::strip_comments`]).
 
+#[path = "build_support/comments.rs"]
+mod comments;
 #[path = "build_support/density_art.rs"]
 mod density_art;
 
@@ -11,24 +15,28 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn main() {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
-    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR must be set");
+    let manifest_dir =
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
+    let out_dir = std::env::var_os("OUT_DIR").expect("OUT_DIR must be set");
     let out_dir = Path::new(&out_dir);
     let asset_dir = Path::new(&manifest_dir).join("sprites/default");
 
     // The one rerun trigger: cargo rescans a directory for any change, so an
-    // added or removed sprite regenerates the list. An edited sprite rebuilds
-    // the crate without it, since rustc tracks every `include_str!` input.
+    // added, removed or edited file there, `pack.toml` included, reruns this
+    // script, which rewrites everything it embeds.
     println!("cargo:rerun-if-changed={}", asset_dir.display());
 
+    // Core's `PACK_MANIFEST`, which a build script cannot import: a rename fails
+    // this read, and so the build.
     let pack_toml = std::fs::read_to_string(asset_dir.join("pack.toml")).expect("read pack.toml");
-    let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_DENSITY_ART").is_some() {
-        (pack_toml, BTreeSet::new())
+    let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_CUTAWAY_ASSETS").is_some() {
+        (comments::strip_comments(&pack_toml), BTreeSet::new())
     } else {
-        density_art::strip_density_art(&pack_toml)
+        density_art::bundled_without_density_art(&pack_toml)
     };
-    std::fs::write(out_dir.join("embedded_pack.toml"), pack_toml)
-        .expect("write embedded_pack.toml");
+    std::fs::write(out_dir.join("bundled_pack.toml"), pack_toml).expect("write bundled_pack.toml");
+    let stripped = out_dir.join("sprites");
+    std::fs::create_dir_all(&stripped).expect("create the stripped sprite dir");
 
     let mut sprites: Vec<_> = std::fs::read_dir(&asset_dir)
         .expect("read sprites/default")
@@ -55,15 +63,18 @@ fn main() {
         if dropped.contains(name) {
             continue;
         }
+        let src = std::fs::read_to_string(path).expect("read a sprite");
+        let bundled = stripped.join(name);
+        std::fs::write(&bundled, comments::strip_comments(&src)).expect("write a stripped sprite");
         // `{:?}` escapes the path for a Rust string literal, backslashes
         // included.
         writeln!(
             list,
             "    ({name:?}, include_str!({:?})),",
-            path.display().to_string()
+            bundled.display().to_string()
         )
         .expect("writing to a String");
     }
     list.push_str("]\n");
-    std::fs::write(out_dir.join("embedded_sprites.rs"), list).expect("write embedded_sprites.rs");
+    std::fs::write(out_dir.join("bundled_sprites.rs"), list).expect("write bundled_sprites.rs");
 }

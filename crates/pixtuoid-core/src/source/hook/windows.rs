@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
 use tokio::sync::Semaphore;
 use tracing::warn;
-use windows_sys::Win32::Foundation::{LocalFree, ERROR_ACCESS_DENIED};
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
@@ -14,7 +14,7 @@ use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 
 use crate::source::TaggedSender;
 
-use super::{handle_conn, CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
+use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS, handle_conn};
 
 /// Must cover the shim's whole stamped wire line — `STDIN_CAP` + the 256B
 /// `STAMP_HEADROOM` in pixtuoid-hook are test-pinned to this 1MiB quota — so
@@ -28,6 +28,14 @@ const IN_BUFFER_SIZE: u32 = 1 << 20;
 struct OwnerOnlySd {
     psd: PSECURITY_DESCRIPTOR,
     attrs: SECURITY_ATTRIBUTES,
+}
+
+impl std::fmt::Debug for OwnerOnlySd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnerOnlySd")
+            .field("psd", &self.psd)
+            .finish_non_exhaustive()
+    }
 }
 
 // SAFETY: the descriptor is immutable after creation (the Win32 calls only
@@ -81,6 +89,7 @@ impl Drop for OwnerOnlySd {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct Listener {
     server: NamedPipeServer,
     name: String,
@@ -106,8 +115,9 @@ unsafe fn create_hook_pipe(
     }
     opts.reject_remote_clients(true)
         .pipe_mode(PipeMode::Byte)
-        .in_buffer_size(IN_BUFFER_SIZE)
-        .create_with_security_attributes_raw(name, attributes_ptr)
+        .in_buffer_size(IN_BUFFER_SIZE);
+    // SAFETY: forwarded from this fn's contract.
+    unsafe { opts.create_with_security_attributes_raw(name, attributes_ptr) }
 }
 
 impl Listener {

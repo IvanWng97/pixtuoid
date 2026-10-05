@@ -36,12 +36,12 @@
 //!   arrive through a different non-shell ancestor, so the pid is not stable and
 //!   corroboration often withholds the arm (#896).
 
-use anyhow::{anyhow, bail, Result};
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 /// The Cursor CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "cursor";
@@ -57,11 +57,11 @@ pub const SOURCE_NAME: &str = "cursor";
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("cursor hook payload must be an object"))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("cursor payload missing hook_event_name"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "hook_event_name"))?;
     // The top-level `cwd` is EMPTY/absent in CLI hook payloads —
     // `workspace_roots[0]` is the real one. Label/cwd only, NOT the AgentId key.
     let workspace = obj
@@ -84,7 +84,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .or(workspace)
-        .ok_or_else(|| anyhow!("cursor payload has no session_id, cwd, or workspace_roots"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id|cwd|workspace_roots"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd = workspace.unwrap_or("");
 
@@ -144,10 +144,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!(
-                "unsupported cursor hook event: {}",
-                crate::source::decoder::display_safe(other)
-            )
+            Err(DecodeError::unsupported(SOURCE_NAME, other))
         }
     };
     let mut evs = decoded?;
@@ -526,10 +523,12 @@ mod tests {
     #[test]
     fn no_session_id_cwd_or_workspace_is_malformed_but_session_id_alone_is_ok() {
         assert!(decode_cursor_hook_payload(&json!({"hook_event_name": "stop"})).is_err());
-        assert!(decode_cursor_hook_payload(
-            &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
-        )
-        .is_err());
+        assert!(
+            decode_cursor_hook_payload(
+                &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
+            )
+            .is_err()
+        );
         assert!(
             decode_cursor_hook_payload(&json!({"hook_event_name": "stop", "session_id": "s"}))
                 .is_ok()

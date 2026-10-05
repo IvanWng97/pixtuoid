@@ -1,7 +1,7 @@
 //! Pathfinding façade — `Router` trait + `AStarRouter` impl.
 //!
 //! `AStarRouter` runs A* on a coarsened cell grid whose primitives
-//! (`cell_walkable`/`snap`/`NEIGHBORS_8`/`CELL_SIZE`) are the SHARED
+//! (`cell_walkable`/`snap`/`CoarseGrid`/`CELL_SIZE`) are the SHARED
 //! `layout::coarse` ones `layout::reach` also rides, so router reachability
 //! can't drift from `ReachSet`. Routes are memoized per (from, to) and
 //! auto-invalidated when the overlay signature changes, so per-frame agent
@@ -12,7 +12,9 @@ use std::collections::{BinaryHeap, HashMap};
 
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use crate::layout::{cell_walkable, snap, Bounds, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
+use crate::layout::{
+    Bounds, COARSE_CELL_SIZE, CoarseGrid, Point, cell_anchor, cell_center, cell_walkable, snap,
+};
 
 /// Cell size in pixels — the coarse routing-grid edge, re-exported from the
 /// SHARED `layout::coarse` so router coarsening can't drift from reachability
@@ -22,7 +24,7 @@ pub const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 /// Abstract pathfinder — routes from `from` to `to` over the supplied mask +
 /// overlay, returning a polyline (first = `from`, last = `to`, intermediate =
 /// corners).
-pub trait Router {
+pub trait Router: std::fmt::Debug {
     /// Compute or look up the route.
     fn route(
         &mut self,
@@ -49,7 +51,7 @@ pub trait Router {
 /// mints a fresh destination every cycle and snap-back/exit legs route from live
 /// interpolated origins — so an always-on office would accumulate keys forever.
 /// Overflowing clears the whole map, which is safe: cornered in-flight legs are
-/// frozen on `MotionState.walk_path` and never re-consult the router, and every
+/// frozen on `WalkState.walk_path` and never re-consult the router, and every
 /// other evicted route just re-routes under the CURRENT overlay.
 const PATH_CACHE_CAP: usize = 512;
 
@@ -170,9 +172,10 @@ impl PartialOrd for Node {
     }
 }
 
-/// Octile-distance step costs (integer, so the heuristic stays admissible) — the
-/// classic 14/10 ≈ √2 : 1 ratio. Shared with `pose::octile_distance` so the
-/// heuristic and the path metric can't drift.
+/// Octile-distance step costs, integer so A* needs no floats — the classic
+/// 14/10 ≈ √2 : 1 ratio. Shared with `pose::octile_distance` so the heuristic
+/// and the path metric can't drift; [`heuristic`] ignores the preferred-zone
+/// discount, so a zone-biased route is not guaranteed shortest.
 pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
 pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
 
@@ -199,13 +202,6 @@ fn cell_in_zone(zone: Option<Bounds>, cx: u16, cy: u16) -> bool {
 
 fn cell_of(p: Point) -> (u16, u16) {
     (p.x / CELL_SIZE, p.y / CELL_SIZE)
-}
-
-fn cell_center(cx: u16, cy: u16) -> Point {
-    Point {
-        x: cx * CELL_SIZE + CELL_SIZE / 2,
-        y: cy * CELL_SIZE + CELL_SIZE / 2,
-    }
 }
 
 /// Coarse-grid dimensions, or `None` when either axis is 0 — a degenerate grid
@@ -251,9 +247,10 @@ pub fn find_path(
     let goal = snap(mask, overlay, cell_of(to), cell_w, cell_h, MAX_SNAP_RADIUS)?;
 
     if start == goal {
-        return Some(vec![from, to]);
+        return Some(reconstruct(mask, &HashMap::new(), start, from, to));
     }
 
+    let mut coarse = CoarseGrid::new(mask, overlay);
     let mut open: BinaryHeap<Node> = BinaryHeap::new();
     let mut came_from: HashMap<(u16, u16), (u16, u16)> = HashMap::new();
     let mut g_score: HashMap<(u16, u16), u32> = HashMap::new();
@@ -266,25 +263,13 @@ pub fn find_path(
 
     while let Some(current) = open.pop() {
         if current.cell == goal {
-            return Some(reconstruct(&came_from, goal, from, to));
+            return Some(reconstruct(mask, &came_from, goal, from, to));
         }
         if current.g > *g_score.get(&current.cell).unwrap_or(&u32::MAX) {
             continue;
         }
-        for (dx, dy) in NEIGHBORS_8.iter() {
-            let nx = current.cell.0 as i32 + dx;
-            let ny = current.cell.1 as i32 + dy;
-            if nx < 0 || ny < 0 {
-                continue;
-            }
-            let (nx, ny) = (nx as u16, ny as u16);
-            if nx >= cell_w || ny >= cell_h {
-                continue;
-            }
-            if !cell_walkable(mask, overlay, nx, ny) {
-                continue;
-            }
-            let base_step = if dx.abs() + dy.abs() == 2 {
+        for ((nx, ny), diagonal) in coarse.neighbors(current.cell) {
+            let base_step = if diagonal {
                 OCTILE_DIAGONAL_COST
             } else {
                 OCTILE_STRAIGHT_COST
@@ -331,18 +316,11 @@ pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
     let (cx, cy) = snap(mask, &empty, cell_of(p), cell_w, cell_h, MAX_SNAP_RADIUS)?;
-    let centre = cell_center(cx, cy);
-    if mask.is_walkable(centre.x, centre.y) {
-        return Some(centre);
-    }
-    // A cell passes at `COARSE_CELL_WALKABLE_MIN` open pixels, so its centre can be a blocked one.
-    let (x0, y0) = (cx * COARSE_CELL_SIZE, cy * COARSE_CELL_SIZE);
-    (y0..y0 + COARSE_CELL_SIZE)
-        .flat_map(|y| (x0..x0 + COARSE_CELL_SIZE).map(move |x| Point { x, y }))
-        .find(|c| mask.is_walkable(c.x, c.y))
+    Some(cell_anchor(mask, cx, cy))
 }
 
 fn reconstruct(
+    mask: &WalkableMask,
     came_from: &HashMap<(u16, u16), (u16, u16)>,
     end: (u16, u16),
     from: Point,
@@ -355,17 +333,66 @@ fn reconstruct(
         cur = prev;
     }
     cells.reverse();
-    let mut pts: Vec<Point> = cells.iter().map(|&(cx, cy)| cell_center(cx, cy)).collect();
-    if pts.is_empty() {
-        return vec![from, to];
+    let anchors: Vec<Point> = cells
+        .iter()
+        .map(|&(cx, cy)| cell_anchor(mask, cx, cy))
+        .collect();
+    // A raw endpoint stands in for its own cell's anchor only where the leg it
+    // shortens stays on open floor: its cell can be up to half wall, and the
+    // straight leg past it then crosses the wall.
+    let mut pts = vec![from];
+    match anchors[..] {
+        [only] => {
+            if !leg_clear(mask, from, to) {
+                pts.push(only);
+            }
+        }
+        [first, ref inner @ .., last] => {
+            if !leg_clear(mask, from, inner.first().copied().unwrap_or(last)) {
+                pts.push(first);
+            }
+            pts.extend_from_slice(inner);
+            if pts.last().is_some_and(|&p| !leg_clear(mask, p, to)) {
+                pts.push(last);
+            }
+        }
+        [] => {}
     }
-    pts[0] = from;
-    let last = pts.len() - 1;
-    pts[last] = to;
-    simplify_polyline(pts)
+    pts.push(to);
+    let mut turned = Vec::with_capacity(pts.len() * 2);
+    for leg in pts.windows(2) {
+        turned.push(leg[0]);
+        turned.extend(elbow(mask, leg[0], leg[1]));
+    }
+    turned.push(to);
+    simplify_polyline(mask, turned)
 }
 
-fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
+/// The corner an axis-aligned detour from `a` to `b` turns on, when the
+/// straight leg crosses blocked floor and one of the two L-shaped ones doesn't.
+/// Two adjacent routing cells are walkable at half open, so the straight leg
+/// between their anchors can clip the corner of a wall standing in either.
+fn elbow(mask: &WalkableMask, a: Point, b: Point) -> Option<Point> {
+    if leg_clear(mask, a, b) {
+        return None;
+    }
+    [Point { x: b.x, y: a.y }, Point { x: a.x, y: b.y }]
+        .into_iter()
+        .find(|&c| mask.is_walkable(c.x, c.y) && leg_clear(mask, a, c) && leg_clear(mask, c, b))
+}
+
+/// Does every pixel a walker passes strictly between `a` and `b` stand on the
+/// static `mask`? The ends are exempt: a raw endpoint may sit in a routing pad.
+fn leg_clear(mask: &WalkableMask, a: Point, b: Point) -> bool {
+    crate::physics::leg_pixels(a, b)
+        .filter(|&p| p != a && p != b)
+        .all(|p| mask.is_walkable(p.x, p.y))
+}
+
+/// Drop each corner collinear with its neighbours, unless the merged leg would
+/// cross blocked floor its two halves step around: a walk truncates toward its
+/// start, so one long leg lands on different pixels than its halves.
+fn simplify_polyline(mask: &WalkableMask, pts: Vec<Point>) -> Vec<Point> {
     if pts.len() < 3 {
         return pts;
     }
@@ -379,7 +406,9 @@ fn simplify_polyline(pts: Vec<Point>) -> Vec<Point> {
         let dy_in = here.y as i32 - prev.y as i32;
         let dx_out = next.x as i32 - here.x as i32;
         let dy_out = next.y as i32 - here.y as i32;
-        if dx_in * dy_out != dy_in * dx_out {
+        let collinear = dx_in * dy_out == dy_in * dx_out;
+        let crossed_clean = leg_clear(mask, prev, here) && leg_clear(mask, here, next);
+        if !collinear || (crossed_clean && !leg_clear(mask, prev, next)) {
             out.push(here);
         }
     }

@@ -101,95 +101,81 @@ const FEED_ROTATE_MS = 6000;
 ---
 
 <div class="statusline" id="statusline">
-  {
-    doc ? (
-      <span class="sl__path">~ pixtuoid docs · /{doc}</span>
-    ) : (
-      <>
-        <nav class="sl__nav" aria-label="Floors">
-          <button
-            class="sl__floor"
-            data-floor-toggle
-            aria-expanded="false"
-            aria-controls="sl-floors"
-            aria-label="Jump to a floor"
-          >
-            <span class="sl__digit" data-lift-digit>
-              {FLOORS[0].fl}
-            </span>
-            <span class="sl__name" data-lift-name>
-              {floorName(FLOORS[0])}
-            </span>
-            <span class="sl__caret" aria-hidden="true">
-              ▴
-            </span>
-          </button>
-          <div id="sl-floors" class="sl__floors" hidden>
-            {FLOORS.map((f) => (
-              <button
-                class="sl__floorbtn"
-                data-floor-btn={f.fl}
-                data-target={f.id}
-                data-name={floorName(f)}
-                aria-current={f.fl === FLOORS[0].fl ? 'location' : undefined}
-              >
-                {f.fl} <span class="sl__floorname">{floorName(f)}</span>
-              </button>
-            ))}
-            <div class="sl__keysrow">
-              <span class="sl__keyslabel">keys 1–6</span>
-              <button
-                class="sl__keystoggle"
-                type="button"
-                data-keys-toggle
-                role="switch"
-                aria-checked="true"
-                aria-label="Keyboard shortcuts"
-              >
-                <span data-keys-state>on</span>
-              </button>
-            </div>
-          </div>
-        </nav>
-        <div class="sl__feed" aria-hidden="true">
-          {items.map((it, i) => (
-            <span class:list={['sl__item', { 'is-on': i === 0 }]}>
-              <span class:list={['sl__dot', it.state]} />
-              <span class="sl__text">
-                <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>
-                  {it.who}
-                </b>{' '}
-                · {it.what}
-              </span>
-            </span>
-          ))}
-        </div>
-        <div class="sl__env" aria-hidden="true">
-          <span data-sl-lights>lights ··%</span>
-          <span class="sl__sep">·</span>
-          <span data-sl-clock />
-          <span class="sl__sep">·</span>
-          <span class="sl__onair" data-sl-onair>
-            ○ STATIC
-          </span>
-        </div>
-      </>
-    )
-  }
-  <div class="sl__install hw-panel" id="sl-install">
-    {
-      ghStars && (
-        <a
-          class="sl__stars"
-          href={REPO}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`${ghStars} GitHub stars`}
+  {doc ? (
+    <span class="sl__path">~ pixtuoid docs · /{doc}</span>
+  ) : (
+    <>
+      <nav class="sl__nav" aria-label="Floors">
+        <button
+          class="sl__floor"
+          data-floor-toggle
+          aria-expanded="false"
+          aria-controls="sl-floors"
+          aria-label="Jump to a floor"
         >
-          ★ {ghStars}
-        </a>
-      )
-    }
+          <span class="sl__digit" data-lift-digit>
+            {FLOORS[0].fl}
+          </span>
+          <span class="sl__name" data-lift-name>
+            {floorName(FLOORS[0])}
+          </span>
+          <span class="sl__caret" aria-hidden="true"> ▴ </span>
+        </button>
+        <div id="sl-floors" class="sl__floors" hidden>
+          {FLOORS.map((f) => <button
+            class="sl__floorbtn"
+            data-floor-btn={f.fl}
+            data-target={f.id}
+            data-name={floorName(f)}
+            aria-current={f.fl === FLOORS[0].fl ? 'location' : undefined}
+          >
+            {f.fl} <span class="sl__floorname">{floorName(f)}</span>
+          </button>)}
+          <div class="sl__keysrow">
+            <span class="sl__keyslabel">keys 1–6</span>
+            <button
+              class="sl__keystoggle"
+              type="button"
+              data-keys-toggle
+              role="switch"
+              aria-checked="true"
+              aria-label="Keyboard shortcuts"
+            >
+              <span data-keys-state>on</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+      <div class="sl__feed" aria-hidden="true">
+        {items.map((it, i) => <span class:list={['sl__item', { 'is-on': i === 0 }]}>
+          <span class:list={['sl__dot', it.state]} />
+          <span class="sl__text">
+            <b style={badgeColor(it.who) ? `--who:${badgeColor(it.who)}` : undefined}>
+              {it.who}
+            </b
+            >{' '} · {it.what}
+          </span>
+        </span>)}
+      </div>
+      <div class="sl__env" aria-hidden="true">
+        <span data-sl-lights>lights ··%</span>
+        <span class="sl__sep">·</span>
+        <span data-sl-clock />
+        <span class="sl__sep">·</span>
+        <span class="sl__onair" data-sl-onair> ○ STATIC </span>
+      </div>
+    </>
+  )}
+  <div class="sl__install hw-panel" id="sl-install">
+    {ghStars && <a
+      class="sl__stars"
+      href={REPO}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`${ghStars} GitHub stars`}
+    >
+      ★ {ghStars}
+    </a>}
     <a
       class="sl__copy"
       href={doc ? `${asset('')}#install` : '#install'}
@@ -205,11 +191,7 @@ const FEED_ROTATE_MS = 6000;
   {
     /* deliberately AFTER #sl-install: bundling this into the index fragment
       above silently swaps the two rightmost items */
-    !doc && (
-      <span class="sl__keys" aria-hidden="true">
-        keys 1–6
-      </span>
-    )
+    !doc && <span class="sl__keys" aria-hidden="true"> keys 1–6 </span>
   }
 </div>
 

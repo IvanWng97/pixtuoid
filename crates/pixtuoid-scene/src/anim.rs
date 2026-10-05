@@ -2,7 +2,7 @@
 //! layer shares.
 //!
 //! Wall-clock `SystemTime`, not `Instant`: matches the rest of the animation
-//! state (FloorTransition, LightingState, PoseHistory) — serializable, no
+//! state (FloorTransition, VacancyDim, PoseHistory) — serializable, no
 //! out-of-process consumer today.
 
 use std::time::{Duration, SystemTime};
@@ -13,6 +13,10 @@ pub enum Easing {
     EaseOutCubic,
     EaseInOutCubic,
     EaseInQuad,
+    /// GLSL's `smoothstep` Hermite, `t²(3 − 2t)`
+    /// (<https://registry.khronos.org/OpenGL-Refpages/gl4/html/smoothstep.xhtml>):
+    /// flat at both ends, so what it moves leaves and lands without a jolt.
+    Smoothstep,
 }
 
 impl Easing {
@@ -30,6 +34,7 @@ impl Easing {
                 }
             }
             Easing::EaseInQuad => t * t,
+            Easing::Smoothstep => t * t * (3.0 - 2.0 * t),
         }
     }
 }
@@ -51,6 +56,182 @@ pub(crate) const HOUR_MS: u64 = 3_600_000;
 /// never imports the renderer for it.
 pub(crate) fn epoch_ms(now: SystemTime) -> u64 {
     elapsed_ms(now, SystemTime::UNIX_EPOCH)
+}
+
+/// How much of the office's ambient life moves: the loops that only make it
+/// look alive — a flicker, a twinkle, an idle wander — never what an agent is
+/// doing. Each tier steps those loops on its own clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Motion {
+    /// Every loop, stepped each [`FULL_TICK_MS`].
+    #[default]
+    Full,
+    /// Every loop at a quarter of Full's pace: each [`CALM_TICK_MS`] it steps
+    /// one Full tick, so a loop plays Full's very sequence, slower, and none
+    /// aliases on the slower repaint.
+    Calm,
+    /// No loop moves and no lightning flashes: each holds its first frame.
+    Still,
+}
+
+/// How often a [`Motion::Full`] loop steps.
+pub const FULL_TICK_MS: u64 = 125;
+/// How often a [`Motion::Calm`] loop steps.
+pub const CALM_TICK_MS: u64 = 500;
+/// The rate the TUI and the floating window repaint an office with agents in
+/// it, on every tier: the sampling rate the walks' strides are sized for
+/// (`a_walking_person_never_slides`).
+pub const PAINT_FPS: u32 = 30;
+
+/// The least any phase of a flash — a strike's level, a starved neon's catch,
+/// the dark between — lasts in loop time: the project's own floor, beside
+/// [WCAG 2.3.1]'s three flashes in any one second.
+///
+/// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
+pub const PHOTOSENSITIVE_PHASE_MIN_MS: u64 = 100;
+
+/// The most flashes [WCAG 2.3.1] allows in any one second.
+///
+/// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
+#[cfg(test)]
+pub(crate) const PHOTOSENSITIVE_FLASHES_PER_SECOND: usize = 3;
+
+/// The least change of a level, as a share of full, that counts toward a
+/// flash: [WCAG]'s general flash threshold.
+///
+/// [WCAG]: https://www.w3.org/TR/WCAG22/#dfn-general-flash-and-red-flash-thresholds
+#[cfg(test)]
+const FLASH_MIN_CHANGE: f32 = 0.1;
+
+/// The most flashes in any one second of `samples`, each `(wall ms, level)`
+/// in time order with the level a share of full: a flash is a pair of
+/// opposing changes, each at least [`FLASH_MIN_CHANGE`], and a run of changes
+/// one way is one change.
+#[cfg(test)]
+pub(crate) fn most_flashes_in_a_second(samples: impl IntoIterator<Item = (u64, f32)>) -> usize {
+    const SECOND_MS: u64 = 1000;
+    let mut samples = samples.into_iter();
+    let Some((_, mut settled)) = samples.next() else {
+        return 0;
+    };
+    let mut turns: Vec<(u64, bool)> = Vec::new();
+    for (ms, level) in samples {
+        if (level - settled).abs() < FLASH_MIN_CHANGE {
+            continue;
+        }
+        let up = level > settled;
+        settled = level;
+        if turns.last().is_none_or(|&(_, was_up)| was_up != up) {
+            turns.push((ms, up));
+        }
+    }
+    let mut first = 0;
+    let mut most = 0;
+    for last in 0..turns.len() {
+        while turns[last].0 - turns[first].0 >= SECOND_MS {
+            first += 1;
+        }
+        most = most.max((last - first + 1).div_ceil(2));
+    }
+    most
+}
+
+impl Motion {
+    /// Every tier.
+    pub(crate) const ALL: [Motion; 3] = [Motion::Full, Motion::Calm, Motion::Still];
+
+    /// Wall-clock ms per ms of loop time; `None` at rest.
+    pub(crate) const fn pace(self) -> Option<u64> {
+        match self {
+            Self::Full => Some(1),
+            Self::Calm => Some(CALM_TICK_MS / FULL_TICK_MS),
+            Self::Still => None,
+        }
+    }
+
+    /// The ambient clock at `now`, a function of `now` alone so a frame is
+    /// too: Full's is the instant floored to its tick, Calm's that many
+    /// repaints of Full ticks.
+    pub(crate) fn beat(self, now: SystemTime) -> Beat {
+        match self.pace() {
+            Some(pace) => Beat::looping(loop_time(now, pace), pace),
+            None => Beat {
+                loop_ms: None,
+                pace: 1,
+            },
+        }
+    }
+
+    /// `now` and its [`beat`](Self::beat).
+    pub(crate) fn timing(self, now: SystemTime) -> Timing {
+        Timing {
+            now,
+            beat: self.beat(now),
+        }
+    }
+}
+
+/// Loop time at `wall` for a tier `pace` wall ms to the loop ms: whole Full
+/// ticks, one each `pace` of them.
+fn loop_time(wall: SystemTime, pace: u64) -> u64 {
+    epoch_ms(wall) / (FULL_TICK_MS * pace) * FULL_TICK_MS
+}
+
+/// An instant, and the [`Beat`] its ambient loops read at it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Timing {
+    pub(crate) now: SystemTime,
+    pub(crate) beat: Beat,
+}
+
+/// The clock every ambient loop reads instead of the wall clock, so two
+/// instants on one beat paint the same frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Beat {
+    /// Loop time, in ms; `None` at rest.
+    loop_ms: Option<u64>,
+    /// Wall-clock ms per ms of loop time.
+    pace: u64,
+}
+
+impl Beat {
+    fn looping(loop_ms: u64, pace: u64) -> Self {
+        Self {
+            loop_ms: Some(loop_ms),
+            pace,
+        }
+    }
+
+    /// Milliseconds of loop time on the beat; 0 at rest, where every loop
+    /// holds its first frame.
+    pub(crate) fn ms(self) -> u64 {
+        self.loop_ms.unwrap_or(0)
+    }
+
+    /// Whether nothing moves: a source with no frame to hold, a flash, shows
+    /// none.
+    pub(crate) fn is_rest(self) -> bool {
+        self.loop_ms.is_none()
+    }
+
+    /// The loop time this beat's tier reads at `wall`: what [`ms`](Self::ms)
+    /// is when `wall` is now, so an ambient walk times its start and its
+    /// present on one clock.
+    pub(crate) fn loop_at(self, wall: SystemTime) -> u64 {
+        loop_time(wall, self.pace)
+    }
+
+    /// The wall-clock ms loop time `loop_ms` plays at, where what keeps real
+    /// time — the weather — is read.
+    pub(crate) fn wall_ms(self, loop_ms: u64) -> u64 {
+        loop_ms.saturating_mul(self.pace)
+    }
+
+    /// A beat at exactly `ms`, off any tier's tick.
+    #[cfg(test)]
+    pub(crate) fn at_ms(ms: u64) -> Self {
+        Self::looping(ms, 1)
+    }
 }
 
 /// Compute the eased progress of an animation `[0.0, 1.0]` given its
@@ -75,8 +256,94 @@ mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
 
+    /// `flashes` square flashes, one each `period_ms`: up at its start, down
+    /// halfway through.
+    fn square(flashes: u64, period_ms: u64) -> Vec<(u64, f32)> {
+        std::iter::once((0, 0.0))
+            .chain((0..flashes).flat_map(|k| {
+                let start = 1 + k * period_ms;
+                [(start, 1.0), (start + period_ms / 2, 0.0)]
+            }))
+            .collect()
+    }
+
+    /// WCAG's general flash: a rise and a fall of 10% of full or more.
+    #[test]
+    fn a_flash_is_a_rise_and_a_fall_of_a_tenth_or_more() {
+        let pulse = |level: f32| most_flashes_in_a_second([(0, 0.0), (100, level), (200, 0.0)]);
+        assert_eq!(pulse(0.10), 1);
+        assert_eq!(pulse(0.09), 0);
+    }
+
+    /// Four flashes spread so no second holds more than three pass; the same
+    /// four inside a second do not.
+    #[test]
+    fn flashes_are_counted_in_any_one_second() {
+        assert_eq!(most_flashes_in_a_second(square(4, 350)), 3);
+        assert_eq!(most_flashes_in_a_second(square(4, 200)), 4);
+    }
+
+    /// A slow ramp, each step under the threshold, is one change once it has
+    /// moved past it, so a ramp up and back down is one flash.
+    #[test]
+    fn a_slow_ramp_is_one_change() {
+        const STEPS: u64 = 10;
+        let step = 2.0 * FLASH_MIN_CHANGE / STEPS as f32;
+        let up = (0..=STEPS).map(|i| (i * 20, step * i as f32));
+        let down = (1..=STEPS).map(|i| ((STEPS + i) * 20, step * (STEPS - i) as f32));
+        assert_eq!(most_flashes_in_a_second(up.chain(down)), 1);
+    }
+
+    /// Changes one way in a row are one change: a rise in two steps and a
+    /// fall in two is one flash.
+    #[test]
+    fn a_run_of_changes_one_way_is_one_change() {
+        let stepped = [(0, 0.0), (20, 0.5), (40, 1.0), (60, 0.5), (80, 0.0)];
+        assert_eq!(most_flashes_in_a_second(stepped), 1);
+    }
+
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
+    }
+
+    fn at(ms: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn each_moving_tier_steps_its_loops_once_a_tick() {
+        const T0: u64 = 1_700_000_000_000;
+        for (motion, tick) in [(Motion::Full, FULL_TICK_MS), (Motion::Calm, CALM_TICK_MS)] {
+            let beat = |ms| motion.beat(at(T0 + ms));
+            assert_eq!(beat(0), beat(tick - 1), "{motion:?} moved inside a tick");
+            assert_ne!(beat(tick - 1), beat(tick), "{motion:?} held past its tick");
+        }
+    }
+
+    /// Calm's repaint advances its loops by exactly one Full tick, so a loop
+    /// whose frames hold whole Full ticks visits each in turn: a two-frame loop
+    /// of any whole-tick period flips within that many repaints, where a plain
+    /// 500 ms sample of a 250 ms loop would land on one frame forever.
+    #[test]
+    fn calm_plays_every_whole_tick_loop_without_aliasing() {
+        const T0: u64 = 1_700_000_000_000;
+        for ticks in 1..=10 {
+            let period = ticks * FULL_TICK_MS;
+            let frames: std::collections::HashSet<u64> = (0..=ticks)
+                .map(|repaint| Motion::Calm.beat(at(T0 + repaint * CALM_TICK_MS)).ms() / period % 2)
+                .collect();
+            assert_eq!(frames.len(), 2, "a {period} ms two-frame loop aliased");
+        }
+        let step = |n: u64| Motion::Calm.beat(at(T0 + n * CALM_TICK_MS)).ms();
+        assert_eq!(step(1) - step(0), FULL_TICK_MS, "one Full tick a repaint");
+    }
+
+    #[test]
+    fn still_rests_at_every_instant() {
+        let beat = |ms| Motion::Still.beat(at(ms));
+        assert!(beat(0).is_rest());
+        assert_eq!(beat(1_700_000_000_000), beat(1_700_003_600_000));
+        assert_eq!(beat(0).ms(), 0, "a loop at rest holds its first frame");
     }
 
     #[test]
@@ -108,12 +375,21 @@ mod tests {
     }
 
     #[test]
+    fn smoothstep_is_the_hermite_cubic() {
+        assert_eq!(Easing::Smoothstep.apply(0.0), 0.0);
+        assert_eq!(Easing::Smoothstep.apply(1.0), 1.0);
+        // 3t² − 2t³, exact in f32; a linear curve gives 0.25.
+        assert_eq!(Easing::Smoothstep.apply(0.25), 0.15625);
+    }
+
+    #[test]
     fn all_curves_are_monotone_non_decreasing() {
         for curve in [
             Easing::Linear,
             Easing::EaseOutCubic,
             Easing::EaseInOutCubic,
             Easing::EaseInQuad,
+            Easing::Smoothstep,
         ] {
             let mut prev = -1.0_f32;
             for i in 0..=100 {

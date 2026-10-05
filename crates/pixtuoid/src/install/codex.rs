@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use toml::value::Table;
 
-use crate::install::target::MergeOutcome;
 use crate::install::SENTINEL_KEY;
+use crate::install::target::MergeOutcome;
 
 pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionStart",
@@ -62,7 +62,7 @@ fn prune_managed_handlers(group: &mut toml::Value) {
 /// Install-schema verification: every `CODEX_EVENTS` group still holds a
 /// sentinel-tagged handler, and the shim command is read back for the on-disk check.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");
     };
@@ -337,11 +337,13 @@ command = "/hand/written/pixtuoid-hook"
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
-        assert!(hook_command(
-            std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"),
-            false
-        )
-        .is_err());
+        assert!(
+            hook_command(
+                std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"),
+                false
+            )
+            .is_err()
+        );
         let err = hook_command(
             std::path::Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"),
             false,
@@ -431,41 +433,36 @@ command = "/hand/written/pixtuoid-hook"
 
     #[test]
     fn default_config_path_honors_codex_home_env() {
-        // std::env is process-global; serialize against other env-mutating tests.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("CODEX_HOME");
         let fallback_suffix = PathBuf::from(".codex").join("config.toml");
 
-        std::env::remove_var("CODEX_HOME");
-        assert!(
-            default_config_path().unwrap().ends_with(&fallback_suffix),
-            "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
-            default_config_path().unwrap()
-        );
+        temp_env::with_var_unset("CODEX_HOME", || {
+            assert!(
+                default_config_path().unwrap().ends_with(&fallback_suffix),
+                "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
+                default_config_path().unwrap()
+            );
+        });
 
         let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
         std::fs::create_dir_all(&custom).unwrap();
-        std::env::set_var("CODEX_HOME", &custom);
-        assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+        temp_env::with_var("CODEX_HOME", Some(&custom), || {
+            assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+        });
 
         // A non-existent dir falls back, matching upstream codex's own gate.
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
         let _ = std::fs::remove_dir_all(&missing);
-        std::env::set_var("CODEX_HOME", &missing);
-        assert!(
-            default_config_path().unwrap().ends_with(&fallback_suffix),
-            "non-existent CODEX_HOME must fall back to .codex/config.toml"
-        );
+        temp_env::with_var("CODEX_HOME", Some(&missing), || {
+            assert!(
+                default_config_path().unwrap().ends_with(&fallback_suffix),
+                "non-existent CODEX_HOME must fall back to .codex/config.toml"
+            );
+        });
 
-        std::env::set_var("CODEX_HOME", "");
-        assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
+        temp_env::with_var("CODEX_HOME", Some(""), || {
+            assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
+        });
 
-        match saved {
-            Some(v) => std::env::set_var("CODEX_HOME", v),
-            None => std::env::remove_var("CODEX_HOME"),
-        }
         let _ = std::fs::remove_dir_all(&custom);
     }
 

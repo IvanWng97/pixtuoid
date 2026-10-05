@@ -81,10 +81,10 @@ fn diff_cells(
     baseline: &SceneState,
     now: SystemTime,
 ) -> std::collections::BTreeSet<(u16, u16)> {
-    r.render(baseline, &pack(), now).unwrap();
-    let base = r.buf().clone();
-    r.render(scene, &pack(), now).unwrap();
-    let buf = r.buf();
+    r.render(baseline, pack(), now).unwrap();
+    let base = r.buf().expect("a frame").clone();
+    r.render(scene, pack(), now).unwrap();
+    let buf = r.buf().expect("a frame");
     (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))
@@ -148,8 +148,8 @@ fn two_gateways_render_two_independent_mascots() {
 
 #[test]
 fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
-    // The PAINTER owns this decision (`MascotFrame.instance`) and the only way to
-    // observe it is the hover text.
+    // `GatewayCard::of` owns this decision (`GatewayCard.instance`) and the only
+    // way to observe it is the hover text.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let gateway_tooltips = |ports: &[&str]| -> Vec<String> {
         let scene = gateway_scene_at(ports, entered, seen);
@@ -157,12 +157,12 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         let cells: Vec<_> = mascot_cells(&mut r, &scene, t0()).into_iter().collect();
         assert!(!cells.is_empty(), "the gateways must paint lobsters");
         let mut out = Vec::new();
-        // A stride, not every cell: the hitbox is the painted lobster frame
-        // (`MascotFrame.w`), so it still lands inside BOTH mascots without
-        // paying a full render per pixel.
+        // A stride, not every cell: the hover is the painted lobster frame, so
+        // it still lands inside BOTH mascots without paying a full render per
+        // pixel.
         for &(x, y) in cells.iter().step_by(5) {
             r.set_mouse_pos(Some((x, y / 2)));
-            r.render(&scene, &pack(), t0()).unwrap();
+            r.render(&scene, pack(), t0()).unwrap();
             let text = frame_text(r.frame_buffer());
             if text.contains("gateway") {
                 out.push(text);
@@ -210,7 +210,7 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
     assert!(!cells.is_empty(), "openclaw still paints its lobster");
     for &(x, y) in cells.iter().step_by(5) {
         r.set_mouse_pos(Some((x, y / 2)));
-        r.render(&mixed, &pack(), t0()).unwrap();
+        r.render(&mixed, pack(), t0()).unwrap();
         let text = frame_text(r.frame_buffer());
         if text.contains("gateway") {
             assert!(
@@ -430,7 +430,7 @@ fn gateway_mascot_tooltip_on_hover() {
     );
     // vec![] = no pet, so the pet hover arm is skipped and the mascot arm runs.
     let mut r = build(160, 80, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     assert!(
         !frame_text(r.frame_buffer()).contains("gateway"),
@@ -440,10 +440,10 @@ fn gateway_mascot_tooltip_on_hover() {
     let (x0, y0, x1, y1) = mascot_bbox(&mut r, &scene, t0()).expect("lobster on screen");
     let cx = (x0 + x1) / 2;
     let cy_px = (y0 + y1) / 2;
-    // The hitbox is the painted frame (`MascotFrame.w`), which tolerates the
-    // approximate center; half-block ⇒ /2.
+    // The hover is the painted frame, which tolerates the approximate
+    // center; half-block ⇒ /2.
     r.set_mouse_pos(Some((cx, cy_px / 2)));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     // The literal "gateway" is exclusive to the mascot arm — pet/coffee/furniture
     // tooltips never say it — so it distinguishes the branch from the fallthroughs.

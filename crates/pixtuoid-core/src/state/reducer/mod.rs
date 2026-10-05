@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::AgentId;
 use crate::source::decoder::label_prefix_for;
 use crate::source::{AgentEvent, Transport};
-use crate::state::correlation::{elapsed_at_least, elapsed_past, Correlation, ToolEventKind};
-use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState, ToolKind};
-use crate::AgentId;
+use crate::state::correlation::{Correlation, ToolEventKind, elapsed_at_least, elapsed_past};
+use crate::state::{ActivityState, AgentSlot, SceneState, ToolKind, fsm, scope};
 
 #[doc(hidden)]
 pub use crate::state::correlation::{
@@ -19,7 +19,7 @@ pub use crate::state::correlation::{
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
 /// Defers a drained parent's b1 cascade (#151): one FSEvents coalescing hop,
-/// deliberately NOT the 60s `scan_root` poll backstop.
+/// deliberately NOT the `DEFAULT_POLL_INTERVAL` backstop.
 #[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 
@@ -40,8 +40,8 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// For `SourceCaps::short_idle_reap()`. Codex motivates it: its `SessionEnd`
 /// hook covers only graceful teardown, its payloads carry no PID, and
-/// `ShutdownComplete` never reaches the rollout — no other reaper exists. CC has
-/// a clean-exit hook, so it keeps the 30-min one; don't give it this.
+/// `ShutdownComplete` never reaches the rollout, and its open-fd probe (`source::fd_probe`) returns nothing
+/// off macOS/Linux. CC has a clean-exit hook, so it keeps [`STALE_IDLE_TIMEOUT`].
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -54,7 +54,7 @@ fn stale_threshold(slot: &AgentSlot) -> Duration {
 
 /// Policy half of [`stale_threshold`], split from the registry lookup so caps
 /// combinations no registered source has YET are unit-testable with a synthetic
-/// [`SourceCaps`].
+/// [`SourceCaps`](crate::source::registry::SourceCaps).
 fn stale_threshold_with_caps(
     slot: &AgentSlot,
     caps: Option<crate::source::registry::SourceCaps>,
@@ -83,7 +83,7 @@ fn stale_threshold_with_caps(
 }
 
 /// Exactly the registry prefix (a `LabelDeriver`'s empty-cwd fallback) is a
-/// [`LabelProvenance::PrefixFallback`] the back-fill may still upgrade;
+/// [`LabelProvenance::PrefixFallback`](crate::state::LabelProvenance::PrefixFallback) the back-fill may still upgrade;
 /// anything else is a real display name. Judged at the mint, not at back-fill
 /// time — a bare-prefix Rename always lands on a slot whose source is already
 /// set, so the slot's prefix is the right yardstick.
@@ -126,17 +126,16 @@ fn backfill_identity<'a>(slot: &mut AgentSlot, ctx: IdentityCtx<'a>) -> Option<&
     if slot.session_id.is_empty() && !ctx.session_id.is_empty() {
         slot.session_id = Arc::<str>::from(ctx.session_id);
     }
-    if slot.unknown_cwd || slot.cwd.as_os_str().is_empty() {
-        if let Some(base) = ctx
+    if (slot.unknown_cwd || slot.cwd.as_os_str().is_empty())
+        && let Some(base) = ctx
             .cwd
             .file_name()
             .and_then(|n| n.to_str())
             .filter(|s| !s.is_empty())
-        {
-            slot.cwd = Arc::<std::path::Path>::from(ctx.cwd);
-            slot.unknown_cwd = false;
-            return Some(base);
-        }
+    {
+        slot.cwd = Arc::<std::path::Path>::from(ctx.cwd);
+        slot.unknown_cwd = false;
+        return Some(base);
     }
     None
 }
@@ -154,13 +153,10 @@ enum Preprocessed {
 }
 
 struct TaskTracking {
-    /// An `ActivityEnd` drained a tracked Task: the general ActivityEnd arm
-    /// must be skipped, or it would re-apply a transition the drain already
-    /// made — restarting Delegating, and with it `state_started_at`, whenever
-    /// parallel Tasks remain.
+    /// An `ActivityEnd` drained a tracked Task, applying its transition.
     handled_by_task_tracking: bool,
-    /// An `ActivityStart` dispatched a Task (already applied as
-    /// Active(Delegating) by the pre-pass): the general arm must be skipped.
+    /// An `ActivityStart` was a Task dispatch, which the tracker owns — replays
+    /// included.
     handled_by_task_start: bool,
 }
 
@@ -263,30 +259,22 @@ impl Reducer {
                 parent_id,
                 now,
             ),
+            // The tracker owns every Task-dispatch Start, replays included.
+            AgentEvent::ActivityStart { .. } if tracking.handled_by_task_start => {}
             AgentEvent::ActivityStart {
                 agent_id,
                 tool_use_id,
                 detail,
-            } => self.apply_activity_start(
-                scene,
-                agent_id,
-                tool_use_id,
-                detail,
-                tracking.handled_by_task_start,
-                from,
-                now,
-            ),
+            } => self.apply_activity_start(scene, agent_id, tool_use_id, detail, from, now),
+            // The pre-pass tracker already drained a tracked Task with this End:
+            // the drain applied the transition itself, so re-running it would
+            // restart Delegating — resetting `state_started_at` — whenever
+            // parallel Tasks remain.
+            AgentEvent::ActivityEnd { .. } if tracking.handled_by_task_tracking => {}
             AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id,
-            } => self.apply_activity_end(
-                scene,
-                agent_id,
-                tool_use_id.as_deref(),
-                tracking.handled_by_task_tracking,
-                from,
-                now,
-            ),
+            } => self.apply_activity_end(scene, agent_id, tool_use_id.as_deref(), from, now),
             AgentEvent::Waiting {
                 agent_id,
                 reason,
@@ -387,28 +375,27 @@ impl Reducer {
             return Preprocessed::Drop;
         }
 
-        if from == Transport::Jsonl {
-            if let Some((kind, tuid)) = event_tool_use_id(event) {
-                if let Some((_, recorded)) =
-                    self.corr.recent_hook_tool_uses.get(&(id, tuid.to_string()))
-                {
-                    // Kind-ASYMMETRIC (#150): a hook Start never eats a JSONL
-                    // End, the only completion signal left if PostToolUse drops.
-                    if !(*recorded == ToolEventKind::Start && kind == ToolEventKind::End) {
-                        return Preprocessed::Drop;
-                    }
-                }
+        if from == Transport::Jsonl
+            && let Some((kind, tuid)) = event_tool_use_id(event)
+            && let Some((_, recorded)) =
+                self.corr.recent_hook_tool_uses.get(&(id, tuid.to_string()))
+        {
+            // Kind-ASYMMETRIC (#150): a hook Start never eats a JSONL
+            // End, the only completion signal left if PostToolUse drops.
+            if !(*recorded == ToolEventKind::Start && kind == ToolEventKind::End) {
+                return Preprocessed::Drop;
             }
         }
 
         // Gated on the slot EXISTING: a synthesis REFUSED for desk exhaustion
         // would leave a record that dedup-eats the JSONL registration's Start.
-        if from == Transport::Hook && scene.agents.contains_key(&id) {
-            if let Some((kind, tuid)) = event_tool_use_id(event) {
-                self.corr
-                    .recent_hook_tool_uses
-                    .insert((id, tuid.to_string()), (now, kind));
-            }
+        if from == Transport::Hook
+            && scene.agents.contains_key(&id)
+            && let Some((kind, tuid)) = event_tool_use_id(event)
+        {
+            self.corr
+                .recent_hook_tool_uses
+                .insert((id, tuid.to_string()), (now, kind));
         }
 
         let tracking = self.track_active_tasks(scene, event, now);
@@ -418,8 +405,7 @@ impl Reducer {
         Preprocessed::Dispatch(tracking)
     }
 
-    /// The `ActivityStart` arm. Skipped entirely when the pre-pass tracker
-    /// already applied this event as a Task dispatch.
+    /// The `ActivityStart` arm, for a Start the pre-pass tracker left to it.
     ///
     /// A Start whose id is a GATED member is the same call re-observed across
     /// an approval round (#951): on Jsonl it is the transcript's Start landing
@@ -433,20 +419,15 @@ impl Reducer {
     /// (a parallel auto-approved tool must not strip a pending approval) or for
     /// an already-counted id — a late transcript twin whose approval round may
     /// have queued siblings.
-    #[allow(clippy::too_many_arguments)]
     fn apply_activity_start(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
         tool_use_id: Option<String>,
         detail: Option<crate::source::ToolDetail>,
-        handled_by_task_start: bool,
         from: Transport,
         now: SystemTime,
     ) {
-        if handled_by_task_start {
-            return;
-        }
         let gated = tool_use_id
             .as_deref()
             .is_some_and(|t| self.corr.gate_matches(&agent_id, t));
@@ -541,22 +522,15 @@ impl Reducer {
             }
     }
 
-    /// The `ActivityEnd` arm. Skipped entirely when the pre-pass tracker
-    /// already drained a tracked Task with this event: the drain applied the
-    /// transition itself, so re-running here would restart Delegating —
-    /// resetting `state_started_at` — whenever parallel Tasks remain.
+    /// The `ActivityEnd` arm, for an End the pre-pass tracker left to it.
     fn apply_activity_end(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
         tool_use_id: Option<&str>,
-        handled_by_task_tracking: bool,
         from: Transport,
         now: SystemTime,
     ) {
-        if handled_by_task_tracking {
-            return;
-        }
         let resolves_wait = self.wait_resolved_by(scene, agent_id, tool_use_id, from);
         if let Some(t) = tool_use_id {
             // A call's End retires ITS gate whether or not it resolved a wait
@@ -689,12 +663,11 @@ impl Reducer {
             // Reasonix parentless resurrect keeps registering.
             && !self.corr.child_recently_ended(agent_id, now)
             && self.register_slot(scene, agent_id, ctx, None, now)
+            && let Some(slot) = scene.agents.get_mut(&agent_id)
         {
-            if let Some(slot) = scene.agents.get_mut(&agent_id) {
-                slot.unknown_cwd = false;
-                if pid.is_some() {
-                    slot.pid = pid;
-                }
+            slot.unknown_cwd = false;
+            if pid.is_some() {
+                slot.pid = pid;
             }
         }
     }
@@ -711,10 +684,10 @@ impl Reducer {
         now: SystemTime,
     ) {
         if let Some(slot) = scene.agents.get_mut(&agent_id) {
-            if let Some(m) = obs.model {
-                if slot.model.as_deref() != Some(m) {
-                    slot.model = Some(Arc::from(m));
-                }
+            if let Some(m) = obs.model
+                && slot.model.as_deref() != Some(m)
+            {
+                slot.model = Some(Arc::from(m));
             }
             if let Some(e) = obs.effort {
                 slot.effort = Some(crate::state::EffortObservation::new(Arc::from(e), now));
@@ -861,28 +834,28 @@ impl Reducer {
         let Some(slot) = scene.agents.get_mut(&agent_id) else {
             return false;
         };
-        if slot.parent_id.is_none() {
-            if let Some(p) = parent_id {
-                slot.parent_id = Some(p);
-                self.corr.link_applied_parent(agent_id, p);
-            }
+        if slot.parent_id.is_none()
+            && let Some(p) = parent_id
+        {
+            slot.parent_id = Some(p);
+            self.corr.link_applied_parent(agent_id, p);
         }
         // A slot can exist with MISSING identity: hook synthesis registers from
         // the AgentId alone, and a Codex revive ghost has an empty cwd.
         let label_is_upgradable = slot.label.is_upgradable();
-        if let Some(base) = backfill_identity(slot, ctx) {
-            if label_is_upgradable {
-                // `base` BYPASSES the `cwd_basename_label` chokepoint, so the
-                // same decode-boundary cap is applied here.
-                slot.label = crate::state::SlotLabel::cwd_derived(format!(
-                    "{}·{}",
-                    label_prefix_for(&slot.source),
-                    crate::source::decoder::ellipsize(
-                        base,
-                        crate::source::decoder::MAX_DECODED_FIELD_CHARS,
-                    )
-                ));
-            }
+        if let Some(base) = backfill_identity(slot, ctx)
+            && label_is_upgradable
+        {
+            // `base` BYPASSES the `cwd_basename_label` chokepoint, so the
+            // same decode-boundary cap is applied here.
+            slot.label = crate::state::SlotLabel::cwd_derived(format!(
+                "{}·{}",
+                label_prefix_for(&slot.source),
+                crate::source::decoder::ellipsize(
+                    base,
+                    crate::source::decoder::MAX_DECODED_FIELD_CHARS,
+                )
+            ));
         }
         slot.last_event_at = now;
         if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none() {
@@ -933,12 +906,11 @@ impl Reducer {
             },
             None,
             now,
-        ) {
-            if let Some(slot) = scene.agents.get_mut(&id) {
-                // NOT an unknown-cwd ghost: that reap targets startup
-                // JSONL-seeding artifacts, and a hook proves this one alive.
-                slot.unknown_cwd = false;
-            }
+        ) && let Some(slot) = scene.agents.get_mut(&id)
+        {
+            // NOT an unknown-cwd ghost: that reap targets startup
+            // JSONL-seeding artifacts, and a hook proves this one alive.
+            slot.unknown_cwd = false;
         }
     }
 
@@ -1052,17 +1024,17 @@ impl Reducer {
         if suppress {
             // A suppressed child event means the subagent resumed, so its
             // misattributed gate resolved — unless the tuid ∉ `active_tasks`.
-            if let Some(slot) = scene.agents.get_mut(&id) {
-                if matches!(slot.state, ActivityState::Waiting { .. }) {
-                    let gate_is_own_tool =
-                        self.corr.gated_before_waiting.get(&id).is_some_and(|g| {
-                            g.iter().any(|m| !tasks.is_some_and(|s| s.contains(&**m)))
-                        });
-                    if !gate_is_own_tool {
-                        let task_tuid = self.corr.any_active_task(&id);
-                        fsm::enter_delegating(slot, task_tuid, now);
-                        self.corr.gated_before_waiting.remove(&id);
-                    }
+            if let Some(slot) = scene.agents.get_mut(&id)
+                && matches!(slot.state, ActivityState::Waiting { .. })
+            {
+                let gate_is_own_tool =
+                    self.corr.gated_before_waiting.get(&id).is_some_and(|g| {
+                        g.iter().any(|m| !tasks.is_some_and(|s| s.contains(&**m)))
+                    });
+                if !gate_is_own_tool {
+                    let task_tuid = self.corr.any_active_task(&id);
+                    fsm::enter_delegating(slot, task_tuid, now);
+                    self.corr.gated_before_waiting.remove(&id);
                 }
             }
         }
@@ -1073,7 +1045,7 @@ impl Reducer {
     /// gains one Active("Delegating") so it doesn't look asleep while subagents
     /// work. b1 subagent-completion inference (CC writes no completion marker):
     /// a drained parent Task means the subtree returned — cascade EXIT to the
-    /// DESCENDANTS, not the parent, so they leave before the idle stale-sweep.
+    /// DESCENDANTS, not the parent, so they leave before [`STALE_IDLE_TIMEOUT`].
     fn track_active_tasks(
         &mut self,
         scene: &mut SceneState,
@@ -1102,36 +1074,35 @@ impl Reducer {
                         .corr
                         .recent_task_drains
                         .contains_key(&(*agent_id, tuid.clone()))
+                    && let Some(slot) = scene.agents.get_mut(agent_id)
                 {
-                    if let Some(slot) = scene.agents.get_mut(agent_id) {
-                        fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
-                    }
+                    fsm::enter_delegating(slot, Some(Arc::<str>::from(tuid.as_str())), now);
                 }
             }
             AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: Some(tuid),
             } => {
-                if let Some(set) = self.corr.active_tasks.get_mut(agent_id) {
-                    if set.remove(tuid) {
-                        handled_by_task_tracking = true;
-                        self.corr
-                            .recent_task_drains
-                            .insert((*agent_id, tuid.clone()), now);
-                        // #152: the drain skips the main arm, so a gate on THIS
-                        // tuid goes stale. Inline: `set` still borrows `corr`.
-                        if let Some(g) = self.corr.gated_before_waiting.get_mut(agent_id) {
-                            g.retain(|m| &**m != tuid.as_str());
-                        }
-                        if let Some(slot) = scene.agents.get_mut(agent_id) {
-                            slot.last_event_at = now;
-                            // Arm the debounce only when actually Active: a
-                            // Waiting parent's expiry would false-clear it.
-                            if set.is_empty() {
-                                self.pending_b1_cascades.insert(*agent_id, now);
-                                if matches!(slot.state, ActivityState::Active { .. }) {
-                                    fsm::arm_pending_idle(slot, now);
-                                }
+                if let Some(set) = self.corr.active_tasks.get_mut(agent_id)
+                    && set.remove(tuid)
+                {
+                    handled_by_task_tracking = true;
+                    self.corr
+                        .recent_task_drains
+                        .insert((*agent_id, tuid.clone()), now);
+                    // #152: the drain skips the main arm, so a gate on THIS
+                    // tuid goes stale. Inline: `set` still borrows `corr`.
+                    if let Some(g) = self.corr.gated_before_waiting.get_mut(agent_id) {
+                        g.retain(|m| &**m != tuid.as_str());
+                    }
+                    if let Some(slot) = scene.agents.get_mut(agent_id) {
+                        slot.last_event_at = now;
+                        // Arm the debounce only when actually Active: a
+                        // Waiting parent's expiry would false-clear it.
+                        if set.is_empty() {
+                            self.pending_b1_cascades.insert(*agent_id, now);
+                            if matches!(slot.state, ActivityState::Active { .. }) {
+                                fsm::arm_pending_idle(slot, now);
                             }
                         }
                     }

@@ -4,8 +4,8 @@ Thanks for your interest! PRs are welcome — especially **new themes**, sprite 
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 (the agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
-Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
-nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
+Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
+nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
 architecture invariants and conventions. Many things that look like bugs are
 documented, intentional design: read the whole item, its doc comment and the
 comments on the lines it governs, before changing it.
@@ -14,45 +14,64 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The `justfile` is the
-single source of truth for every check — CI and the git hooks call the same
-recipes.
+headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
+CI jobs call `justfile` recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order)
+just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
-just test         # the whole suite (cargo-nextest if installed, else cargo test)
-cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
+just test         # the whole suite, under cargo-nextest (`just setup-tools`)
+just test -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
-> build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight` (the exact CI order), or one check at a time.
+> **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
+> builds carry over only build scripts and proc-macros, so iterate with one of
+> them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
-(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`).
+(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
+the tests are CI's).
 
 ## CI gates
 
-`just preflight` is the local gate. CI runs the jobs below, and all but
-**hygiene** and zizmor's offline audits are invisible to preflight, so a green
-preflight does not mean a green PR:
+CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
+runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
+offline audits are invisible to preflight, so a green preflight does not mean a
+green PR.
+
+A PR's pushes run only the **light tier** (every job without
+`if: inputs.full`: linters, formatters, unit tests on every platform and
+compile checks), and its `ci-gate` judges that tier. Both tiers run on the
+merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
+merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
+a push to `main` or a manual dispatch
+([two-step CI](https://docs.mergify.com/merge-queue/two-step/)). CodeQL and
+CodSpeed skip drafts. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
-- **docs** — `cargo doc` with `-D warnings` (broken/private intra-doc links
-  deny) plus the doctests nextest skips.
-- **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
-  package generator (`just npm-check`)** — committed media and icons, README
-  freshness, and the npm package generator + OpenClaw plugin contract.
+- **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
+  the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
+  nextest skips.
+- **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
+  compare-selftest`) — generated sprites, icons and README freshness, and the
+  image comparator.
+- **smoke · npm package generator (`just npm-check`)** — the release
+  binaries and the hook shim's silent exit, and the npm package generator +
+  OpenClaw plugin contract. The README's media drift (`just gen-media-check`)
+  is reported in smoke as evidence, not a gate.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
-- **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
-  pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
-  pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
+- **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
+  the other-unix arms.
+- **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
+  gzipped size (`just gen-wasm-check`).
+- **site** — `site.yml`: format, lint, types, knip and unit tests on every push; the demo-reading test, e2e and
+  Lighthouse on a build with freshly built wasm, so a Rust change that breaks
+  a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
-  plain `cargo test` can't see.
+  `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
   so a skipped local preflight can't land a lint break), including `just ci-observability`
   (`policy/ci-observability/`: contracts for the silent, costly workflow
@@ -62,11 +81,12 @@ preflight does not mean a green PR:
   capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
-- **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
-  read-only model job on the trusted default branch, the PR diff as inert
-  data, a separate least-privilege publisher — and a third job that comments
-  when the model job fails or declines, because absence otherwise renders as
-  a pass (#809). `claude.yml` refuses fork PR heads.
+- **One automatic Claude reviewer per [`REVIEW.md`](../REVIEW.md) lens**
+  rides `claude-readonly-review.yml`: a read-only model job on the trusted
+  default branch, the PR diff, title, body and the lens's prior threads as
+  inert data, and a separate least-privilege publisher that opens a review
+  thread per finding and sets the lens's `claude-review/<lens>` status.
+  `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -93,17 +113,16 @@ a lint to dodge the bump.
 1. **Dispatch** `release-plz.yml` from Actions, on `main`. It opens
    `chore(release): vX.Y.Z` from a `release-plz-*` branch, with the workspace
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
-   rewritten. The bump level comes from the conventional-commit log — nobody
-   picks it — and the PR body carries the `cargo-semver-checks` verdict.
-2. **Review it like any PR.** `main` requires branches to be up to date, because
-   the tag lands on the squash commit and release-plz publishes to crates.io from
-   it before `ci-gate` finishes. If `main` moved, **re-dispatch — never "Update
-   branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
-   the merge commit "Update branch" adds counts as a human's, so the next
-   dispatch closes this PR and opens a new number. release-plz has already raised
-   the bump for any break `cargo-semver-checks` detects; raise it further with
+   rewritten.
+2. **Review it like any PR, but merge it by hand**: the merge queue refuses it,
+   since its update would merge `main` in. If `main` moved, **re-dispatch —
+   never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the
+   new commits, and the merge commit "Update branch" adds counts as a human's,
+   so the next dispatch closes this PR and opens a new number. Merged behind
+   `main`, or with `main` merged or rebased in, it fails `release-plz.yml`'s
+   `release-merge` and publishes nothing. Raise the bump with
    `cargo set-version --workspace X.Y.Z` (cargo-edit) and push only for a break
-   its lints cannot see. A user-facing change that touched no packaged file
+   `cargo-semver-checks` cannot see. A user-facing change that touched no packaged file
    (`npm/`, `release.yml` packaging) is not in the generated notes — add its line
    to `CHANGELOG.md` by hand as the last commit before merging.
 3. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
@@ -113,39 +132,32 @@ a lint to dodge the bump.
    publishes the draft, and publishes the npm packages. The tag also starts a
    homebrew-core autobump.
 
-The crates.io upload happens in the `release` job, which runs on the merge push
-with no `needs` — `ci.yml` is still running at that moment. What makes that safe
-is the branch-protection setting above: a release PR cannot merge unless its
-tree is `main`'s tree, and that tree is the one its own CI already passed.
+The crates.io upload happens in the `release` job on the merge push, which
+first waits for that commit's own `ci-gate`: a failure or timeout publishes
+nothing, and re-running the workflow after a passing `ci.yml` re-run resumes it.
+The wait is in the workflow because the queue can land other PRs while a
+release PR is open, so no merge-time check proves the tree it publishes.
 
 `cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
 job; `just semver` reproduces its verdict locally.
 
-Each crate's crates.io **Trusted Publisher** record names `release-plz.yml`.
-Renaming that workflow file, or publishing from another one, is rejected until
-the records are updated — the record is keyed on the filename.
-
 Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s
-header says why it cannot be the automatic token. **The secret has to exist
-before `release-plz.yml` reaches main, not before the first dispatch**: the
-`release` job runs on every push, and the action refuses an empty token.
+header says why it cannot be the automatic token.
 
 A release PR that release-plz closes and re-opens (it does that when the branch
 carries non-bot commits) leaves a commit you pushed to it — a raised bump —
 behind: `git cherry-pick` it onto the new branch. No committed frame carries the
 version (`BOARD_BRAND`), so a release PR needs no `just gen`.
 
-Merging the release PR is what publishes, so a human owns it. The tag also
-publishes **outside** this repo:
+The tag also publishes **outside** this repo:
 homebrew-core's formula is `autobump: true` and builds from the tag tarball,
 instantly, with DEFAULT features on macOS *and* Linux — the one configuration
 our release never builds. Two consequences:
 
 - **A from-source build break lands in Homebrew's CI, not ours.** Anything
   adding a system-library dependency needs a matching `depends_on` in the core
-  formula, in the same bump PR. Outstanding now: the default-on `audio`
-  feature needs `depends_on "alsa-lib"` — [#731](https://github.com/IvanWng97/pixtuoid/issues/731).
+  formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
@@ -179,16 +191,11 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 6. **Build** — TDD: failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
    whole-file comment audit: every file the PR touches — even by one line —
-   gets its entire comment population re-read against `CLAUDE.md`'s comment
+   gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md)'s
-   always-on comment row). Not the merge gate.
-8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
-   lenses on the diff) + green CI + every online-bot finding dispositioned,
-   judged under the `two-lens-review` skill's **convergence contract**: churn
-   budget before review, a two-fix-round hard cap, only a confirmed HIGH
-   blocks, and a bot `Findings: 0` is evidence, not the gate. (Bot errored or
-   absent at HEAD → the skill's step 6 owns the fallback.) **A human merges.**
+   [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
+8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
+   runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
 
@@ -197,7 +204,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
-doc comment is the design record, and the nested `CLAUDE.md` says only what its
+doc comment is the design record, and the nested `AGENTS.md` says only what its
 crate IS.
 
 ### The running order
@@ -206,8 +213,11 @@ crate IS.
 |---|---|
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
-| before push | `just preflight` (never piped — a pipe eats the exit code) |
-| before merge | the two-lens review |
+| before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
+| while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
+| once the branch is ready to merge and [a PR slot](../AGENTS.md#workflow) is free | open the PR ready: the light tier and the review bots run; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
+| when a REVIEW.md local row matches | the `local-review` skill |
+| once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
 One change spanning the Rust lib + the site + the Raycast extension:
@@ -226,76 +236,103 @@ Advisory backstops that surface risk but never gate:
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
 `just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
 
-## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
+## Conventions and architecture invariants
 
-- **TDD first** — failing test → minimal impl. No code without a test.
-- **DRY, YAGNI** — nothing beyond the current scope.
-- **No `unwrap()` in non-test code**; `anyhow` (app) / `thiserror` (core); the
-  hook listener and JSONL watcher log-and-continue, never panic.
-- **Comments explain WHY, not what.**
-- **Keep docs current** — structure/API/workflow changes update the relevant
-  `CLAUDE.md`/`README.md` in the same commit.
-- **macOS-first** — BSD CLI; `shellcheck` any `.sh` you touch.
-- **Sprite changes need visual verification** — `beautify-decoration` skill;
-  an intentional visual change commits the `just gen`-regenerated references
-  in the same change (CI pixel-diffs against `docs/images/reference-*.png`).
-
-## Architecture invariants (don't break these)
-
-1. `pixtuoid-core` and `pixtuoid-scene` have **no terminal, window or
-   audio-device dependencies** (`just arch` + the crate boundary enforce it);
-   that code lives in the binary's `tui/`/`floating/` painters and audio gateway.
-2. Events flow through **one** channel typed `mpsc::Sender<(Transport,
-   AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup).
-3. The **`Source` trait** is the only seam for a transcript-bearing agent CLI
-   (hook-only CLIs ship a hook decoder + an install `Target` instead).
-4. Hook install writes **through symlinks** (`resolve_symlink`).
-5. The hook shim **never blocks CC** — always exit 0; the send bound
-   (pixtuoid-hook's `transport::WRITE_TIMEOUT`) is watchdog-enforced on both
-   platforms.
-6. Walkable mask = **ground footprint only**; sprites may be visually larger.
+Both live in [`AGENTS.md`](../AGENTS.md) ("Conventions", "Architecture
+invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
-- Every PR is reviewed by **2+ agents with differentiated lenses** before
-  merge — no exceptions. The mechanical teeth are the `claude-review` +
-  `claude-security-review` workflows plus your local two-lens pass.
+- Review rules: [`REVIEW.md`](../REVIEW.md).
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
-- **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
-  in [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md). Agents
-  never file issues, and "acknowledged, no action" is not a state.
 
-### Recurring pitfalls (this codebase's review history, distilled)
+### The merge gate
 
-1. **Byte-vs-char slicing** — user-visible text truncates on `char`/grapheme
-   boundaries, never bytes.
-2. **Parallel-implementation drift** — a value in two places (platform arms,
-   core+tui twins, manifest+enum) gets single-sourced or a bridge test; when
-   your diff guards one path, grep for its siblings (#159→#172).
-3. **Sanitize at the decode boundary** — untrusted input is cleaned where it
-   enters, not at each use site.
-4. **Negative-branch test gaps** — pin the REFUSAL path, both sides of any
-   window/threshold, with offsets derived from the constant under test.
-5. **Unwired additions** — every new field/parameter/asset needs a consumer
-   wired in the same diff (`_x` bindings and `pub` fields evade the lints; #61).
-6. **Denylist completeness** — diff any strip-set against the platform's
-   documented set; prefer an allowlist (#198/#201/#206).
+Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
+`success` at the final head; every finding's review thread resolved by its
+disposition; zero open confirmed `issue (blocking)`; each matching
+[local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
+`<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
+up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
+`-`, leading and trailing `-` dropped, and the sha is the head the run judged;
+an update that only merges `main` in leaves the record standing. The
+[`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
+rows. A published review passes whatever it found; a failed or missing status
+is no review: comment `/claude-review`, else split the PR smaller.
+
+Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
+entry is a command because no queue condition can confirm a finding or match a
+local row. The queue tests up to `batch_size` PRs together on a draft PR
+(`mergify/merge-queue/…`) running the full tier, then merges the PRs
+themselves; it never updates a PR's own branch
+([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
+are the ones merged"), so the bots' statuses on the PR's head are the ones its
+`queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
+bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
+generated-art record: it renders main's merged code, which each look PR's lens
+already read as evidence.
+
+The bots never review a fork PR on their own: a maintainer approves its CI
+run, then comments `/claude-review`, again after every push. Its author can
+resolve their own threads, so before merging read each thread's `resolvedBy`
+and its reply. Its bot verdict is advisory, since the
+author can steer it through the diff, so the maintainer reads the diff too.
+The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
+too, again after every Dependabot rebase.
+
+### Dispositions
+
+Every finding reaches exactly one terminal state in its review thread: FIXED ·
+REFUTED (cite the mechanism, per AGENTS.md; add one where none exists. Before
+adding code for a finding, establish its case is reachable: when a test or
+sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
+RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
+change, and bigger than the PR: split it off into #N; a redesign that brings
+the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
+and not FIXED in place — in place fits a small defect inside code this change
+already touches, adding no local row — so it is fixed in #N; a defect in
+another session's tree cites that session's PR). A
+disposition is the reply that resolves the thread, STARTING with its state:
+`FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
+`FOLLOW-UP → #N: …`, where #N is a PR other than this one: open, merged, or
+closed under [the open-PR cap](../AGENTS.md#workflow) with the fix on its branch. A
+re-flag of an already-dispositioned finding replies with the original's
+disposition (link it). "Acknowledged" and "surfaced" are not states. Sweep at
+the FINAL merge head; check WHICH commit a bot re-flag was raised against
+before re-litigating.
+
+### Convergence contract
+
+- **Churn budget** — a diff whose added + modified lines exceed ~1500 is split
+  (stacked PRs) before review. Pure deletions are exempt once censused; a
+  change that both adds and deletes at scale is two PRs.
+- **Deletion census** — before deleting N members of a class, the full list
+  and its criterion land in the first commit or the PR body (#943).
+- **Two fix rounds, hard cap.** Round 1 folds every accepted finding into ONE
+  commit. Round 2 verifies the dispositions; a round-2 finding outside round
+  1's fold is dispositioned, never folded. A blocking issue confirmed in round
+  1's fixes STOPS the loop: revert the fold and re-land smaller, or re-scope.
+  No round 3.
+- **Round 2's fold** is the last behavior change and is verified, not
+  re-reviewed: each fix is a revert, a deletion, or a change shipping a test
+  that fails without it. Anything else reverts the fold.
+- **A fix round adds no new gate** — a wanted check is its own PR, asserting
+  facts in its own layer (a Rust fact from Rust, never a Python regex over
+  `.rs`).
 
 ### Handy `gh` commands
 
 ```bash
 gh pr checks --watch                         # live CI status
-gh pr merge --auto --squash --delete-branch  # auto-merge once checks pass
 gh issue develop <number> --checkout         # branch linked to an issue
 gh run rerun --failed                        # rerun only failed CI jobs
 ```
 
 ## Adding a new agent CLI
 
-The registration steps (4–7, 9) are test-forced — skipping one fails
-`just test`. Step 8 is forced only for hook-only sources; step 10 by the theme
-guards; steps 1–3, 11 and 12 are on you.
+The registration steps (4–7, 9) and step 12's roster literals are test-forced —
+skipping one fails `just test`. Step 8 is forced only for hook-only sources;
+step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact
@@ -304,6 +341,9 @@ guards; steps 1–3, 11 and 12 are on you.
    unmirrored axis is fail-silent: the watcher polls a directory the CLI
    never writes and the office stays empty (#880). Resolver axes are
    deliberately NOT drift-watched — re-run the probe matrix when the CLI majors.
+   A custom root gets ONE `pub fn <cli>_home()`, called by both the watcher's
+   `default_paths()` and the installer's `default_config_path()` so they
+   can't disagree.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`:
    `SOURCE_NAME`, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`), a
    label deriver, unit tests per event mapping. Format knowledge lives HERE.
@@ -318,14 +358,15 @@ guards; steps 1–3, 11 and 12 are on you.
    capability flags, `verified_version` + `version_probe`. Lifecycle policy
    derives from the flags; you do **not** edit the reducer.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
-   projects `REGISTRY`, and the conformance suite then requires a fixture.
-6. **Drop a sanitized real-capture fixture** under
-   `tests/sources/fixtures/<name>/<scenario>/` (see the fixtures README for
-   provenance rules), then `cargo insta review`. The conformance harness
-   asserts all of a session's events coalesce to ONE `AgentId`. Test-layout
-   map: [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md).
-7. **Wire it into `runtime/driver.rs::run_async`** (the registry drives the
-   guard test, not the spawning).
+   projects `REGISTRY`, and the conformance suite then requires a fixture. The
+   `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
+   must list it: `SNAPSHOTS=overwrite just test -p pixtuoid --test cli_json`.
+6. **Record the fixture** — the test steps in
+   [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
+   (a RECORDED SessionStart scenario via `just capture-fixture`), then
+   `cargo insta review`.
+7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
+   construction site; the registry drives the guard test, not the spawning).
 8. **If the CLI has hooks**, add an `install/` target (a `Target` row +
    `merge_install`/`merge_uninstall` + a `verify_schema` fn mirroring the
    target's own config format + the registered-events↔decoder-arms guard).
@@ -335,15 +376,15 @@ guards; steps 1–3, 11 and 12 are on you.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
-11. **Docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md` entry,
-    and a `check_upstream_drift.py` row where one is owed — which surfaces owe
+11. **Drift-watch in the same PR**: a `check_upstream_drift.py` row where one
+    is owed — which surfaces owe
     one is `source/drift.rs`'s header, read it there. A row is four steps: the
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
     row plus its selftest case (the case census fails without it).
-12. **Three roster literals no failure message spells out**: the row-by-row
-    byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
-    `tests/sources/captures.rs`; a case row + `#[test]` in
+12. **Three roster literals in three test binaries** (a scoped run misses
+    them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
+    in `tests/sources/captures.rs`; a case row + `#[test]` in
     `crates/pixtuoid/tests/wire_to_pixels.rs`.
 
 ## License

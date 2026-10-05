@@ -7,11 +7,11 @@ fn coffee_state_evicted_when_agent_leaves_scene() {
     let mut r = build(100, 40, vec![]);
     r.inject_coffee(id, t0());
     r.evict_missing(&scene);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(r.coffee_contains(id));
     let empty = SceneState::uniform(16);
     r.evict_missing(&empty);
-    r.render(&empty, &pack(), t0() + Duration::from_millis(33))
+    r.render(&empty, pack(), t0() + Duration::from_millis(33))
         .unwrap();
     assert!(
         !r.coffee_contains(id),
@@ -29,7 +29,7 @@ fn coffee_state_is_evicted_during_a_floor_transition() {
     r.inject_coffee(a, t0());
     let mut now = t0();
     r.evict_missing(&scene);
-    r.render(&scene, &pack(), now).expect("render");
+    r.render(&scene, pack(), now).expect("render");
     assert!(r.coffee_contains(a), "cup staged");
 
     now += Duration::from_millis(33);
@@ -37,7 +37,7 @@ fn coffee_state_is_evicted_during_a_floor_transition() {
     let gone = scene_with(vec![slot(b, 1, cap, t0())], cap);
     now += Duration::from_millis(33);
     r.evict_missing(&gone);
-    r.render(&gone, &pack(), now).expect("render");
+    r.render(&gone, pack(), now).expect("render");
     assert!(r.transition().is_some(), "still mid-slide");
     assert!(
         !r.coffee_contains(a),
@@ -78,11 +78,11 @@ fn coffee_persists_through_floor_transition() {
     // floor-0 wanderer walking back from the pantry.
     let mut scratch = build(100, 40, vec![]);
     let mut now = t0();
-    scratch.render(&scene, &p, now).unwrap();
+    scratch.render(&scene, p, now).unwrap();
     let mut hit = None;
     'outer: for _ in 0..400 {
         now += step;
-        scratch.render(&scene, &p, now).unwrap();
+        scratch.render(&scene, p, now).unwrap();
         for &id in &f0_ids {
             if scratch.coffee_contains(id) {
                 hit = Some((id, now));
@@ -98,10 +98,10 @@ fn coffee_persists_through_floor_transition() {
     // else this timeline diverges from the scratch pass.
     let mut r = build(100, 40, vec![]);
     let mut t = t0();
-    r.render(&scene, &p, t).unwrap();
+    r.render(&scene, p, t).unwrap();
     while t + step < detect_at {
         t += step;
-        r.render(&scene, &p, t).unwrap();
+        r.render(&scene, p, t).unwrap();
     }
     assert!(
         !r.coffee_contains(agent),
@@ -109,7 +109,7 @@ fn coffee_persists_through_floor_transition() {
     );
     r.navigate_floor(1, t);
     assert!(r.transition().is_some(), "navigation begins a transition");
-    r.render(&scene, &p, detect_at).unwrap();
+    r.render(&scene, p, detect_at).unwrap();
     assert!(
         r.coffee_contains(agent),
         "a coffee run completing mid-transition must persist (regression: \
@@ -129,19 +129,19 @@ fn injected_coffee_changes_desk_render() {
     let t1 = t0() + Duration::from_millis(33);
 
     let mut base = build(100, 40, vec![]);
-    base.render(&scene, &pack(), t0()).unwrap();
-    base.render(&scene, &pack(), t1).unwrap();
-    let baseline = base.buf().clone();
+    base.render(&scene, pack(), t0()).unwrap();
+    base.render(&scene, pack(), t1).unwrap();
+    let baseline = base.buf().expect("a frame").clone();
     let desk = base.cached_layout().expect("layout").home_desks[0];
 
     let mut r = build(100, 40, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     r.inject_coffee(id, t0()); // fresh fetch ⇒ within steam window
-    r.render(&scene, &pack(), t1).unwrap();
+    r.render(&scene, pack(), t1).unwrap();
 
     let d = region_diff(
         &baseline,
-        r.buf(),
+        r.buf().expect("a frame"),
         desk.x.saturating_sub(2),
         desk.y.saturating_sub(6),
         18,
@@ -157,16 +157,16 @@ fn injected_coffee_changes_desk_render() {
 fn no_pet_when_pets_disabled() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    assert!(r.cached_pet_pos().is_none(), "no pet when none enabled");
+    r.render(&scene, pack(), t0()).unwrap();
+    assert!(r.drawn_pet().is_none(), "no pet when none enabled");
 }
 
 #[test]
 fn pet_present_when_enabled() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    assert!(r.cached_pet_pos().is_some(), "a cat should be placed");
+    r.render(&scene, pack(), t0()).unwrap();
+    assert!(r.drawn_pet().is_some(), "a cat should be placed");
 }
 
 #[test]
@@ -176,8 +176,11 @@ fn pet_position_varies_over_its_cycle() {
     let mut seen = std::collections::HashSet::new();
     for i in 0..5 {
         let now = t0() + Duration::from_secs(i * 10);
-        r.render(&scene, &pack(), now).unwrap();
-        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
+        r.render(&scene, pack(), now).unwrap();
+        if let Some(PetHover {
+            centre: pos, anim, ..
+        }) = r.drawn_pet()
+        {
             seen.insert((pos.x, pos.y, anim));
         }
     }
@@ -192,17 +195,19 @@ fn pet_position_varies_over_its_cycle() {
 fn petting_freezes_pet_position() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    let PetFrame { pos, kind, .. } = r.cached_pet_pos().expect("pet placed");
+    r.render(&scene, pack(), t0()).unwrap();
+    let PetHover {
+        centre: pos, kind, ..
+    } = r.drawn_pet().expect("pet placed");
     r.set_active_pet(Some(PetState {
         petted_at: t0(),
         pet_pos: pos,
         kind,
         floor_idx: 0,
     }));
-    r.render(&scene, &pack(), t0() + Duration::from_millis(500))
+    r.render(&scene, pack(), t0() + Duration::from_millis(500))
         .unwrap();
-    let PetFrame { pos: pos2, .. } = r.cached_pet_pos().expect("pet still placed");
+    let PetHover { centre: pos2, .. } = r.drawn_pet().expect("pet still placed");
     assert_eq!(pos, pos2, "a petted pet holds its position");
 }
 
@@ -212,11 +217,11 @@ fn pet_walk_is_frame_stable() {
     let now = t0() + Duration::from_millis(5_000); // mid walk-phase of cycle 0
     let mut r1 = build(160, 80, vec![PetKind::Cat]);
     let mut r2 = build(160, 80, vec![PetKind::Cat]);
-    r1.render(&scene, &pack(), now).unwrap();
-    r2.render(&scene, &pack(), now).unwrap();
+    r1.render(&scene, pack(), now).unwrap();
+    r2.render(&scene, pack(), now).unwrap();
     assert_eq!(
-        r1.cached_pet_pos().map(|f| (f.pos.x, f.pos.y)),
-        r2.cached_pet_pos().map(|f| (f.pos.x, f.pos.y)),
+        r1.drawn_pet().map(|f| (f.centre.x, f.centre.y)),
+        r2.drawn_pet().map(|f| (f.centre.x, f.centre.y)),
         "identical `now` must give identical pet position (no flash)"
     );
 }
@@ -225,24 +230,27 @@ fn pet_walk_is_frame_stable() {
 fn pet_walk_never_clips_through_furniture() {
     let scene = scene_with(vec![active("/pwalk/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(160, 80, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout after prime").clone();
     for cycle in 0u64..4 {
         for step in 0..35u64 {
-            let now = t0() + Duration::from_millis(cycle * 40_000 + step * 400);
-            r.render(&scene, &pack(), now).unwrap();
-            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
-                if anim == PetKind::Cat.walk_anim() {
-                    // Coarse-cell walkable is the predicate A* itself guarantees;
-                    // per-pixel `is_walkable` is stricter than the router delivers
-                    // and would hold the pet to a higher bar than the agents.
-                    assert!(
-                        pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
-                        "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
-                        pos.x,
-                        pos.y
-                    );
-                }
+            let now =
+                t0() + Duration::from_millis(cycle * pixtuoid_scene::PET_CYCLE_MS + step * 400);
+            r.render(&scene, pack(), now).unwrap();
+            if let Some(PetHover {
+                centre: pos, anim, ..
+            }) = r.drawn_pet()
+                && anim == PetKind::Cat.walk_anim()
+            {
+                // Coarse-cell walkable is the predicate A* itself guarantees;
+                // per-pixel `is_walkable` is stricter than the router delivers
+                // and would hold the pet to a higher bar than the agents.
+                assert!(
+                    pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
+                    "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
+                    pos.x,
+                    pos.y
+                );
             }
         }
     }
@@ -252,23 +260,28 @@ fn pet_walk_never_clips_through_furniture() {
 fn pet_rest_pos_is_walkable() {
     let scene = scene_with(vec![active("/prest/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(160, 80, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout after prime").clone();
     for cycle in 0u64..4 {
         for step in 0..10u64 {
-            let now = t0() + Duration::from_millis(cycle * 40_000 + 14_200 + step * 2_600);
-            r.render(&scene, &pack(), now).unwrap();
-            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
-                if anim != PetKind::Cat.walk_anim() {
-                    // Rest pose is a snapped cell center, so the stronger per-pixel
-                    // check applies here (unlike the walk phase above).
-                    assert!(
-                        layout.walkable.is_walkable(pos.x, pos.y),
-                        "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
-                        pos.x,
-                        pos.y
-                    );
-                }
+            let now = t0()
+                + Duration::from_millis(
+                    cycle * pixtuoid_scene::PET_CYCLE_MS + 14_200 + step * 2_600,
+                );
+            r.render(&scene, pack(), now).unwrap();
+            if let Some(PetHover {
+                centre: pos, anim, ..
+            }) = r.drawn_pet()
+                && anim != PetKind::Cat.walk_anim()
+            {
+                // Rest pose is a snapped cell center, so the stronger per-pixel
+                // check applies here (unlike the walk phase above).
+                assert!(
+                    layout.walkable.is_walkable(pos.x, pos.y),
+                    "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
+                    pos.x,
+                    pos.y
+                );
             }
         }
     }
@@ -280,12 +293,12 @@ fn pet_leg_boundary_no_pop() {
     // is also the next leg's snapped walk-start anchor.
     let scene = scene_with(vec![active("/pbnd/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(160, 80, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0() + Duration::from_millis(39_600))
+    r.render(&scene, pack(), t0() + Duration::from_millis(39_600))
         .unwrap();
-    let before = r.cached_pet_pos().map(|f| (f.pos.x, f.pos.y));
-    r.render(&scene, &pack(), t0() + Duration::from_millis(40_040))
+    let before = r.drawn_pet().map(|f| (f.centre.x, f.centre.y));
+    r.render(&scene, pack(), t0() + Duration::from_millis(40_040))
         .unwrap();
-    let after = r.cached_pet_pos().map(|f| (f.pos.x, f.pos.y));
+    let after = r.drawn_pet().map(|f| (f.centre.x, f.centre.y));
     if let (Some((x0, y0)), Some((x1, y1))) = (before, after) {
         let gap = (x0 as i32 - x1 as i32).unsigned_abs() + (y0 as i32 - y1 as i32).unsigned_abs();
         assert!(
@@ -300,8 +313,8 @@ fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
     for (kind, word) in [(PetKind::Cat, "purr"), (PetKind::Dog, "woof")] {
         let scene = scene_with(vec![active("/ck/0.jsonl", 0, "Edit", t0())], 16);
         let mut r = build(140, 48, vec![kind]);
-        r.render(&scene, &pack(), t0()).unwrap();
-        let PetFrame { pos, .. } = r.cached_pet_pos().expect("pet placed");
+        r.render(&scene, pack(), t0()).unwrap();
+        let PetHover { centre: pos, .. } = r.drawn_pet().expect("pet placed");
         r.set_active_pet(Some(PetState {
             petted_at: t0(),
             pet_pos: pos,
@@ -309,7 +322,7 @@ fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
             floor_idx: 0,
         }));
         r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-        r.render(&scene, &pack(), t0() + Duration::from_millis(200))
+        r.render(&scene, pack(), t0() + Duration::from_millis(200))
             .unwrap();
         let text = frame_text(r.frame_buffer());
         assert!(
@@ -330,17 +343,19 @@ fn pet_tooltip_shows_sleeping_when_all_idle() {
     let mut hit = None;
     for i in 0..40u64 {
         let now = t0() + Duration::from_secs(i);
-        r.render(&scene, &pack(), now).unwrap();
-        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
-            if anim == PetKind::Cat.sleep_anim() {
-                hit = Some((pos, now));
-                break;
-            }
+        r.render(&scene, pack(), now).unwrap();
+        if let Some(PetHover {
+            centre: pos, anim, ..
+        }) = r.drawn_pet()
+            && anim == PetKind::Cat.sleep_anim()
+        {
+            hit = Some((pos, now));
+            break;
         }
     }
     let (pos, now) = hit.expect("a long-idle cat must enter its sleep anim within the window");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("sleeping"),
@@ -352,7 +367,7 @@ fn pet_tooltip_shows_sleeping_when_all_idle() {
 fn furniture_tooltip_flips_below_near_top_edge() {
     let scene = scene_with(vec![idle("/flip/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let mut top_hit = None;
     'scan: for my in 0..6u16 {
@@ -370,7 +385,7 @@ fn furniture_tooltip_flips_below_near_top_edge() {
     }
     let (mx, my) = top_hit.expect("some furniture must hover-test near the top edge");
     r.set_mouse_pos(Some((mx, my)));
-    r.render(&scene, &pack(), t0())
+    r.render(&scene, pack(), t0())
         .expect("top-edge furniture hover must flip the tooltip below without panic");
 }
 
@@ -380,7 +395,7 @@ fn agent_tooltip_flips_up_near_bottom_edge() {
     // cursor and never takes the flip-up branch.
     let probe = SceneState::uniform(16);
     let mut r = build(120, 44, vec![]);
-    r.render(&probe, &pack(), t0()).unwrap();
+    r.render(&probe, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout").clone();
     let bottom_idx = layout
         .home_desks
@@ -397,9 +412,9 @@ fn agent_tooltip_flips_up_near_bottom_edge() {
         )],
         16,
     );
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let id = AgentId::from_transcript_path("/flup/0.jsonl");
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0())
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0())
         .expect("bottom-edge hover must not panic");
 }

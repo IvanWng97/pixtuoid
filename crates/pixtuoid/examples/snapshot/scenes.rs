@@ -6,7 +6,7 @@ use anyhow::Result;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 pub(crate) async fn capture_live_scene(
     projects_root: &str,
@@ -36,8 +36,8 @@ pub(crate) async fn capture_live_scene(
     // real time. SocketBusy (a running pixtuoid owns it) degrades to
     // transcript-only, like the app.
     let hook_handle = {
-        use pixtuoid_core::source::hook::HookRouter;
         use pixtuoid_core::source::DynSource;
+        use pixtuoid_core::source::hook::HookRouter;
         let socket = pixtuoid_core::source::claude_code::ClaudeCodeSource::default_socket_path();
         let router: Box<dyn DynSource> = Box::new(HookRouter::new(socket));
         let tx = tx_hook;
@@ -91,12 +91,20 @@ pub(crate) fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -
     s
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum GatewayState {
+    Idle,
+    Busy,
+    Degraded,
+    Down,
+}
+
 /// Stage one OpenClaw gateway presence (the wandering lobster mascot) per entry
 /// in `ports` — empty ⇒ the single upstream default port, so every existing
 /// caller and every gen-media baseline is unchanged.
 pub(crate) fn inject_openclaw_presence(
     s: &mut SceneState,
-    state: &str,
+    state: GatewayState,
     now: SystemTime,
     ports: &[String],
 ) -> Result<()> {
@@ -104,19 +112,16 @@ pub(crate) fn inject_openclaw_presence(
     // Busy is DERIVED from the run set: "busy" = UP + in-flight runs, never a
     // stored state.
     let (liveness, active_sessions, runs) = match state {
-        "idle" => (DaemonLiveness::UP, 1, Vec::new()),
-        "busy" => (
+        GatewayState::Idle => (DaemonLiveness::UP, 1, Vec::new()),
+        GatewayState::Busy => (
             DaemonLiveness::UP,
             1,
             vec!["run-a".to_string(), "run-b".to_string()],
         ),
         // Up, but the model backend fails every run — no in-flight runs, because
         // the last one FAILED out of the set.
-        "degraded" => (DaemonLiveness::Up { degraded: true }, 1, Vec::new()),
-        "down" => (DaemonLiveness::Down, 0, Vec::new()),
-        other => {
-            anyhow::bail!("unknown --openclaw {other:?}; valid: idle | busy | degraded | down")
-        }
+        GatewayState::Degraded => (DaemonLiveness::Up { degraded: true }, 1, Vec::new()),
+        GatewayState::Down => (DaemonLiveness::Down, 0, Vec::new()),
     };
     // `entered_at` ~20s in the past lands past the enter animation, so a static
     // snapshot captures the steady wander rather than the walk-in.
@@ -332,8 +337,8 @@ const MEETING_WARMUP_LEAD_MS: u64 = 1_500;
 
 /// Build a scene where `n` agents (desks 0..n) are staged to converge on ONE
 /// meeting room: each `state_started_at` is back-dated by
-/// `cycle_n * est_wander_cycle_ms + ε` so motion's bootstrap fast-forward
-/// selects a cycle landing on a DISTINCT slot of the same room. Motion restarts
+/// `cycle_n * est_wander_cycle_ms + ε` so `advance_wander`'s bootstrap fast-forward
+/// selects a cycle landing on a DISTINCT slot of the same room. It restarts
 /// the phase clock on first observation (anti-teleport), so every staged agent
 /// still sits out its full `seated_dwell_ms`; the returned warmup pre-rolls the
 /// capture to just before the first rise.
@@ -352,14 +357,9 @@ pub(crate) fn meeting_scene(
         waypoint_index_for_cycle,
     };
 
-    // Match the renderer's layout EXACTLY (terminal minus 1-row footer,
-    // half-block doubling), `None` being the same desk fill `draw_scene` passes
-    // — otherwise the waypoint indices shift and the staging silently misses.
-    let (buf_w, buf_h) = (
-        cols,
-        rows.saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-            .saturating_mul(2),
-    );
+    // The renderer's own buffer and `None` desk fill: any other layout shifts the
+    // waypoint indices and the staging silently misses.
+    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .ok_or_else(|| anyhow::anyhow!("--meeting: scene too small to compute a layout"))?;
     let nw = l.waypoints.len();
@@ -367,7 +367,7 @@ pub(crate) fn meeting_scene(
     // Candidate sweep over deterministic synthetic ids: the LOWEST cycle ≥1 whose
     // trip lands on a meeting slot. Cycle 0's 400ms back-date sits inside
     // ENTRY_ANIMATION_MS, where the door entry-walk override would hijack the
-    // staging. Reachability rides motion's approach_point fallback — a boxed-in
+    // staging. Reachability rides approach_point's fallback — a boxed-in
     // seat degrades to an aimless amble, caught by the visual check at `just gen`.
     let south_y_of_room = |room: usize| -> Option<u16> {
         l.waypoints
@@ -510,7 +510,9 @@ pub(crate) fn meeting_scene(
     }
     // Fill the rest so the floor doesn't look dead around the meeting.
     fill_sample_agents(&mut s, now, n..n_agents);
-    eprintln!("MEETING staged {n} agents, warmup={warmup_ms}ms (min desk_dwell {min_dwell}ms − {MEETING_WARMUP_LEAD_MS}ms)");
+    eprintln!(
+        "MEETING staged {n} agents, warmup={warmup_ms}ms (min desk_dwell {min_dwell}ms − {MEETING_WARMUP_LEAD_MS}ms)"
+    );
     Ok((s, warmup_ms))
 }
 
@@ -647,19 +649,14 @@ pub(crate) fn anim_scene(
     floor_seed: u64,
     facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_scene::layout::{Facing, SceneLayout, CLASSIC_OFFICE_DESKS};
+    use pixtuoid_scene::layout::{CLASSIC_OFFICE_DESKS, Facing, SceneLayout};
     use pixtuoid_scene::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
 
-    // Match the renderer EXACTLY: scene_rect = terminal minus the 1-row footer,
-    // buf_h = scene_rect.height*2 (half-block). A 2px mismatch shifts the
-    // waypoint set and the agent targets the wrong furniture.
-    let (buf_w, buf_h) = (
-        cols,
-        rows.saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-            .saturating_mul(2),
-    );
+    // The renderer's own buffer: a 2px mismatch shifts the waypoint set and the
+    // agent targets the wrong furniture.
+    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .expect("anim layout computes");
     let n = l.waypoints.len();
@@ -819,13 +816,8 @@ mod tests {
         let (scene, warmup_ms) = meeting_scene(now, 3, cols, rows, 0, max_desks, 12).unwrap();
         assert_eq!(scene.agents.len(), 12, "staged 3 + 9 archetype fillers");
 
-        let layout = SceneLayout::compute_with_seed(
-            cols,
-            (rows - pixtuoid::tui::renderer::FOOTER_ROWS) * 2,
-            Some(max_desks),
-            0,
-        )
-        .unwrap();
+        let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+        let layout = SceneLayout::compute_with_seed(buf_w, buf_h, Some(max_desks), 0).unwrap();
         let staged: Vec<_> = scene
             .agents
             .values()
@@ -843,7 +835,7 @@ mod tests {
                 .duration_since(slot.state_started_at)
                 .unwrap()
                 .as_millis() as u64;
-            // Mirror motion's bootstrap fast-forward exactly.
+            // Mirror `advance_wander`'s bootstrap fast-forward exactly.
             let cycle_n = elapsed_ms / est_wander_cycle_ms(id);
             assert!(cycle_n >= 1, "cycle 0 back-dates under the thinking window");
             assert!(takes_trip(id, cycle_n), "staged cycle must be a trip");

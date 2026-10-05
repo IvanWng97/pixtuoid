@@ -6,11 +6,11 @@ use std::time::Duration;
 use anyhow::Result;
 
 use super::{
-    decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path, omp_profile_sessions_dirs,
-    omp_sessions_dir, SOURCE_NAME,
+    SOURCE_NAME, decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path,
+    omp_profile_sessions_dirs, omp_sessions_dir,
 };
 use crate::source::decoder::parsed_tail_lines;
-use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot, DEFAULT_POLL_INTERVAL};
+use crate::source::jsonl::{DEFAULT_POLL_INTERVAL, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
 /// The profile-roots lister [`OmpSource::run`] re-invokes on its rescan tick,
@@ -51,6 +51,17 @@ pub struct OmpSource {
     /// watcher gets the fd probe without the replay-excluding layout gate.
     /// Only [`Self::default_paths`] sets it.
     first_party_roots: bool,
+}
+
+impl std::fmt::Debug for OmpSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OmpSource")
+            .field("sessions_root", &self.sessions_root)
+            .field("profile_sessions_roots", &self.profile_sessions_roots)
+            .field("rescan_interval", &self.rescan_interval)
+            .field("first_party_roots", &self.first_party_roots)
+            .finish_non_exhaustive()
+    }
 }
 
 impl OmpSource {

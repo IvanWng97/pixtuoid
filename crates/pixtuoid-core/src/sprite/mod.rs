@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use palette::color_difference::EuclideanDistance;
 use palette::convert::FromColorUnclamped;
-use palette::{FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Srgb};
+use palette::{Clamp, FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Oklch, Srgb};
 
 use crate::grid::Grid;
 
 /// Compositing a `Frame` onto an `RgbBuffer`, skipping transparent pixels.
 pub mod blit;
+pub mod error;
 /// Sprite-pack file format: `pack.toml` + `.sprite` parsing and pack loading.
 pub mod format;
 
@@ -22,13 +24,11 @@ pub struct Rgb {
     pub b: u8,
 }
 
-/// The share of the distance left to white or black that one ramp level covers.
-/// Small, so a ramp's contrast is chosen per material by how many levels it
-/// spans.
+/// The share of the distance left to white or black one ramp level covers:
+/// small, so a material picks its ramp's contrast by how many levels it spans.
 const RAMP_LIGHTNESS_STEP: f32 = 0.1;
 
-/// How far one ramp level pulls a color toward the warm or cool hue, in OKLab
-/// chroma.
+/// How far one ramp level pulls a color toward the warm or cool hue, in OKLab chroma.
 const RAMP_HUE_PULL: f32 = 0.006;
 
 /// The OKLCH hue highlights pull toward: amber, a warm key light.
@@ -37,39 +37,102 @@ const RAMP_WARM_HUE_DEG: f32 = 80.0;
 /// The OKLCH hue shadows pull toward: blue-violet, a cool ambient fill.
 const RAMP_COOL_HUE_DEG: f32 = 280.0;
 
-/// Halvings of an out-of-gamut color's chroma search; far past the point where
-/// a further halving moves no 8-bit channel.
-const GAMUT_BISECTION_STEPS: u32 = 16;
+/// One just-noticeable ΔE-OK, the farthest a clipped color may land from its
+/// target: CSS Color 4's <https://www.w3.org/TR/css-color-4/#GMA-Binary-local-MINDE>.
+const GAMUT_JND: f32 = 0.02;
+
+/// Where that search stops, in chroma and in ΔE-OK short of [`GAMUT_JND`].
+const GAMUT_EPSILON: f32 = 0.0001;
+
+/// Bounds [`RAMP_MEMO`] for a process that ramps ever new colours.
+const RAMP_MEMO_CAP: usize = 1 << 12;
+
+thread_local! {
+    /// Ramp levels already walked: a painter re-resolves palette ramps per frame.
+    static RAMP_MEMO: std::cell::RefCell<HashMap<(Rgb, i8), Rgb>> = Default::default();
+}
 
 impl Rgb {
+    const WHITE: Rgb = Rgb {
+        r: u8::MAX,
+        g: u8::MAX,
+        b: u8::MAX,
+    };
+    const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+
     /// This color `level` steps along a hue-shifted ramp: lighter and warmer
     /// above zero, darker and cooler below, itself at zero.
     ///
     /// Stepped in OKLab, where equal lightness steps look equal whatever the
-    /// hue. A level covers a share of the distance left to white or black
-    /// rather than a fixed amount, so levels close in on them instead of
-    /// clamping: a fixed step would merge a dark base's deeper shadows into one
-    /// black.
+    /// hue. A level covers a share of the distance left to white or black, at
+    /// least a `GAMUT_JND` where that fits: a fixed step would merge a dark
+    /// base's deeper shadows into one black. A step past the gamut gives up
+    /// chroma before that lightness, so a highlight pales.
     ///
     /// The warm and cool shift is a pull in OKLab's a/b plane toward a fixed
-    /// hue, not a hue rotation. A rotation "toward yellow" flips direction at
-    /// the hue opposite yellow and has nothing to rotate on a grey; the pull is
-    /// continuous for every base, and gives a grey warm lights and cool shadows.
+    /// hue: a hue rotation flips direction at the hue opposite its target and
+    /// has nothing to rotate on a grey, where the pull warms its lights.
     pub fn ramp(self, level: i8) -> Rgb {
         if level == 0 {
             return self;
         }
+        RAMP_MEMO.with_borrow_mut(|memo| {
+            if memo.len() >= RAMP_MEMO_CAP {
+                memo.clear();
+            }
+            *memo.entry((self, level)).or_insert_with(|| {
+                self.ramp_run(level > 0)
+                    .take(usize::from(level.unsigned_abs()))
+                    .last()
+                    .unwrap_or(self)
+            })
+        })
+    }
+
+    fn ramp_run(self, lit: bool) -> impl Iterator<Item = Rgb> {
         let base = self.to_oklab();
-        let steps = level.unsigned_abs();
+        (1..=u8::MAX).scan((self, base.l), move |(prev, aim), steps| {
+            (*prev, *aim) = Rgb::ramp_step(base, steps, lit, *prev, *aim);
+            Some(*prev)
+        })
+    }
+
+    /// Level `steps` past `prev` (aimed at `prev_aim`), and the lightness it aims at.
+    fn ramp_step(base: Oklab, steps: u8, lit: bool, prev: Rgb, prev_aim: f32) -> (Rgb, f32) {
         let keep = (1.0 - RAMP_LIGHTNESS_STEP).powi(i32::from(steps));
-        let (l, hue) = if level > 0 {
-            (1.0 - (1.0 - base.l) * keep, RAMP_WARM_HUE_DEG)
+        let (own, hue, toward) = if lit {
+            (1.0 - (1.0 - base.l) * keep, RAMP_WARM_HUE_DEG, 1.0)
         } else {
-            (base.l * keep, RAMP_COOL_HUE_DEG)
+            (base.l * keep, RAMP_COOL_HUE_DEG, -1.0)
         };
         let (sin, cos) = hue.to_radians().sin_cos();
         let pull = RAMP_HUE_PULL * f32::from(steps);
-        Rgb::from_oklab_in_gamut(Oklab::new(l, base.a + pull * cos, base.b + pull * sin))
+        let (a, b) = (base.a + pull * cos, base.b + pull * sin);
+        let room = if lit { 1.0 - prev_aim } else { prev_aim };
+        // One share held back keeps the last declarable level off white or black.
+        let shares = format::MAX_RAMP_LEVEL.unsigned_abs().saturating_sub(steps) + 2;
+        let gap = GAMUT_JND.min(room / f32::from(shares));
+        let aim = if lit {
+            own.max(prev_aim + gap)
+        } else {
+            own.min(prev_aim - gap)
+        };
+        // Rounding to 8 bits can still land on `prev`: push on past it.
+        let below = prev.lightness();
+        let (mut l, mut nudge) = (aim, GAMUT_EPSILON);
+        loop {
+            let c = Rgb::from_oklab_within(Oklab::new(l, a, b), gap / 2.0);
+            let past = if lit {
+                c.lightness() > below
+            } else {
+                c.lightness() < below
+            };
+            if past || (lit && l >= 1.0) || (!lit && l <= 0.0) {
+                return (c, aim);
+            }
+            l += toward * nudge;
+            nudge *= 2.0;
+        }
     }
 
     /// The color `t` of the way from this one to `other`, `t` clamped to
@@ -83,30 +146,67 @@ impl Rgb {
         Rgb::from_oklab_in_gamut(self.to_oklab().mix(other.to_oklab(), t))
     }
 
+    /// How light this color looks, from black at 0 to white at 1: OKLab's
+    /// lightness, the axis [`Rgb::ramp`] steps along and [`Rgb::mix`] runs
+    /// evenly on.
+    pub fn lightness(self) -> f32 {
+        self.to_oklab().l
+    }
+
     fn to_oklab(self) -> Oklab {
         Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
     }
 
-    /// The sRGB color at `c`'s lightness and hue with as much of its chroma as
-    /// fits. Clipping each channel instead shifts the hue and can undo a ramp
-    /// step outright: lit yellow clips back to the yellow itself.
+    /// `c` cut in chroma at its lightness and hue until clipping lands within
+    /// [`GAMUT_JND`]: clipping alone turns hue, cutting alone jumps at a graze.
     fn from_oklab_in_gamut(c: Oklab) -> Rgb {
-        let at =
-            |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
-        let mut share = 1.0;
-        if !at(share).is_within_bounds() {
-            let (mut fits, mut spills) = (0.0, 1.0);
-            for _ in 0..GAMUT_BISECTION_STEPS {
-                let mid = (fits + spills) / 2.0;
-                if at(mid).is_within_bounds() {
-                    fits = mid;
-                } else {
-                    spills = mid;
+        Rgb::from_oklab_within(c, GAMUT_JND)
+    }
+
+    /// [`Rgb::from_oklab_in_gamut`], its clip also within `slack` of `c`'s lightness.
+    fn from_oklab_within(c: Oklab, slack: f32) -> Rgb {
+        if c.l >= 1.0 {
+            return Rgb::WHITE;
+        }
+        if c.l <= 0.0 {
+            return Rgb::BLACK;
+        }
+        let lin = |c: Oklch| LinSrgb::from_color_unclamped(c);
+        let clip = |c: Oklch| {
+            let clipped = lin(c).clamp();
+            let landed = Oklab::from_color_unclamped(clipped);
+            let miss = landed.distance(Oklab::from_color_unclamped(c));
+            let near = miss < GAMUT_JND && (landed.l - c.l).abs() < slack;
+            (clipped, miss, near)
+        };
+        let mut current = Oklch::from_color_unclamped(c);
+        let mut clipped = lin(current);
+        if !clipped.is_within_bounds() {
+            let near;
+            (clipped, _, near) = clip(current);
+            if !near {
+                let (mut min, mut max) = (0.0, current.chroma);
+                let mut min_in_gamut = true;
+                while max - min > GAMUT_EPSILON {
+                    current.chroma = (min + max) / 2.0;
+                    if min_in_gamut && lin(current).is_within_bounds() {
+                        min = current.chroma;
+                        continue;
+                    }
+                    let (miss, near);
+                    (clipped, miss, near) = clip(current);
+                    if !near {
+                        max = current.chroma;
+                    } else if GAMUT_JND - miss < GAMUT_EPSILON {
+                        break;
+                    } else {
+                        min_in_gamut = false;
+                        min = current.chroma;
+                    }
                 }
             }
-            share = fits;
         }
-        let out: Srgb<u8> = Srgb::<f32>::from_linear(at(share)).into_format();
+        let out: Srgb<u8> = Srgb::<f32>::from_linear(clipped).into_format();
         Rgb {
             r: out.red,
             g: out.green,
@@ -300,31 +400,160 @@ impl Frame {
     }
 }
 
+/// A named point on one frame, from a `.sprite` frame's `@mark <name> <x> <y>`:
+/// where a painter lays something over the art, in the frame's own pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Mark {
+    name: String,
+    x: u16,
+    y: u16,
+}
+
+impl Mark {
+    pub(crate) fn new(name: String, x: u16, y: u16) -> Self {
+        Self { name, x, y }
+    }
+
+    /// Its name: `head.<view>` is where a hairstyle is laid ([`Sprite::head`]).
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Its column.
+    pub fn x(&self) -> u16 {
+        self.x
+    }
+
+    /// Its row.
+    pub fn y(&self) -> u16 {
+        self.y
+    }
+}
+
+/// Which way a character frame's head faces the viewer: the view a hairstyle
+/// draws its layers for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum HeadView {
+    /// The face toward the viewer.
+    Front,
+    /// The back of the head toward the viewer.
+    Back,
+    /// In profile.
+    Side,
+    /// Seen from above, face down.
+    Crown,
+}
+
+impl HeadView {
+    /// Every view.
+    pub const ALL: [HeadView; 4] = [Self::Front, Self::Back, Self::Side, Self::Crown];
+
+    /// The name a head mark (`head.<name>`) and a `[hairstyles]` table call it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Front => "front",
+            Self::Back => "back",
+            Self::Side => "side",
+            Self::Crown => "crown",
+        }
+    }
+
+    /// The view called `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.name() == name)
+    }
+
+    /// Its place in [`HeadView::ALL`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// A frame's head: which way it faces and the point a hairstyle layer's own
+/// head is laid on, read from the frame's one `head.<view>` [`Mark`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct HeadMark {
+    /// Which way the head faces.
+    pub view: HeadView,
+    /// The mark's column.
+    pub x: u16,
+    /// The mark's row.
+    pub y: u16,
+}
+
+impl HeadMark {
+    /// The head `mark` places, where it is a `head.<view>` mark.
+    pub fn of(mark: &Mark) -> Option<Self> {
+        let view = HeadView::from_name(mark.name().strip_prefix(HEAD_MARK)?)?;
+        Some(Self {
+            view,
+            x: mark.x,
+            y: mark.y,
+        })
+    }
+}
+
+/// What a head mark's name starts with, before its view.
+pub(crate) const HEAD_MARK: &str = "head.";
+
 /// An animation: its frames in order, the palette indices they were drawn
-/// with, and the per-frame hold time.
+/// with, each frame's marks, the per-frame hold time, and a walk's stride.
 #[derive(Debug, Clone)]
 pub struct Sprite {
     /// The frames in their own palette's colors.
     frames: Vec<Frame>,
     /// The same frames as indices into `palette`, for a recolor to resolve again.
     indexed: Vec<IndexedFrame>,
+    /// Each frame's `@mark`s.
+    marks: Vec<Vec<Mark>>,
     /// The palette `indexed` refers to: the sprite's own pack's, which it keeps
     /// when a custom pack inherits it, so a recolor never reads its indices
     /// through another pack's keys.
     palette: Arc<Palette>,
     frame_ms: u32,
+    stride: Option<std::num::NonZeroU16>,
 }
 
 impl Sprite {
-    fn new(indexed: Vec<IndexedFrame>, palette: Arc<Palette>, frame_ms: u32) -> Self {
+    fn new(
+        marked: Vec<(IndexedFrame, Vec<Mark>)>,
+        palette: Arc<Palette>,
+        frame_ms: u32,
+        stride: Option<std::num::NonZeroU16>,
+    ) -> Self {
         let pixels = palette.resolved();
+        let (indexed, marks): (Vec<_>, Vec<_>) = marked.into_iter().unzip();
         let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
         Sprite {
             frames,
             indexed,
+            marks,
             palette,
             frame_ms,
+            stride,
         }
+    }
+
+    /// Frame `idx`'s marks, in the order the file names them.
+    pub fn marks(&self, idx: usize) -> &[Mark] {
+        self.marks.get(idx).map_or(&[], Vec::as_slice)
+    }
+
+    /// Frame `idx`'s head: where a hairstyle dresses it.
+    pub fn head(&self, idx: usize) -> Option<HeadMark> {
+        self.marks(idx).iter().find_map(HeadMark::of)
+    }
+
+    /// Frame 0 and its offset when its own head mark is laid on `head`.
+    pub fn laid_on(&self, head: HeadMark) -> Option<(&Frame, i32, i32)> {
+        let mark = self.head(0)?;
+        Some((
+            self.frames.first()?,
+            i32::from(head.x) - i32::from(mark.x),
+            i32::from(head.y) - i32::from(mark.y),
+        ))
     }
 
     /// The frames, played in order.
@@ -332,9 +561,17 @@ impl Sprite {
         &self.frames
     }
 
-    /// How long each frame holds before advancing, in milliseconds.
+    /// How long each frame holds before advancing, in milliseconds: a walk
+    /// with a [`stride`](Self::stride) steps by distance instead.
     pub fn frame_ms(&self) -> u32 {
         self.frame_ms
+    }
+
+    /// The base-grid pixels a walker covers in one full cycle of its frames:
+    /// they advance by distance travelled, so a planted foot stays planted at
+    /// any speed. `None` where the pack declares none.
+    pub fn stride(&self) -> Option<std::num::NonZeroU16> {
+        self.stride
     }
 
     /// Frame `idx` as the palette indices a recolor resolves; `None` past the
@@ -374,35 +611,65 @@ impl RecolorableFrame<'_> {
 
 /// A flat RGB buffer used as a blit target.
 #[derive(Debug, Clone)]
-pub struct RgbBuffer(Grid<Rgb>);
+pub struct RgbBuffer {
+    pixels: Grid<Rgb>,
+    writes: Option<Writes>,
+}
+
+/// A write epoch of the one buffer whose [`RgbBuffer::begin_writes`] minted it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteEpoch(u32);
+
+/// Each pixel's epoch of its last noted write.
+#[derive(Debug, Clone)]
+struct Writes {
+    at: Vec<u32>,
+    now: u32,
+    tracking: bool,
+}
+
+impl Writes {
+    fn note(&mut self, i: usize) {
+        if self.tracking {
+            self.at[i] = self.now;
+        }
+    }
+
+    fn note_all(&mut self) {
+        if self.tracking {
+            self.at.fill(self.now);
+        }
+    }
+}
 
 impl std::ops::Deref for RgbBuffer {
     type Target = Grid<Rgb>;
     fn deref(&self) -> &Grid<Rgb> {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for RgbBuffer {
-    fn deref_mut(&mut self) -> &mut Grid<Rgb> {
-        &mut self.0
+        &self.pixels
     }
 }
 
 impl RgbBuffer {
     /// A `width × height` buffer with every pixel set to `fill`.
+    #[inline]
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
-        RgbBuffer(Grid::filled(width, height, fill))
+        RgbBuffer {
+            pixels: Grid::filled(width, height, fill),
+            writes: None,
+        }
     }
 
     /// Build from a row-major `Vec<Rgb>` (length = `width * height`).
     pub fn from_pixels(width: u16, height: u16, pixels: Vec<Rgb>) -> Self {
-        RgbBuffer(Grid::from_vec(width, height, pixels))
+        RgbBuffer {
+            pixels: Grid::from_vec(width, height, pixels),
+            writes: None,
+        }
     }
 
     #[inline]
     fn raw_index(&self, x: u16, y: u16) -> usize {
-        (y as usize) * (self.0.width as usize) + (x as usize)
+        (y as usize) * (self.pixels.width as usize) + (x as usize)
     }
 
     /// [`raw_index`](Self::raw_index) guarded by a debug-only bounds assert: a
@@ -411,36 +678,107 @@ impl RgbBuffer {
     #[inline]
     fn checked_index(&self, x: u16, y: u16) -> usize {
         debug_assert!(
-            x < self.0.width && y < self.0.height,
+            x < self.pixels.width && y < self.pixels.height,
             "RgbBuffer index out of bounds: ({x},{y}) in {}x{}",
-            self.0.width,
-            self.0.height
+            self.pixels.width,
+            self.pixels.height
         );
         self.raw_index(x, y)
     }
 
     /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
     /// unchecked in release (the hot blit path clips first).
+    #[inline]
     pub fn get(&self, x: u16, y: u16) -> Rgb {
-        self.0.as_slice()[self.checked_index(x, y)]
+        self.pixels.as_slice()[self.checked_index(x, y)]
     }
 
     /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
+    #[inline]
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
-        self.0.as_mut_slice()[i] = rgb;
+        self.write(i, rgb);
     }
 
     /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
     /// THE clip primitive for per-pixel scatter (glyphs, particles) that can't
     /// pre-clip; the hot blit path clips its loop bounds once and keeps the
     /// unchecked [`put`](Self::put).
+    #[inline]
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
-        if x < self.0.width && y < self.0.height {
+        if x < self.pixels.width && y < self.pixels.height {
             let i = self.raw_index(x, y);
-            self.0.as_mut_slice()[i] = rgb;
+            self.write(i, rgb);
         }
+    }
+
+    /// Every pixel, row-major, to write in bulk. While
+    /// [`begin_writes`](Self::begin_writes) tracks, the whole buffer counts as
+    /// written this epoch, since a bulk write may touch any of it.
+    pub fn as_mut_slice(&mut self) -> &mut [Rgb] {
+        if let Some(w) = &mut self.writes {
+            w.note_all();
+        }
+        self.pixels.as_mut_slice()
+    }
+
+    /// Resize to `width × height` with every pixel `fill`, which counts as
+    /// writing every pixel.
+    pub fn resize_fill(&mut self, width: u16, height: u16, fill: Rgb) {
+        let reshaped = (width, height) != (self.pixels.width, self.pixels.height);
+        self.pixels.resize_fill(width, height, fill);
+        if let Some(w) = &mut self.writes {
+            if reshaped {
+                w.at.clear();
+                w.at.resize(self.pixels.as_slice().len(), 0);
+            }
+            w.note_all();
+        }
+    }
+
+    #[inline]
+    fn write(&mut self, i: usize, rgb: Rgb) {
+        self.pixels.as_mut_slice()[i] = rgb;
+        if let Some(w) = &mut self.writes {
+            w.note(i);
+        }
+    }
+
+    /// Start a write epoch and return it, for [`written_in`](Self::written_in):
+    /// unlike a diff, it sees a pixel written in the colour already there.
+    pub fn begin_writes(&mut self) -> WriteEpoch {
+        let n = self.pixels.as_slice().len();
+        let w = self.writes.get_or_insert_with(|| Writes {
+            at: vec![0; n],
+            now: 0,
+            tracking: false,
+        });
+        w.tracking = true;
+        w.now = w.now.wrapping_add(1);
+        if w.now == 0 {
+            w.at.fill(0);
+            w.now = 1;
+        }
+        WriteEpoch(w.now)
+    }
+
+    /// Stop noting writes until the next [`begin_writes`](Self::begin_writes);
+    /// epochs already noted still answer [`written_in`](Self::written_in).
+    pub fn end_writes(&mut self) {
+        if let Some(w) = &mut self.writes {
+            w.tracking = false;
+        }
+    }
+
+    /// Whether `(x, y)` was last written in `epoch` ([`begin_writes`](Self::begin_writes)).
+    pub fn written_in(&self, x: u16, y: u16, epoch: WriteEpoch) -> bool {
+        x < self.pixels.width
+            && y < self.pixels.height
+            && self
+                .writes
+                .as_ref()
+                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch.0))
     }
 }
 
@@ -450,6 +788,55 @@ mod tests {
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
+    }
+
+    #[test]
+    fn a_bulk_write_counts_as_writing_every_pixel() {
+        let mut buf = RgbBuffer::filled(3, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(1, 1, epoch));
+        buf.as_mut_slice()[0] = rgb(9, 9, 9);
+        assert!((0..2).all(|y| (0..3).all(|x| buf.written_in(x, y, epoch))));
+        let epoch = buf.begin_writes();
+        buf.resize_fill(4, 4, rgb(1, 1, 1));
+        assert!(buf.written_in(3, 3, epoch), "a resize writes every pixel");
+    }
+
+    #[test]
+    fn a_write_after_end_writes_leaves_the_last_epoch_standing() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.put(1, 0, rgb(9, 9, 9));
+        assert!(buf.written_in(0, 0, epoch));
+        assert!(
+            !buf.written_in(1, 0, epoch),
+            "a write after end_writes is not noted"
+        );
+    }
+
+    #[test]
+    fn a_reshape_forgets_epochs_noted_in_the_old_layout() {
+        let mut buf = RgbBuffer::filled(4, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 1, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.resize_fill(2, 4, rgb(0, 0, 0));
+        assert!(!(0..4).any(|y| (0..2).any(|x| buf.written_in(x, y, epoch))));
+    }
+
+    #[test]
+    fn an_epoch_past_the_last_never_reads_an_unwritten_pixel_as_written() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        if let Some(w) = &mut buf.writes {
+            w.now = u32::MAX;
+        }
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(0, 0, epoch));
+        assert!(!buf.written_in(1, 0, epoch));
     }
 
     /// Mid grey, dark hair, skin, and red, blue and yellow, which a lit step
@@ -464,18 +851,133 @@ mod tests {
         rgb(255, 255, 0),
     ];
 
+    fn shades(base: Rgb) -> Vec<Rgb> {
+        let max = usize::from(format::MAX_RAMP_LEVEL.unsigned_abs());
+        let mut shades: Vec<Rgb> = base.ramp_run(false).take(max).collect();
+        shades.reverse();
+        shades.push(base);
+        shades.extend(base.ramp_run(true).take(max));
+        shades
+    }
+
+    #[test]
+    fn a_ramp_level_is_that_step_of_its_walk() {
+        let max = format::MAX_RAMP_LEVEL;
+        for base in RAMP_BASES {
+            let shades = shades(base);
+            for (n, &shade) in (-max..=max).zip(&shades) {
+                assert_eq!(base.ramp(n), shade, "{base:?} level {n}");
+            }
+        }
+    }
+
     /// Also catches a clipped out-of-gamut step ([`Rgb::from_oklab_in_gamut`]).
     #[test]
     fn every_ramp_level_a_pack_may_declare_is_lighter_than_the_one_below() {
-        let max = format::MAX_RAMP_LEVEL;
         for base in RAMP_BASES {
             assert_eq!(base.ramp(0), base);
-            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).to_oklab().l).collect();
+            let lightness: Vec<f32> = shades(base).iter().map(|c| c.lightness()).collect();
             assert!(
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
             );
         }
+    }
+
+    #[test]
+    fn every_ramp_steps_through_ever_lighter_distinct_colors() {
+        let levels = (0..=u8::MAX).step_by(8).chain([u8::MAX]);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let base = rgb(r, g, b);
+                    let shades = shades(base);
+                    assert!(
+                        shades.windows(2).all(|w| (w[0] == w[1]
+                            && (w[0] == Rgb::WHITE || w[0] == Rgb::BLACK))
+                            || (w[0] != w[1] && w[0].lightness() < w[1].lightness())),
+                        "{base:?}: {shades:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A one-level nudge to a base moves no ramp step a JND further, past rounding.
+    fn assert_ramp_moves_continuously(from: Rgb, to: Rgb) {
+        let moved = |a: Rgb, b: Rgb| a.to_oklab().distance(b.to_oklab());
+        for (a, b) in shades(from).into_iter().zip(shades(to)) {
+            let rounding = [a.r.abs_diff(b.r), a.g.abs_diff(b.g), a.b.abs_diff(b.b)]
+                .iter()
+                .all(|&d| d <= 1);
+            assert!(
+                rounding || moved(a, b) - moved(from, to) < GAMUT_JND,
+                "{from:?} -> {a:?} but {to:?} -> {b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_ramp_step_has_no_cliff_where_its_chroma_path_grazes_the_gamut() {
+        for b in 240..u8::MAX {
+            assert_ramp_moves_continuously(rgb(11, 86, b), rgb(11, 86, b + 1));
+        }
+    }
+
+    #[test]
+    fn every_ramp_step_moves_continuously_with_its_base() {
+        let levels = (0..u8::MAX).step_by(16);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let base = rgb(r, g, b);
+                    for next in [rgb(r + 1, g, b), rgb(r, g + 1, b), rgb(r, g, b + 1)] {
+                        assert_ramp_moves_continuously(base, next);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_ramp_step_grazing_the_gamut_by_float_noise_keeps_its_chroma() {
+        assert_eq!(
+            rgb(11, 86, 249).ramp(-3),
+            rgb(0, 0, 207),
+            "not (0, 39, 185), where a strict bounds check stops the chroma search"
+        );
+    }
+
+    #[test]
+    fn an_srgb_lattice_survives_an_oklab_round_trip() {
+        let levels = (0..=255u8).step_by(15);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let c = rgb(r, g, b);
+                    assert_eq!(Rgb::from_oklab_in_gamut(c.to_oklab()), c);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_write_is_noted_in_its_epoch_even_in_the_colour_already_there() {
+        let grey = rgb(128, 128, 128);
+        let mut buf = RgbBuffer::filled(4, 2, grey);
+        let first = buf.begin_writes();
+        buf.put(1, 0, grey);
+        buf.put_checked(9, 9, grey);
+        assert!(buf.written_in(1, 0, first));
+        assert!(!buf.written_in(2, 0, first));
+        assert!(!buf.written_in(9, 9, first));
+        let second = buf.begin_writes();
+        assert!(
+            !buf.written_in(1, 0, second),
+            "an epoch sees only its own writes"
+        );
+        buf.put(3, 1, grey);
+        assert!(buf.written_in(3, 1, second));
     }
 
     #[test]
@@ -485,12 +987,22 @@ mod tests {
         assert_eq!(navy.mix(amber, 1.0), amber);
         assert_eq!(navy.mix(amber, -1.0), navy, "t clamps below");
         assert_eq!(navy.mix(amber, 2.0), amber, "t clamps above");
-        let l = |t: f32| navy.mix(amber, t).to_oklab().l;
+        let l = |t: f32| navy.mix(amber, t).lightness();
         let (l0, l1) = (l(0.0), l(1.0));
         for t in [0.25, 0.5, 0.75] {
             let even = l0 + (l1 - l0) * t;
             assert!((l(t) - even).abs() < 0.01, "t={t}: {} vs {even}", l(t));
         }
+    }
+
+    #[test]
+    fn lightness_runs_from_black_to_white_as_the_eye_sees_it() {
+        assert!(rgb(0, 0, 0).lightness().abs() < 1e-4);
+        assert!((rgb(255, 255, 255).lightness() - 1.0).abs() < 1e-4);
+        assert!(
+            rgb(0, 0, 255).lightness() < rgb(0, 160, 0).lightness(),
+            "perceived, not a channel sum: pure blue is darker than a dimmer green"
+        );
     }
 
     #[test]
@@ -504,26 +1016,26 @@ mod tests {
         );
     }
 
-    /// Blue to yellow leaves the sRGB gamut just past blue: the mix gives up
-    /// chroma and keeps the hue it interpolated, where clipping each channel
-    /// would turn it.
+    /// Blue to green leaves the gamut mid-way, where a plain clip turns the hue.
     #[test]
     fn a_mix_that_leaves_the_gamut_keeps_its_hue() {
-        let (blue, yellow) = (rgb(0, 0, 255), rgb(255, 255, 0));
-        let (from, to) = (blue.to_oklab(), yellow.to_oklab());
-        let hue = |c: Oklab| c.b.atan2(c.a).to_degrees();
-        for t in [0.05, 0.1] {
+        let (blue, green) = (rgb(0, 0, 255), rgb(0, 255, 0));
+        let (from, to) = (blue.to_oklab(), green.to_oklab());
+        let off_hue = |c: Oklab, of: Oklab| {
+            let lch = Oklch::from_color_unclamped(c);
+            let on_hue = Oklch::new(lch.l, lch.chroma, Oklch::from_color_unclamped(of).hue);
+            c.distance(Oklab::from_color_unclamped(on_hue))
+        };
+        for t in [0.2, 0.3] {
             let lerped = from.mix(to, t);
+            let clipped =
+                Oklab::from_color_unclamped(LinSrgb::from_color_unclamped(lerped).clamp());
             assert!(
-                !LinSrgb::from_color_unclamped(lerped).is_within_bounds(),
-                "t={t} must leave the gamut, or this checks nothing"
+                off_hue(clipped, lerped) >= GAMUT_JND,
+                "t={t}: clipping must turn the hue, or this checks nothing"
             );
-            let got = hue(blue.mix(yellow, t).to_oklab());
-            assert!(
-                (got - hue(lerped)).abs() < 0.3,
-                "t={t}: hue {got} vs {}",
-                hue(lerped)
-            );
+            let got = off_hue(blue.mix(green, t).to_oklab(), lerped);
+            assert!(got < GAMUT_JND, "t={t}: {got} off the hue");
         }
     }
 

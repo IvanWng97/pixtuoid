@@ -178,8 +178,7 @@ async fn bind_bails_when_a_live_listener_holds_the_path() {
 
     let err = HookSocketListener::bind(path.clone())
         .await
-        .err()
-        .expect("a second bind on a LIVE socket must fail loudly, not steal it");
+        .expect_err("a second bind on a LIVE socket must fail loudly, not steal it");
     assert!(
         err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
             .is_some(),
@@ -308,8 +307,7 @@ async fn bind_respects_lock_arbitration_even_without_a_socket_file() {
 
     let err = HookSocketListener::bind(path.clone())
         .await
-        .err()
-        .expect("a live lock-holder must make a second bind fail, socket file or not");
+        .expect_err("a live lock-holder must make a second bind fail, socket file or not");
     assert!(
         err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
             .is_some(),
@@ -336,8 +334,7 @@ async fn bind_defers_to_a_lockless_live_listener_via_the_connect_probe() {
 
     let err = HookSocketListener::bind(path.clone())
         .await
-        .err()
-        .expect("a lock-less but LIVE listener must be deferred to, not reclaimed");
+        .expect_err("a lock-less but LIVE listener must be deferred to, not reclaimed");
     assert!(
         err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
             .is_some(),
@@ -453,10 +450,10 @@ async fn hook_router_socket_busy_exits_clean_without_death() {
 // EVERY source (stamped codex here).
 #[tokio::test]
 async fn hook_router_tee_captures_child_ends_from_the_shared_socket() {
+    use pixtuoid_core::AgentId;
+    use pixtuoid_core::source::Source;
     use pixtuoid_core::source::hook::HookRouter;
     use pixtuoid_core::source::jsonl::ChildEndUnclaims;
-    use pixtuoid_core::source::Source;
-    use pixtuoid_core::AgentId;
 
     let dir = TempDir::new().unwrap();
     let sock = dir.path().join("pixtuoid.sock");

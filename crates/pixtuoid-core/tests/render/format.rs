@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use pixtuoid_core::sprite::error::{LineError, PackError, SpriteError};
 use pixtuoid_core::sprite::format::{load_pack, load_pack_from_strings, validate_pack_animations};
 use pixtuoid_core::sprite::{Frame, Rgb};
 
@@ -12,6 +13,68 @@ fn parse(src: &str) -> anyhow::Result<Vec<Frame>> {
         &[("f.sprite", src)],
     )?;
     Ok(pack.animation("idle").expect("idle").frames().to_vec())
+}
+
+/// A caller can match the failure, and `{:#}` names each step of it once.
+#[test]
+fn a_bad_pixel_is_matchable_and_its_chain_prints_each_step_once() {
+    let err = load_pack_from_strings(
+        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        &[("f.sprite", "@frame 0\nA z")],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            PackError::Decode {
+                file,
+                source: SpriteError::Line {
+                    line: 2,
+                    kind: LineError::UnknownKey { key: 'z', .. },
+                    ..
+                },
+                ..
+            } if file == "f.sprite"
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        format!("{:#}", anyhow::Error::from(err)),
+        "decoding f.sprite: unknown palette key 'z' (line 2)"
+    );
+}
+
+#[test]
+fn a_shape_error_names_the_line_at_fault() {
+    let line_of = |sprite: &str| match load_pack_from_strings(
+        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        &[("f.sprite", sprite)],
+    )
+    .unwrap_err()
+    {
+        PackError::Decode {
+            source: SpriteError::Line { line, .. },
+            ..
+        } => line,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        line_of("@frame 0\nA A\nA\nA A\n@frame 1\nA A"),
+        3,
+        "the ragged row"
+    );
+    assert_eq!(
+        line_of("@frame 0\n@mark hat 5 0\nA A\nA A\n"),
+        2,
+        "the mark outside"
+    );
+    assert_eq!(
+        line_of("@frame 0\nA\n@frame 1\n@frame 2\nA"),
+        3,
+        "the empty frame"
+    );
 }
 
 #[test]
@@ -78,7 +141,9 @@ fn rejects_palette_key_longer_than_one_char() {
     let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"AB\"=\"#010203\"\n\
          [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
-    let err = load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err();
+    let err = anyhow::Error::from(
+        load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
+    );
     assert!(
         format!("{err:#}").contains("exactly one character"),
         "a >1-char palette key must bail; got: {err:#}"
@@ -90,7 +155,9 @@ fn rejects_palette_value_not_six_hex_digits() {
     let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"A\"=\"#12345\"\n\
          [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
-    let err = load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err();
+    let err = anyhow::Error::from(
+        load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
+    );
     assert!(
         format!("{err:#}").contains("6 hex digits"),
         "a non-6-hex-digit color must bail; got: {err:#}"
@@ -104,7 +171,7 @@ fn validate_reports_insufficient_frames_for_single_frame_typing() {
          [palette]\n\"A\"=\"#010203\"\n\
          [animations.typing]\nframes=[\"t.sprite\"]\nframe_ms=100\n";
     let pack = load_pack_from_strings(pack_toml, &[("t.sprite", "@frame 0\nA")]).unwrap();
-    let report = validate_pack_animations(&pack, &[]);
+    let report = validate_pack_animations(&pack, &[], &[]);
     assert!(
         report
             .insufficient_frames
@@ -161,7 +228,7 @@ fn default_pack_loads_with_required_animations() {
 #[test]
 fn default_pack_passes_validation() {
     let pack = load_pack(Path::new("../pixtuoid-scene/sprites/default")).unwrap();
-    let report = validate_pack_animations(&pack, &[]);
+    let report = validate_pack_animations(&pack, &[], &[]);
     assert!(
         report.missing_required.is_empty(),
         "missing required: {:?}",
@@ -177,7 +244,7 @@ fn default_pack_passes_validation() {
 #[test]
 fn robot_pack_passes_validation() {
     let pack = load_pack(Path::new("../pixtuoid/sprites/robot")).unwrap();
-    let report = validate_pack_animations(&pack, &[]);
+    let report = validate_pack_animations(&pack, &[], &[]);
     assert!(
         report.missing_required.is_empty(),
         "missing required: {:?}",
@@ -200,7 +267,7 @@ fn robot_pack_passes_validation() {
 #[test]
 fn skeleton_pack_passes_validation() {
     let pack = load_pack(Path::new("../pixtuoid/sprites/skeleton")).unwrap();
-    let report = validate_pack_animations(&pack, &[]);
+    let report = validate_pack_animations(&pack, &[], &[]);
     assert!(
         report.missing_required.is_empty(),
         "missing required: {:?}",
@@ -216,7 +283,7 @@ fn skeleton_pack_passes_validation() {
 #[test]
 fn mini_pack_reports_missing_required() {
     let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
-    let report = validate_pack_animations(&pack, &[]);
+    let report = validate_pack_animations(&pack, &[], &[]);
     assert!(
         !report.missing_required.is_empty(),
         "mini pack should be missing required animations"
@@ -227,7 +294,7 @@ fn mini_pack_reports_missing_required() {
 #[test]
 fn validation_detects_unknown_animations() {
     let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
-    let report = validate_pack_animations(&pack, &[]);
+    let report = validate_pack_animations(&pack, &[], &[]);
     assert!(
         report.unknown.contains(&"idle".to_string()),
         "mini pack's 'idle' animation should be flagged as unknown"

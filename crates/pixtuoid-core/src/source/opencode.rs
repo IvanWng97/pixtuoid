@@ -32,12 +32,12 @@
 //!   `server.instance.disposed` carries only a `directory` (no session ids), so
 //!   it is NOT decoded — the pid-watch covers instance teardown.
 
-use anyhow::{anyhow, Result};
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "opencode";
@@ -56,11 +56,11 @@ const SUBAGENT_TOOLS: &[&str] = &["task"];
 pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("opencode hook payload must be an object"))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("type")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("opencode payload missing type"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "type"))?;
     // `properties` is the EventV2 `data`.
     let props_val = obj.get("properties").unwrap_or(&Value::Null);
     let empty = serde_json::Map::new();
@@ -117,12 +117,12 @@ fn decode_session_lifecycle(
     let info = props
         .get("info")
         .and_then(|i| i.as_object())
-        .ok_or_else(|| anyhow!("opencode session event missing info"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "session", "info"))?;
     let session_id = info
         .get("id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("opencode session info missing/empty id"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "session info", "id"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
     let parent = info
         .get("parentID")
@@ -174,7 +174,7 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
         .get("sessionID")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("opencode message.part.updated missing sessionID"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "message.part.updated", "sessionID"))?;
     let part = match props.get("part").and_then(|p| p.as_object()) {
         Some(p) => p,
         None => return Ok(vec![]),
@@ -240,7 +240,7 @@ fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
         .get("sessionID")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("opencode permission event missing sessionID"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "permission", "sessionID"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
     const KEYS: &[&str] = &["action", "permission", "title", "pattern", "type", "tool"];
     let reason = crate::source::decoder::first_present_str(props, KEYS)
@@ -314,9 +314,11 @@ mod tests {
             let got = decode_oc_hook_payload(&payload(ev)).expect("a decoded event decodes");
             assert!(!got.is_empty(), "{ev} must reach a real arm");
         }
-        assert!(decode_oc_hook_payload(&payload("session.archived"))
-            .expect("an unhandled type is not an error")
-            .is_empty());
+        assert!(
+            decode_oc_hook_payload(&payload("session.archived"))
+                .expect("an unhandled type is not an error")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -338,12 +340,14 @@ mod tests {
             "properties": {"sessionID": "ses_n", "info": {"id": "ses_n", "directory": "/repo"}}
         });
         let evs = decode_oc_hook_payload(&v).unwrap();
-        assert!(evs
-            .iter()
-            .any(|e| matches!(e, AgentEvent::SessionStart { .. })));
-        assert!(!evs
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ModelInfo { .. })));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, AgentEvent::SessionStart { .. }))
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, AgentEvent::ModelInfo { .. }))
+        );
     }
     use crate::source::decoder::MAX_TOOL_TARGET_CHARS;
     use serde_json::json;
@@ -645,10 +649,10 @@ mod tests {
             decode_oc_hook_payload(&json!({"properties": {}})).is_err(),
             "missing type"
         );
-        assert!(decode_oc_hook_payload(
-            &json!({"type": "session.created", "properties": {"info": {}}})
-        )
-        .is_err());
+        assert!(
+            decode_oc_hook_payload(&json!({"type": "session.created", "properties": {"info": {}}}))
+                .is_err()
+        );
         assert!(
             decode_oc_hook_payload(&json!({"type": "session.created", "properties": {}})).is_err()
         );

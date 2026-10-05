@@ -4,7 +4,7 @@
 //! A hook-only source has no tailable transcript and therefore none of the JSONL
 //! watcher's liveness ladder; its ONLY exit signal is the best-effort
 //! `session_end` hook on a CLEAN quit, so an abrupt exit ghosts the sprite until
-//! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid`, an
+//! the reducer's stale sweep (`stale_threshold`). When the shim can stamp the CLI's pid (`_pid`, an
 //! ancestor walk past the runner's interposed shell where the OS allows one),
 //! [`ExitWatch`] emits a
 //! `SessionEnd` the moment that pid dies. Fed ONLY from the hook decode path,
@@ -18,13 +18,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::AgentId;
 use crate::source::exit_watch::ExitWatch;
 use crate::source::{AgentEvent, TaggedSender, Transport};
-use crate::AgentId;
 
 /// Cloneable handle (one per hook connection task) over a shared pid→agents
 /// registry + the process-exit watcher.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct HookPidWatch {
     exit: Arc<ExitWatch>,
     bindings: Arc<Mutex<Bindings>>,
@@ -33,6 +33,7 @@ pub(crate) struct HookPidWatch {
 /// One agent's pid sighting. An agent is armed on AT MOST ONE pid, which is why
 /// this is an enum and not a pair of maps: "armed on two pids at once" was
 /// reachable when the two states lived in separate collections.
+#[derive(Debug)]
 enum Sighting {
     /// A shim GUESS seen once — armed only if the next sighting repeats it.
     Candidate(i32),
@@ -40,7 +41,7 @@ enum Sighting {
     Armed(i32),
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Bindings {
     by_agent: HashMap<AgentId, Sighting>,
 }

@@ -1,6 +1,51 @@
 use super::*;
 
 #[test]
+fn bounds_overlap_is_half_open_and_a_zero_sized_box_overlaps_nothing() {
+    let b = |x, y, width, height| Bounds {
+        x,
+        y,
+        width,
+        height,
+    };
+    let a = b(10, 10, 4, 4);
+    assert!(a.overlaps(b(13, 13, 4, 4)), "one shared pixel");
+    assert!(!a.overlaps(b(14, 10, 4, 4)), "touching edges share none");
+    assert!(!a.overlaps(b(11, 11, 0, 2)), "zero width, inside");
+    assert!(!b(11, 11, 2, 0).overlaps(a), "zero height, inside");
+}
+
+/// A cell on the far edge, which `CellArea` saturates to `u16::MAX`, ends one
+/// past the last representable column and row.
+#[test]
+fn a_box_on_the_far_edge_overlaps_by_its_pixels() {
+    let b = |x, y, width, height| Bounds {
+        x,
+        y,
+        width,
+        height,
+    };
+    let edge = b(u16::MAX, u16::MAX, 1, 1);
+    let near = b(u16::MAX - 1, u16::MAX - 1, 2, 2);
+    assert!(edge.overlaps(near));
+    assert!(near.overlaps(edge));
+    assert!(!edge.overlaps(b(0, 0, 4, 4)));
+}
+
+#[test]
+fn widening_against_column_0_keeps_the_east_edge() {
+    let b = |x, width| Bounds {
+        x,
+        y: 5,
+        width,
+        height: 3,
+    };
+    assert_eq!(b(4, 6).widened(2), b(2, 10));
+    assert_eq!(b(0, 6).widened(2), b(0, 8), "the east edge stays at 6 + 2");
+    assert_eq!(b(1, 6).widened(2), b(0, 9));
+}
+
+#[test]
 fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let island = l
@@ -169,9 +214,9 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // Seed 1 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
+    // Seed 11 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
     // width gate — the gate is a property of size AND seed, not of size alone.
-    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 1)
+    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 11)
         .expect("fits");
     assert!(
         !s.waypoints
@@ -197,11 +242,14 @@ fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
         let h: Vec<_> = l
             .room_walls
             .iter()
-            .filter(|w| w.start.y == split_y && w.end.y == split_y)
+            .filter_map(|w| match *w {
+                WallSegment::Horizontal { y, x0, x1 } if y == split_y => Some((x0, x1)),
+                _ => None,
+            })
             .collect();
         assert_eq!(h.len(), 1, "seed {seed}: ONE solid shared wall, got {h:?}");
         assert_eq!(
-            (h[0].start.x, h[0].end.x),
+            h[0],
             (0, l.meeting_rooms[1].bounds.width),
             "seed {seed}: no inter-meeting door gap"
         );
@@ -211,21 +259,23 @@ fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
             let mut v: Vec<_> = l
                 .room_walls
                 .iter()
-                .filter(|w| {
-                    w.start.x == vx
-                        && w.end.x == vx
-                        && w.start.y >= b.y
-                        && w.end.y <= b.y + b.height
+                .filter_map(|w| match *w {
+                    WallSegment::Vertical { x, y0, y1 }
+                        if x == vx && y0 >= b.y && y1 <= b.y + b.height =>
+                    {
+                        Some((y0, y1))
+                    }
+                    _ => None,
                 })
                 .collect();
-            v.sort_by_key(|w| w.start.y);
+            v.sort_unstable();
             assert_eq!(
                 v.len(),
                 2,
                 "seed {seed} room {id}: east wall split by its door"
             );
             assert!(
-                v[0].end.y < v[1].start.y,
+                v[0].1 < v[1].0,
                 "seed {seed} room {id}: the corridor door gap must be real"
             );
         }
@@ -458,12 +508,11 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
         narrowest_band = narrowest_band.min(l.cubicle_band.width);
         shortest_band = shortest_band.min(l.cubicle_band.height);
     }
-    // TIGHTNESS. The width arm is blind to a +1 overshoot (`pct` floors, so adjacent
-    // widths share a band) — `neither_floor_carries_a_safety_margin` covers that.
-    assert_eq!(
-        narrowest_band,
-        crate::layout::compute::DESK_BAND_MIN_W,
-        "the width floor overshoots: the widest left column leaves more band than one desk needs"
+    // The width floor is the north wall's, wider than one desk's band needs:
+    // `neither_floor_carries_a_safety_margin` holds it tight.
+    assert!(
+        narrowest_band >= crate::layout::compute::DESK_BAND_MIN_W,
+        "the width floor leaves a band narrower than one desk needs"
     );
     assert_eq!(
         shortest_band,
@@ -563,7 +612,7 @@ fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
     // A pod's back row faces the front row across the thin INTRA_POD_GAP_Y, whose
     // edge cell sits in a ReachSet-rejected coarse cell straddling the desk — only
     // the deeper reachable-aware scan finds it, and only a far-side probe prefers it.
-    use crate::layout::{approach_point, desk_walk_anchor_facing, Facing, Furniture};
+    use crate::layout::{Facing, Furniture, approach_point, desk_walk_anchor_facing};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
         // Without this the loop is vacuous: chair, probe and assertion agree under
@@ -863,7 +912,7 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
         lamp_east + 2,
         "tank west edge sits exactly the pinned gap past the lamp's east edge"
     );
-    let door_west = l.door.expect("elevator fits at this size").x;
+    let door_west = l.door.x;
     assert!(
         tank.x + half_w + super::compute::FISH_TANK_ELEVATOR_CLEARANCE <= door_west,
         "tank + clearance stays west of the elevator door column"
@@ -928,6 +977,20 @@ fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
         roomy.meeting_rooms[0].coat_rack_pos().is_some(),
         "roomy fitted room keeps the rack"
     );
+}
+
+#[test]
+fn a_room_too_short_for_the_rack_drops_it() {
+    let room = MeetingRoom {
+        bounds: Bounds {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 4,
+        },
+        trio: None,
+    };
+    assert_eq!(room.coat_rack_pos(), None);
 }
 
 #[test]
@@ -1015,7 +1078,7 @@ fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
         .filter(|p| p.kind == PlantKind::Ficus)
         .collect();
     assert_eq!(ficus.len(), 2, "both ratified Ficus spots place at 192x160");
-    let door = l.door.expect("elevator");
+    let door = l.door;
     assert!(
         ficus
             .iter()
@@ -1047,10 +1110,10 @@ fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
     assert_eq!(
         pantry.water_cooler_rect(),
         Some(Bounds {
-            x: 10 + 40 - 6,
-            y: 20 + 8,
-            width: 3,
-            height: 6,
+            x: 10 + 40 - 7,
+            y: 20 + 6,
+            width: 4,
+            height: 9,
         }),
     );
     assert_eq!(
@@ -1136,4 +1199,96 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
 
     let bare = MeetingRoom { bounds, trio: None };
     assert_eq!(bare.sofa_east_drain_edge(), None);
+}
+
+/// A standing fixture's height as a percent band of [`CHARACTER_SPRITE_H`].
+struct HeightBand {
+    min_pct: u16,
+    max_pct: u16,
+}
+
+/// Person-height: a figure reaches the brand panel.
+const VENDING_MACHINE_HEIGHT: HeightBand = HeightBand {
+    min_pct: 100,
+    max_pct: 115,
+};
+/// A floor-standing copier: its lid at a figure's waist.
+const PRINTER_HEIGHT: HeightBand = HeightBand {
+    min_pct: 60,
+    max_pct: 75,
+};
+/// Its taps at a standing figure's hand.
+const WATER_COOLER_HEIGHT: HeightBand = HeightBand {
+    min_pct: 70,
+    max_pct: 80,
+};
+/// Coats hang at a figure's shoulders.
+const COAT_RACK_HEIGHT: HeightBand = HeightBand {
+    min_pct: 95,
+    max_pct: 105,
+};
+/// The shade at a figure's head.
+const FLOOR_LAMP_HEIGHT: HeightBand = HeightBand {
+    min_pct: 95,
+    max_pct: 110,
+};
+/// A room its occupant steps into.
+const PHONE_BOOTH_HEIGHT: HeightBand = HeightBand {
+    min_pct: 120,
+    max_pct: 135,
+};
+
+#[test]
+fn standing_fixtures_are_in_proportion_to_a_figure() {
+    let visual_h = |f: Furniture| furniture_def(f).visual.h;
+    for (name, h, band) in [
+        (
+            "vending machine",
+            visual_h(Furniture::VendingMachine),
+            VENDING_MACHINE_HEIGHT,
+        ),
+        ("printer", visual_h(Furniture::Printer), PRINTER_HEIGHT),
+        (
+            "water cooler",
+            super::rooms::pantry::WATER_COOLER.h,
+            WATER_COOLER_HEIGHT,
+        ),
+        (
+            "coat rack",
+            coat_rack_rect_at(Point { x: 10, y: 10 }).height,
+            COAT_RACK_HEIGHT,
+        ),
+        (
+            "floor lamp",
+            visual_h(Furniture::FloorLamp),
+            FLOOR_LAMP_HEIGHT,
+        ),
+        (
+            "phone booth",
+            visual_h(Furniture::PhoneBooth),
+            PHONE_BOOTH_HEIGHT,
+        ),
+    ] {
+        let pct = h * 100 / CHARACTER_SPRITE_H;
+        assert!(
+            (band.min_pct..=band.max_pct).contains(&pct),
+            "{name}: {h}px is {pct}% of a figure, outside {}..={}%",
+            band.min_pct,
+            band.max_pct
+        );
+    }
+}
+
+#[test]
+fn waypoint_depth_baseline_is_its_grounds_south_row() {
+    let pos = Point { x: 40, y: 40 };
+    for kind in [WaypointKind::VendingMachine, WaypointKind::Printer] {
+        let def = furniture_def(kind.furniture());
+        let (tl, size) = def.ground_rect(Pivot::Center, pos).expect("has footprint");
+        assert_eq!(
+            sort_row_at(Pivot::Center, pos, def.visual.h),
+            tl.y + size.h - 1,
+            "{kind:?}: sorts on the row it stands on"
+        );
+    }
 }

@@ -66,6 +66,7 @@ const BUS_TRIM: f32 = 0.35;
 
 /// Per-stem gain ramps chasing the scene's target levels. Mute ramps to
 /// silence through the same slew (no click).
+#[derive(Debug)]
 pub struct Mixer {
     current: [f32; LoopStem::ALL.len()],
     target: StemLevels,
@@ -107,11 +108,7 @@ impl Mixer {
     /// The scalar every one-shot's gain multiplies through — mute silences them
     /// instantly (one-shots are transient; no ramp needed).
     pub fn one_shot_gain(&self) -> f32 {
-        if self.muted {
-            0.0
-        } else {
-            self.master_amp()
-        }
+        if self.muted { 0.0 } else { self.master_amp() }
     }
 
     /// Advance every gain toward its target; returns `(stem, gain)` pairs
@@ -142,6 +139,7 @@ impl Mixer {
 
 /// Typing-burst scheduler driven by the scene's `typing` level: 0 = silence,
 /// higher = more bursts.
+#[derive(Debug)]
 pub struct TypingScheduler {
     rng: NoiseStream,
     burst_left: u32,
@@ -189,6 +187,7 @@ impl TypingScheduler {
 }
 
 /// Runtime raindrop scatter — the bed loops, the drops never repeat.
+#[derive(Debug)]
 pub struct DropScheduler {
     rng: NoiseStream,
     next_at_s: f64,

@@ -4,9 +4,9 @@
 //! A binary-only front-end on the shared engine: it boots the SAME
 //! `runtime::pipeline::spawn_pipeline` spine the TUI uses — from
 //! `window::resumed` rather than [`run`], because the desk-capacity seed needs
-//! the REAL window size (see `PipelineBoot`) — but presents each frame as a
-//! full-resolution [`offscreen::OfficeRenderer`] `RgbBuffer` blitted into a
-//! `winit` + `softbuffer` window instead of half-block terminal cells.
+//! the REAL window size (see `PipelineBoot`) — but presents each frame as an
+//! [`offscreen::OfficeRenderer`] `RgbBuffer` upscaled into a `winit` +
+//! `softbuffer` window instead of half-block terminal cells.
 //! `pixtuoid-core` stays window-free (invariant #1) — all windowing lives here.
 
 mod cadence;
@@ -40,11 +40,12 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         connected,
         config_path,
         audio,
+        motion,
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
     let floating_cfg = config::resolve_floating(&app_config);
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(pack)
+    let pack = pixtuoid_scene::pack::load_sprite_pack(pack)
         .context("loading the sprite pack for the floating window")?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -66,14 +67,14 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         .context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
 
-    // FloatingApp OWNS the audio device thread via its AudioController. Constructed
-    // HERE, after every fallible `?` boot step, so a boot failure means no thread
-    // ever existed — and once `app` exists, its Drop joins the device thread on
-    // EVERY exit (run_app returning normally OR a window-creation failure), with no
-    // manual shutdown call.
+    // After every fallible `?` boot step: `app` owns the audio device thread (see
+    // `crate::audio::AudioController::new`).
     let mut app = FloatingApp::new(
         floating_cfg,
-        theme,
+        window::Appearance {
+            theme,
+            motion: motion.or(pixtuoid_scene::anim::Motion::Full),
+        },
         pack,
         config_path,
         pets,
@@ -85,8 +86,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             proxy,
             rt: rt.handle().clone(),
         },
-        audio.muted,
-        audio.volume,
+        audio,
     );
     event_loop
         .run_app(&mut app)

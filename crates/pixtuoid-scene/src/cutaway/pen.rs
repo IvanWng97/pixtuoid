@@ -1,81 +1,27 @@
-//! The cutaway's one grid: the art pixel.
-//!
-//! The sprites are authored at a density `d` — `d` art pixels per logical unit —
-//! and a render at scale `s` blits each art pixel `s / d` buffer pixels square.
-//! Whatever else the cutaway paints lands on that same grid, so nothing in the
-//! room is finer or coarser than the art beside it: a pixel-art frame mixes no
-//! pixel sizes. Painting through a [`Pen`] is what holds that, because it has no
-//! way to address a buffer pixel.
+//! Painting on the [`Pen`]'s art grid.
 
-use std::num::NonZeroU16;
-
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::shade::fill;
-use crate::render_scale::RenderScale;
-
-/// A length or coordinate on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ArtPx(pub(crate) u16);
-
-/// A rect on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ArtRect {
-    pub(crate) x: ArtPx,
-    pub(crate) y: ArtPx,
-    pub(crate) w: ArtPx,
-    pub(crate) h: ArtPx,
-}
-
-/// Paints on a render's art grid (the module doc): `k` buffer pixels make one
-/// art pixel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Pen {
-    d: NonZeroU16,
-    k: NonZeroU16,
-}
+use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::dither::Stepped;
 
 impl Pen {
-    /// The pen for art authored at density `d`, painted at `scale`; `None` when
-    /// `d` does not divide it, since an art pixel would then straddle buffer
-    /// pixels.
-    pub(crate) fn new(scale: RenderScale, d: u16) -> Option<Self> {
-        let d = NonZeroU16::new(d)?;
-        let s = scale.get();
-        if !s.is_multiple_of(d.get()) {
-            return None;
+    /// Copy `from`'s art pixel onto `buf` wherever `take` holds for it.
+    pub(crate) fn take_where(
+        self,
+        buf: &mut RgbBuffer,
+        from: &RgbBuffer,
+        take: impl Fn(ArtPx, ArtPx) -> bool,
+    ) {
+        let k = self.buffer(ArtPx(1));
+        for y in 0..buf.height().min(from.height()) {
+            for x in 0..buf.width().min(from.width()) {
+                if take(ArtPx(x / k), ArtPx(y / k)) {
+                    buf.put(x, y, from.get(x, y));
+                }
+            }
         }
-        Some(Self {
-            d,
-            k: NonZeroU16::new(s / d.get())?,
-        })
-    }
-
-    /// The pen for `pack` at `scale`: the densest of its variant densities that
-    /// divides `scale`, else the base art's. [`densest_frame`](crate::pixel_painter::densest_frame)
-    /// applies the same rule per piece, so the room shares every piece's grid
-    /// only while the pack draws its variants at one common density, as the
-    /// bundled pack does.
-    pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
-        pack.density_variants()
-            .into_iter()
-            .find_map(|d| Self::new(scale, d))
-            .unwrap_or(Self {
-                d: NonZeroU16::MIN,
-                k: scale.factor(),
-            })
-    }
-
-    /// `logical` layout units, as art pixels: the one conversion from the
-    /// layout's units onto the grid.
-    pub(crate) fn art(self, logical: u16) -> ArtPx {
-        ArtPx(logical.saturating_mul(self.d.get()))
-    }
-
-    /// `a` art pixels, as buffer pixels.
-    fn buffer(self, a: ArtPx) -> u16 {
-        a.0.saturating_mul(self.k.get())
     }
 
     /// Paint `r` solid, clipped to the buffer.
@@ -90,13 +36,83 @@ impl Pen {
         );
     }
 
+    /// [`shade`](Self::shade) the lines of a `pitch` grid laid from `r`'s top
+    /// left corner, within `r`: each art pixel once, so a crossing is no darker
+    /// than the lines through it.
+    pub(crate) fn shade_grid(self, buf: &mut RgbBuffer, r: ArtRect, pitch: ArtPx, level: i8) {
+        let p = pitch.0.max(1);
+        let (x1, y1) = (r.x.0.saturating_add(r.w.0), r.y.0.saturating_add(r.h.0));
+        let mut stepped = Stepped::new(level);
+        for y in (r.y.0..y1).step_by(usize::from(p)) {
+            let row = ArtRect {
+                y: ArtPx(y),
+                h: ArtPx(1),
+                ..r
+            };
+            self.shade(buf, row, &mut stepped);
+            // The columns run from under this row to the next one.
+            let run = ArtPx((p - 1).min(y1 - y - 1));
+            for x in (r.x.0..x1).step_by(usize::from(p)) {
+                let col = ArtRect {
+                    x: ArtPx(x),
+                    y: ArtPx(y + 1),
+                    w: ArtPx(1),
+                    h: run,
+                };
+                self.shade(buf, col, &mut stepped);
+            }
+        }
+    }
+
+    /// Step every pixel of `r` `stepped`'s level stops along its own ramp
+    /// ([`Rgb::ramp`](pixtuoid_core::sprite::Rgb::ramp)), clipped to the
+    /// buffer: a tone relative to what is already painted there, not a colour
+    /// of its own. An art pixel that was one colour stays one.
+    fn shade(self, buf: &mut RgbBuffer, r: ArtRect, stepped: &mut Stepped) {
+        let (x0, y0) = (self.buffer(r.x), self.buffer(r.y));
+        let x1 = x0.saturating_add(self.buffer(r.w)).min(buf.width());
+        let y1 = y0.saturating_add(self.buffer(r.h)).min(buf.height());
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let c = stepped.of(buf.get(x, y));
+                buf.put(x, y, c);
+            }
+        }
+    }
+
+    /// Recolour each art pixel of `r` from what lies there, clipped to the
+    /// buffer: `f` gets the pixel's offset in `r` and its colour, and what it
+    /// returns covers the whole art pixel.
+    pub(crate) fn recolour(
+        self,
+        buf: &mut RgbBuffer,
+        r: ArtRect,
+        mut f: impl FnMut(u16, u16, Rgb) -> Rgb,
+    ) {
+        for dy in 0..r.h.0 {
+            for dx in 0..r.w.0 {
+                let at = ArtRect {
+                    x: ArtPx(r.x.0 + dx),
+                    y: ArtPx(r.y.0 + dy),
+                    w: ArtPx(1),
+                    h: ArtPx(1),
+                };
+                let (x, y) = (self.buffer(at.x), self.buffer(at.y));
+                if x < buf.width() && y < buf.height() {
+                    let c = f(dx, dy, buf.get(x, y));
+                    self.fill(buf, at, c);
+                }
+            }
+        }
+    }
+
     /// Dither a full-width band from `light` at its top to `dark` at its
     /// bottom, `y1` exclusive; a band with no height paints nothing.
     ///
     /// One matrix cell is one art pixel on both axes, and the level steps once
     /// per art row: a cell or a step any finer would be a pixel smaller than the
-    /// art's. The indices stay ABSOLUTE (`% 4` of the art coordinate, not of its
-    /// offset in the band), so the pattern tiles across every band sharing the
+    /// art's. The matrix is indexed by the ABSOLUTE art coordinate, not its
+    /// offset in the band, so the pattern tiles across every band sharing the
     /// buffer with no seam at a band's boundary.
     pub(crate) fn dither_band(
         self,
@@ -109,15 +125,17 @@ impl Pen {
         if y1 <= y0 {
             return;
         }
-        let k = self.k.get();
+        let k = self.buffer(ArtPx(1));
         let span = u32::from(y1.0 - y0.0);
         let columns = buf.width().div_ceil(k);
         for y in y0.0..y1.0 {
-            // How far through the transition this row sits, on the matrix's scale.
-            let level = (u32::from(y - y0.0) * BAYER_LEVELS / span) as u8;
+            let through = f32::from(y - y0.0) / span as f32;
             for x in 0..columns {
-                let threshold = BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)];
-                let c = if threshold < level { dark } else { light };
+                let c = if crate::dither::takes_next(x, y, through) {
+                    dark
+                } else {
+                    light
+                };
                 self.fill(
                     buf,
                     ArtRect {
@@ -133,18 +151,10 @@ impl Pen {
     }
 }
 
-/// The 4x4 ordered (Bayer) threshold matrix.
-///
-/// Its evenly-spread levels are why a dither reads as a smooth ramp rather than
-/// as noise or as banding: the classic pixel-art answer, and the reason the
-/// floor falloff needs two tones instead of a dozen.
-const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-/// How many threshold levels [`BAYER_4X4`] spreads.
-const BAYER_LEVELS: u32 = 16;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render_scale::RenderScale;
 
     const LIGHT: Rgb = Rgb {
         r: 200,
@@ -160,29 +170,6 @@ mod tests {
 
     fn pen(s: u16, d: u16) -> Pen {
         Pen::new(RenderScale::new(s).expect("nonzero"), d).expect("d divides s")
-    }
-
-    #[test]
-    fn a_pen_needs_its_density_to_divide_the_scale() {
-        let s = RenderScale::new(8).expect("nonzero");
-        assert_eq!(Pen::new(s, 4).map(|p| p.k.get()), Some(2));
-        assert_eq!(
-            Pen::new(s, 3),
-            None,
-            "an art pixel would straddle buffer pixels"
-        );
-        assert_eq!(Pen::new(s, 0), None);
-    }
-
-    #[test]
-    fn a_pens_density_is_the_densest_the_pack_draws_at_that_scale() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("the embedded pack loads");
-        let d = pack.max_density_variant();
-        let at = |s: u16| Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
-        assert_eq!(at(d * 2), pen(d * 2, d), "the variant's grid");
-        assert_eq!(at(1), pen(1, 1), "no variant fits: the base art's grid");
     }
 
     #[test]
@@ -202,6 +189,27 @@ mod tests {
                             "s {s} d {d}: the art pixel at ({x}, {y}) is split"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_take_copies_whole_art_pixels_where_it_holds() {
+        let take = |x: ArtPx, y: ArtPx| (x.0 + 2 * y.0).is_multiple_of(3);
+        for (s, d) in [(1u16, 1u16), (8, 4), (12, 4)] {
+            let pen = pen(s, d);
+            let k = s / d;
+            let mut buf = RgbBuffer::filled(9 * k, 9 * k, BG);
+            pen.take_where(&mut buf, &RgbBuffer::filled(9 * k, 9 * k, LIGHT), take);
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
+                    let want = if take(ArtPx(x / k), ArtPx(y / k)) {
+                        LIGHT
+                    } else {
+                        BG
+                    };
+                    assert_eq!(buf.get(x, y), want, "s {s} d {d}: ({x}, {y})");
                 }
             }
         }
@@ -263,6 +271,82 @@ mod tests {
         pen(1, 1).dither_band(&mut buf, ArtPx(3), ArtPx(3), DARK, LIGHT);
         pen(1, 1).dither_band(&mut buf, ArtPx(3), ArtPx(1), DARK, LIGHT);
         assert!(buf.as_slice().iter().all(|&c| c == BG));
+    }
+
+    #[test]
+    fn a_shade_steps_every_pixel_along_its_own_ramp() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        for x in 4..8 {
+            for y in 0..4 {
+                buf.put(x, y, LIGHT);
+            }
+        }
+        let r = ArtRect {
+            x: ArtPx(1),
+            y: ArtPx(0),
+            w: ArtPx(2),
+            h: ArtPx(1),
+        };
+        pen(2, 1).shade(&mut buf, r, &mut Stepped::new(-2));
+        assert_eq!(
+            buf.get(2, 1),
+            BG.ramp(-2),
+            "the dark pixel, two stops darker"
+        );
+        assert_eq!(
+            buf.get(5, 0),
+            LIGHT.ramp(-2),
+            "the light one, relative to itself"
+        );
+        assert_eq!(buf.get(1, 0), BG, "nothing west of the rect");
+        assert_eq!(buf.get(2, 2), BG, "nothing south of it");
+    }
+
+    #[test]
+    fn a_shade_past_the_edge_clips_rather_than_wrapping() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        let r = ArtRect {
+            x: ArtPx(3),
+            y: ArtPx(0),
+            w: ArtPx(2),
+            h: ArtPx(1),
+        };
+        pen(2, 1).shade(&mut buf, r, &mut Stepped::new(-2));
+        assert_eq!(buf.get(7, 1), BG.ramp(-2), "the part on the buffer");
+        assert_eq!(buf.get(0, 1), BG, "nothing wraps into the next row");
+        assert_eq!(buf.get(1, 2), BG, "nor the one after");
+    }
+
+    #[test]
+    fn a_grid_shades_each_line_pixel_once() {
+        let mut buf = RgbBuffer::filled(8, 8, BG);
+        let r = ArtRect {
+            x: ArtPx(0),
+            y: ArtPx(0),
+            w: ArtPx(4),
+            h: ArtPx(4),
+        };
+        pen(2, 1).shade_grid(&mut buf, r, ArtPx(2), -2);
+        let line = BG.ramp(-2);
+        assert_eq!(buf.get(0, 0), line, "a crossing, shaded once");
+        assert_eq!(buf.get(4, 5), line, "a row");
+        assert_eq!(buf.get(5, 3), line, "a column");
+        assert_eq!(buf.get(3, 3), BG, "inside a cell");
+    }
+
+    #[test]
+    fn a_recolour_covers_whole_art_pixels_from_their_offset() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        let r = ArtRect {
+            x: ArtPx(1),
+            y: ArtPx(0),
+            w: ArtPx(4),
+            h: ArtPx(1),
+        };
+        pen(2, 1).recolour(&mut buf, r, |dx, _, c| if dx == 1 { LIGHT } else { c });
+        assert_eq!(buf.get(4, 1), LIGHT, "offset 1 is the art pixel at x 2");
+        assert_eq!(buf.get(5, 0), LIGHT, "all of it");
+        assert_eq!(buf.get(2, 0), BG, "offset 0 kept its colour");
     }
 
     #[test]

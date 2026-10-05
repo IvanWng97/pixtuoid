@@ -1,28 +1,25 @@
-use std::time::SystemTime;
-
-use pixtuoid_core::state::DaemonState;
-use pixtuoid_core::SceneState;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{display_width, to_color, StateCounts};
+use super::{display_width, to_color};
 use crate::tui::renderer::clip_widget_rect;
+use pixtuoid_scene::board::BoardModel;
 
 /// The wall board's text width, DERIVED from the painted neon panel's dark
 /// interior so the lit sign's letters can never overrun the glowing frame
 /// (laying text to the full outer `NEON_PANEL_W` overran it). Only the
 /// horizontal derives — the vertical is a half-block 2:1 coordinate system, so
 /// the 3-row height and the `+1` cell row stay literal.
-pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W;
+pub(super) const BOARD_W: u16 = pixtuoid_scene::layout::NEON_PANEL_INNER_W;
 
 /// The board text's top-left terminal cell = the neon panel's dark interior
 /// origin. BOTH `paint_wall_display` and `star_hit_rect` read THIS one helper,
 /// so the painted text and the click target share an origin.
 fn board_cell_origin(scene_rect: Rect) -> (u16, u16) {
     (
-        scene_rect.x + pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X,
+        scene_rect.x + pixtuoid_scene::layout::NEON_PANEL_INNER_X,
         scene_rect.y + 1,
     )
 }
@@ -40,29 +37,16 @@ fn board_tone_color(
 /// the mood pulse (L2), the office context row (L3). It owns nothing critical
 /// exclusively, since it may clip off-screen; the must-not-miss signals live in
 /// the footer.
-#[allow(clippy::too_many_arguments)] // a painter's distinct inputs (like paint_footer)
 pub(crate) fn paint_wall_display(
     f: &mut ratatui::Frame<'_>,
-    scene: &SceneState,
+    model: &BoardModel,
     scene_rect: Rect,
-    now: SystemTime,
-    counts: StateCounts,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
-    gateway: Option<DaemonState>,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
 
     let (cell_x, cell_y) = board_cell_origin(scene_rect);
-
-    let model = pixtuoid_scene::board::build_board(
-        counts,
-        pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        floor_info.map(|fi| (fi.current, fi.total_floors)),
-        gateway,
-        now,
-    );
 
     // The star right-flushes to the panel edge — the SAME position
     // `star_hit_rect` derives the click target from. The assert is STRICT (`<`)
@@ -141,6 +125,10 @@ pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_core::SceneState;
+    use pixtuoid_core::state::DaemonState;
+    use pixtuoid_scene::board::StateCounts;
+    use std::time::SystemTime;
 
     fn full_bounds(w: u16, h: u16) -> Rect {
         Rect {
@@ -157,8 +145,8 @@ mod tests {
 
     #[test]
     fn wall_board_renders_the_three_model_lines_over_the_panel() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         // Uptime reads the scene, empty here → "<1m". A gateway + no floor
         // exercises the L3 chip and the single-floor (no breadcrumb) context.
         let counts = StateCounts {
@@ -172,16 +160,15 @@ mod tests {
         let scene_rect = full_bounds(120, 44);
         let mut term = Terminal::new(TestBackend::new(120, 44)).unwrap();
         term.draw(|f| {
-            paint_wall_display(
-                f,
-                &scene,
-                scene_rect,
-                SystemTime::UNIX_EPOCH,
+            let model = pixtuoid_scene::board::build_board(
                 counts,
+                pixtuoid_scene::board::scene_uptime_secs(&scene, SystemTime::UNIX_EPOCH),
                 None,
                 Some(DaemonState::Idle),
-                &pixtuoid_scene::theme::NORMAL,
+                pixtuoid_scene::anim::Motion::Full,
+                SystemTime::UNIX_EPOCH,
             );
+            paint_wall_display(f, &model, scene_rect, &pixtuoid_scene::theme::NORMAL);
         })
         .unwrap();
         let buf = term.backend().buffer();
@@ -207,7 +194,7 @@ mod tests {
         assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
         assert!(
             !l3.contains('F'),
-            "no floor breadcrumb when floor_info is None: {l3:?}"
+            "no floor breadcrumb when floor is None: {l3:?}"
         );
     }
 
@@ -229,7 +216,14 @@ mod tests {
             };
             for ms in (0..A_MINUTE_MS).step_by(FRAME_MS) {
                 let now = SystemTime::UNIX_EPOCH + Duration::from_millis(ms);
-                let model = pixtuoid_scene::board::build_board(counts, 0, None, None, now);
+                let model = pixtuoid_scene::board::build_board(
+                    counts,
+                    0,
+                    None,
+                    None,
+                    pixtuoid_scene::anim::Motion::Full,
+                    now,
+                );
                 let l2: String = model.mood.iter().map(|s| s.text.as_str()).collect();
                 assert_eq!(display_width(&l2), l2.chars().count(), "{l2:?} at {ms}ms");
                 assert!(display_width(&l2) <= BOARD_W as usize, "{l2:?} at {ms}ms");
@@ -240,7 +234,7 @@ mod tests {
     #[test]
     fn star_hit_rect_fits_and_truncates() {
         let star_w = display_width(pixtuoid_scene::board::BOARD_STAR) as u16;
-        let inner_x = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X;
+        let inner_x = pixtuoid_scene::layout::NEON_PANEL_INNER_X;
         let star_x = inner_x + BOARD_W - star_w;
         let wide = star_hit_rect(full_bounds(120, 44)).expect("star fits");
         assert_eq!(

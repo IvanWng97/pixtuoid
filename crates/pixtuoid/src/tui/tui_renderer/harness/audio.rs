@@ -2,7 +2,7 @@
 //! renderer must feed the audio thread ONLY the floor being viewed.
 
 use super::*;
-use crate::audio::{drain_frames, AudioHandle};
+use crate::audio::{AudioHandle, drain_frames};
 
 fn active_on(path: &str, floor_idx: usize, desk: usize) -> AgentSlot {
     let mut s = slot(AgentId::from_transcript_path(path), floor_idx, desk, t0());
@@ -32,7 +32,7 @@ fn audio_stems_count_only_the_viewed_floor() {
     let (handle, rx) = AudioHandle::test_pair();
     r.set_audio(handle);
     let pack = pack();
-    r.render(&scene, &pack, t0()).expect("render");
+    r.render(&scene, pack, t0()).expect("render");
     let frames = drain_frames(&rx);
     assert!(!frames.is_empty(), "an enabled handle receives frames");
     let stems = frames.last().unwrap().stems;
@@ -62,13 +62,13 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
     r.set_audio(handle);
     let pack = pack();
     let mut now = t0();
-    r.render(&scene, &pack, now).expect("prime render");
+    r.render(&scene, pack, now).expect("prime render");
     drain_frames(&rx);
 
     agents.push(active_on("/d/f1-new.jsonl", 1, cap));
     let scene = scene_with(agents.clone(), cap);
     now += std::time::Duration::from_millis(33);
-    r.render(&scene, &pack, now).expect("render");
+    r.render(&scene, pack, now).expect("render");
     let off_floor: Vec<_> = drain_frames(&rx)
         .into_iter()
         .flat_map(|f| f.events)
@@ -81,7 +81,7 @@ fn door_chime_fires_only_for_viewed_floor_arrivals() {
     agents.push(active_on("/d/f0-new.jsonl", 0, 1));
     let scene = scene_with(agents, cap);
     now += std::time::Duration::from_millis(33);
-    r.render(&scene, &pack, now).expect("render");
+    r.render(&scene, pack, now).expect("render");
     let on_floor: Vec<_> = drain_frames(&rx)
         .into_iter()
         .flat_map(|f| f.events)
@@ -108,11 +108,11 @@ fn floor_switch_reprimes_without_a_chime_volley() {
     r.set_audio(handle);
     let pack = pack();
     let mut now = t0();
-    r.render(&scene, &pack, now).expect("prime on floor 0");
+    r.render(&scene, pack, now).expect("prime on floor 0");
     drain_frames(&rx);
 
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &scene, &pack, &mut now, 1);
+    render_until_settled(&mut r, &scene, pack, &mut now, 1);
     let after_switch: Vec<_> = drain_frames(&rx)
         .into_iter()
         .flat_map(|f| f.events)
@@ -132,7 +132,7 @@ fn floor_switch_reprimes_without_a_chime_volley() {
         cap,
     );
     now += std::time::Duration::from_millis(33);
-    r.render(&scene, &pack, now).expect("render");
+    r.render(&scene, pack, now).expect("render");
     let arrivals: Vec<_> = drain_frames(&rx)
         .into_iter()
         .flat_map(|f| f.events)
@@ -149,7 +149,7 @@ fn footer_note_glyph_tracks_effective_audibility() {
     let pack = pack();
 
     let mut silent = build(80, 40, vec![]);
-    silent.render(&scene, &pack, t0()).expect("render");
+    silent.render(&scene, pack, t0()).expect("render");
     assert!(
         !frame_text(silent.frame_buffer()).contains('\u{2669}'),
         "a disabled handle shows no note glyph"
@@ -158,14 +158,14 @@ fn footer_note_glyph_tracks_effective_audibility() {
     let mut r = build(80, 40, vec![]);
     let (handle, _rx) = AudioHandle::test_pair();
     r.set_audio(handle.clone());
-    r.render(&scene, &pack, t0()).expect("render");
+    r.render(&scene, pack, t0()).expect("render");
     assert!(
         frame_text(r.frame_buffer()).contains('\u{2669}'),
         "enabled + unmuted shows ♩ in the footer"
     );
 
     handle.set_muted(true);
-    r.render(&scene, &pack, t0()).expect("render");
+    r.render(&scene, pack, t0()).expect("render");
     assert!(
         !frame_text(r.frame_buffer()).contains('\u{2669}'),
         "muting hides the glyph"
@@ -173,15 +173,66 @@ fn footer_note_glyph_tracks_effective_audibility() {
 
     handle.set_muted(false);
     handle.set_volume(0.0);
-    r.render(&scene, &pack, t0()).expect("render");
+    r.render(&scene, pack, t0()).expect("render");
     assert!(
         !frame_text(r.frame_buffer()).contains('\u{2669}'),
         "0% volume shows no note glyph"
     );
     handle.set_volume(0.4);
-    r.render(&scene, &pack, t0()).expect("render");
+    r.render(&scene, pack, t0()).expect("render");
     assert!(
         frame_text(r.frame_buffer()).contains('\u{2669}'),
         "restoring volume restores the glyph"
     );
+}
+
+/// A forced weather reaches every consumer the renderer feeds: the viewed
+/// frame, both halves of a floor slide, and the audio frame's rain.
+#[test]
+fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
+    use pixtuoid_scene::sky::{Weather, WeatherPolicy};
+    let cap = 16;
+    let scene = scene_with(
+        vec![
+            active_on("/w/f0.jsonl", 0, 0),
+            active_on("/w/f1.jsonl", 1, cap),
+        ],
+        cap,
+    );
+    let under = |w| {
+        let mut r = build(80, 40, vec![]);
+        let (handle, rx) = AudioHandle::test_pair();
+        r.set_audio(handle);
+        r.set_weather(WeatherPolicy::Forced(w));
+        r.render(&scene, pack(), t0()).expect("render");
+        let rain = drain_frames(&rx).last().expect("a frame").stems.rain;
+        let still = r.buf().expect("a frame").as_slice().to_vec();
+        r.navigate_floor(1, t0());
+        r.render(&scene, pack(), t0() + Duration::from_millis(33))
+            .expect("render");
+        assert!(r.transition().is_some(), "{w:?}: mid-slide");
+        let halves = [0, 1].map(|f| {
+            r.floors[f]
+                .raster
+                .pixels()
+                .expect("a frame")
+                .as_slice()
+                .to_vec()
+        });
+        (rain, still, halves)
+    };
+    let (storm, clear) = (under(Weather::Storm), under(Weather::Clear));
+    assert!(
+        storm.0 > 0.0 && clear.0 == 0.0,
+        "the rain follows the weather: {} vs {}",
+        storm.0,
+        clear.0
+    );
+    assert!(storm.1 != clear.1, "the viewed frame follows the weather");
+    for f in 0..2 {
+        assert!(
+            storm.2[f] != clear.2[f],
+            "slide half {f} follows the weather"
+        );
+    }
 }

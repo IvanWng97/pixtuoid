@@ -272,7 +272,7 @@ impl From<String> for SlotLabel {
 pub struct AgentSlot {
     /// This agent's stable identity — the `SceneState::agents` map key.
     pub agent_id: AgentId,
-    /// Registry name of the source that produced this agent (e.g. `cc`, `codex`).
+    /// Registry name of the source that produced this agent (e.g. `claude-code`, `codex`).
     #[serde(with = "arc_str_serde")]
     pub source: Arc<str>,
     /// Source-native session identifier this slot is keyed under.
@@ -645,7 +645,7 @@ impl DaemonRoster {
     pub(crate) fn instances_of_mut(
         &mut self,
         source: &str,
-    ) -> impl Iterator<Item = (&DaemonInstanceId, &mut DaemonPresence)> + '_ {
+    ) -> impl Iterator<Item = (&DaemonInstanceId, &mut DaemonPresence)> + use<'_> {
         self.0
             .get_mut(source)
             .into_iter()

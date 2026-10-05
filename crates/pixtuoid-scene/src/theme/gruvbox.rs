@@ -164,11 +164,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 189,
             b: 47,
         },
-        ceiling_pool: Rgb {
-            r: 235,
-            g: 219,
-            b: 178,
-        },
         floor_lamp_halo: Rgb {
             r: 254,
             g: 128,
@@ -367,9 +362,9 @@ pub static GRUVBOX: Theme = Theme {
             b: 132,
         },
         label_exiting: Rgb {
-            r: 102,
-            g: 92,
-            b: 84,
+            r: 150,
+            g: 135,
+            b: 120,
         },
         tooltip_bg: Rgb {
             r: 29,

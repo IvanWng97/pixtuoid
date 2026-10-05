@@ -48,9 +48,9 @@ fn run() -> Result<()> {
     if is_run_tui {
         use pixtuoid::term::ColorPreflight;
         match pixtuoid::term::color_preflight(
-            std::env::var("NO_COLOR").ok().as_deref(),
-            std::env::var("CLICOLOR_FORCE").ok().as_deref(),
-            std::env::var("TERM").ok().as_deref(),
+            pixtuoid_core::platform::text_env("NO_COLOR").as_deref(),
+            pixtuoid_core::platform::text_env("CLICOLOR_FORCE").as_deref(),
+            pixtuoid_core::platform::text_env("TERM").as_deref(),
         ) {
             ColorPreflight::Proceed => {}
             ColorPreflight::ForceColor => crossterm::style::force_color_output(true),
@@ -88,9 +88,10 @@ fn run() -> Result<()> {
     if pixtuoid::term::warn_zone(
         is_run_tui,
         std::io::IsTerminal::is_terminal(&std::io::stderr()),
-        std::env::var("COLORTERM").ok().as_deref(),
-        std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
-    ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT) != Some(true)
+        pixtuoid_core::platform::text_env("COLORTERM").as_deref(),
+        pixtuoid_core::platform::text_env("PIXTUOID_NO_TRUECOLOR_WARN").as_deref(),
+    ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT)
+        .warrants_warning()
     {
         let _ = writeln!(
             std::io::stderr(),
@@ -111,13 +112,20 @@ fn run() -> Result<()> {
             source,
             max_desks: cli_max_desks,
             headless,
+            graphics,
         } => {
-            let rc = build_run_config(cli_theme.as_deref(), source, cli_max_desks, headless)?;
+            let rc = build_run_config(
+                cli_theme.as_deref(),
+                source,
+                cli_max_desks,
+                headless,
+                graphics,
+            )?;
             runtime::run(rc)
         }
         Cmd::Floating { source } => {
             // No desk cap: floating seeds its capacity from the window.
-            let rc = build_run_config(cli_theme.as_deref(), source, None, false)?;
+            let rc = build_run_config(cli_theme.as_deref(), source, None, false, None)?;
             floating::run(rc)
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
@@ -174,6 +182,7 @@ fn build_run_config(
     source: SourceArgs,
     cli_max_desks: Option<usize>,
     headless: bool,
+    cli_graphics: Option<pixtuoid::GraphicsMode>,
 ) -> Result<runtime::RunConfig> {
     let SourceArgs {
         socket,
@@ -193,6 +202,8 @@ fn build_run_config(
     let desk_cap = config::resolve_desk_cap(&cfg, cli_max_desks, &mut cfg_warnings);
     let pack = config::resolve_pack_source(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
+    let graphics = config::resolve_graphics(&cfg, cli_graphics, &mut cfg_warnings);
+    let motion = config::resolve_motion(&cfg, &mut cfg_warnings);
     let connected = config::resolve_connected(&cfg);
     if !headless {
         // Config problems must reach stderr BEFORE any alternate screen / window,
@@ -217,6 +228,8 @@ fn build_run_config(
         log_path: Some(logging::log_file_path()),
         first_run,
         audio: config::resolve_audio(&cfg),
+        graphics,
+        motion,
     })
 }
 

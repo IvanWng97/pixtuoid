@@ -35,6 +35,9 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Pipes", "Win32_System_Threading"] }
 
+[dev-dependencies]
+temp-env = { workspace = true }
+
 [target.'cfg(unix)'.dev-dependencies]
 tempfile = "3"
 
@@ -45,4 +48,6 @@ tokio = { workspace = true, features = ["sync", "rt", "macros", "net", "time", "
 section = "utils"
 assets = [
     ["target/release/pixtuoid-hook", "usr/bin/", "755"],
+    # cargo-deb's generated copyright names the license; MIT wants its text.
+    ["../../LICENSE", "usr/share/doc/pixtuoid-hook/", "644"],
 ]

@@ -1,6 +1,9 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
-use crate::layout::{furniture_def, pct, Bounds, Furniture, Point, OBSTACLE_PAD_PX};
+use super::walls::WALL_H;
+use crate::layout::{
+    Bounds, Furniture, OBSTACLE_PAD_PX, Pivot, Point, anchored_top_left, furniture_def, pct,
+};
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
 /// invariant that a fitted room produces exactly 2 sofas + 1 table.
@@ -10,6 +13,38 @@ pub struct MeetingTrio {
     pub sofas: [Point; 2],
     /// The table centre, midway between the two sofas (pixel-space).
     pub table: Point,
+}
+
+/// A meeting rug's width.
+const MEETING_RUG_W: u16 = 18;
+/// How far a meeting rug runs past the two sofa centres, both ends together.
+const MEETING_RUG_OVERHANG: u16 = 8;
+
+impl MeetingTrio {
+    /// The rug under this trio's table, reaching from sofa to sofa but no
+    /// further than the table's distance to `ground_end`, the row the ground ends
+    /// at (plus the same overhang).
+    pub(crate) fn rug(&self, ground_end: u16) -> Bounds {
+        let [north, south] = self.sofas;
+        let h = south
+            .y
+            .saturating_sub(north.y)
+            .saturating_add(MEETING_RUG_OVERHANG)
+            // A trio by the south edge shortens its rug, still centred on the
+            // table.
+            .min(
+                ground_end
+                    .saturating_sub(self.table.y)
+                    .saturating_add(MEETING_RUG_OVERHANG),
+            );
+        let tl = anchored_top_left(Pivot::Center, self.table, MEETING_RUG_W, h);
+        Bounds {
+            x: tl.x,
+            y: tl.y,
+            width: MEETING_RUG_W,
+            height: h,
+        }
+    }
 }
 
 /// A meeting room: its bounds plus the trio it hosts. Its index in
@@ -35,7 +70,7 @@ pub(crate) const COAT_HOOK_DX: u16 = 1;
 pub(crate) const COAT_W: u16 = 2;
 
 /// Rows from a coat rack's pole top to its base: the row it y-sorts at.
-pub(crate) const COAT_RACK_BASE_DY: u16 = 7;
+pub(crate) const COAT_RACK_BASE_DY: u16 = 11;
 
 /// The box a coat rack whose pole top is `pos` is drawn in: the one authority
 /// for its painter, its y-sort row, its hover box and the chair-clearance gate.
@@ -54,13 +89,15 @@ impl MeetingRoom {
     /// room-centre row) — or `None` when a fitted room is too narrow for the
     /// rack's coats to clear the east chair and its sitter.
     pub(crate) fn coat_rack_pos(&self) -> Option<Point> {
+        /// Rows from the room-centre row down to the rack's base.
+        const BASE_BELOW_MID: u16 = 3;
         let b = self.bounds;
         if b.width <= 20 {
             return None;
         }
         let pos = Point {
             x: b.x + b.width - 5,
-            y: b.y + b.height / 2 - 4,
+            y: (b.y + b.height / 2 + BASE_BELOW_MID).checked_sub(COAT_RACK_BASE_DY)?,
         };
         if let Some(t) = &self.trio {
             // The seated sprite shares the chair body's east edge, so the
@@ -76,11 +113,6 @@ impl MeetingRoom {
             }
         }
         Some(pos)
-    }
-
-    /// The box the coat rack is drawn in (`coat_rack_rect_at` its pole top).
-    pub fn coat_rack_rect(&self) -> Option<Bounds> {
-        self.coat_rack_pos().map(coat_rack_rect_at)
     }
 
     /// Minimum room height that fits the sofa/table trio — the fit gate AND the
@@ -106,14 +138,21 @@ impl MeetingRoom {
     /// sits above the wall band's walkable carpet apron, so its sofa may tuck to
     /// `sofa_h/2`; the DENSE room (room 1) sits under the glass divider (which
     /// stamps `WALL_THICK_H` rows into its top), so its sofa needs a full
-    /// `sofa_h` for its ground to clear the wall.
+    /// `sofa_h` for its ground to clear the wall. Room 0 always has a room
+    /// stacked below, whose wall's cap rises into its south rows, so its south
+    /// sofa ends above the cap, clear of the doorway cut there.
     pub(crate) fn place_trio(bounds: Bounds, dense: bool) -> MeetingTrio {
         let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
         let north_floor = if dense { sofa_h } else { sofa_h / 2 };
+        let south_floor = if dense {
+            sofa_h
+        } else {
+            WALL_H.cap + sofa_h.div_ceil(2)
+        };
         let cx = bounds.x + bounds.width / 2;
         let north_y = (bounds.y + pct(bounds.height, 20)).max(bounds.y + north_floor);
         let south_y = (bounds.y + pct(bounds.height, 80))
-            .min(bounds.y + bounds.height.saturating_sub(sofa_h));
+            .min(bounds.y + bounds.height.saturating_sub(south_floor));
         MeetingTrio {
             sofas: [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }],
             table: Point {
@@ -125,6 +164,7 @@ impl MeetingRoom {
 
     /// The entrance doormat's sprite box (bordered rug on the cubicle side, one
     /// clear column east of the room's east wall) — `None` on a room too narrow.
+    /// The roster's mat also gives way to what stands over it.
     pub fn doormat_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Lazy `.then`: `b.height / 2 - 2` must not run for a sub-gate room.
@@ -147,5 +187,73 @@ impl MeetingRoom {
                 .map_or(0, |s| s.w);
             t.sofas[0].x + sofa_fp_w / 2 + OBSTACLE_PAD_PX
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dual-meeting floors (160x120, 192x158, 240x160) stack a room by the
+    /// south edge, whose last rows the corridor shares.
+    #[test]
+    fn every_meeting_rug_ends_before_the_runner() {
+        let mut south_rooms = 0;
+        for (w, h) in [
+            (96u16, 60u16),
+            (160, 96),
+            (160, 120),
+            (192, 158),
+            (240, 144),
+            (240, 160),
+            (320, 180),
+        ] {
+            for seed in 0..8 {
+                let Some(layout) = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
+                else {
+                    continue;
+                };
+                let ground_end = layout.corridor.map_or(layout.buf_h, |c| c.y);
+                for f in layout.fixtures() {
+                    let crate::layout::FixtureKind::MeetingRug { room } = f.kind else {
+                        continue;
+                    };
+                    let room = layout.meeting_rooms[room].bounds;
+                    south_rooms += usize::from(room.y + room.height > ground_end);
+                    let rug = f.visual;
+                    assert!(
+                        rug.y + rug.height <= ground_end,
+                        "{w}x{h} seed {seed}: {rug:?} past {ground_end}"
+                    );
+                }
+            }
+        }
+        assert!(south_rooms > 0, "no meeting room reaches the corridor");
+    }
+
+    #[test]
+    fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_floor_end() {
+        let x = 40;
+        let trio = MeetingTrio {
+            sofas: [Point { x, y: 50 }, Point { x, y: 90 }],
+            table: Point { x, y: 70 },
+        };
+        let ground_end = 96;
+        assert_eq!(
+            trio.rug(ground_end).height,
+            ground_end - trio.table.y + MEETING_RUG_OVERHANG,
+            "held to the table's distance from the ground's end"
+        );
+        assert_eq!(
+            trio.rug(200).height,
+            90 - 50 + MEETING_RUG_OVERHANG,
+            "sofa to sofa where the floor allows"
+        );
+        let edge = trio.table.y + MEETING_RUG_OVERHANG / 2;
+        assert_eq!(
+            trio.rug(edge).height,
+            edge - trio.table.y + MEETING_RUG_OVERHANG,
+            "nearer the edge than the overhang"
+        );
     }
 }

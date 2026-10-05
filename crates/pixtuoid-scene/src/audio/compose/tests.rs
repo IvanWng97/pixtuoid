@@ -414,3 +414,29 @@ fn night_hats_articulate_above_the_v1_floor() {
         }
     }
 }
+
+/// Every hit a seeded groove lays, bit for bit: the drums the generator
+/// writes, which no frozen take pins. A change to a hit's time, gain or the
+/// order its noise is drawn in moves this.
+#[test]
+fn a_seeded_groove_lays_every_hit_where_it_did() {
+    let mut words = Vec::new();
+    let beat_s = 60.0 / 74.0;
+    let lanes = DAY_GROOVES
+        .iter()
+        .map(|g| day_drums(&mut NoiseStream::new(7), g, beat_s))
+        .chain(std::iter::once(night_drums(
+            &mut NoiseStream::new(7),
+            beat_s,
+        )));
+    for (hits, kicks) in lanes {
+        for (at, kind, gain) in hits {
+            words.extend([at.to_bits(), kind as u32, gain.to_bits()]);
+        }
+        words.extend(kicks.into_iter().map(f32::to_bits));
+    }
+    let h = pixtuoid_core::id::fnv1a(words.into_iter().map(u64::from));
+    assert_eq!(h, GOLDEN, "{h:#018x}");
+}
+
+const GOLDEN: u64 = 0x71ca_6f22_f488_2daf;

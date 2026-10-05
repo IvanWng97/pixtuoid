@@ -27,7 +27,7 @@ pub mod synth;
 // The shared per-tick engine surface — both audio painters build on these, so
 // they can't drift.
 pub use bank::OneShotPool;
-pub use engine::{AudioEngine, PlayCmd, TickCommands, MAX_DT_S};
+pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
 use crate::board::StateCounts;
 
@@ -208,10 +208,11 @@ impl TrackSwitch {
     /// Record a requested switch — ignored while unchanged or while a switch
     /// is already in flight (the settling latch). No-op before `init`.
     pub fn request(&mut self, track: TrackId) {
-        if let Some(cur) = self.current {
-            if track != cur && self.pending.is_none() {
-                self.pending = Some(track);
-            }
+        if let Some(cur) = self.current
+            && track != cur
+            && self.pending.is_none()
+        {
+            self.pending = Some(track);
         }
     }
 
@@ -223,12 +224,12 @@ impl TrackSwitch {
     /// Once the held track stems have reached silence, commit the pending
     /// switch and return `Some(to)` to build + swap in. `None` until then.
     pub fn try_swap(&mut self, track_silent: bool) -> Option<TrackId> {
-        if let Some(to) = self.pending {
-            if track_silent {
-                self.current = Some(to);
-                self.pending = None;
-                return Some(to);
-            }
+        if let Some(to) = self.pending
+            && track_silent
+        {
+            self.current = Some(to);
+            self.pending = None;
+            return Some(to);
         }
         None
     }
@@ -251,7 +252,7 @@ impl AudioCueTracker {
 
     /// Feed one frame's observations; returns the events that fired on this
     /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to its
-    /// kind so the tracker never holds a `Layout` borrow and tests need no
+    /// kind so the tracker never holds a `SceneLayout` borrow and tests need no
     /// layout at all. Purely EDGE-triggered — it takes no clock, so a caller
     /// can't read it as time-dependent.
     pub fn observe<'a>(
@@ -282,7 +283,7 @@ impl AudioCueTracker {
         self.seen_agents = ids;
 
         // A waypoint BECOMING occupied is the moment the matching feedback
-        // animation starts — `sim.rs` keys its anims on this same set.
+        // animation starts — `sim::resolve_characters` keys its anims on this same set.
         for &idx in occupied_waypoints.difference(&self.occupied) {
             match waypoint_kind(idx) {
                 Some(WaypointKind::Printer) => events.push(OneShot::PrinterWhir),

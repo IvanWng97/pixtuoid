@@ -4,7 +4,8 @@ description            = "Terminal pixel-art office for AI coding agents"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
-license.workspace      = true
+# Embeds Monaspace (fonts/) and links pixtuoid-scene's font.
+license                = "MIT AND OFL-1.1"
 repository.workspace   = true
 authors.workspace      = true
 homepage.workspace     = true
@@ -37,22 +38,26 @@ ratatui            = { workspace = true }
 # Linux prebuilds exactly the way ALSA already does (see the `audio` feature).
 # Its sixel backend is `icy_sixel`, pure Rust, so the trimmed set has no C dep.
 ratatui-image      = { version = "11", default-features = false, features = ["crossterm"], optional = true }
+# The kitty encoder's base64: ratatui-image's own, so no second crate.
+base64-simd        = { version = "0.8", optional = true }
+# iTerm2's PNG and kitty's zlib: what ratatui-image's `image` already builds.
+png                = { version = "0.18", optional = true }
+miniz_oxide        = { version = "0.8", optional = true }
 crossterm          = { workspace = true }
-unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
 # `preserve_order` is enabled HERE, not workspace-wide: config merges are a
 # READ→MERGE→WRITE round-trip and serde_json's default BTreeMap-backed `Map`
 # re-emits every object ALPHABETICALLY, silently reordering the user's own
 # hand-authored file on a `connect`. Scoped to this crate so `pixtuoid-web` need
-# not pay indexmap's code size in the committed wasm artifact.
+# not pay indexmap's code size in the site's wasm.
 serde_json         = { workspace = true, features = ["preserve_order"] }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
 # YAML parse+emit for the Hermes install target — the maintained yaml-rust
 # successor, serde_yaml and serde_yml both being abandoned. It data-preserves a
 # user's other config keys on merge but does NOT round-trip comments.
-saphyr             = "0.0.12"
+saphyr             = "0.1.0"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -82,14 +87,17 @@ clap_mangen = "0.3.0"
 
 # Ambient office audio: rodio's playback half only (cpal underneath) — no decoder
 # features, every sound is synthesized into raw sample buffers at startup.
-# Optional so `--no-default-features` builds a silent binary (and skips cpal's
-# Linux ALSA system-header requirement). `tracing` routes rodio's OWN diagnostics
+# Optional, and left out of `portable`, because cpal needs the ALSA system
+# headers on Linux. `tracing` routes rodio's OWN diagnostics
 # to `tracing::error!/debug!` instead of its default `eprintln!` — a raw stderr
 # write mid-altscreen corrupts the TUI.
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "tracing"], optional = true }
 
 [features]
-default = ["audio", "graphics"]
+# `build-target` builds the Linux release artifacts with `portable` alone, so a
+# new default feature goes in `portable` unless it can't build on those targets.
+default = ["audio", "portable"]
+portable = ["graphics"]
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 # Terminal image-protocol detection. Gates the DEPENDENCY, not a runtime switch:
@@ -100,7 +108,7 @@ audio = ["dep:rodio"]
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image"]
+graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs. Same 0.2 as
@@ -143,6 +151,7 @@ windows-sys = { version = "0.61", features = [
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
 tempfile = "3"
+temp-env = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { version = "1", features = ["json"] }
@@ -152,6 +161,8 @@ schemars = "1"
 # test-util: paused-clock signal-arm tests in runtime/driver.rs (headless_loop).
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
+# A decoder our SIXEL encoder's tests did not write: ratatui-image's own.
+icy_sixel = "0.5"
 insta    = "1"
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
@@ -165,6 +176,10 @@ test = true
 section = "utils"
 assets = [
     ["target/release/pixtuoid", "usr/bin/", "755"],
+    # cargo-deb's generated copyright names the license; MIT wants its text.
+    ["../../LICENSE", "usr/share/doc/pixtuoid/", "644"],
+    # The embedded fonts' notices, globbed as `just stage-notices` does.
+    ["../*/fonts/**/*.txt", "usr/share/doc/pixtuoid/licenses/", "644"],
 ]
 extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each running Claude Code session appears as an animated sprite in a top-down ASCII office."
 

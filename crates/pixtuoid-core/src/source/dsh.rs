@@ -14,9 +14,9 @@
 
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 /// Stable source id; MUST equal the registry row's `name`.
 pub const SOURCE_NAME: &str = "dsh";
@@ -72,7 +72,7 @@ fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v s
 /// approval pair maps onto the reducer's gated-wait mechanics keyed by
 /// `callId`: `asked` opens the wait naming the call it gates,
 /// `allowed-once` resumes it, anything else ends it.
-pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
+pub fn decode_dsh_payload(v: &Value) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
     };
@@ -251,13 +251,16 @@ mod tests {
             "type": "session_start", "sessionId": SID, "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                source,
-                session_id,
-                cwd,
-                parent_id,
-            }, AgentEvent::Identity { pid: None, .. }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    source,
+                    session_id,
+                    cwd,
+                    parent_id,
+                },
+                AgentEvent::Identity { pid: None, .. },
+            ] => {
                 assert_eq!(*agent_id, id());
                 assert_eq!(source, "dsh");
                 assert_eq!(session_id, SID);
@@ -310,11 +313,14 @@ mod tests {
             "callId": "call_1", "toolName": "bash",
         }));
         match &evs[..] {
-            [AgentEvent::Identity { .. }, AgentEvent::ActivityStart {
-                tool_use_id: Some(t),
-                detail: Some(ToolDetail::Generic { display }),
-                ..
-            }] => {
+            [
+                AgentEvent::Identity { .. },
+                AgentEvent::ActivityStart {
+                    tool_use_id: Some(t),
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                },
+            ] => {
                 assert_eq!(t, "call_1");
                 assert_eq!(display, "bash");
             }
@@ -338,11 +344,14 @@ mod tests {
             "toolName": "bash", "reason": "rm -rf",
         }));
         match &evs[..] {
-            [AgentEvent::Identity { .. }, AgentEvent::Waiting {
-                reason,
-                tool_use_id: Some(t),
-                ..
-            }] => {
+            [
+                AgentEvent::Identity { .. },
+                AgentEvent::Waiting {
+                    reason,
+                    tool_use_id: Some(t),
+                    ..
+                },
+            ] => {
                 assert_eq!(reason, "bash: rm -rf");
                 assert_eq!(t, "call_9");
             }

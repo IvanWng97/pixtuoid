@@ -8,16 +8,18 @@
 //!   - daemon presence    → the sibling channel (`apply_presence`) (openclaw)
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::harness::{Drive, Reach, DRIVEN_DESKS};
+use pixtuoid_core::SceneState;
+use pixtuoid_core::harness::{DRIVEN_DESKS, Drive, Reach};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
-use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::theme::NORMAL;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 use pixtuoid::tui::tui_renderer::TuiRenderer;
 
@@ -47,9 +49,14 @@ fn read_nonblank_lines(path: &Path) -> Vec<String> {
         .collect()
 }
 
+fn pack() -> Arc<Pack> {
+    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
+    Arc::clone(PACK.get_or_init(|| Arc::new(load_bundled_pack().expect("pack"))))
+}
+
 fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
     let terminal = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
-    TuiRenderer::new(terminal, &NORMAL, vec![])
+    TuiRenderer::new(terminal, &NORMAL, vec![], pack())
 }
 
 /// Render `scene` through the real renderer for a fixed settle window and return
@@ -58,13 +65,13 @@ fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
 /// (timezone-dependent) sky and isolates the agent's footprint.
 fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> Vec<(u8, u8, u8)> {
     // Bounded on BOTH sides: long enough for the entry walk to finish, and
-    // SHORTER than LightingState's 5s EMPTY_DEBOUNCE_MS — past that the empty
+    // SHORTER than VacancyDim's 5s EMPTY_DEBOUNCE_MS — past that the empty
     // office's floor dim would start easing while the occupied office holds its
     // lights, so the two backgrounds would stop being byte-identical and the diff
     // would no longer be purely the agent's paint. Don't raise past ~150 frames.
     const SETTLE_FRAMES: usize = 30;
     const FRAME_STEP: Duration = Duration::from_millis(33);
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = pack();
     let mut r = new_renderer(cols, rows);
     let mut t = now;
     for _ in 0..SETTLE_FRAMES {
@@ -72,6 +79,7 @@ fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> 
         t += FRAME_STEP;
     }
     r.buf()
+        .expect("a frame")
         .as_slice()
         .iter()
         .map(|px| (px.r, px.g, px.b))
@@ -469,9 +477,9 @@ fn lobster_px(
         }
     };
     settle(r, &baseline);
-    let base = r.buf().clone();
+    let base = r.buf().expect("a frame").clone();
     settle(r, scene);
-    let buf = r.buf();
+    let buf = r.buf().expect("a frame");
     (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))
@@ -578,7 +586,7 @@ fn openclaw_presence_envelope_renders_a_lobster() {
 
     // `entered_at` == `now` means the lobster is mid walk-in; settle at a LATER
     // wall-clock so it's scuttling the floor, well past the elevator.
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = pack();
     let mut r = new_renderer(160, 80);
     let times: Vec<_> = (0..10)
         .map(|k| now + Duration::from_secs(20) + Duration::from_millis(k * 130))

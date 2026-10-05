@@ -1,60 +1,40 @@
-use super::anchors::{
-    back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor, CHARACTER_SPRITE_W,
-};
-use super::seat::{settle_seat, Seat};
-use super::wall::WALL_THICK_H_PX;
+use super::background::paint_corridor_runner;
+use super::drawable::paint_character_at;
 use super::*;
-use crate::layout::stitch_vertical_wall;
+use crate::anim::{Motion, epoch_ms};
+use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
+use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
+use crate::cutaway::wall::paint_wall;
+use crate::floor::{FloorInputs, PetInputs};
+use crate::layout::CHARACTER_SPRITE_W;
+use crate::layout::Size;
+use crate::pack::{desk_art_top, frame_at};
 use crate::pose;
-use pixtuoid_core::sprite::{Frame, Pixel};
-use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
+use crate::sim::anchors::{
+    back_couch_top_left, compute_door_frame_idx, seated_top_left, walking_top_left,
+    waypoint_top_left,
+};
+use crate::sim::seat::{Seat, settle_seat};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
+use pixtuoid_core::sprite::Frame;
+use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
-use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
-#[test]
-fn stitch_vertical_wall_connects_each_joint() {
-    let top_margin = 48u16;
-    let top_wall_h = top_margin - 4;
-    let h_y = 90u16;
-    let h_rows = [h_y];
-
-    let (yt, _) = stitch_vertical_wall(top_margin, 70, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        yt, top_wall_h,
-        "top segment should connect up to the window band"
-    );
-
-    let (_, yb) = stitch_vertical_wall(60, h_y, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        yb,
-        h_y + (WALL_THICK_H_PX - 1),
-        "bottom should fill the corner"
-    );
-
-    let (yt2, _) = stitch_vertical_wall(h_y + 6, 120, top_margin, top_wall_h, &h_rows);
-    assert_eq!(yt2, h_y, "lower segment should bridge up to the cross wall");
-
-    let (yt3, yb3) = stitch_vertical_wall(h_y + 20, 130, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        (yt3, yb3),
-        (h_y + 20, 130),
-        "distant segment must not bridge"
-    );
-    let (yt4, yb4) = stitch_vertical_wall(60, 80, top_margin, top_wall_h, &[]);
-    assert_eq!((yt4, yb4), (60, 80), "no joints → unchanged");
-}
-
-#[test]
-fn vertical_wall_top_raise_lands_on_the_band_row() {
-    let top_margin = 48u16;
-    let tbm = crate::layout::WALL_BAND_TO_TOP_MARGIN;
-    let top_wall_h = top_margin - tbm;
-    let band_row = top_margin.saturating_sub(tbm);
-    let (stitch_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
-    assert_eq!(
-        stitch_raise, band_row,
-        "the shared stitch must raise a band-rooted vertical wall top to the band row"
+/// Paint all of `piece` in one call, which the classic's bands add up to.
+fn paint_whole_wall(
+    buf: &mut RgbBuffer,
+    theme: &crate::theme::Theme,
+    piece: crate::layout::WallPiece,
+) {
+    let (at, size) = piece.visual();
+    paint_wall(
+        buf,
+        theme,
+        piece,
+        at.y..at.y + size.h,
+        crate::display::pen::Pen::UNIT,
     );
 }
 
@@ -69,10 +49,32 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(20, 60, floor);
-    wall::paint_glass_wall_v(&mut buf, theme, 5, 10, 24);
-    wall::paint_glass_wall_v(&mut buf, theme, 5, 38, 52);
-    wall::paint_door_jamb_v(&mut buf, theme, 5, 24 - (wall::DOOR_JAMB_PX - 1));
-    wall::paint_door_jamb_v(&mut buf, theme, 5, 38);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: 5,
+            y_top: 10,
+            north: 10,
+            y_bot: 24,
+            south: 24,
+            jamb_north: false,
+            jamb_south: true,
+        },
+    );
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: 5,
+            y_top: 38,
+            north: 38,
+            y_bot: 52,
+            south: 52,
+            jamb_north: true,
+            jamb_south: false,
+        },
+    );
     let dark = theme.office.room_wall_trim_dark;
     for y in [23, 24, 38, 39] {
         assert_eq!(
@@ -87,26 +89,70 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
 }
 
 #[test]
+fn h_door_jambs_sit_flush_on_both_cut_ends() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(60, 30, floor);
+    let y_face = 20;
+    for (x0, x1, jamb_west, jamb_east) in [(5, 19, false, true), (33, 47, true, false)] {
+        paint_whole_wall(
+            &mut buf,
+            theme,
+            crate::layout::WallPiece::Horizontal {
+                x0,
+                x1,
+                y_face,
+                jamb_west,
+                jamb_east,
+            },
+        );
+    }
+    let dark = theme.office.room_wall_trim_dark;
+    for x in [18, 19, 33, 34] {
+        assert_eq!(
+            buf.get(x, y_face),
+            dark,
+            "column {x} must be jamb (posts cover BOTH inclusive cut ends)"
+        );
+    }
+    for x in 20..33 {
+        assert_eq!(
+            buf.get(x, y_face),
+            floor,
+            "column {x} is the OPENING — untouched"
+        );
+    }
+}
+
+#[test]
 fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let dw = l
         .doorways
         .iter()
         .find(|d| d.start.y == d.end.y)
         .expect("the meeting-pantry 60% door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_h(&l, &mut drawables);
+    enqueue_room_walls(&l, &mut drawables);
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWallH {
-                x0,
-                x1,
-                jamb_left,
-                jamb_right,
+            DrawableKind::RoomWall {
+                piece:
+                    crate::layout::WallPiece::Horizontal {
+                        x0,
+                        x1,
+                        jamb_west,
+                        jamb_east,
+                        ..
+                    },
                 ..
-            } => Some((x0, x1, jamb_left, jamb_right)),
+            } => Some((x0, x1, jamb_west, jamb_east)),
             _ => None,
         })
         .collect();
@@ -131,24 +177,32 @@ fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
 #[test]
 fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let dw = l
         .doorways
         .iter()
         .find(|d| d.start.x == d.end.x)
         .expect("the meeting room's centered vertical door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_v(&l, l.wall_band_h(), &mut drawables);
+    enqueue_room_walls(&l, &mut drawables);
+    // Each wall's southmost band: the one that sorts on the wall's own end.
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWallV {
-                x,
-                y_top,
-                y_bot,
-                jamb_north,
-                jamb_south,
-            } if x == dw.start.x => Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south)),
+            DrawableKind::RoomWall {
+                piece:
+                    crate::layout::WallPiece::Vertical {
+                        x,
+                        y_top,
+                        y_bot,
+                        jamb_north,
+                        jamb_south,
+                        ..
+                    },
+                ref rows,
+            } if x == dw.start.x && rows.end == y_bot + 1 => {
+                Some((d.sort_row, y_top, y_bot, jamb_north, jamb_south))
+            }
             _ => None,
         })
         .collect();
@@ -196,12 +250,22 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     for x in 4..20 {
         buf.put(x, cap_row, character);
     }
-    paint_glass_wall_h(&mut buf, theme, 0, 47, y_top);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Horizontal {
+            x0: 0,
+            x1: 47,
+            y_face: y_top,
+            jamb_west: false,
+            jamb_east: false,
+        },
+    );
     let after = buf.get(8, cap_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.r < character.r && after.b > character.b,
-        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+        after.r > after.g.max(after.b),
+        "the pane is see-through: the character still reads red: {after:?}"
     );
 }
 
@@ -209,9 +273,8 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
 fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (x_left, y_top, y_bot) = (10u16, 20u16, 40u16);
-    // Row `y_top` is a seam glint (bright specular), so probe the NEXT cap row
-    // at the soft east edge — the coolest column of the strip.
-    let probe_col = x_left + crate::layout::WALL_THICK_V - 1;
+    // The outer columns are frame (rim, post), so probe a pane cell.
+    let probe_col = x_left + 1;
     let probe_row = y_top + 1;
     let character = Rgb {
         r: 220,
@@ -228,12 +291,24 @@ fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
         },
     );
     buf.put(probe_col, probe_row, character);
-    paint_glass_wall_v(&mut buf, theme, x_left, y_top, y_bot);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: x_left,
+            y_top,
+            y_bot,
+            north: y_top,
+            south: y_bot,
+            jamb_north: false,
+            jamb_south: false,
+        },
+    );
     let after = buf.get(probe_col, probe_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.r < character.r && after.b > character.b,
-        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+        after.r > after.g.max(after.b),
+        "the pane is see-through: the character still reads red: {after:?}"
     );
 }
 
@@ -285,10 +360,10 @@ fn seat_view_maps_facing_to_sprite_and_flip() {
 }
 
 #[test]
+#[cfg(feature = "native")]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     use crate::layout::{Facing, Point};
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let pack = crate::pack::test_default_pack();
     let desk = Point { x: 40, y: 30 };
     let back = Seat::at_desk(desk, Facing::North);
     let front = Seat::at_desk(desk, Facing::South);
@@ -311,9 +386,8 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
         );
     }
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack =
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(fixture))
-            .expect("fixture pack");
+    let old_pack = crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(fixture))
+        .expect("fixture pack");
     assert!(
         old_pack.animation("seated_back").is_none(),
         "fixture must lack every back view to bite"
@@ -327,7 +401,8 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
 
 /// The skeleton fixture pack with the `[animations.X]` sections named in
 /// `without` removed and `extra` appended — the only way to reach `sprite_in_pack`'s
-/// degradation rungs, since the embedded pack has every animation.
+/// degradation rungs, since the bundled pack has every animation.
+#[cfg(feature = "native")]
 fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
     let dir = tmp.join("pack");
     std::fs::create_dir_all(&dir).expect("mkdir");
@@ -350,13 +425,13 @@ fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
         })
         .collect();
     std::fs::write(dir.join("pack.toml"), format!("{kept}{extra}")).expect("write manifest");
-    crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(dir))
-        .expect("fixture pack")
+    crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(dir)).expect("fixture pack")
 }
 
 /// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
 /// not the pose's own still hides a back-turned sitter's face.
 #[test]
+#[cfg(feature = "native")]
 fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
     use crate::layout::{Facing, Point};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -378,10 +453,10 @@ fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
 }
 
 #[test]
+#[cfg(feature = "native")]
 fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
-    let full = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let full = crate::pack::test_default_pack();
     assert_eq!(
         Seat::at_waypoint(
             WaypointKind::MeetingChair,
@@ -393,9 +468,8 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
         "a pack WITH the profile sprite uses it"
     );
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack =
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(fixture))
-            .expect("fixture pack");
+    let old_pack = crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(fixture))
+        .expect("fixture pack");
     assert!(
         old_pack.animation("side_seated").is_none(),
         "fixture must lack the profile sprite for this test to bite"
@@ -412,97 +486,66 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     );
 }
 
-fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
-    let now = SystemTime::UNIX_EPOCH;
-    AgentSlot {
-        agent_id: id,
-        source: Arc::from("claude-code"),
-        session_id: Arc::from("s"),
-        cwd: Arc::from(PathBuf::from("/x").as_path()),
-        label: "x".into(),
-        state,
-        state_started_at: now,
-        created_at: now,
-        last_event_at: now,
-        exiting_at: None,
-        pending_idle_at: None,
-
-        desk_index: GlobalDeskIndex(0),
-        floor_idx: 0,
-        tool_call_count: 0,
-        active_ms: 0,
-        unknown_cwd: false,
-        parent_id: None,
-        pid: None,
-        model: None,
-        effort: None,
-        tokens_used: 0,
-        last_usage: None,
+/// Every look of frame `i` of `anim` a viewer could see under `overrides`:
+/// recolored and, where the art marks its head, dressed in each of the pack's
+/// hairstyles.
+#[cfg(feature = "cutaway-assets")]
+fn looks(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    anim: &pixtuoid_core::sprite::Sprite,
+    i: usize,
+    overrides: &[(char, pixtuoid_core::sprite::Pixel)],
+) -> Vec<pixtuoid_core::sprite::Frame> {
+    let bare = anim.recolorable(i).expect("frame").recolored(overrides);
+    let line = pack.character_outline();
+    match anim.head(i) {
+        None => vec![bare],
+        Some(head) => pack
+            .hairstyles()
+            .map(|s| {
+                let dress = crate::character::Dress::of(&bare, head, Some(s), line.is_some());
+                crate::character::dress(&bare, &dress, Some(s), overrides, line)
+            })
+            .collect(),
     }
 }
 
-#[cfg(test)]
-fn make_slot_cwd(id_path: &str, cwd: &str, unknown_cwd: bool) -> AgentSlot {
-    let id = pixtuoid_core::AgentId::from_transcript_path(id_path);
-    let mut s = make_slot(id, ActivityState::Idle);
-    s.cwd = std::sync::Arc::from(std::path::Path::new(cwd));
-    s.unknown_cwd = unknown_cwd;
-    s
-}
-
-/// `key`'s color for `slot`, unlit and unburnt.
-fn color_of(slot: &AgentSlot, key: char) -> Pixel {
-    override_of(
-        &agent_overrides(slot, None, crate::burn::BurnTier::Normal),
-        key,
-    )
-}
-
-/// `key`'s color in an agent's overrides.
-fn override_of(overrides: &[(char, Pixel)], key: char) -> Pixel {
-    overrides
+/// Whether recoloring `key` changes some pixel of every look of frame `i`.
+#[cfg(feature = "cutaway-assets")]
+fn recolors(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    anim: &pixtuoid_core::sprite::Sprite,
+    i: usize,
+    key: char,
+) -> bool {
+    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
+    looks(pack, anim, i, &[])
         .iter()
-        .find(|(k, _)| *k == key)
-        .unwrap_or_else(|| panic!("no override for {key:?}"))
-        .1
-}
-
-#[test]
-fn agent_overrides_are_deterministic_per_id() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    assert_eq!(
-        agent_overrides(&slot, None, crate::burn::BurnTier::Normal),
-        agent_overrides(&slot, None, crate::burn::BurnTier::Normal)
-    );
+        .zip(looks(pack, anim, i, &[(key, sentinel)]))
+        .all(|(own, recolored)| own.as_slice() != recolored.as_slice())
 }
 
 /// A key no character frame draws recolors nothing, so every agent would wear
-/// the pack's own color there: `standing` shows all four, at every density.
+/// the pack's own color there: `standing` shows all four, at every density,
+/// dressed in whichever hairstyle.
 #[test]
-#[cfg(feature = "density-art")]
-fn the_embedded_pack_draws_every_key_an_agent_recolors() {
-    use pixtuoid_core::sprite::format::density_variant_name;
-    let pack = crate::embedded_pack::test_default_pack();
-    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
-    let names = std::iter::once("standing".to_string())
-        .chain((2..=pack.max_density_variant()).map(|d| density_variant_name("standing", d)));
+#[cfg(feature = "cutaway-assets")]
+fn the_bundled_pack_draws_every_key_an_agent_recolors() {
+    use pixtuoid_core::sprite::format::{Density, density_variant_name};
+    let pack = crate::pack::test_default_pack();
+    let names = std::iter::once("standing".to_string()).chain(
+        (2..=pack.max_density_variant().get())
+            .filter_map(Density::new)
+            .map(|d| density_variant_name("standing", d)),
+    );
     let mut drawn = 0;
     for name in names {
         let Some(standing) = pack.animation(&name) else {
             continue;
         };
-        let own = &standing.frames()[0];
-        let frame = standing.recolorable(0).expect("frame 0");
-        for key in [
-            palette::SHIRT_KEY,
-            palette::HAIR_KEY,
-            palette::SKIN_KEY,
-            palette::PANTS_KEY,
-        ] {
-            assert_ne!(
-                frame.recolored(&[(key, sentinel)]).as_slice(),
-                own.as_slice(),
+        for key in [SHIRT_KEY, HAIR_KEY, SKIN_KEY, PANTS_KEY] {
+            assert!(
+                recolors(&pack, standing, 0, key),
                 "no {name} pixel is drawn in {key:?}"
             );
         }
@@ -516,35 +559,36 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 
 /// Hair and shirt show in every pose, even face-down asleep, and they are how a
 /// viewer tells two agents apart: every frame, base or `@Nx` variant, draws
-/// them in a key the agent's recolor reaches (the key itself or one of its
-/// `[ramps]` shades), or it shows every agent in the pack's own colours. Skin
-/// and pants may be out of sight.
+/// them, dressed in whichever hairstyle, in a key the agent's recolor reaches
+/// (the key itself or one of its `[ramps]` shades), or it shows every agent in
+/// the pack's own colours. Skin and pants may be out of sight.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
-        density_variant_name, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
+        Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
     };
-    let pack = crate::embedded_pack::test_default_pack();
-    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
+    let pack = crate::pack::test_default_pack();
     let mut variants = 0;
     for &base in REQUIRED_CHARACTER_ANIMATIONS
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
     {
-        let densities = std::iter::once(None).chain((2..=pack.max_density_variant()).map(Some));
+        let densities = std::iter::once(None).chain(
+            (2..=pack.max_density_variant().get())
+                .filter_map(Density::new)
+                .map(Some),
+        );
         for density in densities {
             let name = density.map_or_else(|| base.to_string(), |d| density_variant_name(base, d));
             let Some(anim) = pack.animation(&name) else {
                 continue;
             };
             variants += usize::from(density.is_some());
-            for (i, own) in anim.frames().iter().enumerate() {
-                let frame = anim.recolorable(i).expect("frame");
-                for key in [palette::HAIR_KEY, palette::SHIRT_KEY] {
-                    assert_ne!(
-                        frame.recolored(&[(key, sentinel)]).as_slice(),
-                        own.as_slice(),
+            for i in 0..anim.frames().len() {
+                for key in [HAIR_KEY, SHIRT_KEY] {
+                    assert!(
+                        recolors(&pack, anim, i, key),
                         "{name} frame {i} draws nothing the {key:?} recolor reaches"
                     );
                 }
@@ -559,7 +603,6 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
 /// dense shirt is the classic profile's shirt colour.
 #[test]
 fn character_frame_takes_a_density_variant_recolored_like_the_base() {
-    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
     let one = format!("@frame 0\n{SHIRT_KEY}");
     let two = format!("@frame 0\n{SHIRT_KEY} {SHIRT_KEY}\n{SHIRT_KEY} {SHIRT_KEY}");
     let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
@@ -581,21 +624,33 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     let now = SystemTime::UNIX_EPOCH;
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
 
-    let dense = seat::character_frame(
-        "typing", 0, &slot, &pack, false, None, scale, &mut cache, now,
-    )
-    .expect("art");
-    let got = (dense.frame.width(), dense.logical, dense.blit_at.get());
-    let dense_shirt = dense.frame.get(0, 0).copied().flatten();
-    assert_eq!(got, (2, (1, 1), 2));
-
-    let classic = seat::character_frame(
-        "typing",
-        0,
+    let dense = crate::character::character_frame(
+        crate::character::SpritePose {
+            anim_name: "typing",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         &slot,
         &pack,
-        false,
-        None,
+        scale,
+        &mut cache,
+        now,
+    )
+    .expect("art");
+    let got = (dense.frame.width(), dense.blit_at.get());
+    let dense_shirt = dense.frame.get(0, 0).copied().flatten();
+    assert_eq!(got, (2, 2));
+
+    let classic = crate::character::character_frame(
+        crate::character::SpritePose {
+            anim_name: "typing",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        &slot,
+        &pack,
         crate::render_scale::RenderScale::ONE,
         &mut cache,
         now,
@@ -603,7 +658,7 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     .expect("art");
     // Same agent, animation and frame through one cache: only the density key
     // keeps the classic request from being served the dense recolor.
-    assert_eq!((classic.frame.width(), classic.logical), (1, (1, 1)));
+    assert_eq!(classic.frame.width(), 1);
     assert_eq!(dense_shirt, classic.frame.get(0, 0).copied().flatten());
     assert_ne!(
         dense_shirt,
@@ -618,7 +673,6 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
 /// blitted at the scale, and one drawn differently renders differently.
 #[test]
 fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
-    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
     use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W};
     use crate::render_scale::RenderScale;
     const DENSITY: u16 = 2;
@@ -627,12 +681,18 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     let mut owned = OwnedSimStores::new();
     let frame = sim_step(
         &mut owned.stores(),
-        &scene,
-        &layout,
-        &bundled,
-        &coffee,
-        0,
-        now0 + std::time::Duration::from_millis(250),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &bundled,
+                now: now0 + std::time::Duration::from_millis(250),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
     );
     let anim = frame
         .characters
@@ -659,7 +719,9 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     let pack = |variant_top: Option<(char, char)>| {
         let (g0, g1) = variant_top.unwrap_or((HAIR_KEY, SKIN_KEY));
         let variant = if variant_top.is_some() {
-            format!("[animations.\"{anim}@{DENSITY}x\"]\nframes=[\"g0.sprite\", \"g1.sprite\"]\nframe_ms=100\n")
+            format!(
+                "[animations.\"{anim}@{DENSITY}x\"]\nframes=[\"g0.sprite\", \"g1.sprite\"]\nframe_ms=100\n"
+            )
         } else {
             String::new()
         };
@@ -692,11 +754,27 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
-        let labels = crate::cutaway::paint::render_cutaway(
-            &frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let office = crate::display::Office {
+            layout: &layout,
+            pack,
+            theme,
+            scale,
+        };
+        let ground = crate::floor::FloorMeta::ground();
+        crate::cutaway::paint::render_cutaway(
+            &frame,
+            office,
+            crate::display::compose::tests::showing(ground, now0),
+            &mut cache,
+            &mut buf,
         );
-        let anchors: Vec<_> = labels.iter().map(|l| l.anchor_px).collect();
+        let list = crate::display::compose(
+            &frame,
+            office,
+            crate::display::compose::tests::showing(ground, now0),
+        );
+        let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
         (buf.as_slice().to_vec(), anchors)
     };
 
@@ -723,7 +801,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
 
 /// The TOML and art of a pet shipped at `density` too, drawn in palette `key`:
 /// both packs of a with-and-without-variant comparison carry it, so both paint
-/// the room on one art grid ([`Pen::for_pack`](crate::cutaway::pen::Pen::for_pack))
+/// the room on one art grid ([`Pen::for_pack`](crate::display::pen::Pen::for_pack))
 /// and differ only in the piece compared.
 fn grid_anchor(density: u16, key: char) -> (String, [(&'static str, String); 2]) {
     let square =
@@ -738,6 +816,22 @@ fn grid_anchor(density: u16, key: char) -> (String, [(&'static str, String); 2])
             ("c2.sprite", format!("@frame 0\n{}", square(density))),
         ],
     )
+}
+
+/// A night the desk-foot tests render at: no sun spills through the windows,
+/// so with the room's lights off ([`unlit_room`]) only its darkness reaches the
+/// floor, which [`assert_variant_desk_foot`](crate::cutaway::paint::assert_variant_desk_foot)
+/// accounts for.
+fn desk_foot_hour() -> SystemTime {
+    crate::localclock::at_hour(23)
+}
+
+/// `frame` with the room's own lights switched off.
+fn unlit_room(frame: &SimFrame) -> SimFrame {
+    SimFrame {
+        indoor_scale: 0.0,
+        ..frame.clone()
+    }
 }
 
 /// A desk drawn from a variant that is exactly its base upscaled lands where the
@@ -755,12 +849,18 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
     let mut owned = OwnedSimStores::new();
     let frame = sim_step(
         &mut owned.stores(),
-        &scene,
-        &layout,
-        &bundled,
-        &coffee,
-        0,
-        now0 + std::time::Duration::from_secs(40),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &bundled,
+                now: now0 + std::time::Duration::from_secs(40),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
     );
 
     // A desk top over a darker front row, whole-pixel so an upscale by
@@ -813,9 +913,21 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
-            &frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+            &unlit_room(&frame),
+            crate::display::Office {
+                layout: &layout,
+                pack,
+                theme,
+                scale,
+            },
+            crate::display::compose::tests::showing(
+                crate::floor::FloorMeta::ground(),
+                desk_foot_hour(),
+            ),
+            &mut cache,
+            &mut buf,
         );
         buf.as_slice().to_vec()
     };
@@ -828,6 +940,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         &pack(None),
         theme,
         scale,
+        desk_foot_hour(),
     );
     assert!(
         render(&pack(Some('F'))) != base_px,
@@ -863,12 +976,18 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         .map(|n| {
             sim_step(
                 &mut owned.stores(),
-                &scene,
-                &layout,
-                &bundled,
-                &coffee,
-                0,
-                now0 + Duration::from_millis(100 * n),
+                SimInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &bundled,
+                        now: now0 + Duration::from_millis(100 * n),
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    layout: &layout,
+                    coffee: &coffee,
+                    door_anim_max_ms: 0,
+                },
             )
         })
         .find(|f| {
@@ -880,17 +999,23 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         .expect("the typing agent sits at their desk");
     let unlit = sim_step(
         &mut OwnedSimStores::new().stores(),
-        &SceneState::uniform(16),
-        &layout,
-        &bundled,
-        &coffee,
-        0,
-        now0,
+        SimInputs {
+            world: FloorInputs {
+                scene: &SceneState::uniform(16),
+                pack: &bundled,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
     );
 
     // A desk top, its screen glass, and a darker front row, whole-pixel so an
     // upscale by `DENSITY` is the variant exactly.
-    let glass_key = super::palette::SCREEN_GLASS_KEY;
+    let glass_key = crate::pack::SCREEN_GLASS_KEY;
     let rows = |w: u16, h: u16, glass: char| -> String {
         (0..h)
             .map(|y| {
@@ -943,9 +1068,21 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
-            frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+            &unlit_room(frame),
+            crate::display::Office {
+                layout: &layout,
+                pack,
+                theme,
+                scale,
+            },
+            crate::display::compose::tests::showing(
+                crate::floor::FloorMeta::ground(),
+                desk_foot_hour(),
+            ),
+            &mut cache,
+            &mut buf,
         );
         buf.as_slice().to_vec()
     };
@@ -962,6 +1099,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         &pack(None),
         theme,
         scale,
+        desk_foot_hour(),
     );
     assert!(
         render(&frame, &pack(Some('D'))) != base_px,
@@ -969,47 +1107,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
     );
 }
 
-#[test]
-fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    let normal = crate::burn::BurnTier::Normal;
-    let unlit = agent_overrides(&slot, None, normal);
-    let green_glow = agent_overrides(
-        &slot,
-        Some(Rgb {
-            r: 140,
-            g: 240,
-            b: 170,
-        }),
-        normal,
-    );
-    let blue_glow = agent_overrides(
-        &slot,
-        Some(Rgb {
-            r: 100,
-            g: 160,
-            b: 255,
-        }),
-        normal,
-    );
-    for key in [palette::SHIRT_KEY, palette::HAIR_KEY, palette::PANTS_KEY] {
-        assert_eq!(override_of(&unlit, key), override_of(&green_glow, key));
-    }
-    let skin = |o: &[(char, Pixel)]| override_of(o, palette::SKIN_KEY).expect("opaque skin");
-    let (ug, gg) = (skin(&unlit).g, skin(&green_glow).g);
-    assert!(
-        gg > ug,
-        "green glow should push skin green (lit={gg}, unlit={ug})"
-    );
-    let (ub, bb) = (skin(&unlit).b, skin(&blue_glow).b);
-    assert!(
-        bb > ub,
-        "blue glow should push skin blue (lit={bb}, unlit={ub})"
-    );
-}
-
-/// Pins [`super::desk_screen_glow`], the one screen rule both profiles light
+/// Pins [`crate::lighting::desk_screen_glow`], the one screen rule both profiles light
 /// by: a seated occupant's tool, on a north-facing desk only.
 #[test]
 fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
@@ -1025,9 +1123,11 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     );
     let idle = make_slot(id, ActivityState::Idle);
     let theme = &crate::theme::NORMAL;
-    let tool = palette::tool_glow_tint(&editing, &theme.tool_glow);
+    let tool = tool_glow_tint(&editing, &theme.tool_glow);
     assert!(tool.is_some(), "the fixture's occupant is using a tool");
-    let glow = |occupant, facing, seated| super::desk_screen_glow(occupant, facing, seated, theme);
+    let glow = |occupant, facing, seated| {
+        crate::lighting::desk_screen_glow(occupant, facing, seated, theme)
+    };
     assert_eq!(glow(Some(&editing), Facing::North, true), tool);
     assert_eq!(
         glow(Some(&editing), Facing::South, true),
@@ -1043,56 +1143,11 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     assert_eq!(glow(None, Facing::North, true), None, "nobody");
 }
 
-/// Pins [`super::desk_chair_top_left`]'s gate: only a back-turned seat's chair
-/// stands in view.
-#[test]
-fn only_a_north_facing_desk_stands_a_chair() {
-    use crate::layout::Facing;
-    let pack = crate::embedded_pack::test_default_pack();
-    let desk = Point { x: 40, y: 30 };
-    assert!(super::desk_chair_top_left(&pack, desk, Facing::North).is_some());
-    for facing in [Facing::South, Facing::East, Facing::West] {
-        assert_eq!(
-            super::desk_chair_top_left(&pack, desk, facing),
-            None,
-            "{facing:?}"
-        );
-    }
-}
-
-#[test]
-fn tool_glow_tint_maps_known_tools() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
-    let edit_slot = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: Some(Arc::from("Edit src/main.rs")),
-            kind: ToolKind::Edit,
-        },
-    );
-    let bash_slot = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: Some(Arc::from("Bash: ls")),
-            kind: ToolKind::Bash,
-        },
-    );
-    let idle_slot = make_slot(id, ActivityState::Idle);
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let edit_tint = palette::tool_glow_tint(&edit_slot, glow);
-    let bash_tint = palette::tool_glow_tint(&bash_slot, glow);
-    let idle_tint = palette::tool_glow_tint(&idle_slot, glow);
-    assert!(edit_tint.is_some(), "Edit should produce glow");
-    assert!(bash_tint.is_some(), "Bash should produce glow");
-    assert_eq!(idle_tint, None, "Idle should produce no glow");
-    assert_ne!(edit_tint, bash_tint, "Edit and Bash should differ");
-}
-
-fn drawable(anchor_y: u16) -> Drawable<'static> {
+fn drawable(sort_row: u16) -> Drawable<'static> {
     Drawable {
-        anchor_y,
+        sort_row,
+        layer: Layer::Under,
+        hover: None,
         kind: DrawableKind::MeetingTable {
             pos: Point { x: 0, y: 0 },
         },
@@ -1100,10 +1155,10 @@ fn drawable(anchor_y: u16) -> Drawable<'static> {
 }
 
 #[test]
-fn drawables_sort_ascending_by_anchor_y() {
+fn drawables_sort_ascending_by_sort_row() {
     let mut v = [drawable(30), drawable(10), drawable(20)];
-    v.sort_by_key(|d| d.anchor_y);
-    let ys: Vec<u16> = v.iter().map(|d| d.anchor_y).collect();
+    drawable::sort_drawables(&mut v);
+    let ys: Vec<u16> = v.iter().map(|d| d.sort_row).collect();
     assert_eq!(ys, [10, 20, 30]);
 }
 
@@ -1111,25 +1166,31 @@ fn drawables_sort_ascending_by_anchor_y() {
 fn drawables_sort_is_stable_on_ties() {
     let mut v = [
         Drawable {
-            anchor_y: 10,
+            sort_row: 10,
+            layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 1, y: 0 },
             },
         },
         Drawable {
-            anchor_y: 10,
+            sort_row: 10,
+            layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 2, y: 0 },
             },
         },
         Drawable {
-            anchor_y: 10,
+            sort_row: 10,
+            layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 3, y: 0 },
             },
         },
     ];
-    v.sort_by_key(|d| d.anchor_y);
+    drawable::sort_drawables(&mut v);
     let xs: Vec<u16> = v
         .iter()
         .map(|d| match &d.kind {
@@ -1140,21 +1201,49 @@ fn drawables_sort_is_stable_on_ties() {
     assert_eq!(xs, [1, 2, 3]);
 }
 
+/// Which of a fixture and a figure tied on a row paints on top is the layer's
+/// call, not the queue's: queued in the reverse of paint order, they still
+/// paint fixture under, figure, fixture over.
 #[test]
-fn center_pin_south_offset_lands_on_the_sprite_south_row() {
-    for h in 1u16..=16 {
-        let expected_south = h - 1 - h / 2;
-        assert_eq!(
-            center_pin_south_offset(h),
-            expected_south,
-            "h={h}: z-key must land on the sprite south row, not one past it",
-        );
-    }
+fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
+    let tied = |layer, x| Drawable {
+        sort_row: 10,
+        layer,
+        hover: None,
+        kind: DrawableKind::MeetingTable {
+            pos: Point { x, y: 0 },
+        },
+    };
+    let mut v = [
+        tied(Layer::Over, 3),
+        tied(Layer::Figure, 2),
+        tied(Layer::Under, 1),
+    ];
+    drawable::sort_drawables(&mut v);
+    let layers: Vec<Layer> = v.iter().map(|d| d.layer).collect();
+    assert_eq!(layers, [Layer::Under, Layer::Figure, Layer::Over]);
+}
+
+/// The layer only breaks a tie: a row north still paints first.
+#[test]
+fn a_row_north_paints_first_whatever_its_layer() {
+    let at = |sort_row, layer, x| Drawable {
+        sort_row,
+        layer,
+        hover: None,
+        kind: DrawableKind::MeetingTable {
+            pos: Point { x, y: 0 },
+        },
+    };
+    let mut v = [at(10, Layer::Under, 2), at(5, Layer::Over, 1)];
+    drawable::sort_drawables(&mut v);
+    let rows: Vec<u16> = v.iter().map(|d| d.sort_row).collect();
+    assert_eq!(rows, [5, 10]);
 }
 
 #[test]
-fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
-    let pack = crate::embedded_pack::test_default_pack();
+fn pet_sort_row_tracks_the_selected_anim_sprite_height() {
+    let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
         pack.animation(name)
@@ -1164,9 +1253,9 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     };
     for &kind in crate::pet::PetKind::ALL {
         let sleep_h = anim_h(kind.sleep_anim());
-        let sleep = z_sort_row(Anchor::Center, pos, sleep_h);
-        let walk = z_sort_row(Anchor::Center, pos, anim_h(kind.walk_anim()));
-        let sit = z_sort_row(Anchor::Center, pos, anim_h(kind.sit_anim()));
+        let sleep = sort_row_at(Pivot::Center, pos, sleep_h);
+        let walk = sort_row_at(Pivot::Center, pos, anim_h(kind.walk_anim()));
+        let sit = sort_row_at(Pivot::Center, pos, anim_h(kind.sit_anim()));
         assert!(
             sleep <= walk && sleep <= sit,
             "{kind:?}: shorter sleep sprite must not sort south of walk/sit \
@@ -1174,38 +1263,14 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
         );
         assert_eq!(
             sleep,
-            pos.y + center_pin_south_offset(sleep_h),
+            pos.y + (sleep_h - 1) / 2,
             "{kind:?}: sleep pet must land on its sprite's south row",
         );
     }
 }
 
-#[test]
-fn floor_lamp_south_offset_is_the_base_row() {
-    // The lamp's halo / shadow / z-anchor all read this, so a visual-height
-    // edit surfaces here rather than as a floating halo.
-    assert_eq!(floor_lamp_south_offset(), 4);
-}
-
-#[test]
-fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
-    use crate::layout::{furniture_def, WaypointKind};
-    let south_off = |k: WaypointKind| {
-        furniture_def(k.furniture())
-            .footprint
-            .expect("has footprint")
-            .h
-            / 2
-            - 1
-    };
-    assert_eq!(south_off(WaypointKind::VendingMachine), 2);
-    assert_eq!(south_off(WaypointKind::Printer), 1);
-}
-
-/// The seat centre is the PAINTED desk's midline, not the layout box's — the two
-/// differ (`DESK_W` 10 vs a 14 px sprite), which is why the chair used to sit 2 px
-/// left of the desk it belongs to. Centring here is what makes a symmetric jitter
-/// fit: 8 px of chair on a 14 px desk leaves 3 px a side, so ±2 keeps 1 px.
+/// The seat centre is the painted desk's midline (`visual.w`), not `DESK_W`'s:
+/// only that centring leaves the jitter symmetric room on both sides.
 #[test]
 fn the_seat_centre_is_the_painted_desks_midline() {
     use crate::layout::Facing;
@@ -1237,17 +1302,11 @@ fn a_seeded_seat_moves_the_chair_the_sitter_and_the_walk_together() {
                 // the sitter and the chair both centre on it
                 for w in [CHARACTER_SPRITE_W, 10] {
                     assert_eq!(
-                        seated_anchor_facing(desk, w, facing).x,
+                        seated_top_left(desk, w, facing).x,
                         centre.x - w / 2,
                         "{desk:?} {facing:?} w={w}: sprite must centre on the seat"
                     );
                 }
-                // and the ceiling pool — a THIRD consumer — lights the same x
-                assert_eq!(
-                    crate::layout::desk_ceiling_pool_center(desk, facing).x,
-                    centre.x,
-                    "{desk:?} {facing:?}: the desk's light must pool over the seat"
-                );
                 let base = desk.x + crate::layout::desk_furniture_def().visual.w / 2;
                 offsets.insert(i32::from(centre.x) - i32::from(base));
             }
@@ -1275,10 +1334,10 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
             // Y drift: `a_back_turned_seat_puts_the_occupant_past_the_desk_body`.
             for facing in [crate::layout::Facing::South, crate::layout::Facing::North] {
                 assert_eq!(
-                    walking_anchor(crate::layout::desk_walk_anchor_facing(desk, facing), w),
-                    seated_anchor_facing(desk, w, facing),
-                    "walking_anchor(desk_walk_anchor_facing({desk:?}, {facing:?}), {w}) \
-                     must equal seated_anchor_facing",
+                    walking_top_left(crate::layout::desk_walk_anchor_facing(desk, facing), w),
+                    seated_top_left(desk, w, facing),
+                    "walking_top_left(desk_walk_anchor_facing({desk:?}, {facing:?}), {w}) \
+                     must equal seated_top_left",
                 );
             }
         }
@@ -1286,8 +1345,8 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
 }
 
 #[test]
-fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
-    use crate::layout::{seated_foot_cell, Furniture};
+fn seated_foot_cell_settles_exactly_on_the_render_top_left() {
+    use crate::layout::{Furniture, seated_foot_cell};
     for pos in [
         Point { x: 40, y: 30 },
         Point { x: 100, y: 60 },
@@ -1297,23 +1356,23 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
             for f in [Furniture::Couch, Furniture::MeetingSofa] {
                 let s = seated_foot_cell(f, pos).expect("occupies_pos seat");
                 assert_eq!(
-                    walking_anchor(s, w),
-                    back_couch_anchor(pos, w),
-                    "{f:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
+                    walking_top_left(s, w),
+                    back_couch_top_left(pos, w),
+                    "{f:?}: walking_top_left(S={s:?}) must equal back_couch_top_left(pos={pos:?}) w={w}",
                 );
             }
             let s = seated_foot_cell(Furniture::MeetingChair, pos).expect("occupies_pos seat");
             assert_eq!(
-                walking_anchor(s, w),
-                back_couch_anchor(pos, w),
-                "MeetingChair: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
+                walking_top_left(s, w),
+                back_couch_top_left(pos, w),
+                "MeetingChair: walking_top_left(S={s:?}) must equal back_couch_top_left(pos={pos:?}) w={w}",
             );
             let sd = seated_foot_cell(Furniture::Desk, pos).expect("desk is occupies_pos");
             assert_eq!(
-                walking_anchor(sd, w),
-                seated_anchor_facing(pos, w, crate::layout::Facing::South),
-                "Desk: walking_anchor(seated_foot_cell)={:?} must equal seated_anchor",
-                walking_anchor(sd, w),
+                walking_top_left(sd, w),
+                seated_top_left(pos, w, crate::layout::Facing::South),
+                "Desk: walking_top_left(seated_foot_cell)={:?} must equal seated_top_left",
+                walking_top_left(sd, w),
             );
         }
         assert_eq!(seated_foot_cell(Furniture::Pantry, pos), None);
@@ -1323,8 +1382,8 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
 
 #[test]
 fn settle_view_matches_the_seated_view_for_every_seat() {
-    use crate::layout::{Facing, WaypointKind, TEST_DEFAULT_DESKS};
-    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    use crate::layout::{Facing, TEST_DEFAULT_DESKS, WaypointKind};
+    let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let seats: Vec<_> = l
         .waypoints
         .iter()
@@ -1380,18 +1439,19 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
 
 #[test]
 fn island_settle_z_stays_behind_the_countertop() {
-    use crate::layout::{Anchor, Furniture, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{Furniture, Pivot, TEST_DEFAULT_DESKS, WaypointKind};
     let mut exercised = false;
     for seed in 0..5u64 {
-        let Some(l) = Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed) else {
+        let Some(l) = SceneLayout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed)
+        else {
             continue;
         };
         let Some(island) = l.pantry.and_then(|p| p.kitchen_island) else {
             continue;
         };
         exercised = true;
-        let island_z = crate::layout::z_sort_row(
-            Anchor::Center,
+        let island_sort_row = crate::layout::sort_row_at(
+            Pivot::Center,
             island,
             crate::layout::furniture_def(Furniture::KitchenIsland)
                 .visual
@@ -1404,15 +1464,15 @@ fn island_settle_z_stays_behind_the_countertop() {
         {
             let z = settle_seat(wp.pos, &l)
                 .expect("island stand foot-cell == pos, so it settles")
-                .z_key();
+                .sort_row();
             assert_eq!(
                 z, wp.pos.y,
                 "island stand glide z must be the plain feet row (the settled \
                  AtWaypoint key), not a Side-style +3"
             );
             assert!(
-                z < island_z,
-                "stand z {z} must sort BEHIND the island's south-row key {island_z}"
+                z < island_sort_row,
+                "stand z {z} must sort BEHIND the island's south-row key {island_sort_row}"
             );
         }
     }
@@ -1422,8 +1482,8 @@ fn island_settle_z_stays_behind_the_countertop() {
 #[test]
 fn settle_seat_recognizes_the_home_desk() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    use crate::layout::{desk_walk_anchor_facing, Furniture};
-    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    use crate::layout::{Furniture, desk_walk_anchor_facing};
+    let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     // Pinning `Front` unconditionally would assert the pre-facing world.
@@ -1434,7 +1494,7 @@ fn settle_seat_recognizes_the_home_desk() {
         "the desk chair {chair:?} must settle as that seat"
     );
     assert_eq!(
-        want.z_key(),
+        want.sort_row(),
         chair.y,
         "and sort on its own chair row, not a couch-style pos+2"
     );
@@ -1456,23 +1516,23 @@ fn settle_seat_recognizes_the_home_desk() {
 
 #[test]
 fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
-    use crate::layout::{desk_furniture_def, Facing};
+    use crate::layout::{Facing, desk_furniture_def};
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for facing in [Facing::North, Facing::South] {
             for w in [CHARACTER_SPRITE_W, 10] {
                 let seat = Seat::at_desk(desk, facing);
                 assert_eq!(
-                    seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
-                    seat.z_key(),
+                    seat.render_top_left(w).y + crate::layout::WALKING_Y_OFF,
+                    seat.sort_row(),
                     "{facing:?}: the sitter's feet row must BE the row they sort on"
                 );
                 let desk_z = desk.y + desk_furniture_def().visual.h;
-                let sitter_z = seat.z_key();
+                let sitter_sort_row = seat.sort_row();
                 assert_eq!(
-                    sitter_z < desk_z,
+                    sitter_sort_row < desk_z,
                     facing == Facing::South,
                     "{facing:?}: a viewer-facing sitter sorts BEHIND their desk \
-                     ({sitter_z} < {desk_z}), a back-turned one in FRONT"
+                     ({sitter_sort_row} < {desk_z}), a back-turned one in FRONT"
                 );
             }
         }
@@ -1480,60 +1540,58 @@ fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
 }
 
 #[test]
-fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
+fn sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture() {
     use crate::layout::{
-        furniture_def, z_sort_row, Anchor, Facing, Furniture, WaypointKind, TEST_DEFAULT_DESKS,
+        Facing, Furniture, Pivot, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, sort_row_at,
     };
-    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let mut saw_back = false;
     for w in l
         .waypoints
         .iter()
         .filter(|w| crate::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
     {
-        let z = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
+        let z = Seat::at_waypoint(w.kind, w.pos, w.facing).sort_row();
 
         // Independent oracle: the pre-lift partition, keyed on kind alone.
         let historical = match w.kind {
-            // back_couch_anchor.y + sprite_h(9) = (pos.y - 7) + 9. The chair
-            // shares the front seat anchor + bottom-row geometry by design.
+            // back_couch_top_left.y + sprite_h(9) = (pos.y - 7) + 9. The chair
+            // shares the front seat top-left + bottom-row geometry by design.
             WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                back_couch_anchor(w.pos, CHARACTER_SPRITE_W).y + 9
+                back_couch_top_left(w.pos, CHARACTER_SPRITE_W).y + 9
             }
-            // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint default.
-            WaypointKind::Island => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
+            // waypoint_top_left.y + sprite_h(12) = pos.y — the AtWaypoint default.
+            WaypointKind::Island => waypoint_top_left(w.pos, CHARACTER_SPRITE_W).y + 12,
             _ => unreachable!("{:?} has a foot cell but no oracle arm — add one", w.kind),
         };
         assert_eq!(
             z, historical,
-            "{:?}@{:?}: seat z-key {z} must equal the historical AtWaypoint key {historical}",
+            "{:?}@{:?}: seat sort row {z} must equal the historical AtWaypoint key {historical}",
             w.kind, w.pos
         );
 
         match w.kind {
             WaypointKind::Couch => {
-                let couch_z = z_sort_row(
-                    Anchor::Center,
+                let couch_sort_row = sort_row_at(
+                    Pivot::Center,
                     w.pos,
                     furniture_def(Furniture::Couch).visual.h,
                 );
                 assert!(
-                    z < couch_z,
-                    "couch sitter z {z} must be BEHIND the couch back {couch_z}"
+                    z < couch_sort_row,
+                    "couch sitter z {z} must be BEHIND the couch back {couch_sort_row}"
                 );
                 saw_back = true;
             }
+            // The sofa ties its sitters; its roster `Tie` decides who covers whom
+            // (`a_seat_ties_its_sitter_and_hides_them_only_from_behind`).
             WaypointKind::MeetingSofa => {
-                // Furniture z-key: faces_away (North) → sofa.y+3; else sofa.y+2.
-                if w.facing == Facing::North {
-                    assert!(z < w.pos.y + 3, "back sofa sitter z {z} must be < sofa.y+3");
-                    saw_back = true;
-                } else {
-                    assert!(
-                        z <= w.pos.y + 2,
-                        "front sofa sitter z {z} must be <= sofa.y+2"
-                    );
-                }
+                assert_eq!(
+                    z,
+                    crate::layout::seated_sort_row(w.pos),
+                    "sofa sitter z {z} must tie the sofa"
+                );
+                saw_back |= w.facing == Facing::North;
             }
             WaypointKind::MeetingChair => {
                 assert!(
@@ -1553,11 +1611,11 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
 #[test]
 fn desk_occupant_always_sorts_behind_its_desk() {
     let visual_h = crate::layout::desk_furniture_def().visual.h;
-    // The z-key is width-independent, so a second width would run the identical
+    // The sort row is width-independent, so a second width would run the identical
     // assertion; the axis worth sweeping is the desk position.
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         let desk_furniture_z = desk.y + visual_h;
-        let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).z_key();
+        let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).sort_row();
         assert!(
             seated_z < desk_furniture_z,
             "seated desk occupant z {seated_z} must be BEHIND the desk {desk_furniture_z}"
@@ -1565,16 +1623,16 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     }
 }
 
-/// The geometry table's desk height must match the ART's, or the z-key sorts on
-/// a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
+/// The geometry table's desk height must match the ART's, or the desk's sort row
+/// lands on a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
 /// (top row is the north-overhanging bezel), so it covers `height - 1` from `desk.y`.
 #[test]
-fn desk_z_key_is_the_visual_south() {
-    let pack = crate::embedded_pack::test_default_pack();
+fn desk_sort_row_is_the_visual_south() {
+    let pack = crate::pack::test_default_pack();
     let art = pack
         .animation("desk")
         .and_then(|a| a.frames().first())
-        .expect("the embedded pack ships a desk");
+        .expect("the bundled pack ships a desk");
     assert_eq!(
         crate::layout::desk_furniture_def().visual.h,
         art.height() - 1,
@@ -1584,16 +1642,16 @@ fn desk_z_key_is_the_visual_south() {
     );
 }
 
-/// The painter centres a pack sprite by the ART's size, while its z-sort row,
+/// The painter centres a pack sprite by the ART's size, while its sort row,
 /// ground strip and the binary's hover box place it by the size the layout
 /// reads — a def's `.visual`, the elevator's, a counter's — so the two must
 /// agree for the bundled pack. The desk is the exception: its box starts under
-/// the bezel row it blits above `desk.y` (`desk_z_key_is_the_visual_south`).
+/// the bezel row it blits above `desk.y` (`desk_sort_row_is_the_visual_south`).
 #[test]
 fn every_hover_size_is_its_painted_sprite_size() {
     use crate::layout::{
-        furniture_def, Furniture, PlantKind, PodDecor, Size, WallDecor, COMPACT_COUNTER,
-        ELEVATOR_H, ELEVATOR_W, LARGE_COUNTER,
+        COMPACT_COUNTER, ELEVATOR_H, ELEVATOR_W, Furniture, LARGE_COUNTER, PlantKind, PodDecor,
+        Size, WallDecor, furniture_def,
     };
     let def =
         |f: Furniture, sprite: &'static str| (format!("{f:?}"), furniture_def(f).visual, sprite);
@@ -1602,6 +1660,11 @@ fn every_hover_size_is_its_painted_sprite_size() {
         def(Furniture::MeetingSofaBody, "meeting_sofa_north"),
         def(Furniture::SnackShelf, "snack_shelf"),
         def(Furniture::FloorLamp, "floor_lamp"),
+        def(Furniture::VendingMachine, "vending_machine"),
+        def(Furniture::Printer, "printer"),
+        def(Furniture::MeetingTable, crate::pack::MEETING_TABLE_SPRITE),
+        def(Furniture::DeskChair, crate::pack::DESK_CHAIR_SPRITE),
+        def(Furniture::FilingCabinet, "filing_cabinet"),
         (
             "ELEVATOR".into(),
             Size {
@@ -1613,12 +1676,12 @@ fn every_hover_size_is_its_painted_sprite_size() {
         (
             "LARGE_COUNTER".into(),
             LARGE_COUNTER,
-            super::pantry_counter_anim(LARGE_COUNTER.w),
+            crate::layout::pantry_counter_anim(LARGE_COUNTER.w),
         ),
         (
             "COMPACT_COUNTER".into(),
             COMPACT_COUNTER,
-            super::pantry_counter_anim(COMPACT_COUNTER.w),
+            crate::layout::pantry_counter_anim(COMPACT_COUNTER.w),
         ),
     ];
     pieces.extend(
@@ -1637,7 +1700,7 @@ fn every_hover_size_is_its_painted_sprite_size() {
             .map(|k| def(k.furniture(), k.sprite_name())),
     );
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     for (name, size, sprite) in pieces {
         let frames = pack
             .animation(sprite)
@@ -1653,9 +1716,308 @@ fn every_hover_size_is_its_painted_sprite_size() {
     }
 }
 
+/// A frame with nobody in it, for `layout`.
+fn empty_frame(layout: &SceneLayout) -> SimFrame {
+    SimFrame {
+        agents: Vec::new(),
+        poses: HashMap::new(),
+        seated_agents: HashMap::new(),
+        characters: Vec::new(),
+        indoor_scale: 0.0,
+        neon: crate::floor::NeonLevels::EMPTY,
+        chitchat_bubbles: Vec::new(),
+        new_coffee_carriers: Vec::new(),
+        occupied_waypoints: Default::default(),
+        pet: None,
+        mascots: Vec::new(),
+        desks: vec![Default::default(); layout.home_desks.len()],
+        door_frame: 0,
+    }
+}
+
+/// The classic's queue of `layout`'s fixtures on `frame`.
+fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
+    let pack = crate::pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let (scene, walks) = (SceneState::uniform(16), HashMap::new());
+    let now = SystemTime::UNIX_EPOCH;
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let (mut cache, mut base_fill) = (FrameCache::new(), BaseFillCache::new());
+    let ctx = PaintCtx {
+        scene: &scene,
+        layout,
+        pack: &pack,
+        timing: Motion::Full.timing(now),
+        sky: crate::sky::Sky::clock(now),
+        outside: None,
+        buf: &mut buf,
+        cache: &mut cache,
+        base_fill: &mut base_fill,
+        shadows: &mut crate::ground::DepthsCache::default(),
+        theme,
+        floor: crate::floor::FloorMeta::ground(),
+        walks: &walks,
+        debug_walkable: false,
+    };
+    let lights = crate::lighting::Lights::of(
+        layout,
+        &crate::atmosphere::SkyTones::resolve(&ctx.sky, theme),
+        &crate::lighting::LightInputs {
+            agents: &frame.agents,
+            seated: &frame.seated_agents,
+            floor_idx: 0,
+            indoor_scale: frame.indoor_scale,
+            neon: frame.neon,
+            beat: ctx.timing.beat,
+        },
+    );
+    queue_fixtures(
+        &ctx,
+        frame,
+        &lights.desks,
+        crate::floor::neon_look(frame.neon, theme),
+    )
+}
+
+fn paints_as(kind: crate::layout::FixtureKind) -> &'static str {
+    use crate::layout::{FixtureKind, Station};
+    match kind {
+        FixtureKind::Desk(_) => "desk",
+        FixtureKind::FilingCabinet(_) => "cabinet",
+        FixtureKind::DeskChair(_) => "desk chair",
+        FixtureKind::Station { station, .. } => match station {
+            Station::PantryCounter => "pantry counter",
+            Station::VendingMachine | Station::Printer => "appliance",
+            Station::SnackShelf => "snack shelf",
+        },
+        FixtureKind::Plant { .. } => "plant",
+        FixtureKind::Pod { .. } => "pod",
+        FixtureKind::Wall { .. } => "wall decor",
+        FixtureKind::MeetingRug { .. }
+        | FixtureKind::LoungeRug
+        | FixtureKind::PantryMat
+        | FixtureKind::IslandMat => "rug",
+        FixtureKind::MeetingSofa { .. } | FixtureKind::LoungeCouch => "sofa",
+        FixtureKind::MeetingTable { .. } => "table",
+        FixtureKind::MeetingChair { .. } => "meeting chair",
+        FixtureKind::CoatRack { .. } => "coat rack",
+        FixtureKind::Doormat { .. } => "doormat",
+        FixtureKind::NoticeBoard { .. } => "notice board",
+        FixtureKind::SideTable => "side table",
+        FixtureKind::FloorLamp => "floor lamp",
+        FixtureKind::FishTank => "fish tank",
+        FixtureKind::KitchenIsland => "kitchen island",
+        FixtureKind::WaterCooler => "water cooler",
+        FixtureKind::TrashBin => "trash bin",
+        FixtureKind::Door => "door",
+        FixtureKind::Runner => "runner",
+        FixtureKind::NeonSign => "neon sign",
+        FixtureKind::Clock => "clock",
+    }
+}
+
+/// What a queued fixture drawable is, in [`paints_as`]'s words.
+fn drawn_as(kind: &DrawableKind<'_>) -> &'static str {
+    match kind {
+        DrawableKind::DeskCubicle { .. } => "desk",
+        DrawableKind::FilingCabinet { .. } => "cabinet",
+        DrawableKind::DeskChair { .. } => "desk chair",
+        DrawableKind::WaypointPantry { .. } => "pantry counter",
+        DrawableKind::Appliance { .. } => "appliance",
+        DrawableKind::SnackShelf { .. } => "snack shelf",
+        DrawableKind::Plant { .. } => "plant",
+        DrawableKind::PodDecorItem { .. } => "pod",
+        DrawableKind::WallDecor { .. } => "wall decor",
+        DrawableKind::AreaRug(_) => "rug",
+        DrawableKind::MeetingSofa { .. } => "sofa",
+        DrawableKind::MeetingTable { .. } => "table",
+        DrawableKind::MeetingChair { .. } => "meeting chair",
+        DrawableKind::CoatRack { .. } => "coat rack",
+        DrawableKind::Doormat(_) => "doormat",
+        DrawableKind::NoticeBoard(_) => "notice board",
+        DrawableKind::LoungeSideTable { .. } => "side table",
+        DrawableKind::FloorLamp { .. } => "floor lamp",
+        DrawableKind::FishTank { .. } => "fish tank",
+        DrawableKind::KitchenIsland { .. } => "kitchen island",
+        DrawableKind::WaterCooler(_) => "water cooler",
+        DrawableKind::TrashBin(_) => "trash bin",
+        DrawableKind::Door { .. } => "door",
+        DrawableKind::Runner(_) => "runner",
+        DrawableKind::NeonSign { .. } => "neon sign",
+        DrawableKind::Clock { .. } => "clock",
+        DrawableKind::Character { .. }
+        | DrawableKind::Pet { .. }
+        | DrawableKind::GatewayMascot { .. }
+        | DrawableKind::RoomWall { .. } => panic!("queue_fixtures queues only fixtures"),
+    }
+}
+
+/// The classic queues every fixture the roster yields, as what it is, at the
+/// roster's depth and in roster order: a fixture it drops, or draws as another,
+/// fails here.
+#[test]
+fn the_classic_queues_every_fixture_the_roster_yields() {
+    use crate::layout::{Depth, Tie};
+    for layout in crate::layout::roster::tests::offices() {
+        let q = queued(&layout, &empty_frame(&layout));
+        let got: Vec<(Option<(u16, Layer)>, &str)> = q
+            .backdrop
+            .iter()
+            .map(|(_, k)| (None, drawn_as(k)))
+            .chain(
+                q.sorted
+                    .iter()
+                    .map(|d| (Some((d.sort_row, d.layer)), drawn_as(&d.kind))),
+            )
+            .collect();
+        let want: Vec<(Option<(u16, Layer)>, &str)> = layout
+            .fixtures()
+            .map(|f| {
+                let depth = match f.depth {
+                    Depth::Backdrop => None,
+                    Depth::Sorted {
+                        row,
+                        tie: Tie::FigureOver,
+                    } => Some((row, Layer::Under)),
+                    Depth::Sorted {
+                        row,
+                        tie: Tie::FixtureOver,
+                    } => Some((row, Layer::Over)),
+                };
+                (depth, paints_as(f.kind))
+            })
+            .collect();
+        assert_eq!(got, want, "{}x{}", layout.buf_w, layout.buf_h);
+    }
+}
+
+/// The self-lit wall fixtures are the only ones spared the hour's wash; the
+/// runner, which once stayed daylight-tan in a dimmed office, is washed.
+#[test]
+fn only_the_neon_sign_and_the_clock_are_spared_the_wash() {
+    use crate::layout::FixtureKind;
+    for layout in crate::layout::roster::tests::offices() {
+        for f in layout.fixtures() {
+            let spared = matches!(f.kind, FixtureKind::NeonSign | FixtureKind::Clock);
+            assert_eq!(wash_of(f.kind) == Wash::Spared, spared, "{:?}", f.kind);
+        }
+    }
+    assert_eq!(wash_of(FixtureKind::Runner), Wash::Washed);
+}
+
+/// The background pass paints every spared fixture before every washed one,
+/// so the roster must list them that way or the pass paints out of its order.
+#[test]
+fn the_roster_lists_spared_backdrop_before_washed() {
+    use crate::layout::Depth;
+    for layout in crate::layout::roster::tests::offices() {
+        let washes: Vec<Wash> = layout
+            .fixtures()
+            .filter(|f| f.depth == Depth::Backdrop)
+            .map(|f| wash_of(f.kind))
+            .collect();
+        assert!(
+            washes
+                .windows(2)
+                .all(|w| !(w[0] == Wash::Washed && w[1] == Wash::Spared)),
+            "{washes:?}"
+        );
+    }
+}
+
+/// Only the background pass can spare a fixture the hour's wash: the
+/// foreground one reaches everything the y-sort paints.
+#[test]
+fn only_a_backdrop_fixture_is_spared_the_wash() {
+    use crate::layout::Depth;
+    let mut spared = 0;
+    for layout in crate::layout::roster::tests::offices() {
+        for f in layout
+            .fixtures()
+            .filter(|f| wash_of(f.kind) == Wash::Spared)
+        {
+            assert_eq!(f.depth, Depth::Backdrop, "{:?}", f.kind);
+            spared += 1;
+        }
+    }
+    assert!(spared > 0, "the sweep spares some fixture");
+}
+
+/// A seat sorts at its sitter's own row, so its roster tie alone decides which
+/// paints on top: the sitter on a front sofa or a meeting chair, and a desk
+/// chair or a sofa we see the back of over its sitter.
+#[test]
+fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
+    use crate::layout::{Depth, Facing, FixtureKind, Tie, WaypointKind};
+    let (mut fronts, mut backs, mut chairs, mut meeting_chairs) = (0, 0, 0, 0);
+    for layout in crate::layout::roster::tests::offices() {
+        let fixtures: Vec<_> = layout.fixtures().collect();
+        for w in layout
+            .waypoints
+            .iter()
+            .filter(|w| w.kind == WaypointKind::MeetingSofa)
+        {
+            let back = w.facing == Facing::North;
+            let sofa = fixtures
+                .iter()
+                .find(|f| {
+                    matches!(f.kind, FixtureKind::MeetingSofa { room, faces_away, .. }
+                        if Some(room) == w.room_id && faces_away == back)
+                })
+                .expect("its sofa");
+            let tie = if back {
+                backs += 1;
+                Tie::FixtureOver
+            } else {
+                fronts += 1;
+                Tie::FigureOver
+            };
+            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).sort_row();
+            assert_eq!(sofa.depth, Depth::Sorted { row, tie }, "{w:?}");
+        }
+        for w in layout
+            .waypoints
+            .iter()
+            .filter(|w| w.kind == WaypointKind::MeetingChair)
+        {
+            let chair = fixtures
+                .iter()
+                .find(|f| f.at == w.pos && matches!(f.kind, FixtureKind::MeetingChair { .. }))
+                .expect("its chair");
+            meeting_chairs += 1;
+            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).sort_row();
+            assert_eq!(
+                chair.depth,
+                Depth::Sorted {
+                    row,
+                    tie: Tie::FigureOver
+                },
+                "{w:?}"
+            );
+        }
+        for f in &fixtures {
+            if let FixtureKind::DeskChair(i) = f.kind {
+                chairs += 1;
+                let row = Seat::at_desk(layout.home_desks[i.0], layout.desk_facing(i)).sort_row();
+                assert_eq!(
+                    f.depth,
+                    Depth::Sorted {
+                        row,
+                        tie: Tie::FixtureOver
+                    }
+                );
+            }
+        }
+    }
+    assert!(
+        fronts > 0 && backs > 0 && chairs > 0 && meeting_chairs > 0,
+        "the sweep seats every case"
+    );
+}
+
 #[test]
 fn every_pod_occludes_via_overhang() {
-    use crate::layout::{furniture_def, PodDecor, Size};
+    use crate::layout::{PodDecor, Size, furniture_def};
     assert_eq!(
         PodDecor::ALL.len(),
         5,
@@ -1674,39 +2036,6 @@ fn every_pod_occludes_via_overhang() {
             def.visual.h
         );
     }
-}
-
-#[test]
-fn character_anchor_y_exceeds_desk_when_south_of_it() {
-    let desk_y: u16 = 20;
-    let desk_anchor_y = desk_y
-        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-            .visual
-            .h;
-    let char_feet_anchor = (desk_y + 10) + 12;
-    assert!(
-        char_feet_anchor > desk_anchor_y,
-        "walker south of desk must sort after it: char={char_feet_anchor}, desk={desk_anchor_y}"
-    );
-}
-
-#[test]
-fn character_anchor_y_below_desk_when_seated_at_it() {
-    let desk_y: u16 = 20;
-    let seated_anchor = seated_anchor_facing(
-        Point { x: 0, y: desk_y },
-        CHARACTER_SPRITE_W,
-        crate::layout::Facing::South,
-    );
-    let char_feet_anchor = seated_anchor.y + 12;
-    let desk_anchor_y = desk_y
-        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-            .visual
-            .h;
-    assert!(
-        char_feet_anchor < desk_anchor_y,
-        "seated char must sort before desk: char={char_feet_anchor}, desk={desk_anchor_y}"
-    );
 }
 
 fn entry_slot(created_at_ms_ago: u64, now: SystemTime) -> AgentSlot {
@@ -1750,7 +2079,7 @@ fn wall_clock_epoch_ms_survives_an_f32_cast_only_after_an_integer_reduction() {
 #[test]
 fn door_frame_just_spawned_is_half_open() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    // 50 ms into the 200 ms opening ramp — first half = frame 1.
+    // 50 ms into the `DOOR_TRANSITION_MS` opening ramp — first half = frame 1.
     let slot = entry_slot(50, now);
     assert_eq!(compute_door_frame_idx(&[slot], now, 0), 1);
 }
@@ -1761,7 +2090,7 @@ fn door_frame_after_opening_ramp_is_fully_open() {
     // 150 ms (still inside opening ramp but past midpoint) → frame 2.
     let s1 = entry_slot(150, now);
     assert_eq!(compute_door_frame_idx(&[s1], now, 0), 2);
-    // 2 s into the 4 s window → fully open.
+    // 2 s into the `ENTRY_ANIMATION_MS` window → fully open.
     let s2 = entry_slot(2_000, now);
     assert_eq!(compute_door_frame_idx(&[s2], now, 0), 2);
 }
@@ -1824,8 +2153,8 @@ fn door_frame_uses_physics_window_when_nonzero() {
 
 #[test]
 fn waypoint_rank_offset_x_decollision_table() {
-    use super::anchors::waypoint_rank_offset_x;
     use crate::layout::WaypointKind;
+    use crate::sim::anchors::waypoint_rank_offset_x;
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 1), 9);
@@ -1839,8 +2168,8 @@ fn waypoint_rank_offset_x_decollision_table() {
 
 #[test]
 fn no_exclusive_waypoint_kind_ever_steps_aside() {
-    use super::anchors::waypoint_rank_offset_x;
-    use crate::layout::{furniture_def, WaypointKind};
+    use crate::layout::{WaypointKind, furniture_def};
+    use crate::sim::anchors::waypoint_rank_offset_x;
     let mut exclusive = 0;
     let (mut saw_booth, mut saw_shareable_steps) = (false, false);
     for &kind in WaypointKind::ALL {
@@ -1868,88 +2197,6 @@ fn no_exclusive_waypoint_kind_ever_steps_aside() {
     assert!(
         saw_shareable_steps,
         "a shareable queue spot (pantry/vending/printer/snack) must still step aside"
-    );
-}
-
-#[test]
-fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays() {
-    use pixtuoid_core::ToolDetail;
-    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let active = |detail: Option<&ToolDetail>| {
-        make_slot(
-            id,
-            ActivityState::Active {
-                tool_use_id: None,
-                detail: detail.map(|d| Arc::from(d.display())),
-                kind: detail.map_or(ToolKind::Other, ToolKind::from_detail),
-            },
-        )
-    };
-    let generic = |display: &str| ToolDetail::Generic {
-        display: display.into(),
-    };
-    let table: &[(Option<ToolDetail>, Rgb)] = &[
-        (Some(ToolDetail::Task), glow.agent),
-        (Some(generic("Edit src/main.rs")), glow.edit),
-        (Some(generic("Write: src/foo.rs")), glow.edit),
-        (Some(generic("MultiEdit lib.rs")), glow.edit),
-        (Some(generic("Read: README.md")), glow.read),
-        (Some(generic("Bash: cargo test")), glow.bash),
-        (Some(generic("Grep: TODO")), glow.grep),
-        (Some(generic("Glob **/*.rs")), glow.grep),
-        (Some(generic("WebFetch https://x")), glow.default),
-        (None, glow.default),
-    ];
-    for (detail, expected) in table {
-        assert_eq!(
-            palette::tool_glow_tint(&active(detail.as_ref()), glow),
-            Some(*expected),
-            "display {:?} must keep its pre-ToolKind tint",
-            detail.as_ref().map(ToolDetail::display),
-        );
-    }
-    // A Generic tool that merely SPELLS a delegation word is NOT kind Task —
-    // impossible from production decoders, which type every dispatch as
-    // ToolDetail::Task upstream.
-    assert_eq!(
-        palette::tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
-        Some(glow.default)
-    );
-}
-
-#[test]
-fn tool_glow_for_kind_is_the_shared_kind_to_hue_map() {
-    use pixtuoid_core::state::ToolKind;
-    let glow = &crate::theme::NORMAL.tool_glow;
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Edit, glow), glow.edit);
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Read, glow), glow.read);
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Bash, glow), glow.bash);
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Task, glow),
-        glow.agent
-    );
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Search, glow),
-        glow.grep
-    );
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Other, glow),
-        glow.default
-    );
-    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let edit = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: None,
-            kind: ToolKind::Edit,
-        },
-    );
-    assert_eq!(palette::tool_glow_tint(&edit, glow), Some(glow.edit));
-    assert_eq!(
-        palette::tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
-        None
     );
 }
 
@@ -2052,10 +2299,10 @@ fn obstacle_kinds_render_upright_and_unflipped() {
 fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     use pixtuoid_core::state::EffortObservation;
     use std::time::Duration;
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let black = Rgb { r: 0, g: 0, b: 0 };
-    let anchor = Point { x: 8, y: 8 };
+    let top_left = Point { x: 8, y: 8 };
     let mut slot = make_slot(
         pixtuoid_core::AgentId::from_parts("claude-code", "ses_burn"),
         ActivityState::Idle,
@@ -2063,25 +2310,39 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
 
     let render = |slot: &pixtuoid_core::AgentSlot| {
         let mut buf = RgbBuffer::filled(32, 32, black);
-        paint_character_at(
+        let drawn = paint_character_at(
             &mut buf,
-            "seated",
-            0,
-            anchor,
+            crate::character::SpritePose {
+                anim_name: "seated",
+                frame_idx: 0,
+                flip_x: false,
+                glow_tint: None,
+            },
+            top_left,
             slot,
             &pack,
-            false,
-            None,
             &mut FrameCache::new(),
             now,
+        );
+        let fx = crate::sim::character_effects(
+            slot,
+            top_left,
+            drawn.map(|s| s.w),
+            crate::sim::Cues::default(),
+            Motion::Full.timing(now),
+        );
+        super::effects::paint_effects(
+            &mut buf,
+            &fx,
+            crate::theme::theme_by_name("normal").expect("normal theme"),
         );
         buf
     };
     let has = |buf: &RgbBuffer, c: Rgb| {
         (0..buf.height()).any(|y| (0..buf.width()).any(|x| buf.get(x, y) == c))
     };
-    const EMBER: Rgb = super::effects::FLAME_DEEP;
-    const TIP: Rgb = super::effects::FLAME_TIP;
+    const EMBER: Rgb = crate::effects::look::FLAME_DEEP;
+    const TIP: Rgb = crate::effects::look::FLAME_TIP;
 
     let plain = render(&slot);
     assert!(
@@ -2098,7 +2359,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     slot.effort = Some(EffortObservation::new("ultra".into(), now));
     let burning = render(&slot);
     assert!(has(&burning, TIP), "Top paints flame tips");
-    let above = (0..anchor.y).any(|y| (0..32).any(|x| burning.get(x, y) != black));
+    let above = (0..top_left.y).any(|y| (0..32).any(|x| burning.get(x, y) != black));
     assert!(above, "the crown must rise above the sprite's top row");
 
     slot.effort = Some(EffortObservation::new(
@@ -2110,9 +2371,64 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     assert!(has(&decayed, EMBER), "…back to ember hair");
 }
 
+/// The sim crowns a Top-burning agent's placement on its post-breath top-left,
+/// centred on its pack frame; a Premium one burns no crown.
+#[test]
+fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
+    use crate::effects::EffectKind;
+    use crate::pose::Pose;
+    use pixtuoid_core::state::EffortObservation;
+    let (mut scene, layout, id, now0, pack) = sim_rig();
+    // A breathing instant, where the post-breath top-left is off the fit.
+    let now = (0..u64::from(u16::MAX))
+        .map(|ms| now0 + std::time::Duration::from_millis(ms))
+        .find(|&t| {
+            crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, Motion::Full.beat(t)).y == 0
+        })
+        .expect("the breath rises within a cycle");
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.model = Some("claude-fable-5".into());
+    let crowns = |scene: &SceneState| {
+        let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+        let poses = HashMap::from([(id, Some(Pose::SeatedThinking))]);
+        let (placements, ..) = crate::sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            Motion::Full.timing(now),
+        );
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
+        let crowns: Vec<Point> = p
+            .effects
+            .iter()
+            .filter(|e| e.kind == EffectKind::FlameCrown)
+            .map(|e| e.at)
+            .collect();
+        (p, crowns)
+    };
+    assert!(crowns(&scene).1.is_empty(), "Premium must not flame");
+
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.effort = Some(EffortObservation::new("ultra".into(), now));
+    let (p, crowns) = crowns(&scene);
+    let w = crate::sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
+        .expect("the pack draws the pose")
+        .w;
+    assert_eq!(
+        crowns,
+        [Point {
+            x: p.top_left.x + w / 2,
+            y: p.top_left.y
+        }]
+    );
+}
+
 #[test]
 fn paint_character_at_missing_anim_is_a_noop() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let mut cache = FrameCache::new();
     let id = pixtuoid_core::AgentId::from_transcript_path("/c.jsonl");
     let slot = make_slot(id, ActivityState::Idle);
@@ -2120,13 +2436,15 @@ fn paint_character_at_missing_anim_is_a_noop() {
     let mut buf = RgbBuffer::filled(40, 40, bg);
     paint_character_at(
         &mut buf,
-        "does_not_exist",
-        0,
+        crate::character::SpritePose {
+            anim_name: "does_not_exist",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         Point { x: 20, y: 20 },
         &slot,
         &pack,
-        false,
-        None,
         &mut cache,
         SystemTime::UNIX_EPOCH,
     );
@@ -2143,12 +2461,22 @@ fn paint_character_at_missing_anim_is_a_noop() {
 
 #[test]
 fn glass_wall_h_clamps_below_buffer_bottom() {
-    // y_top near the buffer bottom makes the cap+face span exceed the height,
-    // firing the per-row `y >= bh continue`.
+    // `y_face` at the buffer's last row runs the face past it, so the pen's
+    // clip drops the rows below.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bh = 16u16;
     let mut buf = RgbBuffer::filled(40, bh, Rgb { r: 0, g: 0, b: 0 });
-    paint_glass_wall_h(&mut buf, theme, 0, 39, bh - 1);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Horizontal {
+            x0: 0,
+            x1: 39,
+            y_face: bh - 1,
+            jamb_west: false,
+            jamb_east: false,
+        },
+    );
     let mut painted = false;
     for y in 0..bh {
         for x in 0..40u16 {
@@ -2162,12 +2490,24 @@ fn glass_wall_h_clamps_below_buffer_bottom() {
 
 #[test]
 fn glass_wall_v_clamps_past_right_edge() {
-    // x_left == bw-1 → x_left+dx for dx>=1 exceeds the width, exercising the
-    // `x >= bw continue`. Must not panic.
+    // `x` at the last column runs the strip past the width, so the pen's clip
+    // drops the columns beyond. Must not panic.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bw = 12u16;
     let mut buf = RgbBuffer::filled(bw, 40, Rgb { r: 0, g: 0, b: 0 });
-    paint_glass_wall_v(&mut buf, theme, bw - 1, 5, 20);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: bw - 1,
+            y_top: 5,
+            north: 5,
+            y_bot: 20,
+            south: 20,
+            jamb_north: false,
+            jamb_south: false,
+        },
+    );
     let mut painted = false;
     for y in 5..21u16 {
         if buf.get(bw - 1, y) != (Rgb { r: 0, g: 0, b: 0 }) {
@@ -2179,12 +2519,16 @@ fn glass_wall_v_clamps_past_right_edge() {
 
 #[test]
 fn pet_hearts_skip_dead_and_faded_hearts() {
-    use super::effects::paint_pet_hearts;
     let bg = Rgb { r: 0, g: 0, b: 0 };
     let cat_pos = Point { x: 20, y: 20 };
     let painted_count = |elapsed_ms: u64| -> usize {
         let mut buf = RgbBuffer::filled(40, 40, bg);
-        paint_pet_hearts(&mut buf, cat_pos, elapsed_ms);
+        let hearts: Vec<_> = crate::effects::pet_hearts(cat_pos, elapsed_ms).collect();
+        super::effects::paint_effects(
+            &mut buf,
+            &hearts,
+            crate::theme::theme_by_name("normal").expect("normal theme"),
+        );
         (0..40u16)
             .flat_map(|y| (0..40u16).map(move |x| (x, y)))
             .filter(|&(x, y)| buf.get(x, y) != bg)
@@ -2204,12 +2548,7 @@ fn pet_hearts_skip_dead_and_faded_hearts() {
 }
 
 #[test]
-fn furniture_room_decor_too_small_bounds_are_noops() {
-    use super::furniture::{
-        paint_doormat, paint_notice_board, paint_trash_bin, paint_water_cooler,
-    };
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let bg = Rgb { r: 9, g: 9, b: 9 };
+fn room_decor_does_not_fit_too_small_a_room() {
     let small = crate::layout::Bounds {
         x: 2,
         y: 2,
@@ -2225,21 +2564,9 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
         counter_size: crate::layout::COMPACT_COUNTER,
         kitchen_island: None,
     };
-    let assert_noop = |f: &dyn Fn(&mut RgbBuffer)| {
-        let mut buf = RgbBuffer::filled(60, 60, bg);
-        f(&mut buf);
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(buf.get(x, y), bg, "too-small bounds must paint nothing");
-            }
-        }
-    };
-    assert_noop(&|b| paint_notice_board(b, small, theme));
-    assert_noop(&|b| paint_doormat(b, &small_meeting, theme));
-    assert_noop(&|b| {
-        paint_water_cooler(b, &small_pantry, std::time::SystemTime::UNIX_EPOCH, theme)
-    });
-    assert_noop(&|b| paint_trash_bin(b, &small_pantry));
+    assert_eq!(small_meeting.doormat_rect(), None);
+    assert_eq!(small_pantry.water_cooler_rect(), None);
+    assert_eq!(small_pantry.trash_bin_rect(), None);
 }
 
 #[test]
@@ -2274,11 +2601,16 @@ fn furniture_room_decor_large_bounds_paint() {
         assert!(painted, "large bounds must paint the decor");
     };
     assert_paints(&|b| paint_notice_board(b, big, theme));
-    assert_paints(&|b| paint_doormat(b, &big_meeting, theme));
+    assert_paints(&|b| paint_doormat(b, big_meeting.doormat_rect().expect("fits"), theme));
     assert_paints(&|b| {
-        paint_water_cooler(b, &big_pantry, std::time::SystemTime::UNIX_EPOCH, theme)
+        paint_water_cooler(
+            b,
+            big_pantry.water_cooler_rect().expect("fits"),
+            Motion::Full.beat(std::time::SystemTime::UNIX_EPOCH),
+            theme,
+        )
     });
-    assert_paints(&|b| paint_trash_bin(b, &big_pantry));
+    assert_paints(&|b| paint_trash_bin(b, big_pantry.trash_bin_rect().expect("fits")));
 }
 
 #[test]
@@ -2324,21 +2656,27 @@ fn furniture_painters_fill_exactly_their_rect_authority() {
             height: max_y - min_y + 1,
         })
     };
+    let bin = pantry.trash_bin_rect().expect("fits");
+    let mat = meeting.doormat_rect().expect("fits");
+    let cooler = pantry.water_cooler_rect().expect("fits");
     assert_eq!(
-        painted_bbox(&|b| paint_trash_bin(b, &pantry)),
-        pantry.trash_bin_rect(),
+        painted_bbox(&|b| paint_trash_bin(b, bin)),
+        Some(bin),
         "trash bin paints exactly its rect",
     );
     assert_eq!(
-        painted_bbox(&|b| paint_doormat(b, &meeting, theme)),
-        meeting.doormat_rect(),
+        painted_bbox(&|b| paint_doormat(b, mat, theme)),
+        Some(mat),
         "doormat paints exactly its rect",
     );
     assert_eq!(
-        painted_bbox(&|b| {
-            paint_water_cooler(b, &pantry, std::time::SystemTime::UNIX_EPOCH, theme)
-        }),
-        pantry.water_cooler_rect(),
+        painted_bbox(&|b| paint_water_cooler(
+            b,
+            cooler,
+            Motion::Full.beat(std::time::SystemTime::UNIX_EPOCH),
+            theme
+        )),
+        Some(cooler),
         "water cooler paints exactly its rect (glug bubble stays inside)",
     );
 }
@@ -2350,67 +2688,17 @@ fn furniture_corner_clip_does_not_panic() {
     // Centre each piece near the (0,0) corner so part of the sprite has a
     // negative px/py, exercising the `< 0` / out-of-range `continue` clamps.
     let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
-    paint_area_rug(&mut buf, 1, 1, 10, 8, theme);
+    // A rug's box can't reach west of the buffer, only past its far corner.
+    let rug = crate::layout::Bounds {
+        x: 35,
+        y: 36,
+        width: 10,
+        height: 8,
+    };
+    paint_area_rug(&mut buf, rug, theme);
     paint_side_table(&mut buf, 1, 1, theme);
     super::furniture::paint_kitchen_island(&mut buf, 1, 1, theme);
     // No panic reaching here is the assertion (negative coords are clipped).
-}
-
-#[test]
-fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
-    // `t`'s natural (un-forced) weather is NOT Storm, so dropping the override
-    // shows up in the observed weather, not just in the Ok/Err return. The
-    // override is a thread-local Cell — every assert must run on one thread.
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    force_weather(None).expect("clear is Ok");
-    let natural = crate::sky::Sky::at(t).weather();
-
-    assert!(force_weather(Some("storm")).is_ok(), "known name → Ok");
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Storm,
-        "force_weather(storm) must drive the sky to Storm",
-    );
-    assert_eq!(
-        crate::sky::Sky::at(t + std::time::Duration::from_secs(987_654)).weather(),
-        crate::sky::Weather::Storm,
-        "the override must ignore the clock",
-    );
-
-    assert!(
-        force_weather(Some("STORM")).is_ok(),
-        "case-insensitive → Ok"
-    );
-    assert_eq!(crate::sky::Sky::at(t).weather(), crate::sky::Weather::Storm);
-
-    assert!(force_weather(Some("snow")).is_ok());
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Snow,
-        "a second known name must re-set the override",
-    );
-
-    let err = force_weather(Some("not-a-weather")).expect_err("unknown → Err");
-    assert_eq!(
-        err,
-        weather_names(),
-        "Err payload must be the canonical weather names",
-    );
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Snow,
-        "an unknown name must NOT touch the override",
-    );
-
-    assert!(force_weather(None).is_ok(), "None → Ok");
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        natural,
-        "None must restore the clock-based selection",
-    );
-
-    // Reset so the override can't leak into sibling time-based weather tests.
-    force_weather(None).expect("reset");
 }
 
 #[test]
@@ -2436,83 +2724,38 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         .collect();
     assert_eq!(
         ids,
-        weather_names(),
+        crate::sky::weather_names(),
         "site/src/weather.json ids must match Weather::ALL names in order — \
          update the manifest + run `just gen-media` when the enum changes"
     );
 }
 
 #[test]
-fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
-    let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
-    let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
-    assert_eq!(
-        color_of(&a, palette::SHIRT_KEY),
-        color_of(&b, palette::SHIRT_KEY),
-        "same cwd should share shirt"
-    );
-    assert_eq!(
-        color_of(&a, palette::PANTS_KEY),
-        color_of(&b, palette::PANTS_KEY),
-        "same cwd should share pants"
-    );
-    assert_ne!(
-        (
-            color_of(&a, palette::HAIR_KEY),
-            color_of(&a, palette::SKIN_KEY)
-        ),
-        (
-            color_of(&b, palette::HAIR_KEY),
-            color_of(&b, palette::SKIN_KEY)
-        ),
-        "different agents in the same repo must differ in hair/skin"
-    );
-}
-
-#[test]
-fn agent_overrides_unknown_cwd_falls_back_to_id_outfit() {
-    let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
-    let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
-    assert_eq!(
-        color_of(&unknown, palette::SHIRT_KEY),
-        color_of(&empty, palette::SHIRT_KEY)
-    );
-    assert_eq!(
-        color_of(&unknown, palette::PANTS_KEY),
-        color_of(&empty, palette::PANTS_KEY)
-    );
-    let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
-    assert_ne!(
-        color_of(&other, palette::SHIRT_KEY),
-        color_of(&empty, palette::SHIRT_KEY),
-        "cwd-less agents keep distinct per-id outfits"
-    );
-}
-
-#[test]
 fn cwd_backfill_invalidates_cached_outfit_frames() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let unknown = make_slot_cwd("/p/heal.jsonl", "", true);
     // Pick a cwd whose Team-Palette outfit differs from the id-seeded fallback,
     // or the assertion has no teeth.
     let healed = (0..64)
         .map(|i| make_slot_cwd("/p/heal.jsonl", &format!("/repo/team{i}"), false))
-        .find(|h| color_of(h, palette::SHIRT_KEY) != color_of(&unknown, palette::SHIRT_KEY))
+        .find(|h| color_of(h, SHIRT_KEY) != color_of(&unknown, SHIRT_KEY))
         .expect("some cwd lands on a different outfit than the fallback");
 
-    let anchor = Point { x: 2, y: 2 };
+    let top_left = Point { x: 2, y: 2 };
     let black = Rgb { r: 0, g: 0, b: 0 };
     let mut cache = FrameCache::new();
     let mut before = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut before,
-        "seated",
-        0,
-        anchor,
+        crate::character::SpritePose {
+            anim_name: "seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        top_left,
         &unknown,
         &pack,
-        false,
-        None,
         &mut cache,
         SystemTime::UNIX_EPOCH,
     );
@@ -2520,13 +2763,15 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut after = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut after,
-        "seated",
-        0,
-        anchor,
+        crate::character::SpritePose {
+            anim_name: "seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        top_left,
         &healed,
         &pack,
-        false,
-        None,
         &mut cache,
         SystemTime::UNIX_EPOCH,
     );
@@ -2534,13 +2779,15 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut fresh = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut fresh,
-        "seated",
-        0,
-        anchor,
+        crate::character::SpritePose {
+            anim_name: "seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        top_left,
         &healed,
         &pack,
-        false,
-        None,
         &mut FrameCache::new(),
         SystemTime::UNIX_EPOCH,
     );
@@ -2557,31 +2804,9 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     );
 }
 
-#[test]
-fn agent_overrides_same_id_different_cwd_changes_outfit() {
-    let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
-    let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
-    assert_ne!(
-        color_of(&a, palette::SHIRT_KEY),
-        color_of(&b, palette::SHIRT_KEY),
-        "different cwds should pick different outfits"
-    );
-    assert_eq!(
-        color_of(&a, palette::HAIR_KEY),
-        color_of(&b, palette::HAIR_KEY)
-    );
-    assert_eq!(
-        color_of(&a, palette::SKIN_KEY),
-        color_of(&b, palette::SKIN_KEY)
-    );
-}
-
 struct OwnedSimStores {
-    router: crate::pathfind::AStarRouter,
-    overlay: OccupancyOverlay,
-    history: pose::PoseHistory,
-    motion: std::collections::HashMap<pixtuoid_core::AgentId, crate::motion::MotionState>,
-    light: LightingState,
+    route: pose::RouteRig<crate::pathfind::AStarRouter>,
+    vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
 }
@@ -2589,11 +2814,8 @@ struct OwnedSimStores {
 impl OwnedSimStores {
     fn new() -> Self {
         Self {
-            router: crate::pathfind::AStarRouter::new(),
-            overlay: OccupancyOverlay::new(),
-            history: pose::PoseHistory::new(),
-            motion: std::collections::HashMap::new(),
-            light: LightingState::new(),
+            route: pose::RouteRig::new(crate::pathfind::AStarRouter::new()),
+            vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
         }
@@ -2601,20 +2823,26 @@ impl OwnedSimStores {
 
     fn stores(&mut self) -> SimStores<'_> {
         SimStores {
-            router: &mut self.router,
-            overlay: &mut self.overlay,
-            history: &mut self.history,
-            motion: &mut self.motion,
-            light: &mut self.light,
+            router: &mut self.route.router,
+            overlay: &mut self.route.overlay,
+            history: &mut self.route.history,
+            walks: &mut self.route.walks,
+            vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
         }
     }
 }
 
-fn sim_rig() -> (SceneState, Layout, pixtuoid_core::AgentId, SystemTime, Pack) {
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
+fn sim_rig() -> (
+    SceneState,
+    SceneLayout,
+    pixtuoid_core::AgentId,
+    SystemTime,
+    Pack,
+) {
+    let pack = crate::pack::test_default_pack();
+    let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
     let now0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let id = pixtuoid_core::AgentId::from_transcript_path("/p/sim-seam.jsonl");
     let mut slot = make_slot(id, ActivityState::Idle);
@@ -2642,11 +2870,28 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
         let mut last = None;
         for _ in 0..ms / frame.as_millis() as u64 {
             now += frame;
-            last = Some(sim_step(&mut owned.stores(), scene, &layout, &pack, &coffee, 0, now).neon);
+            last = Some(
+                sim_step(
+                    &mut owned.stores(),
+                    SimInputs {
+                        world: FloorInputs {
+                            scene,
+                            pack: &pack,
+                            now,
+                            floor: crate::floor::FloorMeta::ground(),
+                            pets: PetInputs::default(),
+                        },
+                        layout: &layout,
+                        coffee: &coffee,
+                        door_anim_max_ms: 0,
+                    },
+                )
+                .neon,
+            );
         }
         last.expect("at least one frame")
     };
-    let debounce = crate::floor::LightingState::EMPTY_DEBOUNCE_MS;
+    let debounce = crate::floor::VacancyDim::EMPTY_DEBOUNCE_MS;
     assert_eq!(run(&empty, debounce * 3), crate::floor::NeonLevels::EMPTY);
     run(&populated, 60_000);
     // A gap between transcripts: the tally is empty, the room's debounce is not up.
@@ -2680,8 +2925,8 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let wide = crate::embedded_pack::test_wide_pack();
-    let default = crate::embedded_pack::test_default_pack();
+    let wide = crate::pack::test_wide_pack();
+    let default = crate::pack::test_default_pack();
     assert_eq!(
         wide.animation("standing").expect("standing").frames()[0].width(),
         10,
@@ -2692,8 +2937,8 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
         CHARACTER_SPRITE_W,
     );
 
-    let layout =
-        Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), 0).expect("240x160 lays out");
+    let layout = SceneLayout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), 0)
+        .expect("240x160 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let (bw, bh) = (layout.walkable.width(), layout.walkable.height());
 
@@ -2725,8 +2970,22 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
 
     let reserve = |pack: &Pack| {
         let mut owned = OwnedSimStores::new();
-        sim_step(&mut owned.stores(), &scene, &layout, pack, &coffee, 0, now);
-        reserved_bbox_width(&owned.overlay, bw, bh)
+        sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
+        reserved_bbox_width(&owned.route.overlay, bw, bh)
     };
     assert_eq!(
         reserve(&wide),
@@ -2761,12 +3020,18 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
     for ms in [50u64, 250, 1_000, 4_000, 12_000, 40_000] {
         let f = sim_step(
             &mut stores,
-            &scene,
-            &layout,
-            &pack,
-            &coffee,
-            0,
-            now0 + Duration::from_millis(ms),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0 + Duration::from_millis(ms),
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
         );
         let Some(c) = f.characters.first() else {
             continue;
@@ -2779,7 +3044,7 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
                     "a WALKING agent is not seated at a desk (t={ms}ms)"
                 );
             }
-            Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. })) => {
+            Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping)) => {
                 seated_seen = true;
                 let desk = c.seat_desk.expect("a seated agent carries its desk");
                 assert!(
@@ -2794,8 +3059,406 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
     assert!(seated_seen, "the sweep never observed a seated pose");
 }
 
+/// A desk's props are the sim's call, from its occupant, so no painter
+/// re-decides the cup or the tower.
 #[test]
-fn sim_step_advances_motion_without_painting() {
+fn sim_step_decides_each_desks_props_from_its_occupant() {
+    use std::time::Duration;
+    let (mut scene, layout, id, now0, pack) = sim_rig();
+    scene
+        .agents
+        .get_mut(&id)
+        .expect("the rig's agent")
+        .tokens_used = crate::token_meter::TIER_BASE_TOKENS;
+    scene
+        .agents
+        .get_mut(&id)
+        .expect("the rig's agent")
+        .last_usage = Some(pixtuoid_core::state::UsageObservation::new(
+        crate::token_meter::SHEET_MIN_DELTA_TOKENS,
+        now0,
+    ));
+    let desk = scene.agents[&id].desk_index.single_floor_local().0;
+    let coffee = HashMap::from([(id, now0)]);
+    let desks_at = |now| {
+        let mut owned = OwnedSimStores::new();
+        sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        )
+        .desks
+    };
+    let fresh = desks_at(now0);
+    assert_eq!(fresh.len(), layout.home_desks.len());
+    assert_eq!(fresh[desk].cup, Some(crate::sim::Cup::Steaming));
+    assert_eq!(fresh[desk].token_tier, 1);
+    assert_eq!(
+        fresh[desk].sheet_fall,
+        Some(0),
+        "a big reading drops a sheet"
+    );
+    for (i, props) in fresh.iter().enumerate() {
+        assert_eq!(
+            props.scanline,
+            crate::sim::scanline_col(layout.home_desks[i].x, Motion::Full.beat(now0)),
+            "desk {i}'s scanline is its own column's"
+        );
+        if i != desk {
+            assert_eq!(
+                *props,
+                crate::sim::DeskProps {
+                    scanline: props.scanline,
+                    ..Default::default()
+                },
+                "desk {i} has no occupant"
+            );
+        }
+    }
+    let cold = desks_at(now0 + Duration::from_secs(crate::floor::CoffeeState::STEAM_WINDOW_SECS));
+    assert_eq!(
+        cold[desk].cup,
+        Some(crate::sim::Cup::Cold),
+        "the cup stays after it stops steaming"
+    );
+    assert_eq!(cold[desk].sheet_fall, None, "and the sheet has landed");
+}
+
+#[test]
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+    let (scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
+    let floor = crate::floor::FloorMeta::ground();
+    let step = |pets| {
+        let mut owned = OwnedSimStores::new();
+        sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0,
+                    floor,
+                    pets,
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        )
+        .pet
+    };
+    assert!(
+        step(PetInputs::default()).is_none(),
+        "no pet on a floor without one"
+    );
+    let roaming = step(PetInputs {
+        pet: Some(&pet),
+        petting: None,
+    })
+    .expect("the cat roams");
+    let hearts = |p: &crate::sim::PetPlacement| -> Vec<u64> {
+        p.effects
+            .iter()
+            .filter(|e| e.kind == crate::effects::EffectKind::PetHeart)
+            .map(|e| e.phase)
+            .collect()
+    };
+    assert!(
+        hearts(&roaming).is_empty(),
+        "a roaming cat is not being petted"
+    );
+
+    let clicked = Point { x: 40, y: 50 };
+    let petting = crate::pet::PetState {
+        petted_at: now0,
+        pet_pos: clicked,
+        kind: pet.kind,
+        floor_idx: floor.floor_idx,
+    };
+    let held = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&petting),
+    })
+    .expect("the petted cat");
+    assert_eq!(held.pos, clicked);
+    assert_eq!(held.anim_name, pet.kind.sit_anim());
+    assert_eq!(
+        hearts(&held),
+        [0],
+        "petted just now: its first heart leaves"
+    );
+
+    // Held in the canvas's corner, its frame is fitted back on.
+    let in_corner = crate::pet::PetState {
+        pet_pos: Point { x: 0, y: 0 },
+        ..petting
+    };
+    let cornered = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&in_corner),
+    })
+    .expect("the petted cat");
+    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
+    assert_eq!(
+        cornered.pos,
+        Point {
+            x: size.w / 2,
+            y: size.h / 2
+        }
+    );
+
+    let upstairs = crate::pet::PetState {
+        floor_idx: floor.floor_idx + 1,
+        ..petting
+    };
+    let elsewhere = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&upstairs),
+    })
+    .expect("the cat roams");
+    assert!(
+        hearts(&elsewhere).is_empty(),
+        "a petting on another floor leaves this one roaming"
+    );
+    let a_dog = crate::pet::PetState {
+        kind: crate::pet::PetKind::Dog,
+        ..petting
+    };
+    let other_kind = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&a_dog),
+    })
+    .expect("the cat roams");
+    assert!(
+        hearts(&other_kind).is_empty(),
+        "petting another kind of pet leaves the cat roaming"
+    );
+}
+
+#[test]
+fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
+    let layout =
+        SceneLayout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let cabinets: Vec<bool> = (0..layout.home_desks.len())
+        .map(|i| crate::layout::desk_has_cabinet(FloorLocalDeskIndex(i)))
+        .collect();
+    assert!(cabinets.len() >= 2);
+    assert!(cabinets.iter().step_by(2).all(|&c| c), "{cabinets:?}");
+    assert!(
+        !cabinets.iter().skip(1).step_by(2).any(|&c| c),
+        "{cabinets:?}"
+    );
+}
+
+/// A mascot hovers as its gateway's instance, and its sprite greys exactly
+/// when its gateway is degraded.
+#[test]
+fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
+    let pack = crate::pack::test_default_pack();
+    let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
+        .expect("openclaw has a mascot");
+    for degraded in [false, true] {
+        let mascot = crate::sim::MascotPlacement {
+            pos: Point { x: 60, y: 60 },
+            size: Size { w: 14, h: 12 },
+            anim_name: def.walk,
+            frame_idx: 0,
+            key: crate::creatures::openclaw_key("18789"),
+            degraded,
+            effects: Vec::new(),
+        };
+        let mut drawables = Vec::new();
+        enqueue_gateway_mascots(&pack, std::slice::from_ref(&mascot), &mut drawables);
+        let [
+            Drawable {
+                hover: Some(hover),
+                kind:
+                    DrawableKind::GatewayMascot {
+                        degraded: drawn, ..
+                    },
+                ..
+            },
+        ] = drawables.as_slice()
+        else {
+            panic!("one drawn mascot");
+        };
+        assert_eq!(
+            hover.target,
+            HoverTarget::Mascot(mascot.key.clone()),
+            "the hover"
+        );
+        assert_eq!(*drawn, degraded, "the sprite");
+    }
+}
+
+#[test]
+fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        now0,
+    );
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0 + Duration::from_secs(6),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
+    );
+    let [mascot] = frame.mascots.as_slice() else {
+        panic!("one gateway, one mascot: {:?}", frame.mascots);
+    };
+    let card = crate::creatures::GatewayCard::of(&scene, &mascot.key).expect("its card");
+    assert_eq!(card.name, "OpenClaw");
+    assert_eq!(card.instance, None, "a lone instance needs no port");
+}
+
+/// A mascot whose anim the pack lacks paints nothing, so it lists nothing to
+/// hover; a drawn one is sized by the frame it blitted.
+#[test]
+fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        now0,
+    );
+    let now = now0 + Duration::from_secs(6);
+    let mut owned = OwnedSimStores::new();
+    let mut frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let [drawn] = frame.mascots.as_slice() else {
+        panic!("one gateway, one mascot: {:?}", frame.mascots);
+    };
+    let art = pack
+        .animation(drawn.anim_name)
+        .and_then(|a| frame_at(a, drawn.frame_idx))
+        .map(|f| (f.width(), f.height()))
+        .expect("the bundled pack draws the mascot");
+    let mut ghost = drawn.clone();
+    ghost.anim_name = "does_not_exist";
+    ghost.key = crate::creatures::openclaw_key("18790");
+    frame.mascots.push(ghost);
+
+    let hovers = paint_drawn(&owned, &scene, &layout, &pack, now, &frame).hovers;
+    let listed: Vec<_> = hovers
+        .listed()
+        .iter()
+        .filter(|h| matches!(h.target, HoverTarget::Mascot(_)))
+        .map(|h| (h.target.clone(), (h.at.width, h.at.height)))
+        .collect();
+    assert_eq!(listed, vec![(HoverTarget::Mascot(key), art)]);
+}
+
+#[test]
+fn sim_step_fits_every_mascot_frame_on_the_canvas() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    for port in 0..32 {
+        let key = DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            DaemonInstanceId::new(format!("{}", 18789 + port)).expect("id"),
+        );
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            now0,
+        );
+    }
+    let mut owned = OwnedSimStores::new();
+    let mut edge = false;
+    for s in 0..600 {
+        let frame = sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0 + Duration::from_secs(s),
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
+        for m in &frame.mascots {
+            let size = m.size;
+            let (Some(x0), Some(y0)) = (
+                m.pos.x.checked_sub(size.w / 2),
+                m.pos.y.checked_sub(size.h / 2),
+            ) else {
+                panic!("{m:?} overruns the canvas's west or north edge");
+            };
+            assert!(
+                x0 + size.w <= layout.buf_w && y0 + size.h <= layout.buf_h,
+                "{m:?} overruns the canvas"
+            );
+            edge |= x0 == 0 || y0 == 0;
+        }
+    }
+    assert!(edge, "the sweep never walked a mascot to the canvas edge");
+}
+
+#[test]
+fn sim_step_advances_walks_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
     let (scene, layout, id, now0, pack) = sim_rig();
@@ -2810,21 +3473,33 @@ fn sim_step_advances_motion_without_painting() {
     };
     let f1 = sim_step(
         &mut stores,
-        &scene,
-        &layout,
-        &pack,
-        &coffee,
-        0,
-        now0 + Duration::from_millis(50),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0 + Duration::from_millis(50),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
     );
     let f2 = sim_step(
         &mut stores,
-        &scene,
-        &layout,
-        &pack,
-        &coffee,
-        0,
-        now0 + Duration::from_millis(250),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0 + Duration::from_millis(250),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
     );
     assert!(
         walk_t(&f2) > walk_t(&f1),
@@ -2840,8 +3515,12 @@ fn sim_step_advances_motion_without_painting() {
     );
     let _ = stores;
     assert!(
-        owned.motion.get(&id).is_some_and(|m| m.entry.is_some()),
-        "sim_step snapshotted the entry walk profile into the motion store"
+        owned
+            .route
+            .walks
+            .get(&id)
+            .is_some_and(|walk| walk.entry.is_some()),
+        "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
 
@@ -2866,23 +3545,38 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
         slot.created_at = now0;
         slot.state_started_at = now0;
         let mut owned = OwnedSimStores::new();
-        let f = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+        let f = sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
         let p = f
             .characters
             .iter()
             .find(|p| p.seat_desk.is_some())
             .expect("a waiting agent is SEATED at its desk");
+        let carries = |kind| p.effects.iter().any(|e| e.kind == kind);
         assert!(
-            p.waiting_bubble,
+            carries(crate::effects::EffectKind::WaitingMark),
             "{facing:?} desk {i}: a waiting agent must carry the bubble"
         );
         // Waiting rides the SeatedIdle pose, whose default sprite is the
         // sleeping one — a waiter drawn asleep inverts the state's meaning.
         assert!(
-            p.sleep_z_seed.is_none() && !p.anim_name.contains("sleeping"),
-            "{facing:?} desk {i}: a waiting agent must be AWAKE, saw {} with sleep seed {:?}",
+            !carries(crate::effects::EffectKind::SleepZ) && !p.anim_name.contains("sleeping"),
+            "{facing:?} desk {i}: a waiting agent must be AWAKE, saw {} with {:?}",
             p.anim_name,
-            p.sleep_z_seed
+            p.effects
         );
         seen.insert(format!("{facing:?}"));
     }
@@ -2891,6 +3585,267 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
         2,
         "the sweep must cover BOTH facings, saw {seen:?}"
     );
+}
+
+/// An agent off the layout's desks draws nothing, so hover never names it; the
+/// rest are listed in paint order.
+#[test]
+fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    scene.agents.clear();
+    let slot = |path: &str, desk: usize, created: SystemTime| {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(path),
+            ActivityState::Idle,
+        );
+        s.desk_index = GlobalDeskIndex(desk);
+        (s.created_at, s.state_started_at, s.last_event_at) = (created, created, created);
+        s
+    };
+    let off = slot("/hover/off.jsonl", layout.home_desks.len(), now0);
+    let lead = slot("/hover/lead.jsonl", 0, now0);
+    let trail = slot("/hover/trail.jsonl", 1, now0 + Duration::from_millis(150));
+    for s in [&off, &lead, &trail] {
+        scene.agents.insert(s.agent_id, s.clone());
+    }
+    let now = now0 + Duration::from_millis(400);
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let hover = paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            timing: Motion::Full.timing(now),
+            sky: crate::sky::Sky::clock(now),
+            outside: None,
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            walks: &owned.route.walks,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+
+    let queued: Vec<_> = frame
+        .characters
+        .iter()
+        .map(|c| (c.sort_row, frame.agents[c.agent_idx].agent_id))
+        .collect();
+    let mut sorted = queued.clone();
+    // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
+    sorted.sort_by_key(|&(row, _)| row);
+    assert_ne!(sorted, queued, "premise: paint order is not the queue's");
+    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
+    let hovered: Vec<_> = hover
+        .hovers
+        .listed()
+        .iter()
+        .map(|h| h.target.clone())
+        .collect();
+    assert_eq!(
+        hovered,
+        sorted
+            .iter()
+            .map(|&(_, id)| HoverTarget::Agent(id))
+            .collect::<Vec<_>>()
+    );
+    assert!(!listed.contains(&off.agent_id));
+    let [a, b] = [lead.agent_id, trail.agent_id].map(|id| {
+        hover
+            .hovers
+            .listed()
+            .iter()
+            .find(|h| h.target == HoverTarget::Agent(id))
+            .expect("drawn")
+            .at
+    });
+    assert!(
+        a.overlaps(b),
+        "premise: the two arrivals overlap: {a:?} {b:?}"
+    );
+}
+
+/// A character or a pet whose anim the pack lacks paints nothing, so it
+/// neither hovers nor wears a badge.
+#[test]
+fn a_figure_whose_anim_is_missing_is_not_hoverable() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let mut frame = frames.last().expect("a walk").clone();
+    let walker = frame.agents[0].agent_id;
+    let mut ghost = frame.characters[0].clone();
+    ghost.anim_name = "does_not_exist";
+    ghost.agent_idx = frame.agents.len();
+    frame.agents.push(AgentSlot {
+        agent_id: pixtuoid_core::AgentId::from_transcript_path("/ghost.jsonl"),
+        ..frame.agents[0].clone()
+    });
+    frame.characters.push(ghost);
+    frame.pet = Some(crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos: frame.characters[0].top_left,
+        flip: false,
+        anim_name: "does_not_exist",
+        frame_idx: 0,
+        effects: Vec::new(),
+    });
+    let drawn = paint_drawn(
+        &OwnedSimStores::new(),
+        &SceneState::uniform(16),
+        &layout,
+        &pack,
+        SystemTime::UNIX_EPOCH,
+        &frame,
+    );
+    let hovered: Vec<_> = drawn
+        .hovers
+        .listed()
+        .iter()
+        .map(|h| h.target.clone())
+        .collect();
+    assert_eq!(hovered, vec![HoverTarget::Agent(walker)]);
+    let badged: Vec<_> = drawn.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(badged, vec![walker]);
+}
+
+/// Each figure on a walk to a desk hovers on exactly the box the classic
+/// blits its frame in; the cutaway's at 1x is the same box, and at its densest
+/// stands on the same feet, raised by the hair it draws.
+#[test]
+fn a_figure_hovers_on_the_box_it_is_drawn_in_in_both_looks() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let (owned, scene) = (OwnedSimStores::new(), SceneState::uniform(16));
+    let now = SystemTime::UNIX_EPOCH;
+    let mut scratch = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    for frame in &frames {
+        let blitted: Vec<_> = frame
+            .characters
+            .iter()
+            .map(|c| {
+                let agent = &frame.agents[c.agent_idx];
+                let pose = crate::character::SpritePose::of(c, agent, theme);
+                let size = paint_character_at(
+                    &mut scratch,
+                    pose,
+                    c.top_left,
+                    agent,
+                    &pack,
+                    &mut FrameCache::new(),
+                    now,
+                )
+                .expect("the bundled pack draws the walk");
+                Hover::figure(
+                    Pivot::TopLeft,
+                    c.top_left,
+                    size,
+                    HoverTarget::Agent(agent.agent_id),
+                )
+            })
+            .collect();
+        let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, frame);
+        assert_eq!(drawn.hovers.listed(), blitted);
+        let cutaway = |scale| {
+            let office = crate::display::Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            crate::display::compose::tests::list_at(frame, office, 12)
+                .hovers()
+                .clone()
+        };
+        let scale = crate::render_scale::RenderScale::new;
+        assert_eq!(
+            cutaway(scale(1).expect("nonzero")).listed(),
+            blitted,
+            "the cutaway at 1x"
+        );
+        let densest = cutaway(scale(pack.max_density_variant().get()).expect("nonzero"));
+        assert_eq!(densest.listed().len(), blitted.len());
+        for (dense, flat) in densest.listed().iter().zip(&blitted) {
+            let (d, f) = (dense.at, flat.at);
+            assert_eq!(dense.target, flat.target);
+            assert_eq!(
+                (d.x, d.width, d.y + d.height),
+                (f.x, f.width, f.y + f.height),
+                "the same columns and feet"
+            );
+            assert!(d.y <= f.y, "{d:?} sinks below {f:?}");
+        }
+    }
+}
+
+/// Two gateways of one source are two hovers, each naming its own instance,
+/// in paint order.
+#[test]
+fn each_mascot_hovers_as_its_own_instance() {
+    use pixtuoid_core::source::daemon::{DaemonPresenceUpdate, apply_presence};
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    for port in ["18789", "18790"] {
+        apply_presence(
+            &mut scene,
+            &crate::creatures::openclaw_key(port),
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            now0,
+        );
+    }
+    let now = now0 + std::time::Duration::from_secs(6);
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let mut painted: Vec<_> = frame.mascots.iter().collect();
+    painted.sort_by_key(|m| sort_row_at(Pivot::Center, m.pos, m.size.h));
+    let expected: Vec<_> = painted
+        .iter()
+        .map(|m| HoverTarget::Mascot(m.key.clone()))
+        .collect();
+    assert_eq!(expected.len(), 2, "premise: both gateways walk in");
+    let hovers = paint_drawn(&owned, &scene, &layout, &pack, now, &frame).hovers;
+    let listed: Vec<_> = hovers
+        .listed()
+        .iter()
+        .map(|h| h.target.clone())
+        .filter(|t| matches!(t, HoverTarget::Mascot(_)))
+        .collect();
+    assert_eq!(listed, expected);
 }
 
 #[test]
@@ -2902,11 +3857,25 @@ fn paint_frame_is_pure_and_byte_identical() {
 
     let mut owned = OwnedSimStores::new();
     let now = now0 + Duration::from_millis(120);
-    let frame = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
+    );
 
-    let light_before = owned.light.level();
-    let motion_before = format!("{:?}", owned.motion);
-    let history_before = format!("{:?}", owned.history);
+    let light_before = owned.vacancy_dim.level();
+    let walks_before = format!("{:?}", owned.route.walks);
+    let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
@@ -2921,18 +3890,16 @@ fn paint_frame_is_pure_and_byte_identical() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                now,
-                sky: crate::sky::Sky::at(now),
+                timing: Motion::Full.timing(now),
+                sky: crate::sky::Sky::clock(now),
+                outside: None,
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
+                shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
-                coffee: &coffee,
-                motion: &owned.motion,
-                door_anim_max_ms: 0,
+                walks: &owned.route.walks,
                 debug_walkable: false,
             },
             &frame,
@@ -2949,17 +3916,17 @@ fn paint_frame_is_pure_and_byte_identical() {
         "the paint pass actually painted the office"
     );
     assert_eq!(
-        owned.light.level(),
+        owned.vacancy_dim.level(),
         light_before,
         "paint must not tick lighting"
     );
     assert_eq!(
-        format!("{:?}", owned.motion),
-        motion_before,
-        "paint must not move motion state"
+        format!("{:?}", owned.route.walks),
+        walks_before,
+        "paint must not move walk state"
     );
     assert_eq!(
-        format!("{:?}", owned.history),
+        format!("{:?}", owned.route.history),
         history_before,
         "paint must not record pose history"
     );
@@ -2972,8 +3939,7 @@ fn paint_frame_is_pure_and_byte_identical() {
 
 #[test]
 fn corridor_runner_weaves_sparse_diamonds_without_inner_edge_rows() {
-    // Taste pin: stride-10 lattice, border rows only — the old stride-6 +
-    // inner-edge treatment read as bathroom tiling, not a woven runner.
+    // Taste pin: stride-10 lattice, border rows only.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,
@@ -3010,7 +3976,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
     // Taste pin: an entry mat centered under the pantry's north doorway, one
     // clear row off the wall face.
     use crate::layout::{TEST_DEFAULT_DESKS, WALL_THICK_H};
-    let l = Layout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let p = l.pantry.expect("pantry");
     let dw = l
         .doorways
@@ -3024,7 +3990,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
-    furniture::paint_pantry_entry_mat(&mut buf, &l, theme);
+    furniture::paint_area_rug(&mut buf, l.pantry_entry_mat().expect("the mat"), theme);
     let cx = (dw.start.x + dw.end.x) / 2;
     let mat_cy = dw.start.y + WALL_THICK_H + 3;
     assert_ne!(buf.get(cx, mat_cy), floor, "mat center row painted");
@@ -3044,7 +4010,7 @@ fn kitchen_island_sits_on_a_bar_mat() {
     // Taste pin: a thin bordered mat under the island whose south sliver peeks
     // out in front of the bar.
     use crate::layout::TEST_DEFAULT_DESKS;
-    let l = Layout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let isl = l
         .pantry
         .and_then(|p| p.kitchen_island)
@@ -3056,7 +4022,7 @@ fn kitchen_island_sits_on_a_bar_mat() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
-    furniture::paint_island_bar_mat(&mut buf, &l, theme);
+    furniture::paint_area_rug(&mut buf, l.island_bar_mat().expect("the mat"), theme);
     assert_ne!(
         buf.get(isl.x, isl.y + 4),
         floor,
@@ -3087,7 +4053,7 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
     // 120x160 is the narrow-pantry case where the entry mat box reaches the
     // water-cooler column (the paint-order catch).
     for (w, h) in [(192u16, 160u16), (240, 160), (160, 120), (120, 160)] {
-        let Some(l) = Layout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
+        let Some(l) = SceneLayout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
             continue;
         };
         let Some(p) = l.pantry else { continue };
@@ -3098,8 +4064,12 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
         };
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let mut buf = RgbBuffer::filled(w, h, floor);
-        furniture::paint_pantry_entry_mat(&mut buf, &l, theme);
-        furniture::paint_island_bar_mat(&mut buf, &l, theme);
+        for mat in [l.pantry_entry_mat(), l.island_bar_mat()]
+            .into_iter()
+            .flatten()
+        {
+            furniture::paint_area_rug(&mut buf, mat, theme);
+        }
         let b = p.bounds;
         for y in 0..h {
             for x in 0..w {
@@ -3118,7 +4088,7 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
 
 #[test]
 fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
-    use crate::layout::{furniture_def, Furniture};
+    use crate::layout::{Furniture, furniture_def};
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,
@@ -3128,7 +4098,7 @@ fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
     let mut buf = RgbBuffer::filled(60, 40, floor);
     let pos = Point { x: 30, y: 20 };
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_234_567);
-    furniture::paint_fish_tank(&mut buf, pos, now, theme);
+    furniture::paint_fish_tank(&mut buf, pos, Motion::Full.beat(now), theme);
     let def = furniture_def(Furniture::FishTank);
     let (x0, y0) = (pos.x - def.visual.w / 2, pos.y - def.visual.h / 2);
     let fc = &theme.furniture;
@@ -3233,8 +4203,7 @@ fn a_coat_rack_fills_exactly_its_bounds() {
 
 #[test]
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("embedded pack");
+    let pack = crate::pack::test_default_pack();
     let c = pack.palette().get('C').flatten().expect("couch fabric key");
     let g = pack
         .palette()
@@ -3250,20 +4219,19 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 }
 
 #[test]
-fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
-    use crate::layout::{Facing, Point, WaypointKind, SEAT_RENDER_Y_OFF};
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("embedded pack");
+fn chair_sitter_bottom_row_lands_on_its_sort_row_overlapping_the_chair_body() {
+    use crate::layout::{Facing, Point, SEAT_RENDER_Y_OFF, WaypointKind};
+    let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
     let seated_h = pack.animation(anim).expect("chair sprite").frames()[0].height();
-    let anchor_y = pos.y - SEAT_RENDER_Y_OFF;
-    let bottom = anchor_y + seated_h - 1;
+    let top = pos.y - SEAT_RENDER_Y_OFF;
+    let bottom = top + seated_h - 1;
     assert_eq!(
         bottom,
-        seat.z_key(),
-        "the chair sprite's bottom row must land on its seat z-key row"
+        seat.sort_row(),
+        "the chair sprite's bottom row must land on its seat sort row"
     );
     let chair = crate::layout::furniture_def(crate::layout::Furniture::MeetingChair).visual;
     let chair_top = pos.y - chair.h / 2;
@@ -3273,86 +4241,94 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     );
 }
 
-#[test]
-fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+/// Paint the appliance `sprite` at `ms` past the epoch, `busy` or not.
+fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
+    let pack = crate::pack::test_default_pack();
     let mut cache = FrameCache::new();
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let pos = Point { x: 30, y: 20 };
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(600); // mid-eject
-    let bg = Rgb { r: 1, g: 2, b: 3 };
-    let mut render = |busy: bool| {
-        let mut buf = RgbBuffer::filled(60, 40, bg);
-        let d = Drawable {
-            anchor_y: pos.y + 2,
-            kind: DrawableKind::Printer { pos, busy },
-        };
-        paint_drawable(
-            &d,
-            &mut super::drawable::DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                now,
-                theme,
-            },
-        );
-        buf
+    let mut buf = RgbBuffer::filled(60, 40, Rgb { r: 1, g: 2, b: 3 });
+    let d = Drawable {
+        sort_row: 23,
+        layer: Layer::Under,
+        hover: None,
+        kind: DrawableKind::Appliance {
+            pos: Point { x: 30, y: 20 },
+            sprite,
+            busy,
+        },
     };
-    let busy = render(true);
-    let idle = render(false);
-    let paper = theme.appliance.printer_paper;
-    let below = (1..=3u16).any(|dx| busy.get(pos.x - 2 + dx, pos.y + 2) == paper);
-    assert!(below, "busy printer shows paper emerging below the tray");
-    assert!(
-        (1..=3u16).all(|dx| idle.get(pos.x - 2 + dx, pos.y + 2) == bg),
-        "idle printer paints nothing below the tray"
+    paint_drawable(
+        &d.kind,
+        &mut super::drawable::DrawableCtx {
+            buf: &mut buf,
+            pack: &pack,
+            cache: &mut cache,
+            timing: Motion::Full
+                .timing(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
+            theme: crate::theme::theme_by_name("normal").expect("theme"),
+        },
     );
+    buf
 }
 
+/// A busy appliance reads busy for most of its loop at every density: fewer
+/// than half its busy frames may show it at rest.
 #[test]
-fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
-    let mut cache = FrameCache::new();
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let pos = Point { x: 30, y: 20 };
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_200); // mid-drop
-    let bg = Rgb { r: 1, g: 2, b: 3 };
-    let mut render = |busy: bool| {
-        let mut buf = RgbBuffer::filled(60, 40, bg);
-        let d = Drawable {
-            anchor_y: pos.y + 3,
-            kind: DrawableKind::VendingMachine { pos, busy },
-        };
-        paint_drawable(
-            &d,
-            &mut super::drawable::DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                now,
-                theme,
-            },
+#[cfg(feature = "cutaway-assets")]
+fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
+    let pack = crate::pack::test_default_pack();
+    for name in [
+        "vending_machine",
+        "printer",
+        "vending_machine@4x",
+        "printer@4x",
+    ] {
+        let frames = pack.animation(name).expect("the appliance art").frames();
+        let (rest, busy) = frames.split_first().expect("a rest frame");
+        let at_rest = busy
+            .iter()
+            .filter(|f| f.as_slice() == rest.as_slice())
+            .count();
+        assert!(
+            at_rest * 2 < busy.len(),
+            "{name}: {at_rest} of {} busy frames show it at rest",
+            busy.len()
         );
-        buf
-    };
-    let busy = render(true);
-    let idle = render(false);
-    let (sdx, sdy) = super::drawable::VENDING_PICKUP_SLOT;
-    let slot = (pos.x.saturating_sub(2) + sdx, pos.y.saturating_sub(3) + sdy);
+    }
+}
+
+/// An idle appliance holds still; a busy one plays its loop, and a vend drops
+/// one of the machine's drinks where the idle machine shows none.
+#[test]
+fn a_busy_appliance_animates_and_an_idle_one_holds_still() {
+    let drinks = crate::theme::theme_by_name("normal")
+        .expect("theme")
+        .appliance
+        .vending_drinks;
+    for sprite in ["vending_machine", "printer"] {
+        let rest = appliance_at(sprite, false, 0);
+        let sweep = (0..40).map(|i| i * 150);
+        assert!(
+            sweep
+                .clone()
+                .all(|ms| appliance_at(sprite, false, ms).as_slice() == rest.as_slice()),
+            "{sprite}: an idle appliance moves"
+        );
+        assert!(
+            sweep
+                .map(|ms| appliance_at(sprite, true, ms))
+                .any(|b| b.as_slice() != rest.as_slice()),
+            "{sprite}: a busy appliance never leaves its rest frame"
+        );
+    }
+    let rest = appliance_at("vending_machine", false, 0);
+    let vend = appliance_at("vending_machine", true, 1_200);
+    let dropped = (0..rest.height())
+        .flat_map(|y| (0..rest.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| rest.get(x, y) != vend.get(x, y))
+        .any(|(x, y)| drinks.contains(&vend.get(x, y)));
     assert!(
-        theme
-            .appliance
-            .vending_drinks
-            .contains(&busy.get(slot.0, slot.1)),
-        "busy vending drops a can into the slot"
-    );
-    assert_eq!(
-        idle.get(slot.0, slot.1),
-        theme.appliance.vending_trim,
-        "idle vending keeps the plain slot"
+        dropped,
+        "mid-vend, a drink lands where the idle machine shows none"
     );
 }
 
@@ -3375,14 +4351,15 @@ fn water_cooler_glugs_a_rising_bubble() {
         let mut buf = RgbBuffer::filled(60, 60, bg);
         furniture::paint_water_cooler(
             &mut buf,
-            &pantry,
-            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms),
+            pantry.water_cooler_rect().expect("fits"),
+            Motion::Full.beat(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
             theme,
         );
         buf
     };
     let bubble = theme.furniture.tank_water_line;
-    let (wx, wy) = (pr.x + pr.width - 6, pr.y + 8);
+    let cooler = pantry.water_cooler_rect().expect("fits");
+    let (wx, wy) = (cooler.x, cooler.y);
     let a = render(100); // phase 0: bubble low
     let b = render(500); // phase 1: bubble high
     assert_eq!(
@@ -3406,7 +4383,21 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
     let mut pinned = false;
     for step in 0..240u64 {
         let now = now0 + Duration::from_secs(5 * step);
-        let f = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let f = sim_step(
+            &mut stores,
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
         let at_wp: Vec<usize> = f
             .poses
             .values()
@@ -3430,19 +4421,26 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         pinned,
         "the idle agent never reached a waypoint in 20 min of sim"
     );
-    let layout = Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let layout =
+        SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let printer_idx = layout
         .waypoints
         .iter()
         .position(|w| w.kind == crate::layout::WaypointKind::Printer)
-        .expect("printer at 160x96");
-    let occupied: std::collections::HashSet<usize> = [printer_idx].into();
-    let mut drawables = Vec::new();
-    enqueue_lounge_pantry_appliances(&layout, &occupied, &mut drawables);
-    let busy_flag = drawables
+        .expect("the layout places a printer");
+    let frame = SimFrame {
+        occupied_waypoints: [printer_idx].into(),
+        ..empty_frame(&layout)
+    };
+    let busy_flag = queued(&layout, &frame)
+        .sorted
         .iter()
         .find_map(|d| match d.kind {
-            DrawableKind::Printer { busy, .. } => Some(busy),
+            DrawableKind::Appliance {
+                sprite: "printer",
+                busy,
+                ..
+            } => Some(busy),
             _ => None,
         })
         .expect("printer drawable enqueued");
@@ -3454,12 +4452,13 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
 
 #[test]
 fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
-    use crate::layout::{furniture_def, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let pack = crate::pack::test_default_pack();
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = SceneState::uniform(64);
     for i in 0..TEST_DEFAULT_DESKS {
@@ -3481,7 +4480,21 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
     let mut seat_visits = 0usize;
     for step in 0..3_600u64 {
         let now = now0 + Duration::from_millis(250 * step);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
         let mut occupants: HashMap<usize, usize> = HashMap::new();
         for pose in frame.poses.values().flatten() {
             let Pose::AtWaypoint { wp, kind } = pose else {
@@ -3502,15 +4515,85 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
     assert!(seat_visits > 100, "agents barely sat down ({seat_visits})");
 }
 
+/// The cutaway grounds a figure with a shadow unless `seated`, so a sofa
+/// sitter flagged standing lays a shadow slab across the sofa's front.
 #[test]
-fn an_active_agent_releases_the_seat_it_snapped_back_from() {
-    use crate::layout::{furniture_def, TEST_DEFAULT_DESKS};
-    use crate::motion::WanderKind;
+fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
+    use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind};
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let pack = crate::pack::test_default_pack();
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut scene = SceneState::uniform(64);
+    for i in 0..TEST_DEFAULT_DESKS {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/sit{i}.jsonl"));
+        let mut slot = make_slot(id, ActivityState::Idle);
+        let started = now0 - Duration::from_secs(5 + (i as u64 * 11) % 80);
+        slot.created_at = started;
+        slot.state_started_at = started;
+        slot.last_event_at = started;
+        slot.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(id, slot);
+    }
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
+    let (mut on_furniture, mut on_foot) = (0usize, 0usize);
+    for step in 0..3_600u64 {
+        let now = now0 + Duration::from_millis(250 * step);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
+        for c in &frame.characters {
+            let id = frame.agents[c.agent_idx].agent_id;
+            let sits = match frame.poses.get(&id) {
+                Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping)) => true,
+                Some(Some(Pose::AtWaypoint { kind, .. })) => matches!(
+                    kind,
+                    WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair
+                ),
+                _ => false,
+            };
+            if sits && c.seat_desk.is_none() {
+                on_furniture += 1;
+            } else if !sits {
+                on_foot += 1;
+            }
+            assert_eq!(c.seated, sits, "{:?} at step {step}", frame.poses.get(&id));
+        }
+    }
+    assert!(
+        on_furniture > 0,
+        "nobody sat on a couch, sofa or meeting chair"
+    );
+    assert!(on_foot > 0, "nobody stood or walked");
+}
+
+#[test]
+fn an_active_agent_releases_the_seat_it_snapped_back_from() {
+    use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
+    use crate::pose::Pose;
+    use crate::walk::WanderKind;
+    use std::time::Duration;
+
+    let pack = crate::pack::test_default_pack();
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let id = pixtuoid_core::AgentId::from_transcript_path("/p/claim-release.jsonl");
     let mut slot = make_slot(id, ActivityState::Idle);
@@ -3528,18 +4611,32 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let mut now = now0;
     for _ in 0..2_000 {
         now += Duration::from_millis(250);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
-        if let Some(Pose::AtWaypoint { wp, kind }) = frame.poses.get(&id).copied().flatten() {
-            if furniture_def(kind.furniture()).occupies_pos {
-                sat_at = Some(wp);
-                break;
-            }
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
+        if let Some(Pose::AtWaypoint { wp, kind }) = frame.poses.get(&id).copied().flatten()
+            && furniture_def(kind.furniture()).occupies_pos
+        {
+            sat_at = Some(wp);
+            break;
         }
     }
     let sat_at = sat_at.expect("agent never reached a seat");
     assert!(
         matches!(
-            owned.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Named { wp_idx, .. } if wp_idx == sat_at
         ),
         "the seated agent should hold its seat's claim"
@@ -3553,50 +4650,40 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     scene.agents.get_mut(&id).expect("slot").state_started_at = now;
     let mut stores = owned.stores();
     now += Duration::from_millis(250);
-    sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+    sim_step(
+        &mut stores,
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &coffee,
+            door_anim_max_ms: 0,
+        },
+    );
 
     assert!(
-        matches!(owned.motion[&id].wander.target.kind, WanderKind::Aimless),
+        matches!(
+            owned.route.walks[&id].wander.target.kind,
+            WanderKind::Aimless
+        ),
         "an agent that left the wander machine must release its seat claim"
     );
 }
 
 #[test]
-fn precipitation_level_maps_audible_rain_and_honors_the_override() {
-    // force_weather's override is thread-local — reset at the end so it can't
-    // leak into the sibling time-based weather tests.
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-
-    force_weather(Some("storm")).expect("storm is known");
-    assert_eq!(precipitation_level(t), 1.0, "storm is full precipitation");
-
-    force_weather(Some("rain")).expect("rain is known");
-    let rain = precipitation_level(t);
-    assert!(
-        rain > 0.0 && rain < 1.0,
-        "rain sits strictly between clear and storm, got {rain}"
-    );
-
-    for quiet in ["clear", "snow", "fog", "overcast", "windy", "smog"] {
-        force_weather(Some(quiet)).expect("known name");
-        assert_eq!(
-            precipitation_level(t),
-            0.0,
-            "{quiet} must be silent precipitation"
-        );
-    }
-
-    force_weather(None).expect("restore");
-}
-
-#[test]
 fn one_meeting_sofa_still_seats_three_agents_at_once() {
-    use crate::layout::{furniture_def, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, furniture_def};
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let pack = crate::pack::test_default_pack();
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let sofa: Vec<usize> = {
         let mut out: Vec<usize> = vec![];
         for (i, w) in layout.waypoints.iter().enumerate() {
@@ -3647,7 +4734,21 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     // wander, whose route rides live desk positions.
     for step in 0..60_000u64 {
         let now = now0 + Duration::from_millis(250 * step);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
         let n = frame
             .poses
             .values()
@@ -3666,13 +4767,14 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
 }
 
 #[test]
-fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
-    use crate::layout::{stand_point, WaypointKind, TEST_DEFAULT_DESKS};
-    use crate::pose::{Pose, RouteCtx};
+fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
+    use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, stand_point};
+    use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let pack = crate::pack::test_default_pack();
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = SceneState::uniform(64);
     for i in 0..TEST_DEFAULT_DESKS {
@@ -3692,7 +4794,21 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
         let now = now0 + Duration::from_millis(250 * step);
         let frame = {
             let mut stores = owned.stores();
-            sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now)
+            sim_step(
+                &mut stores,
+                SimInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    layout: &layout,
+                    coffee: &coffee,
+                    door_anim_max_ms: 0,
+                },
+            )
         };
         let mc = frame.poses.iter().find_map(|(id, p)| match p {
             Some(Pose::AtWaypoint {
@@ -3716,28 +4832,23 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
             w.facing,
             &layout.reachable,
         );
-        // Idempotent re-derive at the same `now` (sim_step already stamped
-        // last_advanced_at, so no wander transition fires here).
-        let label = {
-            let mut rctx = RouteCtx {
-                router: &mut owned.router,
-                overlay: &owned.overlay,
-                history: &mut owned.history,
-                motion: &mut owned.motion,
-            };
-            character_anchor(agent, &layout, now, &mut rctx).expect("chair sitter is visible")
-        };
-        let seat = back_couch_anchor(stand, CHARACTER_SPRITE_W);
-        let walk = waypoint_anchor(stand, CHARACTER_SPRITE_W);
+        let drawn = frame
+            .characters
+            .iter()
+            .find(|c| frame.agents[c.agent_idx].agent_id == id)
+            .map(|c| c.top_left)
+            .expect("chair sitter is placed");
+        let seat = back_couch_top_left(stand, CHARACTER_SPRITE_W);
+        let walk = waypoint_top_left(stand, CHARACTER_SPRITE_W);
         assert!(
-            (label.y as i32 - seat.y as i32).abs() <= 1,
-            "meeting-chair label y {} must track the seat sprite anchor {} (±breath), not float above",
-            label.y,
+            (drawn.y as i32 - seat.y as i32).abs() <= 1,
+            "meeting-chair sitter y {} must track the seat top-left {} (±breath)",
+            drawn.y,
             seat.y
         );
         assert!(
-            (label.y as i32 - walk.y as i32).abs() >= 4,
-            "meeting-chair label must NOT sit on the 5px-high waypoint_anchor {} (the bug)",
+            (drawn.y as i32 - walk.y as i32).abs() >= 4,
+            "meeting-chair sitter must NOT sit on the 5px-high waypoint_top_left {} (the bug)",
             walk.y
         );
         checked = true;
@@ -3747,7 +4858,7 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
 }
 
 #[test]
-fn render_anchor_matches_the_pre_lift_kind_partition() {
+fn render_top_left_matches_the_pre_lift_kind_partition() {
     use crate::layout::{Facing, Point, WaypointKind};
     let stand = Point { x: 80, y: 60 };
     let w = CHARACTER_SPRITE_W;
@@ -3755,15 +4866,15 @@ fn render_anchor_matches_the_pre_lift_kind_partition() {
         // Independent oracle: the exact pre-lift partition, keyed on kind alone.
         let expected = match kind {
             WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                back_couch_anchor(stand, w)
+                back_couch_top_left(stand, w)
             }
-            _ => waypoint_anchor(stand, w),
+            _ => waypoint_top_left(stand, w),
         };
         for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
             assert_eq!(
-                Seat::at_waypoint(kind, stand, facing).render_anchor(w),
+                Seat::at_waypoint(kind, stand, facing).render_top_left(w),
                 expected,
-                "{kind:?}/{facing:?}: render anchor drifted from the pre-lift partition"
+                "{kind:?}/{facing:?}: render top-left drifted from the pre-lift partition"
             );
         }
     }
@@ -3783,124 +4894,16 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
         }
         let seat = Seat::at_waypoint(kind, stand, Facing::South);
         assert_eq!(
-            seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
-            seat.z_key(),
+            seat.render_top_left(w).y + crate::layout::WALKING_Y_OFF,
+            seat.sort_row(),
             "{kind:?}: an upright occupant's feet row must BE the row they sort on"
         );
         assert_eq!(
-            seat.z_key(),
+            seat.sort_row(),
             stand.y,
             "{kind:?}: and that row is the stand cell"
         );
     }
-}
-
-#[test]
-fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
-    let desk = Point { x: 40, y: 30 };
-    let v = crate::layout::desk_furniture_def().visual;
-    let e = desk_shadow_ellipse(desk);
-    assert_eq!(e.cy, desk.y + v.h);
-    assert_eq!(e.cx, desk.x + v.w / 2);
-}
-
-#[test]
-fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
-    let l =
-        Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    let pools: Vec<_> = ceiling_pool_regions(&l).collect();
-    assert_eq!(
-        pools.len(),
-        l.home_desks.len() + l.pantry.is_some() as usize + l.corridor.is_some() as usize
-    );
-    let mut desk_rows = std::collections::HashSet::new();
-    for (i, (pool, desk)) in pools.iter().zip(&l.home_desks).enumerate() {
-        // Derived from the ONE authority rather than restating its arithmetic.
-        let want = crate::layout::desk_ceiling_pool_center(
-            *desk,
-            l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
-        );
-        assert_eq!((pool.cx, pool.cy), (want.x, want.y));
-        assert_eq!((pool.half_w, pool.half_h), (10, 5));
-        desk_rows.insert(pool.cy as i32 - desk.y as i32);
-    }
-    // Negative control: with one lift, a facing-blind impl passes the loop above.
-    assert!(
-        desk_rows.len() >= 2,
-        "this layout seats both sides, so its desk lights must sit at two \
-         different offsets — got {desk_rows:?}"
-    );
-    if let Some(pr) = l.pantry.map(|p| p.bounds) {
-        let p = pools[l.home_desks.len()];
-        assert_eq!((p.cx, p.cy), (pr.x + pr.width / 2, pr.y + pr.height / 2));
-        assert_eq!((p.half_w, p.half_h), (12, 6));
-    }
-    if let Some(c) = l.corridor {
-        let p = *pools.last().unwrap();
-        assert_eq!((p.cx, p.cy), (c.x + c.width / 2, c.y + c.height / 2));
-        assert_eq!((p.half_w, p.half_h), (14, 5));
-    }
-}
-
-#[test]
-fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
-    use crate::layout::WaypointKind;
-    let l =
-        Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    // Ellipse is Copy, not PartialEq — compare by field tuple.
-    let e = |el: &Ellipse| (el.cx, el.cy, el.half_w, el.half_h);
-
-    let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
-    for &desk in &l.home_desks {
-        expected.push(e(&desk_shadow_ellipse(desk)));
-    }
-    for wp in l.waypoints.iter().filter(|w| {
-        !matches!(
-            w.kind,
-            WaypointKind::Couch | WaypointKind::Printer | WaypointKind::Island
-        )
-    }) {
-        let vis_w = crate::layout::furniture_def(wp.kind.furniture()).visual.w;
-        let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
-        expected.push((wp.pos.x, wp.pos.y + 2, half_w, 2));
-    }
-    if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
-        let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
-        expected.push((
-            island.x,
-            island.y + center_pin_south_offset(vis.h),
-            vis.w / 2 + 1,
-            2,
-        ));
-    }
-    for wp in l
-        .waypoints
-        .iter()
-        .filter(|w| w.kind == WaypointKind::Printer)
-    {
-        expected.push((wp.pos.x, wp.pos.y + 1, 5, 1));
-    }
-    if let Some(c) = l.couch_sprite_center() {
-        expected.push((c.x, c.y + 2, 7, 2));
-    }
-    for &PlantItem { kind, pos } in &l.plants {
-        expected.push((
-            pos.x,
-            pos.y
-                + center_pin_south_offset(crate::layout::furniture_def(kind.furniture()).visual.h),
-            3,
-            1,
-        ));
-    }
-    if let Some(lamp) = l.floor_lamp() {
-        expected.push((lamp.x, lamp.y + floor_lamp_south_offset(), 2, 1));
-    }
-
-    let got: Vec<_> = floor_shadow_ellipses(&l).map(|el| e(&el)).collect();
-    assert_eq!(
-        got, expected,
-        "one fitted shadow per family member, emitted in paint order"
-    );
 }
 
 #[test]
@@ -3934,16 +4937,13 @@ fn character_render_names_resolve_in_the_animation_registry() {
 // so no single port/instant demonstrates it.
 #[test]
 fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
-    use pixtuoid_core::source::daemon::{apply_presence, DaemonInstanceKey, DaemonPresenceUpdate};
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
     use pixtuoid_core::state::DaemonInstanceId;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 128, None, 0).expect("layout");
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let pack = crate::pack::test_default_pack();
+    let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let coffee = HashMap::new();
-    let motion = HashMap::new();
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
@@ -3967,31 +4967,27 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
         // both the walking legs and the resting cells get sampled.
         for step in 0..24u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
-            let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
-            let mut cache = FrameCache::new();
-            let mut base_fill = BaseFillCache::new();
-            let ctx = PaintCtx {
-                scene: &scene,
-                layout: &layout,
-                pack: &pack,
-                now,
-                sky: crate::sky::Sky::at(now),
-                buf: &mut buf,
-                cache: &mut cache,
-                base_fill: &mut base_fill,
-                theme,
-                floor,
-                active_pet: None,
-                floor_pet: Some(&pet),
-                coffee: &coffee,
-                motion: &motion,
-                door_anim_max_ms: 0,
-                debug_walkable: false,
-            };
-            let mut drawables = Vec::new();
-            let pet_frame = enqueue_pet(&ctx, &[], &mut drawables);
-            for m in enqueue_gateway_mascots(&ctx, &mut drawables) {
-                let (w, h) = (m.w, m.h);
+            let mut owned = OwnedSimStores::new();
+            let frame = sim_step(
+                &mut owned.stores(),
+                SimInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor,
+                        pets: PetInputs {
+                            pet: Some(&pet),
+                            petting: None,
+                        },
+                    },
+                    layout: &layout,
+                    coffee: &HashMap::new(),
+                    door_anim_max_ms: 0,
+                },
+            );
+            for m in &frame.mascots {
+                let Size { w, h } = m.size;
                 if m.pos.x < w / 2
                     || m.pos.x + w.div_ceil(2) > layout.buf_w
                     || m.pos.y < h / 2
@@ -4003,9 +4999,9 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     ));
                 }
             }
-            if let Some(p) = pet_frame {
+            if let Some(p) = &frame.pet {
                 let (w, h) = pack
-                    .animation(p.anim)
+                    .animation(p.anim_name)
                     .and_then(|a| a.frames().first())
                     .map_or((0, 0), |f| (f.width(), f.height()));
                 if p.pos.x < w / 2
@@ -4028,29 +5024,29 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 }
 
 #[test]
-fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
-    use crate::layout::{Anchor, Size};
-    use crate::pixel_painter::anchors::keep_sprite_on_canvas;
+fn keep_sprite_on_canvas_bounds_differ_by_pivot() {
+    use crate::layout::{Pivot, Size};
+    use crate::sim::anchors::keep_sprite_on_canvas;
     let buf = Size { w: 100, h: 80 };
     let size = Size { w: 8, h: 12 };
-    let at = |a, x, y| keep_sprite_on_canvas(a, Point { x, y }, size, buf);
+    let at = |p, x, y| keep_sprite_on_canvas(p, Point { x, y }, size, buf);
 
     // Centre-anchored: `pos` is the middle, so BOTH bounds inset by half.
-    assert_eq!(at(Anchor::Center, 0, 0), Point { x: 4, y: 6 });
-    assert_eq!(at(Anchor::Center, 99, 79), Point { x: 96, y: 74 });
+    assert_eq!(at(Pivot::Center, 0, 0), Point { x: 4, y: 6 });
+    assert_eq!(at(Pivot::Center, 99, 79), Point { x: 96, y: 74 });
     // Top-left-anchored: `u16` already floors the near edge, only the far one binds.
-    assert_eq!(at(Anchor::TopLeft, 0, 0), Point { x: 0, y: 0 });
-    assert_eq!(at(Anchor::TopLeft, 99, 79), Point { x: 92, y: 68 });
+    assert_eq!(at(Pivot::TopLeft, 0, 0), Point { x: 0, y: 0 });
+    assert_eq!(at(Pivot::TopLeft, 99, 79), Point { x: 92, y: 68 });
 
     // A canvas smaller than the sprite: `Center` falls back to its lower bound
     // rather than `clamp`'s inverted-range panic; `TopLeft` just floors at 0.
     let tiny = Size { w: 4, h: 4 };
     assert_eq!(
-        keep_sprite_on_canvas(Anchor::Center, Point { x: 2, y: 2 }, size, tiny),
+        keep_sprite_on_canvas(Pivot::Center, Point { x: 2, y: 2 }, size, tiny),
         Point { x: 4, y: 6 }
     );
     assert_eq!(
-        keep_sprite_on_canvas(Anchor::TopLeft, Point { x: 2, y: 2 }, size, tiny),
+        keep_sprite_on_canvas(Pivot::TopLeft, Point { x: 2, y: 2 }, size, tiny),
         Point { x: 0, y: 0 }
     );
 }
@@ -4062,7 +5058,7 @@ fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
 /// only the survivors are worth an A* run — but a cold routing store answers
 /// `Walking`, so a caller must still drive its agent second by second up to the
 /// returned target.
-fn east_rim_targets(layout: &Layout, now0: SystemTime) -> Vec<(u32, u64)> {
+fn east_rim_targets(layout: &SceneLayout, now0: SystemTime) -> Vec<(u32, u64)> {
     use crate::pose::Pose;
     use std::time::Duration;
     let w = CHARACTER_SPRITE_W;
@@ -4077,7 +5073,7 @@ fn east_rim_targets(layout: &Layout, now0: SystemTime) -> Vec<(u32, u64)> {
                     matches!(
                         pose::derive(&slot, now0 + Duration::from_secs(secs), layout),
                         Some(Pose::AimlessAt { dest })
-                            if waypoint_anchor(dest, w).x + w > layout.buf_w
+                            if waypoint_top_left(dest, w).x + w > layout.buf_w
                     )
                 })
                 .map(|secs| (aid, secs))
@@ -4100,13 +5096,13 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
+    let pack = crate::pack::test_default_pack();
+    let layout = SceneLayout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
 
-    // Three agents, not all 48 — the earliest arrivals cost the fewest steps.
+    // Three agents, not every target — the earliest arrivals cost the fewest steps.
     let mut hit = 0usize;
     for &(aid, target) in east_rim_targets(&layout, now0).iter().take(3) {
         let id = edge_agent_id(aid);
@@ -4121,11 +5117,25 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
 
         for secs in 1..=target {
             let now = now0 + Duration::from_secs(secs);
-            let f = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
-            if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id) {
-                if waypoint_anchor(*dest, w).x + w > layout.buf_w {
-                    hit += 1;
-                }
+            let f = sim_step(
+                &mut stores,
+                SimInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    layout: &layout,
+                    coffee: &coffee,
+                    door_anim_max_ms: 0,
+                },
+            );
+            if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id)
+                && waypoint_top_left(*dest, w).x + w > layout.buf_w
+            {
+                hit += 1;
             }
             for c in &f.characters {
                 let fw = pack
@@ -4133,11 +5143,11 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
                     .and_then(|a| a.frames().first())
                     .map_or(w, |fr| fr.width());
                 assert!(
-                    c.anchor.x + fw <= layout.buf_w,
+                    c.top_left.x + fw <= layout.buf_w,
                     "agent {aid} at {secs}s renders at {:?} ({fw} px wide), running {} px \
                      past the {} px canvas",
-                    c.anchor,
-                    c.anchor.x + fw - layout.buf_w,
+                    c.top_left,
+                    c.top_left.x + fw - layout.buf_w,
                     layout.buf_w
                 );
             }
@@ -4149,16 +5159,332 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     );
 }
 
-/// The badge/hit-box twin of the sprite guard above, and NOT covered by it:
-/// `character_anchor` is a second, independent derivation, so a clamp too loose
-/// to bind leaves every `sim_step`-driven test green while the badge floats
-/// off-screen.
+/// One tick, simulated then painted: the frame and the sprites paint drew.
+fn sim_and_paint(
+    owned: &mut OwnedSimStores,
+    scene: &SceneState,
+    layout: &SceneLayout,
+    pack: &Pack,
+    now: SystemTime,
+) -> (SimFrame, Vec<(AgentFrame, crate::layout::Bounds)>) {
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene,
+                pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let drawn = badged(&paint_drawn(owned, scene, layout, pack, now, &frame));
+    (frame, drawn)
+}
+
+fn paint_drawn(
+    owned: &OwnedSimStores,
+    scene: &SceneState,
+    layout: &SceneLayout,
+    pack: &Pack,
+    now: SystemTime,
+    frame: &SimFrame,
+) -> Drawn {
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    paint_frame(
+        &mut PaintCtx {
+            scene,
+            layout,
+            pack,
+            timing: Motion::Full.timing(now),
+            sky: crate::sky::Sky::clock(now),
+            outside: None,
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            walks: &owned.route.walks,
+            debug_walkable: false,
+        },
+        frame,
+    )
+}
+
+/// Each badged sprite and the box it hovers on, which is the box it is drawn
+/// in.
+fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
+    drawn
+        .agents
+        .iter()
+        .map(|&f| {
+            let hover = drawn
+                .hovers
+                .listed()
+                .iter()
+                .find(|h| h.target == HoverTarget::Agent(f.agent_id))
+                .expect("a badged sprite hovers");
+            (f, hover.at)
+        })
+        .collect()
+}
+
+/// Every drawn sprite's badge sits over its frame's top-centre: level with the
+/// breath-free top, or higher only as far as the art of the desk it sits at.
+fn assert_badges_top_their_frames(
+    frame: &SimFrame,
+    drawn: &[(AgentFrame, crate::layout::Bounds)],
+    layout: &SceneLayout,
+    pack: &Pack,
+) {
+    // A breath lifts the drawn top by one pixel, never the badge.
+    const BREATH: u16 = 1;
+    assert!(!drawn.is_empty(), "premise: something is drawn");
+    for (f, body) in drawn {
+        let at = f.label_anchor;
+        assert_eq!(
+            at.x,
+            body.x + body.width / 2,
+            "{f:?}: off its frame's centre"
+        );
+        assert!(at.y <= body.y + BREATH, "{f:?}: under its frame's top");
+        let c = frame
+            .characters
+            .iter()
+            .find(|c| frame.agents[c.agent_idx].agent_id == f.agent_id)
+            .expect("every drawn sprite has a placement");
+        let desk_top = c.seat_desk.and_then(|d| {
+            crate::pack::desk_art(pack, layout.desk_facing_at(d))
+                .map(|art| desk_art_top(pack, d.y, art.height()))
+        });
+        match desk_top {
+            Some(row) => assert!(
+                at.y <= row && (at.y == row || at.y >= body.y),
+                "{f:?}: a sitter's badge rises to its desk art's top {row} and no higher"
+            ),
+            None => assert!(at.y >= body.y, "{f:?}: floats above its frame"),
+        }
+    }
+}
+
+/// A waiting agent at every desk, both facings, past the entry walk.
+fn seated_at_every_desk() -> (SceneState, SceneLayout, SystemTime, Pack) {
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    scene.agents.clear();
+    for i in 0..layout.home_desks.len() {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(&format!("/badge/{i}.jsonl")),
+            ActivityState::Waiting {
+                reason: "perm".into(),
+            },
+        );
+        s.desk_index = GlobalDeskIndex(i);
+        (s.created_at, s.state_started_at, s.last_event_at) = (now0, now0, now0);
+        scene.agents.insert(s.agent_id, s);
+    }
+    let now = now0 + std::time::Duration::from_millis(crate::pose::ENTRY_ANIMATION_MS + 5_000);
+    (scene, layout, now, pack)
+}
+
 #[test]
-fn a_character_badge_is_never_anchored_off_the_canvas() {
+fn every_seated_badge_tops_its_frame_and_clears_a_raised_monitor() {
+    let (scene, layout, now, pack) = seated_at_every_desk();
+    let (frame, drawn) = sim_and_paint(&mut OwnedSimStores::new(), &scene, &layout, &pack, now);
+    assert_eq!(
+        drawn.len(),
+        scene.agents.len(),
+        "premise: everyone is drawn"
+    );
+    assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
+    assert!(
+        drawn.iter().any(|(f, body)| f.label_anchor.y < body.y),
+        "premise: some back-turned sitter's monitor rises over their head"
+    );
+}
+
+/// The breath bobs the sprite, not its badge.
+#[test]
+fn a_breathing_sitter_s_badge_holds_still() {
+    use std::time::Duration;
+    let (mut scene, layout, now, pack) = seated_at_every_desk();
+    let keep = *scene.agents.keys().next().expect("an agent");
+    scene.agents.retain(|id, _| *id == keep);
+    let mut owned = OwnedSimStores::new();
+    let (mut tops, mut badges) = (
+        std::collections::BTreeSet::new(),
+        std::collections::BTreeSet::new(),
+    );
+    // Long enough for a whole breath cycle.
+    for step in 0..24u64 {
+        let (_, drawn) = sim_and_paint(
+            &mut owned,
+            &scene,
+            &layout,
+            &pack,
+            now + Duration::from_millis(250 * step),
+        );
+        let [(f, body)] = drawn[..] else {
+            panic!("one agent, one sprite: {drawn:?}")
+        };
+        tops.insert(body.y);
+        badges.insert((f.label_anchor.x, f.label_anchor.y));
+    }
+    assert_eq!(tops.len(), 2, "premise: the sprite breathes");
+    assert_eq!(badges.len(), 1, "the badge bobbed with it: {badges:?}");
+}
+
+/// A typist keys on the art its seat resolves to: a back-turned desk plays
+/// `typing_back`'s own loop, which a pack may time apart from `typing`'s.
+#[test]
+fn a_typist_keys_on_the_art_its_seat_resolves_to() {
+    use crate::layout::Facing;
+    use crate::pose::Pose;
+    let (mut scene, layout, id, now0, _) = sim_rig();
+    let pack = crate::pack::test_pack_declaring(
+        "[animations.typing_back]\nframes   = [\"typing_back_0.sprite\", \"typing_back_1.sprite\"]\nframe_ms = 125",
+        "[animations.typing_back]\nframes   = [\"typing_back_0.sprite\", \"typing_back_1.sprite\"]\nframe_ms = 250",
+    );
+    let back = (0..layout.home_desks.len())
+        .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == Facing::North)
+        .expect("a back-turned desk");
+    scene.agents.get_mut(&id).expect("the agent").desk_index = GlobalDeskIndex(back);
+    let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+    let art = pack.animation("typing_back").expect("the back view");
+    let ms = u64::from(art.frame_ms());
+    let typing = pack.animation("typing").expect("the front view");
+    assert_ne!(
+        ms,
+        u64::from(typing.frame_ms()),
+        "premise: the two views keep their own time"
+    );
+    let frames = art.frames().len() as u64;
+    let phase = epoch_ms(agents[0].state_started_at) / ms;
+    let tick = crate::anim::FULL_TICK_MS;
+    for step in 0..2 * frames * ms / tick {
+        let timing = Motion::Full.timing(now0 + std::time::Duration::from_millis(step * tick));
+        let poses = HashMap::from([(id, Some(Pose::SeatedTyping))]);
+        let (placements, ..) = crate::sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            timing,
+        );
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
+        assert_eq!(p.anim_name, "typing_back");
+        let want = ((timing.beat.ms() / ms + phase) % frames) as usize;
+        assert_eq!(p.frame_idx, want, "at {} ms", step * tick);
+    }
+}
+
+/// Breath rides `breathes` alone: at a breathing instant a walker's sprite stays
+/// on its fit while a figure at rest rises off it.
+#[test]
+fn only_a_placement_that_breathes_takes_the_breath() {
+    use crate::pose::Pose;
+    let (scene, layout, id, now0, pack) = sim_rig();
+    let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+    let now = (0..u64::from(u16::MAX))
+        .map(|ms| now0 + std::time::Duration::from_millis(ms))
+        .find(|&t| {
+            crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, Motion::Full.beat(t)).y == 0
+        })
+        .expect("the breath rises within a cycle");
+    let mid = Point {
+        x: layout.buf_w / 2,
+        y: layout.buf_h / 2,
+    };
+    let place = |pose| {
+        let poses = HashMap::from([(id, Some(pose))]);
+        let (placements, ..) = crate::sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            Motion::Full.timing(now),
+        );
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
+        p
+    };
+    let walker = place(Pose::walking(mid, mid, 0, false));
+    let idler = place(Pose::AimlessAt { dest: mid });
+    let sitter = place(Pose::SeatedThinking);
+    assert!(!walker.breathes && idler.breathes && sitter.breathes);
+    // Neither stands at a desk, so the badge row IS the fitted top.
+    assert_eq!(
+        walker.top_left.y, walker.label_anchor.y,
+        "the walker breathed"
+    );
+    assert_eq!(
+        idler.top_left.y + 1,
+        idler.label_anchor.y,
+        "the idler held its breath"
+    );
+}
+
+/// Co-located visitors step aside, and each one's badge goes with them.
+#[test]
+fn co_located_visitors_badges_step_aside_with_their_sprites() {
+    use crate::sim::anchors::waypoint_rank_offset_x;
+    let (mut scene, layout, _, now, pack) = sim_rig();
+    scene.agents.clear();
+    let (wp, kind) = layout
+        .waypoints
+        .iter()
+        .enumerate()
+        .find(|(_, w)| waypoint_rank_offset_x(w.kind, 1) != 0)
+        .map(|(i, w)| (i, w.kind))
+        .expect("the layout has a shareable spot");
+    for i in 0..3 {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(&format!("/queue/{i}.jsonl")),
+            ActivityState::Idle,
+        );
+        s.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(s.agent_id, s);
+    }
+    let mut owned = OwnedSimStores::new();
+    let (mut frame, _) = sim_and_paint(&mut owned, &scene, &layout, &pack, now);
+    let poses = scene
+        .agents
+        .keys()
+        .map(|&id| (id, Some(crate::pose::Pose::AtWaypoint { wp, kind })))
+        .collect();
+    (frame.characters, ..) = crate::sim::resolve_characters(
+        &frame.agents,
+        &poses,
+        &layout,
+        &pack,
+        CHARACTER_SPRITE_W,
+        &HashMap::new(),
+        Motion::Full.timing(now),
+    );
+    let drawn = badged(&paint_drawn(&owned, &scene, &layout, &pack, now, &frame));
+    assert_eq!(drawn.len(), 3, "premise: all three are drawn");
+    assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
+    let xs: std::collections::BTreeSet<_> = drawn.iter().map(|(f, _)| f.label_anchor.x).collect();
+    assert_eq!(xs.len(), 3, "the badges stacked: {drawn:?}");
+}
+
+/// At the canvas rim the fit moves the sprite, and the badge moves with it.
+#[test]
+fn a_badge_follows_its_sprite_fitted_to_the_canvas_rim() {
+    use crate::pose::Pose;
     use std::time::Duration;
 
-    let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
+    let pack = crate::pack::test_default_pack();
+    let layout = SceneLayout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
 
     let mut at_the_rim = 0usize;
@@ -4168,37 +5494,43 @@ fn a_character_badge_is_never_anchored_off_the_canvas() {
         slot.created_at = now0;
         slot.state_started_at = now0;
         slot.last_event_at = now0;
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(id, slot);
         let mut owned = OwnedSimStores::new();
 
         for secs in 1..=target {
-            let Some(anchor) = character_anchor(
-                &slot,
-                &layout,
-                now0 + Duration::from_secs(secs),
-                &mut pose::RouteCtx {
-                    router: &mut owned.router,
-                    overlay: &owned.overlay,
-                    history: &mut owned.history,
-                    motion: &mut owned.motion,
+            let now = now0 + Duration::from_secs(secs);
+            let frame = sim_step(
+                &mut owned.stores(),
+                SimInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    layout: &layout,
+                    coffee: &coffee,
+                    door_anim_max_ms: 0,
                 },
-            ) else {
+            );
+            let Some(Some(Pose::AimlessAt { dest })) = frame.poses.get(&id) else {
                 continue;
             };
-            assert!(
-                anchor.x + w <= layout.buf_w,
-                "agent {aid} at {secs}s badges at {anchor:?}, running {} px past the {} px canvas",
-                anchor.x + w - layout.buf_w,
-                layout.buf_w
-            );
-            if anchor.x + w == layout.buf_w {
-                at_the_rim += 1;
+            if waypoint_top_left(*dest, w).x + w <= layout.buf_w {
+                continue;
             }
+            let drawn = badged(&paint_drawn(&owned, &scene, &layout, &pack, now, &frame));
+            assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
+            at_the_rim += drawn
+                .iter()
+                .filter(|(_, body)| body.x + body.width == layout.buf_w)
+                .count();
+            break;
         }
     }
-    assert!(
-        at_the_rim > 0,
-        "no badge ever reached the east rim — the clamp went untested"
-    );
+    assert!(at_the_rim > 0, "no sprite was fitted to the east rim");
 }
 
 #[test]
@@ -4206,8 +5538,8 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
     use crate::layout::{Facing, Furniture};
     let desk_h = crate::layout::furniture_def(Furniture::Desk).visual.h;
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        let far = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
-        let near = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far = seated_top_left(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = seated_top_left(desk, CHARACTER_SPRITE_W, Facing::North);
         assert!(
             far.y < desk.y,
             "a viewer-facing occupant sits ABOVE the desk row: {far:?} vs {desk:?}"
@@ -4225,95 +5557,28 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
     }
 }
 
-#[test]
-fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
-    use crate::layout::Facing;
-    // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
-    // standby SCREEN is the one that gates on facing.
-    for darkness in [0.0_f32, 0.5, 1.0] {
-        let north = super::desk_light(Facing::North, darkness, 1.0);
-        let south = super::desk_light(Facing::South, darkness, 1.0);
-        assert_eq!(
-            north.lamp, south.lamp,
-            "the lamp may not depend on facing (darkness {darkness})"
-        );
-        assert!(
-            south.screen_idle == 0.0 && north.screen_idle >= south.screen_idle,
-            "only a back-turned desk shows its screen (darkness {darkness})"
-        );
-    }
-    assert!(
-        super::desk_light(Facing::South, 1.0, 1.0).lamp > 0.0,
-        "a viewer-facing desk must still light its lamp after dark"
-    );
-}
-
-/// The two desk emitters (`lamp`, `screen_idle`); the ceiling pools and the floor lamp share the
-/// rule but not this pin. Dropping either factor makes that emitter's two
-/// readings equal.
-#[test]
-fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
-    use crate::layout::Facing;
-    let min = crate::floor::LightingState::MIN_LEVEL;
-    let lit = super::desk_light(Facing::North, 1.0, 1.0);
-    let empty = super::desk_light(Facing::North, 1.0, min);
-    for (what, lit, empty) in [
-        ("lamp", lit.lamp, empty.lamp),
-        ("screen_idle", lit.screen_idle, empty.screen_idle),
-    ] {
-        assert!(
-            (empty - lit * min).abs() < f32::EPSILON,
-            "an empty floor's {what} must scale with the level, got {empty} against {lit}"
-        );
-    }
-}
-
-#[test]
-fn a_lamp_casting_no_pool_is_not_drawn_lit() {
-    // Whatever the fixture reads as, it must track the light it casts.
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let desk = Point { x: 20, y: 14 };
-    let bg = Rgb { r: 9, g: 9, b: 9 };
-    let render = |strength: f32| {
-        let mut buf = RgbBuffer::filled(60, 40, bg);
-        super::drawable::paint_desk_lamp(&mut buf, desk, strength, theme);
-        buf
-    };
-    let (dim, bright) = (render(0.05), render(1.0));
-    let lum = |c: Rgb| 0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32;
-    assert!(
-        lum(dim.get(desk.x, desk.y)) < lum(bright.get(desk.x, desk.y)),
-        "a barely-lit lamp must not paint the same shade as a fully-lit one: \
-         {:?} vs {:?}",
-        dim.get(desk.x, desk.y),
-        bright.get(desk.x, desk.y)
-    );
-}
-
-/// Asserted on the DRAWABLE list, not on pixels: a chair's rect is lit by the
-/// desk's ceiling pool, which is facing-dependent, so contrasting
-/// a north desk's rect against a south one measures the pool as much as the
-/// chair — it passes with no chair drawn.
+/// Asserted on the DRAWABLE list, not on pixels: a chair's rect also carries
+/// the hour and the desk's lights, so contrasting a north desk's rect against a
+/// south one measures more than the chair and can pass with no chair drawn.
 #[test]
 fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     for seed in 0..8u64 {
         let layout =
-            Layout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
+            SceneLayout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
                 .expect("240x160 lays out");
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let chair_w = super::drawable::desk_chair_frame(&pack)
-            .expect("desk_chair is in the embedded pack")
+            .expect("desk_chair is in the bundled pack")
             .width();
-        let mut drawables = Vec::new();
-        super::enqueue_desk_chairs(&layout, &pack, &mut drawables);
         // Keyed on the FULL position: desks in one pod column share an x, so an
         // x-only key silently folds a wrongly-chaired south desk onto its
         // north neighbour and the assertion cannot see it.
-        let seated: std::collections::BTreeSet<(u16, u16)> = drawables
+        let seated: std::collections::BTreeSet<(u16, u16)> = queued(&layout, &empty_frame(&layout))
+            .sorted
             .iter()
-            .map(|d| match d.kind {
-                super::DrawableKind::DeskChair { pos, .. } => (pos.x, pos.y),
-                _ => panic!("enqueue_desk_chairs pushed a non-chair drawable"),
+            .filter_map(|d| match d.kind {
+                super::DrawableKind::DeskChair { pos, .. } => Some((pos.x, pos.y)),
+                _ => None,
             })
             .collect();
         let want: std::collections::BTreeSet<(u16, u16)> = layout
@@ -4326,7 +5591,7 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
             })
             .map(|(_, &d)| {
                 (
-                    super::anchors::seated_anchor_facing(d, chair_w, crate::layout::Facing::North)
+                    crate::sim::anchors::seated_top_left(d, chair_w, crate::layout::Facing::North)
                         .x,
                     d.y + 6,
                 )
@@ -4340,40 +5605,14 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     }
 }
 
-/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort; breaking
-/// either paints the chair under its occupant with every other test still green. This is that gate: it reads
-/// `paint_frame`'s own source, because the failure is in the call order, not in
-/// any value a fixture can produce.
-#[test]
-fn the_chair_still_enqueues_after_its_occupant_and_the_sort_is_stable() {
-    let src = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pixel_painter/mod.rs"),
-    )
-    .expect("the painter's own source");
-    let chars = src
-        .find("enqueue_characters(ctx, frame,")
-        .expect("enqueue_characters call");
-    let chairs = src
-        .find("enqueue_desk_chairs(")
-        .expect("enqueue_desk_chairs call");
-    assert!(
-        chars < chairs,
-        "the chair must be pushed AFTER its occupant, or the stable sort paints it under them"
-    );
-    assert!(
-        src.contains("drawables.sort_by_key("),
-        "the z-sort must stay STABLE — sort_unstable_by_key breaks the chair/occupant tie"
-    );
-}
-
-/// The painter half of the chair, on a BLANK buffer: no floor, no ceiling pool,
+/// The painter half of the chair, on a BLANK buffer: no floor, no light,
 /// no hour — so the only thing that can move these pixels is the chair itself.
 #[test]
 fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
     const BG: Rgb = Rgb { r: 1, g: 2, b: 3 };
     let mut buf = RgbBuffer::filled(64, 32, BG);
     let at = Point { x: 20, y: 10 };
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     super::drawable::paint_chair_back(&mut buf, at, &pack);
     let painted: Vec<(u16, u16)> = (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -4389,7 +5628,7 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
         painted.iter().map(|p| p.1).max().unwrap(),
     );
     let w = super::drawable::desk_chair_frame(&pack)
-        .expect("desk_chair is in the embedded pack")
+        .expect("desk_chair is in the bundled pack")
         .width();
     assert!(
         y0 == at.y && x0 >= at.x && x1 < at.x + w && y1 < at.y + 8,
@@ -4413,26 +5652,29 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
 fn paint_flame_crown_draws_its_pattern() {
     const BG: Rgb = Rgb { r: 9, g: 9, b: 9 };
     let mut buf = RgbBuffer::filled(40, 40, BG);
-    let anchor = Point { x: 12, y: 20 };
+    let top_left = Point { x: 12, y: 20 };
     const W: u16 = 8;
-    super::effects::paint_flame_crown(&mut buf, anchor, W, SystemTime::UNIX_EPOCH);
+    super::effects::paint_effect(
+        &mut buf,
+        &crate::effects::flame_crown(top_left, W, Motion::Full.beat(SystemTime::UNIX_EPOCH)),
+        crate::theme::theme_by_name("normal").expect("normal theme"),
+    );
     let painted: Vec<(u16, u16)> = (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != BG)
         .collect();
     assert!(!painted.is_empty(), "the crown must paint");
-    let cx = anchor.x + W / 2;
+    let cx = top_left.x + W / 2;
     for &(x, y) in &painted {
         assert!(
-            (cx - 2..=cx + 1).contains(&x) && (anchor.y - 2..=anchor.y).contains(&y),
+            (cx - 2..=cx + 1).contains(&x) && (top_left.y - 2..=top_left.y).contains(&y),
             "the crown painted outside its own box at ({x}, {y})"
         );
     }
 }
 
-/// The couch's rung is NEW on the waypoint path: the old two-rung ladder went
-/// straight to the front pose, seating a face at the window.
 #[test]
+#[cfg(feature = "native")]
 fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
     use crate::layout::{Facing, Point, WaypointKind};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -4454,9 +5696,8 @@ fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
     );
 }
 
-/// The upright kinds reach the degradation rung too: before the seat model they
-/// asked for a sprite the pack lacked and painted NOTHING.
 #[test]
+#[cfg(feature = "native")]
 fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
     use crate::layout::{Facing, Point, WaypointKind};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -4499,22 +5740,6 @@ fn the_chair_and_the_island_mirror_on_opposite_facings() {
                 "{kind:?} must mirror on {flips_on:?} and nothing else, saw {facing:?} -> {flip}"
             );
         }
-    }
-}
-
-/// The desk's shadow falls under the desk. `DESK_W` is the SURFACE width, not
-/// the piece's — the side cabinets that cast the shadow make it `visual.w` — so
-/// a shadow keyed on `DESK_W` sits 2 px west of the thing casting it (#906).
-#[test]
-fn the_desk_shadow_is_centred_on_the_desk_that_casts_it() {
-    let v = crate::layout::desk_furniture_def().visual;
-    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        let e = super::desk_shadow_ellipse(desk);
-        // The desk's ground is stamped TOP-LEFT at `desk`, full `visual.w` wide.
-        assert!(
-            e.cx.saturating_sub(e.half_w) >= desk.x && e.cx + e.half_w <= desk.x + v.w,
-            "{desk:?}: the shadow must stay inside the desk's ground contact"
-        );
     }
 }
 
@@ -4625,5 +5850,290 @@ fn wash_since_washes_exactly_the_diff_set_and_matches_the_naive_reference() {
                 );
             }
         }
+    }
+}
+
+/// A pose is the placement's own frame, facing and resolved glow — the one
+/// mapping both profiles draw through.
+#[test]
+fn a_pose_is_its_placements_frame_facing_and_glow() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let id = pixtuoid_core::AgentId::from_transcript_path("/pose.jsonl");
+    let typing = make_slot(
+        id,
+        ActivityState::Active {
+            tool_use_id: None,
+            detail: Some(Arc::from("Edit src/main.rs")),
+            kind: ToolKind::Edit,
+        },
+    );
+    let placement = |glow| CharacterPlacement {
+        agent_idx: 0,
+        sort_row: 0,
+        anim_name: "typing",
+        frame_idx: 3,
+        top_left: Point { x: 0, y: 0 },
+        label_anchor: Point { x: 0, y: 0 },
+        flip_x: true,
+        glow,
+        effects: Vec::new(),
+        breathes: true,
+        seat_desk: None,
+        seated: true,
+    };
+    let pose = crate::character::SpritePose::of(&placement(CharacterGlow::Tool), &typing, theme);
+    assert_eq!(
+        (pose.anim_name, pose.frame_idx, pose.flip_x),
+        ("typing", 3, true)
+    );
+    assert_eq!(pose.glow_tint, tool_glow_tint(&typing, &theme.tool_glow));
+    let thinking =
+        crate::character::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
+    assert_eq!(thinking.glow_tint, Some(theme.tool_glow.default));
+    let unlit = crate::character::SpritePose::of(&placement(CharacterGlow::None), &typing, theme);
+    assert_eq!(unlit.glow_tint, None);
+}
+
+/// Unflipped, a character is drawn as its art faces; `flip_x` alone mirrors it.
+#[test]
+fn an_unflipped_character_faces_the_way_its_art_does() {
+    let pack = crate::pack::test_default_pack();
+    let slot = make_slot(
+        pixtuoid_core::AgentId::from_transcript_path("/face.jsonl"),
+        ActivityState::Idle,
+    );
+    let mut cache = FrameCache::new();
+    let opaque = |f: &Frame| -> Vec<bool> { f.as_slice().iter().map(Option::is_some).collect() };
+    let art = pack
+        .animation("side_seated")
+        .and_then(|a| a.frames().first().cloned())
+        .expect("the side view");
+    let drawn = crate::character::character_frame(
+        crate::character::SpritePose {
+            anim_name: "side_seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        &slot,
+        &pack,
+        crate::render_scale::RenderScale::ONE,
+        &mut cache,
+        SystemTime::UNIX_EPOCH,
+    )
+    .expect("the side view")
+    .frame
+    .clone();
+    assert_eq!(opaque(&drawn), opaque(&art));
+    assert_ne!(
+        opaque(&art),
+        opaque(&art.mirror_horizontal()),
+        "the side view must be asymmetric for this to see a flip"
+    );
+}
+
+/// A facing flip mirrors the dressed frame; it never dresses a mirrored one. A
+/// style's layers are drawn for the art as authored, so profile hair laid on a
+/// flipped body would land on the face side.
+#[test]
+#[cfg(feature = "cutaway-assets")]
+fn a_facing_flip_mirrors_the_dressed_frame() {
+    let pack = crate::pack::test_default_pack();
+    let scale =
+        crate::render_scale::RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let mut cache = crate::frame_cache::FrameCache::new();
+    let now = SystemTime::UNIX_EPOCH;
+    let mut asymmetric = 0;
+    for i in 0..12 {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/flip/{i}.jsonl"));
+        let slot = make_slot(id, ActivityState::Idle);
+        let mut look = |flip| {
+            crate::character::character_frame(
+                crate::character::SpritePose {
+                    anim_name: "side_seated",
+                    frame_idx: 0,
+                    flip_x: flip,
+                    glow_tint: None,
+                },
+                &slot,
+                &pack,
+                scale,
+                &mut cache,
+                now,
+            )
+            .expect("the side view")
+            .frame
+            .clone()
+        };
+        let (east, west) = (look(false), look(true));
+        let mirrored = east.mirror_horizontal();
+        assert_eq!(west.as_slice(), mirrored.as_slice(), "agent {i}");
+        asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
+    }
+    assert!(asymmetric > 0, "a profile is not its own mirror");
+}
+
+/// Under every sky the sweep draws, a frame matches the one whose windows show
+/// its instant's no-weather sky — the same room, lit alike — everywhere but on
+/// glass no fixture paints.
+#[test]
+fn the_outside_reaches_only_the_glass() {
+    let (scene, _, _, now0, pack) = sim_rig();
+    // Wide enough for meeting rooms, whose notice boards hang on the panes.
+    let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("240x144 lays out");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
+    let (w, h) = (layout.buf_w, layout.buf_h);
+    let mut hung_on_glass = std::collections::HashSet::new();
+    let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
+    for weathered in crate::outside::tests::every_sky() {
+        let name = &weathered.name;
+        let timing = Motion::Full.timing(weathered.now);
+        let paint = |outside| {
+            let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
+            paint_frame(
+                &mut PaintCtx {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    timing,
+                    sky: weathered.sky,
+                    outside,
+                    buf: &mut buf,
+                    cache: &mut FrameCache::new(),
+                    base_fill: &mut BaseFillCache::new(),
+                    shadows: &mut crate::ground::DepthsCache::default(),
+                    theme,
+                    floor: crate::floor::FloorMeta::ground(),
+                    walks: &owned.route.walks,
+                    debug_walkable: false,
+                },
+                &frame,
+            );
+            buf
+        };
+        let (shown, bare) = (paint(None), paint(Some(weathered.bare)));
+        // Every pixel a fixture paints, each painted alone: one set an instant.
+        if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
+            let mut over = RgbBuffer::filled(w, h, UNPAINTED);
+            let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
+            let fctx = PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                timing,
+                sky: weathered.sky,
+                outside: None,
+                buf: &mut scratch,
+                cache: &mut FrameCache::new(),
+                base_fill: &mut BaseFillCache::new(),
+                shadows: &mut crate::ground::DepthsCache::default(),
+                theme,
+                floor: crate::floor::FloorMeta::ground(),
+                walks: &owned.route.walks,
+                debug_walkable: false,
+            };
+            let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
+            let lights = Lights::of(
+                &layout,
+                &moment.look,
+                &LightInputs {
+                    agents: &frame.agents,
+                    seated: &frame.seated_agents,
+                    floor_idx: 0,
+                    indoor_scale: frame.indoor_scale,
+                    neon: frame.neon,
+                    beat: timing.beat,
+                },
+            );
+            let neon = crate::floor::neon_look(frame.neon, theme);
+            let Furnishings { backdrop, sorted } =
+                queue_fixtures(&fctx, &frame, &lights.desks, neon);
+            let kinds = backdrop
+                .iter()
+                .map(|(_, k)| k)
+                .chain(sorted.iter().map(|d| &d.kind));
+            let mut painted = vec![false; usize::from(w) * usize::from(h)];
+            let mut cache = FrameCache::new();
+            for kind in kinds {
+                let epoch = over.begin_writes();
+                paint_drawable(
+                    kind,
+                    &mut drawable::DrawableCtx {
+                        buf: &mut over,
+                        pack: &pack,
+                        cache: &mut cache,
+                        timing,
+                        theme,
+                    },
+                );
+                for y in 0..h {
+                    for x in 0..w {
+                        if over.written_in(x, y, epoch) {
+                            painted[usize::from(y) * usize::from(w) + usize::from(x)] = true;
+                        }
+                    }
+                }
+            }
+            over.end_writes();
+            covered = Some((weathered.now, painted));
+        }
+        let covered = &covered.as_ref().expect("filled above").1;
+        let mut glass = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
+                if hung && layout.glass_at(x, y) {
+                    hung_on_glass.insert((x, y));
+                }
+                if shown.get(x, y) == bare.get(x, y) {
+                    continue;
+                }
+                assert!(
+                    layout.glass_at(x, y) && !hung,
+                    "{name}: the outside reached ({x}, {y}), off the glass"
+                );
+                glass += 1;
+            }
+        }
+        assert_eq!(
+            glass > 0,
+            weathered.changes_glass,
+            "{name}: {glass} glass pixels"
+        );
+    }
+    for kind in ["neon sign", "notice board"] {
+        let over_glass = layout.fixtures().any(|f| {
+            let named = match f.kind {
+                FixtureKind::NeonSign => "neon sign",
+                FixtureKind::NoticeBoard { .. } => "notice board",
+                _ => return false,
+            };
+            named == kind
+                && (f.visual.y..f.visual.y + f.visual.height).any(|y| {
+                    (f.visual.x..f.visual.x + f.visual.width)
+                        .any(|x| hung_on_glass.contains(&(x, y)))
+                })
+        });
+        assert!(
+            over_glass,
+            "no {kind} hangs over a window, so none was compared there"
+        );
     }
 }

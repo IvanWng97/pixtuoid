@@ -1,64 +1,35 @@
-//! Standalone furniture paint helpers — the room and corridor pieces the pixel
-//! painter stamps (tables, rugs, appliances, and the procedural room-fill decor).
+//! Furniture the pixel painter stamps procedurally, without pack art.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::anim::FULL_TICK_MS;
 use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
+use crate::pack::COOLER_WATER;
 
-/// Low meeting-room table between the sofas.
-pub(super) fn paint_meeting_table(
+/// Bordered area rug filling `rug` — the meeting and lounge rugs and both
+/// pantry mats.
+pub(crate) fn paint_area_rug(
     buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    w: u16,
-    h: u16,
+    rug: crate::layout::Bounds,
     theme: &crate::theme::Theme,
 ) {
-    let top = theme.furniture.wood_top;
-    let trim = theme.furniture.wood_trim;
-    let min_x = cx.saturating_sub(w / 2);
-    let max_x = (cx + w / 2 + (w & 1)).min(buf.width());
-    let min_y = cy.saturating_sub(h / 2);
-    let max_y = (cy + h / 2 + (h & 1)).min(buf.height());
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let on_front = y + 1 == max_y;
-            buf.put(x, y, if on_front { trim } else { top });
-        }
-    }
-}
-
-/// Bordered area rug centred on `cx,cy` — the meeting rug and both pantry mats.
-pub(super) fn paint_area_rug(
-    buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    w: u16,
-    h: u16,
-    theme: &crate::theme::Theme,
-) {
-    let rug_field = theme.furniture.rug_field;
-    let rug_trim = theme.furniture.rug_trim;
-    let rug_accent = theme.furniture.rug_accent;
-    let half_w = w as i32 / 2;
-    let half_h = h as i32 / 2;
-    for dy in 0..h as i32 {
-        for dx in 0..w as i32 {
-            let px = cx as i32 - half_w + dx;
-            let py = cy as i32 - half_h + dy;
-            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
+    let f = &theme.furniture;
+    for dy in 0..rug.height {
+        for dx in 0..rug.width {
+            let (x, y) = (rug.x.saturating_add(dx), rug.y.saturating_add(dy));
+            if x >= buf.width() || y >= buf.height() {
                 continue;
             }
-            let on_border = dx == 0 || dx == w as i32 - 1 || dy == 0 || dy == h as i32 - 1;
-            let on_inner_border = dx == 1 || dx == w as i32 - 2 || dy == 1 || dy == h as i32 - 2;
+            let on_border = dx == 0 || dx + 1 == rug.width || dy == 0 || dy + 1 == rug.height;
+            let on_inner_border = dx == 1 || dx + 2 == rug.width || dy == 1 || dy + 2 == rug.height;
             let color = if on_border {
-                rug_trim
+                f.rug_trim
             } else if on_inner_border {
-                rug_accent
+                f.rug_accent
             } else {
-                rug_field
+                f.rug_field
             };
-            buf.put(px as u16, py as u16, color);
+            buf.put(x, y, color);
         }
     }
 }
@@ -161,37 +132,26 @@ pub(super) fn paint_kitchen_island(
     putxy(buf, w - 5, 0, accents[2]);
 }
 
-/// Notice board on the meeting room's south wall.
-pub(super) fn paint_notice_board(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::theme::Theme) {
-    if !(mr.height > 20 && mr.width > 15) {
-        return;
-    }
+/// Notice board filling `board`, the box
+/// [`SceneLayout::notice_board_rect`](crate::layout::SceneLayout::notice_board_rect)
+/// places and gates.
+pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &crate::theme::Theme) {
     let wall_color = theme.office.room_wall_trim_dark;
     let accent = theme.furniture.rug_accent;
-    let bx = mr.x + 4;
-    let by = mr.y + mr.height - 8;
-    for dy in 0..5u16 {
-        for dx in 0..8u16 {
-            let px = bx + dx;
-            let py = by + dy;
+    for dy in 0..board.height {
+        for dx in 0..board.width {
+            let px = board.x + dx;
+            let py = board.y + dy;
             if px < buf.width() && py < buf.height() {
-                let on_edge = dx == 0 || dx == 7 || dy == 0 || dy == 4;
+                let on_edge = dx == 0 || dx == board.width - 1 || dy == 0 || dy == board.height - 1;
                 buf.put(px, py, if on_edge { wall_color } else { accent });
             }
         }
     }
 }
 
-/// Small doormat at the meeting-room entrance. Placement + fit-gate come from
-/// [`MeetingRoom::doormat_rect`] — the ONE authority the hover hit-test shares.
-pub(super) fn paint_doormat(
-    buf: &mut RgbBuffer,
-    room: &crate::layout::MeetingRoom,
-    theme: &crate::theme::Theme,
-) {
-    let Some(mat) = room.doormat_rect() else {
-        return;
-    };
+/// Small doormat filling `mat`, its fixture's box.
+pub(super) fn paint_doormat(buf: &mut RgbBuffer, mat: Bounds, theme: &crate::theme::Theme) {
     let mat_color = theme.furniture.rug_trim;
     let mat_accent = theme.furniture.rug_field;
     for dy in 0..mat.height {
@@ -206,43 +166,38 @@ pub(super) fn paint_doormat(
     }
 }
 
-/// The cooler bottle's fill — theme-independent, so every theme's
-/// `tank_water_line` glug bubble must stay distinguishable from it.
-pub(crate) const COOLER_WATER: Rgb = Rgb {
-    r: 100,
-    g: 180,
-    b: 230,
-};
-
-/// Water cooler; placement + fit-gate come from [`PantryRoom::water_cooler_rect`]
-/// — the ONE authority the hover hit-test shares.
+/// Water cooler filling `cooler`, the box
+/// [`PantryRoom::water_cooler_rect`](crate::layout::PantryRoom::water_cooler_rect)
+/// places and gates.
 pub(super) fn paint_water_cooler(
     buf: &mut RgbBuffer,
-    room: &crate::layout::PantryRoom,
-    now: std::time::SystemTime,
+    cooler: Bounds,
+    beat: crate::anim::Beat,
     theme: &crate::theme::Theme,
 ) {
-    let Some(cooler) = room.water_cooler_rect() else {
-        return;
-    };
     let cooler_body = theme.office.building_light;
     let cooler_water = COOLER_WATER;
+    const BOTTLE_ROWS: u16 = 3;
     let (wx, wy) = (cooler.x, cooler.y);
     for dy in 0..cooler.height {
         for dx in 0..cooler.width {
             let px = wx + dx;
             let py = wy + dy;
             if px < buf.width() && py < buf.height() {
-                let color = if dy < 2 { cooler_water } else { cooler_body };
+                let color = if dy < BOTTLE_ROWS {
+                    cooler_water
+                } else {
+                    cooler_body
+                };
                 buf.put(px, py, color);
             }
         }
     }
     // Ambient glug: a bubble climbs the bottle each cycle. Reusing
     // tank_water_line also keeps it off the mascot harness's bubble sentinel.
-    const GLUG_CYCLE_MS: u64 = 2_000;
-    const GLUG_STEP_MS: u64 = 400;
-    let phase = (super::epoch_ms(now) % GLUG_CYCLE_MS) / GLUG_STEP_MS;
+    const GLUG_STEP_MS: u64 = 3 * FULL_TICK_MS;
+    const GLUG_CYCLE_MS: u64 = 5 * GLUG_STEP_MS;
+    let phase = (beat.ms() % GLUG_CYCLE_MS) / GLUG_STEP_MS;
     if phase < 2 {
         let (bx, by) = (wx + 1, wy + 1 - phase as u16);
         if bx < buf.width() && by < buf.height() {
@@ -251,14 +206,11 @@ pub(super) fn paint_water_cooler(
     }
 }
 
-/// Trash bin near the pantry counter. Its colours are intentionally un-themed
-/// neutral greys (a semantic object, like the water bottle's blue), so it takes no
-/// theme; placement + fit-gate come from [`PantryRoom::trash_bin_rect`] — the ONE
-/// authority the hover hit-test shares.
-pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryRoom) {
-    let Some(bin) = room.trash_bin_rect() else {
-        return;
-    };
+/// Trash bin filling `bin`, the box
+/// [`PantryRoom::trash_bin_rect`](crate::layout::PantryRoom::trash_bin_rect)
+/// places and gates. Its colours are intentionally un-themed neutral greys (a
+/// semantic object, like the water bottle's blue), so it takes no theme.
+pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, bin: Bounds) {
     let (tx, ty) = (bin.x, bin.y);
     let bin_outer = Rgb {
         r: 70,
@@ -290,18 +242,10 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryR
                 let on_edge = dx == 0 || dx == bin.width - 1;
                 let color = if dy == 0 {
                     // Rim row.
-                    if on_edge {
-                        bin_rim
-                    } else {
-                        bag_liner
-                    }
+                    if on_edge { bin_rim } else { bag_liner }
                 } else if dy == 1 {
                     // Bag-liner peek.
-                    if on_edge {
-                        bin_outer
-                    } else {
-                        bag_fill
-                    }
+                    if on_edge { bin_outer } else { bag_fill }
                 } else {
                     // Body.
                     bin_outer
@@ -312,64 +256,16 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryR
     }
 }
 
-/// Entry mat centered under the pantry's north doorway. One clear floor row
-/// separates it from the wall face — the offset derives from the SAME
-/// `WALL_THICK_H` the wall painter is thick by, so they can't drift.
-pub(super) fn paint_pantry_entry_mat(
-    buf: &mut RgbBuffer,
-    layout: &crate::layout::SceneLayout,
-    theme: &crate::theme::Theme,
-) {
-    const ENTRY_MAT_W: u16 = 16;
-    const ENTRY_MAT_H: u16 = 5;
-    let Some(p) = layout.pantry else { return };
-    let Some(dw) = layout
-        .doorways
-        .iter()
-        .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)
-    else {
-        return;
-    };
-    let cx = (dw.start.x + dw.end.x) / 2;
-    let cy = dw.start.y + crate::layout::WALL_THICK_H + 1 + ENTRY_MAT_H / 2;
-    paint_area_rug(buf, cx, cy, ENTRY_MAT_W, ENTRY_MAT_H, theme);
-}
-
-/// Thin bar mat under the kitchen island: the island body covers most of it,
-/// leaving a sliver peeking out along the bar's south serving front.
-pub(super) fn paint_island_bar_mat(
-    buf: &mut RgbBuffer,
-    layout: &crate::layout::SceneLayout,
-    theme: &crate::theme::Theme,
-) {
-    const BAR_MAT_W: u16 = 26;
-    const BAR_MAT_H: u16 = 4;
-    // The island anchor is its body center; +4 drops the mat's center to the
-    // seat row so the sliver clears the body's south edge (mock-verified).
-    const BAR_MAT_Y_OFF: u16 = 4;
-    let Some(isl) = layout.pantry.and_then(|p| p.kitchen_island) else {
-        return;
-    };
-    paint_area_rug(
-        buf,
-        isl.x,
-        isl.y + BAR_MAT_Y_OFF,
-        BAR_MAT_W,
-        BAR_MAT_H,
-        theme,
-    );
-}
-
 /// Aquarium on a low cabinet: theme water behind a shared-dark frame, two fish
 /// patrolling opposite lanes on the anim clock, a rising bubble and a plant sprig.
 /// Geometry derives from the `FishTank` furniture row.
 pub(super) fn paint_fish_tank(
     buf: &mut RgbBuffer,
     pos: crate::layout::Point,
-    now: std::time::SystemTime,
+    beat: crate::anim::Beat,
     theme: &crate::theme::Theme,
 ) {
-    use crate::layout::{furniture_def, Furniture};
+    use crate::layout::{Furniture, furniture_def};
     let def = furniture_def(Furniture::FishTank);
     let (w, h) = (def.visual.w, def.visual.h);
     let x0 = pos.x.saturating_sub(w / 2);
@@ -418,11 +314,11 @@ pub(super) fn paint_fish_tank(
     }
     // Fish patrol: a triangle wave over the interior span, one lane each. Distinct
     // periods (and a phase offset) keep the pair from mirroring in lockstep.
-    let t = super::epoch_ms(now);
-    const FISH_STEP_MS: u64 = 430;
-    const FISH_ALT_STEP_MS: u64 = 520;
+    let t = beat.ms();
+    const FISH_STEP_MS: u64 = 3 * FULL_TICK_MS;
+    const FISH_ALT_STEP_MS: u64 = 4 * FULL_TICK_MS;
     const FISH_ALT_PHASE_STEPS: u64 = 7;
-    const BUBBLE_RISE_STEP_MS: u64 = 300;
+    const BUBBLE_RISE_STEP_MS: u64 = 2 * FULL_TICK_MS;
     let span = (w - 5) as u64;
     let mut fish = |lane_dy: u16, color: Rgb, step_ms: u64, phase: u64| {
         let cycle = span * 2;
@@ -502,142 +398,6 @@ pub(super) const MEETING_FABRIC_LIT: Rgb = Rgb {
     g: 0x8e,
     b: 0x98,
 };
-
-/// Vending machine centred at `pos` — drinks panel, a grid of themed cans, and
-/// the pickup slot. When `busy`, a product cell darkens and its can lands in the
-/// slot each cycle. The slot cell reuses `VENDING_PICKUP_SLOT`, the one authority
-/// the pixel test also derives from.
-pub(super) fn paint_vending_machine(
-    buf: &mut RgbBuffer,
-    pos: crate::layout::Point,
-    busy: bool,
-    now: std::time::SystemTime,
-    theme: &crate::theme::Theme,
-) {
-    let body = theme.appliance.vending_body;
-    let panel = theme.appliance.vending_panel;
-    let drinks = theme.appliance.vending_drinks;
-    let vend = super::drawable::VENDING_BODY;
-    let vx = pos.x.saturating_sub(vend.w / 2);
-    let vy = pos.y.saturating_sub(vend.h / 2);
-    for dy in 0..vend.h {
-        for dx in 0..vend.w {
-            let px = vx + dx;
-            let py = vy + dy;
-            if px < buf.width() && py < buf.height() {
-                let color = if dy == 0 {
-                    panel
-                } else if (1..=3).contains(&dy) && (1..=2).contains(&dx) {
-                    let idx = ((dy - 1) * 2 + (dx - 1)) as usize;
-                    if idx < drinks.len() {
-                        drinks[idx]
-                    } else {
-                        body
-                    }
-                } else if (dx, dy) == super::drawable::VENDING_PICKUP_SLOT {
-                    theme.appliance.vending_trim
-                } else if dy == 5 {
-                    theme.appliance.vending_dark
-                } else {
-                    body
-                };
-                buf.put(px, py, color);
-            }
-        }
-    }
-
-    if busy {
-        // A product cell goes dark and its can lands in the pickup slot; the
-        // product rotates per cycle.
-        const DROP_CYCLE_MS: u64 = 3_000;
-        const DROP_STEP_MS: u64 = 500;
-        let t = super::epoch_ms(now);
-        let phase = (t % DROP_CYCLE_MS) / DROP_STEP_MS;
-        let pick = ((t / DROP_CYCLE_MS) % drinks.len() as u64) as u16;
-        let (ddx, ddy) = (1 + pick % 2, 1 + pick / 2);
-        let mut put = |x: u16, y: u16, c| {
-            if x < buf.width() && y < buf.height() {
-                buf.put(x, y, c);
-            }
-        };
-        if (1..=4).contains(&phase) {
-            put(vx + ddx, vy + ddy, theme.appliance.vending_dark);
-        }
-        if (2..=4).contains(&phase) {
-            let can = drinks[(pick as usize) % drinks.len()];
-            put(
-                vx + super::drawable::VENDING_PICKUP_SLOT.0,
-                vy + super::drawable::VENDING_PICKUP_SLOT.1,
-                can,
-            );
-        }
-    }
-}
-
-/// Printer centred at `pos` — dark lid with a glass strip, white chassis, and an
-/// output tray. When `busy`, a page slides out below the tray, rests, then clears.
-pub(super) fn paint_printer(
-    buf: &mut RgbBuffer,
-    pos: crate::layout::Point,
-    busy: bool,
-    now: std::time::SystemTime,
-    theme: &crate::theme::Theme,
-) {
-    let body_white = theme.appliance.printer_body;
-    let top_dark = theme.appliance.printer_top;
-    let glass = theme.appliance.printer_glass;
-    let paper = theme.appliance.printer_paper;
-    let tray = theme.appliance.printer_tray;
-    let pbody = super::drawable::PRINTER_BODY;
-    let px0 = pos.x.saturating_sub(pbody.w / 2);
-    let py0 = pos.y.saturating_sub(pbody.h / 2);
-    for dy in 0..pbody.h {
-        for dx in 0..pbody.w {
-            let px = px0 + dx;
-            let py = py0 + dy;
-            if px < buf.width() && py < buf.height() {
-                let color = if dy == 0 {
-                    if (1..=3).contains(&dx) {
-                        glass
-                    } else {
-                        top_dark
-                    }
-                } else if dy == 3 {
-                    if (1..=3).contains(&dx) {
-                        paper
-                    } else {
-                        tray
-                    }
-                } else if dx == 0 || dx == 4 {
-                    tray
-                } else {
-                    body_white
-                };
-                buf.put(px, py, color);
-            }
-        }
-    }
-
-    if busy {
-        const PAGE_CYCLE_MS: u64 = 2_400;
-        const PAGE_STEP_MS: u64 = 300;
-        let phase = (super::epoch_ms(now) % PAGE_CYCLE_MS) / PAGE_STEP_MS;
-        let rows = match phase {
-            1 => 1,
-            2..=6 => 2,
-            _ => 0,
-        };
-        for dy in 0..rows {
-            for dx in 1..=3u16 {
-                let px = px0 + dx;
-                let py = py0 + 4 + dy;
-                if px < buf.width() && py < buf.height() {
-                    buf.put(px, py, paper);
-                }
-            }
-        }
-    }
-}
 
 /// Meeting-room coat rack centred on `pos`, the pole top, filling
 /// `coat_rack_rect_at(pos)`.

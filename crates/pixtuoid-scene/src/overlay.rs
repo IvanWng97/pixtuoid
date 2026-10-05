@@ -5,15 +5,13 @@
 //! activity-derived `LabelTone` and each painter maps it to its own color type.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
-use crate::layout::{Layout, Point, DESK_W};
-use crate::pixel_painter::character_anchor;
-use crate::pose::RouteCtx;
+use crate::layout::{DESK_W, Point};
+use crate::pixel_painter::AgentFrame;
 use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
@@ -25,13 +23,8 @@ use crate::theme::Theme;
 /// char.
 const LABEL_SEP: char = '\u{b7}';
 
-/// At least `desk_north.sprite`'s extra height, with headroom — not a copy of
-/// it. Keep EVEN: a half-block painter halves it, and an odd lift rounds onto
-/// the screen.
-const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
-
 /// Activity-derived label tone — backend-agnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LabelTone {
     Active,
     Waiting,
@@ -59,62 +52,85 @@ pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
         .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }
 
-/// One agent name-badge to paint above its sprite. `anchor_px` is in SCENE-buffer
-/// pixel space; `text` is already disambiguated + truncated and carries NO ●/▸
-/// marker (each painter adds its own).
+/// One agent name-badge to paint above its sprite. `text` is already
+/// disambiguated + truncated and carries NO ●/▸ marker (each painter adds its own).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelElement {
+    /// The drawn sprite's [`AgentFrame::label_anchor`], in SCENE-buffer pixels.
     pub anchor_px: Point,
     pub text: String,
     pub tone: LabelTone,
     pub hovered: bool,
 }
 
-/// Gated on the anchor MATCHING the desk's seated anchor, not on the pose: an agent walking past
-/// their own desk still reads `Facing::North`, and lifting their badge mid-corridor detaches it.
-fn lift_over_raised_monitor(
-    anchor: Point,
-    agent: &pixtuoid_core::AgentSlot,
-    layout: &Layout,
-) -> Point {
-    let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
-        return anchor;
-    };
-    let facing = layout.desk_facing(agent.desk_index.single_floor_local());
-    if facing != crate::layout::Facing::North {
-        return anchor;
-    }
-    let seated =
-        crate::pixel_painter::seated_anchor_facing(desk, crate::layout::CHARACTER_SPRITE_W, facing);
-    if anchor != seated {
-        return anchor;
-    }
-    Point {
-        x: anchor.x,
-        y: anchor.y.saturating_sub(RAISED_MONITOR_LABEL_LIFT),
+/// The colours of a badge's two parts, the one decision every painter reads:
+/// the name in the activity tone, which every theme holds at text contrast,
+/// and the source's identity on the marker, a graphic, since a brand hue as
+/// text can fall below that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BadgeInk {
+    /// The leading `●`: the source's badge hue, else the tone.
+    pub marker: Rgb,
+    /// The label text: the tone.
+    pub name: Rgb,
+}
+
+/// The glyph every painter's badge leads with, in [`BadgeInk::marker`].
+pub const BADGE_MARKER: char = '\u{25cf}';
+
+/// A badge's width in terminal cells, its marker included: the classic
+/// painter clips its badge to it, and a label is truncated to what is left.
+pub const BADGE_CELLS: u16 = DESK_W + BADGE_OVERHANG;
+/// The cells a badge may run past its desk's width.
+const BADGE_OVERHANG: u16 = 4;
+
+/// The [`BadgeInk`] of a badge reading `text` in `tone`.
+pub fn badge_ink(text: &str, tone: LabelTone, theme: &Theme) -> BadgeInk {
+    let name = label_tone_rgb(tone, theme);
+    BadgeInk {
+        marker: badge_hue(text, theme).unwrap_or(name),
+        name,
     }
 }
 
-/// Build one `LabelElement` per VISIBLE agent — off-floor agents get no
-/// `character_anchor` and are skipped, so labels align 1:1 with the sprites.
+/// One `LabelElement` per sprite in `drawn`, in its paint order: an agent the
+/// painter did not draw gets no badge.
 pub fn build_overlay(
     scene: &SceneState,
-    layout: &Layout,
-    now: SystemTime,
-    rctx: &mut RouteCtx<'_>,
+    drawn: &[AgentFrame],
     hovered: Option<AgentId>,
 ) -> Vec<LabelElement> {
-    let mut label_counts: HashMap<&str, usize> = HashMap::new();
-    for agent in scene.agents.values() {
-        *label_counts.entry(&*agent.label).or_insert(0) += 1;
+    let namesakes = Namesakes::of(scene.agents.values());
+    drawn
+        .iter()
+        .filter_map(|frame| {
+            let agent = scene.agents.get(&frame.agent_id)?;
+            Some(LabelElement {
+                anchor_px: frame.label_anchor,
+                text: namesakes.text(agent),
+                tone: tone_of(agent),
+                hovered: hovered == Some(agent.agent_id),
+            })
+        })
+        .collect()
+}
+
+/// How many agents wear each label: an agent sharing its label carries its
+/// session's suffix, even where the namesake is not drawn.
+pub(crate) struct Namesakes<'a>(HashMap<&'a str, usize>);
+
+impl<'a> Namesakes<'a> {
+    pub(crate) fn of(agents: impl IntoIterator<Item = &'a AgentSlot>) -> Self {
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for agent in agents {
+            *counts.entry(&*agent.label).or_insert(0) += 1;
+        }
+        Self(counts)
     }
-    let mut out = Vec::new();
-    for agent in scene.agents.values() {
-        let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
-            continue;
-        };
-        let anchor = lift_over_raised_monitor(anchor, agent, layout);
-        let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
+
+    /// `agent`'s badge text, disambiguated and truncated, with no marker.
+    pub(crate) fn text(&self, agent: &AgentSlot) -> String {
+        let needs_disambig = self.0.get(&*agent.label).copied().unwrap_or(0) > 1
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
             let id4 = disambig_suffix(&agent.session_id);
@@ -122,47 +138,49 @@ pub fn build_overlay(
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
-        const LABEL_BUDGET_PAD: u16 = 4;
-        let text = truncate_label(&raw, (DESK_W + LABEL_BUDGET_PAD) as usize).into_owned();
-        let tone = if agent.exiting_at.is_some() {
-            LabelTone::Exiting
-        } else {
-            match &agent.state {
-                ActivityState::Active { .. } => LabelTone::Active,
-                ActivityState::Waiting { .. } => LabelTone::Waiting,
-                ActivityState::Idle => LabelTone::Idle,
-            }
-        };
-        out.push(LabelElement {
-            anchor_px: anchor,
-            text,
-            tone,
-            hovered: hovered == Some(agent.agent_id),
-        });
+        let marker = crate::display::text::cells(BADGE_MARKER.encode_utf8(&mut [0; 4]));
+        truncate_label(&raw, BADGE_CELLS.saturating_sub(marker)).into_owned()
     }
-    out
 }
 
-/// Fit a label into `budget` chars without losing the `·xxxx` session-id
-/// disambiguation suffix. Truncates from the base (left of the `·`), not the
-/// suffix — otherwise the disambig becomes useless ("TikTok-Android·a" tells us
-/// nothing the base alone wouldn't).
-pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_, str> {
+/// `agent`'s badge tone: exiting over whatever it last did.
+pub(crate) fn tone_of(agent: &AgentSlot) -> LabelTone {
+    if agent.exiting_at.is_some() {
+        return LabelTone::Exiting;
+    }
+    match &agent.state {
+        ActivityState::Active { .. } => LabelTone::Active,
+        ActivityState::Waiting { .. } => LabelTone::Waiting,
+        ActivityState::Idle => LabelTone::Idle,
+    }
+}
+
+/// The plate a badge drawn in pixels sits on, so its text keeps one contrast
+/// whatever the room behind it
+/// (`every_badge_ink_reads_on_its_plate_in_every_theme`).
+pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
+    theme.ui.tooltip_bg
+}
+
+/// Fit a label into `budget` terminal cells without losing the `·xxxx`
+/// session-id disambiguation suffix. Truncates from the base (left of the `·`),
+/// not the suffix — otherwise the disambig becomes useless ("TikTok-Android·a"
+/// tells us nothing the base alone wouldn't).
+pub(crate) fn truncate_label(label: &str, budget: u16) -> std::borrow::Cow<'_, str> {
+    use crate::display::text::cells;
     use std::borrow::Cow;
-    if label.chars().count() <= budget {
+    if cells(label) <= budget {
         return Cow::Borrowed(label);
     }
     if let Some(sep_byte) = label.rfind(LABEL_SEP) {
         let suffix = &label[sep_byte..];
-        let suffix_len = suffix.chars().count();
-        if suffix_len < budget {
-            let base = &label[..sep_byte];
-            let base_take = budget - suffix_len;
-            let truncated: String = base.chars().take(base_take).collect();
-            return Cow::Owned(format!("{truncated}{suffix}"));
+        let suffix_cells = cells(suffix);
+        if suffix_cells < budget {
+            let base = crate::display::text::take(&label[..sep_byte], budget - suffix_cells);
+            return Cow::Owned(format!("{base}{suffix}"));
         }
     }
-    Cow::Owned(label.chars().take(budget).collect())
+    Cow::Borrowed(crate::display::text::take(label, budget))
 }
 
 /// 4-hex-char disambiguation suffix, hashed from the WHOLE `session_id` —
@@ -179,26 +197,18 @@ pub fn disambig_suffix(session_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        badge_hue, build_overlay, disambig_suffix, truncate_label, LabelElement, LabelTone,
+        LabelElement, LabelTone, badge_hue, build_overlay, disambig_suffix, truncate_label,
     };
-    use crate::layout::Layout;
-    use crate::motion::MotionState;
-    use crate::pathfind::AStarRouter;
-    use crate::pose::{PoseHistory, RouteCtx};
-    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
-    use pixtuoid_core::walkable::OccupancyOverlay;
+    use crate::layout::Point;
+    use crate::pixel_painter::AgentFrame;
     use pixtuoid_core::AgentId;
-    use std::collections::HashMap;
+    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
     fn now() -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
-    }
-
-    fn layout() -> Layout {
-        Layout::compute(120, 96, Some(4)).expect("fits")
     }
 
     fn slot(label: &str, session_id: &str, desk: usize, state: ActivityState) -> AgentSlot {
@@ -244,19 +254,63 @@ mod tests {
         s
     }
 
+    /// `slot`'s sprite as drawn, its badge hung at `at`.
+    fn drawn(slot: &AgentSlot, at: Point) -> AgentFrame {
+        AgentFrame {
+            agent_id: slot.agent_id,
+            label_anchor: at,
+        }
+    }
+
+    /// Every agent in `scene` drawn, the order immaterial to the test.
     fn overlay_of(scene: &SceneState, hovered: Option<AgentId>) -> Vec<LabelElement> {
-        let l = layout();
-        let mut router = AStarRouter::new();
-        let occ = OccupancyOverlay::new();
-        let mut history = PoseHistory::new();
-        let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-        let mut rctx = RouteCtx {
-            router: &mut router,
-            overlay: &occ,
-            history: &mut history,
-            motion: &mut motion,
-        };
-        build_overlay(scene, &l, now(), &mut rctx, hovered)
+        let frames: Vec<_> = scene
+            .agents
+            .values()
+            .map(|a| drawn(a, Point { x: 0, y: 0 }))
+            .collect();
+        build_overlay(scene, &frames, hovered)
+    }
+
+    #[test]
+    fn badges_follow_the_drawn_frames_in_paint_order() {
+        let a = slot("aa", "sess-aaaa", 0, active());
+        let b = slot("bb", "sess-bbbb", 1, active());
+        let (at_a, at_b) = (Point { x: 30, y: 9 }, Point { x: 12, y: 40 });
+        let frames = [drawn(&b, at_b), drawn(&a, at_a)];
+        let s = scene_of(vec![a, b]);
+        let els = build_overlay(&s, &frames, None);
+        let got: Vec<_> = els.iter().map(|e| (e.text.as_str(), e.anchor_px)).collect();
+        assert_eq!(got, [("bb", at_b), ("aa", at_a)]);
+    }
+
+    /// The missing-anim case: the painter skips a sprite it has no art for, and its
+    /// badge goes with it.
+    #[test]
+    fn an_agent_the_painter_did_not_draw_gets_no_badge() {
+        let a = slot("aa", "sess-aaaa", 0, active());
+        let b = slot("bb", "sess-bbbb", 1, active());
+        let frames = [drawn(&a, Point { x: 4, y: 4 })];
+        let s = scene_of(vec![a, b]);
+        let texts: Vec<_> = build_overlay(&s, &frames, None)
+            .into_iter()
+            .map(|e| e.text)
+            .collect();
+        assert_eq!(texts, ["aa"]);
+    }
+
+    /// Disambiguation is over the scene, not the sprites: an undrawn namesake still
+    /// makes the drawn one's badge carry its id.
+    #[test]
+    fn an_undrawn_namesake_still_disambiguates_the_drawn_badge() {
+        let a = slot("cc", "session-aaaa", 0, active());
+        let b = slot("cc", "session-bbbb", 1, active());
+        let frames = [drawn(&a, Point { x: 4, y: 4 })];
+        let want = format!("cc\u{00b7}{}", disambig_suffix(&a.session_id));
+        let s = scene_of(vec![a, b]);
+        let els = build_overlay(&s, &frames, None);
+        assert_eq!(els.len(), 1);
+        assert_eq!(els[0].text, want);
     }
 
     #[test]
@@ -363,6 +417,39 @@ mod tests {
         assert_eq!(out, "x\u{00b7}ab");
     }
 
+    /// A long name's badge, marker and all, fills [`BADGE_CELLS`] and no
+    /// more, short only by the half a wide character would split.
+    ///
+    /// [`BADGE_CELLS`]: super::BADGE_CELLS
+    #[test]
+    fn a_long_names_badge_fills_its_cells_marker_included() {
+        use crate::display::text::cells;
+        for label in [
+            "cc\u{b7}a-very-long-project-name",
+            "cc\u{b7}日本語プロジェクト管理ツール",
+            "cc\u{b7}a日本語プロジェクト管理",
+        ] {
+            let s = scene_of(vec![slot(label, "sess-abcd", 0, active())]);
+            let badge = format!("{}{}", super::BADGE_MARKER, overlay_of(&s, None)[0].text);
+            let n = cells(&badge);
+            assert!(
+                (super::BADGE_CELLS - 1..=super::BADGE_CELLS).contains(&n),
+                "{badge:?} takes {n} cells"
+            );
+        }
+    }
+
+    /// The budget is in cells, which a CJK character takes two of: a wide name
+    /// gets half the characters, the suffix kept as for any other.
+    #[test]
+    fn truncate_label_budgets_cells_not_chars() {
+        assert_eq!(truncate_label("日本語プロジェクト", 8), "日本語プ");
+        assert_eq!(
+            truncate_label("日本語プロジェクト\u{00b7}a09a", 12),
+            "日本語\u{00b7}a09a"
+        );
+    }
+
     #[test]
     fn uuid_ids_get_distinct_suffixes() {
         let a = disambig_suffix("c0f7fb3f-dc9c-47c3-840d-f775dd2855a3");
@@ -385,37 +472,65 @@ mod tests {
         assert_ne!(a, b);
     }
 
+    /// WCAG 2.2's relative luminance
+    /// (<https://www.w3.org/TR/WCAG22/#dfn-relative-luminance>).
+    fn luminance(c: pixtuoid_core::sprite::Rgb) -> f64 {
+        let linear = |v: u8| {
+            let s = f64::from(v) / 255.0;
+            if s <= 0.04045 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+    }
+
+    /// WCAG 2.2's contrast ratio (<https://www.w3.org/TR/WCAG22/#dfn-contrast-ratio>).
+    fn contrast(a: pixtuoid_core::sprite::Rgb, b: pixtuoid_core::sprite::Rgb) -> f64 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// A badge's name is small text, never large-scale, so it holds WCAG 2.2
+    /// AA's 4.5:1 (<https://www.w3.org/TR/WCAG22/#contrast-minimum>) on its
+    /// plate; its marker is a graphic, held to 3:1
+    /// (<https://www.w3.org/TR/WCAG22/#non-text-contrast>). Over every source's
+    /// label and a bare one, in every tone. The guarantee holds on the plate,
+    /// which the cutaway paints: the painter #873 measured an idle badge in at
+    /// 2.05:1, straight on the floor.
+    #[test]
+    fn every_badge_ink_reads_on_its_plate_in_every_theme() {
+        use super::{badge_ink, badge_plate};
+        let labels: Vec<String> = pixtuoid_core::source::registry::REGISTRY
+            .iter()
+            .map(|s| format!("{}\u{b7}repo", s.label_prefix))
+            .chain(["bare".to_owned()])
+            .collect();
+        for theme in crate::theme::ALL_THEMES {
+            let plate = badge_plate(theme);
+            for tone in [
+                LabelTone::Active,
+                LabelTone::Waiting,
+                LabelTone::Idle,
+                LabelTone::Exiting,
+            ] {
+                for label in &labels {
+                    let ink = badge_ink(label, tone, theme);
+                    let name = contrast(ink.name, plate);
+                    let marker = contrast(ink.marker, plate);
+                    let at = format!("{} {tone:?} {label}", theme.name);
+                    assert!(name >= 4.5, "{at}: name {name:.2}:1");
+                    assert!(marker >= 3.0, "{at}: marker {marker:.2}:1");
+                }
+            }
+        }
+    }
+
     #[test]
     fn multibyte_ids_are_safe_and_deterministic() {
         let a = disambig_suffix("/naïveté/app");
         assert_eq!(a, disambig_suffix("/naïveté/app"));
         assert_eq!(a.len(), 4);
-    }
-
-    /// Pins the lift against the art it cannot read: clearance, and evenness.
-    #[test]
-    fn desk_north_art_fits_under_the_label_lift() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("embedded pack loads");
-        let h = |name: &str| {
-            pack.animation(name)
-                .and_then(|a| a.frames().first())
-                .unwrap_or_else(|| panic!("the embedded pack ships {name}"))
-                .height()
-        };
-        let extra = h("desk_north") - h("desk");
-        let lift = super::RAISED_MONITOR_LABEL_LIFT;
-        assert!(
-            lift >= extra,
-            "desk_north rises {extra} rows above desk, but the badge lifts only \
-             {lift} — it would paint over the screen"
-        );
-        assert_eq!(
-            lift % 2,
-            0,
-            "an odd lift can round back onto the monitor once a half-block \
-             painter halves the anchor into a terminal cell"
-        );
     }
 }

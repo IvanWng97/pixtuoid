@@ -1,8 +1,8 @@
 use super::*;
-use crate::layout::{Layout, WallSegment};
+use crate::layout::{SceneLayout, WallSegment};
 
-fn make_layout() -> Layout {
-    Layout::compute(160, 200, Some(4)).expect("layout fits")
+fn make_layout() -> SceneLayout {
+    SceneLayout::compute(160, 200, Some(4)).expect("layout fits")
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn simplify_collapses_collinear() {
         Point { x: 12, y: 0 },
         Point { x: 12, y: 4 },
     ];
-    let s = simplify_polyline(pts);
+    let s = simplify_polyline(&WalkableMask::new_open(64, 64), pts);
     assert_eq!(s.len(), 3);
 }
 
@@ -46,7 +46,10 @@ fn simplify_collapses_diagonal_collinear() {
         Point { x: 3, y: 3 },
         Point { x: 5, y: 5 },
     ];
-    assert_eq!(simplify_polyline(pts).len(), 2);
+    assert_eq!(
+        simplify_polyline(&WalkableMask::new_open(64, 64), pts).len(),
+        2
+    );
 }
 
 #[test]
@@ -56,7 +59,10 @@ fn simplify_keeps_genuine_corner() {
         Point { x: 2, y: 0 },
         Point { x: 2, y: 2 },
     ];
-    assert_eq!(simplify_polyline(pts).len(), 3);
+    assert_eq!(
+        simplify_polyline(&WalkableMask::new_open(64, 64), pts).len(),
+        3
+    );
 }
 
 #[test]
@@ -81,15 +87,16 @@ fn vertical_wall_is_impassable_except_through_the_door() {
     // THROUGH — which is why `WALL_ROUTING_MARGIN_X` widens the stamp.
     let l = make_layout();
     let overlay = OccupancyOverlay::new();
-    let WallSegment { start, end } = l
+    let (wall_x, north) = l
         .room_walls
         .iter()
-        .copied()
-        .find(|w| w.start.x == w.end.x)
+        .find_map(|w| match *w {
+            WallSegment::Vertical { x, y0, .. } => Some((x, y0)),
+            WallSegment::Horizontal { .. } => None,
+        })
         .expect("layout has a vertical wall");
-    let wall_x = start.x;
     // A y inside the wall body, near its top — clear of the mid door gap.
-    let y = start.y.min(end.y) + 3;
+    let y = north + 3;
     let from = Point {
         x: wall_x.saturating_sub(12),
         y,
@@ -132,12 +139,11 @@ fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
     ];
     for (w, h) in sizes {
         for seed in 0..5u64 {
-            let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
+            let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
+            else {
                 continue;
             };
-            let Some(origin) = l.door_threshold else {
-                continue;
-            };
+            let origin = l.door_threshold;
             for wp in &l.waypoints {
                 assert!(
                     find_path(&l.walkable, &overlay, None, origin, wp.pos).is_some(),
@@ -158,8 +164,8 @@ fn every_approach_point_is_routable_from_its_home_desk() {
     // furniture CENTER and so can pass while a specific desk's chosen approach
     // side is unroutable. When NO allowed+reachable side exists `approach_point`
     // returns the `wp.pos` sentinel, which isn't a destination — excluded below.
-    use crate::layout::approach_point;
     use crate::layout::TEST_DEFAULT_DESKS;
+    use crate::layout::approach_point;
     let overlay = OccupancyOverlay::new();
     for (w, h) in [
         (96u16, 70u16),
@@ -169,7 +175,8 @@ fn every_approach_point_is_routable_from_its_home_desk() {
         (240, 160),
     ] {
         for seed in 0..5u64 {
-            let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
+            let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
+            else {
                 continue;
             };
             for &desk in &l.home_desks {
@@ -207,12 +214,11 @@ fn reachset_never_claims_an_unroutable_cell() {
     let overlay = OccupancyOverlay::new();
     for (w, h) in [(160u16, 120u16), (200, 80), (96, 70)] {
         for seed in 0..3u64 {
-            let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
+            let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed)
+            else {
                 continue;
             };
-            let Some(door) = l.door_threshold else {
-                continue;
-            };
+            let door = l.door_threshold;
             let mut y = 0;
             while y < l.buf_h {
                 let mut x = 0;
@@ -243,8 +249,8 @@ fn reachset_never_claims_an_unroutable_cell() {
 fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     use crate::floor::floor_seed;
     use crate::pose::{aimless_wander_seed, desk_leg_endpoint, pick_aimless_dest};
-    use pixtuoid_core::state::MAX_FLOORS;
     use pixtuoid_core::AgentId;
+    use pixtuoid_core::state::MAX_FLOORS;
 
     let overlay = OccupancyOverlay::new();
     for (w, h) in [
@@ -255,7 +261,7 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
         (240, 160),
     ] {
         for floor in 0..MAX_FLOORS {
-            let Some(l) = Layout::compute_with_seed(w, h, None, floor_seed(floor)) else {
+            let Some(l) = SceneLayout::compute_with_seed(w, h, None, floor_seed(floor)) else {
                 continue;
             };
             let origins: Vec<Point> = [l.home_desks.first(), l.home_desks.last()]
@@ -704,6 +710,7 @@ fn snap_point_to_walkable_returns_walkable_cell() {
 
 /// A Router that does NOT override `set_preferred_zone`, so calling it hits the
 /// trait DEFAULT no-op body.
+#[derive(Debug)]
 struct NoZoneRouter;
 impl Router for NoZoneRouter {
     fn route(
@@ -867,5 +874,34 @@ fn snap_lands_on_an_open_pixel_when_the_cell_centre_itself_is_blocked() {
         mask.is_walkable(snapped.x, snapped.y),
         "snap must return a point that passes the predicate its name promises: \
          {snapped:?}"
+    );
+}
+
+#[test]
+fn a_route_turns_on_the_open_pixel_nearest_a_blocked_centre() {
+    let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(64, 64);
+    let cell = (4u16, 4u16);
+    let centre = cell_center(cell.0, cell.1);
+    // The cell's south half: still walkable to the coarse grid, centre inside.
+    mask.mark_blocked(centre.x - 2, centre.y, 4, 2, 0);
+    assert!(cell_walkable(
+        &mask,
+        &OccupancyOverlay::new(),
+        cell.0,
+        cell.1
+    ));
+    assert_eq!(
+        cell_anchor(&mask, cell.0, cell.1),
+        Point {
+            x: centre.x,
+            y: centre.y - 1
+        },
+        "one step north of the centre is the nearest open pixel"
+    );
+    mask.mark_walkable(centre.x, centre.y, 1, 1);
+    assert_eq!(
+        cell_anchor(&mask, cell.0, cell.1),
+        centre,
+        "an open centre is kept"
     );
 }

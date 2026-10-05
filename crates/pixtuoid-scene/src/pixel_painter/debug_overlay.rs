@@ -12,9 +12,9 @@ use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend_pixel;
 use crate::layout::{
-    desk_walk_anchor_facing, furniture_def, Furniture, Layout, Point, Size, WaypointKind,
+    Furniture, Point, SceneLayout, Size, WaypointKind, desk_walk_anchor_facing, furniture_def,
 };
-use crate::motion::MotionState;
+use crate::walk::WalkState;
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
 const BLOCKED: Rgb = Rgb {
@@ -43,13 +43,13 @@ const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (1, 0), (-1, 0)];
 
 pub(super) fn paint(
     buf: &mut RgbBuffer,
-    layout: &Layout,
+    layout: &SceneLayout,
     scene: &SceneState,
-    motion: &HashMap<AgentId, MotionState>,
+    walks: &HashMap<AgentId, WalkState>,
 ) {
     paint_mask(buf, layout);
     paint_approach(buf, layout);
-    paint_routes(buf, scene, motion);
+    paint_routes(buf, scene, walks);
 }
 
 fn tint(buf: &mut RgbBuffer, x: i32, y: i32, c: Rgb, t: f32) {
@@ -71,7 +71,7 @@ fn blob(buf: &mut RgbBuffer, cx: i32, cy: i32, c: Rgb, t: f32) {
     }
 }
 
-fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
+fn paint_mask(buf: &mut RgbBuffer, layout: &SceneLayout) {
     for y in 0..layout.buf_h {
         for x in 0..layout.buf_w {
             if !layout.is_walkable(x, y) {
@@ -84,11 +84,11 @@ fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
 /// The seat-approach scan, borrowed from the sim's own authority rather than
 /// mirrored here: a second copy of the ladder (or of its scan bound) could make
 /// the green dots disagree with where agents actually route.
-fn first_reachable_on_side(layout: &Layout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
+fn first_reachable_on_side(layout: &SceneLayout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
     crate::layout::first_reachable_on_side(&layout.walkable, &layout.reachable, origin, dx, dy)
 }
 
-fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
+fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
     for wp in &layout.waypoints {
         let def = furniture_def(wp.kind.furniture());
         if def.occupies_pos {
@@ -151,12 +151,12 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     }
 }
 
-fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, motion: &HashMap<AgentId, MotionState>) {
+fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, walks: &HashMap<AgentId, WalkState>) {
     for agent in scene.agents.values() {
-        let Some(ms) = motion.get(&agent.agent_id) else {
+        let Some(walk) = walks.get(&agent.agent_id) else {
             continue;
         };
-        let Some(wp) = &ms.walk_path else {
+        let Some(wp) = &walk.walk_path else {
             continue;
         };
         for seg in wp.path.windows(2) {
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn paint_routes_draws_frozen_paths_and_skips_the_rest() {
-        use crate::motion::{MotionState, WalkPathSnapshot};
+        use crate::walk::{WalkPathSnapshot, WalkState};
         use std::collections::HashMap;
 
         let mut scene = SceneState::uniform(8);
@@ -306,20 +306,20 @@ mod tests {
         for id in [id_path, id_nopath, id_absent] {
             scene.agents.insert(id, slot(id));
         }
-        let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-        let mut ms_path = MotionState::new(id_path);
+        let mut walks: HashMap<AgentId, WalkState> = HashMap::new();
+        let mut ms_path = WalkState::new(id_path);
         ms_path.walk_path = Some(WalkPathSnapshot {
             from: Point { x: 5, y: 5 },
             to: Point { x: 80, y: 80 },
             path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
         });
-        motion.insert(id_path, ms_path);
-        motion.insert(id_nopath, MotionState::new(id_nopath));
-        // id_absent is intentionally NOT in the motion map.
+        walks.insert(id_path, ms_path);
+        walks.insert(id_nopath, WalkState::new(id_nopath));
+        // id_absent is intentionally NOT in the walks map.
 
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(50, 50, bg);
-        paint_routes(&mut buf, &scene, &motion);
+        paint_routes(&mut buf, &scene, &walks);
         let painted = (0..50u16)
             .flat_map(|y| (0..50u16).map(move |x| (x, y)))
             .any(|(x, y)| buf.get(x, y) != bg);

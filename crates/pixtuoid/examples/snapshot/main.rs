@@ -1,6 +1,7 @@
-//! Renders the TUI off-screen via ratatui's TestBackend, then converts every
-//! cell into an 8x16-px tile in a PNG so we can verify the visual output
-//! without needing a real terminal.
+//! Renders the TUI off-screen via ratatui's TestBackend and rasterizes every cell
+//! into a `CELL_W`×`CELL_H` px tile — of a PNG, an animated GIF (`--gif`) or
+//! `--proof` frame sequences — so the visual output is verifiable without a real
+//! terminal.
 
 mod encode;
 mod proof;
@@ -11,20 +12,19 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid::tui::renderer::{DrawCtx, DrawOut, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
-use ratatui::backend::TestBackend;
+use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 use crate::encode::{
-    centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
-    save_backend_as_png, save_renderer_gif,
+    AnimJob, Timeline, centered_crop, compute_crop_rect, print_walkability_report, save_animation,
+    save_backend_as_png, save_renderer_animation,
 };
 use crate::scenes::{
-    anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
-    sample_scene,
+    GatewayState, anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence,
+    meeting_scene, sample_scene,
 };
 
 const COLS: u16 = 192;
@@ -33,7 +33,8 @@ const CELL_W: u32 = 8;
 const CELL_H: u32 = 16;
 
 #[derive(Debug, Parser)]
-#[command(about = "Render the TUI off-screen to a PNG for verification")]
+#[command(about = "Render the TUI off-screen to a PNG, GIF or proof frames for verification")]
+#[command(group(clap::ArgGroup::new("animation").args(["gif", "anim", "proof"]).multiple(true)))]
 struct SnapshotArgs {
     /// Output PNG path.
     #[arg(default_value = "snapshot.png")]
@@ -81,11 +82,11 @@ struct SnapshotArgs {
     #[arg(long)]
     gif: bool,
 
-    /// GIF duration in seconds (only with --gif).
+    /// GIF duration in seconds (only with --gif, which --anim implies).
     #[arg(long, default_value_t = 5)]
     gif_duration: u64,
 
-    /// GIF frame rate (only with --gif).
+    /// GIF frame rate (only with --gif, which --anim implies).
     #[arg(long, default_value_t = 10)]
     gif_fps: u64,
 
@@ -93,13 +94,13 @@ struct SnapshotArgs {
     #[arg(long, default_value = "normal")]
     theme: String,
 
-    /// Floor seed — selects floor layout variant (0–4).
+    /// Floor seed — hashed to one of the floor layout variants.
     #[arg(long, default_value_t = 0)]
     floor_seed: u64,
 
     /// Schedule floor navigations inside a --gif capture: repeatable
-    /// `--navigate-at <sec>:<floor>` (0-based floor). Navigations less than
-    /// ~1s apart are dropped (a slide in flight ignores navigate_floor).
+    /// `--navigate-at <sec>:<floor>` (0-based floor). A navigation during another
+    /// one's slide is dropped.
     #[arg(
         long = "navigate-at",
         value_name = "SEC:FLOOR",
@@ -113,24 +114,29 @@ struct SnapshotArgs {
     empty: bool,
 
     /// Inject an OpenClaw gateway presence (the wandering lobster mascot) in the
-    /// given state (idle | busy | down).
-    #[arg(long)]
-    openclaw: Option<String>,
+    /// given state.
+    #[arg(long, value_enum)]
+    openclaw: Option<GatewayState>,
 
     /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
-    /// upstream default port). The multi-instance render is the one thing no gate
-    /// can check, so N gateways must be renderable to a PNG a human can look at.
+    /// upstream default port).
+    // The multi-instance render is the one thing no gate can check, so N gateways
+    // must be renderable to a PNG a human can look at.
     #[arg(long, value_delimiter = ',')]
     openclaw_ports: Vec<String>,
 
-    /// Override local hour-of-day (0–23) used by time-of-day effects
-    /// (sun spot, dust motes, lighting).
+    /// Override local hour-of-day (0–23) used by time-of-day lighting.
     #[arg(long)]
     now_hour: Option<u32>,
 
-    /// Override local day-of-January-2026 used by time-of-day.
-    #[arg(long, default_value_t = 1)]
+    /// Override the local day (1 = `pixtuoid_scene::localclock`'s base date) used by time-of-day.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
+
+    /// Seconds past `--now-hour` (0–3599), fine enough to sample a weather
+    /// transition.
+    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..3600))]
+    now_sec: u64,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
@@ -196,7 +202,7 @@ struct SnapshotArgs {
     /// walk-out (settle/sit follow); set a LARGER value to start the capture at
     /// a later phase — e.g. desk_dwell + walk + sit_dwell to capture the LEAVE
     /// (walk-back).
-    #[arg(long)]
+    #[arg(long, requires = "anim", conflicts_with_all = ["pets", "navigate_at"])]
     anim_skip_ms: Option<u64>,
 
     /// Stage N agents (2–3) converging on ONE meeting room in a `--gif`
@@ -214,7 +220,7 @@ struct SnapshotArgs {
     meeting: Option<u8>,
 
     /// Pre-roll a `--gif` capture: advance the simulated clock through the
-    /// real per-frame render (motion state advances) WITHOUT encoding frames
+    /// real per-frame render (walk state advances) WITHOUT encoding frames
     /// for the first N seconds, so the clip starts mid-action. Overrides the
     /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
     /// `--anim-skip-ms`.)
@@ -233,14 +239,14 @@ struct SnapshotArgs {
     #[arg(long)]
     anim_facing: Option<String>,
 
-    /// Crop the generated PNG (and text preview) to a 40x24-cell window
-    /// centered on the agent with this label. Static-PNG path only: the
-    /// --gif/--anim paths return before the crop is computed, so clap
-    /// rejects the combination instead of silently ignoring the flag.
+    /// Crop the generated PNG (and text preview) to the fixed crop window
+    /// centered on the agent with this label. Static-PNG path only.
+    // The --gif/--anim paths return before the crop is computed, so clap rejects
+    // the combination instead of silently ignoring the flag.
     #[arg(long, conflicts_with_all = ["crop_furniture", "gif", "anim"])]
     crop_agent: Option<String>,
 
-    /// Crop the generated PNG (and text preview) to a 40x24-cell window
+    /// Crop the generated PNG (and text preview) to the fixed crop window
     /// centered on a furniture piece. Static-PNG path only.
     /// One of: pantry | couch | vending | printer | meeting | sofa | chair |
     /// island | snackshelf | desk.
@@ -252,11 +258,14 @@ struct SnapshotArgs {
     #[arg(long)]
     flame: Option<String>,
 
-    /// Crop the generated PNG to a window centered on the gateway lobster mascot.
-    /// Needs a VISIBLE mascot: pass --openclaw <state> — enforced at runtime, not
-    /// by clap, since "visible" isn't expressible as a static flag dependency.
-    /// Static-PNG path only.
-    #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
+    /// Crop the generated PNG to the fixed crop window centered on the gateway
+    /// lobster mascot `--openclaw` stages. Static-PNG path only.
+    // Visibility is still checked at runtime (the mascot may be off-canvas).
+    #[arg(
+        long,
+        requires = "openclaw",
+        conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"]
+    )]
     crop_mascot: bool,
 
     /// Render the §3 split-screen proof replay from a captured CC session
@@ -269,8 +278,10 @@ struct SnapshotArgs {
           "crop_agent", "crop_furniture", "crop_mascot", "debug_walkable"])]
     proof: Option<std::path::PathBuf>,
 
-    /// Output directory for --proof frame sequences (wide/ + tall/ created inside).
-    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "proof")]
+    /// Output directory for an animation's lossless PNG frames (`f0001.png`, …):
+    /// --gif/--anim write them here INSTEAD of the GIF at OUT; --proof writes its
+    /// two sequences into wide/ + tall/ inside it.
+    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "animation")]
     frames_dir: Option<std::path::PathBuf>,
 
     /// --proof frame rate.
@@ -310,29 +321,49 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
         .collect()
 }
 
+/// The centre of the pixels a pointer finds the first mascot on.
+fn mascot_centre(drawn: &DrawOut) -> Option<pixtuoid_scene::layout::Point> {
+    use pixtuoid_scene::display::HoverTarget;
+    use pixtuoid_scene::layout::{Bounds, Point};
+    let layout = drawn.layout.as_deref()?;
+    let at = |(x, y)| {
+        drawn.hovers.at(Bounds {
+            x,
+            y,
+            width: 1,
+            height: 1,
+        })
+    };
+    let pixels = || (0..layout.buf_h).flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)));
+    let mascot = pixels().find_map(|p| at(p).filter(|t| matches!(t, HoverTarget::Mascot(_))))?;
+    let (x0, y0, x1, y1) = pixels()
+        .filter(|&p| at(p) == Some(mascot))
+        .fold((u16::MAX, u16::MAX, 0, 0), |(x0, y0, x1, y1), (x, y)| {
+            (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+        });
+    Some(Point {
+        x: x0.midpoint(x1),
+        y: y0.midpoint(y1),
+    })
+}
+
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
-    // Sets a thread-local honored by every weather derivation on this thread,
-    // including each frame of the GIF path.
-    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(args.weather.as_deref()) {
-        anyhow::bail!(
+    let weather = match pixtuoid_scene::sky::WeatherPolicy::from_name(args.weather.as_deref()) {
+        Ok(w) => w,
+        Err(valid) => anyhow::bail!(
             "unknown --weather {:?}; valid: {}",
             args.weather.unwrap_or_default(),
             valid.join(" | ")
-        );
-    }
+        ),
+    };
 
     let now = match args.now_hour {
         Some(h) => {
-            use chrono::TimeZone;
-            chrono::Local
-                .with_ymd_and_hms(2026, 1, args.now_day, h, 0, 0)
-                .single()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("invalid --now-day/--now-hour {}:{}", args.now_day, h)
-                })?
-                .into()
+            pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
+                .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?
+                + std::time::Duration::from_secs(args.now_sec)
         }
         None => SystemTime::now(),
     };
@@ -400,18 +431,17 @@ fn main() -> Result<()> {
             }
         }
     }
-    if let Some(state) = args.openclaw.as_deref() {
+    if let Some(state) = args.openclaw {
         inject_openclaw_presence(&mut scene, state, now, &args.openclaw_ports)?;
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
-    let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-    let pack = load_sprite_pack(
+    let pack = std::sync::Arc::new(load_sprite_pack(
         args.pack_dir
             .clone()
             .map_or(PackSource::Bundled, PackSource::Explicit),
-    )?;
-    let mut store = pixtuoid_scene::floor::FloorCtx::new();
+    )?);
+    let mut floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone(&pack));
     // A typo'd theme silently rendering NORMAL would put wrong-palette art into
     // the docs/site screenshot pipelines.
     let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
@@ -436,12 +466,15 @@ fn main() -> Result<()> {
             frames_dir,
             cols,
             rows,
-            fps: args.proof_fps,
-            secs: args.proof_secs,
+            timeline: Timeline {
+                fps: args.proof_fps,
+                secs: args.proof_secs,
+                start: now,
+            },
             max_desks: args.max_desks,
             theme,
             pack: &pack,
-            start: now,
+            weather,
         })?;
         println!("wrote proof frames → {}", frames_dir.display());
         return Ok(());
@@ -470,44 +503,38 @@ fn main() -> Result<()> {
              TuiRenderer derives per-floor seeds internally"
         );
     }
+    let anim_job = AnimJob {
+        path: &args.out,
+        frames_dir: args.frames_dir.as_deref(),
+        timeline: Timeline {
+            fps: args.gif_fps,
+            secs: args.gif_duration,
+            start: now,
+        },
+        scene: &scene,
+        pack: &pack,
+        theme,
+        weather,
+    };
+    let anim_dest = args.frames_dir.as_deref().unwrap_or(&args.out);
     if !navigations.is_empty() || !pet_vec.is_empty() {
-        save_renderer_gif(
-            term,
-            &scene,
-            &pack,
-            now,
-            &args.out,
-            cols,
-            rows,
-            args.gif_fps,
-            args.gif_duration,
-            theme,
-            &navigations,
-            pet_vec,
-        )?;
-        println!("wrote {}", args.out.display());
+        save_renderer_animation(&anim_job, term, &navigations, pet_vec)?;
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
+    let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground().with_weather(weather);
+    floor_meta.floor_seed = args.floor_seed;
     if args.gif || args.anim.is_some() {
-        save_as_gif(
+        save_animation(
+            &anim_job,
             &mut term,
-            &scene,
-            &pack,
-            now,
-            &args.out,
-            cols,
-            rows,
-            &mut buf,
-            &mut store,
-            args.gif_fps,
-            args.gif_duration,
-            theme,
-            args.floor_seed,
+            &mut floor,
+            floor_meta,
             skip_ms,
             args.debug_walkable,
         )?;
-        println!("wrote {}", args.out.display());
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
@@ -530,11 +557,11 @@ fn main() -> Result<()> {
         })
         .unwrap_or_default();
     let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
-    let mut chitchat_state = std::collections::HashMap::new();
+    let mut office = pixtuoid_scene::floor::PerOffice::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
-        store.light.snap_to_empty();
+        floor.ctx.vacancy_dim.snap_to_empty();
     }
     let (dash_rows, dash_selected) = if args.dashboard {
         let folds = pixtuoid::tui::dashboard::DashboardFolds::default();
@@ -686,74 +713,58 @@ fn main() -> Result<()> {
         socket_line: connection_socket_line,
     };
     let mut draw_ctx = DrawCtx {
-        buf: &mut buf,
-        store: &mut store,
         mouse_pos: args.hover.as_deref().and_then(|s| {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         debug_walkable: args.debug_walkable,
-        theme,
         theme_picker: args.theme_picker,
-        floor_info: None,
-        // Single-floor still: empty office-wide tallies (no cross-floor cue).
-        per_floor: Default::default(),
-        // DERIVED from the scene, exactly as the runtime does — a hardcoded `None`
-        // here renders the `--openclaw` lobster with its `⬢gw` chip off.
-        gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-        audio_audible: false,
-        volume_flash: None,
-        floor: {
-            let mut m = pixtuoid_scene::floor::FloorMeta::ground();
-            m.floor_seed = args.floor_seed;
-            m
-        },
-        active_pet: None,
-        last_pet_pos: None,
-        last_mascots: Vec::new(),
-        floor_pet: None,
-        chitchat_state: &mut chitchat_state,
-        chitchat_bubbles: Vec::new(),
-        coffee: &std::collections::HashMap::new(),
-        new_coffee_carriers: Vec::new(),
-        occupied_waypoints: Default::default(),
+        footer: pixtuoid::tui::widgets::footer_context(
+            &scene,
+            None,
+            false,
+            None,
+            warning_text.as_deref(),
+        ),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
-        source_warning: warning_text.as_deref(),
         dashboard: &dashboard_frame,
         connection: &connection_frame,
         onboarding: &onboarding_frame,
+        ..DrawCtx::offscreen(
+            &mut floor,
+            office.stores(),
+            theme,
+            &scene,
+            &pack,
+            now,
+            floor_meta,
+        )
     };
-    draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
+    let drawn = draw_scene(&mut term, &mut draw_ctx)?;
 
     if args.debug_walkable {
-        debug_paint_walkable_overlay(&mut term, args.floor_seed)?;
+        print_walkability_report(&term, args.floor_seed)?;
     }
 
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
-        // the renderer actually resolved, not a precomputed layout point. `pos`
-        // is the logical half-block buffer (1px per cell across, 2px down).
-        let m = draw_ctx.last_mascots.first().ok_or_else(|| {
-            anyhow::anyhow!("--crop-mascot needs a visible mascot; pass --openclaw <state>")
-        })?;
-        Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))
+        // the renderer actually resolved, not a precomputed layout point.
+        let at = mascot_centre(&drawn).context("--crop-mascot needs a visible mascot")?;
+        Some(centered_crop(at, cols, rows))
     } else {
-        compute_crop_rect(&args, &scene, &store.history, cols, rows, now)?
+        compute_crop_rect(&args, &scene, &floor.ctx.history, cols, rows, now)?
     };
+    let area = crop_rect.unwrap_or(ratatui::layout::Rect::new(0, 0, cols, rows));
 
-    save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
+    save_backend_as_png(&term, &args.out, area)?;
     println!("wrote {}", args.out.display());
 
     println!("\n--- text preview (symbols only) ---");
     let buf = term.backend().buffer();
-    let (start_x, start_y, render_w, render_h) = match crop_rect {
-        Some(r) => (r.x, r.y, r.width, r.height),
-        None => (0, 0, cols, rows),
-    };
-    for y in 0..render_h {
-        for x in 0..render_w {
-            print!("{}", buf[(start_x + x, start_y + y)].symbol());
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            print!("{}", buf[(x, y)].symbol());
         }
         println!();
     }
@@ -807,14 +818,23 @@ mod tests {
         }
     }
 
+    /// The committed multi-floor clip's clock: 10s at 15fps.
+    fn clip_timeline() -> Timeline {
+        Timeline {
+            fps: 15,
+            secs: 10,
+            start: std::time::UNIX_EPOCH,
+        }
+    }
+
     #[test]
     fn due_navigations_fires_each_exactly_once_in_schedule_order() {
         let navs = vec![(7000u64, 0usize), (3000, 1)];
         let mut fired = vec![false; navs.len()];
-        let mut hits: Vec<(u64, usize)> = Vec::new();
-        for i in 0..150u64 {
-            let elapsed_ms = i * 1000 / 15;
-            for floor in due_navigations(&navs, &mut fired, elapsed_ms) {
+        let mut hits: Vec<(usize, usize)> = Vec::new();
+        let timeline = clip_timeline();
+        for i in 0..timeline.frame_count() {
+            for floor in due_navigations(&navs, &mut fired, timeline.elapsed_ms(i)) {
                 hits.push((i, floor));
             }
         }
@@ -828,9 +848,9 @@ mod tests {
         let navs = vec![(9900u64, 1usize)];
         let mut fired = vec![false; 1];
         let mut hit = None;
-        for i in 0..150u64 {
-            let elapsed_ms = i * 1000 / 15;
-            if !due_navigations(&navs, &mut fired, elapsed_ms).is_empty() {
+        let timeline = clip_timeline();
+        for i in 0..timeline.frame_count() {
+            if !due_navigations(&navs, &mut fired, timeline.elapsed_ms(i)).is_empty() {
                 hit = Some(i);
             }
         }
@@ -895,9 +915,11 @@ mod tests {
         let scene = sample_scene(now, 12, 12);
         let history = pixtuoid_scene::pose::PoseHistory::new();
         let args = crop_args(&[]);
-        assert!(compute_crop_rect(&args, &scene, &history, 192, 64, now)
-            .unwrap()
-            .is_none());
+        assert!(
+            compute_crop_rect(&args, &scene, &history, 192, 64, now)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -918,14 +940,21 @@ mod tests {
     #[test]
     fn crop_flags_conflict_with_gif_and_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--gif", "--crop-agent", "x"]).is_err());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "--anim",
-            "couch",
-            "--crop-furniture",
-            "pantry"
-        ])
-        .is_err());
+        assert!(SnapshotArgs::try_parse_from(["snapshot", "--crop-mascot"]).is_err());
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "--crop-mascot", "--openclaw", "idle"])
+                .is_ok()
+        );
+        assert!(
+            SnapshotArgs::try_parse_from([
+                "snapshot",
+                "--anim",
+                "couch",
+                "--crop-furniture",
+                "pantry"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -962,28 +991,81 @@ mod tests {
             SnapshotArgs::try_parse_from(["snapshot", "--gif", "--warmup-secs", "13.5"]).is_ok()
         );
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--warmup-secs", "5"]).is_err());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "--gif",
-            "--warmup-secs",
-            "5",
-            "--anim",
-            "sofa"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from([
+                "snapshot",
+                "--gif",
+                "--warmup-secs",
+                "5",
+                "--anim",
+                "sofa"
+            ])
+            .is_err()
+        );
+    }
+
+    /// The renderer path (`--pets` / `--navigate-at`) encodes from t=0, so clap
+    /// refuses each pre-roll flag beside it rather than dropping it.
+    #[test]
+    fn pre_roll_flags_conflict_with_the_renderer_path() {
+        let gif = &["snapshot", "--gif"][..];
+        let pre_rolls = [
+            &["--warmup-secs", "5"][..],
+            &["--anim", "sofa"],
+            &["--anim", "sofa", "--anim-skip-ms", "5"],
+        ];
+        let renderers = [&["--pets", "cat"][..], &["--navigate-at", "3:1"]];
+        for alone in pre_rolls.iter().chain(&renderers) {
+            let argv = [gif, alone].concat();
+            assert!(
+                SnapshotArgs::try_parse_from(&argv).is_ok(),
+                "rejected {argv:?}"
+            );
+        }
+        let skip_alone = &["--anim-skip-ms", "5"][..];
+        let argv = [gif, skip_alone].concat();
+        assert!(
+            SnapshotArgs::try_parse_from(&argv).is_err(),
+            "accepted {argv:?}"
+        );
+        for pre_roll in pre_rolls.into_iter().chain([skip_alone]) {
+            for renderer in renderers {
+                let argv = [gif, pre_roll, renderer].concat();
+                assert!(
+                    SnapshotArgs::try_parse_from(&argv).is_err(),
+                    "accepted {argv:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn frames_dir_needs_an_animation() {
+        for ok in [
+            vec!["snapshot", "--gif", "--frames-dir", "d"],
+            vec!["snapshot", "--anim", "sofa", "--frames-dir", "d"],
+            vec!["snapshot", "--proof", "f.jsonl", "--frames-dir", "d"],
+        ] {
+            assert!(
+                SnapshotArgs::try_parse_from(ok.clone()).is_ok(),
+                "rejected {ok:?}"
+            );
+        }
+        assert_eq!(
+            SnapshotArgs::try_parse_from(["snapshot", "--frames-dir", "d"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]
     fn dashboard_flag_parses_and_conflicts_with_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard"]).is_ok());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "out.png",
-            "--dashboard",
-            "--anim",
-            "desk"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--anim", "desk"])
+                .is_err()
+        );
         assert!(
             SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--gif"]).is_err()
         );

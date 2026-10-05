@@ -5,11 +5,12 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use super::{decode_ag_line, SOURCE_NAME};
+use super::{SOURCE_NAME, decode_ag_line};
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 
 /// Source that watches Antigravity CLI conversation log directories.
+#[derive(Debug)]
 pub struct AntigravitySource {
     /// The watched Antigravity brain-dir root; conversation-log JSONL lives under it.
     pub brain_root: PathBuf,

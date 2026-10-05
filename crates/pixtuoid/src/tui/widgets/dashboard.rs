@@ -5,13 +5,12 @@
 use std::time::SystemTime;
 
 use pixtuoid_core::source::registry::descriptor_for;
-use pixtuoid_core::AgentId;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{marquee_or_truncate, paint_panel, source_badge_span, to_color, Overflow};
-use crate::tui::dashboard::{DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
+use super::{Overflow, Panel, marquee_or_truncate, source_badge_span, to_color};
+use crate::tui::dashboard::{DASHBOARD_VIEWPORT_ROWS, DashboardFrame, DashboardRow, RowState};
 use pixtuoid_scene::theme::Theme;
 
 const LABEL_W: usize = 32;
@@ -20,31 +19,32 @@ const POPUP_W: u16 = 76;
 
 pub(crate) fn paint_dashboard(
     f: &mut ratatui::Frame<'_>,
-    rows: &[DashboardRow],
-    selected: Option<AgentId>,
-    scroll: usize,
+    frame: &DashboardFrame,
     now: SystemTime,
     bounds: Rect,
     theme: &Theme,
 ) {
+    let &DashboardFrame {
+        open: _,
+        ref rows,
+        selected,
+        scroll,
+    } = frame;
     if rows.is_empty() {
         /// Fits "No active agents".
         const EMPTY_W: u16 = 24;
-        paint_panel(
-            f,
-            theme,
-            Some("Agents"),
-            bounds,
-            EMPTY_W,
-            1.0,
-            vec![],
-            vec![Line::from(Span::styled(
+        Panel {
+            title: Some("Agents"),
+            content_w: EMPTY_W,
+            above: vec![],
+            list: vec![Line::from(Span::styled(
                 "No active agents",
                 Style::default().fg(to_color(theme.ui.label_idle)),
             ))],
-            vec![],
-            Overflow::None,
-        );
+            below: vec![],
+            overflow: Overflow::None,
+        }
+        .paint(f, bounds, theme);
         return;
     }
 
@@ -52,7 +52,7 @@ pub(crate) fn paint_dashboard(
         " Agents ({})  [\u{2191}\u{2193} \u{2190}\u{2192} z \u{23ce} esc] ",
         rows.len()
     );
-    // Build EVERY row; `paint_panel` windows the list at the real inner height,
+    // Build EVERY row; `Panel::paint` windows the list at the real inner height,
     // follows the selection, and appends the `⋮ N more ▾` cue. A `None` selection
     // (unselected OR exited) keeps the persisted scroll.
     let selected_idx = selected.and_then(|s| rows.iter().position(|r| r.agent_id == s));
@@ -60,22 +60,19 @@ pub(crate) fn paint_dashboard(
         .iter()
         .map(|row| dashboard_line(row, selected == Some(row.agent_id), now, theme))
         .collect();
-    paint_panel(
-        f,
-        theme,
-        Some(&title),
-        bounds,
-        POPUP_W,
-        1.0,
-        vec![],
+    Panel {
+        title: Some(&title),
+        content_w: POPUP_W,
+        above: vec![],
         list,
-        vec![],
-        Overflow::Follow {
+        below: vec![],
+        overflow: Overflow::Follow {
             selected: selected_idx,
             scroll,
             cap: Some(DASHBOARD_VIEWPORT_ROWS as u16),
         },
-    );
+    }
+    .paint(f, bounds, theme);
 }
 
 fn dashboard_line(
@@ -116,8 +113,6 @@ fn dashboard_line(
         Style::default()
     };
 
-    // Badge uses the source color but is NEVER reversed — a low-luminance hue
-    // inverted becomes invisible against the highlight background.
     let badge_tag = descriptor_for(row.source.as_ref()).map_or("??", |d| d.label_prefix);
 
     Line::from(vec![
@@ -282,7 +277,7 @@ mod tests {
             assert_ne!(
                 line.spans[0].style.fg,
                 Some(fallback),
-                "source {:?} (prefix {:?}) renders the idle FALLBACK badge color — add its arm to the match in dashboard_line",
+                "source {:?} (prefix {:?}) renders the idle FALLBACK badge color — add its arm to `SourceColors::by_prefix`",
                 d.name,
                 d.label_prefix,
             );

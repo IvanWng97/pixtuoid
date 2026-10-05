@@ -5,10 +5,12 @@ built with [Astro](https://astro.build). Deploys to GitHub Pages at
 **https://pixtuoid.dev/** (the old project page
 https://ivanwng97.github.io/pixtuoid/ redirects there).
 
-Self-contained: a Node project living in `site/`, independent of the Rust
-workspace. CI (`.github/workflows/site.yml`) runs the same checks as
-`npm run verify`; deploys run via `.github/workflows/pages.yml`. Agent notes,
-build-input coupling, and CSP details: [`CLAUDE.md`](CLAUDE.md). Generated
+A Node project living in `site/`. The live office's `public/wasm/` is
+gitignored output of `just gen-wasm` (needs Rust); `dev` and `verify` work
+without it on the poster fallback. CI (`.github/workflows/site.yml`) runs
+`npm run verify`'s checks except `audit`, plus e2e and Lighthouse; deploys
+run via `.github/workflows/pages.yml`, which audits first. Agent notes,
+build-input coupling, and CSP details: [`AGENTS.md`](AGENTS.md). Generated
 content and its sources: [`SINGLE-SOURCED.md`](SINGLE-SOURCED.md).
 
 ## Develop
@@ -25,12 +27,12 @@ ready; stop it before `just site-e2e` (dev and preview share port 4321).
 ## Quality gates
 
 ```sh
-npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs → audit
-npm run e2e        # Playwright smoke suite vs the PRODUCTION build
+npm run verify     # format:check → lint → check → knip → test:unit → test:demos → build → check:docs → audit
 npm run lighthouse # three-run a11y / SEO / performance budgets (in-repo runner)
 ```
 
-From the repo root: `just site-check`, `just site-fmt`, `just site-e2e`.
+From the repo root: `just site-check`, `just site-fmt`, and `just site-e2e` for
+the Playwright smoke suite (not bare `npm run e2e`: it builds the wasm first).
 `audit` runs LAST in `verify` on purpose (it resolves advisories live —
 someone else's publish would short-circuit every check below it); `pages.yml`
 keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
@@ -80,7 +82,8 @@ keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
 
 ## Demo art
 
-`public/demos/*` is **generated**, never hand-placed — `just gen-media` from
+`public/demos/*` is **generated** and gitignored, never hand-placed:
+`just site-demos` renders it when absent or its manifests change (`just gen-media --only site` re-renders a look change) from
 the repo root (`scripts/gen-media.py` + `scripts/media.json`, rendering
 through the real TuiRenderer; clips re-encode to `.mp4` + `.webm` + poster).
 Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer
@@ -91,16 +94,16 @@ would resize/blur it.
 Manifest-driven (`Showcase` → `ChannelStage`), defined in
 **`src/showcase.json`** alongside `src/themes.json`, `src/weather.json`,
 `src/features.json`, `src/install.json`. Channel kinds: **`clip`** (mp4 +
-webm + poster from `just gen-media`), **`variant-set`** (screenshot grid via
+webm + poster from `just gen-media --only site`), **`variant-set`** (screenshot grid via
 `variantsRef`/`variants`), **`soon`** (placeholder). `astro.config.mjs`
 enforces the invariants at build time (one default live channel, unique ids,
 assets present, features↔showcase bijection).
 
-**Adding a demo channel**: one `showcase.json` entry + `just gen-media`
+**Adding a demo channel**: one `showcase.json` entry + `just gen-media --only site`
 assets (a `clip` channel also adds its render + `encode_clip` block in
 `scripts/gen-media.py`). No component edits.
 
-**Adding a theme**: one row in `src/themes.json` + `just gen-media`. Chips,
+**Adding a theme**: one row in `src/themes.json` + `just gen-media --only site`. Chips,
 counts, retint, and renders all pick it up automatically.
 
 ## Custom domain & deploy

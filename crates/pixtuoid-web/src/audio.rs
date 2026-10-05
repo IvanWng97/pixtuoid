@@ -8,14 +8,15 @@
 
 use std::sync::Arc;
 
-use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS};
+use pixtuoid_scene::audio::bank::{AssetBank, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS, TrackBeds};
 use pixtuoid_scene::audio::compose::GeneratedScore;
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
-    synth, AudioEngine, AudioFrame, OneShotPool, TickCommands, TrackId, BUILD_SEED, MAX_DT_S,
+    AudioEngine, AudioFrame, BUILD_SEED, MAX_DT_S, OneShotPool, TickCommands, TrackId, synth,
 };
 
+#[derive(Debug)]
 pub(crate) struct WebAudioDriver {
     rng: NoiseStream,
     bank: Option<AssetBank>,
@@ -137,12 +138,12 @@ impl WebAudioDriver {
             Some(p) => p.build.step(&mut self.rng),
             None => None,
         };
-        if let Some(beds) = finished {
-            if let Some(p) = self.pending.take() {
-                self.beds = Some(TrackBeds::from_arcs(beds));
-                self.track = p.to;
-                cmds.swap = Some(p.to);
-            }
+        if let Some(beds) = finished
+            && let Some(p) = self.pending.take()
+        {
+            self.beds = Some(TrackBeds::from_arcs(beds));
+            self.track = p.to;
+            cmds.swap = Some(p.to);
         }
         cmds
     }
@@ -180,6 +181,7 @@ impl WebAudioDriver {
 
 const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
 
+#[derive(Debug)]
 struct LaneBuild {
     score: GeneratedScore,
     beds: Vec<Arc<Vec<f32>>>,
@@ -205,6 +207,7 @@ impl LaneBuild {
     }
 }
 
+#[derive(Debug)]
 struct PendingBuild {
     to: TrackId,
     build: LaneBuild,
@@ -214,6 +217,7 @@ struct PendingBuild {
 /// instance are copied here piece-by-piece, because a postMessage transfer
 /// can't cross wasm memories. A torn handoff (worker died mid-stream) yields
 /// `None` so the click-time warmup runs instead.
+#[derive(Debug)]
 pub(crate) struct Adoption {
     track: TrackId,
     keystrokes: Vec<Arc<Vec<f32>>>,
@@ -347,7 +351,7 @@ fn fmt_f32(v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_scene::audio::{bank, PlayCmd};
+    use pixtuoid_scene::audio::{PlayCmd, bank};
 
     #[test]
     fn every_oneshot_pool_has_a_finite_end_the_js_discovery_loop_can_find() {

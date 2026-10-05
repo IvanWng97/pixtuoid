@@ -1,7 +1,7 @@
 //! Corpus check — real transcripts in, "did we parse it AND would the UI show
 //! it" out, for the whole corpus on the machine. The ONE shell that closes the
 //! loop to the render layer: `harness::Drive` (decode → reduce) →
-//! `FloorSession::observe`, whose frame's `characters` are the fully resolved
+//! `FloorSession::step`, whose frame's `characters` are the fully resolved
 //! sprites the painter would draw. The first half is the shared pipeline every
 //! other driver runs, so a difference here is a difference in the BYTES.
 //!
@@ -22,10 +22,10 @@ use pixtuoid_core::harness::{Drive, LineFailure};
 use pixtuoid_core::source::decoder::TailActivity;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
+use pixtuoid_scene::pack::load_bundled_pack;
 
-/// The instant the whole census runs at — the drive's fold and the observe
+/// The instant the whole census runs at — the drive's fold and the step
 /// below MUST share it, or every sprite is judged mid-entry-walk.
 fn now() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
@@ -80,7 +80,7 @@ fn epoch(t: SystemTime) -> Option<u64> {
 /// but never rendered" for a reason that has nothing to do with the decoder. The
 /// seed's own events are then excluded from every count, or the census would
 /// report a verdict on bytes that decoded to nothing.
-fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
+fn check_file(source: &str, path: &Path, pack: &std::sync::Arc<Pack>) -> Verdict {
     let mut v = Verdict {
         mtime: std::fs::metadata(path)
             .ok()
@@ -116,16 +116,19 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
 
     // One `FloorSession` per file so no cross-file render state can carry a
     // verdict.
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(std::sync::Arc::clone(pack));
     v.drawn = session
-        .observe(
-            &driven.scene,
-            pack,
+        .step(
+            pixtuoid_scene::floor::FloorInputs {
+                scene: &driven.scene,
+                pack,
+                now: now(),
+                floor: FloorMeta::ground(),
+                pets: pixtuoid_scene::floor::PetInputs::default(),
+            },
             pixtuoid_scene::layout::Size { w: 192, h: 80 },
-            FloorMeta::ground(),
-            now(),
         )
-        .map_or(0, |observed| observed.frame.characters.len());
+        .map_or(0, |stepped| stepped.frame.characters.len());
     v
 }
 
@@ -150,7 +153,7 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
 /// index these columns POSITIONALLY, so inserting a column shifts every one of
 /// them at once and the degradation is quiet — `fixture-age`'s probe map empties
 /// and its report reads "nothing stale" from having compared nothing.
-/// `the_whole_roster_is_pinned_row_by_row` is the pin CLAUDE.md's magic-number
+/// `the_whole_roster_is_pinned_row_by_row` is the pin AGENTS.md's magic-number
 /// rule asks for at a cross-language boundary.
 fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
     let probe = d
@@ -221,7 +224,7 @@ fn main() {
         std::process::exit(3);
     }
 
-    let pack = load_sprite_pack(PackSource::Bundled).expect("embedded pack");
+    let pack = std::sync::Arc::new(load_bundled_pack().expect("bundled pack"));
     let mut totals = Verdict::default();
     let mut registered_files = 0usize;
     let mut drove_files = 0usize;

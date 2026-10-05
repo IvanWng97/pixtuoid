@@ -1,5 +1,5 @@
 //! `pixtuoid-web` — the WebAssembly canvas painter over the `pixtuoid-scene`
-//! engine: an [`Office`] handle owns everything cross-frame so motion/pose stay
+//! engine: an [`Office`] handle owns everything cross-frame so walks/poses stay
 //! continuous, and `step(now_ms, w, h)` renders one frame into an RGBA staging
 //! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
@@ -15,22 +15,25 @@ use wasm_bindgen::prelude::*;
 
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::{AgentEvent, AgentId, Transport};
 
 use crate::script::{
-    hero_gateway, hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS,
+    Beat, LOOP_MS, PresenceBeat, hero_gateway, hero_script, hire_beats, lobster_beats,
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
-use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
-use pixtuoid_scene::layout::{Size, CHARACTER_SPRITE_W};
-use pixtuoid_scene::theme::{Theme, ALL_THEMES};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
+use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
+use pixtuoid_scene::pack::load_bundled_pack;
+use pixtuoid_scene::sky::WeatherPolicy;
+use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
+#[derive(Debug)]
 struct ScheduledEvent {
     at: SystemTime,
     event: AgentEvent,
@@ -38,7 +41,7 @@ struct ScheduledEvent {
 
 /// The visitor-hire lane — grouped so the cap invariant lives in ONE place
 /// across the enqueue (`try_hire`) and drain (`drain_due`) sides.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct VisitorHires {
     /// Kept sorted by time; drained from the front.
     pending: Vec<ScheduledEvent>,
@@ -103,15 +106,16 @@ impl VisitorHires {
 }
 
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
-/// handle alive across `step` calls is what keeps motion/pose continuous.
+/// handle alive across `step` calls is what keeps walks/poses continuous.
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct Office {
     scene: SceneState,
     session: FloorSession,
     /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
     /// view into wasm memory, so blitting is zero-copy on the JS side.
     rgba: Vec<u8>,
-    pack: Pack,
+    pack: std::sync::Arc<Pack>,
     theme: &'static Theme,
     seed: u64,
     reducer: Reducer,
@@ -130,7 +134,7 @@ pub struct Office {
     /// The buffer size `floor_capacities` was last synced for — lets
     /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
-    weather_override: Option<String>,
+    weather: WeatherPolicy,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -142,17 +146,17 @@ pub struct Office {
 #[wasm_bindgen]
 impl Office {
     /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the compile-time-embedded sprite pack fails to parse.
+    /// only if the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
-            load_sprite_pack(PackSource::Bundled).map_err(|e| JsError::new(&e.to_string()))?;
+            std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits
             // agents the rendered office can seat.
             scene: SceneState::default(),
-            session: FloorSession::new(),
+            session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
             theme: ALL_THEMES[0],
@@ -166,7 +170,7 @@ impl Office {
             hires: VisitorHires::default(),
             last_now: None,
             caps_size: None,
-            weather_override: None,
+            weather: WeatherPolicy::Clock,
             audio: None,
             adopting: None,
         })
@@ -184,13 +188,6 @@ impl Office {
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
-        // `force_weather` is a thread-local shared by every Office in the module, so
-        // each office must set its own value right before rendering. An unknown name
-        // leaves that thread-local UNTOUCHED, which would silently render whatever
-        // the last writer forced — hence the Err path clearing it.
-        if pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref()).is_err() {
-            let _ = pixtuoid_scene::pixel_painter::force_weather(None);
-        }
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -236,15 +233,14 @@ impl Office {
         self.hires.try_hire(base, &self.scene)
     }
 
-    /// Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
-    /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
-    /// An unrecognized name renders as the clock-based cycle.
+    /// Force one of the [`weather_names`](pixtuoid_scene::sky::weather_names),
+    /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
-        self.weather_override = name;
+        self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }
 
-    /// Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
-    /// "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
+    /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+    /// name = no-op.
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
             self.theme = t;
@@ -256,7 +252,7 @@ impl Office {
     /// site's sky-slider thumb reads this, so it delegates to the engine's ONE
     /// day/night boundary rather than restating it.
     pub fn is_day(&self, hour: f32) -> bool {
-        pixtuoid_scene::pixel_painter::hour_is_day(hour)
+        pixtuoid_scene::sky::hour_is_day(hour)
     }
 
     /// Export the current frame's name-badge labels + neon wall-board TEXT as a
@@ -270,7 +266,7 @@ impl Office {
     /// Colors are RESOLVED against the CURRENT theme. Call right after `step` (it
     /// reads the step's clock).
     pub fn overlay_json(&mut self) -> String {
-        use pixtuoid_scene::pixel_painter::{
+        use pixtuoid_scene::layout::{
             NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
         };
         let Some(now) = self.last_now else {
@@ -278,24 +274,31 @@ impl Office {
         };
         let theme = self.theme;
 
-        let labels = self.session.overlay(&self.scene, now, None);
-        let board = self.session.board(&self.scene, now, None);
+        let labels = self.session.overlay(&self.scene, None);
+        let board = self
+            .session
+            .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
         for (i, el) in labels.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
-            let cx = el.anchor_px.x as i32 + CHARACTER_SPRITE_W as i32 / 2;
-            out.push_str(&format!("{{\"x\":{cx},\"y\":{},\"text\":", el.anchor_px.y));
-            push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
-            out.push_str(&format!(",\"color\":\"{}\"", label_hex(theme, el.tone)));
-            // The registry prefix before the first '·' resolves to the source's
-            // badge hue: the site paints the WHOLE name in it while the ● marker
-            // stays the activity tone. An unregistered prefix emits no badge.
-            if let Some(rgb) = pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
-                out.push_str(&format!(",\"badge\":\"{}\"", hex(rgb)));
-            }
+            out.push_str(&format!(
+                "{{\"x\":{},\"y\":{},\"text\":",
+                el.anchor_px.x, el.anchor_px.y
+            ));
+            push_json_string(
+                &mut out,
+                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
+            );
+            // The site paints the ● in `color` and the name in `badge`.
+            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
+            out.push_str(&format!(
+                ",\"color\":\"{}\",\"badge\":\"{}\"",
+                hex(ink.marker),
+                hex(ink.name)
+            ));
             out.push('}');
         }
         out.push_str(&format!(
@@ -380,7 +383,9 @@ impl Office {
         }
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
-        let frame = self.session.audio_frame(&self.scene, 0, now);
+        let frame = self
+            .session
+            .audio_frame(&self.scene, self.floor_meta(), now);
         let cmd = self
             .audio
             .as_mut()
@@ -445,6 +450,7 @@ impl Office {
 /// OWN wasm module (memories can't be shared), pumps [`SynthTake::step`] to 0,
 /// then transfers each buffer to the main thread for `Office::audio_adopt_*`.
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct SynthTake {
     driver: audio::WebAudioDriver,
     night: bool,
@@ -460,7 +466,7 @@ impl SynthTake {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
         // `floor::track_for` is the ONE track-pick authority; its TrackId payload
         // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
-        let track = pixtuoid_scene::floor::track_for(now);
+        let track = pixtuoid_scene::floor::track_for(now, WeatherPolicy::Clock);
         let (night, epoch) = match track {
             pixtuoid_scene::audio::TrackId::GenNight(e) => (true, e),
             pixtuoid_scene::audio::TrackId::GenDay(e) => (false, e),
@@ -512,7 +518,7 @@ impl SynthTake {
 impl Office {
     fn current_track(&self) -> pixtuoid_scene::audio::TrackId {
         match self.last_now {
-            Some(now) => pixtuoid_scene::floor::track_for(now),
+            Some(now) => pixtuoid_scene::floor::track_for(now, self.weather),
             None => pixtuoid_scene::audio::TrackId::GenDay(0),
         }
     }
@@ -537,8 +543,8 @@ impl Office {
         if self.caps_size == Some((buf_w, buf_h)) {
             return;
         }
-        // The SAME (size, cap=None, seed) computation `render` feeds
-        // `render_floor`, so reducer capacity and painted layout can't drift.
+        // The SAME (size, cap=None, seed) computation `render` lays out, so
+        // reducer capacity and painted layout can't drift.
         let cap = floor_capacity(buf_w, buf_h, self.seed);
         self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
         self.caps_size = Some((buf_w, buf_h));
@@ -599,31 +605,41 @@ impl Office {
             .drain_due(now, &mut self.reducer, &mut self.scene);
     }
 
-    fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
-        // The layout seed is the hero's variant seed (NOT floor-derived), so build
-        // the meta then override the seed. Too-small layouts leave the cleared
-        // buffer; never panics.
-        let floor_meta = FloorMeta {
+    /// The hero's one floor: its layout seed is the hero's variant seed, not
+    /// floor-derived, under this office's own weather.
+    fn floor_meta(&self) -> FloorMeta {
+        FloorMeta {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
-        };
-        self.session.render(FrameInputs {
-            scene: &self.scene,
-            pack: &self.pack,
-            theme: self.theme,
-            now,
-            size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            active_pet: None,
-            floor_pet: None,
-            debug_walkable: false,
-        });
+        }
+        .with_weather(self.weather)
+    }
+
+    fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
+        // Too-small layouts leave the cleared buffer; never panics.
+        let floor_meta = self.floor_meta();
+        self.session.render(
+            Look::Classic,
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &self.scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
+                theme: self.theme,
+                size: Size { w: buf_w, h: buf_h },
+                place: Place::default(),
+                debug_walkable: false,
+            },
+        );
     }
 
     /// `Rgb` is not `repr(C)`, so expand into the RGBA staging vec per-pixel
     /// (opaque alpha) — don't cast.
     fn expand_rgba(&mut self) {
-        let px = self.session.buf().as_slice();
+        let px = self.session.buf().map_or(&[][..], |b| b.as_slice());
         self.rgba.clear();
         self.rgba.reserve(px.len() * 4);
         for c in px {
@@ -636,10 +652,6 @@ impl Office {
 
 fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
-}
-
-fn label_hex(theme: &Theme, tone: pixtuoid_scene::overlay::LabelTone) -> String {
-    hex(pixtuoid_scene::overlay::label_tone_rgb(tone, theme))
 }
 
 fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
@@ -702,7 +714,7 @@ mod tests {
     fn office() -> Office {
         match Office::new(1) {
             Ok(o) => o,
-            Err(_) => panic!("embedded pack must parse"),
+            Err(_) => panic!("bundled pack must parse"),
         }
     }
 
@@ -795,10 +807,10 @@ mod tests {
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
         let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
-        let expect = format!("\"badge\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
+        let expect = format!("\"color\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
-            "labels carry the cc badge hue: {json}"
+            "the markers carry the cc badge hue: {json}"
         );
         // Scope the count to the labels array: board segments also emit "text".
         let labels_json = json.split("],\"board\"").next().unwrap();
@@ -906,11 +918,11 @@ mod tests {
         assert!(board["mood"].is_array() && board["context"].is_array());
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
-            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W as u64
+            pixtuoid_scene::layout::NEON_PANEL_INNER_W as u64
         );
         assert_eq!(
             board["rect"]["h"].as_u64().unwrap(),
-            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_H as u64
+            pixtuoid_scene::layout::NEON_PANEL_INNER_H as u64
         );
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 
@@ -921,6 +933,33 @@ mod tests {
             assert!(l["text"].as_str().unwrap().starts_with('\u{25cf}'));
             assert!(l["color"].as_str().unwrap().starts_with('#'));
         }
+    }
+
+    /// The site centres each span on `x`, so `x` is the anchor itself.
+    #[test]
+    fn overlay_json_hangs_each_label_at_its_anchor() {
+        let mut o = office();
+        let mut t = 0u64;
+        while t <= LOOP_MS / 2 {
+            o.step(T0_MS + t as f64, 288, 180);
+            t += 5_000;
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
+        let got: Vec<(u64, u64)> = v["labels"]
+            .as_array()
+            .expect("labels")
+            .iter()
+            .map(|l| (l["x"].as_u64().unwrap(), l["y"].as_u64().unwrap()))
+            .collect();
+        let want: Vec<(u64, u64)> = o
+            .session
+            .overlay(&o.scene, None)
+            .iter()
+            .map(|e| (u64::from(e.anchor_px.x), u64::from(e.anchor_px.y)))
+            .collect();
+        assert!(!want.is_empty(), "premise: agents are drawn");
+        assert_eq!(got, want);
     }
 
     #[test]
@@ -971,8 +1010,8 @@ mod tests {
         }
         assert!(
             o.scene.agents.contains_key(&cast_id(5))
-                && o.session.floor.ctx.motion.contains_key(&cast_id(5)),
-            "agent 5 must be live with motion state mid-loop (positive control)"
+                && o.session.floor.ctx.walks.contains_key(&cast_id(5)),
+            "agent 5 must be live with walk state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd + the exit grace + sweep.
         while t <= 115_000 {
@@ -984,8 +1023,8 @@ mod tests {
             "agent 5 exited and was GC'd"
         );
         assert!(
-            !o.session.floor.ctx.motion.contains_key(&cast_id(5)),
-            "agent 5's motion state was evicted with its slot"
+            !o.session.floor.ctx.walks.contains_key(&cast_id(5)),
+            "agent 5's walk state was evicted with its slot"
         );
         assert!(
             !o.session.office.coffee.map().contains_key(&cast_id(5)),
@@ -1071,7 +1110,7 @@ mod tests {
 
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
-        use pixtuoid_scene::layout::Layout;
+        use pixtuoid_scene::layout::SceneLayout;
         // The site renders BUF_H=130; this width seats the full cast plus at
         // least one spare. The free-desk count is DERIVED, not a size literal —
         // the density pass re-tunes desks-per-buffer out from under a literal.
@@ -1095,7 +1134,7 @@ mod tests {
             "the click past exhaustion is refused outright: {admitted:?}"
         );
         o.step(T0_MS + 32_000.0, w, h);
-        let layout = Layout::compute_with_seed(w as u16, h as u16, None, o.seed)
+        let layout = SceneLayout::compute_with_seed(w as u16, h as u16, None, o.seed)
             .expect("the portrait buffer lays out");
         assert_eq!(
             o.scene.total_capacity(),
@@ -1232,15 +1271,12 @@ mod tests {
             "storm office must keep its own weather after another office stepped"
         );
 
-        // `force_weather` leaves the override UNTOUCHED on Err, so a swallowed Err
-        // would render the PREVIOUS office's weather — here, storm.
         let mut typo = Office::new(1).unwrap();
         typo.set_weather(Some("stormy".into()));
         typo.step(T0_MS, 160, 96);
         let typo_frame = typo.frame().to_vec();
 
         let mut unforced = Office::new(1).unwrap();
-        typo.step(T0_MS, 160, 96); // leave `typo`'s (mis)override as the last writer
         unforced.step(T0_MS, 160, 96);
         // `assert!` over the slices, not `assert_eq!`: a mismatch would otherwise
         // dump two whole frames into the failure output.
@@ -1248,9 +1284,30 @@ mod tests {
             typo_frame == unforced.frame(),
             "an unknown weather name must render the clock-based cycle"
         );
-        assert!(
-            typo_frame != storm_frame,
-            "…and specifically must NOT inherit the sibling office's storm"
+    }
+
+    /// An office's rain sounds follow its own weather, whatever another
+    /// office stepped since.
+    #[test]
+    fn an_offices_rain_follows_its_own_weather_after_another_steps() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(T0_MS as u64);
+        let rain = |o: &mut Office| {
+            let floor = o.floor_meta();
+            o.session.audio_frame(&o.scene, floor, now).stems
+        };
+        let mut storm = Office::new(1).unwrap();
+        storm.set_weather(Some("storm".into()));
+        storm.step(T0_MS, 160, 96);
+        let alone = rain(&mut storm);
+
+        let mut clear = Office::new(1).unwrap();
+        clear.set_weather(Some("clear".into()));
+        clear.step(T0_MS, 160, 96);
+        assert_ne!(rain(&mut clear), alone, "storm vs clear must sound apart");
+        assert_eq!(
+            rain(&mut storm),
+            alone,
+            "the storm office keeps its own rain after the clear one stepped"
         );
     }
 

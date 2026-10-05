@@ -13,29 +13,49 @@ mod mask;
 mod placement;
 mod reach;
 mod rooms;
+pub(crate) mod roster;
+mod windows;
 
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
-pub use compute::{min_layout_size, PANTRY_COUNTER_LARGE_W};
-pub(crate) use decor::repels_plants;
+pub use compute::{PANTRY_COUNTER_LARGE_W, min_layout_size};
 pub use decor::{
-    desk_ceiling_pool_center, desk_furniture_def, desk_walk_anchor_facing, furniture_def,
-    seated_foot_cell, ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
-    PodDecor, WallDecor, WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    ApproachSides, DESK_APPROACH, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
+    PodDecor, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, WallDecor, WaypointKind, desk_furniture_def,
+    desk_walk_anchor_facing, furniture_def, seated_foot_cell,
 };
-pub use placement::{anchored_top_left, z_sort_row, Anchor};
+pub(crate) use decor::{repels_plants, seated_sort_row};
+pub use placement::{Pivot, anchored_top_left, sort_row_at};
 pub use reach::ReachSet;
-pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
-pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
-pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
-// Both SHARED with the pixel painter's `enqueue_room_walls_v`, so the blocked
-// ground and the drawn glass meet the band / crossing walls at the same joints
-// and over the same crossing-wall inputs.
-pub(crate) use rooms::walls::{crossing_h_rows, stitch_vertical_wall};
+pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
+pub(crate) use rooms::pantry::{
+    COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
+};
+pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
+pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
+pub(crate) use roster::{
+    CLOCK, Depth, Fixture, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_fixtures,
+    desk_chair_sort_row, desk_chair_top_left, desk_fixtures, pod_decor_fixtures,
+};
+pub use roster::{
+    FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
+    NEON_PANEL_W, Station,
+};
+#[cfg(test)]
+pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols, desk_has_cabinet};
+// Painter tests tile walls no `SceneLayout` has.
+pub(crate) use windows::{
+    NEON_DOOR_WALL_W, WINDOW_TOP, WindowBay, door_x, glass_rows, wall_trim_row, window_frame,
+    window_posts, window_rows, window_run,
+};
+#[cfg(test)]
+pub(crate) use windows::{WINDOW_W, window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
-pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
+pub(crate) use coarse::{
+    COARSE_CELL_SIZE, CoarseGrid, cell_anchor, cell_center, cell_walkable, snap,
+};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;
@@ -52,6 +72,48 @@ pub struct Bounds {
     pub width: u16,
     /// Height in pixels.
     pub height: u16,
+}
+
+impl Bounds {
+    /// Whether the two half-open boxes share a pixel. A zero-sized box shares
+    /// none.
+    pub(crate) fn overlaps(self, other: Bounds) -> bool {
+        // u32: a box's exclusive end can lie one past `u16::MAX`.
+        let end = |at: u16, len: u16| u32::from(at) + u32::from(len);
+        self.width > 0
+            && self.height > 0
+            && other.width > 0
+            && other.height > 0
+            && u32::from(self.x) < end(other.x, other.width)
+            && u32::from(other.x) < end(self.x, self.width)
+            && u32::from(self.y) < end(other.y, other.height)
+            && u32::from(other.y) < end(self.y, self.height)
+    }
+
+    /// Whether the two half-open boxes share a column, whatever their rows.
+    pub(crate) fn shares_columns(self, other: Bounds) -> bool {
+        Bounds {
+            y: 0,
+            height: 1,
+            ..self
+        }
+        .overlaps(Bounds {
+            y: 0,
+            height: 1,
+            ..other
+        })
+    }
+
+    /// The box grown `dx` columns on each side, its west edge clamped at
+    /// column 0 and its east edge kept.
+    pub(crate) fn widened(self, dx: u16) -> Bounds {
+        let x = self.x.saturating_sub(dx);
+        Bounds {
+            x,
+            width: self.x + self.width + dx - x,
+            ..self
+        }
+    }
 }
 
 /// A position in buffer-pixel space (screen-space: east = +x, south = +y,
@@ -74,14 +136,29 @@ pub struct Size {
     pub h: u16,
 }
 
-/// An interior room-wall segment — the two endpoints of a straight (horizontal
-/// or vertical) wall run.
+/// An interior room wall's straight run, both ends inclusive and in order. It
+/// names its axis because a one-cell run, the post a door flush with its run's
+/// end leaves, could not say it with its ends alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WallSegment {
-    /// One endpoint of the straight wall run (pixel-space).
-    pub start: Point,
-    /// The other endpoint (pixel-space).
-    pub end: Point,
+pub enum WallSegment {
+    /// An E-W run.
+    Horizontal {
+        /// Its row.
+        y: u16,
+        /// Its west end.
+        x0: u16,
+        /// Its east end.
+        x1: u16,
+    },
+    /// A N-S run.
+    Vertical {
+        /// Its column.
+        x: u16,
+        /// Its north end.
+        y0: u16,
+        /// Its south end.
+        y1: u16,
+    },
 }
 
 /// A placed plant: its kind paired with its centre position.
@@ -127,11 +204,8 @@ pub struct Waypoint {
     pub room_id: Option<usize>,
 }
 
-/// Backwards-compat alias for [`SceneLayout`].
-pub type Layout = SceneLayout;
-
 /// The lounge vignette placed as one unit. Couch + floor lamp + side table
-/// share the one `lounge_fits` gate (hence non-optional here); the aquarium
+/// share one fit gate (hence non-optional here); the aquarium
 /// carries an EXTRA east-clearance gate against the elevator door, so it
 /// stays `Option`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +220,30 @@ pub struct Lounge {
     /// Aquarium centre, east of the lamp against the north wall band — `None`
     /// when the elevator-door east clearance fails.
     pub fish_tank: Option<Point>,
+}
+
+/// The lounge rug's size.
+const LOUNGE_RUG: Size = Size { w: 22, h: 7 };
+/// How far south of the couch centre the lounge rug's centre sits, so it reaches
+/// out in front of the couch.
+const LOUNGE_RUG_DY: u16 = 3;
+
+impl Lounge {
+    /// The rug the couch stands on, ending by `ground_end`, the row the desks
+    /// south of it start at.
+    pub(crate) fn rug(&self, ground_end: u16) -> Bounds {
+        let centre = Point {
+            x: self.couch_center.x,
+            y: self.couch_center.y + LOUNGE_RUG_DY,
+        };
+        let tl = anchored_top_left(Pivot::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
+        Bounds {
+            x: tl.x,
+            y: tl.y.min(ground_end.saturating_sub(LOUNGE_RUG.h)),
+            width: LOUNGE_RUG.w,
+            height: LOUNGE_RUG.h,
+        }
+    }
 }
 
 /// The computed office geometry for one floor — quadrant bounds, per-agent
@@ -180,10 +278,10 @@ pub struct SceneLayout {
     /// individual pieces via the accessors ([`Self::couch_sprite_center`],
     /// [`Self::floor_lamp`], …).
     pub lounge: Option<Lounge>,
-    /// The office entry-door position, or `None` if none fits.
-    pub door: Option<Point>,
+    /// The office entry door's top-left cell, in the window wall's last slot.
+    pub door: Point,
     /// The walkable cell just inside the door — the entry/exit waypoint.
-    pub door_threshold: Option<Point>,
+    pub door_threshold: Point,
     /// Meeting rooms in floor order — the index IS the `room_id` every
     /// waypoint and painter joins on.
     pub meeting_rooms: Vec<MeetingRoom>,
@@ -196,6 +294,9 @@ pub struct SceneLayout {
     /// draws door frames from these instead of re-inferring gaps from
     /// segment adjacency.
     pub doorways: Vec<Doorway>,
+    /// `room_walls` as the mask stamps them and the painters draw them, their
+    /// doorways framed: built once, here.
+    pub(crate) wall_pieces: Vec<WallPiece>,
     /// Top offset in px reserved above the floor for the north wall+window
     /// band (and its carpet apron).
     pub top_margin: u16,
@@ -245,6 +346,8 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Glass columns offset from the desk sprite's left edge.
+pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 /// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
 pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
 pub(crate) const DESK_FRONT_ROWS: u16 = 1;
@@ -265,21 +368,46 @@ const _: () = assert!(
 /// (invariant #6). Distinct from `DESK_H`, which prices the slot.
 pub(crate) const DESK_FOOT_H: u16 = 2;
 /// Default character sprite width (px) — the ONE authority every
-/// out-of-pixel_painter consumer centers/hit-tests on. Sprite BLIT sites still
+/// out-of-pixel_painter consumer centers on. Sprite BLIT sites still
 /// pass the pack's REAL `frame.width`; this is the width-unknown fallback.
 /// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
 /// Default character sprite height (px) — [`CHARACTER_SPRITE_W`]'s twin: the
-/// height `character_anchor` clamps by and hit tests size by, and the fallback
-/// where a custom pack's real frame isn't threaded. The pose offsets are a
-/// SEPARATE vertical-anchor concern.
+/// fallback where a custom pack's real frame isn't threaded. The pose offsets
+/// are a SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H: u16 = 12;
 /// Elevator-door sprite width in buffer px, read by the layout, the wall's
 /// window cut-out and the hover box; `every_hover_size_is_its_painted_sprite_size`
 /// pins it to the door sprite.
 pub const ELEVATOR_W: u16 = 16;
-/// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
+/// Elevator-door sprite height in buffer px — which sets the door's sort row.
 pub const ELEVATOR_H: u16 = 14;
+
+/// The buffer rows a half-block terminal cell shows.
+pub(crate) const CELL_ROWS: u16 = 2;
+
+/// The rows over a door whose top row is `door_y` that the terminal's floor
+/// indicator writes its text across: the whole cell above the door's.
+pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
+    let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
+    top..top + CELL_ROWS
+}
+
+/// What the floor indicator says on floor `floor` (one-based), every painter's.
+pub fn floor_indicator_text(floor: usize) -> String {
+    format!("\u{25b2} F{floor} \u{25bc}")
+}
+
+/// Where the exit sign hangs over a door at `door`: centred above its floor
+/// indicator, or `None` where that would climb above the windows' head.
+pub(crate) fn exit_sign_pos(door: Point) -> Option<Point> {
+    let sign = furniture_def(WallDecor::ExitSign.furniture()).visual;
+    let y = floor_indicator_rows(door.y).start.checked_sub(sign.h)?;
+    (y >= WINDOW_TOP).then_some(Point {
+        x: door.x + (ELEVATOR_W - sign.w) / 2,
+        y,
+    })
+}
 /// NOT a cap — production layouts fill the buffer's physical space
 /// (`max_desks: None`). This is the stable "one classic office worth of desks"
 /// reference, and the `snapshot` example that renders the docs/CI media
@@ -308,9 +436,8 @@ pub const INTRA_POD_GAP_X: u16 = 12;
 pub const INTRA_POD_GAP_Y: u16 = 6;
 const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
-/// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
-/// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,
-/// so spread wider horizontally and pack tighter vertically.
+/// pod boundary visually distinct. Deliberately > the N-S gap: screens are
+/// landscape, so spread wider horizontally and pack tighter vertically.
 pub const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
@@ -353,86 +480,50 @@ impl SceneLayout {
     /// Is `p` clear of the furniture sprites that PAINT OVER it? Walkable is the
     /// GROUND rule (invariant #6), so the cell in front of a desk is legitimately
     /// walkable AND legitimately covered — fine to walk THROUGH, wrong to park in.
-    ///
-    /// Destructured with NO `..`, the same guarantee `placement_sweep::pieces`
-    /// takes: a new collection is a compile error HERE, not a finding two review
-    /// rounds later. Three kinds carry a `0x0` table `visual` — the pantry's
-    /// sprite is runtime-sized, and a meeting-sofa seat's or island stand's is
-    /// another row's — so each is read from its own authority below.
     pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
-        let SceneLayout {
-            home_desks,
-            waypoints,
-            plants,
-            pod_decor,
-            wall_decor,
-            lounge,
-            meeting_rooms,
-            pantry,
-            desk_facings: _, // a desk ATTRIBUTE, not a sprite
-            room_walls: _,   // translucent glass; a creature behind it still reads
-            door: _,         // architecture, and the band it punches is not walkable
-            door_threshold: _,
-            doorways: _,
-            corridor: _,     // a zone, not a sprite
-            cubicle_band: _, // containers
-            cubicle_aisle: _,
-            buf_w: _,
-            buf_h: _,
-            top_margin: _,
-            walkable: _,
-            reachable: _,
-        } = self;
-        let inside = |tl: Point, sz: Size| {
-            p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h
-        };
-        let covered = |anchor: Anchor, pos: Point, kind: Furniture| {
-            let (tl, sz) = furniture_def(kind).visual_rect(anchor, pos);
-            inside(tl, sz)
-        };
-        let table = home_desks
-            .iter()
-            .any(|&d| covered(Anchor::TopLeft, d, Furniture::Desk))
-            || waypoints
-                .iter()
-                .any(|w| covered(Anchor::Center, w.pos, w.kind.furniture()))
-            || plants
-                .iter()
-                .any(|pl| covered(Anchor::Center, pl.pos, pl.kind.furniture()))
-            || pod_decor
-                .iter()
-                .any(|d| covered(Anchor::Center, d.pos, d.kind.furniture()))
-            // Wall decor is NOT out as a class: the whiteboard is free-standing
-            // floor furniture standing in an inter-pod aisle.
-            || wall_decor
-                .iter()
-                .any(|d| covered(Anchor::TopLeft, d.pos, d.kind.furniture()));
-        let lounge = lounge.is_some_and(|l| {
-            covered(Anchor::Center, l.couch_center, Furniture::Couch)
-                || covered(Anchor::Center, l.floor_lamp, Furniture::FloorLamp)
-                || covered(Anchor::Center, l.side_table, Furniture::LoungeSideTable)
-                || l.fish_tank
-                    .is_some_and(|t| covered(Anchor::Center, t, Furniture::FishTank))
-        });
-        let runtime = waypoints.iter().any(|w| {
-            w.kind == WaypointKind::Pantry && {
-                let sz = self.pantry_counter_size();
-                inside(
-                    placement::anchored_top_left(Anchor::Center, w.pos, sz.w, sz.h),
-                    sz,
-                )
-            }
-        }) || meeting_rooms.iter().any(|r| {
-            r.trio.is_some_and(|tr| {
-                tr.sofas
-                    .iter()
-                    .any(|&s| covered(Anchor::Center, s, Furniture::MeetingSofaBody))
-                    || covered(Anchor::Center, tr.table, Furniture::MeetingTable)
-            })
-        }) || pantry
-            .and_then(|pa| pa.kitchen_island)
-            .is_some_and(|i| covered(Anchor::Center, i, Furniture::KitchenIsland));
-        !(table || lounge || runtime)
+        let inside =
+            |b: Bounds| p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+        !self.fixtures().any(|f| {
+            let covers = match f.kind {
+                FixtureKind::Desk(_)
+                | FixtureKind::Station { .. }
+                | FixtureKind::Plant { .. }
+                | FixtureKind::Pod { .. }
+                // Not out as a class: the whiteboard is free-standing floor
+                // furniture standing in an inter-pod aisle.
+                | FixtureKind::Wall { .. }
+                | FixtureKind::MeetingSofa { .. }
+                | FixtureKind::MeetingTable { .. }
+                | FixtureKind::MeetingChair { .. }
+                | FixtureKind::LoungeCouch
+                | FixtureKind::SideTable
+                | FixtureKind::FloorLamp
+                | FixtureKind::FishTank
+                | FixtureKind::KitchenIsland => true,
+                // Flat on the floor: whatever stands on them paints over them.
+                FixtureKind::MeetingRug { .. }
+                | FixtureKind::LoungeRug
+                | FixtureKind::Doormat { .. }
+                | FixtureKind::PantryMat
+                | FixtureKind::IslandMat
+                | FixtureKind::Runner => false,
+                // Hung in the backdrop, under the whole sorted scene.
+                FixtureKind::NoticeBoard { .. } | FixtureKind::NeonSign | FixtureKind::Clock => {
+                    false
+                }
+                // Architecture, and the band it punches is not walkable.
+                FixtureKind::Door => false,
+                // They do paint over what stands behind them, but covering them
+                // moves where the pet and the mascots rest: a look change, left
+                // to its own decision.
+                FixtureKind::CoatRack { .. }
+                | FixtureKind::FilingCabinet(_)
+                | FixtureKind::DeskChair(_)
+                | FixtureKind::WaterCooler
+                | FixtureKind::TrashBin => false,
+            };
+            covers && inside(f.visual)
+        })
     }
 
     /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).

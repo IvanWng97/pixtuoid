@@ -1,6 +1,7 @@
 //! Shared anti-aliased text rasterizer (Monaspace Neon) for the binary's pixel
 //! surfaces — the floating window's name badges + wall board, and the examples'
-//! cell text, `--proof` panel and cutaway.
+//! cell text and `--proof` panel. The cutaway paints its own pixel font
+//! (`pixtuoid_scene`'s `cutaway::text`).
 //!
 //! Kept BINARY-side on purpose: `pixtuoid-scene` also compiles to wasm for the
 //! web hero, so it stays font-dep-free — no font parser, no embedded font, no
@@ -23,7 +24,7 @@
 
 use std::sync::LazyLock;
 
-use ab_glyph_rasterizer::{point, Point, Rasterizer};
+use ab_glyph_rasterizer::{Point, Rasterizer, point};
 use skrifa::charmap::Charmap;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::metrics::GlyphMetrics;

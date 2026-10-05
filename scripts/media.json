@@ -76,7 +76,7 @@
    {
     "name": "reference-night",
     "theme": "cyberpunk",
-    "hour": 3,
+    "hour": 1,
     "weather": "clear"
    }
   ]
@@ -207,6 +207,7 @@
   "duration": 10,
   "fps": 15,
   "hour": 17,
+  "poster": 9,
   "extra": [
    "--max-desks",
    "16",
@@ -274,6 +275,7 @@
  {
   "id": "proof",
   "kind": "proof",
+  "day": 3,
   "targets": [
    "site"
   ],

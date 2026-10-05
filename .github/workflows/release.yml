@@ -60,7 +60,7 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
           fi
-      # Intentionally lighter than `just preflight` (no lint + hack): the tag comes
+      # Intentionally lighter than `just preflight full` (no lint + hack): the tag comes
       # from main, which already passed the full CI matrix — this re-verifies
       # fmt/clippy/tests against the exact tagged commit.
       - run: just fmt-check
@@ -131,7 +131,7 @@ jobs:
           mkdir "$DIR"
           cp "target/${{ matrix.target }}/release/pixtuoid" "$DIR/"
           cp "target/${{ matrix.target }}/release/pixtuoid-hook" "$DIR/"
-          cp LICENSE "$DIR/"
+          just stage-notices "$DIR"
           tar czf "${DIR}.tar.gz" "$DIR"
 
       - name: Package (Windows)
@@ -144,7 +144,7 @@ jobs:
           mkdir "$DIR"
           cp "target/${{ matrix.target }}/release/pixtuoid.exe" "$DIR/"
           cp "target/${{ matrix.target }}/release/pixtuoid-hook.exe" "$DIR/"
-          cp LICENSE "$DIR/"
+          just stage-notices "$DIR"
           ( cd "$DIR" && 7z a "../${DIR}.zip" . )
 
       - uses: actions/upload-artifact@v7

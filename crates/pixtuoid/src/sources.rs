@@ -12,9 +12,8 @@ use pixtuoid_core::source::registry;
 
 use crate::config;
 use crate::install::{
-    self,
-    target::{by_source, is_present, Target},
-    InstallReport, UninstallReport,
+    self, InstallReport, UninstallReport,
+    target::{Target, by_source, is_present},
 };
 
 /// The wire-facing outcome token — a CLOSED set, published in the JSON schema
@@ -76,6 +75,24 @@ impl ChangeOutcome {
         match self {
             ChangeOutcome::Failed(msg) => Some(msg),
             _ => None,
+        }
+    }
+}
+
+/// An attempted connect or disconnect — [`ChangeOutcome`] without its `NoOp`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppliedChange {
+    Connected,
+    Disconnected,
+    Failed(String),
+}
+
+impl From<AppliedChange> for ChangeOutcome {
+    fn from(c: AppliedChange) -> Self {
+        match c {
+            AppliedChange::Connected => ChangeOutcome::Connected,
+            AppliedChange::Disconnected => ChangeOutcome::Disconnected,
+            AppliedChange::Failed(e) => ChangeOutcome::Failed(e),
         }
     }
 }
@@ -292,15 +309,23 @@ pub fn reconcile_to(cfg: &Path, desired: &HashSet<String>) -> Vec<(String, Chang
 
 fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
     match action {
-        Action::Connect => match connect(cfg, sid) {
-            Ok(_) => ChangeOutcome::Connected,
-            Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
-        },
-        Action::Disconnect => match disconnect(cfg, sid) {
-            Ok(o) => map_disconnect_outcome(o),
-            Err(e) => ChangeOutcome::Failed(format!("{e:#}")),
-        },
+        Action::Connect => apply_want(cfg, sid, true).into(),
+        Action::Disconnect => apply_want(cfg, sid, false).into(),
         Action::NoOp => ChangeOutcome::NoOp,
+    }
+}
+
+fn apply_want(cfg: &Path, sid: &'static str, want: bool) -> AppliedChange {
+    if want {
+        match connect(cfg, sid) {
+            Ok(_) => AppliedChange::Connected,
+            Err(e) => AppliedChange::Failed(format!("{e:#}")),
+        }
+    } else {
+        match disconnect(cfg, sid) {
+            Ok(o) => map_disconnect_outcome(o),
+            Err(e) => AppliedChange::Failed(format!("{e:#}")),
+        }
     }
 }
 
@@ -317,13 +342,13 @@ pub const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal fai
 
 /// A folded hook-removal failure MUST surface as `Failed` (with the reason),
 /// NEVER a clean `Disconnected` — else a caller hides stale hooks behind it.
-fn map_disconnect_outcome(o: DisconnectOutcome) -> ChangeOutcome {
+fn map_disconnect_outcome(o: DisconnectOutcome) -> AppliedChange {
     match o {
         DisconnectOutcome::HookRemovalFailed(e) => {
-            ChangeOutcome::Failed(format!("{HOOK_REMOVAL_FAILED_PREFIX}{e}"))
+            AppliedChange::Failed(format!("{HOOK_REMOVAL_FAILED_PREFIX}{e}"))
         }
         DisconnectOutcome::FlagOnly | DisconnectOutcome::Uninstalled(_) => {
-            ChangeOutcome::Disconnected
+            AppliedChange::Disconnected
         }
     }
 }
@@ -331,17 +356,10 @@ fn map_disconnect_outcome(o: DisconnectOutcome) -> ChangeOutcome {
 /// Apply an EXPLICIT per-source decision list (the first-run onboarding apply).
 /// Unlike the declarative `reconcile_to`, this touches ONLY the ids passed — a
 /// source absent from the list keeps its existing flag, never a surprise write.
-pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(String, ChangeOutcome)> {
+pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(String, AppliedChange)> {
     choices
         .iter()
-        .map(|&(sid, want)| {
-            let action = if want {
-                Action::Connect
-            } else {
-                Action::Disconnect
-            };
-            (sid.to_string(), apply_one(cfg, sid, action))
-        })
+        .map(|&(sid, want)| (sid.to_string(), apply_want(cfg, sid, want)))
         .collect()
 }
 
@@ -627,19 +645,19 @@ mod tests {
     #[test]
     fn map_disconnect_outcome_surfaces_a_folded_hook_removal_failure() {
         match map_disconnect_outcome(DisconnectOutcome::HookRemovalFailed("boom".into())) {
-            ChangeOutcome::Failed(m) => assert_eq!(m, "hooks not removed: boom"),
+            AppliedChange::Failed(m) => assert_eq!(m, "hooks not removed: boom"),
             other => panic!("expected Failed, got {other:?}"),
         }
         assert!(matches!(
             map_disconnect_outcome(DisconnectOutcome::FlagOnly),
-            ChangeOutcome::Disconnected
+            AppliedChange::Disconnected
         ));
     }
 
     #[test]
     fn connect_then_disconnect_a_no_target_source_persists_the_flag() {
         // Antigravity has no install target → a pure flag flip, so this touches no
-        // real agent config and mutates no env (no TEST_ENV_LOCK needed).
+        // real agent config and mutates no env.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
 
@@ -924,7 +942,7 @@ mod tests {
             apply_choices(&cfg, &[("antigravity", true)])
                 .into_iter()
                 .collect();
-        assert_eq!(outcomes["antigravity"], ChangeOutcome::Connected);
+        assert_eq!(outcomes["antigravity"], AppliedChange::Connected);
 
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(

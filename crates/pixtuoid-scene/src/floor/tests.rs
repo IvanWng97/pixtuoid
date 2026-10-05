@@ -1,4 +1,5 @@
 use super::*;
+use crate::anim::Motion;
 use pixtuoid_core::id::AgentId;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use std::path::Path;
@@ -8,7 +9,7 @@ use std::time::Duration;
 #[test]
 fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     let mut ctx = FloorCtx::new();
-    let fresh = crate::layout::Layout::compute_with_seed(192, 156, None, 0).unwrap();
+    let fresh = crate::layout::SceneLayout::compute_with_seed(192, 156, None, 0).unwrap();
     let a = ctx.frame_layout(192, 156, 0).unwrap();
     let b = ctx.frame_layout(192, 156, 0).unwrap();
     // Pointer identity first: the value-equality below would still pass a reverted
@@ -23,7 +24,7 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
         assert_eq!(l.home_desks.len(), fresh.home_desks.len());
     }
     let resized = ctx.frame_layout(120, 100, 0).unwrap();
-    let fresh_resized = crate::layout::Layout::compute_with_seed(120, 100, None, 0).unwrap();
+    let fresh_resized = crate::layout::SceneLayout::compute_with_seed(120, 100, None, 0).unwrap();
     assert_eq!(resized.walkable, fresh_resized.walkable);
     // A too-small buffer is None and must not poison the memo.
     assert!(ctx.frame_layout(3, 3, 0).is_none());
@@ -31,6 +32,29 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
         ctx.frame_layout(192, 156, 0).unwrap().walkable,
         fresh.walkable
     );
+}
+
+/// A new layout drops the router's cached paths: `route` revalidates a cached
+/// path against the overlay alone, never the mask, so a stale one would walk
+/// through the new layout's walls.
+#[test]
+fn a_new_layout_drops_the_routers_cached_paths() {
+    use crate::pathfind::Router;
+    use pixtuoid_core::walkable::OccupancyOverlay;
+    let mut ctx = FloorCtx::new();
+    let l = ctx.frame_layout(192, 156, 0).unwrap();
+    let mut walkable = (0..l.buf_h)
+        .flat_map(|y| (0..l.buf_w).map(move |x| crate::layout::Point { x, y }))
+        .filter(|p| l.is_walkable(p.x, p.y));
+    let from = walkable.next().expect("a walkable cell");
+    let to = walkable.next_back().expect("another walkable cell");
+    ctx.router
+        .route(&l.walkable, &OccupancyOverlay::new(), from, to);
+    assert!(!ctx.router.is_empty(), "the route was cached");
+    ctx.frame_layout(192, 156, 0).unwrap();
+    assert!(!ctx.router.is_empty(), "the same layout keeps its paths");
+    ctx.frame_layout(120, 100, 0).unwrap();
+    assert!(ctx.router.is_empty(), "a new layout drops its paths");
 }
 
 #[test]
@@ -68,13 +92,13 @@ fn daemons_projects_onto_the_ground_floor_only() {
 
 #[test]
 fn door_anim_excludes_arrived_entry_profiles() {
-    use crate::motion::MotionState;
+    use crate::walk::WalkState;
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut ms = MotionState::new(id);
+    let mut walk = WalkState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some(crate::motion::WalkLeg {
+    walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
             duration_ms: 2000,
@@ -85,7 +109,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         },
         from: crate::layout::Point { x: 0, y: 0 },
     });
-    fctx.motion.insert(id, ms);
+    fctx.walks.insert(id, walk);
 
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
@@ -93,7 +117,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         "in-flight entry walk should drive the door cosmetic window"
     );
 
-    // Past arrival, even though MotionState.entry is never cleared for this agent.
+    // Past arrival, even though WalkState.entry is never cleared for this agent.
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(3000));
     assert_eq!(
         fctx.door_anim_max_ms, 0,
@@ -108,23 +132,20 @@ fn floor_ctx_default_equals_new() {
         d.door_anim_max_ms, 0,
         "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
     );
-    assert!(
-        d.motion.is_empty(),
-        "default FloorCtx has no in-flight motion"
-    );
+    assert!(d.walks.is_empty(), "default FloorCtx has no walks");
 }
 
 #[test]
-fn lighting_state_default_equals_new() {
+fn vacancy_dim_default_equals_new() {
     assert_eq!(
-        LightingState::default().level(),
-        LightingState::new().level(),
-        "LightingState::default() must equal new()"
+        VacancyDim::default().level(),
+        VacancyDim::new().level(),
+        "VacancyDim::default() must equal new()"
     );
     assert_eq!(
-        LightingState::default().level(),
+        VacancyDim::default().level(),
         1.0,
-        "a fresh LightingState is fully lit"
+        "a fresh VacancyDim is fully lit"
     );
 }
 
@@ -377,10 +398,10 @@ fn t0() -> SystemTime {
 
 #[test]
 fn light_steady_state_populated() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
     for ms in (0..3_000).step_by(33) {
-        let level = light.tick(false, start + Duration::from_millis(ms));
+        let level = dim.tick(false, start + Duration::from_millis(ms));
         assert!(
             (level - 1.0).abs() < 1e-6,
             "populated steady state drifted: ms={ms} level={level}"
@@ -390,11 +411,11 @@ fn light_steady_state_populated() {
 
 #[test]
 fn light_holds_during_debounce_window() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
-    light.tick(true, start);
+    dim.tick(true, start);
     // 4 s after going empty, inside the 5 s debounce.
-    let level = light.tick(true, start + Duration::from_millis(4_000));
+    let level = dim.tick(true, start + Duration::from_millis(4_000));
     assert!(
         (level - 1.0).abs() < 1e-6,
         "level dropped before debounce expired: {level}"
@@ -403,57 +424,57 @@ fn light_holds_during_debounce_window() {
 
 #[test]
 fn light_eases_toward_min_after_debounce() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
-    light.tick(true, start);
+    dim.tick(true, start);
     // 6 s: the debounce expired 1 s ago, ~1.25 tau of fade.
-    let level = light.tick(true, start + Duration::from_millis(6_000));
+    let level = dim.tick(true, start + Duration::from_millis(6_000));
     assert!(level < 0.95, "no fade started after debounce: {level}");
-    assert!(level > LightingState::MIN_LEVEL, "overshot floor: {level}");
+    assert!(level > VacancyDim::MIN_LEVEL, "overshot floor: {level}");
 }
 
 #[test]
 fn light_converges_to_min_when_empty_long_enough() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
     // A realistic frame cadence for 30 s, so the exponential ease has fully landed.
     for ms in (0..30_000).step_by(33) {
-        light.tick(true, start + Duration::from_millis(ms));
+        dim.tick(true, start + Duration::from_millis(ms));
     }
-    let level = light.level();
+    let level = dim.level();
     assert!(
-        (level - LightingState::MIN_LEVEL).abs() < 1e-3,
+        (level - VacancyDim::MIN_LEVEL).abs() < 1e-3,
         "did not converge to MIN_LEVEL: {level}"
     );
 }
 
 #[test]
 fn light_rises_back_when_repopulated() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
     for ms in (0..20_000).step_by(33) {
-        light.tick(true, start + Duration::from_millis(ms));
+        dim.tick(true, start + Duration::from_millis(ms));
     }
-    assert!(light.level() < 0.2);
+    assert!(dim.level() < 0.2);
     let later = start + Duration::from_millis(20_000);
     for ms in (0..3_000).step_by(33) {
-        light.tick(false, later + Duration::from_millis(ms));
+        dim.tick(false, later + Duration::from_millis(ms));
     }
-    let level = light.level();
+    let level = dim.level();
     assert!(level > 0.95, "did not rise back when repopulated: {level}");
 }
 
 #[test]
 fn light_resets_empty_since_when_repopulated() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
-    light.tick(true, start);
-    light.tick(true, start + Duration::from_millis(3_000));
-    light.tick(false, start + Duration::from_millis(3_500));
+    dim.tick(true, start);
+    dim.tick(true, start + Duration::from_millis(3_000));
+    dim.tick(false, start + Duration::from_millis(3_500));
     // Empty again: the debounce must restart here, so the 7.5 s sample is only
     // 3.9 s into the new window and must still hold at 1.0.
-    light.tick(true, start + Duration::from_millis(3_600));
-    let level = light.tick(true, start + Duration::from_millis(7_500));
+    dim.tick(true, start + Duration::from_millis(3_600));
+    let level = dim.tick(true, start + Duration::from_millis(7_500));
     assert!(
         (level - 1.0).abs() < 1e-6,
         "empty_since did not reset on repopulate: {level}"
@@ -462,28 +483,28 @@ fn light_resets_empty_since_when_repopulated() {
 
 #[test]
 fn light_large_dt_does_not_overshoot_or_nan() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
-    light.tick(true, start);
-    let later = start + Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS + 1_000);
-    let level = light.tick(true, later);
+    dim.tick(true, start);
+    let later = start + Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS + 1_000);
+    let level = dim.tick(true, later);
     assert!(level.is_finite(), "level went non-finite: {level}");
     assert!(
-        level >= LightingState::MIN_LEVEL - 1e-6,
+        level >= VacancyDim::MIN_LEVEL - 1e-6,
         "level undershot floor: {level}"
     );
 }
 
 #[test]
 fn light_backward_clock_jump_does_not_move_level() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let start = t0();
-    light.tick(false, start);
-    let before = light.level();
+    dim.tick(false, start);
+    let before = dim.level();
     // A backward "now" makes duration_since() error; the impl's `.ok()` collapses
     // dt to 0.
     let backward = start - Duration::from_millis(500);
-    let level = light.tick(true, backward);
+    let level = dim.tick(true, backward);
     assert!(
         (level - before).abs() < 1e-9,
         "backward clock jump moved level: before={before} after={level}"
@@ -492,9 +513,9 @@ fn light_backward_clock_jump_does_not_move_level() {
 
 #[test]
 fn light_snap_to_empty_forces_min_level() {
-    let mut light = LightingState::new();
-    light.snap_to_empty();
-    assert!((light.level() - LightingState::MIN_LEVEL).abs() < f32::EPSILON);
+    let mut dim = VacancyDim::new();
+    dim.snap_to_empty();
+    assert!((dim.level() - VacancyDim::MIN_LEVEL).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -580,12 +601,38 @@ fn transition_escapes_a_backward_clock_step() {
     );
 }
 
+/// One classic frame of `scene` at `now` through `session`'s entry.
+fn classic_frame(
+    session: &mut FloorSession,
+    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+    scene: &SceneState,
+    now: SystemTime,
+    floor: FloorMeta,
+    size: Size,
+) -> Option<Arc<crate::layout::SceneLayout>> {
+    session.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world: FloorInputs {
+                scene,
+                pack,
+                now,
+                floor,
+                pets: PetInputs::default(),
+            },
+            theme: crate::theme::theme_by_name("normal").expect("normal theme exists"),
+            size,
+            place: crate::look::Place::default(),
+            debug_walkable: false,
+        },
+    )
+}
+
 #[test]
-fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
+fn the_classic_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
     // slot.model/effort fails here while the unit-level paint test stays green.
-    let pack = crate::embedded_pack::test_default_pack();
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let pack = Arc::new(crate::pack::test_default_pack());
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
     let slot = scene.agents.values_mut().next().expect("one agent");
@@ -594,26 +641,14 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         "ultra".into(),
         now,
     ));
-    let mut fctx = FloorCtx::new();
-    let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-    let mut coffee = CoffeeState::new();
-    let mut chitchat = HashMap::new();
-    render_floor(
-        &mut fctx,
-        &mut buf,
-        &mut coffee,
-        &mut chitchat,
-        FrameInputs {
-            scene: &scene,
-            pack: &pack,
-            theme,
-            now,
-            size: Size { w: 192, h: 160 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
-            debug_walkable: false,
-        },
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    classic_frame(
+        &mut session,
+        &pack,
+        &scene,
+        now,
+        FloorMeta::ground(),
+        Size { w: 192, h: 160 },
     )
     .expect("layout");
     // Against the SAME scene with the crown's inputs cleared: the foreground's
@@ -624,28 +659,20 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     let slot = plain.agents.values_mut().next().expect("one agent");
     slot.model = None;
     slot.effort = None;
-    let mut fctx2 = FloorCtx::new();
-    let mut buf2 = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-    let mut coffee2 = CoffeeState::new();
-    let mut chitchat2 = HashMap::new();
-    render_floor(
-        &mut fctx2,
-        &mut buf2,
-        &mut coffee2,
-        &mut chitchat2,
-        FrameInputs {
-            scene: &plain,
-            pack: &pack,
-            theme,
-            now,
-            size: Size { w: 192, h: 160 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
-            debug_walkable: false,
-        },
+    let mut session2 = FloorSession::new(Arc::clone(&pack));
+    classic_frame(
+        &mut session2,
+        &pack,
+        &plain,
+        now,
+        FloorMeta::ground(),
+        Size { w: 192, h: 160 },
     )
     .expect("layout");
+    let (buf, buf2) = (
+        session.buf().expect("classic buffer"),
+        session2.buf().expect("classic buffer"),
+    );
     // What this pins is that model/effort REACH the painter through projection
     // and the sim/paint hop — not that the crown itself drew. The burn tier also
     // tints the sprite over the crown's own pixels, so no scoping of this diff
@@ -662,59 +689,40 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
 }
 
 #[test]
-fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
-    let pack = crate::embedded_pack::test_default_pack();
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+fn the_classic_paints_records_coffee_state_and_survives_a_tiny_buffer() {
+    let pack = Arc::new(crate::pack::test_default_pack());
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let scene = SceneState::new([8; MAX_FLOORS]);
-    let mut fctx = FloorCtx::new();
-    let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-    let mut coffee = CoffeeState::new();
-    let mut chitchat = HashMap::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
 
-    let none = render_floor(
-        &mut fctx,
-        &mut buf,
-        &mut coffee,
-        &mut chitchat,
-        FrameInputs {
-            scene: &scene,
-            pack: &pack,
-            theme,
-            now,
-            size: Size { w: 8, h: 8 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
-            debug_walkable: false,
-        },
+    let none = classic_frame(
+        &mut session,
+        &pack,
+        &scene,
+        now,
+        FloorMeta::ground(),
+        Size { w: 8, h: 8 },
     );
     assert!(none.is_none(), "an unlayoutable size returns None");
+    let buf = session.buf().expect("classic buffer");
     assert_eq!(
         (buf.width(), buf.height()),
         (8, 8),
         "the buffer was still sized"
     );
 
-    let layout = render_floor(
-        &mut fctx,
-        &mut buf,
-        &mut coffee,
-        &mut chitchat,
-        FrameInputs {
-            scene: &scene,
-            pack: &pack,
-            theme,
-            now,
-            size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
-            debug_walkable: false,
-        },
+    let layout = classic_frame(
+        &mut session,
+        &pack,
+        &scene,
+        now,
+        FloorMeta::ground(),
+        Size { w: 160, h: 96 },
     );
     assert!(layout.is_some(), "a layoutable size returns the layout");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let bg = theme.surface.bg_fallback;
+    let buf = session.buf().expect("classic buffer");
     assert!(
         buf.as_slice()
             .iter()
@@ -725,34 +733,35 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
 
 #[test]
 fn floor_session_render_owns_the_dual_eviction() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
-    let mut session = FloorSession::new();
-    session
-        .floor
-        .ctx
-        .motion
-        .insert(gone, MotionState::new(gone));
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
-    let layout = session.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
-        theme,
-        now,
-        size: Size { w: 160, h: 96 },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
-        debug_walkable: false,
-    });
+    let layout = session.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            theme,
+            size: Size { w: 160, h: 96 },
+            place: crate::look::Place::default(),
+            debug_walkable: false,
+        },
+    );
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
-        !session.floor.ctx.motion.contains_key(&gone),
-        "render() evicts the floor half (motion) — the floating-leak class"
+        !session.floor.ctx.walks.contains_key(&gone),
+        "render() evicts the floor half (walks) — the floating-leak class"
     );
     assert!(
         !session.office.coffee.map().contains_key(&gone),
@@ -764,7 +773,7 @@ fn floor_session_render_owns_the_dual_eviction() {
 fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     // `last_occupied` is the set the shared `AudioObserver` reads, so recording it
     // here is what lets a windowed painter avoid re-running the sim.
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
@@ -773,7 +782,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         slot.state_started_at = now0;
         slot.last_event_at = now0;
     }
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
     assert!(session.last_occupied.is_empty(), "empty before any render");
     // Requiring the FALL back to empty is the anti-stick tooth: an accumulating
     // `last_occupied` is monotone non-decreasing and can never produce it.
@@ -782,17 +791,22 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     for step in 0..600u64 {
         let now = now0 + Duration::from_secs(3 * step);
         let layout = session
-            .render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
-                theme,
-                now,
-                size: Size { w: 160, h: 96 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
-                debug_walkable: false,
-            })
+            .render(
+                crate::look::Look::Classic,
+                crate::look::RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w: 160, h: 96 },
+                    place: crate::look::Place::default(),
+                    debug_walkable: false,
+                },
+            )
             .expect("160x96 lays out");
         if session.last_occupied.is_empty() {
             if occupied_ever {
@@ -817,17 +831,22 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         fell_back_empty,
         "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
     );
-    let none = session.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
-        theme,
-        now: now0,
-        size: Size { w: 8, h: 8 },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
-        debug_walkable: false,
-    });
+    let none = session.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            theme,
+            size: Size { w: 8, h: 8 },
+            place: crate::look::Place::default(),
+            debug_walkable: false,
+        },
+    );
     assert!(none.is_none());
     assert!(
         session.last_occupied.is_empty(),
@@ -836,117 +855,121 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
 }
 
 #[test]
-fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
-    let pack = crate::embedded_pack::test_default_pack();
+fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
+    let pack = Arc::new(crate::pack::test_default_pack());
     let scene = make_scene(1, 8);
     let id = AgentId::from_transcript_path("/p/0.jsonl");
     let t = t0() + Duration::from_millis(100); // 100ms in: entry walk in flight
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
 
     let frame = session
-        .observe(
-            &scene,
-            &pack,
+        .step(
+            crate::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t,
+                floor: FloorMeta::ground(),
+                pets: crate::floor::PetInputs::default(),
+            },
             Size { w: 160, h: 96 },
-            FloorMeta::ground(),
-            t,
         )
-        .expect("a layoutable size observes")
+        .expect("a layoutable size steps")
         .frame;
     assert!(
         frame.poses.contains_key(&id),
         "the frame carries the agent's routed pose"
     );
     assert!(
-        session.floor.ctx.motion.contains_key(&id),
-        "the sim advanced: the entry leg was snapshotted into motion"
+        session.floor.ctx.walks.contains_key(&id),
+        "the sim advanced: the entry leg was snapshotted into walks"
     );
     assert!(
         session.floor.ctx.door_anim_max_ms > 0,
         "the epilogue ran headlessly: the in-flight entry drives the door clamp"
     );
-    assert_eq!(
-        (session.buf().width(), session.buf().height()),
-        (0, 0),
-        "no pixel buffer was bought"
-    );
+    assert!(session.buf().is_none(), "no pixel buffer was bought");
 
     assert!(
         session
-            .observe(&scene, &pack, Size { w: 8, h: 8 }, FloorMeta::ground(), t)
+            .step(
+                crate::floor::FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: t,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default()
+                },
+                Size { w: 8, h: 8 }
+            )
             .is_none(),
-        "an unlayoutable size observes nothing"
+        "an unlayoutable size steps nothing"
     );
 }
 
-/// `observe` hands back the memoized layout itself, not an equal copy.
+/// `step` hands back the memoized layout itself, not an equal copy.
 #[test]
-fn observe_hands_back_the_layout_the_sim_stepped_on() {
-    let pack = crate::embedded_pack::test_default_pack();
+fn step_hands_back_the_layout_the_sim_stepped_on() {
+    let pack = Arc::new(crate::pack::test_default_pack());
     let scene = make_scene(1, 8);
     let size = Size { w: 160, h: 96 };
     let meta = FloorMeta::ground();
-    let mut session = FloorSession::new();
-    let observed = session
-        .observe(&scene, &pack, size, meta, t0())
-        .expect("a layoutable size observes");
+    let mut session = FloorSession::new(Arc::clone(&pack));
     let stepped = session
+        .step(
+            crate::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t0(),
+                floor: meta,
+                pets: crate::floor::PetInputs::default(),
+            },
+            size,
+        )
+        .expect("a layoutable size steps");
+    let memoized = session
         .floor
         .ctx
         .frame_layout(size.w, size.h, meta.floor_seed)
         .expect("the memoized layout");
-    assert!(Arc::ptr_eq(&observed.layout, &stepped));
+    assert!(Arc::ptr_eq(&stepped.layout, &memoized));
+}
+
+/// A painter steps one floor through its projected scene, which holds no
+/// other floor's agents: their coffee must outlive it.
+#[test]
+fn stepping_a_projected_floor_keeps_other_floors_coffee() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let scene = make_scene(17, 16);
+    let downstairs = AgentId::from_transcript_path("/p/0.jsonl");
+    assert_eq!(scene.agents[&downstairs].floor_idx, 0);
+    let mut office = PerOffice::new();
+    office.coffee.insert(downstairs, t0());
+    let mut upstairs = PerFloor::new(Arc::clone(&pack));
+    let projected = project_floor_scene(&scene, 1);
+    let stepped = step_floor(
+        &mut upstairs.ctx,
+        &mut office.coffee,
+        &mut office.chitchat,
+        crate::floor::FloorInputs {
+            scene: &projected,
+            pack: &pack,
+            now: t0(),
+            floor: FloorMeta::for_floor(1, num_floors(&scene)),
+            pets: crate::floor::PetInputs::default(),
+        },
+        Size { w: 160, h: 96 },
+    );
+    assert!(stepped.is_some());
+    assert!(office.coffee.map().contains_key(&downstairs));
 }
 
 #[test]
 fn session_types_default_equals_new() {
-    assert_eq!(PerFloor::default().ctx.door_anim_max_ms, 0);
-    assert_eq!(
-        (
-            PerFloor::default().buf.width(),
-            PerFloor::default().buf.height()
-        ),
-        (0, 0)
-    );
+    let floor = PerFloor::new(Arc::new(crate::pack::test_default_pack()));
+    assert_eq!(floor.ctx.door_anim_max_ms, 0);
+    assert!(floor.raster.pixels().is_none());
     assert!(PerOffice::default().coffee.map().is_empty());
     assert!(PerOffice::default().chitchat.is_empty());
-    let s = FloorSession::default();
-    assert!(s.floor.ctx.motion.is_empty());
-    assert!(s.office.coffee.map().is_empty());
-}
-
-#[test]
-fn reset_frame_cache_clears_cached_sprites() {
-    use crate::frame_cache::FrameKey;
-    use pixtuoid_core::{sprite::Frame, AgentId};
-
-    let mut s = FloorSession::new();
-    // Prime the cache, so the assertion below distinguishes a real reset from a
-    // no-op on an already-empty cache.
-    s.floor.ctx.cache.get_or_make(
-        FrameKey {
-            agent_id: AgentId::from_parts("test", "agent"),
-            anim_name: "idle",
-            frame_idx: 0,
-            flip_x: false,
-            glow_tint: None,
-            burn: crate::burn::BurnTier::Normal,
-            density: std::num::NonZeroU16::MIN,
-        },
-        Frame::default,
-    );
-    assert_eq!(
-        s.floor.ctx.cache.len(),
-        1,
-        "priming must populate the cache"
-    );
-
-    s.reset_frame_cache();
-    assert_eq!(
-        s.floor.ctx.cache.len(),
-        0,
-        "reset must clear a populated cache"
-    );
 }
 
 #[test]
@@ -955,8 +978,8 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let scene = make_scene(4, 16);
     let occupied = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
-    let frame = obs.frame(&scene, &occupied, |_| None, 0, now);
-    let precip = crate::pixel_painter::precipitation_level(now);
+    let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
+    let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
         crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
@@ -965,7 +988,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     assert_eq!(
         frame.track,
         crate::audio::select_track(
-            crate::pixel_painter::is_day_at(now),
+            crate::sky::is_day_at(now),
             precip,
             crate::audio::track_epoch(now),
         ),
@@ -980,13 +1003,19 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
     let printer = |i: usize| (i == 0 || i == 1).then_some(crate::layout::WaypointKind::Printer);
     let mut obs = AudioObserver::new();
 
-    let _ = obs.frame(&scene, &std::collections::HashSet::new(), printer, 0, now);
+    let _ = obs.frame(
+        &scene,
+        &std::collections::HashSet::new(),
+        printer,
+        FloorMeta::ground(),
+        now,
+    );
     assert_eq!(obs.primed_floor(), Some(0));
 
     // Switch to floor 1 with an appliance ALREADY occupied — this would fire
     // PrinterWhir without the reprime.
     let occ0: std::collections::HashSet<usize> = [0usize].into_iter().collect();
-    let switch = obs.frame(&scene, &occ0, printer, 1, now);
+    let switch = obs.frame(&scene, &occ0, printer, FloorMeta::for_floor(1, 2), now);
     assert_eq!(obs.primed_floor(), Some(1));
     assert!(
         switch.events.is_empty(),
@@ -994,7 +1023,7 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
     );
 
     let occ01: std::collections::HashSet<usize> = [0usize, 1usize].into_iter().collect();
-    let next = obs.frame(&scene, &occ01, printer, 1, now);
+    let next = obs.frame(&scene, &occ01, printer, FloorMeta::for_floor(1, 2), now);
     assert!(
         next.events.contains(&crate::audio::OneShot::PrinterWhir),
         "after the reprime, a newly occupied printer still fires"
@@ -1011,13 +1040,13 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     let occ = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
 
-    let _ = obs.frame(&empty, &occ, |_| None, 0, now);
-    let arrival = obs.frame(&one, &occ, |_| None, 0, now);
+    let _ = obs.frame(&empty, &occ, |_| None, FloorMeta::ground(), now);
+    let arrival = obs.frame(&one, &occ, |_| None, FloorMeta::ground(), now);
     assert!(
         arrival.events.contains(&crate::audio::OneShot::DoorChime),
         "an arrival chimes on the frame it happens"
     );
-    let resumed = obs.frame(&one, &occ, |_| None, 0, now);
+    let resumed = obs.frame(&one, &occ, |_| None, FloorMeta::ground(), now);
     assert!(
         !resumed.events.contains(&crate::audio::OneShot::DoorChime),
         "no volley on resume — the observer saw the agent while muted"
@@ -1038,36 +1067,27 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // The weather is picked per UTC slot, so the same two local hours land on
     // different weathers in different zones: pinned, the pair differs by the
     // clock alone.
-    let _weather = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
+    let clear = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Clear);
     let render = |now: SystemTime| {
-        let pack = crate::embedded_pack::test_default_pack();
-        let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+        let pack = Arc::new(crate::pack::test_default_pack());
         let scene = make_scene(6, 8);
-        let mut fctx = FloorCtx::new();
-        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-        let mut coffee = CoffeeState::new();
-        let mut chitchat = HashMap::new();
-        render_floor(
-            &mut fctx,
-            &mut buf,
-            &mut coffee,
-            &mut chitchat,
-            FrameInputs {
-                scene: &scene,
-                pack: &pack,
-                theme,
-                now,
-                size: Size { w: 192, h: 160 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
-                debug_walkable: false,
-            },
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        classic_frame(
+            &mut session,
+            &pack,
+            &scene,
+            now,
+            FloorMeta::ground().with_weather(clear),
+            Size { w: 192, h: 160 },
         )
         .expect("layout");
-        buf
+        session
     };
-    let (noon, night) = (render(at_hour(12)), render(at_hour(2)));
+    let (noon_session, night_session) = (render(at_hour(12)), render(at_hour(2)));
+    let (noon, night) = (
+        noon_session.buf().expect("classic buffer"),
+        night_session.buf().expect("classic buffer"),
+    );
     let (w, h) = (noon.width(), noon.height());
     let frozen = |x: u16, y: u16| noon.get(x, y) == night.get(x, y);
     // CLUSTERED, not counted. Two different blends can round to one u8, so a few
@@ -1115,7 +1135,7 @@ fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::Office
 const ROOM_LIT: bool = false;
 const ROOM_DIMMED: bool = true;
 /// A live painter's frame tick — well under the shortest stutter flash.
-const FRAME: Duration = Duration::from_millis(33);
+const FRAME: Duration = Duration::from_millis(1000 / crate::anim::PAINT_FPS as u64);
 
 #[test]
 fn neon_first_tick_snaps_to_the_mood() {
@@ -1126,7 +1146,11 @@ fn neon_first_tick_snaps_to_the_mood() {
         (neon_mood(0, 0, 0), ROOM_DIMMED, NeonLevels::EMPTY),
         (neon_mood(0, 0, 0), ROOM_LIT, NeonLevels::CALM),
     ] {
-        assert_eq!(NeonState::new().tick(mood, room, t0()), want, "{mood:?}");
+        assert_eq!(
+            NeonState::new().tick(mood, room, Motion::Full.timing(t0())),
+            want,
+            "{mood:?}"
+        );
     }
 }
 
@@ -1134,23 +1158,19 @@ fn neon_first_tick_snaps_to_the_mood() {
 /// to a bit-exact 1.0, so the sign reads the room's VERDICT, not its level.
 #[test]
 fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
-    let mut light = LightingState::new();
+    let mut dim = VacancyDim::new();
     let mut neon = NeonState::new();
     let mut now = t0();
     let mut run = |empty: bool, mood: crate::board::OfficeMood, ms: u64| {
         let mut last = NeonLevels::CALM;
         for _ in 0..ms / FRAME.as_millis() as u64 {
             now += FRAME;
-            light.tick(empty, now);
-            last = neon.tick(mood, light.dimmed(), now);
+            dim.tick(empty, now);
+            last = neon.tick(mood, dim.dimmed(), Motion::Full.timing(now));
         }
-        (last, light.level())
+        (last, dim.level())
     };
-    let (starved, _) = run(
-        true,
-        neon_mood(0, 0, 0),
-        LightingState::EMPTY_DEBOUNCE_MS * 3,
-    );
+    let (starved, _) = run(true, neon_mood(0, 0, 0), VacancyDim::EMPTY_DEBOUNCE_MS * 3);
     assert_eq!(starved, NeonLevels::EMPTY);
     let (_, level) = run(false, neon_mood(2, 0, 0), 60_000);
     assert!(level < 1.0, "the premise: the f32 ease stalls short of 1.0");
@@ -1162,25 +1182,25 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
 /// The `--empty` still: one tick after the snap must still judge the floor empty.
 #[test]
 fn light_snap_to_empty_survives_its_first_tick_and_reads_dimmed() {
-    let mut light = LightingState::new();
-    light.snap_to_empty();
-    assert!(light.dimmed());
-    let level = light.tick(true, t0());
-    assert_eq!(level, LightingState::MIN_LEVEL);
-    assert!(light.dimmed(), "the debounce was back-dated, not re-armed");
-    light.tick(false, t0() + FRAME);
-    assert!(!light.dimmed(), "and a populated floor clears it");
+    let mut dim = VacancyDim::new();
+    dim.snap_to_empty();
+    assert!(dim.dimmed());
+    let level = dim.tick(true, t0());
+    assert_eq!(level, VacancyDim::MIN_LEVEL);
+    assert!(dim.dimmed(), "the debounce was back-dated, not re-armed");
+    dim.tick(false, t0() + FRAME);
+    assert!(!dim.dimmed(), "and a populated floor clears it");
 }
 
 #[test]
 fn light_is_dimmed_exactly_once_the_debounce_runs_out() {
-    let mut light = LightingState::new();
-    let debounce = Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS);
-    light.tick(true, t0());
-    light.tick(true, t0() + debounce - Duration::from_millis(1));
-    assert!(!light.dimmed());
-    light.tick(true, t0() + debounce);
-    assert!(light.dimmed());
+    let mut dim = VacancyDim::new();
+    let debounce = Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS);
+    dim.tick(true, t0());
+    dim.tick(true, t0() + debounce - Duration::from_millis(1));
+    assert!(!dim.dimmed());
+    dim.tick(true, t0() + debounce);
+    assert!(dim.dimmed());
 }
 
 #[test]
@@ -1188,28 +1208,28 @@ fn neon_eases_into_a_new_mood_and_lands_on_it() {
     let mut neon = NeonState::new();
     let fade = Duration::from_millis(NeonState::FADE_MS as u64);
     let alert = neon_mood(2, 1, 0);
-    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, t0());
+    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, Motion::Full.timing(t0()));
     let changed = t0() + FRAME;
-    let first = neon.tick(alert, ROOM_LIT, changed);
+    let first = neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed));
     assert_eq!(
         first,
         NeonLevels::BUSY,
         "the change frame still shows the old mood"
     );
-    let mid = neon.tick(alert, ROOM_LIT, changed + fade / 2);
+    let mid = neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed + fade / 2));
     assert!(
         mid.alert > NeonLevels::BUSY.alert && mid.alert < NeonLevels::ALERT.alert,
         "mid-fade alert is between the moods: {mid:?}"
     );
     // Not `fade - 1ms`: an ease-out's last millisecond rounds to the target in f32.
-    let late = neon.tick(alert, ROOM_LIT, changed + fade * 3 / 4);
+    let late = neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed + fade * 3 / 4));
     assert_ne!(
         late,
         NeonLevels::ALERT,
         "still crossing over late in the fade"
     );
     assert_eq!(
-        neon.tick(alert, ROOM_LIT, changed + fade),
+        neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed + fade)),
         NeonLevels::ALERT
     );
 }
@@ -1221,24 +1241,32 @@ fn neon_snaps_when_its_last_light_is_older_than_a_fade() {
     let fade = Duration::from_millis(NeonState::FADE_MS as u64);
     let (calm, busy) = (neon_mood(0, 0, 1), neon_mood(3, 0, 0));
     let mut fresh = NeonState::new();
-    fresh.tick(calm, ROOM_LIT, t0());
+    fresh.tick(calm, ROOM_LIT, Motion::Full.timing(t0()));
     assert_eq!(
-        fresh.tick(busy, ROOM_LIT, t0() + fade),
+        fresh.tick(busy, ROOM_LIT, Motion::Full.timing(t0() + fade)),
         NeonLevels::CALM,
         "fades"
     );
     let mut stale = NeonState::new();
-    stale.tick(calm, ROOM_LIT, t0());
+    stale.tick(calm, ROOM_LIT, Motion::Full.timing(t0()));
     let later = t0() + fade + Duration::from_millis(1);
-    assert_eq!(stale.tick(busy, ROOM_LIT, later), NeonLevels::BUSY, "snaps");
+    assert_eq!(
+        stale.tick(busy, ROOM_LIT, Motion::Full.timing(later)),
+        NeonLevels::BUSY,
+        "snaps"
+    );
 }
 
 #[test]
 fn neon_ignores_a_count_change_within_a_mood() {
     let mut neon = NeonState::new();
-    neon.tick(neon_mood(0, 2, 0), ROOM_LIT, t0());
+    neon.tick(neon_mood(0, 2, 0), ROOM_LIT, Motion::Full.timing(t0()));
     assert_eq!(
-        neon.tick(neon_mood(0, 3, 0), ROOM_LIT, t0() + FRAME),
+        neon.tick(
+            neon_mood(0, 3, 0),
+            ROOM_LIT,
+            Motion::Full.timing(t0() + FRAME)
+        ),
         NeonLevels::ALERT
     );
 }
@@ -1246,11 +1274,19 @@ fn neon_ignores_a_count_change_within_a_mood() {
 #[test]
 fn neon_reversing_mid_fade_starts_from_the_current_light() {
     let mut neon = NeonState::new();
-    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0());
+    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(t0()));
     let half = Duration::from_millis(NeonState::FADE_MS as u64 / 2);
-    neon.tick(neon_mood(0, 1, 3), ROOM_LIT, t0());
-    let mid = neon.tick(neon_mood(0, 1, 3), ROOM_LIT, t0() + half);
-    let reversed = neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0() + half);
+    neon.tick(neon_mood(0, 1, 3), ROOM_LIT, Motion::Full.timing(t0()));
+    let mid = neon.tick(
+        neon_mood(0, 1, 3),
+        ROOM_LIT,
+        Motion::Full.timing(t0() + half),
+    );
+    let reversed = neon.tick(
+        neon_mood(0, 0, 3),
+        ROOM_LIT,
+        Motion::Full.timing(t0() + half),
+    );
     assert_eq!(
         reversed, mid,
         "the reversal frame holds the light it interrupted"
@@ -1260,11 +1296,19 @@ fn neon_reversing_mid_fade_starts_from_the_current_light() {
 #[test]
 fn neon_holds_on_a_backward_clock() {
     let mut neon = NeonState::new();
-    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, t0() + Duration::from_secs(5));
-    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0() + Duration::from_secs(5));
+    neon.tick(
+        neon_mood(2, 0, 0),
+        ROOM_LIT,
+        Motion::Full.timing(t0() + Duration::from_secs(5)),
+    );
+    neon.tick(
+        neon_mood(0, 0, 3),
+        ROOM_LIT,
+        Motion::Full.timing(t0() + Duration::from_secs(5)),
+    );
     let earlier = t0() + Duration::from_secs(1);
     assert_eq!(
-        neon.tick(neon_mood(0, 0, 3), ROOM_LIT, earlier),
+        neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(earlier)),
         NeonLevels::BUSY
     );
 }
@@ -1281,7 +1325,16 @@ fn starved_cycle(step: Duration) -> Vec<(u64, NeonLevels)> {
     let empty = neon_mood(0, 0, 0);
     (0..NeonState::STUTTER_MS)
         .step_by(step.as_millis() as usize)
-        .map(|ms| (ms, neon.tick(empty, ROOM_DIMMED, in_stutter_cycle(ms))))
+        .map(|ms| {
+            (
+                ms,
+                neon.tick(
+                    empty,
+                    ROOM_DIMMED,
+                    Motion::Full.timing(in_stutter_cycle(ms)),
+                ),
+            )
+        })
         .collect()
 }
 
@@ -1300,21 +1353,129 @@ fn neon_a_starved_tube_flashes_inside_its_windows_and_only_there() {
     }
 }
 
-/// A flash shorter than the frame gap can't be drawn: a still (one tick) and the
-/// floating window's ambient cadence get the steady tube, never a held flash.
+/// Calm plays every loop slower, the stutter too: an empty, dimmed sign
+/// repainted at Calm's cadence flashes within one stutter cycle of its loop
+/// time.
+#[test]
+fn neon_a_starved_tube_stutters_at_the_calm_pace() {
+    use crate::anim::{CALM_TICK_MS, FULL_TICK_MS};
+    let mut neon = NeonState::new();
+    let repaints = NeonState::STUTTER_MS / FULL_TICK_MS;
+    let flashed = (0..=repaints)
+        .map(|n| {
+            let at = in_stutter_cycle(0) + Duration::from_millis(n * CALM_TICK_MS);
+            neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Calm.timing(at))
+        })
+        .any(|levels| levels == NeonLevels::FLASH);
+    assert!(flashed, "the stutter never played at Calm");
+}
+
+/// On every moving tier, ticked at a live painter's [`FRAME`], a starved tube
+/// catches on exactly the frames whose loop time lies in a window, and each
+/// catch and each dark between, timed in loop time from its first frame to
+/// the next's, lasts at least the photosensitive floor, across the cycle's
+/// wrap too.
+#[test]
+fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
+    const CYCLES: u64 = 2;
+    for motion in Motion::ALL {
+        let Some(pace) = motion.pace() else {
+            continue;
+        };
+        let mut neon = NeonState::new();
+        let mut runs: Vec<(bool, u64)> = Vec::new();
+        let frames = CYCLES * NeonState::STUTTER_MS * pace / FRAME.as_millis() as u64;
+        for n in 0..frames {
+            let timing = motion.timing(in_stutter_cycle(0) + FRAME * n as u32);
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing) == NeonLevels::FLASH;
+            let loop_ms = timing.beat.ms();
+            let in_window = NeonState::STUTTER_FLASHES_MS
+                .iter()
+                .any(|&(start, end)| (start..end).contains(&(loop_ms % NeonState::STUTTER_MS)));
+            // The first frame has no step to be drawn across.
+            if n > 0 {
+                assert_eq!(lit, in_window, "{motion:?} at {loop_ms} ms of loop time");
+            }
+            if runs.last().is_none_or(|&(was, _)| was != lit) {
+                runs.push((lit, loop_ms));
+            }
+        }
+        assert!(runs.iter().any(|&(lit, _)| lit), "{motion:?} never flashed");
+        // The first run opens with the frames, not with a catch or a dark.
+        for pair in runs[1..].windows(2) {
+            let ms = pair[1].1 - pair[0].1;
+            assert!(
+                ms >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS,
+                "{motion:?}: {runs:?}"
+            );
+        }
+    }
+}
+
+/// On every tier, ticked at a live painter's [`FRAME`], a starved tube
+/// flashes at most [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] times in any second
+/// of wall time.
+///
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
+#[test]
+fn neon_a_starved_tube_flashes_at_most_three_times_a_second() {
+    use crate::anim::{PHOTOSENSITIVE_FLASHES_PER_SECOND, most_flashes_in_a_second};
+    const CYCLES: u64 = 2;
+    let frame_ms = FRAME.as_millis() as u64;
+    for motion in Motion::ALL {
+        let mut neon = NeonState::new();
+        let span = CYCLES * NeonState::STUTTER_MS * motion.pace().unwrap_or(1);
+        let samples = (0..span / frame_ms).map(|n| {
+            let timing = motion.timing(in_stutter_cycle(0) + FRAME * n as u32);
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing) == NeonLevels::FLASH;
+            (n * frame_ms, if lit { 1.0 } else { 0.0 })
+        });
+        let most = most_flashes_in_a_second(samples);
+        assert!(
+            most <= PHOTOSENSITIVE_FLASHES_PER_SECOND,
+            "{motion:?}: {most}"
+        );
+        assert!(
+            motion == Motion::Still || most > 0,
+            "{motion:?} never flashed"
+        );
+    }
+}
+
+/// At rest a starved tube holds steady: no flash, for the photosensitive.
+#[test]
+fn neon_a_starved_tube_never_flashes_at_rest() {
+    let mut neon = NeonState::new();
+    for ms in (0..NeonState::STUTTER_MS).step_by(10) {
+        let timing = Motion::Still.timing(in_stutter_cycle(ms));
+        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing);
+        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms");
+    }
+}
+
+/// A painter stepping further than a flash can't draw it: a still (one tick)
+/// and the floating window's ambient cadence get the steady tube, never a
+/// held flash.
 #[test]
 fn neon_a_painter_slower_than_a_flash_never_shows_one() {
     let shortest = Duration::from_millis(NeonState::shortest_flash_ms());
-    for (ms, levels) in starved_cycle(shortest) {
-        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
+    let slower = shortest + Duration::from_millis(crate::anim::FULL_TICK_MS);
+    for (ms, levels) in starved_cycle(slower) {
+        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {slower:?} tick");
     }
-    let just_faster = shortest - Duration::from_millis(1);
-    assert!(starved_cycle(just_faster)
-        .iter()
-        .any(|(_, levels)| *levels == NeonLevels::FLASH));
+    assert!(
+        starved_cycle(shortest)
+            .iter()
+            .any(|(_, levels)| *levels == NeonLevels::FLASH),
+        "a painter stepping a flash at a time draws each"
+    );
     let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     assert_eq!(
-        NeonState::new().tick(neon_mood(0, 0, 0), ROOM_DIMMED, in_a_flash),
+        NeonState::new().tick(
+            neon_mood(0, 0, 0),
+            ROOM_DIMMED,
+            Motion::Full.timing(in_a_flash)
+        ),
         NeonLevels::EMPTY,
         "a still's single tick"
     );
@@ -1324,19 +1485,218 @@ fn neon_a_painter_slower_than_a_flash_never_shows_one() {
 fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     let flash_at = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     let mut lit = NeonState::new();
-    lit.tick(neon_mood(0, 0, 3), ROOM_LIT, flash_at - FRAME);
+    lit.tick(
+        neon_mood(0, 0, 3),
+        ROOM_LIT,
+        Motion::Full.timing(flash_at - FRAME),
+    );
     assert_eq!(
-        lit.tick(neon_mood(0, 0, 3), ROOM_LIT, flash_at),
+        lit.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(flash_at)),
         NeonLevels::CALM
     );
     let mut coasting = NeonState::new();
     let mut now = flash_at - Duration::from_millis(NeonState::FADE_MS as u64 / 2);
-    coasting.tick(neon_mood(2, 0, 0), ROOM_LIT, now - FRAME);
-    let mut last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, now);
+    coasting.tick(
+        neon_mood(2, 0, 0),
+        ROOM_LIT,
+        Motion::Full.timing(now - FRAME),
+    );
+    let mut last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(now));
     while now < flash_at {
         now += Duration::from_millis(10);
-        last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, now);
+        last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(now));
     }
     assert_ne!(last, NeonLevels::FLASH);
     assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
+}
+
+/// The classic looks out from its own floor.
+#[test]
+fn the_classic_sees_the_skyline_from_its_floors_altitude() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = make_scene(1, 8);
+    let render = |floor_meta: FloorMeta| {
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        classic_frame(
+            &mut session,
+            &pack,
+            &scene,
+            now,
+            floor_meta,
+            Size { w: 192, h: 160 },
+        )
+        .expect("layout");
+        session
+    };
+    let (ground_session, top_session) = (
+        render(FloorMeta::ground()),
+        render(FloorMeta {
+            altitude: 1.0,
+            ..FloorMeta::ground()
+        }),
+    );
+    let ground = ground_session.buf().expect("classic buffer");
+    let top = top_session.buf().expect("classic buffer");
+    assert!(
+        (0..ground.height())
+            .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))
+            .any(|(x, y)| ground.get(x, y) != top.get(x, y)),
+        "the top floor's windows show the ground floor's skyline"
+    );
+}
+
+/// An office with every ambient loop running at `t0`, long settled: a typist,
+/// a burning typist, a waiter and a wandering gateway mascot; at rest also
+/// idle sleepers, whose wander leaves the sim's walks for real time.
+fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::{DaemonInstanceId, EffortObservation, ToolKind};
+    let typing = || ActivityState::Active {
+        tool_use_id: None,
+        detail: None,
+        kind: ToolKind::Edit,
+    };
+    let settled = t0 - Duration::from_secs(3_600);
+    let n = if resting { 5 } else { 3 };
+    let mut scene = make_scene(n, 8);
+    for (i, slot) in scene.agents.values_mut().enumerate() {
+        slot.created_at = settled;
+        slot.state_started_at = settled;
+        slot.last_event_at = settled;
+        slot.state = match i {
+            0 | 1 => typing(),
+            2 => ActivityState::Waiting {
+                reason: Arc::from("ok?"),
+            },
+            _ => ActivityState::Idle,
+        };
+        if i == 1 {
+            slot.model = Some(Arc::from("claude-fable"));
+            slot.effort = Some(EffortObservation::new(Arc::from("max"), t0));
+        }
+    }
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        settled,
+    );
+    scene
+}
+
+/// Both looks' pixels for `scene` on `floor` at `now`, each from fresh
+/// stores so only the instant differs.
+fn both_painters(
+    scene: &SceneState,
+    floor: FloorMeta,
+    pet: Option<&Pet>,
+    now: SystemTime,
+) -> (Vec<Rgb>, Vec<Rgb>) {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let inputs = crate::look::RenderInputs {
+        world: FloorInputs {
+            scene,
+            pack: &pack,
+            now,
+            floor,
+            pets: PetInputs { pet, petting: None },
+        },
+        theme,
+        size: crate::layout::Size { w: 192, h: 80 },
+        place: crate::look::Place {
+            gateway: crate::board::office_gateway(scene),
+            floor: None,
+        },
+        debug_walkable: false,
+    };
+    let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
+    let [classic, cutaway_px] = [
+        crate::look::Look::Classic,
+        crate::look::Look::Cutaway { scale },
+    ]
+    .map(|look| {
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        session.render(look, inputs).expect("lays out");
+        session.buf().expect("a frame").as_slice().to_vec()
+    });
+    (classic, cutaway_px)
+}
+
+/// Every ambient loop either painter draws reads its floor's beat: two
+/// instants on one beat paint one frame, and at rest every instant does — no
+/// loop, wander or flash moves.
+#[test]
+fn both_painters_paint_one_frame_per_beat() {
+    use crate::anim::{CALM_TICK_MS, FULL_TICK_MS};
+    use crate::sky::{Weather, WeatherPolicy};
+    let cat = Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "cat".into(),
+    };
+    for (hour, weather) in [(23, Weather::Storm), (12, Weather::Clear)] {
+        // On every tier's tick: an hour is a whole number of beats.
+        let t0 = crate::localclock::at_hour(hour) + Duration::from_secs(5);
+        for (motion, later_ms) in [
+            (Motion::Full, FULL_TICK_MS - 1),
+            (Motion::Calm, CALM_TICK_MS - 1),
+            (Motion::Still, 3 * CALM_TICK_MS),
+        ] {
+            let resting = motion == Motion::Still;
+            let scene = ambient_office(t0, resting);
+            let floor = FloorMeta::ground()
+                .with_weather(WeatherPolicy::Forced(weather))
+                .with_motion(motion);
+            let pet = Some(&cat);
+            let (classic, cutaway_px) = both_painters(&scene, floor, pet, t0);
+            let later = both_painters(&scene, floor, pet, t0 + Duration::from_millis(later_ms));
+            assert!(
+                classic == later.0,
+                "{motion:?} {weather:?}: the classic moved"
+            );
+            assert!(
+                cutaway_px == later.1,
+                "{motion:?} {weather:?}: the cutaway moved"
+            );
+        }
+    }
+}
+
+/// The census above has teeth: the same office a beat on paints anew.
+#[test]
+fn a_full_beat_on_moves_both_painters() {
+    use crate::anim::FULL_TICK_MS;
+    let t0 = crate::localclock::at_hour(23) + Duration::from_secs(5);
+    let scene = ambient_office(t0, false);
+    let floor = FloorMeta::ground().with_motion(Motion::Full);
+    let (classic, cutaway_px) = both_painters(&scene, floor, None, t0);
+    let later = both_painters(
+        &scene,
+        floor,
+        None,
+        t0 + Duration::from_millis(FULL_TICK_MS),
+    );
+    assert!(classic != later.0, "the classic held still");
+    assert!(cutaway_px != later.1, "the cutaway held still");
+}
+
+/// The loop clock is closed-form, never accumulated: whatever renderer paints
+/// it, one instant on one tier is one frame.
+#[test]
+fn a_frame_is_a_function_of_its_instant_and_tier() {
+    let t = crate::localclock::at_hour(23) + Duration::from_millis(5_321);
+    let scene = ambient_office(t, false);
+    for motion in Motion::ALL {
+        let floor = FloorMeta::ground().with_motion(motion);
+        let (a, b) = (
+            both_painters(&scene, floor, None, t),
+            both_painters(&scene, floor, None, t),
+        );
+        assert!(a == b, "{motion:?}");
+    }
 }

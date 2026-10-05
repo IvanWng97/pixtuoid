@@ -1,21 +1,26 @@
 //! Render ONE frame of the `pixtuoid floating` office to a PNG — visual verification for
-//! the floating window. It drives the SAME `OfficeRenderer` and `paint_labels_into_surface`
-//! the live window uses, so the PNG is byte-faithful to what the window blits.
+//! the floating window. It drives the SAME `OfficeRenderer`, `XrgbSurface` upscale and
+//! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
 //!
 //! Usage:
-//!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]
-//! e.g. `... -- /tmp/floating.png 720x480 --agents 6` (Retina default), `... -- /tmp/f.png 360x240`.
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
+//! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
+//! `... -- /tmp/f.png 360x240`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{paint_labels_into_surface, OfficeRenderer};
+use pixtuoid::floating::offscreen::{
+    OfficeRenderer, XrgbSurface, paint_labels_into_surface, window_buffer_geometry,
+};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
+use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::theme::theme_by_name;
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
@@ -100,7 +105,11 @@ fn main() -> Result<()> {
         anyhow!("usage: floating_snapshot <out.png> [WxH] [--theme <name>] [--agents N]")
     })?;
 
-    let mut size = (720u16, 480u16); // Retina default (360x240 logical @2x)
+    const RETINA_SCALE_FACTOR: u32 = 2;
+    let mut size = (
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_W * RETINA_SCALE_FACTOR)?,
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_H * RETINA_SCALE_FACTOR)?,
+    );
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
     let rest: Vec<String> = args.collect();
@@ -136,41 +145,43 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )?;
+    let pack = std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
-    let mut renderer = OfficeRenderer::new();
-    // Mirror floating::window EXACTLY: render at window/SCALE, nearest-neighbor upscale into
-    // a `u32` surface, then blit the name badges — otherwise the PNG is not byte-faithful.
+    let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
-    let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
-    let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
-    let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
-    let buf = renderer.render(&scene, &pack, theme, now, ow, oh, FloorMeta::ground(), None);
-    let (bw, bh) = (buf.width() as u32, buf.height() as u32);
-
+    let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
+    let buf = renderer
+        .render(RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            theme,
+            size: Size { w: ow, h: oh },
+            place: pixtuoid_scene::look::Place::default(),
+            debug_walkable: false,
+        })
+        .expect("a frame");
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
-    for wy in 0..win_h {
-        let oy = (wy / scale).min(bh - 1);
-        for wx in 0..win_w {
-            let ox = (wx / scale).min(bw - 1);
-            let p = buf.as_slice()[(oy * bw + ox) as usize];
-            sb[wy as usize * ww + wx as usize] =
-                (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32;
-        }
-    }
-    let labels = renderer.labels(&scene, now);
-    paint_labels_into_surface(&mut sb, ww, wh, &labels, scale as i32, theme);
-    let board = renderer.board(&scene, now);
+    let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
+    surf.fill_upscaled(buf, scale as usize);
+    let (bw, bh) = (buf.width(), buf.height());
+    let labels = renderer.labels(&scene);
+    paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
+    let board = renderer.board(
+        &scene,
+        pixtuoid_scene::floor::FloorMeta::ground().motion,
+        now,
+    );
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
-        &mut sb,
-        ww,
-        wh,
+        &mut surf,
         &board,
         scale as i32,
         theme,
@@ -178,7 +189,7 @@ fn main() -> Result<()> {
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);
-    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut sb, ww, wh, &footer, theme);
+    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut surf, &footer, theme);
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {

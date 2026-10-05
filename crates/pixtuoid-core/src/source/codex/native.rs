@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{codex_home, codex_id_from_path, decode_codex_line, SOURCE_NAME};
+use super::{SOURCE_NAME, codex_home, codex_id_from_path, decode_codex_line};
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
@@ -75,6 +75,7 @@ fn codex_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBu
 }
 
 /// Source that watches the Codex session transcript directory.
+#[derive(Debug)]
 pub struct CodexSource {
     /// The watched Codex `sessions` rollout root (`~/.codex/sessions`).
     pub sessions_root: PathBuf,

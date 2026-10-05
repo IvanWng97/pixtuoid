@@ -1,19 +1,19 @@
-//! Anchor conventions: WHERE a furniture/decor box sits relative to its layout
+//! Pivot conventions: WHERE a furniture/decor box sits relative to its layout
 //! `pos`. Shared by the walkable mask (ground footprint rect) and the renderer
 //! (sprite blit origin + y-sort row), so the three representations of the same
 //! fact cannot drift.
 //!
-//! The anchor is a property of the PLACEMENT ROLE, not the furniture — so the
+//! The pivot is a property of the PLACEMENT ROLE, not the furniture — so the
 //! call site passes it explicitly rather than reading it off `FurnitureDef`.
 //! `Furniture::Whiteboard` proves why: it is `Center` as pod-aisle decor but
 //! `TopLeft` as a wall-hung board. One geometry row, two placement conventions —
-//! a single per-furniture anchor field could not represent both.
+//! a single per-furniture pivot field could not represent both.
 
-use super::{Point, Size};
+use super::{Bounds, Point, Size};
 
 /// How a `(w, h)` box is positioned relative to its `pos`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Anchor {
+pub enum Pivot {
     /// `pos` is the box CENTER. Top-left = `pos - size/2`; the y-sort row is the
     /// box's south (front) edge. Most furniture.
     Center,
@@ -25,29 +25,34 @@ pub enum Anchor {
 /// Top-left corner of a `(w, h)` box anchored at `pos`. Used for BOTH the mask
 /// footprint rect (pass the footprint size) and the sprite blit origin (pass the
 /// visual size), so blocked ground and painted sprite can't diverge.
-pub fn anchored_top_left(anchor: Anchor, pos: Point, w: u16, h: u16) -> Point {
-    match anchor {
-        Anchor::Center => Point {
+pub fn anchored_top_left(pivot: Pivot, pos: Point, w: u16, h: u16) -> Point {
+    match pivot {
+        Pivot::Center => Point {
             x: pos.x.saturating_sub(w / 2),
             y: pos.y.saturating_sub(h / 2),
         },
-        Anchor::TopLeft => pos,
+        Pivot::TopLeft => pos,
     }
 }
 
-/// Half-open AABB intersection of two `(top_left, size)` rects. Zero-sized rects
-/// overlap nothing.
-pub(super) fn rects_overlap(a: (Point, Size), b: (Point, Size)) -> bool {
-    let (at, asz) = a;
-    let (bt, bsz) = b;
-    asz.w > 0
-        && asz.h > 0
-        && bsz.w > 0
-        && bsz.h > 0
-        && at.x < bt.x + bsz.w
-        && bt.x < at.x + asz.w
-        && at.y < bt.y + bsz.h
-        && bt.y < at.y + asz.h
+/// The `size` box whose top-left is `tl`.
+pub(super) fn boxed(tl: Point, size: Size) -> Bounds {
+    Bounds {
+        x: tl.x,
+        y: tl.y,
+        width: size.w,
+        height: size.h,
+    }
+}
+
+/// A centre-pinned `size` box at `pos`.
+pub(super) fn centred(pos: Point, size: Size) -> Bounds {
+    boxed(anchored_top_left(Pivot::Center, pos, size.w, size.h), size)
+}
+
+/// [`Bounds::overlaps`] for two `(top_left, size)` rects.
+pub(super) fn rects_overlap((a, a_size): (Point, Size), (b, b_size): (Point, Size)) -> bool {
+    boxed(a, a_size).overlaps(boxed(b, b_size))
 }
 
 /// Does `probe` overlap `obstacle` grown by `clearance` px on every side? Callers
@@ -70,13 +75,19 @@ pub(super) fn overlaps_within_clearance(
     rects_overlap(probe, (grown_tl, grown))
 }
 
-/// The y-sort key for a sprite of height `h` anchored at `pos`: its south
-/// (front) base ROW. Derived from [`anchored_top_left`] so it can NEVER drift
+/// The sort row of a sprite of height `h` placed at `pos`: its south
+/// (front) base row. Derived from [`anchored_top_left`] so it can NEVER drift
 /// from where the sprite actually blits (`origin.y + h - 1`).
-pub fn z_sort_row(anchor: Anchor, pos: Point, h: u16) -> u16 {
-    anchored_top_left(anchor, pos, 0, h)
+pub fn sort_row_at(pivot: Pivot, pos: Point, h: u16) -> u16 {
+    anchored_top_left(pivot, pos, 0, h)
         .y
         .saturating_add(h.saturating_sub(1))
+}
+
+/// The centre `y` an [`Pivot::Center`] sprite `h` tall takes to stand on row
+/// `base`: [`sort_row_at`]'s inverse.
+pub(super) fn centre_y_standing_on(base: u16, h: u16) -> u16 {
+    (base + 1).saturating_sub(h - h / 2)
 }
 
 #[cfg(test)]
@@ -84,15 +95,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn z_sort_row_is_the_sprite_south_row_for_every_anchor() {
+    fn a_sprite_centred_to_stand_on_a_row_sorts_on_it() {
+        for h in 1u16..24 {
+            let base = 40;
+            let pos = Point {
+                x: 50,
+                y: centre_y_standing_on(base, h),
+            };
+            assert_eq!(sort_row_at(Pivot::Center, pos, h), base, "h={h}");
+        }
+    }
+
+    #[test]
+    fn sort_row_at_is_the_sprite_south_row_for_every_pivot() {
         let pos = Point { x: 50, y: 40 };
-        for &a in &[Anchor::Center, Anchor::TopLeft] {
+        for &p in &[Pivot::Center, Pivot::TopLeft] {
             for h in 1u16..24 {
-                let tl = anchored_top_left(a, pos, 8, h);
+                let tl = anchored_top_left(p, pos, 8, h);
                 assert_eq!(
-                    z_sort_row(a, pos, h),
+                    sort_row_at(p, pos, h),
                     tl.y + h - 1,
-                    "{a:?} h={h}: z-sort row must equal the box south row"
+                    "{p:?} h={h}: sort row must equal the box south row"
                 );
             }
         }
@@ -103,7 +126,7 @@ mod tests {
         let pos = Point { x: 30, y: 25 };
         for h in 1u16..24 {
             assert_eq!(
-                z_sort_row(Anchor::Center, pos, h),
+                sort_row_at(Pivot::Center, pos, h),
                 pos.y + (h - 1) / 2,
                 "h={h}"
             );
@@ -113,15 +136,15 @@ mod tests {
     #[test]
     fn topleft_origin_is_pos() {
         let pos = Point { x: 7, y: 9 };
-        assert_eq!(anchored_top_left(Anchor::TopLeft, pos, 14, 11), pos);
-        assert_eq!(z_sort_row(Anchor::TopLeft, pos, 11), pos.y + 10);
+        assert_eq!(anchored_top_left(Pivot::TopLeft, pos, 14, 11), pos);
+        assert_eq!(sort_row_at(Pivot::TopLeft, pos, 11), pos.y + 10);
     }
 
     #[test]
     fn center_origin_is_pos_minus_half() {
         let pos = Point { x: 40, y: 30 };
         assert_eq!(
-            anchored_top_left(Anchor::Center, pos, 8, 6),
+            anchored_top_left(Pivot::Center, pos, 8, 6),
             Point { x: 36, y: 27 }
         );
     }

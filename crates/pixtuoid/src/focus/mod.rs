@@ -98,15 +98,15 @@ pub(crate) fn resolve_pid(
         return None;
     }
     if let Some(cached) = slot.pid {
-        if let Some(stamped) = cached.started {
-            if table.start_time(cached.pid) != Some(stamped) {
-                tracing::debug!(
-                    agent = %slot.label,
-                    pid = cached.pid,
-                    "focus: refused — cached pid gone or recycled (start marker mismatch)"
-                );
-                return None;
-            }
+        if let Some(stamped) = cached.started
+            && table.start_time(cached.pid) != Some(stamped)
+        {
+            tracing::debug!(
+                agent = %slot.label,
+                pid = cached.pid,
+                "focus: refused — cached pid gone or recycled (start marker mismatch)"
+            );
+            return None;
         }
         return Some(cached.pid);
     }
@@ -177,11 +177,32 @@ pub(crate) fn focus_agent(
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{activate_os, OsProcessTable};
+pub(crate) use linux::{OsProcessTable, activate_os};
 #[cfg(target_os = "macos")]
-pub(crate) use macos::{activate_os, OsProcessTable};
+pub(crate) use macos::{OsProcessTable, activate_os};
 #[cfg(windows)]
-pub(crate) use windows::{activate_os, OsProcessTable};
+pub(crate) use windows::{OsProcessTable, activate_os};
+
+/// No focus glue on this OS: nothing is focusable, so every click is the
+/// module's silent no-op.
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub(crate) struct OsProcessTable;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+impl ProcessTable for OsProcessTable {
+    fn ppid(&self, _pid: i32) -> Option<i32> {
+        None
+    }
+
+    fn focusable(&self, _pid: i32) -> bool {
+        false
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub(crate) fn activate_os(_pid: i32) -> bool {
+    false
+}
 
 #[cfg(test)]
 mod tests {

@@ -15,6 +15,7 @@ use pixtuoid_core::source::{
 };
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
+#[derive(Debug)]
 pub(crate) struct Beat {
     pub at_ms: u64,
     pub transport: Transport,
@@ -172,6 +173,7 @@ pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)>
 /// deliberately NOT a [`Beat`]/`AgentEvent` (invariant #2: the one event
 /// channel is `AgentId`-pure) — these ride their own lane and land through the
 /// REAL `source::daemon::apply_presence` state machine.
+#[derive(Debug)]
 pub(crate) struct PresenceBeat {
     pub at_ms: u64,
     pub update: DaemonPresenceUpdate,
@@ -417,8 +419,8 @@ pub(crate) fn hero_script() -> Vec<Beat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_core::state::reducer::Reducer;
     use pixtuoid_core::state::SceneState;
+    use pixtuoid_core::state::reducer::Reducer;
     use std::time::{Duration, SystemTime};
 
     fn run_script_through_reducer(loops: u32) -> SceneState {
@@ -472,8 +474,10 @@ mod tests {
         for a in scene.agents.values() {
             let prefix = a.label.split('·').next().unwrap();
             assert!(
-                ["cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm", "gk", "rx", "om"]
-                    .contains(&prefix),
+                [
+                    "cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm", "gk", "rx", "om"
+                ]
+                .contains(&prefix),
                 "label {:?} must carry a registered source prefix",
                 a.label
             );

@@ -5,7 +5,7 @@ How a running coding-agent session becomes a moving sprite in the office.
 > This file is the **single source** for pixtuoid's architecture overview. It
 > renders on the website at [`/architecture`](https://pixtuoid.dev/architecture)
 > and on GitHub (the diagram below is native Mermaid). Contributor-level
-> detail lives in `CLAUDE.md` and the code's own doc comments.
+> detail lives in `AGENTS.md` and the code's own doc comments.
 
 ## The shape of it
 
@@ -16,25 +16,24 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
   reducer + scene state, the sprite format, the grid/walkable vocabulary. No
   terminal dependencies.
 - **`pixtuoid-scene`** — the backend-agnostic render + simulation **engine**:
-  the office world itself (`render_to_rgb_buffer`, layout, walk physics,
-  pose/motion/pathfinding, themes, pets). Terminal- AND window-free **by
+  the office world itself (`look::render`, layout, pose, walk
+  physics and pathfinding, themes, pets). Terminal- AND window-free **by
   crate boundary** — compiler-enforced, not just a lint.
 - **`pixtuoid`** — the binary: the CLI, the runtime wiring, and two thin
   painters over the engine — the TUI renderer and the floating desktop
   window.
 - **`pixtuoid-web`** — the third painter: a publish-excluded wasm crate
   rendering the same engine into a browser `<canvas>` (the site's live hero),
-  with core's async `native` runtime disabled so the pure decode/reduce core
-  compiles to wasm32.
+  with `native` (core's async runtime, disk pack reads) disabled so the pure
+  decode/reduce core compiles to wasm32.
 - **`pixtuoid-hook`** — a tiny shim your coding agent invokes per hook event:
   stdin JSON → a local IPC endpoint (Unix socket / named pipe), and it
   **always exits 0** so it can never block your agent.
 
 Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ←
-{pixtuoid, pixtuoid-web}`. The engine's render seam (`render_floor` /
-`render_to_rgb_buffer`) is the inversion point that keeps the core
-terminal-free — the same pixel pass drives the terminal, the desktop window,
-and the browser canvas.
+{pixtuoid, pixtuoid-web}`. The engine's frame entry (`look::render`) is the
+inversion point that keeps the core terminal-free — the same entry drives the
+terminal, the desktop window, and the browser canvas, in either look.
 
 A **`Source`** is an **Agent** — a transcript- or hook-bearing coding CLI
 whose events become a **desk sprite** — or a **Daemon** — a long-running
@@ -79,7 +78,7 @@ flowchart TB
   end
 
   subgraph scene["pixtuoid-scene (engine)"]
-    PX["render_to_rgb_buffer<br/>(desks + mascots)"]
+    PX["look::render<br/>(desks + mascots)"]
   end
 
   W --> TR --> PX --> FL
@@ -118,7 +117,7 @@ gateway route to distinct mascots; a daemon has no per-session pid, so
 
 ## Seams & invariants
 
-Load-bearing — see `CLAUDE.md` and the nested crate guides before changing:
+Load-bearing — see `AGENTS.md` and the nested crate guides before changing:
 
 - The **`Source` trait** is the only seam for a transcript-bearing agent CLI;
   per-source format knowledge lives in that source's own decoders. Hook-only
@@ -138,5 +137,5 @@ Load-bearing — see `CLAUDE.md` and the nested crate guides before changing:
 - **Configure it:** [`docs/CONFIGURATION.md`](CONFIGURATION.md) ·
   [live `/config`](https://pixtuoid.dev/config)
 - **Contribute:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- **Agent/contributor detail:** the workspace `CLAUDE.md` + the nested
-  per-crate `CLAUDE.md` files.
+- **Agent/contributor detail:** the workspace `AGENTS.md` + the nested
+  per-crate `AGENTS.md` files.

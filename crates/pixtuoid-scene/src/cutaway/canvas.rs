@@ -1,0 +1,1079 @@
+//! The cutaway painted into a buffer kept across frames: a frame whose display
+//! list matches the last one's is not painted at all, and one that differs is
+//! painted whole but reports where it can differ, so a painter re-encodes only
+//! there.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::format::Pack;
+
+use crate::cutaway::paint::paint;
+use crate::display::light::Ambient;
+use crate::display::{Hovers, Office, Showing, Span, compose};
+use crate::floor::SteppedFloor;
+use crate::layout::{Bounds, SceneLayout};
+use crate::render_scale::RenderScale;
+use crate::theme::Theme;
+
+/// A cutaway painter's frame buffer and what it shows, for one pack.
+#[derive(Debug)]
+pub struct CutawayCanvas {
+    // Held, so no other pack can take its place unnoticed.
+    pack: Arc<Pack>,
+    buf: RgbBuffer,
+    /// `None` until the first frame.
+    shown: Option<Shown>,
+}
+
+/// One frame from [`CutawayCanvas::frame`].
+#[derive(Debug)]
+pub struct CanvasFrame<'a> {
+    /// The whole frame, as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
+    /// paints it.
+    pub buf: &'a RgbBuffer,
+    /// Where it may differ from the canvas's previous frame.
+    pub dirty: Dirty,
+}
+
+/// Where a frame's pixels may differ from the frame before.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Dirty {
+    /// Anywhere.
+    All,
+    /// Only inside these, in buffer pixels on whole layout cells.
+    Rects(Rects),
+    /// Nowhere: the frame was not painted.
+    Unchanged,
+}
+
+/// The rects a frame may differ inside: never none, which is
+/// [`Dirty::Unchanged`], so a consumer that skips on it skips every unchanged
+/// frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rects(Vec<Bounds>);
+
+impl Rects {
+    /// Each rect, in buffer pixels on whole layout cells.
+    pub fn as_slice(&self) -> &[Bounds] {
+        &self.0
+    }
+}
+
+impl Dirty {
+    /// Only inside `rects`: [`Self::Unchanged`] when there are none.
+    pub fn within(rects: Vec<Bounds>) -> Self {
+        if rects.is_empty() {
+            Self::Unchanged
+        } else {
+            Self::Rects(Rects(rects))
+        }
+    }
+}
+
+/// What every pixel of a frame is painted under, beyond its display list and
+/// the canvas's pack.
+#[derive(Debug)]
+struct Epoch {
+    // Held, so a later layout cannot reuse its address.
+    layout: Arc<SceneLayout>,
+    // A static, so its address is its identity.
+    theme: &'static Theme,
+    scale: RenderScale,
+    ambient: Ambient,
+    carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
+    flash: crate::display::light::Flash,
+}
+
+impl PartialEq for Epoch {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.layout, &other.layout)
+            && std::ptr::eq(self.theme, other.theme)
+            && self.scale == other.scale
+            && self.ambient == other.ambient
+            && self.carpet == other.carpet
+            && self.flash == other.flash
+    }
+}
+
+#[derive(Debug)]
+struct Shown {
+    epoch: Epoch,
+    /// Every piece's reach and every light's span, each with its fingerprint.
+    footprints: Vec<(Span, u64)>,
+    hovers: Hovers,
+}
+
+impl CutawayCanvas {
+    /// A canvas that draws with `pack`.
+    pub fn new(pack: Arc<Pack>) -> Self {
+        Self {
+            pack,
+            buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
+            shown: None,
+        }
+    }
+
+    /// Paint `stepped` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
+    /// does, unless the frame would be the one already shown.
+    pub fn frame(
+        &mut self,
+        stepped: &SteppedFloor,
+        theme: &'static Theme,
+        scale: RenderScale,
+        showing: Showing<'_>,
+        cache: &mut crate::cutaway::paint::CutawayCache,
+    ) -> CanvasFrame<'_> {
+        let layout = &stepped.layout;
+        let office = Office {
+            layout,
+            pack: &self.pack,
+            theme,
+            scale,
+        };
+        let list = compose(&stepped.frame, office, showing);
+        let epoch = Epoch {
+            layout: Arc::clone(layout),
+            theme,
+            scale,
+            ambient: list.ambient(),
+            carpet: list.carpet(),
+            flash: list.flash(),
+        };
+        let footprints: Vec<(Span, u64)> = list
+            .pieces()
+            .iter()
+            .map(|p| (p.reach(), p.fingerprint))
+            .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
+            .collect();
+        let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+        let dirty = match self.shown.take() {
+            Some(shown) if shown.epoch == epoch => Dirty::within(
+                changed(&shown.footprints, &footprints)
+                    .into_iter()
+                    .filter_map(|s| on_buffer(s, scale, size))
+                    .collect(),
+            ),
+            _ => Dirty::All,
+        };
+        if dirty != Dirty::Unchanged {
+            if (self.buf.width(), self.buf.height()) != size {
+                self.buf = RgbBuffer::filled(size.0, size.1, theme.surface.bg_fallback);
+            }
+            paint(layout, &list, cache, &mut self.buf);
+        }
+        self.shown = Some(Shown {
+            epoch,
+            footprints,
+            hovers: list.hovers().clone(),
+        });
+        CanvasFrame {
+            buf: &self.buf,
+            dirty,
+        }
+    }
+
+    /// The last frame painted, empty before the first.
+    pub(crate) fn buf(&self) -> &RgbBuffer {
+        &self.buf
+    }
+
+    /// What the last frame answers a pointer with; `None` before the first.
+    pub(crate) fn hovers(&self) -> Option<&Hovers> {
+        self.shown.as_ref().map(|shown| &shown.hovers)
+    }
+}
+
+/// The spans of the footprints in `was` or `now` but not both, counting
+/// repeats; each once, in order.
+fn changed(was: &[(Span, u64)], now: &[(Span, u64)]) -> Vec<Span> {
+    let mut count: HashMap<(Span, u64), isize> = HashMap::new();
+    for &f in was {
+        *count.entry(f).or_default() += 1;
+    }
+    for &f in now {
+        *count.entry(f).or_default() -= 1;
+    }
+    was.iter()
+        .chain(now)
+        .filter_map(|f| {
+            let n = count.get_mut(f)?;
+            (std::mem::take(n) != 0).then_some(f.0)
+        })
+        .collect()
+}
+
+/// `span`'s cells in buffer pixels at `scale`, clipped to a `w`×`h` buffer;
+/// `None` where none of it is left.
+fn on_buffer(span: Span, scale: RenderScale, (w, h): (u16, u16)) -> Option<Bounds> {
+    let (x, y) = (
+        scale.to_buffer(span.x0).min(w),
+        scale.to_buffer(span.y0).min(h),
+    );
+    let x1 = scale.to_buffer(span.x1.saturating_add(1)).min(w);
+    let y1 = scale.to_buffer(span.y1.saturating_add(1)).min(h);
+    (x1 > x && y1 > y).then_some(Bounds {
+        x,
+        y,
+        width: x1 - x,
+        height: y1 - y,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use pixtuoid_core::AgentId;
+
+    use super::*;
+    use crate::anim::Motion;
+    use crate::cutaway::paint::render_cutaway;
+    use crate::display::compose::tests::{empty_frame, lively_office, sit_down};
+    use crate::display::{HoverTarget, PieceKind};
+    use crate::floor::FloorMeta;
+    use crate::pack::test_default_pack;
+    use crate::sim::SimFrame;
+
+    /// The ground floor under a clear sky: rain or snow on the glass moves
+    /// every tick, so the clock's weather would decide what a tick repaints.
+    fn clear_ground() -> FloorMeta {
+        FloorMeta::ground().with_weather(crate::sky::WeatherPolicy::Forced(
+            crate::sky::Weather::Clear,
+        ))
+    }
+
+    /// How a run of frames through a canvas was reported.
+    #[derive(Debug, Default)]
+    struct Run {
+        skipped: usize,
+        partial: usize,
+        whole: usize,
+        /// Pixels that changed outside what diffing by span, not reach, reports.
+        missed_by_span: usize,
+    }
+
+    fn normal() -> &'static Theme {
+        crate::theme::theme_by_name("normal").expect("theme")
+    }
+
+    /// `layout`'s full render of `frame` on `floor` at `now`, under the normal
+    /// theme.
+    fn full_render(
+        layout: &SceneLayout,
+        pack: &Pack,
+        scale: RenderScale,
+        (frame, floor): (&SimFrame, FloorMeta),
+        now: SystemTime,
+    ) -> RgbBuffer {
+        let theme = normal();
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        let office = Office {
+            layout,
+            pack,
+            theme,
+            scale,
+        };
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        render_cutaway(
+            frame,
+            office,
+            crate::display::compose::tests::showing(floor, now),
+            &mut cache,
+            &mut buf,
+        );
+        buf
+    }
+
+    /// Drive `steps` through one canvas beside a full render of each, at the
+    /// pack's densest scale: every frame it shows, painted or skipped, is the
+    /// full render, and every pixel two full renders in a row differ in lies in
+    /// what it reported.
+    fn run(layout: SceneLayout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
+        run_under(layout, pack, steps, clear_ground())
+    }
+
+    /// [`run`] on `floor`, under its weather.
+    fn run_under(
+        layout: SceneLayout,
+        pack: Pack,
+        steps: &[(SimFrame, SystemTime)],
+        floor: FloorMeta,
+    ) -> Run {
+        let (layout, pack) = (Arc::new(layout), Arc::new(pack));
+        let theme = normal();
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let w = scale.to_buffer(layout.buf_w);
+        let inside = |rects: &[Bounds], i: usize| {
+            let (x, y) = ((i % usize::from(w)) as u16, (i / usize::from(w)) as u16);
+            rects
+                .iter()
+                .any(|r| (r.x..r.x + r.width).contains(&x) && (r.y..r.y + r.height).contains(&y))
+        };
+        let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let mut tally = Run::default();
+        let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
+        for (k, (frame, now)) in steps.iter().enumerate() {
+            let full = full_render(&layout, &pack, scale, (frame, floor), *now);
+            let list = compose(
+                frame,
+                office,
+                crate::display::compose::tests::showing(floor, *now),
+            );
+            let spans: Vec<(Span, u64)> = list
+                .pieces()
+                .iter()
+                .map(|p| (p.span, p.fingerprint))
+                .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
+                .collect();
+            let stepped = SteppedFloor {
+                layout: Arc::clone(&layout),
+                frame: frame.clone(),
+            };
+            let shown = canvas.frame(
+                &stepped,
+                theme,
+                scale,
+                crate::display::compose::tests::showing(floor, *now),
+                &mut cache,
+            );
+            assert!(
+                shown.buf.as_slice() == full.as_slice(),
+                "step {k}: the canvas shows other than the full render ({:?})",
+                shown.dirty
+            );
+            if let Some((before, was_spans)) = &last {
+                let differ: Vec<usize> = (0..full.as_slice().len())
+                    .filter(|&i| before.as_slice()[i] != full.as_slice()[i])
+                    .collect();
+                let rects = match &shown.dirty {
+                    Dirty::All => None,
+                    Dirty::Rects(rects) => Some(rects.as_slice()),
+                    Dirty::Unchanged => Some(&[][..]),
+                };
+                match rects {
+                    None => tally.whole += 1,
+                    Some(rects) => {
+                        if rects.is_empty() {
+                            tally.skipped += 1;
+                        } else {
+                            tally.partial += 1;
+                        }
+                        assert_eq!(
+                            differ.iter().find(|&&i| !inside(rects, i)),
+                            None,
+                            "step {k}: a pixel changed outside {rects:?}"
+                        );
+                        let by_span: Vec<Bounds> = changed(was_spans, &spans)
+                            .into_iter()
+                            .filter_map(|s| on_buffer(s, scale, (w, scale.to_buffer(layout.buf_h))))
+                            .collect();
+                        tally.missed_by_span +=
+                            differ.iter().filter(|&&i| !inside(&by_span, i)).count();
+                    }
+                }
+            }
+            last = Some((full, spans));
+        }
+        tally
+    }
+
+    /// `n` instants a frame tick apart from `start`.
+    fn ticks(start: SystemTime, n: u64) -> impl Iterator<Item = SystemTime> {
+        (0..n).map(move |i| start + Duration::from_millis(100 * i))
+    }
+
+    /// A walk to a desk and the sit, at noon when shadows are deepest. Diffing
+    /// by span instead of reach misses where the walker's shadow moved, so the
+    /// walk proves the reach is needed.
+    #[test]
+    fn a_walk_repaints_only_where_it_moves() {
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 4);
+        let steps: Vec<_> = frames
+            .into_iter()
+            .zip(ticks(crate::localclock::at_hour(12), u64::MAX))
+            .collect();
+        let tally = run(layout, pack, &steps);
+        assert!(tally.partial > 0, "{tally:?}");
+        assert!(
+            tally.missed_by_span > 0,
+            "diffing by span missed no shadow, so the reach goes untested: {tally:?}"
+        );
+    }
+
+    /// From afternoon into night, ten minutes a step, the room's tone moves
+    /// with the hour and the weather, repainting the whole frame; the steps
+    /// between move only the sky and the lights.
+    #[test]
+    fn each_change_of_the_rooms_tone_repaints_the_whole_frame() {
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let seated = frames.last().expect("a seated frame");
+        let steps: Vec<_> = (0..36)
+            .map(|i| {
+                (
+                    seated.clone(),
+                    crate::localclock::at_hour_min(16 + i / 6, (i % 6) * 10),
+                )
+            })
+            .collect();
+        let tally = run(layout, pack, &steps);
+        assert!(tally.whole > 0 && tally.partial > 0, "{tally:?}");
+    }
+
+    /// A storm's strike, a tick apart through its phases: each change of the
+    /// flash repaints the whole frame, and the canvas shows the full render.
+    #[test]
+    fn each_phase_of_a_strike_repaints_the_whole_frame() {
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let seated = frames.last().expect("a seated frame");
+        let storm = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Storm);
+        let strike = (0..60_000u64)
+            .step_by(10)
+            .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
+            .find(|&t| crate::sky::Sky::at(Motion::Full.timing(t), storm).flash() > 0.0)
+            .expect("a strike in the first minute");
+        let steps: Vec<_> = ticks(strike - Duration::from_millis(200), 8)
+            .map(|t| (seated.clone(), t))
+            .collect();
+        let tally = run_under(
+            layout,
+            pack,
+            &steps,
+            FloorMeta::ground().with_weather(storm),
+        );
+        assert!(tally.whole >= 2, "{tally:?}");
+    }
+
+    /// The elevator opening, the sign fading up to alert and both appliances
+    /// busy, a tick apart.
+    #[test]
+    fn what_plays_repaints_only_where_it_plays() {
+        let layout = lively_office();
+        let quiet = empty_frame(&layout);
+        let steps: Vec<_> = ticks(crate::localclock::at_hour(21), 30)
+            .enumerate()
+            .map(|(i, now)| {
+                let frame = SimFrame {
+                    door_frame: i.min(5) / 2,
+                    neon: crate::floor::NeonLevels {
+                        alert: (i as f32 / 20.0).min(1.0),
+                        ..crate::floor::NeonLevels::CALM
+                    },
+                    occupied_waypoints: (0..layout.waypoints.len()).collect(),
+                    ..quiet.clone()
+                };
+                (frame, now)
+            })
+            .collect();
+        let tally = run(layout, test_default_pack(), &steps);
+        assert!(tally.partial > 0, "{tally:?}");
+    }
+
+    /// An office with nobody in it skips the ticks on which nothing it shows
+    /// moves, and reports only where the sign breathes or a loop plays on the
+    /// rest.
+    #[test]
+    fn an_idle_office_skips_the_ticks_that_change_nothing() {
+        let layout = lively_office();
+        let quiet = empty_frame(&layout);
+        let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)
+            .map(|now| (quiet.clone(), now))
+            .collect();
+        let tally = run(layout, test_default_pack(), &steps);
+        assert!(tally.skipped > 0 && tally.partial > 0, "{tally:?}");
+        assert_eq!(tally.whole, 0, "{tally:?}");
+    }
+
+    /// A change of anything the list does not fingerprint repaints the whole
+    /// frame: the theme, the scale.
+    #[test]
+    fn a_new_theme_or_scale_repaints_everything() {
+        let layout = Arc::new(lively_office());
+        let stepped = SteppedFloor {
+            frame: empty_frame(&layout),
+            layout,
+        };
+        let now = crate::localclock::at_hour(12);
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let mut canvas = CutawayCanvas::new(Arc::new(test_default_pack()));
+        let other = crate::theme::ALL_THEMES
+            .iter()
+            .copied()
+            .find(|t| !std::ptr::eq(*t, normal()))
+            .expect("a second theme");
+        let mut dirty = |theme, s| {
+            let scale = RenderScale::new(s).expect("nonzero");
+            canvas
+                .frame(
+                    &stepped,
+                    theme,
+                    scale,
+                    crate::display::compose::tests::showing(clear_ground(), now),
+                    &mut cache,
+                )
+                .dirty
+        };
+        assert_eq!(dirty(normal(), 2), Dirty::All, "the first frame");
+        assert_eq!(dirty(normal(), 2), Dirty::Unchanged, "the same frame");
+        assert_eq!(dirty(other, 2), Dirty::All, "a new theme");
+        assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
+    }
+
+    /// A walk to a desk, shown at scale 2.
+    struct Hovering {
+        layout: Arc<SceneLayout>,
+        pack: Arc<Pack>,
+        frames: Vec<SimFrame>,
+        scale: RenderScale,
+    }
+
+    impl Hovering {
+        /// To a north-facing desk.
+        fn new() -> Self {
+            Self::facing(crate::layout::Facing::North)
+        }
+
+        fn facing(facing: crate::layout::Facing) -> Self {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            Self {
+                layout: Arc::new(layout),
+                pack: Arc::new(pack),
+                frames,
+                scale: RenderScale::new(2).expect("nonzero"),
+            }
+        }
+
+        fn now() -> SystemTime {
+            crate::localclock::at_hour(12)
+        }
+
+        /// `frame`'s pieces bar the badges as `(is a desk, box, agent)`, back
+        /// to front: a character's box is their body.
+        fn boxes(&self, frame: &SimFrame) -> Vec<(bool, Span, Option<AgentId>)> {
+            let office = Office {
+                layout: &self.layout,
+                pack: &self.pack,
+                theme: normal(),
+                scale: self.scale,
+            };
+            let list = compose(
+                frame,
+                office,
+                crate::display::compose::tests::showing(clear_ground(), Self::now()),
+            );
+            list.pieces()
+                .iter()
+                .filter_map(|p| match &p.kind {
+                    PieceKind::Badge { .. } => None,
+                    PieceKind::Character { figure, body, .. } => {
+                        Some((false, *body, Some(figure.key.frame.agent_id)))
+                    }
+                    kind => Some((matches!(kind, PieceKind::Desk { .. }), p.span, None)),
+                })
+                .collect()
+        }
+
+        /// `canvas` after showing `frame`, and the frame's hovers.
+        fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) -> Hovers {
+            let stepped = SteppedFloor {
+                layout: Arc::clone(&self.layout),
+                frame: frame.clone(),
+            };
+            let mut cache = crate::cutaway::paint::CutawayCache::default();
+            canvas.frame(
+                &stepped,
+                normal(),
+                self.scale,
+                crate::display::compose::tests::showing(clear_ground(), Self::now()),
+                &mut cache,
+            );
+            canvas.hovers().expect("a frame").clone()
+        }
+    }
+
+    /// What one half-block terminal cell shows, from logical `(x, y)` down.
+    fn cell((x, y): (u16, u16)) -> Bounds {
+        Bounds {
+            x,
+            y,
+            width: 1,
+            height: 2,
+        }
+    }
+
+    /// Where a cell shows the walker over a desk drawn before them, hovering
+    /// names them: the topmost box wins.
+    #[test]
+    fn hovering_a_walker_in_front_of_a_desk_names_the_walker() {
+        let h = Hovering::new();
+        let (frame, area, id) = h
+            .frames
+            .iter()
+            .find_map(|frame| {
+                let boxes = h.boxes(frame);
+                boxes.iter().enumerate().find_map(|(i, &(desk, d, _))| {
+                    if !desk {
+                        return None;
+                    }
+                    boxes[i + 1..].iter().find_map(|&(_, b, agent)| {
+                        let area = cell((d.x0.max(b.x0), d.y0.max(b.y0)));
+                        (d.meets(area) && b.meets(area)).then_some((frame, area, agent?))
+                    })
+                })
+            })
+            .expect("the walk passes in front of a desk");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        assert_eq!(
+            h.show(&mut canvas, frame).at(area),
+            Some(&HoverTarget::Agent(id))
+        );
+    }
+
+    /// A desk painted over its sitter's legs leaves them to the pointer: only
+    /// a later figure covers one.
+    #[test]
+    fn a_desk_over_a_sitter_names_the_sitter() {
+        let h = Hovering::facing(crate::layout::Facing::South);
+        let seated = h.frames.last().expect("a seated frame");
+        let boxes = h.boxes(seated);
+        let (area, id) = boxes
+            .iter()
+            .enumerate()
+            .find_map(|(i, &(_, b, agent))| {
+                let id = agent?;
+                boxes[i + 1..].iter().find_map(|&(desk, d, _)| {
+                    let area = cell((d.x0.max(b.x0), d.y0.max(b.y0)));
+                    (desk && d.meets(area) && b.meets(area)).then_some((area, id))
+                })
+            })
+            .expect("the desk lies over its sitter");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        assert_eq!(
+            h.show(&mut canvas, seated).at(area),
+            Some(&HoverTarget::Agent(id))
+        );
+    }
+
+    /// A cell showing floor no piece stands on hovers nothing.
+    #[test]
+    fn hovering_bare_floor_names_nobody() {
+        let h = Hovering::new();
+        let frame = h.frames.last().expect("a frame");
+        let boxes = h.boxes(frame);
+        let area = (h.layout.top_margin..h.layout.buf_h - 1)
+            .rev()
+            .flat_map(|y| (0..h.layout.buf_w).map(move |x| cell((x, y))))
+            .find(|&a| boxes.iter().all(|&(_, s, _)| !s.meets(a)))
+            .expect("bare floor");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        assert_eq!(h.show(&mut canvas, frame).at(area), None);
+    }
+
+    /// Hovering answers from the last frame: where the walker stood before
+    /// they walked to their desk no longer names them.
+    #[test]
+    fn hovering_where_a_walker_left_names_them_no_more() {
+        let h = Hovering::new();
+        let (first, last) = (&h.frames[0], h.frames.last().expect("a frame"));
+        let (body, id) = h
+            .boxes(first)
+            .into_iter()
+            .find_map(|(_, s, agent)| Some((s, agent?)))
+            .expect("the walker");
+        let area = cell(((body.x0 + body.x1) / 2, (body.y0 + body.y1) / 2));
+        assert!(
+            h.boxes(last)
+                .iter()
+                .all(|&(_, s, agent)| agent != Some(id) || !s.meets(area)),
+            "the walker never left {area:?}"
+        );
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        let id = HoverTarget::Agent(id);
+        assert_eq!(h.show(&mut canvas, first).at(area), Some(&id));
+        assert_ne!(h.show(&mut canvas, last).at(area), Some(&id));
+    }
+
+    /// A neighbour sitting just south has their badge plate over the sitter's
+    /// body; hovering the body there still names the sitter, as in the classic,
+    /// where a badge is no hover target.
+    #[test]
+    fn hovering_a_sitter_under_a_neighbours_badge_names_the_sitter() {
+        const NEIGHBOUR: &str = "cc\u{b7}neighbour";
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let a = seated.characters[0].clone();
+        let a_id = seated.agents[a.agent_idx].agent_id;
+        let body = h
+            .boxes(seated)
+            .into_iter()
+            .find_map(|(_, s, agent)| (agent == Some(a_id)).then_some(s))
+            .expect("the sitter's body");
+        let mut tried = 0;
+        for dy in 1..body.y1 - body.y0 + 16 {
+            let mut both = seated.clone();
+            let mut b = both.agents[a.agent_idx].clone();
+            b.agent_id = AgentId::from_transcript_path("/neighbour.jsonl");
+            b.label = NEIGHBOUR.into();
+            both.agents.push(b.clone());
+            both.characters.push(crate::sim::CharacterPlacement {
+                agent_idx: both.agents.len() - 1,
+                top_left: crate::layout::Point {
+                    x: a.top_left.x + 2,
+                    y: a.top_left.y + dy,
+                },
+                sort_row: a.sort_row + dy,
+                seat_desk: None,
+                seated: false,
+                ..a.clone()
+            });
+            let plate = {
+                let office = Office {
+                    layout: &h.layout,
+                    pack: &h.pack,
+                    theme: normal(),
+                    scale: h.scale,
+                };
+                let list = compose(
+                    &both,
+                    office,
+                    crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+                );
+                // Known by its text: the sitter's badge reads otherwise.
+                list.pieces().iter().find(|p| {
+                    matches!(&p.kind, crate::display::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
+                })
+                    .map(|p| p.span)
+                    .expect("the neighbour's plate")
+            };
+            let b_body = h
+                .boxes(&both)
+                .into_iter()
+                .find_map(|(_, s, agent)| (agent == Some(b.agent_id)).then_some(s))
+                .expect("the neighbour's body");
+            let Some(at) = (body.y0..=body.y1)
+                .flat_map(|y| (body.x0..=body.x1).map(move |x| cell((x, y))))
+                .find(|&c| plate.meets(c) && !b_body.meets(c))
+            else {
+                continue;
+            };
+            tried += 1;
+            let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+            assert_eq!(
+                h.show(&mut canvas, &both).at(at),
+                Some(&HoverTarget::Agent(a_id)),
+                "at {at:?}, {dy} rows south"
+            );
+        }
+        assert!(
+            tried > 0,
+            "no neighbour's plate ever lay over the sitter's body"
+        );
+    }
+
+    /// A badge is a piece of its own: a sitter whose name or state changes
+    /// repaints their badge, and a renamed one nothing else.
+    #[test]
+    fn a_changed_badge_repaints_only_itself() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let plate = |frame: &SimFrame| {
+            let office = Office {
+                layout: &h.layout,
+                pack: &h.pack,
+                theme: normal(),
+                scale: h.scale,
+            };
+            let list = compose(
+                frame,
+                office,
+                crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+            );
+            list.pieces()
+                .iter()
+                .find(|p| matches!(p.kind, crate::display::PieceKind::Badge { .. }))
+                .map(|p| (p.span, p.fingerprint))
+                .expect("a badge")
+        };
+        let mut renamed = seated.clone();
+        renamed.agents[0].label = "cc\u{b7}renamed".into();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, seated);
+        let stepped = SteppedFloor {
+            layout: Arc::clone(&h.layout),
+            frame: renamed.clone(),
+        };
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let size = (
+            h.scale.to_buffer(h.layout.buf_w),
+            h.scale.to_buffer(h.layout.buf_h),
+        );
+        let dirty = canvas
+            .frame(
+                &stepped,
+                normal(),
+                h.scale,
+                crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+                &mut cache,
+            )
+            .dirty;
+        let spans = [plate(seated).0, plate(&renamed).0];
+        let want: Vec<Bounds> = spans
+            .iter()
+            .filter_map(|&s| on_buffer(s, h.scale, size))
+            .collect();
+        assert_eq!(dirty, Dirty::within(want));
+        let mut waiting = seated.clone();
+        waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
+            reason: "permission?".into(),
+        };
+        let (was, now) = (plate(seated), plate(&waiting));
+        assert_eq!(was.0, now.0, "the plate stays put");
+        assert_ne!(was.1, now.1, "its tone is in its fingerprint");
+    }
+
+    /// The board's text is a piece of its own: a new tally repaints the board
+    /// and nothing else.
+    #[test]
+    fn a_new_tally_repaints_only_the_board() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let quiet = crate::display::compose::tests::showing(clear_ground(), Hovering::now());
+        let counts = crate::board::StateCounts {
+            active: 3,
+            total: 3,
+            ..crate::board::StateCounts::default()
+        };
+        let busy = crate::board::build_board(counts, 60, None, None, Motion::Full, Hovering::now());
+        let busy = Showing {
+            board: &busy,
+            ..quiet
+        };
+        let board = |showing| {
+            let office = Office {
+                layout: &h.layout,
+                pack: &h.pack,
+                theme: normal(),
+                scale: h.scale,
+            };
+            compose(seated, office, showing)
+                .pieces()
+                .iter()
+                .find(|p| matches!(p.kind, crate::display::PieceKind::Board { .. }))
+                .map(|p| p.span)
+                .expect("the board")
+        };
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, seated);
+        let stepped = SteppedFloor {
+            layout: Arc::clone(&h.layout),
+            frame: seated.clone(),
+        };
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let dirty = canvas
+            .frame(&stepped, normal(), h.scale, busy, &mut cache)
+            .dirty;
+        let size = (
+            h.scale.to_buffer(h.layout.buf_w),
+            h.scale.to_buffer(h.layout.buf_h),
+        );
+        let want: Vec<Bounds> = [board(quiet), board(busy)]
+            .into_iter()
+            .filter_map(|s| on_buffer(s, h.scale, size))
+            .collect();
+        assert_eq!(dirty, Dirty::within(want));
+    }
+
+    /// No list of rects is empty: "nowhere" is only ever
+    /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
+    /// unchanged frame.
+    #[test]
+    fn an_empty_list_of_rects_is_unchanged() {
+        let b = Bounds {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(Dirty::within(Vec::new()), Dirty::Unchanged);
+        let Dirty::Rects(rects) = Dirty::within(vec![b]) else {
+            panic!("a rect is somewhere");
+        };
+        assert_eq!(rects.as_slice(), [b]);
+    }
+
+    /// A new layout of the same size repaints everything, even one built after
+    /// the last was dropped, where the allocator may hand back its address.
+    #[test]
+    fn a_new_layout_repaints_everything() {
+        let pack = Arc::new(test_default_pack());
+        let scale = RenderScale::new(2).expect("nonzero");
+        let now = crate::localclock::at_hour(12);
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+        let stepped = |seed| {
+            let layout = SceneLayout::compute_with_seed(160, 96, None, seed).expect("lays out");
+            SteppedFloor {
+                frame: empty_frame(&layout),
+                layout: Arc::new(layout),
+            }
+        };
+        let floor = clear_ground();
+        canvas.frame(
+            &stepped(0),
+            normal(),
+            scale,
+            crate::display::compose::tests::showing(floor, now),
+            &mut cache,
+        );
+        let b = stepped(1);
+        let shown = canvas.frame(
+            &b,
+            normal(),
+            scale,
+            crate::display::compose::tests::showing(floor, now),
+            &mut cache,
+        );
+        assert_eq!(shown.dirty, Dirty::All);
+        assert!(
+            shown.buf.as_slice()
+                == full_render(&b.layout, &pack, scale, (&b.frame, clear_ground()), now).as_slice(),
+            "the canvas shows other than the new layout"
+        );
+    }
+
+    /// The digests [`the_canvas_paints_the_pinned_frames`] pins, one frame a
+    /// line.
+    #[cfg(feature = "cutaway-assets")]
+    const PINNED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cutaway/canvas.golden");
+
+    /// Every pixel of a fixed set of frames, as committed: a refactor of the
+    /// cutaway leaves this file as it found it, and a change to its look
+    /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
+    /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
+    // The golden pins 4x rows, which only `cutaway-assets` paints.
+    #[cfg(feature = "cutaway-assets")]
+    #[test]
+    fn the_canvas_paints_the_pinned_frames() {
+        use crate::sky::{Weather, WeatherPolicy};
+        use std::fmt::Write as _;
+        let pack = Arc::new(test_default_pack());
+        let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let walk_layout = Arc::new(walk_layout);
+        let office = crate::floor::FloorSession::new(Arc::clone(&pack))
+            .step(
+                crate::floor::FloorInputs {
+                    scene: &pixtuoid_core::SceneState::uniform(16),
+                    pack: &pack,
+                    now: SystemTime::UNIX_EPOCH,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
+                crate::layout::Size { w: 240, h: 144 },
+            )
+            .expect("lays out");
+        let lively = Arc::new(lively_office());
+        let busy = SimFrame {
+            door_frame: 2,
+            neon: crate::floor::NeonLevels {
+                alert: 1.0,
+                ..crate::floor::NeonLevels::CALM
+            },
+            occupied_waypoints: (0..lively.waypoints.len()).collect(),
+            ..empty_frame(&lively)
+        };
+        let scenes = [
+            ("walk", &walk_layout, &frames[frames.len() / 2]),
+            (
+                "seated",
+                &walk_layout,
+                frames.last().expect("a seated frame"),
+            ),
+            ("office", &office.layout, &office.frame),
+            ("lively", &lively, &busy),
+        ];
+        let moments = [
+            ("normal", Weather::Clear, 12),
+            ("cyberpunk", Weather::Rain, 17),
+            ("dracula", Weather::Storm, 21),
+            ("tokyo-night", Weather::Snow, 7),
+            ("gruvbox", Weather::Fog, 2),
+        ];
+        let densities = [1, pack.max_density_variant().get()];
+        // What the local hour leaves to the absolute instant, so to `$TZ`, held
+        // still: the loops, and the moon, which a new moon keeps out of the
+        // night sky.
+        let new_moon = (0..31u32)
+            .min_by(|&a, &b| {
+                let phase = |day| {
+                    crate::sky::Sky::at_with(crate::localclock::on_day(day, 0), Weather::Clear)
+                        .moon_phase()
+                };
+                phase(a).total_cmp(&phase(b))
+            })
+            .expect("a lunation has days");
+        let mut digests = String::new();
+        for (scene, layout, frame) in scenes {
+            for (i, (theme_name, weather, hour)) in moments.into_iter().enumerate() {
+                let theme = crate::theme::theme_by_name(theme_name).expect("theme");
+                let floor = FloorMeta::for_floor(i % 2 * 3, 4)
+                    .with_weather(WeatherPolicy::Forced(weather))
+                    .with_motion(Motion::Still);
+                for d in densities {
+                    let scale = RenderScale::new(d).expect("nonzero");
+                    let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+                    let stepped = SteppedFloor {
+                        layout: Arc::clone(layout),
+                        frame: frame.clone(),
+                    };
+                    let shown = canvas.frame(
+                        &stepped,
+                        theme,
+                        scale,
+                        crate::display::compose::tests::showing(
+                            floor,
+                            crate::localclock::on_day(new_moon, hour),
+                        ),
+                        &mut crate::cutaway::paint::CutawayCache::default(),
+                    );
+                    let digest = shown.buf.as_slice().iter().fold(
+                        u64::from(shown.buf.width()) << 16 | u64::from(shown.buf.height()),
+                        |h, c| {
+                            pixtuoid_core::id::splitmix64(
+                                h ^ u64::from_be_bytes([0, 0, 0, 0, 0, c.r, c.g, c.b]),
+                            )
+                        },
+                    );
+                    let name = weather.name();
+                    let floor_idx = floor.floor_idx;
+                    writeln!(
+                        digests,
+                        "{scene} {theme_name} {name} {hour:02}h floor{floor_idx} d{d} {digest:016x}"
+                    )
+                    .expect("a String takes every write");
+                }
+            }
+        }
+        if std::env::var_os("UPDATE_CUTAWAY_GOLDEN").is_some() {
+            std::fs::write(PINNED, &digests).expect("writes the golden");
+            return;
+        }
+        let pinned = std::fs::read_to_string(PINNED).expect("reads the golden");
+        assert_eq!(
+            digests, pinned,
+            "these frames are not the pixels {PINNED} pins; run \
+             `just gen-cutaway-golden` if the look changed on purpose"
+        );
+    }
+}

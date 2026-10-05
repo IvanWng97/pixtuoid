@@ -3,21 +3,21 @@
 
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
-    anchored_top_left, furniture_def, Anchor, Furniture, MeetingRoom, PlantItem, PodDecorItem,
-    Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
-    PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX,
+    Furniture, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, Pivot, PlantItem,
+    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_THICK_V, WAYPOINT_STAMP_PAD_PX,
+    WallDecorItem, Waypoint, WaypointKind, anchored_top_left, furniture_def,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
 /// Stamp a furniture footprint as a collision rect DECLARED relative to its
-/// VISUAL box. The visual top-left comes from `anchor` via `anchored_top_left`
+/// VISUAL box. The visual top-left comes from `pivot` via `anchored_top_left`
 /// (the SAME origin the renderer blits from, so blocked ground and painted
 /// sprite can't drift); the footprint is offset inside it by the row's
 /// [`GroundAlign`] per axis. A footprint-less piece (wall-hung decor) stamps
 /// nothing; runtime-footprint pieces build their rect and call `mark_blocked`
 /// directly.
-fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, anchor: Anchor, pos: Point, pad: u16) {
-    if let Some((tl, sz)) = def.ground_rect(anchor, pos) {
+fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, pivot: Pivot, pos: Point, pad: u16) {
+    if let Some((tl, sz)) = def.ground_rect(pivot, pos) {
         mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
     }
 }
@@ -28,14 +28,14 @@ fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, anchor: Anchor, pos
 /// grow a second copy of the offset math. The per-call-site `pad` is
 /// deliberately NOT part of the rect: pad is routing slack, not the object.
 pub(super) fn ground_rect(
-    anchor: Anchor,
+    pivot: Pivot,
     pos: Point,
     fp: Size,
     visual: Size,
     ground_x: GroundAlign,
     ground_y: GroundAlign,
 ) -> (Point, Size) {
-    let vis_tl = anchored_top_left(anchor, pos, visual.w, visual.h);
+    let vis_tl = anchored_top_left(pivot, pos, visual.w, visual.h);
     let left = vis_tl.x + ground_x.offset(visual.w, fp.w);
     let top = vis_tl.y + ground_y.offset(visual.h, fp.h);
     (Point { x: left, y: top }, fp)
@@ -49,7 +49,7 @@ pub(super) fn ground_rect(
 pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
     let depth = PANTRY_FOOTPRINT_DEPTH.min(counter.h);
     ground_rect(
-        Anchor::Center,
+        Pivot::Center,
         pos,
         Size {
             w: counter.w,
@@ -61,7 +61,7 @@ pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
     )
 }
 
-use super::rooms::walls::wall_segment_rect;
+use super::rooms::walls::WallPiece;
 
 /// WEST-only routing clearance stamped onto a vertical wall's footprint (NOT
 /// part of the physical footprint — the placement sweep reads the un-margined
@@ -90,7 +90,7 @@ pub(super) struct MaskObstacles<'a> {
     pub(super) fish_tank: Option<Point>,
     pub(super) wall_decor: &'a [WallDecorItem],
     pub(super) pod_decor: &'a [PodDecorItem],
-    pub(super) room_walls: &'a [WallSegment],
+    pub(super) wall_pieces: &'a [WallPiece],
     pub(super) pantry_counter_size: Size,
 }
 
@@ -109,7 +109,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         fish_tank,
         wall_decor,
         pod_decor,
-        room_walls,
+        wall_pieces,
         pantry_counter_size,
     } = obs;
 
@@ -131,22 +131,22 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
 
     // Both block their FULL visual footprint (invariant #6); only the router
-    // clearance is asymmetric — horizontal faces already fill a routing cell, while
-    // vertical walls are thinner and take `WALL_ROUTING_MARGIN_X` westward.
-    for seg in room_walls {
-        let (origin, size) = wall_segment_rect(seg, top_margin, room_walls);
-        let mx = if seg.start.x == seg.end.x {
-            WALL_ROUTING_MARGIN_X
-        } else {
-            0
+    // clearance is asymmetric — horizontal faces already fill a routing cell top to
+    // bottom, while vertical walls are thinner and take `WALL_ROUTING_MARGIN_X`
+    // westward.
+    for piece in wall_pieces {
+        let (origin, size) = piece.footprint();
+        let (west, east) = match *piece {
+            WallPiece::Vertical { .. } => (WALL_ROUTING_MARGIN_X, 0),
+            // A post a door leaves at a run's end is as thin to the router as a
+            // bare vertical wall, so it widens to one, away from its door.
+            WallPiece::Horizontal { jamb_west, .. } => {
+                let short = WALL_THICK_V.saturating_sub(size.w);
+                if jamb_west { (0, short) } else { (short, 0) }
+            }
         };
-        mask.mark_blocked(
-            origin.x.saturating_sub(mx),
-            origin.y,
-            size.w.saturating_add(mx),
-            size.h,
-            0,
-        );
+        let x = origin.x.saturating_sub(west);
+        mask.mark_blocked(x, origin.y, size.w + (origin.x - x) + east, size.h, 0);
     }
 
     for desk in home_desks {
@@ -154,13 +154,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // the monitor overhangs NORTH and a walker behind it is occluded by the desk's
         // own y-sorted sprite. Stamped TOP-LEFT — the desk pos IS its NW corner.
         let desk_def = super::decor::desk_furniture_def();
-        stamp_ground(
-            &mut mask,
-            &desk_def,
-            Anchor::TopLeft,
-            *desk,
-            OBSTACLE_PAD_PX,
-        );
+        stamp_ground(&mut mask, &desk_def, Pivot::TopLeft, *desk, OBSTACLE_PAD_PX);
     }
 
     for trio in meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
@@ -168,13 +162,13 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // `furniture_def` row.
         let sofa_def = furniture_def(Furniture::MeetingSofaBody);
         for sofa in trio.sofas {
-            stamp_ground(&mut mask, &sofa_def, Anchor::Center, sofa, OBSTACLE_PAD_PX);
+            stamp_ground(&mut mask, &sofa_def, Pivot::Center, sofa, OBSTACLE_PAD_PX);
         }
         let table_def = furniture_def(Furniture::MeetingTable);
         stamp_ground(
             &mut mask,
             &table_def,
-            Anchor::Center,
+            Pivot::Center,
             trio.table,
             OBSTACLE_PAD_PX,
         );
@@ -183,7 +177,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     if let Some(island) = kitchen_island {
         // South-anchored base only; the countertop rows overhang (walk-behind).
         let def = furniture_def(Furniture::KitchenIsland);
-        stamp_ground(&mut mask, &def, Anchor::Center, island, OBSTACLE_PAD_PX);
+        stamp_ground(&mut mask, &def, Pivot::Center, island, OBSTACLE_PAD_PX);
     }
 
     for wp in waypoints {
@@ -204,42 +198,42 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
             continue;
         }
         let def = furniture_def(wp.kind.furniture());
-        let (tl, sz) = def.ground_rect_of(Anchor::Center, wp.pos, Size { w, h });
+        let (tl, sz) = def.ground_rect_of(Pivot::Center, wp.pos, Size { w, h });
         mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, WAYPOINT_STAMP_PAD_PX);
     }
 
     for &PlantItem { kind, pos } in plants {
         let def = furniture_def(kind.furniture());
-        stamp_ground(&mut mask, &def, Anchor::Center, pos, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, pos, 1);
     }
 
     if let Some(lamp) = floor_lamp {
         let def = furniture_def(Furniture::FloorLamp);
-        stamp_ground(&mut mask, &def, Anchor::Center, lamp, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, lamp, 1);
     }
 
     if let Some(t) = lounge_side_table {
         let def = furniture_def(Furniture::LoungeSideTable);
-        stamp_ground(&mut mask, &def, Anchor::Center, t, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, t, 1);
     }
 
     if let Some(t) = fish_tank {
         let def = furniture_def(Furniture::FishTank);
-        stamp_ground(&mut mask, &def, Anchor::Center, t, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, t, 1);
     }
 
     for &WallDecorItem { kind, pos } in wall_decor {
         // pad=1, not OBSTACLE_PAD_PX: these overhang nothing solid, and a 2px band
         // every side inflated the blocked rect back to the full sprite width.
         let def = furniture_def(kind.furniture());
-        stamp_ground(&mut mask, &def, Anchor::TopLeft, pos, 1);
+        stamp_ground(&mut mask, &def, Pivot::TopLeft, pos, 1);
     }
 
     // PhoneBooth + StandingDesk double-block as waypoints too; `mark_blocked` is
     // idempotent. pad=1 because an extra pixel each side disconnects tight aisles.
     for &PodDecorItem { kind, pos } in pod_decor {
         let def = furniture_def(kind.furniture());
-        stamp_ground(&mut mask, &def, Anchor::Center, pos, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, pos, 1);
     }
 
     mask
@@ -248,38 +242,38 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{z_sort_row, WALL_THICK_V};
+    use crate::layout::{WALL_THICK_V, sort_row_at};
 
     #[test]
     fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {
         let l = crate::layout::SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();
-        let seg = l
-            .room_walls
+        let piece = l
+            .wall_pieces
             .iter()
-            .find(|w| w.start.x == w.end.x)
+            .find(|p| matches!(p, WallPiece::Vertical { .. }))
             .copied()
             .expect("a vertical wall");
-        let (o, s) = wall_segment_rect(&seg, l.top_margin, &l.room_walls);
+        let (o, s) = piece.footprint();
         let y = o.y + s.h / 2; // deep in the wall body, clear of any north overhang
         for dx in 0..WALL_THICK_V {
             assert!(
-                !l.is_walkable(seg.start.x + dx, y),
+                !l.is_walkable(o.x + dx, y),
                 "visual column {} must be blocked (no feet-in-wall)",
-                seg.start.x + dx
+                o.x + dx
             );
         }
     }
 
     #[test]
     fn ground_rect_blocks_exactly_its_declared_rect() {
-        for anchor in [Anchor::TopLeft, Anchor::Center] {
+        for pivot in [Pivot::TopLeft, Pivot::Center] {
             for gx in [GroundAlign::Start, GroundAlign::Center, GroundAlign::End] {
                 for gy in [GroundAlign::Start, GroundAlign::Center, GroundAlign::End] {
                     let pos = Point { x: 20, y: 20 };
                     let fp = Size { w: 5, h: 3 };
                     let visual = Size { w: 8, h: 12 };
                     let mut mask = WalkableMask::new_open(40, 40);
-                    let (tl, sz) = ground_rect(anchor, pos, fp, visual, gx, gy);
+                    let (tl, sz) = ground_rect(pivot, pos, fp, visual, gx, gy);
                     mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
                     for y in 0..40u16 {
                         for x in 0..40u16 {
@@ -288,7 +282,7 @@ mod tests {
                             assert_eq!(
                                 !mask.is_walkable(x, y),
                                 in_rect,
-                                "({x},{y}) blocked-vs-rect mismatch for {anchor:?}/{gx:?}/{gy:?}"
+                                "({x},{y}) blocked-vs-rect mismatch for {pivot:?}/{gx:?}/{gy:?}"
                             );
                         }
                     }
@@ -302,14 +296,14 @@ mod tests {
         let pos = Point { x: 20, y: 20 };
         for &kind in Furniture::ALL {
             let def = furniture_def(kind);
-            for anchor in [Anchor::TopLeft, Anchor::Center] {
+            for pivot in [Pivot::TopLeft, Pivot::Center] {
                 let expect = def
                     .footprint
-                    .map(|fp| ground_rect(anchor, pos, fp, def.visual, def.ground_x, def.ground_y));
+                    .map(|fp| ground_rect(pivot, pos, fp, def.visual, def.ground_x, def.ground_y));
                 assert_eq!(
-                    def.ground_rect(anchor, pos),
+                    def.ground_rect(pivot, pos),
                     expect,
-                    "{kind:?} ground_rect diverged from the primitive at {anchor:?}"
+                    "{kind:?} ground_rect diverged from the primitive at {pivot:?}"
                 );
             }
         }
@@ -321,9 +315,9 @@ mod tests {
         let pos = Point { x: 12, y: 30 };
         let fp = Size { w: 7, h: 2 };
         assert_eq!(
-            def.ground_rect_of(Anchor::Center, pos, fp),
+            def.ground_rect_of(Pivot::Center, pos, fp),
             ground_rect(
-                Anchor::Center,
+                Pivot::Center,
                 pos,
                 fp,
                 def.visual,
@@ -340,7 +334,7 @@ mod tests {
         let mut mask = WalkableMask::new_open(40, 40);
         let pos = Point { x: 20, y: 20 };
         let (tl, sz) = ground_rect(
-            Anchor::Center,
+            Pivot::Center,
             pos,
             Size { w: 6, h: 3 },
             Size { w: 6, h: 12 },
@@ -348,7 +342,7 @@ mod tests {
             GroundAlign::End,
         );
         mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
-        let south = z_sort_row(Anchor::Center, pos, 12);
+        let south = sort_row_at(Pivot::Center, pos, 12);
         for dy in 0..3 {
             assert!(
                 !mask.is_walkable(pos.x, south - dy),
@@ -390,7 +384,7 @@ mod tests {
             fish_tank: None,
             wall_decor: &wall_decor,
             pod_decor: &[],
-            room_walls: &[],
+            wall_pieces: &[],
             pantry_counter_size: Size { w: 20, h: 8 },
         });
         let def = furniture_def(Furniture::Whiteboard);
@@ -420,7 +414,7 @@ mod tests {
         let mut mask = WalkableMask::new_open(40, 40);
         let pos = Point { x: 20, y: 20 };
         let (tl, sz) = ground_rect(
-            Anchor::Center,
+            Pivot::Center,
             pos,
             Size { w: 4, h: 6 },
             Size { w: 4, h: 6 },

@@ -8,10 +8,10 @@ use tokio::net::UnixListener;
 use tokio::sync::Semaphore;
 use tracing::warn;
 
-use crate::source::jsonl::FailureLatch;
 use crate::source::TaggedSender;
+use crate::source::jsonl::FailureLatch;
 
-use super::{handle_conn, CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
+use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS, handle_conn};
 
 /// First retry delay after an accept() error. mio/tokio only clear readiness on
 /// EWOULDBLOCK, so a persistent accept errno (the EMFILE class) returns
@@ -156,6 +156,7 @@ fn socket_sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
     ))
 }
 
+#[derive(Debug)]
 pub(super) struct Listener {
     listener: UnixListener,
     // Never unlocked: the kernel releases it however abruptly the process dies, so

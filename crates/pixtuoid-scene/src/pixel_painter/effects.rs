@@ -1,14 +1,12 @@
 //! Effects that ride on a character, a pet or a fixture, painted with it in
-//! z-order.
+//! z-order in their [look](crate::effects::look), and a screen's own.
 
-use std::time::SystemTime;
-
-use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::epoch_ms;
-use super::palette::{blend_pixel, blend_rgb, WHITE};
-use crate::layout::Point;
+use super::palette::{WHITE, blend_pixel};
+use crate::effects::Effect;
+use crate::effects::look::{plot_effect, scanline_color};
+use crate::layout::SCREEN_GLASS_COLS;
 use crate::theme::Theme;
 
 /// Standby tint on a BACK-TURNED desk's glass — a grid of black rectangles reads as "everyone went home".
@@ -29,37 +27,26 @@ pub(super) fn paint_screen_idle(
     }
 }
 
-/// Glass columns offset from the desk sprite's left edge — shared so idle and glow can't diverge.
-const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
-
 /// Casing rows offset from the sprite TOP; lighting only the lower one leaves a black bar capping the glow.
 const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
 const SCREEN_GLASS_ROWS: std::ops::RangeInclusive<u16> = 2..=3;
 const SCREEN_CHIN_ROW: u16 = 4;
-
-/// How long the scanline holds each glass column.
-const SCANLINE_STEP_MS: u64 = 120;
-
-/// The scanline's color over a screen glowing `tint`.
-fn scanline_color(tint: Rgb) -> Rgb {
-    blend_rgb(tint, WHITE, 0.7)
-}
 
 /// `sprite_top` is the monitor's first frame row, NOT `desk.y` — a raised monitor sits rows higher.
 pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
     desk_x: u16,
     sprite_top: u16,
-    now: SystemTime,
+    scanline: u16,
     tint: Rgb,
     theme: &Theme,
 ) {
     // Untinted, the theme's cool `monitor_frame_lit` read as a metal plate capping the glow.
     const CASING_TINT: f32 = 0.35;
-    let frame_lit = blend_rgb(theme.effects.monitor_frame_lit, tint, CASING_TINT);
+    let frame_lit = theme.effects.monitor_frame_lit.mix(tint, CASING_TINT);
     let glow = tint;
-    let glow_bright = blend_rgb(tint, WHITE, 0.4);
-    let scanline = scanline_color(tint);
+    let glow_bright = tint.mix(WHITE, 0.4);
+    let line_color = scanline_color(tint);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         buf.put_checked(desk_x + dx, sprite_top + dy, c);
     };
@@ -78,251 +65,39 @@ pub(super) fn paint_screen_glow(
     for dx in SCREEN_GLASS_COLS {
         put(buf, dx, SCREEN_CHIN_ROW, frame_lit);
     }
-    let elapsed_ms = epoch_ms(now);
-    let phase = elapsed_ms / SCANLINE_STEP_MS + u64::from(desk_x);
-    let glass_w = SCREEN_GLASS_COLS.end() - SCREEN_GLASS_COLS.start() + 1;
-    // The remainder is below `glass_w`, a u16, so the cast cannot truncate.
-    let scan_col = SCREEN_GLASS_COLS.start() + (phase % u64::from(glass_w)) as u16;
+    let scan_col = SCREEN_GLASS_COLS.start() + scanline;
     for dy in SCREEN_GLASS_ROWS {
-        put(buf, scan_col, dy, scanline);
+        put(buf, scan_col, dy, line_color);
     }
 }
 
-pub(super) fn paint_sleep_z(
-    buf: &mut RgbBuffer,
-    head_anchor: Point,
-    now: SystemTime,
-    seed: u64,
-    theme: &Theme,
-) {
-    let z_color = theme.effects.sleep_z;
-    // The height-coupled fade (`1.0 - t`) is what keeps the z from reading as a
-    // solid mark parked over the sprite: it is only briefly visible near the
-    // head, then dissolves.
-    const RISE_MS: u64 = 2000;
-    const REST_MS: u64 = 400;
-    const CYCLE_MS: u64 = RISE_MS + REST_MS;
-    const MAX_RISE: u16 = 4;
-    const FADE_IN_MS: f32 = 150.0;
-    const PEAK_ALPHA: f32 = 0.9;
-    let phase_ms = epoch_ms(now).wrapping_add(seed % CYCLE_MS) % CYCLE_MS;
-    if phase_ms >= RISE_MS {
-        return;
-    }
-    let t = phase_ms as f32 / RISE_MS as f32;
-    // Ramp-in avoids a hard pop when a fresh z spawns at the head.
-    let fade_in = (phase_ms as f32 / FADE_IN_MS).min(1.0);
-    let alpha = PEAK_ALPHA * fade_in * (1.0 - t);
-    if alpha < 0.06 {
-        return;
-    }
-    let rise = (t * MAX_RISE as f32) as u16;
-    let z_x = head_anchor.x + 5;
-    let z_y = head_anchor.y.saturating_sub(rise + 3);
-    const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
-    for (dx, dy) in GLYPH {
-        blend_pixel(buf, z_x + dx, z_y + dy, z_color, alpha);
-    }
-}
-
-pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTime, theme: &Theme) {
-    let steam = theme.effects.coffee_steam;
-    const STEAM_CYCLE_MS: u64 = 1800;
-    let elapsed_ms = epoch_ms(now);
-    for offset in 0..3u64 {
-        let phase = (elapsed_ms + offset * (STEAM_CYCLE_MS / 3)) % STEAM_CYCLE_MS;
-        let rise = (phase / 140) as u16;
-        let alpha = 1.0 - phase as f32 / STEAM_CYCLE_MS as f32;
-        if alpha < 0.15 {
-            continue;
-        }
-        let wiggle = if (phase / 200).is_multiple_of(2) {
-            0
+/// Paint `e` in its look.
+pub(super) fn paint_effect(buf: &mut RgbBuffer, e: &Effect, theme: &Theme) {
+    plot_effect(e, theme, &mut |x, y, c, alpha| {
+        if alpha >= 1.0 {
+            buf.put_checked(x, y, c);
         } else {
-            1
-        };
-        let px = base.x + wiggle;
-        let py = base.y.saturating_sub(rise + 2);
-        blend_pixel(buf, px, py, steam, alpha * 0.55);
-    }
+            blend_pixel(buf, x, y, c, alpha);
+        }
+    });
 }
 
-pub(super) fn paint_walking_dust(
+/// [`paint_effect`] each of `effects`, in order.
+pub(super) fn paint_effects<'e>(
     buf: &mut RgbBuffer,
-    walker_anchor: Point,
-    frame_idx: usize,
+    effects: impl IntoIterator<Item = &'e Effect>,
     theme: &Theme,
 ) {
-    let dust = theme.effects.walking_dust;
-    let foot_y = walker_anchor.y + WALKING_Y_OFF;
-    let foot_x = walker_anchor.x + if frame_idx == 0 { 6 } else { 1 };
-    blend_pixel(buf, foot_x, foot_y, dust, 0.45);
-}
-
-/// Floating heart particles for the "pet the cat" interaction. The stagger and
-/// lifetime are sized so the LAST heart still completes within
-/// `PET_DURATION_MS`.
-pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: u64) {
-    const STAGGER_MS: u64 = 150;
-    const HEART_LIFE_MS: u64 = 1550;
-    let heart_color = Rgb {
-        r: 255,
-        g: 100,
-        b: 100,
-    };
-    for i in 0..4u64 {
-        let stagger = i * STAGGER_MS;
-        if elapsed_ms < stagger {
-            continue;
-        }
-        let local_ms = elapsed_ms - stagger;
-        if local_ms >= HEART_LIFE_MS {
-            continue;
-        }
-        let t = local_ms as f32 / HEART_LIFE_MS as f32;
-        let rise = (t * 6.0) as u16;
-        let alpha = 1.0 - t;
-        if alpha < 0.05 {
-            continue;
-        }
-        let dx: i16 = (i as i16) * 2 - 3;
-        let hx = (cat_pos.x as i32 + dx as i32).max(0) as u16;
-        let hy = cat_pos.y.saturating_sub(4 + rise);
-        for dy in 0..2u16 {
-            for ddx in 0..2u16 {
-                blend_pixel(buf, hx + ddx, hy + dy, heart_color, alpha * 0.8);
-            }
-        }
-    }
-}
-
-pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &Theme) {
-    let fg = theme.effects.waiting_bubble;
-    const GLYPH: &[&[u8]] = &[b".YYY.", b"...Y.", b"..Y..", b"..Y.."];
-    let bx = anchor.x + 1;
-    let by = anchor.y.saturating_sub(5) & !1u16;
-    for (dy, row) in GLYPH.iter().enumerate() {
-        for (dx, byte) in row.iter().enumerate() {
-            if *byte != b'Y' {
-                continue;
-            }
-            let px = bx + dx as u16;
-            let py = by + dy as u16;
-            if px < buf.width() && py < buf.height() {
-                buf.put(px, py, fg);
-            }
-        }
-    }
-}
-
-/// The flame gradient's deep-ember base, which a burning agent's hair also
-/// wears (`palette::EMBER_HAIR` aliases it).
-pub(crate) const FLAME_DEEP: Rgb = Rgb {
-    r: 0xc2,
-    g: 0x28,
-    b: 0x12,
-};
-
-/// The flame gradient's yellow tip. `pub(crate)` so render tests assert the REAL
-/// painted colors instead of re-hardcoding them.
-pub(crate) const FLAME_TIP: Rgb = Rgb {
-    r: 0xff,
-    g: 0xd2,
-    b: 0x4a,
-};
-
-pub(super) fn paint_flame_crown(
-    buf: &mut RgbBuffer,
-    anchor: Point,
-    sprite_w: u16,
-    now: SystemTime,
-) {
-    // The asymmetric two-frame flicker is what reads as fire, not a hat, and the
-    // tips stay ≤2 px above the hair top so the flame never collides with the
-    // name-badge row.
-    const MID: Rgb = Rgb {
-        r: 0xe8,
-        g: 0x64,
-        b: 0x1f,
-    };
-    const TIP: Rgb = FLAME_TIP;
-    const CORE: Rgb = Rgb {
-        r: 0xff,
-        g: 0xf3,
-        b: 0xa0,
-    };
-    const FLICKER_MS: u64 = 260;
-    // INTEGER phase division: epoch-ms as f32 loses precision and freezes it.
-    let f2 = (epoch_ms(now) / FLICKER_MS) % 2 == 1;
-
-    // Pattern entries are (dx from the head center, dy up from the hair top, color).
-    let cx = anchor.x + sprite_w / 2;
-    let frame_a: &[(i32, u16, Rgb)] = &[
-        (-2, 0, MID),
-        (-1, 0, MID),
-        (0, 0, FLAME_DEEP),
-        (1, 0, MID),
-        (-2, 1, MID),
-        (-1, 1, CORE),
-        (0, 1, MID),
-        (1, 1, TIP),
-        (-2, 2, TIP),
-        (0, 2, TIP),
-    ];
-    let frame_b: &[(i32, u16, Rgb)] = &[
-        (-2, 0, MID),
-        (-1, 0, FLAME_DEEP),
-        (0, 0, MID),
-        (1, 0, MID),
-        (-2, 1, TIP),
-        (-1, 1, MID),
-        (0, 1, CORE),
-        (1, 1, MID),
-        (-1, 2, TIP),
-        (1, 2, TIP),
-    ];
-    for &(dx, dy, c) in if f2 { frame_b } else { frame_a } {
-        let Some(px) = cx.checked_add_signed(dx as i16) else {
-            continue;
-        };
-        let Some(py) = anchor.y.checked_sub(dy) else {
-            continue;
-        };
-        if px < buf.width() && py < buf.height() {
-            buf.put(px, py, c);
-        }
+    for e in effects {
+        paint_effect(buf, e, theme);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-
-    /// The phase is epoch-based, so it outgrows a u16: the scanline must keep
-    /// stepping one column per step rather than overflow or jump.
-    #[test]
-    fn the_scanline_keeps_stepping_past_a_u16_phase() {
-        let scan_col = |step: u64| {
-            let mut buf = RgbBuffer::filled(32, 8, Rgb { r: 0, g: 0, b: 0 });
-            let now = SystemTime::UNIX_EPOCH + Duration::from_millis(step * SCANLINE_STEP_MS + 1);
-            let tint = Rgb { r: 0, g: 200, b: 0 };
-            paint_screen_glow(&mut buf, 0, 0, now, tint, theme());
-            SCREEN_GLASS_COLS
-                .clone()
-                .find(|&x| buf.get(x, *SCREEN_GLASS_ROWS.start()) == scanline_color(tint))
-                .expect("a scanline column")
-        };
-        let (before, after) = (
-            scan_col(u64::from(u16::MAX)),
-            scan_col(u64::from(u16::MAX) + 1),
-        );
-        let glass_w = SCREEN_GLASS_COLS.end() - SCREEN_GLASS_COLS.start() + 1;
-        assert_eq!(
-            (after - SCREEN_GLASS_COLS.start()),
-            (before - SCREEN_GLASS_COLS.start() + 1) % glass_w
-        );
-    }
+    use crate::layout::Point;
+    use std::time::{Duration, SystemTime};
 
     fn theme() -> &'static Theme {
         crate::theme::theme_by_name("normal").expect("normal theme")
@@ -334,8 +109,8 @@ mod tests {
     /// the glow paints, and an opaque, non-glass casing and chin around it.
     #[test]
     fn the_glow_lands_on_the_desk_arts_monitor() {
-        use crate::pixel_painter::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
-        let pack = crate::embedded_pack::test_default_pack();
+        use crate::pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+        let pack = crate::pack::test_default_pack();
         let art = pack
             .animation("desk_north")
             .and_then(|a| a.frames().first())
@@ -373,12 +148,12 @@ mod tests {
     fn render(head: Point, phase_ms: u64) -> RgbBuffer {
         let mut buf = RgbBuffer::filled(64, 64, Rgb { r: 0, g: 0, b: 0 });
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(phase_ms);
-        paint_sleep_z(&mut buf, head, now, 0, theme());
+        paint_effects(
+            &mut buf,
+            &crate::effects::sleep_z(head, 0, crate::anim::Motion::Full.beat(now)),
+            theme(),
+        );
         buf
-    }
-
-    fn lum(c: Rgb) -> u32 {
-        c.r as u32 + c.g as u32 + c.b as u32
     }
 
     fn top_lit(buf: &RgbBuffer, head: Point, bg: Rgb) -> Option<(u16, Rgb)> {
@@ -397,13 +172,13 @@ mod tests {
 
         let low = render(head, 200);
         let low_px = low.get(zx, head.y - 3);
-        assert!(lum(low_px) > 0, "z near the head is visible");
+        assert!(low_px.lightness() > 0.0, "z near the head is visible");
 
         let high = render(head, 1600);
         let (top_y, top_px) = top_lit(&high, head, bg).expect("risen z still visible");
         assert!(top_y < head.y - 3, "z rose above its spawn row");
         assert!(
-            lum(top_px) < lum(low_px),
+            top_px.lightness() < low_px.lightness(),
             "a higher z must be dimmer than one at the head"
         );
 

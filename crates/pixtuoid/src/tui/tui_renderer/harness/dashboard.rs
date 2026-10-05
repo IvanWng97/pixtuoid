@@ -1,6 +1,7 @@
 use super::*;
 
-use crate::tui::dashboard::{build_dashboard_rows, DashboardFolds};
+use crate::tui::connection::ConnectionFrame;
+use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
 
 #[test]
 fn dashboard_popup_renders_labels_states_and_live_tool() {
@@ -13,8 +14,13 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let first = rows[0].agent_id;
-    r.set_dashboard_frame_parts(true, rows, Some(first), 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        selected: Some(first),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Agents ("), "header missing:\n{text}");
@@ -68,16 +74,14 @@ fn connection_panel_renders_both_facets_borderless() {
             dead: false,
         },
     ];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
         live,
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Sources"), "title missing:\n{text}");
@@ -116,16 +120,14 @@ fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
         target: None,
         health: Some("install broken: shim binary missing".into()), // NO ⚠ prefix
     }];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
-        vec![LiveInfo::default()],
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        live: vec![LiveInfo::default()],
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains('\u{26a0}'),
@@ -155,16 +157,14 @@ fn connection_panel_armed_shows_confirm_prompt() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
-        vec![LiveInfo::default()],
-        0,
-        Some(0),
-        None,
-        String::new(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        live: vec![LiveInfo::default()],
+        confirm: Some(0),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("(y/n)"),
@@ -187,16 +187,14 @@ fn connection_panel_disconnected_selected_shows_connect_hint() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
-        vec![LiveInfo::default()],
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        live: vec![LiveInfo::default()],
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("press t to connect"),
@@ -222,16 +220,14 @@ fn connection_panel_no_cli_selected_shows_not_detected_hint() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
-        vec![LiveInfo::default()],
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        live: vec![LiveInfo::default()],
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("not detected on this machine"),
@@ -257,16 +253,14 @@ fn connection_panel_connected_without_config_path_shows_connected() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
-        vec![LiveInfo::default()],
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        live: vec![LiveInfo::default()],
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("connected"),
@@ -292,16 +286,15 @@ fn connection_panel_last_result_overrides_per_state_detail() {
         target: None,
         health: None,
     }];
-    r.set_connection_frame_parts(
-        true,
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
         rows,
-        vec![LiveInfo::default()],
-        0,
-        None,
-        Some("X-RESULT-SENTINEL".to_string()),
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+        live: vec![LiveInfo::default()],
+        result: Some("X-RESULT-SENTINEL".to_string()),
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("X-RESULT-SENTINEL"),
@@ -315,19 +308,14 @@ fn connection_panel_last_result_overrides_per_state_detail() {
 
 #[test]
 fn connection_panel_empty_rows_renders_panel_with_blank_detail() {
-    use crate::tui::connection::LiveInfo;
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
-    r.set_connection_frame_parts(
-        true,
-        vec![],
-        Vec::<LiveInfo>::new(),
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Sources"), "title missing:\n{text}");
     assert!(text.contains("j/k move"), "footer missing:\n{text}");
@@ -352,8 +340,9 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let mut root = slot(root_id, 0, 0, t0());
     root.label = "cc\u{b7}root".into();
     let mut agents = vec![root];
-    // 6 > AUTO_COLLAPSE_THRESHOLD (5) → the root auto-collapses on open.
-    for i in 0..6 {
+    // Past the threshold → the root auto-collapses on open.
+    let children = crate::tui::dashboard::AUTO_COLLAPSE_THRESHOLD + 1;
+    for i in 0..children {
         let cid = AgentId::from_transcript_path(&format!("/h/root/subagents/agent-{i}.jsonl"));
         let mut c = slot(cid, 0, 1 + i, t0());
         c.label = format!("explorer{i}").into();
@@ -363,13 +352,18 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let scene = scene_with(agents, 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
-    r.set_dashboard_frame_parts(true, rows, Some(root_id), 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        selected: Some(root_id),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("cc\u{b7}root"), "root row missing:\n{text}");
     assert!(
-        text.contains("(6)"),
+        text.contains(&format!("({children})")),
         "collapsed hidden-count badge missing:\n{text}"
     );
     // The popup's own count proves only the root is listed: a global
@@ -385,8 +379,14 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
 fn dashboard_closed_paints_no_popup() {
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![idle("/h/a.jsonl", 0, t0())], 16);
-    r.set_dashboard_frame_parts(false, Vec::new(), None, 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    // Real rows, so only the `open` gate stands between them and an `Agents (1)` title.
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
+    r.set_dashboard_frame(DashboardFrame {
+        open: false,
+        rows,
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -407,10 +407,10 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     for y in area.y..area.y + area.height {
         let mut row = String::new();
         for x in area.x..area.x + area.width {
-            if let Some(cell) = buf.cell((x, y)) {
-                if cell.bg == bg {
-                    row.push_str(cell.symbol());
-                }
+            if let Some(cell) = buf.cell((x, y))
+                && cell.bg == bg
+            {
+                row.push_str(cell.symbol());
             }
         }
         if !row.trim().is_empty() {
@@ -441,8 +441,12 @@ fn dashboard_renders_waiting_reason_and_active_without_detail() {
     let scene = scene_with(vec![w, a], 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
-    r.set_dashboard_frame_parts(true, rows, None, 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -470,8 +474,13 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let row18 = rows[18].agent_id;
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame_parts(true, rows, Some(row18), 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        selected: Some(row18),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let buf = r.frame_buffer();
     let text = frame_text(buf);
@@ -491,8 +500,11 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
 fn dashboard_empty_scene_shows_placeholder() {
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
-    r.set_dashboard_frame_parts(true, Vec::new(), None, 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(
         frame_text(r.frame_buffer()).contains("No active agents"),
         "empty dashboard must show the placeholder"
@@ -501,7 +513,7 @@ fn dashboard_empty_scene_shows_placeholder() {
 
 /// A terminal too short for the popup's own `DASHBOARD_VIEWPORT_ROWS` cap gets
 /// clamped by `PanelGeometry::compute` to `bounds.height - FOOTER_ROWS`, so
-/// `paint_panel` windows the list into a viewport SMALLER than that cap — and the
+/// `Panel::paint` windows the list into a viewport SMALLER than that cap — and the
 /// selection has to stay inside it. Reachable ONLY on the footer-only draw path: a
 /// terminal tall enough to lay out the office is also tall enough for `full_h` to
 /// saturate at the content height, so the viewport stays at the cap there.
@@ -519,13 +531,13 @@ fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
 
     let painted = |rows: u16| -> (usize, String) {
         let mut r = build(80, rows, vec![]);
-        r.set_dashboard_frame_parts(
-            true,
-            build_dashboard_rows(&scene, &DashboardFolds::default()),
-            Some(deep),
-            0,
-        );
-        r.render(&scene, &pack(), t0()).unwrap();
+        r.set_dashboard_frame(DashboardFrame {
+            open: true,
+            rows: build_dashboard_rows(&scene, &DashboardFolds::default()),
+            selected: Some(deep),
+            ..Default::default()
+        });
+        r.render(&scene, pack(), t0()).unwrap();
         // `dash_popup`, NOT `frame_text`: at a roomy height the OFFICE also renders
         // and paints agent name badges, which a whole-frame scan counts as rows.
         let text = dash_popup(r.frame_buffer());
@@ -567,8 +579,12 @@ fn dashboard_badge_text_present_for_cc_and_cx() {
     let scene = scene_with(vec![cc_slot, cx_slot], 16);
 
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
-    r.set_dashboard_frame_parts(true, rows, None, 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(popup.contains("[cc]"), "cc badge missing:\n{popup}");
@@ -588,8 +604,12 @@ fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
     let scene = scene_with(agents, 32);
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame_parts(true, rows, None, 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -610,8 +630,12 @@ fn dashboard_overflow_cue_absent_when_all_visible() {
     let scene = scene_with(agents, 16);
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame_parts(true, rows, None, 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -634,8 +658,13 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let row20 = rows[20].agent_id;
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame_parts(true, rows, Some(row20), 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        selected: Some(row20),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
     assert!(
         popup.contains("row20"),
@@ -662,8 +691,13 @@ fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
     let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     let last = rows[16].agent_id;
     let mut r = build(120, 44, vec![]);
-    r.set_dashboard_frame_parts(true, rows, Some(last), 0);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.set_dashboard_frame(DashboardFrame {
+        open: true,
+        rows,
+        selected: Some(last),
+        ..Default::default()
+    });
+    r.render(&scene, pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
     assert!(
         popup.contains("row16"),

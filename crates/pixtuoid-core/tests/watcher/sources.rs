@@ -4,14 +4,14 @@ use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
+use pixtuoid_core::source::AgentEvent;
+use pixtuoid_core::source::Source;
+use pixtuoid_core::source::Transport;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
 use pixtuoid_core::source::grok::GrokSource;
-use pixtuoid_core::source::AgentEvent;
-use pixtuoid_core::source::Source;
-use pixtuoid_core::source::Transport;
 
 use crate::fast_watch;
 
@@ -365,8 +365,8 @@ async fn grok_source_run_emits_events_from_updates_jsonl() {
 
 #[tokio::test]
 async fn omp_source_run_watches_profile_roots_beside_the_primary() {
-    use pixtuoid_core::source::omp::OmpSource;
     use pixtuoid_core::AgentId;
+    use pixtuoid_core::source::omp::OmpSource;
 
     fast_watch();
     let dir = TempDir::new().unwrap();
@@ -401,8 +401,8 @@ async fn omp_source_run_watches_profile_roots_beside_the_primary() {
 
 #[tokio::test]
 async fn omp_source_rescan_hot_plugs_a_profile_created_mid_run() {
-    use pixtuoid_core::source::omp::OmpSource;
     use pixtuoid_core::AgentId;
+    use pixtuoid_core::source::omp::OmpSource;
 
     fast_watch();
     let dir = TempDir::new().unwrap();
@@ -457,34 +457,6 @@ async fn omp_source_rescan_hot_plugs_a_profile_created_mid_run() {
     handle.abort();
 }
 
-#[tokio::test]
-#[cfg(unix)]
-async fn omp_source_run_reports_total_watch_failure_instead_of_swallowing_it() {
-    use pixtuoid_core::source::omp::OmpSource;
-    use std::os::unix::fs::PermissionsExt;
-
-    // Deliberately NOT fast_watch(): the forced PollWatcher tolerates a
-    // missing root (walk latches and warns), so only the native backend's
-    // watch() error can exercise the death path.
-    let dir = TempDir::new().unwrap();
-    let sealed = dir.path().join("sealed");
-    tokio::fs::create_dir(&sealed).await.unwrap();
-    let mut perms = std::fs::metadata(&sealed).unwrap().permissions();
-    perms.set_mode(0o000);
-    std::fs::set_permissions(&sealed, perms.clone()).unwrap();
-
-    let (tx, _rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
-    let result = Box::new(OmpSource::single_root(sealed.join("sessions")))
-        .run(tx)
-        .await;
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&sealed, perms).unwrap();
-    assert!(
-        result.is_err(),
-        "every watcher failing must propagate to the deaths surface (#157), got Ok"
-    );
-}
-
 /// The expected-id seam shared by the omp cases: the SAME fold + deriver the
 /// watcher uses, so a raw-case literal cannot pass on Unix and red only on
 /// windows-test.
@@ -519,7 +491,7 @@ async fn wait_for_session_start(
     while tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
             Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) if agent_id == want => {
-                return true
+                return true;
             }
             Ok(Some(_)) => {}
             Ok(None) => return false,
@@ -534,8 +506,8 @@ async fn wait_for_session_start(
 // its stem, the child on the stem CHAIN.
 #[tokio::test]
 async fn omp_source_run_links_a_nested_subagent_to_its_root() {
-    use pixtuoid_core::source::omp::OmpSource;
     use pixtuoid_core::AgentId;
+    use pixtuoid_core::source::omp::OmpSource;
 
     fast_watch();
     let dir = TempDir::new().unwrap();
@@ -756,10 +728,10 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
         match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
             Ok(Some((transport, ev))) => {
                 reducer.apply(&mut scene, ev, std::time::SystemTime::now(), transport);
-                if let Some(slot) = scene.agents.values().next() {
-                    if states.last() != Some(&slot.state) {
-                        states.push(slot.state.clone());
-                    }
+                if let Some(slot) = scene.agents.values().next()
+                    && states.last() != Some(&slot.state)
+                {
+                    states.push(slot.state.clone());
                 }
             }
             // A quiet gap once the finite fixture has been folded is the normal

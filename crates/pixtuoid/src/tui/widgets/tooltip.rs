@@ -8,13 +8,12 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
-use super::{compact_hms, display_width, source_badge_span, state_color, to_color, StateKind};
+use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::layout::{Layout, DESK_W};
-use pixtuoid_scene::overlay::disambig_suffix;
+use pixtuoid_scene::display::GatewayCard;
+use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::tool_glow_for_kind;
-use pixtuoid_scene::pose;
+use pixtuoid_scene::pixel_painter::AgentFrame;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -22,6 +21,15 @@ use pixtuoid_scene::pose;
 /// callers' `+2` size math accounts for.
 pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
     Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
+}
+
+/// Where a cursor tooltip anchors: the hovered cell, and the scene rect it must
+/// stay inside.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TooltipAt {
+    pub(crate) mx: u16,
+    pub(crate) my: u16,
+    pub(crate) scene_rect: Rect,
 }
 
 /// Horizontal anchor for a tooltip of width `tip_w`: just right of the cursor,
@@ -35,49 +43,38 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_label_widgets(
     f: &mut ratatui::Frame<'_>,
-    scene: &SceneState,
-    layout: &Layout,
-    now: SystemTime,
-    rctx: &mut pose::RouteCtx<'_>,
+    labels: &[LabelElement],
     scene_rect: Rect,
-    hovered: Option<AgentId>,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    for el in pixtuoid_scene::overlay::build_overlay(scene, layout, now, rctx, hovered) {
-        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(2);
+    for el in labels {
         let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
-        let label_color = if el.hovered {
-            Color::White
+        let spans = if el.hovered {
+            let style = Style::default()
+                .fg(Color::White)
+                .add_modifier(ratatui::style::Modifier::BOLD);
+            vec![Span::styled(format!("▸{}", el.text), style)]
         } else {
-            to_color(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme))
+            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
+            vec![
+                Span::styled(
+                    pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
+                    Style::default().fg(to_color(ink.marker)),
+                ),
+                Span::styled(el.text.clone(), Style::default().fg(to_color(ink.name))),
+            ]
         };
-        let mut style = Style::default().fg(label_color);
-        if el.hovered {
-            style = style.add_modifier(ratatui::style::Modifier::BOLD);
-        }
-        let marker = if el.hovered { "▸" } else { "●" };
-        // The CLI-identity split: the ● marker is the STATUS dot (activity tone)
-        // while the name text carries the source's badge hue, so status stays
-        // redundantly visible and identity stays constant.
-        let badge = (!el.hovered)
-            .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
-            .flatten();
-        let spans = match badge {
-            Some(rgb) => vec![
-                Span::styled(marker.to_string(), style),
-                Span::styled(el.text.clone(), Style::default().fg(to_color(rgb))),
-            ],
-            None => vec![Span::styled(format!("{marker}{}", el.text), style)],
-        };
-        let para = Paragraph::new(ratatui::text::Line::from(spans));
+        let line = ratatui::text::Line::from(spans);
+        let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
+        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(half_w);
+        let para = Paragraph::new(line);
         if let Some(r) = clip_widget_rect(
             Rect {
                 x: lx,
                 y: ly,
-                width: DESK_W + 4,
+                width: pixtuoid_scene::overlay::BADGE_CELLS,
                 height: 1,
             },
             scene_rect,
@@ -112,17 +109,15 @@ fn short_cwd(cwd: &std::path::Path) -> String {
 /// pinned. Uses the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`)
 /// so it can't drift from the footer/board/dashboard; dim rows use `tooltip_dim`,
 /// NOT the live `label_exiting`.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_hover_tooltip(
     f: &mut ratatui::Frame<'_>,
     scene: &SceneState,
     agent_id: AgentId,
-    mx: u16,
-    my: u16,
-    scene_rect: Rect,
+    at: TooltipAt,
     now: SystemTime,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
+    let TooltipAt { mx, my, scene_rect } = at;
     let Some(agent) = scene.agents.get(&agent_id) else {
         return;
     };
@@ -164,7 +159,7 @@ pub(crate) fn paint_hover_tooltip(
                     state_spans.push(Span::raw(" \u{b7} "));
                     state_spans.push(Span::styled(
                         tool.to_string(),
-                        Style::default().fg(to_color(tool_glow_for_kind(*tk, &theme.tool_glow))),
+                        Style::default().fg(to_color(theme.tool_glow.for_kind(*tk))),
                     ));
                 }
                 if !rest.is_empty() {
@@ -285,11 +280,10 @@ pub(crate) fn paint_hover_tooltip(
 fn paint_simple_tooltip(
     f: &mut ratatui::Frame<'_>,
     text: &str,
-    mx: u16,
-    my: u16,
-    scene_rect: Rect,
+    at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
+    let TooltipAt { mx, my, scene_rect } = at;
     let line = Line::from(Span::styled(
         text,
         Style::default()
@@ -325,36 +319,29 @@ fn paint_simple_tooltip(
 
 pub(crate) fn paint_coffee_tooltip(
     f: &mut ratatui::Frame<'_>,
-    mx: u16,
-    my: u16,
-    scene_rect: Rect,
+    at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    paint_simple_tooltip(f, " \u{2615} Buy Ivan a coffee ", mx, my, scene_rect, theme);
+    paint_simple_tooltip(f, " \u{2615} Buy Ivan a coffee ", at, theme);
 }
 
 pub(crate) fn paint_furniture_tooltip(
     f: &mut ratatui::Frame<'_>,
     label: &str,
-    mx: u16,
-    my: u16,
-    scene_rect: Rect,
+    at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     let text = format!(" {} ", label);
-    paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
+    paint_simple_tooltip(f, &text, at, theme);
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_pet_tooltip(
     f: &mut ratatui::Frame<'_>,
     kind: PetKind,
     anim_name: &str,
     is_on_cooldown: bool,
     display_name: &str,
-    mx: u16,
-    my: u16,
-    scene_rect: Rect,
+    at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     let idle = format!(" {display_name} ");
@@ -370,39 +357,32 @@ pub(crate) fn paint_pet_tooltip(
     } else {
         &idle
     };
-    paint_simple_tooltip(f, text, mx, my, scene_rect, theme);
+    paint_simple_tooltip(f, text, at, theme);
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_mascot_tooltip(
     f: &mut ratatui::Frame<'_>,
-    name: &str,
-    instance: Option<&str>,
-    busy: bool,
-    degraded: bool,
-    active_sessions: u32,
-    mx: u16,
-    my: u16,
-    scene_rect: Rect,
+    card: &GatewayCard,
+    at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let text = mascot_tooltip_text(name, instance, busy, degraded, active_sessions);
-    paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
+    let text = mascot_tooltip_text(card);
+    paint_simple_tooltip(f, &text, at, theme);
 }
 
 /// The mascot tooltip's text. The verb keys on `busy` — see
-/// [`pixtuoid_scene::pixel_painter::MascotFrame::busy`] for why the run state,
-/// not the session count — and `degraded` outranks busy/idle. Plain text (no
-/// emoji) to keep the caller's width math exact.
-fn mascot_tooltip_text(
-    name: &str,
-    instance: Option<&str>,
-    busy: bool,
-    degraded: bool,
-    active_sessions: u32,
-) -> String {
-    // `OpenClaw:19789` — the painter sets `instance` only when there IS a sibling to
-    // tell apart, so the single-gateway tooltip stays byte-unchanged.
+/// [`GatewayCard::busy`] for why the run state, not the session count — and
+/// `degraded` outranks busy/idle.
+fn mascot_tooltip_text(card: &GatewayCard) -> String {
+    let &GatewayCard {
+        name,
+        ref instance,
+        busy,
+        degraded,
+        active_sessions,
+    } = card;
+    // `OpenClaw:19789` — `instance` is set only when there IS a sibling to tell
+    // apart, so the single-gateway tooltip stays byte-unchanged.
     let name = match instance {
         Some(i) => format!("{name}:{i}"),
         None => name.to_string(),
@@ -424,10 +404,19 @@ fn mascot_tooltip_text(
 pub fn paint_chitchat_bubbles(
     f: &mut ratatui::Frame<'_>,
     bubbles: &[pixtuoid_scene::chitchat::ChitchatBubble],
+    agents: &[AgentFrame],
     scene_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     for bubble in bubbles {
+        // The speaker's badge anchor, so bubble and badge share one centre.
+        let Some(at) = agents
+            .iter()
+            .find(|a| a.agent_id == bubble.speaker)
+            .map(|a| a.label_anchor)
+        else {
+            continue;
+        };
         let text = format!(" {} ", bubble.text);
         // Size by DISPLAY width, not byte length: a wide-glyph quip would otherwise
         // over-size and mis-center the bubble.
@@ -435,8 +424,8 @@ pub fn paint_chitchat_bubbles(
         let tip_w = line.width() as u16;
         let tip_h = 1u16;
 
-        let cell_x = scene_rect.x + bubble.anchor.x;
-        let cell_y = scene_rect.y + bubble.anchor.y / 2;
+        let cell_x = scene_rect.x + at.x;
+        let cell_y = scene_rect.y + at.y / 2;
 
         let bx = cell_x.saturating_sub(tip_w / 2);
         let by = cell_y.saturating_sub(3);
@@ -460,11 +449,11 @@ pub fn paint_chitchat_bubbles(
 
 #[cfg(test)]
 mod tests {
-    use super::mascot_tooltip_text;
+    use super::{GatewayCard, TooltipAt, mascot_tooltip_text};
     use pixtuoid_scene::theme;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
-    use ratatui::Terminal;
 
     /// Join the whole buffer into one newline-free string, so a `.contains` probe
     /// finds text regardless of which cell the box landed in.
@@ -492,20 +481,175 @@ mod tests {
         None
     }
 
+    /// A lone `OpenClaw` mascot; only the tooltip-bearing fields vary.
+    fn mascot(
+        instance: Option<&str>,
+        busy: bool,
+        degraded: bool,
+        active_sessions: u32,
+    ) -> GatewayCard {
+        GatewayCard {
+            name: "OpenClaw",
+            instance: instance.map(str::to_string),
+            busy,
+            degraded,
+            active_sessions,
+        }
+    }
+
+    /// A badge's text centres on its anchor, the sprite's top-centre.
+    #[test]
+    fn a_badge_centres_its_text_on_the_anchor() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let scene_rect = Rect {
+            x: 3,
+            y: 1,
+            width: 36,
+            height: 8,
+        };
+        let anchor = Point { x: 20, y: 8 };
+        let text = "abcdefgh";
+        term.draw(|f| {
+            super::paint_label_widgets(
+                f,
+                &[LabelElement {
+                    anchor_px: anchor,
+                    text: text.into(),
+                    tone: LabelTone::Idle,
+                    hovered: false,
+                }],
+                scene_rect,
+                &theme::NORMAL,
+            )
+        })
+        .unwrap();
+        let row = row_of(&term, text).expect("the badge painted");
+        let buf = term.backend().buffer();
+        let left = (0..buf.area.width)
+            .find(|&x| buf[(x, row)].symbol() != " ")
+            .expect("a painted cell");
+        // The ● marker plus the name.
+        let width = 1 + text.chars().count() as u16;
+        assert_eq!(left, scene_rect.x + anchor.x - width / 2);
+    }
+
+    /// The classic badge paints the shared model's ink, which
+    /// `every_badge_ink_reads_on_its_plate_in_every_theme` holds at WCAG AA:
+    /// the ● in the source's hue, the name in the tone, in every theme.
+    #[test]
+    fn a_badge_paints_the_models_ink() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone, badge_ink};
+        let text = "cc\u{b7}repo";
+        for theme in pixtuoid_scene::theme::ALL_THEMES {
+            for tone in [
+                LabelTone::Active,
+                LabelTone::Waiting,
+                LabelTone::Idle,
+                LabelTone::Exiting,
+            ] {
+                let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+                term.draw(|f| {
+                    super::paint_label_widgets(
+                        f,
+                        &[LabelElement {
+                            anchor_px: Point { x: 20, y: 8 },
+                            text: text.into(),
+                            tone,
+                            hovered: false,
+                        }],
+                        f.area(),
+                        theme,
+                    )
+                })
+                .unwrap();
+                let row = row_of(&term, "repo").expect("the badge painted");
+                let buf = term.backend().buffer();
+                let fg = |s: &str| {
+                    (0..buf.area.width)
+                        .find(|&x| buf[(x, row)].symbol() == s)
+                        .and_then(|x| buf[(x, row)].style().fg)
+                };
+                let ink = badge_ink(text, tone, theme);
+                let at = format!("{} {tone:?}", theme.name);
+                let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+                assert_eq!(fg(&marker), Some(super::to_color(ink.marker)), "{at}");
+                assert_eq!(fg("r"), Some(super::to_color(ink.name)), "{at}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_chitchat_bubble_centres_over_its_speakers_badge() {
+        use pixtuoid_scene::chitchat::ChitchatBubble;
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        use pixtuoid_scene::pixel_painter::AgentFrame;
+        let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let scene_rect = Rect {
+            x: 3,
+            y: 1,
+            width: 36,
+            height: 10,
+        };
+        let speaker = AgentFrame {
+            agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
+            label_anchor: Point { x: 20, y: 14 },
+        };
+        let (name, quip) = ("abcdefgh", "LGTM!");
+        term.draw(|f| {
+            super::paint_label_widgets(
+                f,
+                &[LabelElement {
+                    anchor_px: speaker.label_anchor,
+                    text: name.into(),
+                    tone: LabelTone::Idle,
+                    hovered: false,
+                }],
+                scene_rect,
+                &theme::NORMAL,
+            );
+            super::paint_chitchat_bubbles(
+                f,
+                &[ChitchatBubble {
+                    text: quip,
+                    speaker: speaker.agent_id,
+                }],
+                &[speaker],
+                scene_rect,
+                &theme::NORMAL,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let centre = |needle: &str| {
+            let row = row_of(&term, needle).expect("painted");
+            let cells: Vec<u16> = (0..buf.area.width)
+                .filter(|&x| {
+                    buf[(x, row)].symbol() != " "
+                        || buf[(x, row)].bg != ratatui::style::Color::Reset
+                })
+                .collect();
+            let (l, r) = (cells[0], cells[cells.len() - 1]);
+            (l + r) / 2
+        };
+        assert_eq!(centre(quip), centre(name));
+    }
+
     #[test]
     fn mascot_tooltip_paints_gateway_verb_into_buffer() {
         let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
         term.draw(|f| {
             super::paint_mascot_tooltip(
                 f,
-                "OpenClaw",
-                None,
-                true,
-                false,
-                1,
-                10,
-                3,
-                f.area(),
+                &mascot(None, true, false, 1),
+                TooltipAt {
+                    mx: 10,
+                    my: 3,
+                    scene_rect: f.area(),
+                },
                 &theme::NORMAL,
             )
         })
@@ -525,14 +669,12 @@ mod tests {
             .draw(|f| {
                 super::paint_mascot_tooltip(
                     f,
-                    "OpenClaw",
-                    None,
-                    true,
-                    true,
-                    1,
-                    10,
-                    3,
-                    f.area(),
+                    &mascot(None, true, true, 1),
+                    TooltipAt {
+                        mx: 10,
+                        my: 3,
+                        scene_rect: f.area(),
+                    },
                     &theme::NORMAL,
                 )
             })
@@ -555,7 +697,19 @@ mod tests {
         let sit = kind.sit_anim();
         let mut term = Terminal::new(TestBackend::new(40, 8)).unwrap();
         term.draw(|f| {
-            super::paint_pet_tooltip(f, kind, sit, false, "Rex", 10, 3, f.area(), &theme::NORMAL)
+            super::paint_pet_tooltip(
+                f,
+                kind,
+                sit,
+                false,
+                "Rex",
+                TooltipAt {
+                    mx: 10,
+                    my: 3,
+                    scene_rect: f.area(),
+                },
+                &theme::NORMAL,
+            )
         })
         .unwrap();
         let text = buffer_text(&term);
@@ -626,7 +780,18 @@ mod tests {
                     cell.bg = bright;
                 }
             }
-            super::paint_hover_tooltip(f, &scene, id, 20, 10, f.area(), now, &theme::NORMAL);
+            super::paint_hover_tooltip(
+                f,
+                &scene,
+                id,
+                TooltipAt {
+                    mx: 20,
+                    my: 10,
+                    scene_rect: f.area(),
+                },
+                now,
+                &theme::NORMAL,
+            );
         })
         .unwrap();
         let text = buffer_text(&term);
@@ -692,7 +857,18 @@ mod tests {
             scene.agents.insert(id, slot);
             let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
             term.draw(|f| {
-                super::paint_hover_tooltip(f, &scene, id, 20, 12, f.area(), now, &theme::NORMAL);
+                super::paint_hover_tooltip(
+                    f,
+                    &scene,
+                    id,
+                    TooltipAt {
+                        mx: 20,
+                        my: 12,
+                        scene_rect: f.area(),
+                    },
+                    now,
+                    &theme::NORMAL,
+                );
             })
             .unwrap();
             buffer_text(&term)
@@ -733,8 +909,19 @@ mod tests {
         // Box height is 3 (1 content line wrapped in `Padding::uniform(1)`), so the
         // content row = box-top + 1.
         let mut top = Terminal::new(TestBackend::new(40, 24)).unwrap();
-        top.draw(|f| super::paint_simple_tooltip(f, " PROBE ", 5, 0, scene, &theme::NORMAL))
-            .unwrap();
+        top.draw(|f| {
+            super::paint_simple_tooltip(
+                f,
+                " PROBE ",
+                TooltipAt {
+                    mx: 5,
+                    my: 0,
+                    scene_rect: scene,
+                },
+                &theme::NORMAL,
+            )
+        })
+        .unwrap();
         let top_y = row_of(&top, "PROBE").expect("PROBE rendered when cursor at top");
         assert_eq!(
             top_y, 2,
@@ -742,8 +929,19 @@ mod tests {
         );
 
         let mut low = Terminal::new(TestBackend::new(40, 24)).unwrap();
-        low.draw(|f| super::paint_simple_tooltip(f, " PROBE ", 5, 20, scene, &theme::NORMAL))
-            .unwrap();
+        low.draw(|f| {
+            super::paint_simple_tooltip(
+                f,
+                " PROBE ",
+                TooltipAt {
+                    mx: 5,
+                    my: 20,
+                    scene_rect: scene,
+                },
+                &theme::NORMAL,
+            )
+        })
+        .unwrap();
         let low_y = row_of(&low, "PROBE").expect("PROBE rendered when cursor low");
         assert_eq!(
             low_y, 18,
@@ -754,19 +952,19 @@ mod tests {
     #[test]
     fn mascot_tooltip_verb_keys_on_run_state_not_session_count() {
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, false, 0),
+            mascot_tooltip_text(&mascot(None, false, false, 0)),
             " OpenClaw gateway · idle "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, false, 1),
+            mascot_tooltip_text(&mascot(None, false, false, 1)),
             " OpenClaw gateway · idle "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, false, 1),
+            mascot_tooltip_text(&mascot(None, true, false, 1)),
             " OpenClaw gateway · working "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, false, 3),
+            mascot_tooltip_text(&mascot(None, true, false, 3)),
             " OpenClaw gateway · working · 3 sessions "
         );
     }
@@ -774,15 +972,15 @@ mod tests {
     #[test]
     fn mascot_tooltip_names_the_instance_only_when_there_is_a_sibling() {
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", Some("19789"), true, false, 0),
+            mascot_tooltip_text(&mascot(Some("19789"), true, false, 0)),
             " OpenClaw:19789 gateway · working "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", Some("18789"), false, true, 2),
+            mascot_tooltip_text(&mascot(Some("18789"), false, true, 2)),
             " OpenClaw:18789 gateway · model error · 2 sessions "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, false, 0),
+            mascot_tooltip_text(&mascot(None, false, false, 0)),
             " OpenClaw gateway · idle ",
             "a single gateway's tooltip stays byte-identical"
         );
@@ -791,15 +989,15 @@ mod tests {
     #[test]
     fn mascot_tooltip_degraded_overrides_busy_and_idle() {
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, true, 0),
+            mascot_tooltip_text(&mascot(None, false, true, 0)),
             " OpenClaw gateway · model error "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, true, 1),
+            mascot_tooltip_text(&mascot(None, true, true, 1)),
             " OpenClaw gateway · model error "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, true, 3),
+            mascot_tooltip_text(&mascot(None, true, true, 3)),
             " OpenClaw gateway · model error · 3 sessions "
         );
     }
@@ -823,7 +1021,15 @@ mod tests {
                     cell.bg = bright;
                 }
             }
-            super::paint_coffee_tooltip(f, 20, 8, scene, &theme::NORMAL);
+            super::paint_coffee_tooltip(
+                f,
+                TooltipAt {
+                    mx: 20,
+                    my: 8,
+                    scene_rect: scene,
+                },
+                &theme::NORMAL,
+            );
         })
         .unwrap();
         let buf = term.backend().buffer();

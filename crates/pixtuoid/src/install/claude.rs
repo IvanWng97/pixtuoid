@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use pixtuoid_core::source::claude_code::claude_config_dir;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
@@ -79,7 +79,7 @@ pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
 }
 
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble};
     let Ok(doc) = serde_json::from_str::<Value>(content) else {
         return SchemaParse::broken("settings.json no longer parses as JSON");
     };
@@ -175,39 +175,31 @@ mod tests {
 
     #[test]
     fn default_config_path_honors_claude_config_dir() {
-        // std::env is process-global: serialize against the other env-mutating tests
-        // in this binary.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved_config = std::env::var_os("CLAUDE_CONFIG_DIR");
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 
-        std::env::remove_var("CLAUDE_CONFIG_DIR");
-        let unset_path = default_config_path().unwrap();
-        assert!(
-            unset_path.ends_with(&fallback_suffix),
-            "default config path must end with .claude/settings.json, got {unset_path:?}"
-        );
+        temp_env::with_var_unset("CLAUDE_CONFIG_DIR", || {
+            let unset_path = default_config_path().unwrap();
+            assert!(
+                unset_path.ends_with(&fallback_suffix),
+                "default config path must end with .claude/settings.json, got {unset_path:?}"
+            );
+        });
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
-        std::env::set_var("CLAUDE_CONFIG_DIR", &custom_dir);
-        assert_eq!(
-            default_config_path().unwrap(),
-            custom_dir.join("settings.json")
-        );
+        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(&custom_dir), || {
+            assert_eq!(
+                default_config_path().unwrap(),
+                custom_dir.join("settings.json")
+            );
+        });
 
-        std::env::set_var("CLAUDE_CONFIG_DIR", "");
-        let empty_path = default_config_path().unwrap();
-        assert!(
-            empty_path.ends_with(&fallback_suffix),
-            "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
-        );
-
-        match saved_config {
-            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
-            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
-        }
+        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(""), || {
+            let empty_path = default_config_path().unwrap();
+            assert!(
+                empty_path.ends_with(&fallback_suffix),
+                "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
+            );
+        });
     }
 
     #[test]

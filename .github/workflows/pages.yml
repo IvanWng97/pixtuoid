@@ -1,11 +1,8 @@
 name: deploy site
 
 on:
-  # Every input the build reads: a path missing here means the published site
-  # silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml', '.github/actions/setup-site-node/**']
   workflow_dispatch:
 
 # Least-privilege: the build job runs third-party code (npm postinstall
@@ -22,7 +19,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A cold gen-demos (release build plus encodes) on top of a cold gen-wasm.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -32,6 +30,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-site-node
         id: site-node
+      # Before `check`: astro.config.mjs asserts each demo exists.
+      - uses: ./.github/actions/gen-demos
       - name: Audit site dependencies
         working-directory: site
         run: npm run audit
@@ -41,6 +41,7 @@ jobs:
       - name: Type-check site
         working-directory: site
         run: npm run check
+      - uses: ./.github/actions/gen-wasm
       - uses: withastro/action@v6
         # the ticker's build-time merged-PR fetch: unauthenticated quota on
         # shared runner IPs is routinely exhausted -> silent canned-reel fallback

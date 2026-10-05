@@ -7,18 +7,18 @@
 //! agent's home desk.
 //!
 //! Pure geometry over [`WalkableMask`] — no A*, no terminal deps — so the
-//! stateless `pose::pure::idle_pose` and the stateful `motion` walk destinations
-//! stay in lockstep with the render anchor (all three call this with the same
-//! `origin = home desk`).
+//! stateless `pose::pure::idle_pose` and the stateful `walk` destinations
+//! stay in lockstep with where the render stands the sprite (all three call
+//! this with the same `origin = home desk`).
 
-use super::decor::{furniture_def, Facing, Furniture, WaypointKind};
+use super::decor::{Facing, Furniture, WaypointKind, furniture_def};
 use super::reach::ReachSet;
-use super::{Point, Size};
+use super::{Point, Size, WAYPOINT_STAMP_PAD_PX};
 use pixtuoid_core::walkable::WalkableMask;
 
-/// First clear pixel beyond a footprint half-extent: `mask.rs` stamps waypoint
-/// furniture with `pad = 1`, so `half + 2` is the first guaranteed-unblocked one.
-const STAND_CLEARANCE: u16 = 2;
+/// First clear pixel beyond a footprint half-extent: the one past the
+/// [`WAYPOINT_STAMP_PAD_PX`] band the mask stamps around waypoint furniture.
+const STAND_CLEARANCE: u16 = WAYPOINT_STAMP_PAD_PX + 1;
 /// How far past `half + STAND_CLEARANCE` to keep probing for a walkable
 /// cell before giving up on a side.
 const STAND_SCAN: i32 = 4;
@@ -45,13 +45,11 @@ pub(super) fn obstacle_footprint(kind: WaypointKind, pantry_counter_size: Size) 
     furniture_def(kind.furniture()).footprint
 }
 
-/// The walkable cell where an agent should stand to use the OBSTACLE furniture
-/// of `kind` centered at `pos` — the RENDER anchor for an `AtWaypoint` obstacle
-/// sprite. It MUST equal the walk goal [`approach_point`] returns for the same
-/// furniture (else the sprite pops onto a different face on arrival), so it
-/// DELEGATES there rather than re-scanning. Seat furniture (`occupies_pos`)
-/// renders ON its `pos` and short-circuits; falls back to `pos` (the "no valid
-/// approach" sentinel) exactly where `approach_point` does.
+/// The stand cell for the furniture of `kind` centered at `pos`: where an agent
+/// stands to use it — a seat (`occupies_pos`) its own `pos`, OBSTACLE furniture
+/// the walk goal [`approach_point`] returns (else the sprite pops onto a
+/// different face on arrival), which it DELEGATES to rather than re-scanning,
+/// the "no valid approach" sentinel `pos` included.
 pub(crate) fn stand_point(
     kind: WaypointKind,
     pos: Point,
@@ -61,8 +59,7 @@ pub(crate) fn stand_point(
     facing: Facing,
     reachable: &ReachSet,
 ) -> Point {
-    // Seats render ON `pos`; approach_point would return the off-side approach
-    // cell, not the seat.
+    // approach_point would return the off-side approach cell, not the seat.
     if furniture_def(kind.furniture()).occupies_pos {
         return pos;
     }
@@ -132,7 +129,7 @@ pub(crate) fn first_reachable_on_side(
 /// footprint (seats / wall decor).
 ///
 /// INVARIANT: the `visual/2` half-extent derived from this assumes
-/// `Anchor::Center` placement. A future `TopLeft`-placed obstacle waypoint would
+/// `Pivot::Center` placement. A future `TopLeft`-placed obstacle waypoint would
 /// compute the stand cell off a wrong center and must pass a center, not the raw
 /// origin.
 fn approach_clearance_extent(kind: Furniture, pantry_counter_size: Size) -> Option<Size> {
@@ -373,7 +370,7 @@ mod tests {
         // `stand_point ≡ approach_point` is true BY CONSTRUCTION (stand_point
         // delegates), so an equality assert would be a tautology — pin the
         // obstacle branch's real invariants instead.
-        use crate::layout::{furniture_def, SceneLayout};
+        use crate::layout::{SceneLayout, furniture_def};
         let obstacle = |k| {
             !matches!(
                 k,
@@ -581,7 +578,7 @@ mod tests {
 
     #[test]
     fn seat_approach_is_never_behind_the_backrest_on_real_layouts() {
-        use crate::layout::{furniture_def, SceneLayout};
+        use crate::layout::{SceneLayout, furniture_def};
         for (w, h) in [(120u16, 96u16), (160, 120), (192, 160), (240, 160)] {
             for seed in 0..4u64 {
                 let Some(l) = SceneLayout::compute_with_seed(w, h, Some(4), seed) else {

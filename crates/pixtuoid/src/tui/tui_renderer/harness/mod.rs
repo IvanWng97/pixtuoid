@@ -1,11 +1,12 @@
 //! End-to-end headless harness: drives the real `TuiRenderer` (via ratatui
 //! `TestBackend`) through the production render path.
 use super::*;
-use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
+use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::pet::PetKind;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,11 +60,16 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     panic!("floor transition to {target_floor} did not settle");
 }
 
-pub(super) fn pack() -> Pack {
-    pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )
-    .expect("embedded pack")
+/// Parsed once per test process and shared by every harness test.
+pub(super) fn pack() -> &'static Pack {
+    pack_static()
+}
+pub(super) fn pack_arc() -> Arc<Pack> {
+    Arc::clone(pack_static())
+}
+fn pack_static() -> &'static Arc<Pack> {
+    static PACK: std::sync::OnceLock<Arc<Pack>> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack")))
 }
 pub(super) fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
@@ -76,7 +82,7 @@ pub(super) fn dark_theme() -> &'static pixtuoid_scene::theme::Theme {
 }
 /// A terminal one row under the office minimum — the footer-only path, DERIVED
 /// so a floor move can't leave these tests asserting against a size that has
-/// since become perfectly renderable (it did: 80x24 used to be too small).
+/// since become perfectly renderable.
 pub(super) fn too_small_terminal() -> (u16, u16) {
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
     (cols, rows - 1)
@@ -102,6 +108,7 @@ pub(super) fn build_pets(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         pets,
+        pack_arc(),
     )
 }
 /// Idle agent on floor 0 at desk `desk`.
@@ -152,11 +159,7 @@ pub(super) fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 
             n += 1;
         }
     }
-    if n == 0 {
-        0.0
-    } else {
-        sum / n as f32
-    }
+    if n == 0 { 0.0 } else { sum / n as f32 }
 }
 pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> u64 {
     let mut d = 0u64;
@@ -184,6 +187,8 @@ pub(super) fn two_floor_scene() -> SceneState {
 
 mod audio;
 mod coffee_pets;
+#[cfg(feature = "graphics")]
+mod cutaway;
 mod dashboard;
 mod edge_cases;
 mod floors;
@@ -193,29 +198,19 @@ mod overlays;
 mod render_text;
 mod theme_lighting;
 
-/// Drive the PRODUCTION hover path programmatically: scan the rendered layout
-/// for a cell whose agent hit-test resolves to `id` and park the mouse there.
-/// Panics when the agent isn't hit-testable — a test wiring error, not a case.
-pub(super) fn hover_agent(
-    r: &mut TuiRenderer<TestBackend>,
-    scene: &pixtuoid_core::SceneState,
-    id: pixtuoid_core::AgentId,
-    cols: u16,
-    rows: u16,
-) {
-    let layout = r.cached_layout().expect("rendered layout").clone();
-    for my in 0..rows {
-        for mx in 0..cols {
-            if crate::tui::hit_test::hit_test_from_tui(
-                scene,
-                &layout,
-                crate::tui::geometry::CellArea::half_block(mx, my),
-            ) == Some(id)
-            {
-                r.set_mouse_pos(Some((mx, my)));
-                return;
-            }
-        }
-    }
-    panic!("agent {id:?} is not hit-testable in this layout");
+/// Drive the PRODUCTION hover path programmatically: scan the last rendered
+/// frame for a cell whose agent hit-test resolves to `id` and park the mouse
+/// there. Panics when the agent isn't hit-testable — a test wiring error, not a
+/// case.
+pub(super) fn hover_agent<B>(r: &mut TuiRenderer<B>, id: pixtuoid_core::AgentId)
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
+    let cell = r
+        .frame_buffer()
+        .area()
+        .positions()
+        .find(|p| r.hit_test_agent_at(p.x, p.y) == Some(id))
+        .unwrap_or_else(|| panic!("agent {id:?} is not hit-testable in this layout"));
+    r.set_mouse_pos(Some((cell.x, cell.y)));
 }

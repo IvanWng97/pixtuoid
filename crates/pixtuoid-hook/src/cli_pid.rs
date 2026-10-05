@@ -10,8 +10,11 @@
 //! Only the row READ is per-OS, hand-rolled rather than `sysinfo` because this
 //! runs on every tool call of every agent inside the shim's send bound.
 #![cfg_attr(
-    not(any(windows, target_os = "macos", target_os = "linux")),
-    allow(dead_code)
+    all(not(any(windows, target_os = "macos", target_os = "linux")), not(test)),
+    expect(
+        dead_code,
+        reason = "without a row reader the parent pid is stamped as-is, so the walk is unused"
+    )
 )]
 
 #[derive(Clone)]
@@ -130,6 +133,8 @@ fn parse_stat(stat: &str) -> Option<ProcRow> {
 #[cfg(target_os = "macos")]
 fn proc_row(pid: u32) -> Option<ProcRow> {
     let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>()).ok()?;
+    // SAFETY: `proc_bsdshortinfo` is a repr(C) struct of integers and byte arrays,
+    // for which all-zero is a valid value.
     let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
     // Safety: the flavor matches the out-param type, and the kernel writes at
     // most `size` bytes into the owned `info`.
@@ -189,7 +194,7 @@ fn walk_now() -> Option<u32> {
 fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     };
 
@@ -234,7 +239,7 @@ mod tests {
     use super::*;
 
     /// A fake process table as the walk consumes one: pid → (parent, exe).
-    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> {
+    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> + use<> {
         let rows: std::collections::HashMap<u32, ProcRow> = rows
             .iter()
             .map(|&(pid, parent, exe)| {

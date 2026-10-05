@@ -29,30 +29,43 @@
 
 #[doc(hidden)]
 pub mod anim;
+pub(crate) mod atmosphere;
 #[doc(hidden)]
 pub mod audio;
 #[doc(hidden)]
 pub mod board;
 #[doc(hidden)]
 pub mod burn;
+pub(crate) mod celestial;
+pub(crate) mod character;
 pub mod chitchat;
+pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
+pub use creatures::PET_CYCLE_MS;
+#[doc(hidden)]
 pub mod cutaway;
-pub mod embedded_pack;
+#[doc(hidden)]
+pub mod display;
+pub(crate) mod dither;
+pub(crate) mod effects;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;
 #[doc(hidden)]
 pub mod frame_cache;
+pub(crate) mod glass;
+pub(crate) mod glass_weather;
+pub(crate) mod ground;
 pub mod layout;
-// Test-only: local wall-clock instants, so an hour-dependent assertion names
-// the hour instead of inheriting the runner's $TZ.
-#[cfg(test)]
-pub(crate) mod localclock;
-pub mod motion;
+pub(crate) mod lighting;
+#[doc(hidden)]
+pub mod localclock;
+pub mod look;
+pub(crate) mod outside;
 #[doc(hidden)]
 pub mod overlay;
+pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
 pub mod pet;
@@ -60,7 +73,22 @@ pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
 pub mod render_scale;
-pub(crate) mod sky;
+pub mod sim;
+pub mod sky;
+pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+pub mod walk;
+
+/// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
+pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+pub(crate) const GOLDEN_GAMMA_32: u32 = (GOLDEN_GAMMA >> 32) as u32;
+pub(crate) const MURMUR64A_M: u64 = 0xc6a4_a793_5bd1_e995;
+pub(crate) const MURMUR3_FMIX32_M1: u32 = 0x85eb_ca6b;
+
+/// Draw `n` of the splitmix64 stream seeded at `seed`, counting from 1: draw 0
+/// is the bare finalizer, which maps 0 to 0.
+pub(crate) fn splitmix_draw(seed: u64, n: u64) -> u64 {
+    pixtuoid_core::id::splitmix64(seed.wrapping_add(n.wrapping_mul(GOLDEN_GAMMA)))
+}

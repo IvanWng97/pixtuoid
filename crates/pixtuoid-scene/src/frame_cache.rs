@@ -6,15 +6,15 @@
 //! [`FrameCache::note_outfit_seed`] detects. With that one invalidation, caching
 //! is safe.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::{AgentId, SceneState};
 
 /// Cache identity for one recolored frame — every input that changes the output
 /// pixels is part of the key.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FrameKey {
     pub agent_id: AgentId,
     pub anim_name: &'static str,
@@ -26,10 +26,10 @@ pub struct FrameKey {
     pub burn: crate::burn::BurnTier,
     /// The grid the recolored art is authored on — 1 for the base sprite, `N`
     /// for its `@Nx` variant: the same frame at two densities is two images.
-    pub density: std::num::NonZeroU16,
+    pub density: pixtuoid_core::sprite::format::Density,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct FrameCache {
     entries: HashMap<FrameKey, Frame>,
     /// Last-seen outfit-determining seed per agent.
@@ -49,7 +49,7 @@ impl FrameCache {
     /// CHANGE (the cwd backfill) drops the agent's cached frames — otherwise
     /// already-cached poses keep the stale outfit for the agent's lifetime while
     /// new poses render the healed one. Callers pass the exact seed the palette
-    /// derives (`pixel_painter::palette::outfit_seed_for`).
+    /// derives (`sim::outfit_seed_for`).
     pub fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
         match self.outfit_seeds.entry(id) {
             Entry::Occupied(mut e) => {
@@ -101,7 +101,7 @@ mod tests {
             flip_x: false,
             glow_tint: None,
             burn: crate::burn::BurnTier::Normal,
-            density: std::num::NonZeroU16::MIN,
+            density: pixtuoid_core::sprite::format::Density::ONE,
         }
     }
 

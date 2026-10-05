@@ -5,8 +5,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 
 /// Roots with more than this many direct subagents render collapsed by default,
 /// so a large workflow doesn't flood the board.
@@ -87,10 +87,10 @@ impl DashboardFolds {
 pub fn build_dashboard_rows(scene: &SceneState, folds: &DashboardFolds) -> Vec<DashboardRow> {
     let mut children: HashMap<AgentId, Vec<AgentId>> = HashMap::new();
     for (id, slot) in &scene.agents {
-        if let Some(parent) = slot.parent_id {
-            if scene.agents.contains_key(&parent) {
-                children.entry(parent).or_default().push(*id);
-            }
+        if let Some(parent) = slot.parent_id
+            && scene.agents.contains_key(&parent)
+        {
+            children.entry(parent).or_default().push(*id);
         }
     }
 

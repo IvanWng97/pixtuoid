@@ -1,30 +1,27 @@
-//! Terminal-coupled rendering: the `draw_scene` orchestrator, the half-block
-//! flush, and the label/tooltip/notice widget overlays. The pure-pixel pass
-//! (floor/walls/decor/characters -> `RgbBuffer`) lives in the
-//! `pixtuoid_scene::pixel_painter` engine crate.
+//! Terminal-coupled rendering: the `draw_scene` orchestrator and the half-block
+//! flush of the `pixtuoid_scene::pixel_painter` buffer.
 
 use std::time::SystemTime;
 
 use anyhow::Result;
-use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::RgbBuffer;
+use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
-use ratatui::Terminal;
 
 use std::sync::Arc;
 
-use pixtuoid_scene::layout::Layout;
-use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
+use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
+use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
+use pixtuoid_scene::footer::{FooterContext, FooterInputs};
+use pixtuoid_scene::layout::{SceneLayout, Size};
+use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
 
-use crate::tui::geometry::CellArea;
-pub(crate) use crate::tui::hit_test::{
-    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
-};
-pub(crate) use crate::tui::widgets::paint_hover_tooltip;
+use crate::tui::geometry::SceneGeometry;
+pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
+pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
@@ -34,67 +31,84 @@ pub(super) use crate::tui::widgets::{
 
 pub use pixtuoid_scene::pet::PetState;
 
-/// Multi-floor display state, bundled so a renderer never sees the navigation
-/// breadcrumb without the global agent count.
-#[derive(Debug, Clone, Copy)]
-pub struct FloorInfo {
-    /// 1-indexed, for display (e.g. "F2/3").
-    pub current: usize,
-    pub total_floors: usize,
-    pub total_agents: usize,
-}
-
+#[derive(Debug)]
 pub struct DrawCtx<'a> {
-    pub buf: &'a mut RgbBuffer,
-    /// `buf` is deliberately NOT part of this group: it is a sibling of the
-    /// `FloorCtx` on a `PerFloor`, borrowed disjointly.
-    pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
+    pub world: FloorInputs<'a>,
+    /// The floor drawn: its sim stores and raster.
+    pub floor: &'a mut PerFloor,
+    /// The office stores its frame steps and draws with.
+    pub office: OfficeStores<'a>,
     pub mouse_pos: Option<(u16, u16)>,
     /// Walkable/approach/route debug layer toggle (`w`) — transient, never
     /// persisted to config.
     pub debug_walkable: bool,
-    pub theme: &'a pixtuoid_scene::theme::Theme,
+    pub theme: &'static pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
-    /// `Some` iff there's more than one floor.
-    pub floor_info: Option<FloorInfo>,
-    /// Office-wide per-floor state tally, bucketed from the FULL, un-projected
-    /// scene. ALWAYS present — unlike `floor_info` it never vanishes for a
-    /// single-floor office. Distinct from the footer's per-state integers
-    /// (`scene_stats` on the PROJECTED floor): don't derive one from the other.
-    pub per_floor: [crate::tui::widgets::StateCounts; pixtuoid_core::state::MAX_FLOORS],
-    /// Worst-of daemon-liveness rollup; `None` = no daemon configured (chip
-    /// suppressed).
-    pub gateway: Option<pixtuoid_core::state::DaemonState>,
-    /// "You would hear sound right now" — drives the footer's ♩ glyph.
-    pub audio_audible: bool,
-    /// Transient volume readout, in percent.
-    pub volume_flash: Option<u8>,
-    pub floor: pixtuoid_scene::floor::FloorMeta,
-    pub active_pet: Option<&'a PetState>,
-    pub last_pet_pos: Option<PetFrame>,
-    /// Every gateway mascot's frame this render, for hover identity.
-    pub last_mascots: Vec<MascotFrame>,
-    /// `None` when no pets are configured or none maps to this floor seed.
-    pub floor_pet: Option<&'a pixtuoid_scene::pet::Pet>,
-    pub chitchat_state: &'a mut std::collections::HashMap<
-        pixtuoid_scene::chitchat::VenueKey,
-        pixtuoid_scene::chitchat::ActiveChitchat,
-    >,
-    pub chitchat_bubbles: Vec<pixtuoid_scene::chitchat::ChitchatBubble>,
-    /// Key present = has a desk cup; value = the steam-window anchor.
-    pub coffee: &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
-    /// Out-param: the caller records these into the persistent `CoffeeState`.
-    pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
-    /// Out-param: the audio cue tracker's appliance feed.
-    pub occupied_waypoints: std::collections::HashSet<usize>,
+    /// From [`footer_context`](crate::tui::widgets::footer_context).
+    pub footer: FooterContext<'a>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
-    /// Footer warning when a source has died; `None` while healthy.
-    pub source_warning: Option<&'a str>,
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
     pub connection: &'a crate::tui::connection::ConnectionFrame,
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
+}
+
+impl<'a> DrawCtx<'a> {
+    /// An offscreen still of one floor, every input and overlay off; the office-wide
+    /// tallies and gateway come from `scene`, as the live renderer's do. The live `TuiRenderer`
+    /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
+    #[doc(hidden)]
+    pub fn offscreen(
+        floor: &'a mut PerFloor,
+        office: OfficeStores<'a>,
+        theme: &'static pixtuoid_scene::theme::Theme,
+        scene: &'a SceneState,
+        pack: &'a pixtuoid_core::sprite::format::Pack,
+        now: SystemTime,
+        meta: pixtuoid_scene::floor::FloorMeta,
+    ) -> Self {
+        use std::sync::LazyLock;
+        static CLOSED_DASHBOARD: LazyLock<crate::tui::dashboard::DashboardFrame> =
+            LazyLock::new(Default::default);
+        static CLOSED_CONNECTION: LazyLock<crate::tui::connection::ConnectionFrame> =
+            LazyLock::new(Default::default);
+        static CLOSED_ONBOARDING: LazyLock<crate::tui::welcome::OnboardingFrame> =
+            LazyLock::new(Default::default);
+        Self {
+            world: FloorInputs {
+                scene,
+                pack,
+                now,
+                floor: meta,
+                pets: Default::default(),
+            },
+            floor,
+            office,
+            mouse_pos: None,
+            debug_walkable: false,
+            theme,
+            theme_picker: None,
+            footer: crate::tui::widgets::footer_context(scene, None, false, None, None),
+            popup_scale: 0.0,
+            help_open: false,
+            dashboard: &CLOSED_DASHBOARD,
+            connection: &CLOSED_CONNECTION,
+            onboarding: &CLOSED_ONBOARDING,
+        }
+    }
+}
+
+/// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
+/// `Default` is a refused frame, which leaves nothing to hit-test.
+#[derive(Debug, Default)]
+pub struct DrawOut {
+    /// `None` when the frame was refused.
+    pub layout: Option<Arc<SceneLayout>>,
+    pub hovers: Hovers,
+    pub occupied_waypoints: std::collections::HashSet<usize>,
+    /// Where the frame lies under the cells; `None` when it was refused.
+    pub(crate) geometry: Option<SceneGeometry>,
 }
 
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
@@ -122,17 +136,17 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
-/// Minimum drawable scene size (cells) below which the world render is skipped
-/// for a footer-only draw. Shared by both "too small" gates so they can't drift.
+/// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
-/// How many rows at the bottom of the terminal the status footer owns — THE
-/// authority for that count. `pub` so `examples/snapshot`, which mirrors the
-/// renderer's buffer arithmetic to build the committed media, reads it too — public
-/// for MECHANISM, not contract, hence `doc(hidden)`.
-#[doc(hidden)]
-pub const FOOTER_ROWS: u16 = 1;
+/// Whether `scene` is too small to render the world, for a footer-only draw.
+pub(crate) fn scene_too_small(scene: Rect) -> bool {
+    scene.width < MIN_SCENE_WIDTH || scene.height < MIN_SCENE_HEIGHT
+}
+
+/// How many rows at the bottom of the terminal the status footer owns.
+pub(crate) const FOOTER_ROWS: u16 = 1;
 
 pub(crate) fn scene_rect(full: Rect) -> Rect {
     Rect {
@@ -141,6 +155,13 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
         width: full.width,
         height: full.height.saturating_sub(FOOTER_ROWS),
     }
+}
+
+/// The pixel buffer a `cols`×`rows` terminal's scene paints, two half-block pixels a row.
+#[doc(hidden)]
+pub fn scene_buf_size(cols: u16, rows: u16) -> (u16, u16) {
+    let scene = scene_rect(Rect::new(0, 0, cols, rows));
+    (scene.width, scene.height.saturating_mul(2))
 }
 
 pub(crate) struct OverlayFrame<'a> {
@@ -160,22 +181,16 @@ pub(crate) struct OverlayFrame<'a> {
 /// size, so suppressing the overlay here made `?`/`s`/`Tab` toggle something
 /// invisible on any terminal below the office layout's minimum — and first run
 /// opens the onboarding modal there.
-// The footer half travels as one `FooterStats` and the modal half as one
-// `OverlayFrame`; what remains is irreducible.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
-    scene: &SceneState,
-    stats: &crate::tui::widgets::FooterStats<'_>,
+    footer: &FooterInputs<'_>,
     theme: &pixtuoid_scene::theme::Theme,
-    floor_info: Option<FloorInfo>,
-    source_warning: Option<&str>,
     overlays: &OverlayFrame<'_>,
     now: SystemTime,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
-        paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
+        paint_footer(f, footer, actual, theme);
         paint_overlays(f, overlays, now, actual, theme);
         // LAST: a modal centres on the same rows, and first run opens one here —
         // so painting the notice first left the black screen unexplained in the
@@ -188,7 +203,7 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 /// `min_layout_size` in the terminal's own units — rows carry TWO buffer pixels
 /// (half-block), the footer takes its own, and the painter's own floor can outrank
 /// the layout's. The notice states it and the harness derives its fixtures from it;
-/// `runtime::capacity_for_terminal` holds the INVERSE and reads the same `FOOTER_ROWS`.
+/// [`scene_buf_size`] is its inverse.
 pub(crate) fn min_terminal_size() -> (u16, u16) {
     let min = pixtuoid_scene::layout::min_layout_size();
     (min.w.max(MIN_SCENE_WIDTH), advertised_rows(min.h))
@@ -279,13 +294,44 @@ fn paint_too_small_notice(
     }
 }
 
+/// The tooltip for what `hit` names on `world`'s frame, whichever painter
+/// drew it.
+pub(crate) fn paint_scene_tooltip(
+    f: &mut ratatui::Frame<'_>,
+    hit: &SceneHit<'_>,
+    world: &FloorInputs<'_>,
+    at: TooltipAt,
+    theme: &pixtuoid_scene::theme::Theme,
+) {
+    match *hit {
+        SceneHit::Figure(HoverTarget::Agent(id)) => {
+            paint_hover_tooltip(f, world.scene, *id, at, world.now, theme);
+        }
+        SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, anim, .. })) => {
+            let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(world.now));
+            // The hover was drawn from `pets.pet`, so the kinds agree and the
+            // `default_name` arm is not a live path.
+            let display_name = world
+                .pets
+                .pet
+                .map(|p| p.name.as_str())
+                .unwrap_or_else(|| kind.default_name());
+            paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
+        }
+        SceneHit::Figure(HoverTarget::Mascot(key)) => {
+            if let Some(card) = GatewayCard::of(world.scene, key) {
+                paint_mascot_tooltip(f, &card, at, theme);
+            }
+        }
+        SceneHit::Coffee => paint_coffee_tooltip(f, at, theme),
+        SceneHit::Furniture(label) => paint_furniture_tooltip(f, label, at, theme),
+    }
+}
+
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
-    scene: &SceneState,
-    pack: &Pack,
-    now: SystemTime,
     ctx: &mut DrawCtx<'_>,
-) -> Result<Option<Arc<Layout>>> {
+) -> Result<DrawOut> {
     let term_size = term.size()?;
     let full_rect = Rect {
         x: 0,
@@ -295,20 +341,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
     let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
-    let floor_info = ctx.floor_info;
-    let source_warning = ctx.source_warning;
-    let floor = ctx.floor;
-
-    // `per_floor` is copied out of `ctx` before the mutable buffer borrows below,
-    // so `FooterStats` can borrow it across the early-returns and the main paint.
-    let footer_per_floor = ctx.per_floor;
-    let footer_stats = crate::tui::widgets::FooterStats {
-        counts: crate::tui::widgets::scene_stats(scene),
-        per_floor: &footer_per_floor,
-        gateway: ctx.gateway,
-        audio_audible: ctx.audio_audible,
-        volume_flash: ctx.volume_flash,
-    };
+    let world = ctx.world;
+    let FloorInputs { scene, now, .. } = world;
+    let footer = FooterInputs::new(scene, ctx.footer);
+    let floor_info = footer.context.floor;
     let overlays = OverlayFrame {
         theme_picker: ctx.theme_picker,
         dashboard: ctx.dashboard,
@@ -318,174 +354,94 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         onboarding: ctx.onboarding,
     };
 
-    if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
-        draw_footer_only_frame(
-            term,
-            scene,
-            &footer_stats,
-            theme,
-            floor_info,
-            source_warning,
-            &overlays,
-            now,
-        )?;
-        return Ok(None);
+    if scene_too_small(scene_rect) {
+        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
+        return Ok(DrawOut::default());
     }
 
-    let buf_w = scene_rect.width;
-    let buf_h = scene_rect.height.saturating_mul(2);
-    ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
-    let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
-        draw_footer_only_frame(
-            term,
-            scene,
-            &footer_stats,
+    let (buf_w, buf_h) = scene_buf_size(full_rect.width, full_rect.height);
+    let rendered = pixtuoid_scene::look::render(
+        ctx.floor,
+        ctx.office.reborrow(),
+        Look::Classic,
+        RenderInputs {
+            world,
             theme,
-            floor_info,
-            source_warning,
-            &overlays,
-            now,
-        )?;
-        return Ok(None);
+            size: Size { w: buf_w, h: buf_h },
+            place: Place::default(),
+            debug_walkable: ctx.debug_walkable,
+        },
+    );
+    let Some(Rendered {
+        layout,
+        occupied_waypoints,
+        ..
+    }) = rendered
+    else {
+        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
+        return Ok(DrawOut::default());
+    };
+    let Some(ClassicDrawn {
+        pixels,
+        agents,
+        hovers,
+        bubbles: chitchat_bubbles,
+    }) = ctx.floor.raster.classic_drawn()
+    else {
+        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
+        return Ok(DrawOut::default());
     };
 
-    let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
-        store: &mut *ctx.store,
-        buf: &mut *ctx.buf,
-        scene,
-        layout: &layout,
-        pack,
-        now,
-        theme,
-        floor,
-        active_pet: ctx.active_pet,
-        floor_pet: ctx.floor_pet,
-        coffee: ctx.coffee,
-        chitchat_state: ctx.chitchat_state,
-        debug_walkable: ctx.debug_walkable,
-    });
-    ctx.last_pet_pos = pixel_result.pet_pos;
-    ctx.last_mascots = pixel_result.mascots;
-    ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
-    ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
-    ctx.occupied_waypoints = pixel_result.occupied_waypoints;
-
     let mouse_pos = ctx.mouse_pos;
-    let hovered = mouse_pos.and_then(|(mx, my)| {
-        hit_test_agent(
-            scene,
-            &layout,
-            now,
-            &mut ctx.store.route_ctx(),
-            CellArea::half_block(mx, my),
-        )
-    });
+    let geometry = SceneGeometry::half_block(scene_rect);
+    let hit = mouse_pos.and_then(|(mx, my)| scene_hit(hovers, &layout, geometry.area_at(mx, my)?));
+    let hovered = match hit {
+        Some(SceneHit::Figure(HoverTarget::Agent(id))) => Some(*id),
+        _ => None,
+    };
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
-    if ctx.onboarding.dim < 0.999 {
-        apply_dim(ctx.buf, ctx.onboarding.dim);
-    }
+    apply_dim(pixels, ctx.onboarding.dim);
 
-    let buf = &ctx.buf;
-    let chitchat_bubbles = &ctx.chitchat_bubbles;
+    let labels = pixtuoid_scene::overlay::build_overlay(scene, agents, hovered);
+    let board = pixtuoid_scene::board::wall_board(
+        scene,
+        footer.context.gateway,
+        footer.context.floor,
+        ctx.world.floor.motion,
+        now,
+    );
+    let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-        paint_footer(
-            f,
-            scene,
-            &footer_stats,
-            actual_full,
-            theme,
-            floor_info,
-            source_warning,
-        );
+        paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_label_widgets(
-            f,
-            scene,
-            &layout,
-            now,
-            &mut ctx.store.route_ctx(),
-            actual_scene,
-            hovered,
-            theme,
-        );
-        paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
-        paint_wall_display(
-            f,
-            scene,
-            actual_scene,
-            now,
-            footer_stats.counts,
-            floor_info,
-            footer_stats.gateway,
-            theme,
-        );
-        if let Some(door) = layout.door {
-            let current = floor_info.map(|fi| fi.current).unwrap_or(1);
-            paint_elevator_indicator(f, door, current, actual_scene, theme);
-        }
-        if let (Some(agent_id), Some((mx, my))) = (hovered, mouse_pos) {
-            paint_hover_tooltip(f, scene, agent_id, mx, my, actual_scene, now, theme);
-        }
-        if hovered.is_none() {
-            if let Some((mx, my)) = mouse_pos {
-                let cell = CellArea::half_block(mx, my);
-                // `.filter` keeps the pet arm a single branch, so a
-                // present-but-not-hit pet falls through to the next arm.
-                // Coffee before pet here must match the click arms in
-                // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
-                // `hovered.is_none()` skips this block outright.
-                let pet_hit = ctx
-                    .last_pet_pos
-                    .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
-                if hit_test_coffee_machine(&layout, cell) {
-                    paint_coffee_tooltip(f, mx, my, actual_scene, theme);
-                } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
-                    let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
-                    // `last_pet_pos` is only `Some` on the normal render path,
-                    // where it was written from `floor_pet` — so the kinds agree
-                    // and the `default_name` arm is not a live path.
-                    let display_name = ctx
-                        .floor_pet
-                        .map(|p| p.name.as_str())
-                        .unwrap_or_else(|| kind.default_name());
-                    paint_pet_tooltip(
-                        f,
-                        kind,
-                        anim,
-                        on_cooldown,
-                        display_name,
-                        mx,
-                        my,
-                        actual_scene,
-                        theme,
-                    );
-                } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
-                    paint_mascot_tooltip(
-                        f,
-                        m.name,
-                        m.instance.as_deref(),
-                        m.busy,
-                        m.degraded,
-                        m.active_sessions,
-                        mx,
-                        my,
-                        actual_scene,
-                        theme,
-                    );
-                } else if let Some(label) = hit_test_furniture(&layout, cell) {
-                    paint_furniture_tooltip(f, label, mx, my, actual_scene, theme);
-                }
-            }
+        paint_label_widgets(f, &labels, actual_scene, theme);
+        paint_chitchat_bubbles(f, chitchat_bubbles, agents, actual_scene, theme);
+        paint_wall_display(f, &board, actual_scene, theme);
+        let door = layout.door;
+        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
+        paint_elevator_indicator(f, door, current, actual_scene, theme);
+        let at = mouse_pos.map(|(mx, my)| TooltipAt {
+            mx,
+            my,
+            scene_rect: actual_scene,
+        });
+        if let (Some(hit), Some(at)) = (&hit, at) {
+            paint_scene_tooltip(f, hit, &world, at, theme);
         }
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
-    Ok(Some(layout))
+    Ok(DrawOut {
+        layout: Some(layout),
+        hovers: hovers.clone(),
+        occupied_waypoints,
+        geometry: Some(geometry),
+    })
 }
 
 /// The modal-overlay dispatch, centralized so the three draw paths can't drift in
@@ -510,29 +466,10 @@ pub(super) fn paint_overlays(
         paint_theme_picker(f, idx, bounds, theme);
     }
     if dashboard.open {
-        paint_dashboard(
-            f,
-            &dashboard.rows,
-            dashboard.selected,
-            dashboard.scroll,
-            now,
-            bounds,
-            theme,
-        );
+        paint_dashboard(f, dashboard, now, bounds, theme);
     }
     if connection.open {
-        paint_connection_panel(
-            f,
-            &connection.rows,
-            &connection.live,
-            connection.selected,
-            connection.confirm,
-            connection.result.as_deref(),
-            &connection.socket_line,
-            now,
-            bounds,
-            theme,
-        );
+        paint_connection_panel(f, connection, now, bounds, theme);
     }
     if popup_scale > 0.0 {
         paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);
@@ -573,21 +510,33 @@ pub(super) fn flush_buffer_to_term_at_offset(
             let py_bot = cy * 2 + 1;
             let fg = buf.as_slice()[py_top * w + cx];
             let bg = buf.as_slice()[py_bot * w + cx];
-            let cell = &mut term_buf[(x, y)];
-            cell.set_symbol("\u{2580}");
-            cell.fg = Color::Rgb(fg.r, fg.g, fg.b);
-            cell.bg = Color::Rgb(bg.r, bg.g, bg.b);
+            set_half_block(&mut term_buf[(x, y)], fg, bg);
         }
     }
+}
+
+/// Show `top` over `bottom` in `cell`: the half-block every flush of the
+/// office paints with.
+pub(crate) fn set_half_block(
+    cell: &mut ratatui::buffer::Cell,
+    top: pixtuoid_core::sprite::Rgb,
+    bottom: pixtuoid_core::sprite::Rgb,
+) {
+    cell.set_symbol("\u{2580}");
+    cell.fg = Color::Rgb(top.r, top.g, top.b);
+    cell.bg = Color::Rgb(bottom.r, bottom.g, bottom.b);
 }
 
 fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect: Rect) {
     flush_buffer_to_term_at_offset(f, buf, scene_rect, 0);
 }
 
-/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim. The
-/// `factor >= 0.999` no-op short-circuit is the CALLER's; both gate on it.
+/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim.
 pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
+    const UNDIMMED: f32 = 0.999;
+    if factor >= UNDIMMED {
+        return;
+    }
     for px in buf.as_mut_slice() {
         px.r = (px.r as f32 * factor) as u8;
         px.g = (px.g as f32 * factor) as u8;
@@ -595,61 +544,54 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
     }
 }
 
-/// The mascot under the cursor that the user can actually SEE — the one painted on
-/// TOP, not merely the first in the roster. The painter y-sorts its drawables
-/// ascending, so among overlapping mascots the greatest `pos.y` is drawn LAST and
-/// occludes the others; picking the FIRST hit named whichever gateway sorted
-/// earliest in the roster, regardless of which lobster was visible.
-fn topmost_mascot_at(
-    mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
-    cell: CellArea,
-) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
-    mascots
-        .iter()
-        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
-        .max_by_key(|m| m.pos.y)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::geometry::CellArea;
 
     #[test]
-    fn hovering_overlapping_mascots_names_the_one_painted_on_top() {
-        use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::pixel_painter::MascotFrame;
-        let frame = |instance: &str, x: u16, y: u16| MascotFrame {
-            pos: Point { x, y },
-            w: 14,
-            h: 12,
-            name: "OpenClaw",
-            instance: Some(instance.to_string()),
-            busy: false,
-            degraded: false,
-            active_sessions: 0,
+    fn an_undimmed_frame_is_left_untouched() {
+        let px = pixtuoid_core::sprite::Rgb {
+            r: 201,
+            g: 103,
+            b: 7,
         };
-        // `hit_test_mascot` centres the 14x12 box on `pos`: 18789 covers x[33,47) my[22,28) and
-        // 19789 x[37,51) my[25,31) — overlapping at x[37,47) my[25,28), with 19789
-        // lower and so painted last.
-        let mascots = vec![frame("18789", 40, 50), frame("19789", 44, 56)];
-        let hit = |mx, my| {
-            topmost_mascot_at(&mascots, CellArea::half_block(mx, my))
-                .and_then(|m| m.instance.clone())
-                .unwrap_or_else(|| "none".into())
-        };
+        let mut buf = RgbBuffer::filled(3, 2, px);
+        apply_dim(&mut buf, 0.9995);
+        assert!(buf.as_slice().iter().all(|p| *p == px));
+        apply_dim(&mut buf, 0.5);
+        assert!(buf.as_slice().iter().all(|p| *p != px));
+    }
 
-        assert_eq!(hit(40, 26), "19789", "the visible lobster must be named");
-        assert_eq!(hit(34, 23), "18789");
-        assert_eq!(hit(49, 29), "19789");
-        assert_eq!(hit(5, 5), "none");
-        let reversed = vec![frame("19789", 44, 56), frame("18789", 40, 50)];
-        assert_eq!(
-            topmost_mascot_at(&reversed, CellArea::half_block(40, 26))
-                .and_then(|m| m.instance.clone())
-                .as_deref(),
-            Some("19789"),
-            "the pick must be by paint order, not slice position"
+    #[test]
+    fn an_offscreen_still_shows_its_scenes_gateway() {
+        let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut scene = SceneState::uniform(16);
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: t0,
+                entered_at: t0,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
         );
+        let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("pack"));
+        let mut floor = pixtuoid_scene::floor::PerFloor::new(Arc::clone(&pack));
+        let mut office = pixtuoid_scene::floor::PerOffice::new();
+        let ctx = DrawCtx::offscreen(
+            &mut floor,
+            office.stores(),
+            &pixtuoid_scene::theme::NORMAL,
+            &scene,
+            &pack,
+            t0,
+            pixtuoid_scene::floor::FloorMeta::ground(),
+        );
+        assert!(ctx.footer.gateway.is_some());
     }
 
     #[test]

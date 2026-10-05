@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members  = [
     "crates/pixtuoid-core",
     "crates/pixtuoid-scene",
@@ -10,8 +10,8 @@ members  = [
 
 [workspace.package]
 version      = "0.19.0"
-edition      = "2021"
-rust-version = "1.90"
+edition      = "2024"
+rust-version = "1.98"
 license      = "MIT"
 repository   = "https://github.com/IvanWng97/pixtuoid"
 authors      = ["Ivan Wang <ivanwng97@icloud.com>"]
@@ -29,6 +29,14 @@ categories   = ["command-line-utilities", "visualization"]
 # scoped identically to the semver-checks + api-surface gates.
 [workspace.lints.rust]
 unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+
+# An `allow` outlives the warning it silenced; an `expect` fails once its lint
+# stops firing, and a `reason` says why the suppression exists.
+[workspace.lints.clippy]
+allow_attributes                = "warn"
+allow_attributes_without_reason = "warn"
+undocumented_unsafe_blocks      = "warn"
 
 # Rustdoc lints only fire during a doc build, so they're invisible to
 # `cargo build`/`clippy`; CI's `docs` job runs `cargo doc` to execute them.
@@ -42,7 +50,7 @@ codegen-units = 1
 strip         = "debuginfo"
 panic         = "abort"
 
-# The browser engine (`just wasm-build`). `release` is tuned for the native
+# The browser engine (`just gen-wasm`). `release` is tuned for the native
 # binary's speed; the wasm is a DOWNLOAD every visitor pays for before the hero
 # goes live, its frame step is a rounding error against a frame budget and its
 # synth runs in a worker — so it trades the other way. `z` vs `s` is empirical,
@@ -83,6 +91,7 @@ toml               = "1"
 # survive a round-trip.
 toml_edit          = "0.25"
 anyhow             = "1"
+thiserror          = "2"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify             = "8"
@@ -91,5 +100,10 @@ crossterm          = "0.29"
 # Terminal display-column width — the authority ratatui itself uses, so wide
 # glyphs don't miscount against its layout.
 unicode-width      = "0.2"
+# Grapheme clusters, the unit ratatui's buffer writes a cell for.
+unicode-segmentation = "1"
 clap               = { version = "4", features = ["derive"] }
 palette            = { version = "0.7", default-features = false, features = ["std"] }
+# Dev-only: every test that sets or unsets an env var goes through it, behind
+# one process-wide lock.
+temp-env           = "0.3"

@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 
-use crate::layout::{Point, WaypointKind};
+use crate::layout::WaypointKind;
 
 /// Total duration of a single chitchat exchange — the speaking turns fill it
 /// exactly, with no trailing silent gap.
@@ -94,6 +94,7 @@ pub enum VenueKey {
 }
 
 /// A live conversation among the agents currently at a venue.
+#[derive(Debug)]
 pub struct ActiveChitchat {
     /// The venue this conversation belongs to.
     pub venue: VenueKey,
@@ -121,7 +122,7 @@ impl ActiveChitchat {
         chat.seed = chat
             .participants
             .iter()
-            .fold(ms.wrapping_mul(0x9e37_79b9_7f4a_7c15), |acc, a| {
+            .fold(ms.wrapping_mul(crate::GOLDEN_GAMMA), |acc, a| {
                 acc.rotate_left(7) ^ a.raw()
             });
         chat
@@ -220,11 +221,12 @@ pub fn supports_chitchat(kind: WaypointKind) -> bool {
 }
 
 /// A single speech bubble ready for the widget layer to render.
+#[derive(Debug, Clone, Copy)]
 pub struct ChitchatBubble {
     /// The quip to render.
     pub text: &'static str,
-    /// Pixel coords of the speaking agent's anchor.
-    pub anchor: Point,
+    /// The speaking agent; a painter places the bubble over its drawn frame.
+    pub speaker: AgentId,
 }
 
 /// A chitchat-eligible agent present at a venue this frame. Named (not a tuple)
@@ -235,8 +237,6 @@ pub struct Visitor {
     pub wp_idx: usize,
     /// The visiting agent.
     pub agent_id: AgentId,
-    /// The agent's pixel anchor (bubble placement).
-    pub anchor: Point,
     /// `Some(room_id)` for meeting slots, `None` for single-point waypoints.
     pub room_id: Option<usize>,
 }
@@ -251,7 +251,7 @@ pub fn update_and_collect(
 ) -> Vec<ChitchatBubble> {
     state.retain(|_, chat| !chat.is_expired(now));
 
-    let mut by_venue: HashMap<VenueKey, Vec<(AgentId, Point)>> = HashMap::new();
+    let mut by_venue: HashMap<VenueKey, Vec<AgentId>> = HashMap::new();
     for v in visitors {
         let venue = match v.room_id {
             Some(room_id) => VenueKey::Room { floor_idx, room_id },
@@ -260,15 +260,12 @@ pub fn update_and_collect(
                 wp_idx: v.wp_idx,
             },
         };
-        by_venue
-            .entry(venue)
-            .or_default()
-            .push((v.agent_id, v.anchor));
+        by_venue.entry(venue).or_default().push(v.agent_id);
     }
 
     // A TOTAL emission order, never `by_venue`'s: the Vec is painted in order, so
     // hash order would make two overlapping bubbles z-fight between runs.
-    let mut venues: Vec<(&VenueKey, &Vec<(AgentId, Point)>)> = by_venue.iter().collect();
+    let mut venues: Vec<(&VenueKey, &Vec<AgentId>)> = by_venue.iter().collect();
     venues.sort_by_key(|(v, _)| match v {
         VenueKey::Room { floor_idx, room_id } => (*floor_idx, 0usize, *room_id),
         VenueKey::Waypoint { floor_idx, wp_idx } => (*floor_idx, 1usize, *wp_idx),
@@ -279,20 +276,13 @@ pub fn update_and_collect(
         if agents.len() < 2 {
             continue;
         }
-        let present: Vec<AgentId> = agents.iter().map(|(id, _)| *id).collect();
-
         let chat = state
             .entry(*venue)
-            .or_insert_with(|| ActiveChitchat::new(*venue, present.clone(), now));
-        chat.set_participants(present);
+            .or_insert_with(|| ActiveChitchat::new(*venue, agents.clone(), now));
+        chat.set_participants(agents.clone());
 
-        if let Some((speaker_id, text)) = chat.current_bubble(now) {
-            if let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id) {
-                bubbles.push(ChitchatBubble {
-                    text,
-                    anchor: *anchor,
-                });
-            }
+        if let Some((speaker, text)) = chat.current_bubble(now) {
+            bubbles.push(ChitchatBubble { text, speaker });
         }
     }
 
@@ -323,10 +313,6 @@ mod tests {
         Visitor {
             wp_idx,
             agent_id: aid(id),
-            anchor: Point {
-                x: (wp_idx as u16) * 4 + 10,
-                y: 20,
-            },
             room_id,
         }
     }
@@ -347,13 +333,14 @@ mod tests {
         ];
         for round in 0..32 {
             let mut state = HashMap::new();
-            let anchors: Vec<u16> = update_and_collect(&mut state, 0, &visitors, now)
+            let venues: Vec<usize> = update_and_collect(&mut state, 0, &visitors, now)
                 .iter()
-                .map(|b| b.anchor.x)
+                .filter_map(|b| visitors.iter().find(|v| v.agent_id == b.speaker))
+                .map(|v| v.wp_idx)
                 .collect();
             assert_eq!(
-                anchors,
-                vec![14, 30, 46],
+                venues,
+                vec![1, 5, 9],
                 "round {round}: bubbles must emit in venue order (wp 1, 5, 9)"
             );
         }
@@ -438,9 +425,10 @@ mod tests {
     fn no_bubble_after_four_turns() {
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
-        assert!(chat
-            .current_bubble(start + Duration::from_millis(6_000))
-            .is_none());
+        assert!(
+            chat.current_bubble(start + Duration::from_millis(6_000))
+                .is_none()
+        );
     }
 
     #[test]

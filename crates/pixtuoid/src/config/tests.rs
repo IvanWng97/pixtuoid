@@ -240,66 +240,55 @@ fn resolve_pets_collects_unknown_kind_warnings() {
     assert!(w[2].contains("no pets will appear"), "got: {w:?}");
 }
 
-// config_path reads process-global env, so save+restore both vars and drive every
-// branch in ONE test; TEST_ENV_LOCK serializes against the binary's other
-// env-mutating tests so they can't race under plain `cargo test`.
 #[test]
 fn config_path_xdg_home_and_relative_branches() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
-    let saved_home = std::env::var_os("HOME");
-    let saved_userprofile = std::env::var_os("USERPROFILE");
-
-    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
-    // user_home(), so both the HOME arm and the relative-fallback arm need it
-    // absent to reach their branches.
-    std::env::remove_var("USERPROFILE");
-
     // A leading-slash path is not absolute on Windows (no drive prefix).
     let abs_xdg = if cfg!(windows) {
         "C:/xdg/base"
     } else {
         "/xdg/base"
     };
-    std::env::set_var("XDG_CONFIG_HOME", abs_xdg);
-    std::env::set_var("HOME", "/home/u");
-    assert_eq!(
-        config_path(),
-        PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
-    );
 
-    for invalid in ["", "   ", "rel/xdg"] {
-        std::env::set_var("XDG_CONFIG_HOME", invalid);
-        assert_eq!(
-            config_path(),
-            PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
-            "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
+    // user_home(), so both the HOME arm and the relative-fallback arm need it
+    // absent to reach their branches.
+    temp_env::with_var_unset("USERPROFILE", || {
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(abs_xdg)),
+                ("HOME", Some("/home/u")),
+            ],
+            || {
+                assert_eq!(
+                    config_path(),
+                    PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
+                );
+            },
         );
-    }
 
-    std::env::remove_var("XDG_CONFIG_HOME");
-    assert_eq!(
-        config_path(),
-        PathBuf::from("/home/u/.config/pixtuoid/config.toml")
-    );
+        temp_env::with_var("HOME", Some("/home/u"), || {
+            for invalid in ["", "   ", "rel/xdg"] {
+                temp_env::with_var("XDG_CONFIG_HOME", Some(invalid), || {
+                    assert_eq!(
+                        config_path(),
+                        PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
+                        "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+                    );
+                });
+            }
 
-    std::env::remove_var("HOME");
-    assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+            temp_env::with_var_unset("XDG_CONFIG_HOME", || {
+                assert_eq!(
+                    config_path(),
+                    PathBuf::from("/home/u/.config/pixtuoid/config.toml")
+                );
+            });
+        });
 
-    match saved_xdg {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
-    }
-    match saved_home {
-        Some(v) => std::env::set_var("HOME", v),
-        None => std::env::remove_var("HOME"),
-    }
-    match saved_userprofile {
-        Some(v) => std::env::set_var("USERPROFILE", v),
-        None => std::env::remove_var("USERPROFILE"),
-    }
+        temp_env::with_vars_unset(["XDG_CONFIG_HOME", "HOME"], || {
+            assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+        });
+    });
 }
 
 #[test]
@@ -524,7 +513,7 @@ fn save_preserves_max_desks() {
 
 #[test]
 fn a_named_pack_outranks_the_users_own_which_outranks_the_bundled_one() {
-    use pixtuoid_scene::embedded_pack::PackSource;
+    use pixtuoid_scene::pack::PackSource;
     let base = tempfile::TempDir::new().expect("tempdir");
     let sprites = base.path().join("pixtuoid").join("sprites");
     std::fs::create_dir_all(&sprites).expect("mkdir sprites");
@@ -556,28 +545,16 @@ fn a_named_pack_outranks_the_users_own_which_outranks_the_bundled_one() {
     assert_eq!(pack_source(&none, None, None), PackSource::Bundled);
 }
 
-// Reads process-global env, so it holds TEST_ENV_LOCK like
-// `config_path_xdg_home_and_relative_branches`.
 #[test]
 fn resolve_pack_source_finds_the_users_pack_under_xdg_config_home() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
     let base = tempfile::TempDir::new().expect("tempdir");
     let sprites = base.path().join("pixtuoid").join("sprites");
     std::fs::create_dir_all(&sprites).expect("mkdir sprites");
     std::fs::write(sprites.join("pack.toml"), b"").expect("write pack.toml");
-    std::env::set_var("XDG_CONFIG_HOME", base.path());
-    let found = resolve_pack_source(&AppConfig::default(), None);
-    match saved_xdg {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
-    }
-    assert_eq!(
-        found,
-        pixtuoid_scene::embedded_pack::PackSource::Discovered(sprites)
-    );
+    let found = temp_env::with_var("XDG_CONFIG_HOME", Some(base.path()), || {
+        resolve_pack_source(&AppConfig::default(), None)
+    });
+    assert_eq!(found, pixtuoid_scene::pack::PackSource::Discovered(sprites));
 }
 
 #[test]
@@ -1021,9 +998,11 @@ fn floating_config_defaults_and_explicit_roundtrip() {
         (480, 300, Some(10), Some(20))
     );
     assert!((f.opacity - 0.8).abs() < 1e-6);
-    assert!(!toml::to_string(&AppConfig::default())
-        .unwrap()
-        .contains("[floating]"));
+    assert!(
+        !toml::to_string(&AppConfig::default())
+            .unwrap()
+            .contains("[floating]")
+    );
 }
 
 #[test]
@@ -1252,4 +1231,91 @@ fn load_status_is_clean_for_a_missing_file() {
     let (_cfg, degraded) =
         load_with_status(Path::new("/nonexistent/x/config.toml"), &mut Vec::new());
     assert!(!degraded, "a missing file is not a degraded load");
+}
+
+#[test]
+fn graphics_precedence_is_cli_then_config_then_off() {
+    use crate::GraphicsMode;
+    let cfg = |v: Option<&str>| AppConfig {
+        graphics: v.map(String::from),
+        ..AppConfig::default()
+    };
+    let resolve = |c: &AppConfig, cli| resolve_graphics(c, cli, &mut Vec::new());
+    assert_eq!(resolve(&cfg(None), None), GraphicsMode::Off);
+    assert_eq!(resolve(&cfg(Some("auto")), None), GraphicsMode::Auto);
+    assert_eq!(resolve(&cfg(Some("sixel")), None), GraphicsMode::Sixel);
+    assert_eq!(
+        resolve(&cfg(Some("auto")), Some(GraphicsMode::Off)),
+        GraphicsMode::Off
+    );
+    assert_eq!(
+        resolve(&cfg(None), Some(GraphicsMode::Iterm2)),
+        GraphicsMode::Iterm2
+    );
+}
+
+/// The key round-trips through the file under its documented name.
+#[test]
+fn graphics_parses_from_the_file() {
+    let cfg: AppConfig = toml::from_str("graphics = \"kitty\"\n").expect("parses");
+    assert_eq!(
+        resolve_graphics(&cfg, None, &mut Vec::new()),
+        crate::GraphicsMode::Kitty
+    );
+}
+
+/// The key parses under its documented name; absent is `auto`, and a typo
+/// warns and falls back rather than failing the whole load.
+#[test]
+fn motion_parses_from_the_file_and_a_typo_falls_back_to_auto() {
+    let resolve = |toml_text: &str, w: &mut Vec<String>| {
+        let cfg: AppConfig = toml::from_str(toml_text).expect("parses");
+        resolve_motion(&cfg, w)
+    };
+    let mut w = Vec::new();
+    assert_eq!(resolve("", &mut w), MotionMode::Auto);
+    assert_eq!(resolve("motion = \"still\"\n", &mut w), MotionMode::Still);
+    assert_eq!(resolve("motion = \"calm\"\n", &mut w), MotionMode::Calm);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(resolve("motion = \"stil\"\n", &mut w), MotionMode::Auto);
+    assert!(
+        w.len() == 1 && w[0].contains("unknown motion \"stil\""),
+        "{w:?}"
+    );
+}
+
+/// `auto` takes what the display affords; any other mode overrides it.
+#[test]
+fn a_motion_mode_overrides_only_what_auto_would_take() {
+    use pixtuoid_scene::anim::Motion;
+    for afforded in [Motion::Full, Motion::Calm] {
+        assert_eq!(MotionMode::Auto.or(afforded), afforded);
+        assert_eq!(MotionMode::Still.or(afforded), Motion::Still);
+        assert_eq!(MotionMode::Full.or(afforded), Motion::Full);
+        assert_eq!(MotionMode::Calm.or(afforded), Motion::Calm);
+    }
+}
+
+/// A typo'd value warns and falls back rather than failing the whole load, and
+/// warns even when the flag wins — the warning is the only sign the file is
+/// stale.
+#[test]
+fn an_unknown_graphics_value_warns_and_falls_back_to_off() {
+    let cfg = AppConfig {
+        graphics: Some("kity".into()),
+        ..AppConfig::default()
+    };
+    let mut w = Vec::new();
+    assert_eq!(
+        resolve_graphics(&cfg, None, &mut w),
+        crate::GraphicsMode::Off
+    );
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("unknown graphics \"kity\""), "{w:?}");
+    let mut w = Vec::new();
+    assert_eq!(
+        resolve_graphics(&cfg, Some(crate::GraphicsMode::Auto), &mut w),
+        crate::GraphicsMode::Auto
+    );
+    assert_eq!(w.len(), 1, "{w:?}");
 }

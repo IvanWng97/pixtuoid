@@ -1,20 +1,20 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
 use crate::source::decoder::{
-    cwd_basename_label, ellipsize, make_tool_detail, parsed_tail_lines, TailActivity,
-    MAX_DECODED_FIELD_CHARS,
+    MAX_DECODED_FIELD_CHARS, TailActivity, cwd_basename_label, ellipsize, make_tool_detail,
+    parsed_tail_lines,
 };
 
-use crate::source::AgentEvent;
 use crate::AgentId;
+use crate::source::AgentEvent;
 
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{cc_watcher, live_cc_session_ids, ClaudeCodeSource};
+pub use native::{ClaudeCodeSource, cc_watcher, live_cc_session_ids};
 
 /// homebrew-core contract: their formula's `test do` asserts this exact id, so
 /// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
@@ -46,7 +46,6 @@ pub fn cc_id_from_path(path: &Path) -> String {
 /// registration: a Workflow-tool fleet's subagents carry no `Agent` tool_use and no
 /// end marker, so without `SubagentStop` they hold desks until the stale sweep.
 pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
         return Ok(None); // shared path reports the malformed payload
     };
@@ -63,12 +62,12 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
         .get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("{event} missing/empty session_id"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, "session_id"))?;
     let wire_agent_id = obj
         .get("agent_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("{event} missing/empty agent_id"))?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, "agent_id"))?;
     // The wire's `agent_id` is BARE hex while the watcher's id space is
     // `agent-<id>`; the CC docs' example shows one already prefixed.
     let prefixed = if wire_agent_id.starts_with("agent-") {
@@ -94,17 +93,17 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             .filter(|s| !s.is_empty())
             .map(|p| cc_id_from_path(Path::new(&crate::id::normalize_path_key(p))))
             .filter(|s| !s.is_empty());
-        if let Some(ref k) = path_key {
-            if *k != prefixed {
-                // Upstream scheme change: hook-FIRST Start registrations go phantom.
-                crate::source::drift::shape_drift(
-                    SOURCE_NAME,
-                    &format!(
-                        "SubagentStop transcript stem `{k}` != prefixed agent_id \
+        if let Some(ref k) = path_key
+            && *k != prefixed
+        {
+            // Upstream scheme change: hook-FIRST Start registrations go phantom.
+            crate::source::drift::shape_drift(
+                SOURCE_NAME,
+                &format!(
+                    "SubagentStop transcript stem `{k}` != prefixed agent_id \
                          `{prefixed}`; keying on the stem"
-                    ),
-                );
-            }
+                ),
+            );
         }
         Ok(Some(vec![AgentEvent::SessionEnd {
             agent_id: AgentId::from_parts(SOURCE_NAME, &path_key.unwrap_or(prefixed)),
@@ -221,14 +220,14 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         out.push(AgentEvent::Rename { agent_id, label });
     }
 
-    if ty == "attachment" {
-        if let Some(effort) = attachment_effort(obj) {
-            out.push(AgentEvent::ModelInfo {
-                agent_id,
-                model: None,
-                effort: Some(effort.to_string()),
-            });
-        }
+    if ty == "attachment"
+        && let Some(effort) = attachment_effort(obj)
+    {
+        out.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: None,
+            effort: Some(effort.to_string()),
+        });
     }
 
     let Some(message) = message else {
@@ -1159,7 +1158,9 @@ mod cc_id_tests {
 
     #[test]
     fn cc_id_from_path_subagent_is_agent_stem() {
-        let p = Path::new("/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl");
+        let p = Path::new(
+            "/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl",
+        );
         assert_eq!(cc_id_from_path(p), "agent-a0a7dc28dd772bd0d");
     }
 

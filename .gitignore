@@ -1,4 +1,7 @@
-/target
+/target/
+# criterion falls back to <package root>/target/criterion when it can't resolve
+# the workspace target dir. Anchored so a source dir named target isn't hidden.
+/crates/*/target/
 **/*.rs.bk
 Cargo.lock.bak
 .DS_Store
@@ -23,3 +26,6 @@ mutants.out.old/
 *.jsonl.new
 provenance.json.new
 /result
+
+# Any CLAUDE.md switches Claude Code to CLAUDE.md-only, hiding every AGENTS.md.
+CLAUDE.md

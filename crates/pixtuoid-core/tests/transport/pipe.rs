@@ -271,8 +271,7 @@ async fn second_listener_on_same_name_fails_with_typed_socket_busy() {
     let _first = HookSocketListener::bind(&name).await.unwrap();
     let err = HookSocketListener::bind(&name)
         .await
-        .err()
-        .expect("bind on an already-owned pipe must fail, not silently queue");
+        .expect_err("bind on an already-owned pipe must fail, not silently queue");
     assert!(
         err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
             .is_some(),
@@ -311,10 +310,10 @@ async fn hook_router_socket_busy_exits_clean_without_death() {
 
 #[tokio::test]
 async fn hook_router_tee_captures_child_ends_from_the_shared_socket() {
+    use pixtuoid_core::AgentId;
+    use pixtuoid_core::source::Source;
     use pixtuoid_core::source::hook::HookRouter;
     use pixtuoid_core::source::jsonl::ChildEndUnclaims;
-    use pixtuoid_core::source::Source;
-    use pixtuoid_core::AgentId;
 
     let name = pipe_name("tee");
 

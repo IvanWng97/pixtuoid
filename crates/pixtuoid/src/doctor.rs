@@ -222,10 +222,10 @@ impl SourceDiagnostics {
     /// The single worst issue as a one-line, glyph-prefixed summary. Priority:
     /// install-broken (hooks can't fire) > decode-drift.
     pub(crate) fn summary(&self) -> Option<String> {
-        if let Some(i) = &self.install {
-            if !i.is_sound() {
-                return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
-            }
+        if let Some(i) = &self.install
+            && !i.is_sound()
+        {
+            return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
         }
         let n = self.drift.total();
         if n > 0 {
@@ -496,10 +496,10 @@ fn activation_backend() -> (&'static str, bool) {
     #[cfg(target_os = "linux")]
     {
         let (msg, healthy) = linux_activation_backend(
-            marker_set(std::env::var(crate::focus::SWAY_ENV).ok()),
-            marker_set(std::env::var(crate::focus::HYPRLAND_ENV).ok()),
-            marker_set(std::env::var("WAYLAND_DISPLAY").ok()),
-            marker_set(std::env::var("DISPLAY").ok()),
+            marker_set(crate::focus::SWAY_ENV),
+            marker_set(crate::focus::HYPRLAND_ENV),
+            marker_set("WAYLAND_DISPLAY"),
+            marker_set("DISPLAY"),
         );
         (msg, healthy)
     }
@@ -520,10 +520,16 @@ fn activation_backend() -> (&'static str, bool) {
 /// UNSET, NOT bare presence: a leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=` (systemd user units
 /// and non-forwarded ssh sessions leave them routinely) would otherwise print a confidently
 /// wrong verdict at a user whose X11 EWMH channel works fine. `focus::linux::detect_channel`
-/// keys the live channel on the SAME rule.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn marker_set(value: Option<String>) -> bool {
-    crate::install::io::nonempty(value).is_some()
+/// keys the live channel through the SAME reader.
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "only the Linux activation backend reads it off test"
+    )
+)]
+fn marker_set(name: &str) -> bool {
+    pixtuoid_core::platform::path_env(name).is_some()
 }
 
 /// Mirrors `focus/linux.rs`'s ONE-channel-per-env order (sway IPC → hyprland IPC → X11
@@ -531,7 +537,13 @@ fn marker_set(value: Option<String>) -> bool {
 /// be reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland terminal never
 /// appears in XWayland's client list and mutter/kwin block focus-steal anyway, so the ✓
 /// would mislead exactly the users focus fails for.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "only the Linux activation backend reads it off test"
+    )
+)]
 fn linux_activation_backend(
     sway: bool,
     hyprland: bool,
@@ -607,12 +619,27 @@ struct RootStatus {
     env: Option<(&'static str, bool)>,
 }
 
-/// The density variants of the pack `source` loads, or why that pack fails to
+/// The densest art of the pack `source` loads, or why that pack fails to
 /// load: `run` refuses to start on it, so doctor says so.
-fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
-    pixtuoid_scene::embedded_pack::load_sprite_pack(source)
-        .map(|pack| pack.density_variants())
-        .map_err(|e| format!("{e:#}"))
+fn pack_max_density(
+    source: pixtuoid_scene::pack::PackSource,
+) -> Result<pixtuoid_core::sprite::format::Density, String> {
+    use pixtuoid_core::sprite::error::PackError;
+    pixtuoid_scene::pack::load_sprite_pack(source)
+        .map(|pack| pack.max_density_variant())
+        .map_err(|e| {
+            let no_manifest = e.chain().any(|c| {
+                matches!(
+                    c.downcast_ref::<PackError>(),
+                    Some(PackError::NoManifest { .. })
+                )
+            });
+            if no_manifest {
+                format!("{e:#}: point pack-dir at a sprite pack, or drop it for the bundled art")
+            } else {
+                format!("{e:#}")
+            }
+        })
 }
 
 /// Everything `doctor` probed, separated from rendering, so `render` is
@@ -627,11 +654,13 @@ struct DoctorReport {
     log_warning: Option<String>,
     term_env: Option<String>,
     colorterm_env: Option<String>,
-    truecolor_probe: Option<bool>,
+    /// `None` when the DECRQSS truecolor probe never ran.
+    truecolor_probe: Option<crate::term::Truecolor>,
     color_pf: crate::term::ColorPreflight,
-    graphics: crate::GraphicsMode,
-    graphics_probe: crate::graphics::Probe,
-    densities: Vec<u16>,
+    graphics_plan: crate::graphics::Plan,
+    /// What `run` resolves `graphics` to without a flag: the config, then the
+    /// default.
+    run_graphics: crate::GraphicsMode,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: &'static str,
@@ -650,9 +679,6 @@ struct DoctorReport {
     home_split: Option<String>,
     /// Whether the report may carry ANSI color — see [`report_color`].
     color: bool,
-    /// Whether the DECRQSS truecolor probe was actually attempted, so the
-    /// terminal category can tell "asked, no answer" from "never asked".
-    truecolor_probe_ran: bool,
 }
 
 /// Whether the report may carry ANSI color: a tty with color allowed by the
@@ -674,11 +700,7 @@ struct Ink {
 
 impl Ink {
     fn s(&self, s: &str, f: impl FnOnce(&str) -> String) -> String {
-        if self.on {
-            f(s)
-        } else {
-            s.to_string()
-        }
+        if self.on { f(s) } else { s.to_string() }
     }
     fn ok(&self, s: &str) -> String {
         use crossterm::style::Stylize;
@@ -706,23 +728,17 @@ impl Ink {
     }
 }
 
-/// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
-/// `color_preflight` gate the launcher acts on, so the row matches `run`. Off Unix it also
-/// keeps the graphics probe, which is upstream's and writes its query to stdout, out of a
-/// piped `doctor > file`. `--graphics off` skips
-/// the graphics ask for a second reason — a terminal that stays silent spends
-/// `graphics::GRAPHICS_PROBE_TIMEOUT` on a fact the flag says not to use.
+/// Each query only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
+/// `color_preflight` gate the launcher acts on, so the rows match `run`.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
-) -> (Option<bool>, crate::graphics::Probe) {
-    let truecolor_probe = if probe_ok {
-        crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
-    } else {
-        None
-    };
-    let graphics_probe = crate::graphics::probe(probe_ok && graphics != crate::GraphicsMode::Off);
-    (truecolor_probe, graphics_probe)
+    max_density: pixtuoid_core::sprite::format::Density,
+) -> (Option<crate::term::Truecolor>, crate::graphics::Plan) {
+    let truecolor_probe =
+        probe_ok.then(|| crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT));
+    let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, probe_ok);
+    (truecolor_probe, graphics_plan)
 }
 
 /// A wrong root has no symptom but an empty office, so state it outright (#880). Goes
@@ -796,11 +812,11 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let connected = crate::config::resolve_connected(&cfg);
     let (log, log_warning) = read_log(log_path);
 
-    let term_env = std::env::var("TERM").ok();
-    let colorterm_env = std::env::var("COLORTERM").ok();
-    let clicolor_force = std::env::var("CLICOLOR_FORCE").ok();
+    let term_env = pixtuoid_core::platform::text_env("TERM");
+    let colorterm_env = pixtuoid_core::platform::text_env("COLORTERM");
+    let clicolor_force = pixtuoid_core::platform::text_env("CLICOLOR_FORCE");
     let color_pf = crate::term::color_preflight(
-        std::env::var("NO_COLOR").ok().as_deref(),
+        pixtuoid_core::platform::text_env("NO_COLOR").as_deref(),
         clicolor_force.as_deref(),
         term_env.as_deref(),
     );
@@ -812,14 +828,15 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    let (truecolor_probe, graphics_probe) = probe_terminal_caps(probe_ok, graphics);
     // The pack `run` draws, not the bundled art alone, which understates a user
     // pack shipping density variants.
-    let densities =
-        pack_densities(crate::config::resolve_pack_source(&cfg, None)).unwrap_or_else(|reason| {
+    let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
+        .unwrap_or_else(|reason| {
             config_warnings.push(reason);
-            Vec::new()
+            pixtuoid_core::sprite::format::Density::ONE
         });
+    let (truecolor_probe, graphics_plan) = probe_terminal_caps(probe_ok, graphics, max_density);
+    let run_graphics = crate::config::resolve_graphics(&cfg, None, &mut config_warnings);
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {
@@ -878,9 +895,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         colorterm_env,
         truecolor_probe,
         color_pf,
-        graphics,
-        graphics_probe,
-        densities,
+        graphics_plan,
+        run_graphics,
         rows,
         roots,
         backend,
@@ -891,7 +907,6 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         grok_registry: (ShownPath::new(grok_registry), grok_exists),
         home_split,
         color,
-        truecolor_probe_ran: probe_ok,
     }
 }
 
@@ -917,11 +932,7 @@ const DETAIL_INDENT: &str = "      ";
 const CONT_INDENT: &str = "          ";
 
 fn terminal_category(r: &DoctorReport) -> Category {
-    let verdict = crate::term::truecolor_verdict(
-        r.colorterm_env.as_deref(),
-        r.truecolor_probe,
-        !r.truecolor_probe_ran,
-    );
+    let verdict = crate::term::truecolor_verdict(r.colorterm_env.as_deref(), r.truecolor_probe);
     let refused = matches!(
         r.color_pf,
         crate::term::ColorPreflight::RefuseNoColor | crate::term::ColorPreflight::RefuseDumbTerm
@@ -930,16 +941,19 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
         "{DETAIL_INDENT}{}",
-        crate::graphics::graphics_diagnostic_row(r.graphics, r.graphics_probe, &r.densities)
+        r.graphics_plan.diagnostic_row(r.run_graphics)
     )];
     // Whenever it has something to say — incl. the ForceColor note, so a
     // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
     if let Some(row) = crate::term::color_status_row(r.color_pf) {
         details.push(format!("{DETAIL_INDENT}{row}"));
     }
-    // An ATTEMPTED probe that didn't confirm is a warning — the launcher warned about
-    // exactly this terminal and pointed the user here; a skipped probe (piped) stays ✓.
-    let unconfirmed = r.truecolor_probe_ran && !verdict.starts_with("yes");
+    // Same predicate as the launcher's warning, so the two never disagree; a skipped
+    // probe (piped) stays ✓.
+    let unconfirmed = r
+        .truecolor_probe
+        .is_some_and(crate::term::Truecolor::warrants_warning)
+        && !verdict.starts_with("yes");
     let status = if refused || unconfirmed {
         CategoryStatus::Warn
     } else {
@@ -1287,11 +1301,7 @@ fn home_split_category(r: &DoctorReport) -> Option<Category> {
 }
 
 fn plural_s(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if n == 1 { "" } else { "s" }
 }
 
 /// The ONE report: flutter-doctor-style categories — a `[✓]`/`[!]`/`[✗]`
@@ -1404,19 +1414,24 @@ mod tests {
 
     #[test]
     fn an_exported_but_blank_compositor_marker_is_not_a_running_compositor() {
-        assert!(!marker_set(None));
-        assert!(!marker_set(Some(String::new())), "SWAYSOCK= is a leftover");
-        assert!(!marker_set(Some("  \t ".to_string())));
-        assert!(marker_set(Some("/run/user/1000/sway-ipc.sock".to_string())));
-        assert_eq!(
-            linux_activation_backend(
-                marker_set(Some(String::new())),
-                marker_set(None),
-                marker_set(Some(String::new())),
-                marker_set(Some(":0".to_string())),
-            ),
-            ("X11 EWMH ($DISPLAY)", true)
-        );
+        const KEY: &str = "PIXTUOID_TEST_DOCTOR_MARKER";
+        temp_env::with_var_unset(KEY, || assert!(!marker_set(KEY)));
+        for blank in ["", "  \t "] {
+            temp_env::with_var(KEY, Some(blank), || {
+                assert!(!marker_set(KEY), "SWAYSOCK={blank:?} is a leftover");
+            });
+        }
+        temp_env::with_var(KEY, Some("/run/user/1000/sway-ipc.sock"), || {
+            assert!(marker_set(KEY));
+        });
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let path = std::ffi::OsString::from_vec(b"/run/user/1000/caf\xFF.sock".to_vec());
+            temp_env::with_var(KEY, Some(&path), || {
+                assert!(marker_set(KEY), "a non-UTF-8 socket path is still set");
+            });
+        }
     }
 
     #[test]
@@ -1509,24 +1524,21 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_that_fails_to_load_is_reported_not_hidden() {
-        use pixtuoid_scene::embedded_pack::PackSource;
-        let missing = tempfile::TempDir::new()
-            .expect("tempdir")
-            .path()
-            .join("gone");
-        let reason = pack_densities(PackSource::Explicit(missing)).expect_err("gone");
-        assert!(reason.contains("failed to load sprite pack"), "{reason}");
-        assert!(pack_densities(PackSource::Bundled).is_ok());
+    fn a_pack_dir_without_a_manifest_is_named_a_config_mistake() {
+        use pixtuoid_scene::pack::PackSource;
+        let base = tempfile::TempDir::new().expect("tempdir");
+        for dir in [base.path().join("gone"), base.path().to_path_buf()] {
+            let reason = pack_max_density(PackSource::Explicit(dir)).expect_err("no manifest");
+            assert!(
+                reason.contains("holds no pack.toml") && reason.contains("pack-dir"),
+                "{reason}"
+            );
+        }
+        assert!(pack_max_density(PackSource::Bundled).is_ok());
     }
 
-    // Reads process-global env (the config path), so it holds TEST_ENV_LOCK like
-    // `run_renders_the_category_report`.
     #[test]
     fn a_config_pack_dir_that_fails_to_load_shows_in_the_report() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let base = tempfile::TempDir::new().expect("tempdir");
         let config_dir = base.path().join("pixtuoid");
         std::fs::create_dir_all(&config_dir).expect("mkdir config");
@@ -1545,24 +1557,19 @@ mod tests {
             format!("pack-dir = {:?}\n", pack.to_string_lossy()),
         )
         .expect("write config.toml");
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
-            ["XDG_CONFIG_HOME", "CLICOLOR_FORCE", "NO_COLOR"]
-                .iter()
-                .map(|k| (*k, std::env::var_os(k)))
-                .collect();
-        std::env::set_var("XDG_CONFIG_HOME", base.path());
-        std::env::remove_var("CLICOLOR_FORCE");
-        std::env::remove_var("NO_COLOR");
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
+        let out = temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(base.path().as_os_str())),
+                ("CLICOLOR_FORCE", None),
+                ("NO_COLOR", None),
+            ],
+            || {
+                run(
+                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    crate::GraphicsMode::Auto,
+                )
+            },
         );
-        for (k, v) in saved {
-            match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
-            }
-        }
         let out = out.expect("doctor runs");
         assert!(out.contains("failed to load sprite pack"), "{out}");
         assert!(!out.contains(['\u{1b}', '\u{202e}']), "{out:?}");
@@ -1572,25 +1579,12 @@ mod tests {
     fn run_renders_the_category_report() {
         // A dev shell exporting CLICOLOR_FORCE would force escapes even under
         // captured stdout — pin the env so the plain-text asserts hold anywhere.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> = ["CLICOLOR_FORCE", "NO_COLOR"]
-            .iter()
-            .map(|k| (*k, std::env::var_os(k)))
-            .collect();
-        std::env::remove_var("CLICOLOR_FORCE");
-        std::env::remove_var("NO_COLOR");
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
-        );
-        for (k, v) in saved {
-            match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
-            }
-        }
+        let out = temp_env::with_vars_unset(["CLICOLOR_FORCE", "NO_COLOR"], || {
+            run(
+                std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                crate::GraphicsMode::Auto,
+            )
+        });
         let out = out.unwrap();
         assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
         assert!(out.contains("log    "), "{out}");
@@ -1635,9 +1629,10 @@ mod tests {
             colorterm_env: None,
             truecolor_probe: None,
             color_pf: crate::term::ColorPreflight::Proceed,
-            graphics: crate::GraphicsMode::Auto,
-            graphics_probe: crate::graphics::Probe::NotQueried,
-            densities: Vec::new(),
+            graphics_plan: crate::graphics::Plan::Classic {
+                reason: crate::graphics::ClassicReason::NotQueried,
+            },
+            run_graphics: crate::GraphicsMode::Auto,
             rows,
             roots: vec![],
             backend: "NSRunningApplication (macOS)",
@@ -1648,7 +1643,6 @@ mod tests {
             grok_registry: (ShownPath::new("/tmp/gk/active_sessions.json"), true),
             home_split: None,
             color: false,
-            truecolor_probe_ran: false,
         }
     }
 
@@ -1753,25 +1747,76 @@ mod tests {
     #[test]
     fn terminal_category_warns_when_an_attempted_probe_did_not_confirm() {
         let mut r = summary_report(vec![]);
-        r.truecolor_probe_ran = true;
-        r.truecolor_probe = None; // asked, no answer — the launcher warned here
+        use crate::term::Truecolor;
+        // Asked, no answer — the launcher warned here.
+        r.truecolor_probe = Some(Truecolor::NoAnswer);
         let c = terminal_category(&r);
         assert_eq!(c.status, CategoryStatus::Warn);
         assert!(c.summary.contains("did not answer"), "{}", c.summary);
 
-        r.truecolor_probe = Some(false);
+        r.truecolor_probe = Some(Truecolor::Answered(false));
         assert_eq!(terminal_category(&r).status, CategoryStatus::Warn);
 
-        r.truecolor_probe = Some(true);
+        r.truecolor_probe = Some(Truecolor::Answered(true));
         assert_eq!(terminal_category(&r).status, CategoryStatus::Ok);
 
-        // Piped: the probe never ran — that is not a warning, and the wording
-        // must not claim the terminal went silent.
-        r.truecolor_probe_ran = false;
-        r.truecolor_probe = None;
-        let c = terminal_category(&r);
-        assert_eq!(c.status, CategoryStatus::Ok);
-        assert!(c.summary.contains("probe skipped"), "{}", c.summary);
+        // Piped, or nothing could ask: no query ran, which is not a warning,
+        // and the wording must not claim the terminal went silent.
+        for (unasked, says) in [
+            (None, "probe skipped"),
+            (Some(Truecolor::CantAsk), "can't be asked"),
+        ] {
+            r.truecolor_probe = unasked;
+            let c = terminal_category(&r);
+            assert_eq!(c.status, CategoryStatus::Ok, "{unasked:?}");
+            assert!(!unasked.is_some_and(Truecolor::warrants_warning));
+            assert!(c.summary.contains(says), "{}", c.summary);
+        }
+    }
+
+    /// The graphics row, as the terminal category prints it: first, whole,
+    /// under the category line.
+    #[test]
+    fn terminal_category_leads_with_the_graphics_plan() {
+        use crate::graphics::{CellSize, ClassicReason, Fit, ImageProtocol, Plan};
+        let mut r = summary_report(vec![]);
+        let cell = CellSize { w: 17, h: 41 };
+        let area = ratatui::layout::Size {
+            width: 200,
+            height: 49,
+        };
+        let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
+        r.graphics_plan = Plan::Cutaway {
+            fit: Fit::new(cell, area, density).expect("fits"),
+            protocol: ImageProtocol::Kitty,
+            cell,
+            tmux: false,
+            forced: false,
+        };
+        assert_eq!(
+            terminal_category(&r).details[0],
+            format!(
+                "{DETAIL_INDENT}{}",
+                r.graphics_plan.diagnostic_row(crate::GraphicsMode::Auto)
+            )
+        );
+        r.run_graphics = crate::GraphicsMode::Off;
+        assert!(
+            terminal_category(&r).details[0].ends_with("paints it"),
+            "the row reads run's own setting"
+        );
+        r.run_graphics = crate::GraphicsMode::Auto;
+
+        r.graphics_plan = Plan::Classic {
+            reason: ClassicReason::TmuxNeedsKitty(ImageProtocol::Sixel),
+        };
+        assert_eq!(
+            terminal_category(&r).details[0],
+            format!(
+                "{DETAIL_INDENT}graphics: classic half-blocks — inside tmux only kitty \
+                 graphics survive a pane switch here, and this terminal speaks sixel"
+            )
+        );
     }
 
     #[test]
@@ -2046,9 +2091,6 @@ mod tests {
     #[test]
     fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
         use std::os::unix::fs::PermissionsExt;
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
         std::fs::create_dir_all(&home).unwrap();
@@ -2063,26 +2105,22 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
-            ["HOME", "XDG_CONFIG_HOME", "PATH", "OPENCODE_CONFIG_DIR"]
-                .iter()
-                .map(|k| (*k, std::env::var_os(k)))
-                .collect();
-        std::env::set_var("HOME", &home);
-        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
-        std::env::remove_var("OPENCODE_CONFIG_DIR");
-        std::env::set_var("PATH", &bin);
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
+        let xdg_config = home.join(".config");
+        let out = temp_env::with_vars(
+            [
+                ("HOME", Some(home.as_path())),
+                ("XDG_CONFIG_HOME", Some(xdg_config.as_path())),
+                ("OPENCODE_CONFIG_DIR", None),
+                ("PATH", Some(bin.as_path())),
+            ],
+            || {
+                run(
+                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    crate::GraphicsMode::Auto,
+                )
+            },
         );
         let spawned = marker.exists();
-        for (k, v) in saved {
-            match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
-            }
-        }
 
         out.expect("the report still builds");
         assert!(

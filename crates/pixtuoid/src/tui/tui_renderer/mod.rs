@@ -5,32 +5,46 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::Result;
-use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
-use pixtuoid_core::state::SceneState;
 #[cfg(test)]
 use pixtuoid_core::AgentId;
+use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::state::SceneState;
 
-use ratatui::backend::Backend;
 use ratatui::Terminal;
+use ratatui::backend::Backend;
 
 use ratatui::layout::Rect;
 
-use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
+use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
+use pixtuoid_scene::display::Hovers;
 use pixtuoid_scene::floor::{
-    num_floors, project_floor_scene, render_floor, FloorMeta, FloorTransition, FrameInputs,
-    PerFloor, PerOffice,
+    FloorInputs, FloorMeta, FloorTransition, OfficeStores, PerFloor, PerOffice, PetInputs,
+    num_floors, project_floor_scene,
 };
-use pixtuoid_scene::layout::{Layout, Size};
+use pixtuoid_scene::layout::{SceneLayout, Size};
+#[cfg(feature = "graphics")]
+use pixtuoid_scene::look::Rendered;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pathfind::Router;
-use pixtuoid_scene::pet::PetFrame;
+
+/// Floors `a` and `b`, which differ, borrowed together.
+fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
+    if a < b {
+        let (lo, hi) = floors.split_at_mut(b);
+        (&mut lo[a], &mut hi[0])
+    } else {
+        let (lo, hi) = floors.split_at_mut(a);
+        (&mut hi[0], &mut lo[b])
+    }
+}
 
 fn floor_info_for(
     current_idx: usize,
     nf: usize,
     total_agents: usize,
-) -> Option<crate::tui::renderer::FloorInfo> {
-    (nf > 1).then(|| crate::tui::renderer::FloorInfo {
+) -> Option<pixtuoid_scene::footer::FooterFloor> {
+    (nf > 1).then(|| pixtuoid_scene::footer::FooterFloor {
         current: current_idx + 1,
         total_floors: nf,
         total_agents,
@@ -51,36 +65,160 @@ struct PopupState {
     last_scale: f32,
 }
 
+#[derive(Debug)]
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
+    /// The pack every floor's raster draws with, which each frame's must be.
+    pack: Arc<Pack>,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
+    /// [`Self::office_extent`] after the last frame.
+    last_extent: Option<(u16, u16)>,
     mouse_pos: Option<(u16, u16)>,
-    theme: &'static pixtuoid_scene::theme::Theme,
-    theme_picker: Option<usize>,
-    cached_layout: Option<Arc<Layout>>,
-    active_pet: Option<PetState>,
-    last_pet_pos: Option<PetFrame>,
-    pets: Vec<pixtuoid_scene::pet::Pet>,
+    cached_layout: Option<Arc<SceneLayout>>,
+    last_hovers: Hovers,
+    last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
     office: PerOffice,
+    /// Live walkable/approach/route debug layer toggle (`w`); not persisted.
+    debug_walkable: bool,
+    chrome: Chrome,
+    /// The cutaway, painted as terminal images in place of the half-blocks.
+    #[cfg(feature = "graphics")]
+    cutaway: Option<crate::tui::cutaway::TileCutaway>,
+}
+
+/// Everything a frame shows besides the floor: kept apart from `floors` and
+/// `office` so a frame borrows it beside them ([`Chrome::frame`]).
+#[derive(Debug)]
+struct Chrome {
+    theme: &'static pixtuoid_scene::theme::Theme,
+    theme_picker: Option<usize>,
+    active_pet: Option<PetState>,
+    pets: Vec<pixtuoid_scene::pet::Pet>,
     popup: PopupState,
     help_open: bool,
     /// Footer warning when a source has died; `None` while healthy.
     source_warning: Option<String>,
-    /// Live walkable/approach/route debug layer toggle (`w`); not persisted.
-    debug_walkable: bool,
-    /// Agent-dashboard frame mirror. Kept here — disjoint from the floor buffers
-    /// — so the painter can borrow it into the `DrawCtx` without fighting `floors`.
     dashboard: crate::tui::dashboard::DashboardFrame,
     connection: crate::tui::connection::ConnectionFrame,
     onboarding: crate::tui::welcome::OnboardingFrame,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// Transient +/- volume readout (percent); `None` outside the ~1s flash window.
+    /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
+    weather: pixtuoid_scene::sky::WeatherPolicy,
+    motion: pixtuoid_scene::anim::Motion,
+}
+
+/// One floor frame's inputs, the same under either painter.
+struct Frame<'a> {
+    world: FloorInputs<'a>,
+    footer: pixtuoid_scene::footer::FooterContext<'a>,
+    overlays: crate::tui::renderer::OverlayFrame<'a>,
+}
+
+impl PopupState {
+    fn scale(&self, now: SystemTime) -> f32 {
+        use pixtuoid_scene::anim::{Easing, eased_progress};
+        const VERSION_POPUP_GROW_MS: u32 = 200;
+        const VERSION_POPUP_SHRINK_MS: u32 = 120;
+        match (self.open, self.started_at) {
+            (true, Some(start)) => {
+                let progress =
+                    eased_progress(start, VERSION_POPUP_GROW_MS, Easing::EaseOutCubic, now);
+                self.scale_at_edge + (1.0 - self.scale_at_edge) * progress
+            }
+            (false, Some(start)) => {
+                let progress =
+                    eased_progress(start, VERSION_POPUP_SHRINK_MS, Easing::EaseInQuad, now);
+                self.scale_at_edge * (1.0 - progress)
+            }
+            (true, None) => 1.0,
+            (false, None) => 0.0,
+        }
+    }
+}
+
+impl Chrome {
+    /// Floor `floor` of `nf`, under this office's weather, moving as it does.
+    fn floor_meta(&self, floor: usize, nf: usize) -> FloorMeta {
+        FloorMeta::for_floor(floor, nf)
+            .with_weather(self.weather)
+            .with_motion(self.motion)
+    }
+
+    /// Floor `floor` of `nf` in `scene`, whose projection is `floor_scene`.
+    fn frame<'a>(
+        &'a self,
+        scene: &'a SceneState,
+        floor_scene: &'a SceneState,
+        pack: &'a Pack,
+        now: SystemTime,
+        floor: usize,
+        nf: usize,
+    ) -> Frame<'a> {
+        let meta = self.floor_meta(floor, nf);
+        Frame {
+            world: FloorInputs {
+                scene: floor_scene,
+                pack,
+                now,
+                floor: meta,
+                pets: PetInputs {
+                    pet: pixtuoid_scene::pet::select_pet_for_floor(meta.floor_seed, &self.pets),
+                    petting: self.active_pet.as_ref(),
+                },
+            },
+            footer: crate::tui::widgets::footer_context(
+                scene,
+                floor_info_for(floor, nf, scene.agents.len()),
+                self.audio.is_audible(),
+                self.volume_flash,
+                self.source_warning.as_deref(),
+            ),
+            overlays: self.overlays(self.popup.scale(now)),
+        }
+    }
+
+    /// Floor `floor` of `nf` while it slides, whose projection is
+    /// `floor_scene`: its pet is petted only if the petting is there and live.
+    fn slide_world<'a>(
+        &'a self,
+        floor_scene: &'a SceneState,
+        pack: &'a Pack,
+        now: SystemTime,
+        floor: usize,
+        nf: usize,
+    ) -> FloorInputs<'a> {
+        let meta = self.floor_meta(floor, nf);
+        FloorInputs {
+            scene: floor_scene,
+            pack,
+            now,
+            floor: meta,
+            pets: PetInputs {
+                pet: pixtuoid_scene::pet::select_pet_for_floor(meta.floor_seed, &self.pets),
+                petting: self
+                    .active_pet
+                    .as_ref()
+                    .filter(|p| p.floor_idx == floor && p.is_active(now)),
+            },
+        }
+    }
+
+    fn overlays(&self, popup_scale: f32) -> crate::tui::renderer::OverlayFrame<'_> {
+        crate::tui::renderer::OverlayFrame {
+            theme_picker: self.theme_picker,
+            dashboard: &self.dashboard,
+            connection: &self.connection,
+            popup_scale,
+            help_open: self.help_open,
+            onboarding: &self.onboarding,
+        }
+    }
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -88,97 +226,108 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         terminal: Terminal<B>,
         theme: &'static pixtuoid_scene::theme::Theme,
         pets: Vec<pixtuoid_scene::pet::Pet>,
+        pack: Arc<Pack>,
     ) -> Self {
         Self {
             terminal,
-            floors: vec![PerFloor::new()],
+            floors: vec![PerFloor::new(Arc::clone(&pack))],
+            pack,
             current_floor: 0,
             transition: None,
+            last_extent: None,
             mouse_pos: None,
-            theme,
-            theme_picker: None,
             cached_layout: None,
-            active_pet: None,
-            last_pet_pos: None,
-            pets,
+            last_hovers: Hovers::default(),
+            last_geometry: None,
             office: PerOffice::new(),
-            popup: PopupState::default(),
-            help_open: false,
-            source_warning: None,
             debug_walkable: false,
-            dashboard: Default::default(),
-            connection: Default::default(),
-            onboarding: crate::tui::welcome::OnboardingFrame::default(),
-            audio: crate::audio::AudioHandle::disabled(),
-            volume_flash: None,
+            chrome: Chrome {
+                theme,
+                theme_picker: None,
+                active_pet: None,
+                pets,
+                popup: PopupState::default(),
+                help_open: false,
+                source_warning: None,
+                dashboard: Default::default(),
+                connection: Default::default(),
+                onboarding: crate::tui::welcome::OnboardingFrame::default(),
+                audio: crate::audio::AudioHandle::disabled(),
+                volume_flash: None,
+                weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
+                motion: pixtuoid_scene::anim::Motion::Full,
+            },
+            #[cfg(feature = "graphics")]
+            cutaway: None,
+        }
+    }
+
+    /// Paint `cutaway` from the next frame on.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
+        self.cutaway = Some(cutaway);
+    }
+
+    /// Clear the terminal and repaint every cell and every image.
+    pub(crate) fn redraw(&mut self) -> Result<()> {
+        #[cfg(feature = "graphics")]
+        if let Some(cutaway) = &mut self.cutaway {
+            cutaway.forget();
+        }
+        self.terminal.clear()?;
+        Ok(())
+    }
+
+    /// The logical extent the current floor last laid out on: what a resize
+    /// changes, and a slide does not.
+    fn office_extent(&self) -> (u16, u16) {
+        #[cfg(feature = "graphics")]
+        if let Some(office) = self.cutaway.as_ref().and_then(|c| c.office()) {
+            return (office.w, office.h);
+        }
+        self.buf().map_or((0, 0), |b| (b.width(), b.height()))
+    }
+
+    /// A frame laid out at a new extent — a resize — re-routes every floor and
+    /// lands any slide.
+    fn follow_resize(&mut self) {
+        let extent = self.office_extent();
+        if self
+            .last_extent
+            .replace(extent)
+            .is_some_and(|was| was != extent)
+        {
+            self.invalidate_routes();
+            self.cancel_transition();
         }
     }
 
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
-        self.audio = audio;
+        self.chrome.audio = audio;
     }
 
     pub(crate) fn set_volume_flash(&mut self, flash: Option<u8>) {
-        self.volume_flash = flash;
+        self.chrome.volume_flash = flash;
     }
 
     pub fn set_dashboard_frame(&mut self, frame: crate::tui::dashboard::DashboardFrame) {
-        self.dashboard = frame;
+        self.chrome.dashboard = frame;
     }
 
     pub fn set_connection_frame(&mut self, frame: crate::tui::connection::ConnectionFrame) {
-        self.connection = frame;
-    }
-
-    #[cfg(test)]
-    pub fn set_dashboard_frame_parts(
-        &mut self,
-        open: bool,
-        rows: Vec<crate::tui::dashboard::DashboardRow>,
-        selected: Option<pixtuoid_core::AgentId>,
-        scroll: usize,
-    ) {
-        self.dashboard = crate::tui::dashboard::DashboardFrame {
-            open,
-            rows,
-            selected,
-            scroll,
-        };
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_connection_frame_parts(
-        &mut self,
-        open: bool,
-        rows: Vec<crate::tui::connection::ConnectionRow>,
-        live: Vec<crate::tui::connection::LiveInfo>,
-        selected: usize,
-        confirm: Option<usize>,
-        result: Option<String>,
-        socket_line: String,
-    ) {
-        self.connection = crate::tui::connection::ConnectionFrame {
-            open,
-            rows,
-            live,
-            selected,
-            confirm,
-            result,
-            socket_line,
-        };
+        self.chrome.connection = frame;
     }
 
     pub fn set_onboarding_frame(&mut self, frame: crate::tui::welcome::OnboardingFrame) {
-        self.onboarding = frame;
+        self.chrome.onboarding = frame;
     }
 
     pub fn help_open(&self) -> bool {
-        self.help_open
+        self.chrome.help_open
     }
 
     pub fn set_help_open(&mut self, v: bool) {
-        self.help_open = v;
+        self.chrome.help_open = v;
     }
 
     pub fn debug_walkable(&self) -> bool {
@@ -199,18 +348,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn floor_motion(
+    pub fn floor_walks(
         &self,
         floor: usize,
-    ) -> Option<
-        &std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState>,
-    > {
-        self.floors.get(floor).map(|f| &f.ctx.motion)
+    ) -> Option<&std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::walk::WalkState>>
+    {
+        self.floors.get(floor).map(|f| &f.ctx.walks)
     }
 
     #[cfg(test)]
     pub fn floor_buf(&self, floor: usize) -> Option<&RgbBuffer> {
-        self.floors.get(floor).map(|f| &f.buf)
+        self.floors.get(floor)?.raster.pixels()
     }
 
     /// Seed coffee-carrier state directly: the production path needs a full pantry
@@ -220,32 +368,48 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.office.coffee.insert(id, fetched_at);
     }
 
-    pub fn cached_layout(&self) -> Option<&Layout> {
+    pub fn cached_layout(&self) -> Option<&SceneLayout> {
         self.cached_layout.as_deref()
     }
 
-    /// The click twin of the hover hit-test: anchors on `character_anchor`, so it
-    /// follows a walking / wandering / entry / exit sprite. `floor_scene` must be
-    /// projected to the visible floor — its `desk_index.single_floor_local()` reads
-    /// need floor-local indices.
-    pub(crate) fn hit_test_agent_at(
-        &mut self,
-        floor_scene: &SceneState,
-        now: SystemTime,
+    /// Whether the last frame set the wall board's star as text, the one place a
+    /// click opens the repo: only a half-block frame does, not a too-small one or
+    /// a floor slide; the cutaway paints its board into the image.
+    pub(crate) fn star_clickable(&self) -> bool {
+        matches!(
+            self.last_geometry,
+            Some(crate::tui::geometry::SceneGeometry::HalfBlock { .. })
+        )
+    }
+
+    /// The pixels cell `(col, row)` showed in the last frame drawn.
+    pub(crate) fn scene_area_at(
+        &self,
         col: u16,
         row: u16,
-    ) -> Option<pixtuoid_core::AgentId> {
-        // Disjoint struct fields: this shared layout borrow coexists with the
-        // `&mut route_ctx` below.
+    ) -> Option<crate::tui::geometry::CellArea> {
+        self.last_geometry?.area_at(col, row)
+    }
+
+    /// What cell `(col, row)` showed the pointer in the last frame drawn.
+    pub(crate) fn scene_hit_at(
+        &self,
+        col: u16,
+        row: u16,
+    ) -> Option<crate::tui::hit_test::SceneHit<'_>> {
         let layout = self.cached_layout.as_deref()?;
-        let mut rctx = self.floors[self.current_floor].ctx.route_ctx();
-        crate::tui::hit_test::hit_test_agent(
-            floor_scene,
-            layout,
-            now,
-            &mut rctx,
-            crate::tui::geometry::CellArea::half_block(col, row),
-        )
+        crate::tui::hit_test::scene_hit(&self.last_hovers, layout, self.scene_area_at(col, row)?)
+    }
+
+    /// The agent topmost at cell `(col, row)` in the last frame drawn.
+    #[cfg(test)]
+    pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
+        match self.scene_hit_at(col, row)? {
+            crate::tui::hit_test::SceneHit::Figure(
+                pixtuoid_scene::display::HoverTarget::Agent(id),
+            ) => Some(*id),
+            _ => None,
+        }
     }
 
     pub fn current_floor_seed(&self) -> u64 {
@@ -277,76 +441,87 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.mouse_pos = pos;
     }
 
-    pub fn buf(&self) -> &RgbBuffer {
-        &self.floors[self.current_floor].buf
+    /// The current floor's last frame, `None` before its first.
+    pub fn buf(&self) -> Option<&RgbBuffer> {
+        self.floors[self.current_floor].raster.pixels()
     }
 
     pub fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
-        if !std::ptr::eq(self.theme, theme) {
-            self.theme = theme;
+        if !std::ptr::eq(self.chrome.theme, theme) {
+            self.chrome.theme = theme;
             for pf in &mut self.floors {
-                pf.ctx.cache = pixtuoid_scene::frame_cache::FrameCache::new();
+                pf.raster.reset_sprite_cache();
             }
+            self.office.raster.reset();
         }
     }
 
+    /// Which weather every floor shows from the next frame on.
+    pub fn set_weather(&mut self, weather: pixtuoid_scene::sky::WeatherPolicy) {
+        self.chrome.weather = weather;
+    }
+
+    /// How every floor moves from the next frame on.
+    pub fn set_motion(&mut self, motion: pixtuoid_scene::anim::Motion) {
+        self.chrome.motion = motion;
+    }
+
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
-        self.theme_picker = picker;
+        self.chrome.theme_picker = picker;
     }
 
     pub fn set_source_warning(&mut self, warning: Option<String>) {
-        self.source_warning = warning;
+        self.chrome.source_warning = warning;
     }
 
     pub fn set_version_popup(&mut self, v: bool, now: SystemTime) {
-        if v != self.popup.open {
-            self.popup.scale_at_edge = self.version_popup_scale(now);
-            self.popup.started_at = Some(now);
-            self.popup.open = v;
+        if v != self.chrome.popup.open {
+            self.chrome.popup.scale_at_edge = self.version_popup_scale(now);
+            self.chrome.popup.started_at = Some(now);
+            self.chrome.popup.open = v;
         }
     }
 
     pub fn version_popup_started_at(&self) -> Option<SystemTime> {
-        self.popup.started_at
+        self.chrome.popup.started_at
     }
 
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
-        use pixtuoid_scene::anim::{eased_progress, Easing};
-        const VERSION_POPUP_GROW_MS: u32 = 200;
-        const VERSION_POPUP_SHRINK_MS: u32 = 120;
-        match (self.popup.open, self.popup.started_at) {
-            (true, Some(start)) => {
-                let progress =
-                    eased_progress(start, VERSION_POPUP_GROW_MS, Easing::EaseOutCubic, now);
-                self.popup.scale_at_edge + (1.0 - self.popup.scale_at_edge) * progress
-            }
-            (false, Some(start)) => {
-                let progress =
-                    eased_progress(start, VERSION_POPUP_SHRINK_MS, Easing::EaseInQuad, now);
-                self.popup.scale_at_edge * (1.0 - progress)
-            }
-            (true, None) => 1.0,
-            (false, None) => 0.0,
-        }
+        self.chrome.popup.scale(now)
     }
 
-    /// The scale computed during the most recent `render()`. Prefer this over
-    /// `version_popup_scale(SystemTime::now())` in the mouse handler so click
-    /// geometry matches what was painted.
+    /// The scale computed during the most recent `render()`.
     pub fn last_popup_scale(&self) -> f32 {
-        self.popup.last_scale
+        self.chrome.popup.last_scale
     }
 
     pub fn set_active_pet(&mut self, pet: Option<PetState>) {
-        self.active_pet = pet;
+        self.chrome.active_pet = pet;
     }
 
     pub fn active_pet_ref(&self) -> Option<&PetState> {
-        self.active_pet.as_ref()
+        self.chrome.active_pet.as_ref()
     }
 
-    pub fn cached_pet_pos(&self) -> Option<PetFrame> {
-        self.last_pet_pos
+    /// The pet the last frame drew, found as the pointer finds it: on some
+    /// logical pixel it is the topmost hover.
+    #[cfg(test)]
+    pub(crate) fn drawn_pet(&self) -> Option<pixtuoid_scene::display::PetHover> {
+        let layout = self.cached_layout.as_deref()?;
+        (0..layout.buf_h)
+            .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+            .find_map(|(x, y)| {
+                let pixel = pixtuoid_scene::layout::Bounds {
+                    x,
+                    y,
+                    width: 1,
+                    height: 1,
+                };
+                match self.last_hovers.at(pixel)? {
+                    pixtuoid_scene::display::HoverTarget::Pet(pet) => Some(*pet),
+                    _ => None,
+                }
+            })
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves: the
@@ -366,12 +541,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.office.coffee.map().contains_key(&id)
     }
 
-    /// Call when the static walkable mask changes (terminal resize, floor capacity).
-    pub fn invalidate_routes(&mut self) {
+    fn invalidate_routes(&mut self) {
         for pf in &mut self.floors {
             pf.ctx.router.invalidate();
         }
     }
+
     /// Composite two floors sliding in/out during a `FloorTransition`. `nf` is the
     /// live floor count from [`Self::render`].
     fn render_transition(
@@ -391,8 +566,21 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }) else {
             return Ok(());
         };
+        self.forget_drawn();
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
+        // The destination floor's footer for the whole slide, so its count matches
+        // the breadcrumb.
+        let footer = pixtuoid_scene::footer::FooterInputs::new(
+            &to_scene,
+            crate::tui::widgets::footer_context(
+                scene,
+                floor_info_for(to_floor, nf, scene.agents.len()),
+                self.chrome.audio.is_audible(),
+                self.chrome.volume_flash,
+                self.chrome.source_warning.as_deref(),
+            ),
+        );
 
         let term_size = self.terminal.size()?;
         let full_rect = Rect {
@@ -403,349 +591,480 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let scene_rect = crate::tui::renderer::scene_rect(full_rect);
 
-        if scene_rect.width < crate::tui::renderer::MIN_SCENE_WIDTH
-            || scene_rect.height < crate::tui::renderer::MIN_SCENE_HEIGHT
-        {
-            // Too small to render this frame: clear the interaction state the
-            // mouse handler reads, so a click doesn't hit-test against a stale
-            // layout / pet left over from a larger prior frame.
-            self.cached_layout = None;
-            self.last_pet_pos = None;
-            // Paint the SAME footer-only frame draw_scene's gate does, not
-            // nothing — else the stale pre-shrink frame stays frozen on screen.
-            // AND land the transition: this returns before ensure_size, so the
-            // floor buffer's size signature never changes and the event loop's
-            // resize detector can't fire cancel_transition — the slide would
-            // otherwise stay live for its whole ~400 ms timer.
-            let floor_info = floor_info_for(to_floor, nf, scene.agents.len());
-            let theme = self.theme;
-            let source_warning = self.source_warning.clone();
-            let per_floor = crate::tui::widgets::per_floor_counts(scene);
-            let footer_stats = crate::tui::widgets::FooterStats {
-                counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
-                per_floor: &per_floor,
-                gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-                audio_audible: self.audio.is_audible(),
-                volume_flash: self.volume_flash,
-            };
-            // The modals survive the slide (`Tab`/`s` aren't transition-gated), so
-            // they paint here too — their key handlers stay live at every size.
+        if crate::tui::renderer::scene_too_small(scene_rect) {
             let popup_scale = self.version_popup_scale(now);
-            self.popup.last_scale = popup_scale;
-            let overlays = crate::tui::renderer::OverlayFrame {
-                theme_picker: self.theme_picker,
-                dashboard: &self.dashboard,
-                connection: &self.connection,
-                popup_scale,
-                help_open: self.help_open,
-                onboarding: &self.onboarding,
-            };
+            self.chrome.popup.last_scale = popup_scale;
+            let overlays = self.chrome.overlays(popup_scale);
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
-                scene,
-                &footer_stats,
-                theme,
-                floor_info,
-                source_warning.as_deref(),
+                &footer,
+                self.chrome.theme,
                 &overlays,
                 now,
             )?;
+            // This returns before ensure_size, so `office_extent` holds and
+            // `follow_resize` can't land the slide: it would stay live for its
+            // whole `FloorTransition::duration_ms`.
             self.cancel_transition();
             return Ok(());
         }
 
-        let buf_w = scene_rect.width;
-        let buf_h = scene_rect.height.saturating_mul(2);
+        let (buf_w, buf_h) =
+            crate::tui::renderer::scene_buf_size(full_rect.width, full_rect.height);
         // Compute popup scale before the split_at_mut borrows.
         let popup_scale = self.version_popup_scale(now);
-        let onboarding_dim = self.onboarding.dim;
+        let onboarding_dim = self.chrome.onboarding.dim;
 
-        let (lo, hi) = if from_floor < to_floor {
-            (from_floor, to_floor)
-        } else {
-            (to_floor, from_floor)
-        };
-
-        let (floors_lo, floors_hi) = self.floors.split_at_mut(hi);
-        let lo_floor = &mut floors_lo[lo];
-        let hi_floor = &mut floors_hi[0];
-        let (from_floor_half, to_floor_half) = if from_floor < to_floor {
-            (lo_floor, hi_floor)
-        } else {
-            (hi_floor, lo_floor)
-        };
-        let PerFloor {
-            ctx: from_ctx,
-            buf: from_buf,
-        } = from_floor_half;
-        let PerFloor {
-            ctx: to_ctx,
-            buf: to_buf,
-        } = to_floor_half;
-
-        let from_meta = FloorMeta::for_floor(from_floor, nf);
-        let to_meta = FloorMeta::for_floor(to_floor, nf);
+        let (from, to) = floor_pair(&mut self.floors, from_floor, to_floor);
 
         // Transitions hide *text* overlays (tooltips, bubbles, labels) but keep
         // every pixel-level visual, so the slide reads as a continuous scene.
         let mut transition_chitchat = std::collections::HashMap::new();
 
-        let from_active_pet = self
-            .active_pet
-            .as_ref()
-            .filter(|p| p.floor_idx == from_floor && p.is_active(now));
-        let to_active_pet = self
-            .active_pet
-            .as_ref()
-            .filter(|p| p.floor_idx == to_floor && p.is_active(now));
-        let from_pet = pixtuoid_scene::pet::select_pet_for_floor(from_meta.floor_seed, &self.pets);
-        let to_pet = pixtuoid_scene::pet::select_pet_for_floor(to_meta.floor_seed, &self.pets);
-
         // Recording the from-floor's carriers before the to-floor render can't
         // change the to-floor's pixels: an agent lives on exactly ONE floor, and
         // each projected floor scene paints only its own agents' coffee state.
-        render_floor(
-            from_ctx,
-            from_buf,
-            &mut self.office.coffee,
-            &mut transition_chitchat,
-            FrameInputs {
-                scene: &from_scene,
-                pack,
-                theme: self.theme,
-                now,
-                size: Size { w: buf_w, h: buf_h },
-                floor_meta: from_meta,
-                active_pet: from_active_pet,
-                floor_pet: from_pet,
-                debug_walkable: self.debug_walkable,
-            },
-        );
-        render_floor(
-            to_ctx,
-            to_buf,
-            &mut self.office.coffee,
-            &mut transition_chitchat,
-            FrameInputs {
-                scene: &to_scene,
-                pack,
-                theme: self.theme,
-                now,
-                size: Size { w: buf_w, h: buf_h },
-                floor_meta: to_meta,
-                active_pet: to_active_pet,
-                floor_pet: to_pet,
-                debug_walkable: self.debug_walkable,
-            },
-        );
-
-        // Modal backdrop: dim BOTH sliding buffers, the same multiply draw_scene
-        // applies to its single buffer.
-        if onboarding_dim < 0.999 {
-            crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
-            crate::tui::renderer::apply_dim(to_buf, onboarding_dim);
+        for (floor, world) in [
+            (
+                &mut *from,
+                self.chrome
+                    .slide_world(&from_scene, pack, now, from_floor, nf),
+            ),
+            (
+                &mut *to,
+                self.chrome.slide_world(&to_scene, pack, now, to_floor, nf),
+            ),
+        ] {
+            pixtuoid_scene::look::render(
+                floor,
+                OfficeStores {
+                    coffee: &mut self.office.coffee,
+                    chitchat: &mut transition_chitchat,
+                    raster: &mut self.office.raster,
+                },
+                Look::Classic,
+                RenderInputs {
+                    world,
+                    theme: self.chrome.theme,
+                    size: Size { w: buf_w, h: buf_h },
+                    place: Place::default(),
+                    debug_walkable: self.debug_walkable,
+                },
+            );
+            // Modal backdrop: dim BOTH sliding buffers, the same multiply
+            // draw_scene applies to its single buffer.
+            if let Some(drawn) = floor.raster.classic_drawn() {
+                crate::tui::renderer::apply_dim(drawn.pixels, onboarding_dim);
+            }
         }
-
-        // `t` applies to the total travel (screen height + divider gap) so the
-        // easing covers the full distance including the gap.
-        const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
-        let h = scene_rect.height as f32;
-        let divider_h = (scene_rect.height as f32) / FLOOR_SLIDE_DIVIDER_FRACTION;
-        let total = h + divider_h;
-        let (from_offset, to_offset) = if going_down {
-            // Higher floor: current slides DOWN, new enters from TOP
-            let from_y = (t * total) as i32;
-            let to_y = -(total - t * total) as i32;
-            (from_y, to_y)
-        } else {
-            // Lower floor: current slides UP, new enters from BOTTOM
-            let from_y = -(t * total) as i32;
-            let to_y = (total - t * total) as i32;
-            (from_y, to_y)
+        let (Some(from_buf), Some(to_buf)) = (from.raster.pixels(), to.raster.pixels()) else {
+            return Ok(());
         };
 
-        let theme = self.theme;
-        let theme_picker = self.theme_picker;
-        let source_warning = self.source_warning.clone();
-        let help_open = self.help_open;
-        // Clone the frames for the brief transition rather than thread disjoint
-        // borrows through the split_at_mut buffers.
-        let dashboard = self.dashboard.clone();
-        let connection = self.connection.clone();
-        let onboarding = self.onboarding.clone();
-        // Floor label tracks the destination floor for the whole slide so the
-        // footer's per-floor agent count matches the label.
-        let transition_floor_info = floor_info_for(to_floor, nf, scene.agents.len());
-        let transition_per_floor = crate::tui::widgets::per_floor_counts(scene);
-        let footer_stats = crate::tui::widgets::FooterStats {
-            counts: crate::tui::widgets::scene_stats(&to_scene),
-            per_floor: &transition_per_floor,
-            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: self.audio.is_audible(),
-            volume_flash: self.volume_flash,
-        };
+        let (from_offset, to_offset) =
+            crate::tui::geometry::slide_offsets(t, going_down, f32::from(scene_rect.height));
 
+        let overlays = self.chrome.overlays(popup_scale);
+        let theme = self.chrome.theme;
         self.terminal.draw(|f| {
             let actual_full = f.area();
             let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-            crate::tui::renderer::paint_footer(
-                f,
-                &to_scene,
-                &footer_stats,
-                actual_full,
-                theme,
-                transition_floor_info,
-                source_warning.as_deref(),
-            );
+            crate::tui::renderer::paint_footer(f, &footer, actual_full, theme);
             flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
-
-            crate::tui::renderer::paint_overlays(
-                f,
-                &crate::tui::renderer::OverlayFrame {
-                    theme_picker,
-                    dashboard: &dashboard,
-                    connection: &connection,
-                    popup_scale,
-                    help_open,
-                    onboarding: &onboarding,
-                },
-                now,
-                actual_full,
-                theme,
-            );
+            crate::tui::renderer::paint_overlays(f, &overlays, now, actual_full, theme);
         })?;
 
-        self.popup.last_scale = popup_scale;
-        self.cached_layout = None;
-        // The pet has no single interactable position mid-slide; clear the stale
-        // one so the mouse handler can't "pet" a ghost at last frame's location.
-        self.last_pet_pos = None;
+        self.chrome.popup.last_scale = popup_scale;
         Ok(())
+    }
+
+    /// What the mouse handler hit-tests is gone from the screen, so a click
+    /// must not land on its ghost.
+    fn forget_drawn(&mut self) {
+        self.cached_layout = None;
+        self.last_hovers = Hovers::default();
+        self.last_geometry = None;
+    }
+
+    /// A refused frame steps nothing, but the door's clamp still keeps time, as
+    /// [`step_floor`](pixtuoid_scene::floor::step_floor) keeps it for a stepped one.
+    fn rest_floor(&mut self, now: SystemTime) {
+        self.floors[self.current_floor]
+            .ctx
+            .recompute_door_anim_max_ms(now);
+    }
+
+    /// What a floor frame leaves behind, whichever painter drew it: what the
+    /// mouse hit-tests and the floor's audio.
+    fn record_drawn(
+        &mut self,
+        scene: &SceneState,
+        out: crate::tui::renderer::DrawOut,
+        popup_scale: f32,
+        now: SystemTime,
+    ) {
+        self.last_hovers = out.hovers;
+        self.last_geometry = out.geometry;
+        // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
+        // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
+        // THIS frame's layout (`out.layout`, not `self.cached_layout`, which is
+        // still last frame's until set below).
+        let audio_frame = self.office.audio.frame(
+            scene,
+            &out.occupied_waypoints,
+            |idx| pixtuoid_scene::floor::waypoint_kind_of(out.layout.as_deref(), idx),
+            self.chrome.floor_meta(
+                self.current_floor,
+                num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS),
+            ),
+            now,
+        );
+        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
+        self.chrome.audio.frame(audio_frame);
+        self.cached_layout = out.layout;
+        // The popup's click rect derives from the terminal bounds — NOT the
+        // office layout — so the painted scale IS the clickable one on both
+        // draw paths.
+        self.chrome.popup.last_scale = popup_scale;
     }
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
-        if self.active_pet.as_ref().is_some_and(|p| !p.is_active(now)) {
-            self.active_pet = None;
+        self.draw_frame(scene, pack, now)?;
+        self.follow_resize();
+        Ok(())
+    }
+
+    fn draw_frame(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+        if self
+            .chrome
+            .active_pet
+            .as_ref()
+            .is_some_and(|p| !p.is_active(now))
+        {
+            self.chrome.active_pet = None;
         }
 
         let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
 
         while self.floors.len() < nf {
-            self.floors.push(PerFloor::new());
+            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
         }
 
-        if let Some(ref tr) = self.transition {
-            if tr.from_floor >= nf || tr.to_floor >= nf {
-                self.transition = None;
-                self.cached_layout = None;
-            }
+        if let Some(ref tr) = self.transition
+            && (tr.from_floor >= nf || tr.to_floor >= nf)
+        {
+            self.transition = None;
+            self.cached_layout = None;
         }
 
-        if let Some(ref tr) = self.transition {
-            if tr.is_done(now) {
-                self.current_floor = tr.to_floor;
-                self.transition = None;
-            }
+        if let Some(ref tr) = self.transition
+            && tr.is_done(now)
+        {
+            self.current_floor = tr.to_floor;
+            self.transition = None;
         }
 
         if self.current_floor >= nf {
             self.current_floor = nf.saturating_sub(1);
         }
 
-        let floor_info = floor_info_for(self.current_floor, nf, scene.agents.len());
+        #[cfg(feature = "graphics")]
+        if let Some(mut cutaway) = self.cutaway.take() {
+            let size = self.terminal.size()?;
+            let scene_area =
+                crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));
+            let window = self
+                .terminal
+                .backend_mut()
+                .window_size()
+                .ok()
+                .and_then(crate::graphics::CellSize::of_window);
+            let drawn = cutaway.fit_to(scene_area, window).map(|fitted| {
+                if self.transition.is_some() {
+                    self.render_cutaway_slide(&mut cutaway, fitted, scene, pack, now, nf)
+                } else {
+                    self.render_cutaway(&mut cutaway, fitted, scene, pack, now, nf)
+                }
+            });
+            self.cutaway = Some(cutaway);
+            if let Some(drawn) = drawn {
+                return drawn;
+            }
+        }
 
         if self.transition.is_some() {
             return self.render_transition(scene, pack, now, nf);
         }
 
         let floor_scene = project_floor_scene(scene, self.current_floor);
-
-        let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
-        // Compute popup scale before the mutable borrows below.
-        let popup_scale = self.version_popup_scale(now);
-        let pf = &mut self.floors[self.current_floor];
+        let Frame {
+            world,
+            footer,
+            overlays,
+        } = self
+            .chrome
+            .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+        let popup_scale = overlays.popup_scale;
         let mut draw_ctx = DrawCtx {
-            buf: &mut pf.buf,
-            store: &mut pf.ctx,
+            world,
+            floor: &mut self.floors[self.current_floor],
+            office: self.office.stores(),
             mouse_pos: self.mouse_pos,
             debug_walkable: self.debug_walkable,
-            theme: self.theme,
-            theme_picker: self.theme_picker,
-            floor_info,
-            // Office-wide truth from the FULL un-projected scene: the footer's
-            // cross-floor cue + gateway chip render even single-floor.
-            per_floor: crate::tui::widgets::per_floor_counts(scene),
-            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: self.audio.is_audible(),
-            volume_flash: self.volume_flash,
-            floor: floor_meta,
-            active_pet: self.active_pet.as_ref(),
-            last_pet_pos: None,
-            last_mascots: Vec::new(),
-            floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
-            chitchat_state: &mut self.office.chitchat,
-            chitchat_bubbles: Vec::new(),
-            coffee: self.office.coffee.map(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            popup_scale,
-            help_open: self.help_open,
-            source_warning: self.source_warning.as_deref(),
-            dashboard: &self.dashboard,
-            connection: &self.connection,
-            onboarding: &self.onboarding,
+            theme: self.chrome.theme,
+            theme_picker: overlays.theme_picker,
+            footer,
+            popup_scale: overlays.popup_scale,
+            help_open: overlays.help_open,
+            dashboard: overlays.dashboard,
+            connection: overlays.connection,
+            onboarding: overlays.onboarding,
         };
-        let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
-        self.last_pet_pos = draw_ctx.last_pet_pos;
-        // `take` avoids a partial move so the explicit `drop` below can follow.
-        let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
-        let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
-        drop(draw_ctx);
-        // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
-        // the floor you're LOOKING AT; rain stays global). The observer runs EVERY
-        // frame, even muted, so its cue edges stay warm — re-enabling audio fires
-        // no volley for what arrived while silent; only DELIVERY is gated. The
-        // kind-map resolves against THIS frame's layout (the `result` handle, not
-        // `self.cached_layout`, which is still last frame's until set below).
-        let frame_layout = result.as_ref().ok().and_then(|o| o.as_deref());
-        let audio_frame = self.office.audio.frame(
-            scene,
-            &occupied_waypoints,
-            |idx| pixtuoid_scene::floor::waypoint_kind_of(frame_layout, idx),
-            self.current_floor,
-            now,
-        );
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
+        let out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
+        if out.layout.is_none() {
+            self.rest_floor(now);
         }
-        pixtuoid_scene::floor::frame_epilogue(
-            &mut self.floors[self.current_floor].ctx,
-            &mut self.office.coffee,
-            new_coffee_carriers,
-            now,
-        );
-        if let Ok(ref layout_opt) = result {
-            self.cached_layout = layout_opt.clone();
-            // The popup's click rect derives from the terminal bounds — NOT the
-            // office layout — so the painted scale IS the clickable one on both
-            // draw paths.
-            self.popup.last_scale = popup_scale;
-        } else {
-            self.popup.last_scale = 0.0;
-        }
-        result.map(|_| ())
+        self.record_drawn(scene, out, popup_scale, now);
+        Ok(())
     }
 }
 
-/// Test-only access to the rendered ratatui frame. Specialised to `TestBackend`
+#[cfg(feature = "graphics")]
+impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// [`Self::render_transition`] under the cutaway: both floors' frames
+    /// composed into one image that slides as classic's half-blocks do.
+    fn render_cutaway_slide(
+        &mut self,
+        cutaway: &mut crate::tui::cutaway::TileCutaway,
+        fitted: crate::tui::cutaway::Fitted,
+        scene: &SceneState,
+        pack: &Pack,
+        now: SystemTime,
+        nf: usize,
+    ) -> Result<()> {
+        use crate::tui::renderer::{
+            draw_footer_only_frame, paint_footer, paint_overlays, scene_rect,
+        };
+        let Some((from_floor, to_floor, t, going_down)) = self.transition.as_ref().map(|tr| {
+            (
+                tr.from_floor,
+                tr.to_floor,
+                tr.t(now),
+                tr.to_floor > tr.from_floor,
+            )
+        }) else {
+            return Ok(());
+        };
+        self.forget_drawn();
+        let from_scene = project_floor_scene(scene, from_floor);
+        let to_scene = project_floor_scene(scene, to_floor);
+        let scene_area = fitted.scene;
+        // The destination floor's footer for the whole slide, as classic's.
+        let Frame {
+            footer, overlays, ..
+        } = self.chrome.frame(scene, &to_scene, pack, now, to_floor, nf);
+        let popup_scale = overlays.popup_scale;
+        let footer = pixtuoid_scene::footer::FooterInputs::new(&to_scene, footer);
+        let theme = self.chrome.theme;
+        let too_small = crate::tui::renderer::scene_too_small(scene_area);
+        // Each floor shows its own board; only the footer is the destination's.
+        let [from_place, to_place] =
+            [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+                let ctx = self
+                    .chrome
+                    .frame(scene, floor_scene, pack, now, i, nf)
+                    .footer;
+                Place {
+                    gateway: ctx.gateway,
+                    floor: ctx.floor,
+                }
+            });
+        let from_world = self
+            .chrome
+            .slide_world(&from_scene, pack, now, from_floor, nf);
+        let to_world = self.chrome.slide_world(&to_scene, pack, now, to_floor, nf);
+        let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let mut transition_chitchat = std::collections::HashMap::new();
+        let look = Look::Cutaway {
+            scale: fitted.fit.render_scale(),
+        };
+        let mut render = |floor: &mut PerFloor, world, place| {
+            let rendered = pixtuoid_scene::look::render(
+                floor,
+                OfficeStores {
+                    coffee: &mut self.office.coffee,
+                    chitchat: &mut transition_chitchat,
+                    raster: &mut self.office.raster,
+                },
+                look,
+                RenderInputs {
+                    world,
+                    theme,
+                    size: fitted.fit.logical(),
+                    place,
+                    debug_walkable: false,
+                },
+            );
+            rendered.is_some()
+        };
+        let drawn = !too_small
+            && render(&mut *leaving, from_world, from_place)
+            && render(&mut *arriving, to_world, to_place);
+        let (Some(leaving), Some(arriving)) = (
+            drawn.then(|| leaving.raster.pixels()).flatten(),
+            arriving.raster.pixels(),
+        ) else {
+            let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
+            self.chrome.popup.last_scale = popup_scale;
+            // As classic's: a slide nothing shows would otherwise run its course.
+            self.cancel_transition();
+            return drawn;
+        };
+        cutaway.paint_slide(
+            fitted,
+            crate::tui::cutaway::Slide {
+                leaving,
+                arriving,
+                t,
+                going_down,
+            },
+            theme,
+            now,
+        );
+        cutaway.before_flush(now);
+        let mut covered = Vec::new();
+        self.terminal.draw(|f| {
+            let full = f.area();
+            let scene_area = scene_rect(full);
+            paint_footer(f, &footer, full, theme);
+            cutaway.place(f.buffer_mut(), scene_area);
+            paint_overlays(f, &overlays, now, full, theme);
+            covered = cutaway.cover(f.buffer_mut(), scene_area);
+        })?;
+        cutaway.after_flush(&covered, now);
+        self.chrome.popup.last_scale = popup_scale;
+        Ok(())
+    }
+
+    /// [`Self::render`] under the cutaway: the image in place of the
+    /// half-blocks, its badges, wall board and floor indicator painted in it,
+    /// and only the footer, tooltips and modals as terminal text.
+    fn render_cutaway(
+        &mut self,
+        cutaway: &mut crate::tui::cutaway::TileCutaway,
+        fitted: crate::tui::cutaway::Fitted,
+        scene: &SceneState,
+        pack: &Pack,
+        now: SystemTime,
+        nf: usize,
+    ) -> Result<()> {
+        use crate::tui::renderer::{
+            DrawOut, TooltipAt, draw_footer_only_frame, paint_footer, paint_overlays,
+            paint_scene_tooltip, scene_hit, scene_rect,
+        };
+        let scene_area = fitted.scene;
+        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let Frame {
+            world,
+            footer,
+            overlays,
+        } = self
+            .chrome
+            .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+        let popup_scale = overlays.popup_scale;
+        let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
+        let theme = self.chrome.theme;
+        let too_small = crate::tui::renderer::scene_too_small(scene_area);
+        let rendered = (!too_small)
+            .then(|| {
+                pixtuoid_scene::look::render(
+                    &mut self.floors[self.current_floor],
+                    self.office.stores(),
+                    Look::Cutaway {
+                        scale: fitted.fit.render_scale(),
+                    },
+                    RenderInputs {
+                        world,
+                        theme,
+                        size: fitted.fit.logical(),
+                        place: Place {
+                            gateway: footer.context.gateway,
+                            floor: footer.context.floor,
+                        },
+                        debug_walkable: false,
+                    },
+                )
+            })
+            .flatten();
+        let Some(Rendered {
+            pixels,
+            dirty,
+            layout: frame_layout,
+            occupied_waypoints,
+        }) = rendered
+        else {
+            let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
+            self.record_drawn(scene, DrawOut::default(), popup_scale, now);
+            self.rest_floor(now);
+            return drawn;
+        };
+        cutaway.paint(fitted, self.current_floor, pixels, dirty, now);
+        let hovers = self.floors[self.current_floor]
+            .raster
+            .hovers()
+            .cloned()
+            .unwrap_or_default();
+        let geometry = fitted.geometry();
+        let mouse = self.mouse_pos.and_then(|(mx, my)| {
+            let hit = scene_hit(&hovers, &frame_layout, geometry.area_at(mx, my)?)?;
+            Some((mx, my, hit))
+        });
+        cutaway.before_flush(now);
+        let mut covered = Vec::new();
+        self.terminal.draw(|f| {
+            let full = f.area();
+            let scene_area = scene_rect(full);
+            paint_footer(f, &footer, full, theme);
+            cutaway.place(f.buffer_mut(), scene_area);
+            if let Some((mx, my, hit)) = &mouse {
+                let at = TooltipAt {
+                    mx: *mx,
+                    my: *my,
+                    scene_rect: scene_area,
+                };
+                paint_scene_tooltip(f, hit, &world, at, theme);
+            }
+            paint_overlays(f, &overlays, now, full, theme);
+            covered = cutaway.cover(f.buffer_mut(), scene_area);
+        })?;
+        cutaway.after_flush(&covered, now);
+        self.record_drawn(
+            scene,
+            DrawOut {
+                layout: Some(frame_layout),
+                hovers,
+                occupied_waypoints,
+                geometry: Some(geometry),
+            },
+            popup_scale,
+            now,
+        );
+        Ok(())
+    }
+}
+
+/// Test-only access to the rendered ratatui frame, through a `TestBackend`
 /// because only it exposes the post-draw cell buffer.
 #[cfg(test)]
-impl TuiRenderer<ratatui::backend::TestBackend> {
+impl<B> TuiRenderer<B>
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<ratatui::backend::TestBackend>,
+{
     pub fn frame_buffer(&self) -> &ratatui::buffer::Buffer {
-        self.terminal.backend().buffer()
+        self.terminal.backend().borrow().buffer()
     }
 }
 

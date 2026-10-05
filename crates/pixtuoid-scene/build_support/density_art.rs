@@ -1,19 +1,52 @@
-//! Drop the bundled pack's density variants, for a build without the
-//! `density-art` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
-//! both run it, so the manifest a feature-less build embeds is one a test has
-//! loaded.
+//! Drop the bundled pack's density art — its `@Nx` animations, the hairstyles
+//! that dress them and its buildings' `@Nx` variants — for a build without the
+//! `cutaway-assets` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
+//! both run [`bundled_without_density_art`], so the manifest a feature-less
+//! build embeds is one a test has loaded.
 
 use std::collections::BTreeSet;
 
-/// `pack_toml` without its density-variant animations, and the frame files only
-/// those animations drew.
+/// `pack_toml` as a build without `cutaway-assets` embeds it — without its density
+/// art ([`strip_density_art`]), then without its comments — and the files it no
+/// longer draws.
+pub(crate) fn bundled_without_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
+    let (toml, dropped) = strip_density_art(pack_toml);
+    (super::comments::strip_comments(&toml), dropped)
+}
+
+/// `pack_toml` without its density-variant animations, its hairstyles (which
+/// only ever dress density art) and its buildings' density variants, and the
+/// files only those drew.
 ///
-/// Every `@` key in the bundled manifest is a density variant:
-/// `embedded_default_pack_animations_are_all_in_the_registry` fails on any
-/// other, so core's `DENSITY_VARIANT_SEP` alone identifies them here, where its
+/// Every `@` key in the bundled manifest's `[animations]` and `[buildings]` is a
+/// density variant: `bundled_default_pack_animations_are_all_in_the_registry`
+/// fails on any other animation, and core refuses a building base named with
+/// one. So core's `DENSITY_VARIANT_SEP` alone identifies them here, where its
 /// `split_density_variant` is crate-private and core is no build-dependency.
-pub(crate) fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
+fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
     let mut doc: toml_edit::DocumentMut = pack_toml.parse().expect("the bundled pack.toml parses");
+    let mut dropped: BTreeSet<String> = BTreeSet::new();
+    if let Some(styles) = doc.remove("hairstyles") {
+        for (_, style) in styles.as_table_like().into_iter().flat_map(|t| t.iter()) {
+            for (_, layers) in style.as_table_like().into_iter().flat_map(|t| t.iter()) {
+                for (_, file) in layers.as_table_like().into_iter().flat_map(|t| t.iter()) {
+                    dropped.extend(file.as_str().map(str::to_owned));
+                }
+            }
+        }
+    }
+    if let Some(buildings) = doc.get_mut("buildings").and_then(|b| b.as_table_like_mut()) {
+        let variants: Vec<String> = buildings
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .filter(|name| name.contains('@'))
+            .collect();
+        for name in &variants {
+            let sprite = buildings.get(name).and_then(|b| b.get("sprite"));
+            dropped.extend(sprite.and_then(|f| f.as_str()).map(str::to_owned));
+            buildings.remove(name);
+        }
+    }
     let animations = doc["animations"]
         .as_table_like_mut()
         .expect("the bundled pack.toml has an [animations] table");
@@ -32,7 +65,6 @@ pub(crate) fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
             })
             .unwrap_or_default()
     };
-    let mut dropped: BTreeSet<String> = BTreeSet::new();
     for name in &variants {
         dropped.extend(frames_of(animations.get(name)));
         animations.remove(name);
@@ -49,6 +81,33 @@ pub(crate) fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::strip_density_art;
+
+    #[test]
+    fn a_building_keeps_its_base_and_loses_its_density_variants() {
+        let (toml, dropped) = strip_density_art(
+            "[animations.a]\nframes = [\"a.sprite\"]\n\
+             [buildings.tower]\nsprite = \"t.sprite\"\nplanes = [\"near\"]\n\
+             [buildings.\"tower@4x\"]\nsprite = \"t@4x.sprite\"\n",
+        );
+        assert_eq!(dropped.into_iter().collect::<Vec<_>>(), ["t@4x.sprite"]);
+        assert!(
+            toml.contains("[buildings.tower]") && !toml.contains("tower@4x"),
+            "{toml}"
+        );
+    }
+
+    #[test]
+    fn hairstyles_go_with_the_density_art_they_dress() {
+        let (toml, dropped) = strip_density_art(
+            "[animations.a]\nframes = [\"a.sprite\"]\n\
+             [hairstyles.\"mop@2x\"]\nfront = { behind = \"b.sprite\", over = \"o.sprite\" }\n",
+        );
+        assert_eq!(
+            dropped.into_iter().collect::<Vec<_>>(),
+            ["b.sprite", "o.sprite"]
+        );
+        assert!(!toml.contains("hairstyles"), "{toml}");
+    }
 
     #[test]
     fn a_frame_a_kept_animation_draws_survives_its_variant() {

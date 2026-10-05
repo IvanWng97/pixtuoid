@@ -25,7 +25,9 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
-use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
+use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Place, RenderInputs};
 use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
@@ -37,10 +39,12 @@ pub(crate) enum FloatingEvent {
 pub(crate) struct FloatingApp {
     cfg: FloatingConfig,
     theme: &'static Theme,
-    pack: Pack,
+    pack: std::sync::Arc<Pack>,
     config_path: PathBuf,
     /// The configured office pets — one is selected per floor (v1 shows floor 0's).
     pets: Vec<pixtuoid_scene::pet::Pet>,
+    /// How the office moves.
+    motion: pixtuoid_scene::anim::Motion,
     renderer: OfficeRenderer,
     audio_ctl: crate::audio::AudioController,
     /// The pipeline inputs, held until `resumed` can supply the REAL window size
@@ -66,27 +70,28 @@ pub(crate) struct FloatingApp {
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 }
 
+/// How the office looks and moves.
+pub(crate) struct Appearance {
+    pub(crate) theme: &'static Theme,
+    pub(crate) motion: pixtuoid_scene::anim::Motion,
+}
+
 /// Click within this many physical px of the bottom-right corner = resize, else move.
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 impl FloatingApp {
-    #[allow(clippy::too_many_arguments)] // flat construction inputs; bundling adds no clarity
     pub(crate) fn new(
         cfg: FloatingConfig,
-        theme: &'static Theme,
+        Appearance { theme, motion }: Appearance,
         pack: Pack,
         config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,
         boot: super::PipelineBoot,
-        audio_muted: bool,
-        audio_volume: f32,
+        audio: config::AudioConfig,
     ) -> Self {
-        // Built here, AFTER floating::run's fallible boot steps, so a boot
-        // failure means no device thread ever existed and every later exit drops
-        // `app` → the join runs. See `AudioController`.
-        let audio_ctl =
-            crate::audio::AudioController::new(audio_muted, audio_volume, config_path.clone());
-        let mut renderer = OfficeRenderer::new();
+        let audio_ctl = crate::audio::AudioController::new(audio, config_path.clone());
+        let pack = std::sync::Arc::new(pack);
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         renderer.set_audio(audio_ctl.handle().clone());
         Self {
             cfg,
@@ -94,6 +99,7 @@ impl FloatingApp {
             pack,
             config_path,
             pets,
+            motion,
             renderer,
             audio_ctl,
             boot: Some(boot),
@@ -127,8 +133,7 @@ impl FloatingApp {
     }
 
     fn redraw(&mut self) {
-        // Clone the Rc to release the `self.window` borrow before touching `self.surface`.
-        let Some(window) = self.window.clone() else {
+        let Some(window) = self.window.as_ref() else {
             return;
         };
         let size = window.inner_size();
@@ -136,7 +141,7 @@ impl FloatingApp {
         let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
         };
-        // Cloned out so the `self.live` borrow ends before the `&mut self` writes below.
+        // Cloned out: a held `watch::Ref` read-locks the channel, stalling the sender.
         let Some((scene, floor_caps)) = self
             .live
             .as_ref()
@@ -144,37 +149,34 @@ impl FloatingApp {
         else {
             return;
         };
-        // Audio state for the footer's ♩ suffix, resolved BEFORE the surface
-        // borrow below.
         let audio_now = Instant::now();
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
-        // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
-        // Keep the reducer's desk capacity in lockstep with the office actually rendered at
-        // this BUFFER size.
         super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
-        let floor_meta = FloorMeta::ground();
+        let floor_meta = FloorMeta::ground().with_motion(self.motion);
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
-        let office = self.renderer.render(
-            &scene,
-            &self.pack,
-            self.theme,
-            SystemTime::now(),
-            buf_w,
-            buf_h,
-            floor_meta,
-            floor_pet,
-        );
-        let (ow, oh) = (office.width() as usize, office.height() as usize);
-        let opx: Vec<u32> = office
-            .as_slice()
-            .iter()
-            .map(|p| super::offscreen::pack_xrgb(*p))
-            .collect();
-
+        // ONE clock read, so the overlays below annotate the frame actually rendered.
+        let now = SystemTime::now();
+        let office = self.renderer.render(RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &self.pack,
+                now,
+                floor: floor_meta,
+                pets: PetInputs {
+                    pet: floor_pet,
+                    // Click-to-pet needs window pointer hit-testing (deferred).
+                    petting: None,
+                },
+            },
+            theme: self.theme,
+            size: Size { w: buf_w, h: buf_h },
+            place: Place::default(),
+            debug_walkable: false,
+        });
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -184,35 +186,19 @@ impl FloatingApp {
         let Ok(mut sb) = surface.buffer_mut() else {
             return;
         };
-        // Nearest-neighbor upscale. Source indices are clamped so the
-        // integer-division remainder edge repeats the last office pixel.
         let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
-        if ow == 0 || oh == 0 || sb.len() < win_w * win_h {
-            return; // nothing rendered / a transient resize race — skip this frame
-        }
-        for wy in 0..win_h {
-            let src_row = (wy / scale).min(oh - 1) * ow;
-            let dst_row = wy * win_w;
-            for wx in 0..win_w {
-                sb[dst_row + wx] = opx[src_row + (wx / scale).min(ow - 1)];
-            }
-        }
-        // Name badges + the neon wall board, drawn POST-upscale at native surface
-        // res so the text stays crisply anti-aliased.
-        let labels = self.renderer.labels(&scene, SystemTime::now());
-        super::offscreen::paint_labels_into_surface(
-            &mut sb,
-            win_w,
-            win_h,
-            &labels,
-            scale as i32,
-            self.theme,
-        );
-        let board = self.renderer.board(&scene, SystemTime::now());
+        let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
+            return; // nothing rendered — skip this frame
+        };
+        let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
+            return;
+        };
+        surf.fill_upscaled(office, scale);
+        let labels = self.renderer.labels(&scene);
+        super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
+        let board = self.renderer.board(&scene, floor_meta.motion, now);
         super::offscreen::paint_wall_board_into_surface(
-            &mut sb,
-            win_w,
-            win_h,
+            &mut surf,
             &board,
             scale as i32,
             self.theme,
@@ -221,13 +207,12 @@ impl FloatingApp {
         let footer = self
             .renderer
             .footer(&scene, budget, audio_audible, volume_flash);
-        super::offscreen::paint_footer_into_surface(&mut sb, win_w, win_h, &footer, self.theme);
+        super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
         window.pre_present_notify();
         let _ = sb.present();
     }
 }
 
-/// Does the saved window rect `(x, y, w, h)` overlap ANY currently-connected monitor?
 fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h: u32) -> bool {
     super::geometry::window_visible_on_monitors(
         (x, y, w, h),
@@ -256,14 +241,11 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 config::FLOATING_MIN_W as f64,
                 config::FLOATING_MIN_H as f64,
             ));
-        // Restore the saved position ONLY if it still lands on a connected monitor;
-        // else let the OS place it. A window last closed on a now-disconnected
-        // monitor would otherwise restore fully off-screen and be unrecoverable
-        // (frameless + no taskbar + always-on-top → no way to drag it back).
-        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
-            if position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height) {
-                attrs = attrs.with_position(PhysicalPosition::new(x, y));
-            }
+        // A spot on a since-disconnected monitor would open the frameless window unreachably.
+        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
+            && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
+        {
+            attrs = attrs.with_position(PhysicalPosition::new(x, y));
         }
         #[cfg(target_os = "macos")]
         {
@@ -408,10 +390,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).
         let (paint, deadline) = self.clock.poll(Instant::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        if paint {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+        if paint && let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 }

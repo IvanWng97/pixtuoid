@@ -10,12 +10,12 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, FALSE, HWND, INVALID_HANDLE_VALUE, LPARAM, TRUE,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-    PeekMessageW, SetForegroundWindow, ShowWindow, MSG, PM_NOREMOVE, SW_RESTORE, WM_USER,
+    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, MSG,
+    PM_NOREMOVE, PeekMessageW, SW_RESTORE, SetForegroundWindow, ShowWindow, WM_USER,
 };
 
 use super::ProcessTable;
@@ -69,6 +69,7 @@ fn top_level_window_of(pid: i32) -> Option<HWND> {
         let mut owner = 0u32;
         // SAFETY: hwnd comes from EnumWindows; owner is our own out-param.
         unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+        // SAFETY: hwnd comes from EnumWindows, live for the callback.
         if owner == search.pid && unsafe { IsWindowVisible(hwnd) } != 0 {
             search.hwnd = Some(hwnd);
             return 0; // stop enumeration
@@ -94,6 +95,7 @@ pub(crate) fn activate_os(pid: i32) -> bool {
     // A minimized window can become the foreground window and stay an icon.
     // SAFETY: hwnd is a live handle from the enumeration above.
     if unsafe { IsIconic(hwnd) } != 0 {
+        // SAFETY: the same live handle.
         unsafe { ShowWindow(hwnd, SW_RESTORE) };
     }
     if raise(hwnd) {

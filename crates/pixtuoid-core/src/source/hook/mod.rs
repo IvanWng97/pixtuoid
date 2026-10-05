@@ -4,17 +4,17 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tracing::{debug, warn};
 
+use crate::AgentId;
 use crate::source::decoder::{checked_pid, decode_hook_payload};
 use crate::source::registry::SourceDescriptor;
 use crate::source::{AgentEvent, TaggedSender, Transport};
-use crate::AgentId;
 
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
 use unix as imp;
 #[cfg(unix)]
-pub(crate) use unix::{owned_socket_dir, SOCKET_FILE_NAME};
+pub(crate) use unix::{SOCKET_FILE_NAME, owned_socket_dir};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
@@ -57,6 +57,7 @@ impl std::error::Error for SocketBusy {}
 /// pipe) every CLI's hook shim connects to. Frames + decodes each payload onto
 /// the tagged `AgentEvent` channel; optionally attaches a pid-exit watch and the
 /// daemon presence side-channel.
+#[derive(Debug)]
 pub struct HookSocketListener {
     inner: imp::Listener,
     path: PathBuf,
@@ -106,8 +107,8 @@ impl HookSocketListener {
     }
 }
 
-/// Per-connection byte ceiling: 2× the shim's ~1MiB stdin cap, so any stamped
-/// line fits with headroom. `lines()` buffers until a newline, so without this
+/// Per-connection byte ceiling: twice the shim's stamped-line quota (`STDIN_CAP` +
+/// `STAMP_HEADROOM`). `lines()` buffers until a newline, so without this
 /// an adversarial client could grow the buffer unboundedly for the whole
 /// `CONN_TIMEOUT` window × [`MAX_CONCURRENT_CONNS`] slots.
 const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;
@@ -208,7 +209,7 @@ fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool>
 /// batch — the per-source decoders never see the envelope key, so this single
 /// patch point IS the whole focus-jump wiring.
 ///
-/// The gate is the registry's [`FocusChannel`] capability. `TranscriptProbe`
+/// The gate is the registry's [`FocusChannel`](crate::source::registry::FocusChannel) capability. `TranscriptProbe`
 /// sources are skipped: the
 /// shim's resolved pid is the nearest non-shell ancestor, not necessarily the CLI,
 /// and a stamped stale pid would shadow the probe's recycle guard in
@@ -262,26 +263,25 @@ pub(crate) async fn handle_conn(
                     presence_tx.as_ref(),
                     v.get("_pixtuoid_source")
                         .and_then(serde_json::Value::as_str),
-                ) {
-                    if let Some(decode) = crate::source::registry::presence_decoder_for(src) {
-                        match decode(&v) {
-                            Ok(decoded) => {
-                                let key = crate::source::daemon::DaemonInstanceKey::new(
-                                    src,
-                                    decoded.instance,
-                                );
-                                for u in decoded.updates {
-                                    let _ = ptx.send(crate::source::daemon::PresenceMsg {
-                                        key: key.clone(),
-                                        delta: u,
-                                    });
-                                }
+                ) && let Some(decode) = crate::source::registry::presence_decoder_for(src)
+                {
+                    match decode(&v) {
+                        Ok(decoded) => {
+                            let key = crate::source::daemon::DaemonInstanceKey::new(
+                                src,
+                                decoded.instance,
+                            );
+                            for u in decoded.updates {
+                                let _ = ptx.send(crate::source::daemon::PresenceMsg {
+                                    key: key.clone(),
+                                    delta: u,
+                                });
                             }
-                            Err(e) => warn!(error = %e, "daemon presence decode error"),
                         }
-                        // A daemon produces no AgentEvents — never the agent arms.
-                        continue;
+                        Err(e) => warn!(error = %e, "daemon presence decode error"),
                     }
+                    // A daemon produces no AgentEvents — never the agent arms.
+                    continue;
                 }
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
                 // decode. Deliberately NOT gated on `pid_watch`: the exit-watch
@@ -329,8 +329,8 @@ pub(crate) async fn handle_conn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::AgentEvent;
     use crate::AgentId;
+    use crate::source::AgentEvent;
     use tokio::io::AsyncWriteExt;
 
     #[test]
@@ -804,7 +804,7 @@ mod tests {
             loop {
                 match rx.recv().await {
                     Some((transport, AgentEvent::SessionEnd { agent_id, as_child })) => {
-                        return Some((transport, agent_id, as_child))
+                        return Some((transport, agent_id, as_child));
                     }
                     Some(_) => continue,
                     None => return None,

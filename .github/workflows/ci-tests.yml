@@ -2,69 +2,46 @@ name: ci-tests
 
 on:
   workflow_call:
+    inputs:
+      full:
+        description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
+        type: boolean
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  windows-test:
-    name: windows-test
-    # Track windows-latest deliberately: this gate catches hosted-image changes.
-    runs-on: windows-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - run: just test
-        env:
-          NEXTEST_PROFILE: ci
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: target/nextest/ci/junit.xml
-          flag: windows
-          report_type: test_results
-
-  macos-test:
-    name: macos-test
-    # macos-14 exercises the Apple Silicon build; macOS diverges on BSD CLI,
-    # launchd, and config paths.
-    runs-on: macos-14
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - run: just test
-        env:
-          NEXTEST_PROFILE: ci
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: target/nextest/ci/junit.xml
-          flag: macos
-          report_type: test_results
-
-  coverage:
-    name: coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+  # Unit tests on every platform run on every PR push
+  # (docs.mergify.com/merge-queue/two-step: the preliminary step runs
+  # "linters, formatters, unit tests, basic compile checks").
+  test:
+    name: ${{ matrix.platform }}-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            flag: unit
+            timeout: 25
+          # Track windows-latest deliberately: this gate catches hosted-image
+          # changes. Its coverage sees the Windows pipes and atomic-write
+          # retries the Linux entry compiles out.
+          - platform: windows
+            runner: windows-latest
+            flag: windows
+            timeout: 25
+          # macos-14 exercises the Apple Silicon build; macOS diverges on BSD
+          # CLI, launchd, and config paths, which the Linux entry compiles out.
+          - platform: macos
+            runner: macos-14
+            flag: macos
+            timeout: 20
+    runs-on: ${{ matrix.runner }}
+    # nextest owns per-test hang limits.
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
       id-token: write
@@ -76,85 +53,25 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: llvm-tools-preview
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      - name: Generate coverage + JUnit XML (single test run)
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
         run: just coverage
       - name: Upload coverage to Codecov
         uses: ./.github/actions/upload-codecov
         with:
           file: lcov.info
-          flag: unit
+          flag: ${{ matrix.flag }}
           report_type: coverage
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: ./.github/actions/upload-codecov
         with:
           file: target/nextest/ci/junit.xml
-          flag: unit
+          flag: ${{ matrix.flag }}
           report_type: test_results
-
-  # Platform coverage compiles code the Linux job cannot see: Windows pipes and
-  # atomic-write retries, plus macOS paths and launchd.
-  coverage-windows:
-    name: coverage-windows
-    runs-on: windows-latest
-    # nextest owns per-test hang limits.
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          components: llvm-tools-preview
-      # rust-cache separates this from windows-test by job ID and RUSTFLAGS.
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        run: just coverage
-      # lcov only: windows-test already uploads this platform's JUnit report.
-      - name: Upload coverage to Codecov
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: lcov.info
-          flag: windows
-          report_type: coverage
-
-  coverage-macos:
-    name: coverage-macos
-    runs-on: macos-14
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          components: llvm-tools-preview
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        run: just coverage
-      # lcov only: macos-test already uploads this platform's JUnit report.
-      - name: Upload coverage to Codecov
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: lcov.info
-          flag: macos
-          report_type: coverage
 
   snapshots:
     name: snapshot hygiene
@@ -177,6 +94,7 @@ jobs:
 
   smoke:
     name: smoke
+    if: ${{ inputs.full }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -197,26 +115,9 @@ jobs:
           out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
           test -z "$out"
           echo "hook shim exited 0 silently (expected no-op with no socket)"
-      # gen-check needs Node, Pillow, and ffmpeg, but not gifsicle in check mode.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Install ffmpeg
-        # setup-alsa's mirror-retry envelope, for a package that composite
-        # doesn't own; do not pipe the version command through head under pipefail.
-        run: |
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          for attempt in 1 2 3; do
-            if sudo apt-get update "${apt_opts[@]}" \
-              && sudo apt-get install -y "${apt_opts[@]}" ffmpeg; then
-              ffmpeg -version
-              exit 0
-            fi
-            echo "ffmpeg install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
-            sleep "$((attempt * 15))"
-          done
-          echo "ffmpeg install failed after 3 attempts" >&2
-          exit 1
       - name: Cache pip downloads
         uses: actions/cache@v6
         with:
@@ -227,8 +128,11 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Artifact-drift gate (everything `just gen` writes + the wasm pair integrity)
-        run: just gen-check
+      # Evidence, not a gate: a look-changing PR doesn't commit media, and the
+      # generated-art lens reads the overlays below.
+      - name: README media drift (evidence)
+        continue-on-error: true
+        run: just gen-media-check
       - name: Upload gen-check diff overlays
         if: always()
         uses: actions/upload-artifact@v7
@@ -246,7 +150,7 @@ jobs:
     # single protected ci-gate silently lose coverage.
     if: ${{ always() }}
     needs:
-      [windows-test, macos-test, coverage, coverage-windows, coverage-macos, snapshots, smoke]
+      [test, snapshots, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -257,3 +161,4 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "Required test job failed"
+          allow-skipped: ${{ !inputs.full }}

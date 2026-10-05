@@ -16,7 +16,7 @@ mod drift_surface;
 pub mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;
-/// The one graphics item that IS public API: `Cmd::Doctor` carries it, and
+/// The one graphics item that IS public API: `Cmd` and `RunConfig` carry it, and
 /// `main.rs` is a separate crate. Everything else in the module — the plan, the
 /// probe, the scale rule — is `pub(crate)`, because a `pub` item on a published
 /// crate is the one thing a follow-up cannot quietly undo.
@@ -75,6 +75,7 @@ pub fn display_path(p: &std::path::Path) -> String {
 /// completes its side effects and exits with its own verdict, where `println!`
 /// would panic. Any other write error still fails.
 #[doc(hidden)]
+#[derive(Debug)]
 pub struct CliOut<W> {
     inner: W,
     closed: bool,
@@ -182,12 +183,6 @@ fn is_bidi_control(c: char) -> bool {
             | '\u{2066}'..='\u{2069}' // LRI, RLI, FSI, PDI
     )
 }
-
-/// Test-only mutex serializing tests that mutate process-global environment
-/// variables. Unit tests share one binary, so two env-mutating tests race under
-/// plain `cargo test` (nextest isolates per-process; the `justfile` falls back).
-#[cfg(test)]
-pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only `tracing` capture for asserting on what reaches the log sink.
 #[cfg(test)]
@@ -346,16 +341,15 @@ mod tests {
     }
 
     /// Round-trip one probe name through `pixtuoid-core`'s copy of the predicate,
-    /// via `decode_hook_payload`'s unsupported-event `bail!`.
+    /// via `decode_hook_payload`'s unsupported-event error.
     fn core_display_safe(name: &str) -> String {
-        const PREFIX: &str = "unsupported hook_event_name: ";
         let v = serde_json::json!({"hook_event_name": name, "session_id": "s"});
         let e = pixtuoid_core::source::decoder::decode_hook_payload(v)
-            .expect_err("an unregistered hook_event_name must bail");
-        let msg = e.to_string();
-        msg.strip_prefix(PREFIX)
-            .unwrap_or_else(|| panic!("core's bail wording moved; re-point this pin: {msg:?}"))
-            .to_string()
+            .expect_err("an unregistered hook_event_name must be refused");
+        let pixtuoid_core::source::decoder::DecodeError::Unsupported { event, .. } = e else {
+            panic!("an unregistered hook_event_name must be Unsupported, got {e:?}");
+        };
+        event
     }
 
     #[test]

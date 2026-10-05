@@ -13,9 +13,9 @@
 //! Run: cargo run --release --example graphics_spike
 
 use image::{DynamicImage, Rgb, RgbImage};
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::{Rect, Size};
-use ratatui::Terminal;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::{Image, Resize};
 
@@ -44,7 +44,10 @@ fn frame_bytes(term: &mut Terminal<TestBackend>, draw: impl FnOnce(&mut ratatui:
 /// count below measures the wrong image. `halfblocks()` sets a half-block
 /// cell, which is not what a kitty terminal has.
 fn main() {
-    #[allow(deprecated)]
+    #[expect(
+        deprecated,
+        reason = "a fixed font size is the point: the spike measures bytes at a known cell"
+    )]
     let mut picker = Picker::from_fontsize((8, 16).into());
     picker.set_protocol_type(ProtocolType::Kitty);
     println!(

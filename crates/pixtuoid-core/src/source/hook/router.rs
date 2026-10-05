@@ -33,14 +33,13 @@ pub(crate) async fn tee_child_end_unclaims(
     unclaims: ChildEndUnclaims,
 ) {
     while let Some((transport, ev)) = rx.recv().await {
-        if transport == Transport::Hook {
-            if let AgentEvent::SessionEnd {
+        if transport == Transport::Hook
+            && let AgentEvent::SessionEnd {
                 agent_id,
                 as_child: true,
             } = &ev
-            {
-                unclaims.push(*agent_id);
-            }
+        {
+            unclaims.push(*agent_id);
         }
         if tx.send((transport, ev)).await.is_err() {
             return;
@@ -51,6 +50,7 @@ pub(crate) async fn tee_child_end_unclaims(
 /// The shared hook-socket owner: binds the ONE socket, runs the per-connection
 /// decode loop, interposes the #246 tee, and feeds the daemon-presence side
 /// channel.
+#[derive(Debug)]
 pub struct HookRouter {
     socket_path: PathBuf,
     /// The #246 child-end un-claim PRODUCER handle; the runtime shares ONE with

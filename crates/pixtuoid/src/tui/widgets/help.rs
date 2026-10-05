@@ -2,7 +2,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{paint_panel, to_color, Overflow};
+use super::{Overflow, Panel, to_color};
 use pixtuoid_scene::theme::Theme;
 
 const SHORTCUTS: &[(&str, &str)] = &[
@@ -70,25 +70,22 @@ pub(crate) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme
             ),
         ]));
     }
-    paint_panel(
-        f,
-        theme,
-        Some("? Keyboard"),
-        bounds,
-        content_width(),
-        1.0,
-        vec![],
-        lines,
-        vec![],
-        Overflow::CueOnly,
-    );
+    Panel {
+        title: Some("? Keyboard"),
+        content_w: content_width(),
+        above: vec![],
+        list: lines,
+        below: vec![],
+        overflow: Overflow::CueOnly,
+    }
+    .paint(f, bounds, theme);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn render_at(w: u16, h: u16) {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -133,7 +130,8 @@ mod tests {
 
     #[test]
     fn help_overlay_renders_without_panic_across_sizes() {
-        // `paint_panel` guards away below 4×3, so the last two sizes paint nothing.
+        // Once the footer row is reserved, the last two sizes fall under
+        // `PanelGeometry`'s minimum envelope and paint nothing.
         for (w, h) in [(200, 60), (40, 20), (24, 30), (10, 4), (4, 3), (2, 2)] {
             render_at(w, h);
         }

@@ -2,18 +2,18 @@ use std::io::Write;
 use std::time::Instant;
 
 use super::health::FailureLatch;
-use super::liveness::{emit_session_exit, revouch_gated_files, ProbeLadder, ProbeSnapshot};
+use super::liveness::{ProbeLadder, ProbeSnapshot, emit_session_exit, revouch_gated_files};
 use super::unclaim::drain_child_end_unclaims;
 use super::walk::{
-    detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root, walk_jsonl,
-    TASK_SCAN_BYTES,
+    TASK_SCAN_BYTES, detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root,
+    walk_jsonl,
 };
 use super::*;
+use crate::AgentId;
 use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
 use crate::source::decoder::{accept_all_paths, default_id_from_path};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, Transport};
-use crate::AgentId;
 
 fn snap(pairs: &[(&str, i32)]) -> ProbeSnapshot {
     ProbeSnapshot {
@@ -182,10 +182,12 @@ fn fold_returns_each_new_pid_once_for_the_exit_watch() {
         .newly_watched;
     watched.sort_unstable();
     assert_eq!(watched, vec![1, 2]);
-    assert!(ladder
-        .fold(&snap(&[("a", 1), ("c", 2)]), t)
-        .newly_watched
-        .is_empty());
+    assert!(
+        ladder
+            .fold(&snap(&[("a", 1), ("c", 2)]), t)
+            .newly_watched
+            .is_empty()
+    );
 }
 
 #[test]
@@ -339,10 +341,18 @@ fn cc_head_scan_ignores_codex_shaped_payload_cwd() {
     );
 }
 
-fn t_decode(_t: &str, _s: &str, _v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+fn t_decode(
+    _t: &str,
+    _s: &str,
+    _v: serde_json::Value,
+) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     Ok(vec![])
 }
-fn t_decode_lifecycle(t: &str, s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+fn t_decode_lifecycle(
+    t: &str,
+    s: &str,
+    v: serde_json::Value,
+) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
     if v.get("subtype").and_then(|x| x.as_str()) == Some("session_end") {
         return Ok(vec![AgentEvent::SessionEnd {
             agent_id: AgentId::from_parts(s, t),
@@ -1143,9 +1153,11 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::OpenOptions::new()
         .append(true)
@@ -1324,9 +1336,11 @@ async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end()
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::OpenOptions::new()
         .append(true)
@@ -1408,9 +1422,11 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     let file_len = std::fs::metadata(&path).unwrap().len();
 
     let events = walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
     let unclaims = ChildEndUnclaims::new();
     unclaims.push(agent_id);
 
@@ -2631,9 +2647,11 @@ async fn session_exit_parks_truncated_transcript_so_a_straggler_walk_cannot_resu
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
     let new_len = std::fs::metadata(&path).unwrap().len();
@@ -2715,9 +2733,11 @@ async fn child_end_unclaim_parks_truncated_transcript_before_release() {
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
     let new_len = std::fs::metadata(&path).unwrap().len();
@@ -2817,8 +2837,10 @@ async fn park_if_truncated_below_cursor_lands_exactly_at_new_eof() {
 
 #[tokio::test]
 async fn scan_root_on_unreadable_root_latches_failure_and_emits_nothing() {
-    let bad: PathBuf = std::env::temp_dir().join(format!("pixtuoid-no-such-{}", uuid_like()));
-    assert!(!bad.exists(), "fixture: the bad root must not exist");
+    // A file where the root should be: present, but not listable.
+    let dir = tempfile::tempdir().unwrap();
+    let bad = dir.path().join("projects");
+    std::fs::write(&bad, b"").unwrap();
     let cursors = Arc::new(Mutex::new(HashMap::new()));
     let seen = Arc::new(Mutex::new(HashMap::new()));
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
@@ -2844,6 +2866,38 @@ async fn scan_root_on_unreadable_root_latches_failure_and_emits_nothing() {
     assert!(
         !health.on_failure(),
         "scan_root's Err arm must have already latched the failure"
+    );
+}
+
+#[tokio::test]
+async fn scan_root_on_absent_root_is_healthy_and_emits_nothing() {
+    let bad: PathBuf = std::env::temp_dir().join(format!("pixtuoid-no-such-{}", uuid_like()));
+    assert!(!bad.exists(), "fixture: the bad root must not exist");
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+
+    let mut health = FailureLatch::default();
+    scan_root(&bad, t_decoders(), &ctx, &mut health).await;
+    drop(tx);
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "an absent root discovers no sessions, got {events:?}"
+    );
+    assert!(
+        health.on_failure(),
+        "an absent root (an uninstalled CLI's) must not latch a failure"
     );
 }
 
@@ -3002,9 +3056,15 @@ async fn walk_jsonl_resets_cursor_to_zero_when_known_file_truncated_below_cursor
 
 #[tokio::test]
 async fn walk_jsonl_skips_a_line_whose_decoder_errors_and_advances_cursor() {
-    fn err_decode(_t: &str, _s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+    fn err_decode(
+        _t: &str,
+        _s: &str,
+        v: serde_json::Value,
+    ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
         if v.get("boom").is_some() {
-            anyhow::bail!("boom");
+            return Err(crate::source::decoder::DecodeError::unsupported(
+                "fixture", "boom",
+            ));
         }
         Ok(vec![])
     }
@@ -3078,9 +3138,15 @@ async fn task_scan_skips_empty_and_non_utf8_lines_and_still_seeds_a_dispatch() {
 
 #[tokio::test]
 async fn task_scan_skips_a_decoder_error_line_and_still_seeds_a_later_dispatch() {
-    fn deco(t: &str, s: &str, v: serde_json::Value) -> Result<Vec<AgentEvent>> {
+    fn deco(
+        t: &str,
+        s: &str,
+        v: serde_json::Value,
+    ) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
         if v.get("boom").is_some() {
-            anyhow::bail!("x");
+            return Err(crate::source::decoder::DecodeError::unsupported(
+                "fixture", "x",
+            ));
         }
         crate::source::claude_code::decode_cc_line(t, s, v)
     }

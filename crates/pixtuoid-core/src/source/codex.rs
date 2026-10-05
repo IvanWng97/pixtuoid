@@ -8,17 +8,17 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::{Map, Value};
 
-use crate::source::decoder::{ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS};
-use crate::source::AgentEvent;
 use crate::AgentId;
+use crate::source::AgentEvent;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize, make_tool_detail};
 
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{live_codex_rollout_ids, CodexSource};
+pub use native::{CodexSource, live_codex_rollout_ids};
 
 /// The Codex CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codex";
@@ -53,7 +53,6 @@ fn is_uuid(s: &str) -> bool {
 /// falls through (`Ok(None)`) to them. The parent link carried here is the
 /// ONLY one a flat Codex rollout gets.
 pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
-    use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
         return Ok(None); // shared path reports the malformed payload
     };
@@ -70,7 +69,7 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
             .get("session_id")
             .and_then(|s| s.as_str())
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| anyhow!("missing/empty session_id"))?
+            .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id"))?
             .to_string();
         let child = obj
             .get("agent_id")
@@ -87,7 +86,8 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
         // tree (cascade / liveness / readiness).
         "SubagentStart" => {
             let (session_id, child) = guards(obj)?;
-            let child = child.ok_or_else(|| anyhow!("SubagentStart missing/empty agent_id"))?;
+            let child = child
+                .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "SubagentStart", "agent_id"))?;
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             Ok(Some(vec![AgentEvent::SessionStart {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
@@ -102,7 +102,8 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
         // leaves a harmless no-op plus that same fallback.
         "SubagentStop" => {
             let (_session_id, child) = guards(obj)?;
-            let child = child.ok_or_else(|| anyhow!("SubagentStop missing/empty agent_id"))?;
+            let child = child
+                .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "SubagentStop", "agent_id"))?;
             Ok(Some(vec![AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
                 as_child: true,
@@ -480,9 +481,11 @@ mod tests {
         let out = ev(json!({"type":"response_item","payload":{
             "type":"custom_tool_call","call_id":"call_x","name":"exec","input":"ls"}}));
         match out.as_slice() {
-            [AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(d), ..
+                },
+            ] => {
                 assert!(
                     format!("{d:?}").contains("exec"),
                     "tool name must reach the detail: {d:?}"
@@ -714,10 +717,12 @@ mod tests {
             "payload": { "type": "function_call", "arguments": r#"{"cmd":"ls"}"# }
         }));
         match out.as_slice() {
-            [AgentEvent::ActivityStart {
-                detail: Some(ToolDetail::Generic { display }),
-                ..
-            }] => assert_eq!(display, "tool"),
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                },
+            ] => assert_eq!(display, "tool"),
             other => panic!("expected one Generic-detail ActivityStart, got {other:?}"),
         }
     }

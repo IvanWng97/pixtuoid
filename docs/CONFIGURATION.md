@@ -30,6 +30,8 @@ kind = "dog"        # name omitted → "Office Dog"
 | `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
 | `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
 | `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. Without it, a pack in `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` is used when present, and the bundled one if that fails to load. See [Custom sprite packs](#custom-sprite-packs). |
+| `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. Terminal graphics need a Unix terminal; on Windows `run` and `doctor` stay classic. `pixtuoid doctor` shows what your terminal supports. |
+| `motion` | `"auto"` | How much of the office's ambient life moves — flickers, twinkles, idle wandering, lightning. `full` moves all of it; `calm` plays it at a quarter of the pace, with a quarter of the repaints; `still` holds it still and flashes no lightning, for reduced motion. Agents still walk where they're going. `auto` is `full`, except `calm` over SIXEL or iTerm2 graphics, inside tmux or over ssh; the floating window's `auto` is `full`. An unknown value is ignored with a warning. |
 | `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
 
 ## System-managed (don't edit — pixtuoid writes these for you)
@@ -39,7 +41,7 @@ kind = "dog"        # name omitted → "Office Dog"
 | `last-seen-version` | Tracks the last version whose upgrade popup you've seen, so the popup only fires once per upgrade. Pixtuoid rewrites it when the popup fires, on first launch, or to repair an unparseable value — not on every launch. |
 | `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Sources panel** (`s`) or via the scriptable CLI (`pixtuoid connect`/`disconnect`/`sources set`/`setup --yes`). When a source has no entry it is simply not connected (since 0.12.0; on a first run — no `[sources]` yet — the onboarding wizard offers the detected CLIs to connect). A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
 | `[floating]` | Geometry of the `pixtuoid floating` desktop window (`width`/`height`/`x`/`y`), rewritten when the window closes. Sizes below 240×160 clamp up on load; `x`/`y` are dropped when the OS can't report the position (the next launch is OS-placed). A user-set `opacity` is accepted (clamped 0.2–1.0) and preserved across the rewrite, but isn't applied yet. |
-| `[audio]` | Ambient office sound — **starts muted** (`muted = true` is the default; a terminal app never speaks uninvited). Press `m` — in the TUI or the floating window — to turn it on; the toggle persists here, so the office boots exactly as you left it, and the sound system only spins up on the first unmute (muted costs nothing). A ♩ in the TUI footer means you'd hear sound right now. `volume` (0.0–1.0, clamped, default 1.0) scales everything on a perceptual curve — low percents get genuinely quiet, and the whole bus sits under your real work audio by design; `+`/`-` nudge it live (±0.05, persisted, a `♩ N%` readout flashes in the footer — the floating window flashes the same readout in its bottom-right corner; `+` from muted also unmutes). Unmuted: a lofi office soundscape — after dark (the same sundown the office lights follow) or in rain it crossfades to a slower night take — mixed live from how busy **the floor you're viewing** is (a warm band layers up with active agents; typing density tracks them; other floors are silent until you ride to them), gentle rain when the office weather rains (weather is global — it's outside the windows), plus one-shots — a door chime on walk-ins and printer/vending moments. Every sound is synthesized at startup (no audio files). Prebuilt **Linux** binaries ship without audio (ALSA can't link into the static/cross builds); building from source on Linux needs `pkg-config` and the ALSA headers (`pkg-config`, `libasound2-dev`) for the default build, or `--no-default-features --features graphics` for one without audio. |
+| `[audio]` | Ambient office sound — **starts muted** (`muted = true` is the default; a terminal app never speaks uninvited). Press `m` — in the TUI or the floating window — to turn it on; the toggle persists here, so the office boots exactly as you left it, and the sound system only spins up on the first unmute (muted costs nothing). A ♩ in the TUI footer means you'd hear sound right now. `volume` (0.0–1.0, clamped, default 1.0) scales everything on a perceptual curve — low percents get genuinely quiet, and the whole bus sits under your real work audio by design; `+`/`-` nudge it live (±0.05, persisted, a `♩ N%` readout flashes in the footer — the floating window flashes the same readout in its bottom-right corner; `+` from muted also unmutes). Unmuted: a lofi office soundscape — after dark (the same sundown the office lights follow) or in rain it crossfades to a slower night take — mixed live from how busy **the floor you're viewing** is (a warm band layers up with active agents; typing density tracks them; other floors are silent until you ride to them), gentle rain when the office weather rains (weather is global — it's outside the windows), plus one-shots — a door chime on walk-ins and printer/vending moments. Every sound is synthesized at startup (no audio files). Prebuilt **Linux** binaries ship without audio (ALSA can't link into the static/cross builds); building from source on Linux needs `pkg-config` and the ALSA headers (`pkg-config`, `libasound2-dev`) for the default build, or `--no-default-features --features portable` for one without audio. |
 
 ## Themes
 
@@ -74,12 +76,58 @@ A pack can also redraw an animation on a denser grid, registered as
 `<name>@<N>x` (`desk@4x` is `desk` drawn on a 4x grid). Each frame is exactly
 `N` times the size of the matching base frame, and the frame counts match;
 `validate-pack` reports a variant that breaks either rule, and it is never
-drawn. Every renderer pixtuoid ships today — the terminal office, the
-`floating` window and the site's live office — draws the base art. Variants
-are for the pixel-graphics cutaway, not yet wired to `run`: it takes the
+drawn. The classic renderers — the half-block terminal office, the
+`floating` window and the site's live office — draw the base art. Variants
+are for the pixel-graphics cutaway, which `run --graphics` paints over kitty's
+graphics protocol, SIXEL or iTerm2's inline images: it takes the
 densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
+
+A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
+mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
+
+A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
+`stride = <pixels>`: how far, on the base grid, the walker travels in one full
+cycle of its frames. Its frames, and its `@Nx` variants', then step by the
+ground covered, not by `frame_ms`. A walk without one steps on its `frame_ms`,
+and `validate-pack` warns that its feet slide.
+
+A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
+its `@frame` block, at column `x` and row `y` from the frame's top-left. A
+frame names each mark once. `head.<view>` is its head, with `view` one of
+`front`, `back`, `side` or `crown`; a frame has at most one.
+
+A pack can dress its variant characters in hairstyles. A
+`[hairstyles."<name>@<N>x"]` table gives any of the views a `behind` layer, drawn
+under the body, and an `over` layer, drawn on top. Each layer is a one-frame
+sprite marking its own head in that view, and it is laid mark on mark on the
+frame's. Every agent wears one of the pack's styles, picked by name from its id,
+so a pack ships the same styles at every density it dresses. The layers take
+the agent's recolor as the body does. A frame whose view its style leaves out is
+drawn bare, as is a variant frame with no head mark, and a layer reaching past
+the frame's sides is cut off: `validate-pack` warns of each, and fails a style
+at a density the pack draws no character at.
+
+`[characters] outline = "<key>"` draws one line round every marked variant
+frame, bare or dressed: a pack that sets it draws its bodies and layers
+unoutlined, so no line runs between hair and face. A dressed frame may rise
+above its body's box, by the hair and the line over it. Base art is never
+dressed or outlined, and a custom pack never wears the default pack's styles.
+
+A pack can also ship the city seen through the office's windows. `[city]` names
+the palette key of each of its seven materials — `facade`, `shade`, `roof`,
+`glass`, `mullion`, `detail` and `sign` — and a building is drawn in those keys
+alone, since its colours come from its depth and the sky rather than the pack.
+`[buildings.<name>]` is one building: a one-frame `sprite` and the `planes`
+(`"mid"`, `"near"`) it may stand in. `[buildings."<name>@<N>x"]` redraws its
+sprite at exactly `N` times the size. A building that breaks these rules fails
+the pack's load. Each connected run of `glass` is one window, and more of them
+burn as night falls. How tall the city stands is a share of the window, so a
+short window shows the tops of the towers and a tall one shows them whole. Every window
+looks out on one city, the pack's buildings standing in front of plain blocks
+on the horizon. A pack with no `[buildings]` of its own takes the bundled city
+whole, materials and all.
 
 ## Logging & troubleshooting
 

@@ -2,7 +2,7 @@
 //! furniture and waypoint kind in the office, plus THE table giving each its
 //! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
-use super::{Anchor, Point, Size, DESK_FOOT_H, DESK_H, DESK_W};
+use super::{DESK_FOOT_H, DESK_H, DESK_W, Pivot, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -185,26 +185,16 @@ impl FurnitureDef {
     /// visual box + ground aligns — so the runtime-footprint path (a waypoint's
     /// `approach::obstacle_footprint`) shares the def's alignment with the table
     /// path and no call site re-threads `visual`/`ground_x`/`ground_y`.
-    pub(super) fn ground_rect_of(&self, anchor: Anchor, pos: Point, fp: Size) -> (Point, Size) {
-        super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
-    }
-
-    /// The VISUAL rect — `ground_rect`'s twin on the other geometry axis. A sprite
-    /// legitimately overhangs its ground base, so this is strictly the larger box.
-    pub(super) fn visual_rect(&self, anchor: Anchor, pos: Point) -> (Point, Size) {
-        (
-            super::placement::anchored_top_left(anchor, pos, self.visual.w, self.visual.h),
-            self.visual,
-        )
+    pub(super) fn ground_rect_of(&self, pivot: Pivot, pos: Point, fp: Size) -> (Point, Size) {
+        super::mask::ground_rect(pivot, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
     /// The blocked ground rect from this def's OWN table footprint, or `None` when
     /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
     /// counter). THE concentrator the mask stamp / collision checks / placement
     /// sweep all read.
-    pub(super) fn ground_rect(&self, anchor: Anchor, pos: Point) -> Option<(Point, Size)> {
-        self.footprint
-            .map(|fp| self.ground_rect_of(anchor, pos, fp))
+    pub(super) fn ground_rect(&self, pivot: Pivot, pos: Point) -> Option<(Point, Size)> {
+        self.footprint.map(|fp| self.ground_rect_of(pivot, pos, fp))
     }
 }
 
@@ -281,9 +271,11 @@ pub enum Furniture {
     /// An aisle standing desk (alternate workstation). Ground contact is the
     /// legs/base; the desktop overhangs north and occludes a walker behind it.
     StandingDesk,
-    /// A corridor vending machine.
+    /// A corridor vending machine. Ground contact is its plinth; the cabinet
+    /// overhangs north (invariant #6), like [`Furniture::PhoneBooth`].
     VendingMachine,
-    /// A corridor printer.
+    /// A corridor floor-standing printer, grounded like
+    /// [`Furniture::VendingMachine`].
     Printer,
     /// A meeting-room sofa SEAT (its body is [`Furniture::MeetingSofaBody`]).
     MeetingSofa,
@@ -367,6 +359,12 @@ pub enum Furniture {
     /// the cabinet base blocks, the glass tank above it is visual overhang, and
     /// idle fish animate in the paint pass.
     FishTank,
+    /// A home desk's task chair, seen from behind. Decor: its occupant's seat
+    /// is the desk's, so it stamps nothing of its own.
+    DeskChair,
+    /// The filing cabinet beside a home desk. Decor, placed off its desk, so it
+    /// stamps no ground of its own.
+    FilingCabinet,
 }
 
 impl Furniture {
@@ -401,6 +399,8 @@ impl Furniture {
         Furniture::SnackShelf,
         Furniture::Desk,
         Furniture::FishTank,
+        Furniture::DeskChair,
+        Furniture::FilingCabinet,
     ];
 }
 
@@ -415,10 +415,9 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
         Furniture::FishTank
         | Furniture::MeetingSofaBody
         | Furniture::MeetingTable
-        | Furniture::KitchenIsland => true,
-        // Non-waypoint singletons too, but the owner-ratified mock has the lounge
-        // Ficus hug them (1px) — deliberately NOT repelled.
-        Furniture::FloorLamp | Furniture::LoungeSideTable => false,
+        | Furniture::KitchenIsland
+        | Furniture::FloorLamp
+        | Furniture::LoungeSideTable => true,
         // Never a non-waypoint singleton in the plant census — waypoint furniture
         // is repelled via `first_blocking_waypoint` instead.
         Furniture::Couch
@@ -441,7 +440,9 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
         | Furniture::MeetingScreen
         | Furniture::IslandStand
         | Furniture::SnackShelf
-        | Furniture::Desk => false,
+        | Furniture::Desk
+        | Furniture::DeskChair
+        | Furniture::FilingCabinet => false,
     }
 }
 
@@ -491,8 +492,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::PhoneBooth => FurnitureDef {
-            footprint: Some(Size { w: 6, h: 3 }),
-            visual: Size { w: 6, h: 12 },
+            footprint: Some(Size { w: 7, h: 3 }),
+            visual: Size { w: 7, h: 15 },
             occupies_pos: false,
             exclusive: true,
             dwell: DwellWindow {
@@ -517,8 +518,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::VendingMachine => FurnitureDef {
-            footprint: Some(Size { w: 4, h: 6 }),
-            visual: Size { w: 4, h: 6 },
+            footprint: Some(Size { w: 7, h: 3 }),
+            visual: Size { w: 7, h: 13 },
             occupies_pos: false,
             exclusive: false,
             dwell: DwellWindow {
@@ -527,11 +528,11 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             },
             approach: ApproachSides::ALL,
             ground_x: GroundAlign::Center,
-            ground_y: GroundAlign::Center,
+            ground_y: GroundAlign::End,
         },
         Furniture::Printer => FurnitureDef {
-            footprint: Some(Size { w: 5, h: 4 }),
-            visual: Size { w: 5, h: 4 },
+            footprint: Some(Size { w: 7, h: 3 }),
+            visual: Size { w: 7, h: 8 },
             occupies_pos: false,
             exclusive: false,
             dwell: DwellWindow {
@@ -540,7 +541,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             },
             approach: ApproachSides::ALL,
             ground_x: GroundAlign::Center,
-            ground_y: GroundAlign::Center,
+            ground_y: GroundAlign::End,
         },
         Furniture::MeetingSofa => FurnitureDef {
             footprint: None,
@@ -611,6 +612,14 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 5, h: 3 },
             ..DECOR
         },
+        Furniture::DeskChair => FurnitureDef {
+            visual: Size { w: 8, h: 5 },
+            ..DECOR
+        },
+        Furniture::FilingCabinet => FurnitureDef {
+            visual: Size { w: 4, h: 6 },
+            ..DECOR
+        },
         Furniture::MeetingScreen => FurnitureDef {
             footprint: Some(Size { w: 14, h: 3 }),
             visual: Size { w: 14, h: 12 },
@@ -659,8 +668,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::FloorLamp => FurnitureDef {
-            footprint: Some(Size { w: 2, h: 7 }),
-            visual: Size { w: 4, h: 10 },
+            footprint: Some(Size { w: 2, h: 9 }),
+            visual: Size { w: 4, h: 12 },
             ground_y: GroundAlign::Center,
             ..DECOR
         },
@@ -703,7 +712,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
 pub enum GroundAlign {
     /// Flush to the box's LOW edge — North (y) / West (x): offset 0.
     Start,
-    /// Centered ON the sprite center (== the placement `pos` for a Center anchor);
+    /// Centered ON the sprite center (== the placement `pos` for a `Center` pivot);
     /// [`Self::offset`] carries the parity rule that makes it exact.
     Center,
     /// Flush to the box's HIGH edge — South (y) / East (x). THE walk-behind shape
@@ -755,27 +764,37 @@ pub const fn desk_furniture_def() -> FurnitureDef {
     furniture_def(Furniture::Desk)
 }
 
-/// Vertical offset baked into the walking / waypoint sprite anchor
+/// Vertical offset baked into the walking / waypoint sprite top-left
 /// (`p.y - WALKING_Y_OFF`) — the standing sprite height, owned here so
-/// [`seated_foot_cell`] and the anchor invert each other by construction.
+/// [`seated_foot_cell`] and the top-left invert each other by construction.
 pub const WALKING_Y_OFF: u16 = 12;
-/// Vertical offset of the back-view seat sprite anchor (`pos.y - SEAT_RENDER_Y_OFF`).
+/// Vertical offset of the back-view seat sprite top-left (`pos.y - SEAT_RENDER_Y_OFF`).
 /// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF` px south of `pos`,
-/// where `walking_anchor` lands exactly on `back_couch_anchor`.
+/// where `walking_top_left` lands exactly on `back_couch_top_left`.
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
+
+/// How far south of their seat a sitter on seated furniture (couch, sofa,
+/// meeting chair) sorts.
+const SEATED_Z_OFF: u16 = 2;
+
+/// The depth a sitter on seated furniture at `seat` sorts at, which the
+/// furniture under them keys its own depth from.
+pub(crate) fn seated_sort_row(seat: Point) -> u16 {
+    seat.y + SEATED_Z_OFF
+}
 
 /// Y offset from a home desk's top-left to the agent's WALK anchor — how far south
 /// of the desk origin a FAR seat sits (a near one takes `DESK_WALK_Y_OFF_BACK`).
 /// The no-arrival-pop identity holds structurally now that sprite and walk both
-/// route through `Seat::render_anchor`, and
+/// route through `Seat::render_top_left`, and
 /// `desk_walk_anchor_settles_exactly_on_the_seat` still pins it.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
 /// A point packed into one hash input, so a per-spot seed is derived the same
 /// way everywhere it is needed. The PACKING is load-bearing, not an
-/// implementation detail: every committed still and the wasm were rendered
-/// against it, and swapping the halves re-seeds every seat and pot while every
-/// property test still passes — pinned by `point_seed_packing_is_frozen`.
+/// implementation detail: every committed still was rendered against it, and
+/// swapping the halves re-seeds every seat and pot while every property test
+/// still passes — pinned by `point_seed_packing_is_frozen`.
 pub(super) fn point_seed(p: Point) -> u64 {
     (u64::from(p.x) << 32) | u64::from(p.y)
 }
@@ -799,7 +818,7 @@ fn seat_center_x(desk: Point) -> u16 {
 
 pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
-// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the sitter's sprite lands off its chair.
+// Below `WALKING_Y_OFF`, `seated_top_left`'s `saturating_sub` clamps and the sitter's sprite lands off its chair.
 const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
 
 /// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
@@ -814,18 +833,9 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     }
 }
 
-/// Where a desk's ceiling tube pools its light — derived from the SEAT, not the desk origin, since the facing places the workstation.
-pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
-    let walk = desk_walk_anchor_facing(desk, facing);
-    Point {
-        x: walk.x,
-        y: walk.y.saturating_sub(WALKING_Y_OFF / 2),
-    }
-}
-
 /// The cell where a seated agent's WALK visually ends so the seated sprite renders
-/// with no arrival jump — the inverse of the render anchor under
-/// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`. `Some`
+/// with no arrival jump — the inverse of the render top-left under
+/// [`WALKING_Y_OFF`], solving `walking_top_left(S) == render_top_left(pos)`. `Some`
 /// for every `occupies_pos` furniture; `None` for obstacles, whose sprite renders
 /// AT the approach cell. The post-A\* settle walks `approach_point → S`, and a
 /// blocked `S` (meeting sofa, desk) makes that leg the "sit down" motion rather
@@ -890,8 +900,7 @@ impl WallDecor {
         WallDecor::MeetingScreen,
     ];
 
-    /// Geometry kind in the unified [`Furniture`] table. Wall decor isn't
-    /// mask-stamped, so only `.visual` is read from the row.
+    /// Geometry kind in the unified [`Furniture`] table.
     pub const fn furniture(self) -> Furniture {
         match self {
             WallDecor::Whiteboard => Furniture::Whiteboard,
@@ -900,6 +909,12 @@ impl WallDecor {
             WallDecor::ExitSign => Furniture::ExitSign,
             WallDecor::MeetingScreen => Furniture::MeetingScreen,
         }
+    }
+
+    /// Whether it stands on the floor rather than hanging on the wall: it has a
+    /// footprint, which the mask stamps and a sealed lane can drop it for.
+    pub(crate) fn stands_on_floor(self) -> bool {
+        furniture_def(self.furniture()).footprint.is_some()
     }
 
     /// Pack-animation key for this decor's sprite. The blit lives in
@@ -980,8 +995,7 @@ pub enum PodDecor {
 
 impl PodDecor {
     /// The randomly-picked pool. Every member's GROUND footprint has to fit the
-    /// aisle width once the obstacle pad is added — the whiteboard, whose board
-    /// panel overhangs its wheelbase, is the tight one.
+    /// aisle width once the obstacle pad is added.
     pub const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,
         PodDecor::Whiteboard,
@@ -1000,6 +1014,16 @@ impl PodDecor {
             PodDecor::Tv => Furniture::Tv,
             PodDecor::PhoneBooth => Furniture::PhoneBooth,
             PodDecor::StandingDesk => Furniture::StandingDesk,
+        }
+    }
+
+    /// The waypoint this decor also is, or `None` for pure decor. Exhaustive (no
+    /// `_`): a new `PodDecor` makes a deliberate wander decision here.
+    pub(crate) const fn waypoint(self) -> Option<WaypointKind> {
+        match self {
+            PodDecor::PhoneBooth => Some(WaypointKind::PhoneBooth),
+            PodDecor::StandingDesk => Some(WaypointKind::StandingDesk),
+            PodDecor::PlantTall | PodDecor::Whiteboard | PodDecor::Tv => None,
         }
     }
 
@@ -1031,24 +1055,18 @@ mod tests {
             Furniture::MeetingSofaBody,
             Furniture::MeetingTable,
             Furniture::KitchenIsland,
+            Furniture::FloorLamp,
+            Furniture::LoungeSideTable,
         ] {
             assert!(
                 repels_plants(k),
                 "{k:?} is a solid body — must repel plants"
             );
         }
-        assert!(
-            !repels_plants(Furniture::FloorLamp),
-            "lamp keeps the Ficus hug"
-        );
-        assert!(
-            !repels_plants(Furniture::LoungeSideTable),
-            "side table keeps the Ficus hug"
-        );
         assert_eq!(
             Furniture::ALL.iter().filter(|&&k| repels_plants(k)).count(),
-            4,
-            "exactly four kinds repel — a new `true` must be deliberate"
+            6,
+            "exactly six kinds repel — a new `true` must be deliberate"
         );
     }
 
@@ -1133,7 +1151,7 @@ mod tests {
         );
         assert!(
             d.occupies_pos,
-            "agent renders ON the desk (seated_anchor); seat = seated_foot_cell(Desk)"
+            "agent renders ON the desk (seated_top_left); seat = seated_foot_cell(Desk)"
         );
         assert_eq!(
             d.approach, DESK_APPROACH,
@@ -1176,7 +1194,7 @@ mod tests {
     fn furniture_def_invariants_hold_for_every_row() {
         assert_eq!(
             Furniture::ALL.len(),
-            27,
+            29,
             "Furniture variant added/removed — update ALL (and this count)"
         );
         for &f in Furniture::ALL {
@@ -1266,35 +1284,5 @@ mod tests {
                 "sprite_name {n:?} is not a registered OPTIONAL_FURNITURE_ANIMATIONS key"
             );
         }
-    }
-
-    #[test]
-    fn the_desk_light_follows_the_seat_and_leaves_a_far_seat_where_it_was() {
-        // The lift the pool hardcoded before it read the facing.
-        const HISTORICAL_CY_LIFT: u16 = 2;
-        let desk = Point { x: 40, y: 30 };
-
-        let far = desk_ceiling_pool_center(desk, Facing::South);
-        assert_eq!(
-            far,
-            Point {
-                // The pool follows the SEAT, so it reads the seat's own x rather
-                // than re-deriving a midline that would drift from it.
-                x: desk_walk_anchor_facing(desk, Facing::South).x,
-                y: desk.y - HISTORICAL_CY_LIFT,
-            },
-            "a viewer-facing desk lights the seat, at the historical lift"
-        );
-
-        let near = desk_ceiling_pool_center(desk, Facing::North);
-        assert!(
-            near.y > desk.y,
-            "a back-turned desk seats its occupant SOUTH, so its light must move \
-             there too: {near:?} vs desk {desk:?}"
-        );
-        assert!(
-            near.y < desk_walk_anchor_facing(desk, Facing::North).y,
-            "...but stay on the body rather than drop to their feet: {near:?}"
-        );
     }
 }

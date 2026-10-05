@@ -15,15 +15,16 @@ mod welcome;
 pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
 pub(super) use elevator::paint_elevator_indicator;
-pub(super) use footer::{paint_footer, FooterStats};
+pub use footer::footer_context;
+pub(super) use footer::paint_footer;
 pub(super) use help::paint_help_overlay;
-pub(crate) use panel::{borderless_panel, paint_panel, panel_inner_width, Overflow, PanelGeometry};
+pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
+pub(crate) use tooltip::{TooltipAt, paint_hover_tooltip, paint_label_widgets};
 pub(super) use tooltip::{
     paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
 };
-pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
 pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(super) use wall_board::{paint_wall_display, star_hit_rect};
 pub(super) use welcome::paint_welcome;
@@ -47,23 +48,14 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
-/// Display columns a string occupies in the terminal — the ONE width authority (the same
-/// `unicode-width` ratatui uses), replacing scattered `chars().count()` so a wide glyph
-/// in a HUD widget can't miscount its layout.
+/// Display columns a string occupies in the terminal:
+/// [`cells`](pixtuoid_scene::display::text::cells), the one width rule.
 pub(crate) fn display_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthStr;
-    s.width()
+    usize::from(pixtuoid_scene::display::text::cells(s))
 }
 
-// `StateCounts` stays `pub`: it is reachable via the pub `DrawCtx::per_floor` field.
-pub use pixtuoid_scene::board::StateCounts;
-pub(crate) use pixtuoid_scene::board::{
-    compact_hms, gateway_rollup, per_floor_counts, scene_stats,
-};
+pub(crate) use pixtuoid_scene::board::compact_hms;
 
-// Each state carries FOUR redundant channels (glyph/letter/word/hue); hue is never the
-// sole carrier, so the design survives colour removal, a colour-blind viewer, and a
-// terminal that tofus a glyph.
 pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
 
 /// A [`StateKind`]'s themed ratatui hue — the binary shim over the shared

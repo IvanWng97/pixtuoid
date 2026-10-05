@@ -19,13 +19,15 @@
     "type": "git",
     "url": "git+https://github.com/IvanWng97/pixtuoid.git"
   },
-  "license": "MIT",
+  "license": "(MIT AND OFL-1.1)",
   "bin": {
     "pixtuoid": "bin/pixtuoid",
     "pixtuoid-hook": "bin/pixtuoid-hook"
   },
   "files": [
-    "bin/"
+    "bin/",
+    "LICENSE",
+    "licenses/"
   ],
   "optionalDependencies": {
     "@pixtuoid/cli-darwin-arm64": "0.0.0",

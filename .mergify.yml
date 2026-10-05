@@ -1,0 +1,55 @@
+# A PR enters by `@mergifyio queue` once docs/CONTRIBUTING.md#the-merge-gate
+# holds: its local rows are a judgement no condition can make.
+#
+# Two-step CI (docs.mergify.com/merge-queue/two-step): a PR's pushes run the
+# light tier, and the queue's draft PR (`mergify/merge-queue/…`) runs the full
+# tier, batching several PRs into one run. Branch protection is not injected:
+# the bots review the PR, never the queue's draft, so injected `claude-review/*`
+# conditions, which the queue also checks on that draft
+# (docs.mergify.com/merge-queue/rules: "the merge conditions for checks are
+# evaluated against the temporary pull request"), would never pass there.
+merge_queue:
+  max_parallel_checks: 1
+  # Its "ready to queue" box cannot see the local rows.
+  queue_controls_comment: false
+
+queue_rules:
+  - name: default
+    batch_size: 5
+    merge_method: squash
+    # `auto` sizes this from unloaded runs, so a backlog of runners alone times
+    # a PR out and costs a full CI rerun; this covers the backlogged full tier.
+    checks_timeout: 60 min
+    branch_protection_injection_mode: none
+    # `none` requires an account that satisfies the protections itself
+    # (docs.mergify.com/configuration/file-format); enforce_admins holds it to them.
+    merge_bot_account: IvanWng97
+    # The PR itself: branch protection's required checks (here the light-tier
+    # ci-gate) and conversation resolution, restated since nothing is injected.
+    queue_conditions:
+      # A stacked PR waits until its base lands and GitHub retargets it.
+      - base = main
+      - -draft
+      # A queue update would merge main into it, which release-plz.yml's
+      # release-merge refuses after the merge (docs/CONTRIBUTING.md#cutting-the-release).
+      - -head ~= ^release-plz-
+      - check-success = ci-gate
+      - check-success = GitGuardian Security Checks
+      - check-success = claude-review/correctness
+      - check-success = claude-review/design
+      - "#review-threads-unresolved = 0"
+    # The queue's draft PR, where ci-gate is the full tier.
+    merge_conditions:
+      - check-success = ci-gate
+
+pull_request_rules:
+  # media-regen.yml's bot PR queues itself: it renders main's merged code, which
+  # each look PR's generated-art lens already read as evidence. Every file it
+  # touches must sit under docs/images/ (the list operator matches any file).
+  - name: queue the README media regen
+    conditions:
+      - head = bot/media-regen
+      - head-repo-full-name = IvanWng97/pixtuoid
+      - -files ~= ^(?!docs/images/)
+    actions:
+      queue:
