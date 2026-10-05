@@ -14,17 +14,19 @@ use std::io::{Stdout, stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use futures_util::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use tokio::time::MissedTickBehavior;
 
 use tui_renderer::TuiRenderer;
 
@@ -1001,27 +1003,29 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
+        let mut frames = frame_clock(tick);
+        let mut events = EventStream::new();
+        let mut snapshot = scene_rx.borrow().clone();
+        let mut now = ui.now();
         loop {
-            let now = ui.now();
-            let snapshot = scene_rx.borrow_and_update().clone();
-            renderer.evict_missing(&snapshot);
-            let health = source_health.borrow_and_update().clone();
-            ui.build_frames(now, &snapshot, &health)
-                .apply_to(&mut renderer, now);
-            let audio_now = std::time::Instant::now();
-            audio_ctl.tick(audio_now);
-            renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
-            renderer.render(&snapshot, &pack, now)?;
+            tokio::select! {
+                _ = frames.tick() => {
+                    now = ui.now();
+                    snapshot = scene_rx.borrow_and_update().clone();
+                    renderer.evict_missing(&snapshot);
+                    let health = source_health.borrow_and_update().clone();
+                    ui.build_frames(now, &snapshot, &health)
+                        .apply_to(&mut renderer, now);
+                    let audio_now = std::time::Instant::now();
+                    audio_ctl.tick(audio_now);
+                    renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
+                    renderer.render(&snapshot, &pack, now)?;
 
-            if let Some(layout) = renderer.cached_layout() {
-                cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
-            }
-
-            let start = Instant::now();
-            let mut polled = event::poll(tick)?;
-            let mut quit = false;
-            while polled {
-                match event::read()? {
+                    if let Some(layout) = renderer.cached_layout() {
+                        cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
+                    }
+                }
+                event = events.next() => match event.context("terminal input closed")?? {
                     Event::Key(k) if should_dispatch_key(k.kind) => {
                         let floor = FloorNav {
                             n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
@@ -1029,7 +1033,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             in_transition: renderer.transition().is_some(),
                         };
                         let action = dispatch_key(k.code, k.modifiers, ui.modal(), floor);
-                        quit |= apply_key_action(
+                        let quit = apply_key_action(
                             action,
                             &mut KeyCtx {
                                 ui: &mut ui,
@@ -1043,6 +1047,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 respawn: crate::audio::respawn,
                             },
                         );
+                        if quit {
+                            if ui.theme_picker.is_some() {
+                                renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
+                            }
+                            break;
+                        }
                     }
                     Event::Mouse(m) => handle_mouse_event(
                         m,
@@ -1053,20 +1063,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         now,
                     ),
                     _ => {}
-                }
-                polled = event::poll(Duration::from_millis(0))?;
-            }
-            if quit {
-                if ui.theme_picker.is_some() {
-                    renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
-                }
-                break;
-            }
-            // The frame-pacing sleep doubles as the signal-listen window: the crossterm
-            // poll above is synchronous, so this is the loop's only await point.
-            let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
-            tokio::select! {
-                _ = tokio::time::sleep(rem) => {}
+                },
                 res = &mut ctrl_c => match res {
                     Ok(()) => break,
                     Err(e) => {
@@ -1087,6 +1084,42 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     teardown_terminal(&mut renderer.terminal)?;
     result
+}
+
+/// The TUI loop's frame clock, one tick per `period`. A frame that overran
+/// paints at once and the next back on the grid, neither a burst to catch up
+/// nor a re-anchor that lets every late wake stretch the rate
+/// ([`MissedTickBehavior::Skip`]).
+pub(crate) fn frame_clock(period: Duration) -> tokio::time::Interval {
+    let mut frames = tokio::time::interval(period);
+    frames.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    frames
+}
+
+#[cfg(test)]
+mod frame_clock_tests {
+    use super::frame_clock;
+    use std::time::Duration;
+    use tokio::time::{Instant, advance};
+
+    // Whole milliseconds: tokio's timer rounds a deadline up to one.
+    const PERIOD: Duration = Duration::from_millis(30);
+
+    /// A render that overran by a non-whole number of periods: the next frame
+    /// at once, then back on the start's grid — neither a burst nor a whole
+    /// period from the late frame.
+    #[tokio::test(start_paused = true)]
+    async fn an_overrun_paints_at_once_then_falls_back_on_the_grid() {
+        let mut frames = frame_clock(PERIOD);
+        let start = Instant::now();
+        frames.tick().await;
+        advance(PERIOD * 5 / 2).await;
+        let late = Instant::now();
+        frames.tick().await;
+        assert_eq!(Instant::now(), late, "the late frame paints at once");
+        frames.tick().await;
+        assert_eq!(Instant::now(), start + 3 * PERIOD);
+    }
 }
 
 #[cfg(test)]
