@@ -10,7 +10,7 @@ use super::{
     StoodProp, depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
@@ -226,7 +226,7 @@ pub(crate) fn compose_at<'a>(
             .map(|(span, kind)| (span, (span, kind)))
             .collect(),
     );
-    let pieces = sorted
+    let pieces: Vec<Piece> = sorted
         .into_iter()
         .map(|(span, kind)| Piece {
             span,
@@ -236,11 +236,12 @@ pub(crate) fn compose_at<'a>(
         })
         .collect();
     DisplayList {
-        pieces,
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
         carpet: moment.look.carpet(theme),
         flash: crate::cutaway::light::Flash::of(&moment.sky),
+        hovers: pieces.iter().filter_map(Piece::hover).collect(),
+        pieces,
         pack,
         theme,
         scale,
@@ -255,20 +256,28 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
     } = office;
     let pet = frame.pet.iter().map(|p| {
         let flip = if p.flip { Flip::Horizontal } else { Flip::None };
-        (p.pos, p.anim_name, p.frame_idx, flip, false, &p.effects)
+        (
+            p.pos,
+            p.anim_name,
+            p.frame_idx,
+            flip,
+            false,
+            &p.effects,
+            p.target(),
+        )
     });
     let mascots = frame.mascots.iter().map(|m| {
-        let degraded = m.state == pixtuoid_core::state::DaemonState::Degraded;
         (
             m.pos,
             m.anim_name,
             m.frame_idx,
             Flip::None,
-            degraded,
+            m.degraded,
             &m.effects,
+            m.target(),
         )
     });
-    for (at, sprite, frame_idx, flip, degraded, effects) in pet.chain(mascots) {
+    for (at, sprite, frame_idx, flip, degraded, effects, who) in pet.chain(mascots) {
         let Some(dense) = crate::pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE)
         else {
             continue;
@@ -283,7 +292,15 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             frame: frame_idx,
             flip,
         };
-        order.push((span, PieceKind::Creature { at, art, degraded }));
+        order.push((
+            span,
+            PieceKind::Creature {
+                at,
+                art,
+                degraded,
+                who,
+            },
+        ));
         let Some(pen) = crate::pack::densest_frame(pack, sprite, frame_idx, scale)
             .and_then(|d| Pen::new(scale, d.density.get()))
         else {
