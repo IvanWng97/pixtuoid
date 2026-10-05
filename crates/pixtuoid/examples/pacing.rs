@@ -312,16 +312,16 @@ fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1e3
 }
 
-/// Each frame's interval under a render-then-poll loop, the TUI's before
-/// deadline pacing: render, then a full paint interval of polling.
-fn sleep_loop(renders: &[Duration], tick: Duration) -> Vec<Duration> {
+/// Each frame's interval under the loop before #1283: render, then wait a
+/// full paint interval.
+fn render_then_wait(renders: &[Duration], tick: Duration) -> Vec<Duration> {
     renders.iter().map(|&r| r + tick).collect()
 }
 
 /// Each frame's interval under [`frame_clock`]: frames due a paint interval
 /// apart; a render that overran starts the next frame at once, the one after
 /// that falling back on the grid.
-fn deadline_loop(renders: &[Duration], tick: Duration) -> Vec<Duration> {
+fn frame_clock_loop(renders: &[Duration], tick: Duration) -> Vec<Duration> {
     let (mut start, mut due) = (Duration::ZERO, tick);
     renders
         .iter()
@@ -375,8 +375,8 @@ fn main() -> Result<()> {
         "enc",
         "write",
         "over%",
-        "poll p95/jit",
-        "deadl p95/jit",
+        "wait p95/jit",
+        "clock p95/jit",
         "B p50",
         "B p95"
     );
@@ -386,8 +386,8 @@ fn main() -> Result<()> {
         let col = |f: fn(&Frame) -> Duration| frames.iter().map(f).collect::<Vec<_>>();
         let total = col(|f| f.total);
         let over = total.iter().filter(|&&t| t > tick).count() as f64 * 100.0 / total.len() as f64;
-        let poll_loop = sleep_loop(&total, tick);
-        let deadline = deadline_loop(&total, tick);
+        let waiting = render_then_wait(&total, tick);
+        let clocked = frame_clock_loop(&total, tick);
         let jitter = |xs: &[Duration]| pct(xs, 95.0).saturating_sub(pct(xs, 50.0));
         let mut bytes: Vec<u64> = frames.iter().map(|f| f.bytes).collect();
         bytes.sort_unstable();
@@ -408,10 +408,10 @@ fn main() -> Result<()> {
             ms(pct(&col(|f| f.encode), 50.0)),
             ms(pct(&col(|f| f.write), 50.0)),
             over,
-            ms(pct(&poll_loop, 95.0)),
-            ms(jitter(&poll_loop)),
-            ms(pct(&deadline, 95.0)),
-            ms(jitter(&deadline)),
+            ms(pct(&waiting, 95.0)),
+            ms(jitter(&waiting)),
+            ms(pct(&clocked, 95.0)),
+            ms(jitter(&clocked)),
             byte_pct(50.0),
             byte_pct(95.0),
         );
@@ -424,16 +424,16 @@ fn main() -> Result<()> {
             "encode": stats(&col(|f| f.encode)),
             "write": stats(&col(|f| f.write)),
             "over_budget_pct": over,
-            "interval_render_then_poll": stats(&poll_loop),
-            "jitter_render_then_poll_ms": ms(jitter(&poll_loop)),
-            "interval_deadline": stats(&deadline),
-            "jitter_deadline_ms": ms(jitter(&deadline)),
+            "interval_render_then_wait": stats(&waiting),
+            "jitter_render_then_wait_ms": ms(jitter(&waiting)),
+            "interval_frame_clock": stats(&clocked),
+            "jitter_frame_clock_ms": ms(jitter(&clocked)),
             "bytes_p50": byte_pct(50.0),
             "bytes_p95": byte_pct(95.0),
         }));
     }
     let (renders, observed) = real_clock(&pack)?;
-    let modeled = deadline_loop(&renders, tick);
+    let modeled = frame_clock_loop(&renders, tick);
     let _ = writeln!(
         stdout,
         "\nreal-clock half-block Full: interval OBSERVED p50/p95/p99 {:.2}/{:.2}/{:.2} ms vs COMPUTED {:.2}/{:.2}/{:.2} ms",
