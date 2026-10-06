@@ -702,6 +702,10 @@ fn no_route_around_a_wall_corner_cuts_through_it() {
 /// the floor to [`WALL_SCAN_TOP_H`] across the widths, on the floors a user
 /// sees. The discrete [`SWEEP_SIZES`] grid reaches this band at one width.
 #[test]
+#[cfg_attr(
+    coverage,
+    ignore = "an exhaustive sweep outlasts its budget instrumented; the plain suite asserts it on every PR"
+)]
 fn no_route_on_a_short_floor_passes_through_a_wall() {
     let floors: Vec<(u16, u16, u64)> = (super::compute::MIN_LAYOUT_H..=WALL_SCAN_TOP_H)
         .flat_map(|h| {
