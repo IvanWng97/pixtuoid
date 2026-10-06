@@ -860,7 +860,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let drawn = self.draw_frame(scene, pack, now);
         self.follow_resize();
         // Presented even when the draw failed, so nothing stays held.
-        if let Some(Err(e)) = self.frame_out.as_ref().map(|out| out.present()) {
+        let presenting = std::time::Instant::now();
+        let presented = self.frame_out.as_ref().map(|out| out.present());
+        let present = presenting.elapsed();
+        if let Some(Err(e)) = presented {
             // A full terminal: the frame is dropped, and each tile is owed
             // again, as when one of its own writes failed.
             if e.kind() != std::io::ErrorKind::WouldBlock {
@@ -884,8 +887,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .floors
             .get(self.current_floor)
             .and_then(|f| f.raster.note());
-        self.jank
-            .record(begun.elapsed(), send, note, std::time::Instant::now());
+        self.jank.record(
+            begun.elapsed(),
+            present,
+            send,
+            note,
+            std::time::Instant::now(),
+        );
         Ok(())
     }
 
