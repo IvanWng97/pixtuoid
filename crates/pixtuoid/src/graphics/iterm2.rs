@@ -15,6 +15,10 @@ pub(crate) fn transmit(image: &TileImage, origin: Position) -> Result<Vec<u8>, p
     let mut encoder = png::Encoder::new(&mut png, image.width, image.height);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
+    // fdeflate's "extremely fast compression with a decent compression ratio"
+    // (png 0.18 `Compression::Fast`): a frame's tiles encode in time, for
+    // more bytes than the default's.
+    encoder.set_compression(png::Compression::Fast);
     encoder.write_header()?.write_image_data(&image.rgb)?;
     let mut out = image.tile.cursor_to(origin).into_bytes();
     out.extend_from_slice(

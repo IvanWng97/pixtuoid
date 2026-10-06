@@ -2667,6 +2667,7 @@ dependencies = [
  "clap_mangen",
  "codspeed-criterion-compat",
  "crossterm",
+ "foldhash",
  "futures-util",
  "icy_sixel 0.7.0",
  "image",
