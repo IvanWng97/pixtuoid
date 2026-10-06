@@ -89,7 +89,7 @@ fn walks() -> Vec<&'static str> {
 
 /// The animations a painter loops on the beat, each with the frame its loop
 /// starts at: the looping fixtures, the appliances' busy loops
-/// ([`appliance_frame_index`](lookup::appliance_frame_index)), the typists
+/// ([`appliance_frame_index`]), the typists
 /// (`pose::typing_frame`), and every creature pose.
 fn looped_animations() -> Vec<(&'static str, usize)> {
     let appliances =
