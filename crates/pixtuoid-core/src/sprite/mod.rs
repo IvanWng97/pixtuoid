@@ -925,7 +925,7 @@ mod tests {
     }
 
     /// A clipped bulk write sees exactly the clip's rows and columns, and an
-    /// empty clip none.
+    /// empty clip's rows no pixels.
     #[test]
     fn the_writable_rows_are_the_clips_and_no_more() {
         let (bg, ink) = (rgb(0, 0, 0), rgb(9, 9, 9));
@@ -942,10 +942,11 @@ mod tests {
         });
         assert_eq!(drawn(&buf, bg), ["00000", "00000", "01100", "01100"]);
         buf.with_clip((3..3, 0..4), |buf| {
-            assert_eq!(buf.writable_rows_mut().count(), 4)
-        });
-        buf.with_clip((3..3, 0..4), |buf| {
-            assert!(buf.writable_rows_mut().all(|(_, _, row)| row.is_empty()));
+            let runs: Vec<usize> = buf
+                .writable_rows_mut()
+                .map(|(_, _, row)| row.len())
+                .collect();
+            assert_eq!(runs, [0; 4]);
         });
     }
 
