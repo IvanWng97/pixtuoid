@@ -2819,8 +2819,18 @@ mod tests {
         theme: &Theme,
         scale: RenderScale,
     ) -> Option<(u16, u16)> {
-        let w = scale.to_buffer(layout.buf_w);
-        let [a, b] = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+        let painted = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+        stray_pixel_of(kind, span, scale.to_buffer(layout.buf_w), scale, &painted)
+    }
+
+    /// [`stray_pixel`] over `kind`'s [`painted_over_two_fills`], `w` wide.
+    fn stray_pixel_of(
+        kind: &PieceKind,
+        span: Span,
+        w: u16,
+        scale: RenderScale,
+        [a, b]: &[RgbBuffer; 2],
+    ) -> Option<(u16, u16)> {
         // A pixel that is neither the same over both fills nor left alone is a
         // recolouring of what lay under it.
         let recoloured = a
@@ -2917,13 +2927,11 @@ mod tests {
 
     fn lowest_painted_row(
         kind: &PieceKind,
-        layout: &SceneLayout,
-        pack: &Pack,
-        theme: &Theme,
+        w: u16,
         scale: RenderScale,
+        [a, b]: &[RgbBuffer; 2],
     ) -> Option<u16> {
-        let w = usize::from(scale.to_buffer(layout.buf_w));
-        let [a, b] = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+        let w = usize::from(w);
         a.as_slice()
             .iter()
             .zip(b.as_slice())
@@ -4110,7 +4118,15 @@ mod tests {
             std::collections::BTreeSet::new(),
             std::collections::BTreeSet::new(),
         );
-        let mut check = |pack: &Pack, frame: &SimFrame, layout: &SceneLayout, only_people: bool| {
+        // One span and fingerprint always paint the same pixels at one scale
+        // (`one_span_and_fingerprint_always_paint_the_same_pixels`), so a piece
+        // checked once on one pack and canvas is checked for every frame.
+        let mut checked = std::collections::HashSet::new();
+        let mut check = |pack_label: &str,
+                         pack: &Pack,
+                         frame: &SimFrame,
+                         layout: &SceneLayout,
+                         only_people: bool| {
             for s in [1, 3, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let office = Office {
@@ -4148,8 +4164,16 @@ mod tests {
                     if let PieceKind::Prop { art, .. } | PieceKind::Animated { art, .. } = kind {
                         props.insert(art.sprite);
                     }
+                    let canvas = (layout.buf_w, layout.buf_h);
+                    if !checked.insert((pack_label.to_owned(), s, canvas, span, fingerprint(kind)))
+                    {
+                        continue;
+                    }
+                    let painted =
+                        painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+                    let w = scale.to_buffer(layout.buf_w);
                     assert_eq!(
-                        stray_pixel(kind, span, layout, pack, theme, scale),
+                        stray_pixel_of(kind, span, w, scale, &painted),
                         None,
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
@@ -4158,7 +4182,7 @@ mod tests {
                         && ground_shadow(span, kind, pack).is_some()
                     {
                         assert_eq!(
-                            lowest_painted_row(kind, layout, pack, theme, scale),
+                            lowest_painted_row(kind, w, scale, &painted),
                             Some(span.y1),
                             "{kind:?} at scale {s} is grounded on a row it doesn't reach: {span:?}"
                         );
@@ -4170,11 +4194,12 @@ mod tests {
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
             let (layout, pack, frames, _) = sit_down(facing, 2);
             for frame in &frames {
-                check(&pack, frame, &layout, true);
+                check("default", &pack, frame, &layout, true);
             }
             // ...the office around them once, a lit screen and a carried chair
             // included...
             check(
+                "default",
                 &pack,
                 frames.last().expect("a seated frame"),
                 &layout,
@@ -4188,22 +4213,24 @@ mod tests {
             .map(|s| s.name().to_owned())
             .collect();
         let mut worn = std::collections::BTreeSet::new();
+        let base = test_default_pack();
         for i in 0..1000 {
-            let pack = test_default_pack();
+            let pack = &base;
             let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
             let dense =
-                crate::pack::densest_frame(&pack, "walking", 0, scale).expect("the walk's art");
+                crate::pack::densest_frame(pack, "walking", 0, scale).expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
             let style =
-                crate::character::dress_for(&pack, id, dense.frame, dense.head, dense.density)
+                crate::character::dress_for(pack, id, dense.frame, dense.head, dense.density)
                     .and_then(|d| d.style);
             let Some(style) = style.filter(|s| !worn.contains(s)) else {
                 continue;
             };
             worn.insert(style);
-            let (layout, pack, frames, _) = sit_down_as(pack, crate::layout::Facing::South, 0, id);
+            let (layout, pack, frames, _) =
+                sit_down_as(base.clone(), crate::layout::Facing::South, 0, id);
             for frame in &frames {
-                check(&pack, frame, &layout, true);
+                check("default", &pack, frame, &layout, true);
             }
             if worn == styles {
                 break;
@@ -4216,7 +4243,7 @@ mod tests {
             for c in &mut frame.characters {
                 c.effects = every_effect(c.top_left);
             }
-            check(&pack, &frame, &layout, true);
+            check("default", &pack, &frame, &layout, true);
         }
         // ...every desk prop, each tower tier with a sheet mid-fall, both ways
         // a desk faces...
@@ -4228,7 +4255,7 @@ mod tests {
                 d.token_tier = (i % usize::from(crate::token_meter::MAX_TIER + 1)) as u8;
                 d.sheet_fall = Some(1);
             }
-            check(&pack, &frame, &layout, false);
+            check("default", &pack, &frame, &layout, false);
         }
         // ...a walk whose frames differ in size, so a span sized from the wrong
         // frame shows...
@@ -4251,7 +4278,7 @@ mod tests {
         let uneven = crate::pack::test_pack_with(&[("walking_1.sprite", LONG_STRIDE)]);
         let (layout, uneven, frames, _) = sit_down_in(uneven, crate::layout::Facing::South, 0);
         for frame in &frames {
-            check(&uneven, frame, &layout, true);
+            check("uneven", &uneven, frame, &layout, true);
         }
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         let pack = test_default_pack();
@@ -4268,7 +4295,7 @@ mod tests {
                     crate::layout::Size { w, h },
                 )
                 .expect("lays out");
-            check(&pack, &stepped.frame, &stepped.layout, false);
+            check("default", &pack, &stepped.frame, &stepped.layout, false);
         }
         assert_eq!(
             kinds.into_iter().collect::<Vec<_>>(),
@@ -5666,7 +5693,7 @@ mod tests {
     fn the_north_sofas_backrest_starts_on_its_lit_ridge() {
         let pack = test_default_pack();
         let densities = std::iter::once(pixtuoid_core::sprite::format::Density::ONE)
-            .chain(pack.density_variants());
+            .chain(pack.density_variants().iter().copied());
         for d in densities {
             let name = if d == pixtuoid_core::sprite::format::Density::ONE {
                 MEETING_SOFA_NORTH_SPRITE.to_owned()
