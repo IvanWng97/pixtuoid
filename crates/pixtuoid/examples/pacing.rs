@@ -10,6 +10,16 @@
 //! from the measured render times under each loop model, not observed. The
 //! one `real-clock` case runs the production loop's shape on the wall clock
 //! to check that model once.
+//!
+//! `pacing hitch <frames.jsonl>` instead logs every frame of each terminal ×
+//! clock run with what made it slow: each stage's time, the Dirty kind, tiles
+//! and bytes sent, the canvas epoch field that changed, a cloud-raster miss,
+//! the sky's weather and strike. Its runs: the owner's 16x kitty on the real
+//! clock (`HITCH_REAL_SECS`, default 600), then per terminal a clear, an
+//! overcast and a stormy noon, dusk a second a frame, the first clock-weather
+//! transition, and a storm whose every frame paints and sends whole, with and
+//! without lofi track beds synthesizing beside it. `HITCH_ONLY=a|b` keeps the
+//! runs whose terminal or name holds every part.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -464,23 +474,7 @@ fn hitch(path: &Path) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(600);
     let only = pixtuoid_core::platform::text_env("HITCH_ONLY");
-    let shrink: u32 = pixtuoid_core::platform::text_env("HITCH_SHRINK")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
     let noon = pixtuoid_scene::localclock::at_hour(12);
-    if pixtuoid_core::platform::text_env("HITCH_LOFI_BASELINE").is_some() {
-        use pixtuoid_scene::audio::{BUILD_SEED, TrackId, bank::TrackBeds, dsp::NoiseStream};
-        let mut rng = NoiseStream::new(BUILD_SEED);
-        for track in [TrackId::GenDay(0), TrackId::GenNight(1)] {
-            let at = Instant::now();
-            std::hint::black_box(TrackBeds::build(&mut rng, track));
-            let _ = writeln!(
-                std::io::stdout(),
-                "lofi build alone {track:?}: {:.2}s",
-                at.elapsed().as_secs_f64()
-            );
-        }
-    }
     let dusk = pixtuoid_scene::localclock::at_hour_min(19, 55);
     let sweeps = [
         HitchRun {
@@ -545,15 +539,6 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(30),
             whole: true,
             lofi: true,
-        },
-        HitchRun {
-            name: "clock weather ff 1s/frame",
-            weather: WeatherPolicy::Clock,
-            start: Some(noon),
-            step: Duration::from_secs(1),
-            length: Duration::from_secs(1800),
-            whole: false,
-            lofi: false,
         },
     ];
     let real = HitchRun {
@@ -656,7 +641,7 @@ fn hitch(path: &Path) -> Result<()> {
                 None => wall.elapsed(),
                 Some(_) => run.step * u32::try_from(n)?,
             };
-            if offset >= run.length / shrink {
+            if offset >= run.length {
                 break;
             }
             let now = start + offset;
@@ -758,53 +743,7 @@ fn hitch(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The kitty transports at the owner's 16x: a full resend, and walk frames.
-fn transport() -> Result<()> {
-    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
-    let (cols, rows) = (1..=400u16)
-        .flat_map(|c| (1..=200u16).map(move |r| (c, r)))
-        .find(|&(c, r)| {
-            pixtuoid::pacing::cutaway_office(c, r, OWNER_CELL, &pack)
-                .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE)
-        })
-        .context("no terminal fits the owner's office")?;
-    let tick = Duration::from_secs(1) / PAINT_FPS;
-    let pets = vec![Pet::defaulted(PetKind::Cat), Pet::defaulted(PetKind::Dog)];
-    let (mut r, _wire) = renderer(
-        Protocol::Kitty,
-        cols,
-        rows,
-        OWNER_CELL,
-        pets,
-        Arc::clone(&pack),
-    )?;
-    r.set_weather(WeatherPolicy::Forced(Weather::Clear));
-    r.set_motion(Motion::Full);
-    let start = pixtuoid_scene::localclock::at_hour(12);
-    let scene = office(start);
-    let mut stdout = std::io::stdout().lock();
-    let mut prev = None;
-    for n in 0..90u32 {
-        r.render(&scene, &pack, start + tick * n)?;
-        let cur = pixtuoid::pacing::cutaway_image(&r);
-        if n == 0 {
-            let full =
-                pixtuoid::pacing::kitty_transports(&r, None, 7).context("a kitty cutaway")?;
-            let _ = writeln!(stdout, "full {}", serde_json::to_string(&full)?);
-        } else if n % 15 == 0 {
-            let walk = pixtuoid::pacing::kitty_transports(&r, prev.as_ref(), 7)
-                .context("a kitty cutaway")?;
-            let _ = writeln!(stdout, "walk@{n} {}", serde_json::to_string(&walk)?);
-        }
-        prev = cur;
-    }
-    Ok(())
-}
-
 fn main() -> Result<()> {
-    if std::env::args().nth(1).as_deref() == Some("transport") {
-        return transport();
-    }
     if std::env::args().nth(1).as_deref() == Some("hitch") {
         let path = PathBuf::from(
             std::env::args()

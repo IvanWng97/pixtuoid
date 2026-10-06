@@ -490,11 +490,6 @@ impl TileCutaway {
         covered
     }
 
-    /// The last image and its fit, for the pacing bench.
-    pub(crate) fn shown_image(&self) -> Option<(&RgbBuffer, Fitted)> {
-        Some((&self.image, self.fitted?))
-    }
-
     /// Owe every tile again: the terminal may have dropped them.
     pub(crate) fn forget(&mut self) {
         self.tiles.forget();
