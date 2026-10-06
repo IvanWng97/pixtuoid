@@ -2338,7 +2338,8 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             report.orphan_variants.push(name.to_string());
             continue;
         };
-        if variant.frame_ms() != base.frame_ms() {
+        // a single-frame base never steps, so no painter reads its `frame_ms`
+        if base.frames().len() > 1 && variant.frame_ms() != base.frame_ms() {
             report.unread_variant_timing.push(UnreadTiming {
                 name: name.to_string(),
                 field: UnreadField::FrameMs {
@@ -2500,12 +2501,14 @@ mod validation_floor_tests {
 
     /// A variant timed apart from its base is reported, each field its own
     /// warning; one that keeps its base's timing, or leaves the stride to it,
-    /// is not.
+    /// is not, and nor is a single-frame base's `frame_ms`, which nothing steps.
     #[test]
     fn a_variant_timed_apart_from_its_base_is_reported() {
         let pack = pack_with(
-            "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n\
-             [animations.\"walking@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=200\nstride=3\n\
+            "[animations.walking]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=100\nstride=2\n\
+             [animations.\"walking@2x\"]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=200\nstride=3\n\
+             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=600\n\
+             [animations.\"desk@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.typing]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.\"typing@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.\"typing@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n",
