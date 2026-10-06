@@ -140,6 +140,7 @@ mod tests {
     #[test]
     fn is_valid_version_rejects_corrupted() {
         assert!(!is_valid_version("v0.4.0"), "leading v is not semver");
+        assert!(!is_valid_version("0.5"), "semver needs the patch");
         assert!(!is_valid_version("garbage"));
         assert!(!is_valid_version(""));
     }
