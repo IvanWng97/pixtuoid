@@ -63,7 +63,10 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     jank: crate::tui::jank::Jank,
     /// What holds each frame's output and presents it whole; `None` writes
     /// straight to the backend.
-    frame_out: Option<Box<dyn crate::tui::Presents>>,
+    frame_out: Option<crate::tui::FrameOut>,
+    /// A frame was dropped unwritten, though ratatui's diff counts its cells
+    /// as shown: the next repaints everything.
+    redraw_owed: bool,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -231,6 +234,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             pack,
             jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
             frame_out: None,
+            redraw_owed: false,
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -352,7 +356,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// Hold each frame's output in `out` and present it whole.
-    pub(crate) fn present_through(&mut self, out: Box<dyn crate::tui::Presents>) {
+    pub(crate) fn present_through(&mut self, out: crate::tui::FrameOut) {
         self.frame_out = Some(out);
     }
 
@@ -857,23 +861,25 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         if let Some(out) = &self.frame_out {
             out.begin();
         }
-        let drawn = self.draw_frame(scene, pack, now);
+        let redrawn = if std::mem::take(&mut self.redraw_owed) {
+            self.redraw()
+        } else {
+            Ok(())
+        };
+        let drawn = redrawn.and_then(|()| self.draw_frame(scene, pack, now));
         self.follow_resize();
         // Presented even when the draw failed, so nothing stays held.
         let presenting = std::time::Instant::now();
         let presented = self.frame_out.as_ref().map(|out| out.present());
         let present = presenting.elapsed();
         if let Some(Err(e)) = presented {
-            // A full terminal: the frame is dropped, and each tile is owed
-            // again, as when one of its own writes failed.
+            // A full terminal: the frame is dropped, and the next repaints
+            // every cell and every tile.
             if e.kind() != std::io::ErrorKind::WouldBlock {
                 return Err(e.into());
             }
             tracing::warn!(error = %e, "frame write failed");
-            #[cfg(feature = "graphics")]
-            if let Some(cutaway) = &mut self.cutaway {
-                cutaway.forget();
-            }
+            self.redraw_owed = true;
         }
         drawn?;
         #[cfg(feature = "graphics")]

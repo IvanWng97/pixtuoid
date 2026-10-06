@@ -395,7 +395,6 @@ impl TileCutaway {
         let encoded =
             tracing::trace_span!("tiles.encode").in_scope(|| self.encoder().encode_all(&send));
         self.last.encode = begun.elapsed();
-        let begun = Instant::now();
         let mut sent = Vec::with_capacity(send.len());
         for (c, bytes) in send.into_iter().zip(encoded) {
             if wrote.is_err() {
@@ -408,7 +407,6 @@ impl TileCutaway {
             }
         }
         let flushed = wrote.and_then(|()| self.out.flush());
-        self.last.write = begun.elapsed();
         self.last.sent = sent.len();
         match flushed {
             Ok(()) => {

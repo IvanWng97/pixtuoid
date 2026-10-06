@@ -68,8 +68,6 @@ pub(crate) struct FrameSend {
     pub(crate) bytes: u64,
     /// Cutting and encoding them.
     pub(crate) encode: Duration,
-    /// Writing and flushing them.
-    pub(crate) write: Duration,
 }
 
 /// One over-interval frame's report at `level`, with what drew it.
@@ -83,9 +81,8 @@ macro_rules! report {
         });
         tracing::$level!(
             total = ms(total),
-            produce = ms(total.saturating_sub(send.encode + send.write + present)),
+            produce = ms(total.saturating_sub(send.encode + present)),
             encode = ms(send.encode),
-            write = ms(send.write),
             present = ms(present),
             dirty = send.dirty.name(),
             fresh = send.fresh,
@@ -259,7 +256,6 @@ mod tests {
                 sent: 1275,
                 bytes: 1_400_000,
                 encode: Duration::from_millis(30),
-                write: Duration::from_millis(5),
             };
             jank.record(slow(), Duration::from_millis(7), Some(send), None, t0);
         });
@@ -276,7 +272,7 @@ mod tests {
         assert!(logged.contains("sent=1275"), "{logged}");
         assert!(logged.contains("fresh=true"), "{logged}");
         assert!(logged.contains("present=7"), "{logged}");
-        let produce = slow() - Duration::from_millis(30 + 5 + 7);
+        let produce = slow() - Duration::from_millis(30 + 7);
         assert!(
             logged.contains(&format!("produce={}", produce.as_secs_f64() * 1000.0)),
             "the present is not the scene's: {logged}"
