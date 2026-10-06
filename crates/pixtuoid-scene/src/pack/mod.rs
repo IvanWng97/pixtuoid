@@ -430,8 +430,8 @@ mod tests {
         for base in looped {
             let names = std::iter::once(base.to_string()).chain(
                 pack.density_variants()
-                    .into_iter()
-                    .map(|d| density_variant_name(base, d)),
+                    .iter()
+                    .map(|&d| density_variant_name(base, d)),
             );
             for name in names {
                 let Some(anim) = pack.animation(&name) else {

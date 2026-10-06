@@ -5693,7 +5693,7 @@ mod tests {
     fn the_north_sofas_backrest_starts_on_its_lit_ridge() {
         let pack = test_default_pack();
         let densities = std::iter::once(pixtuoid_core::sprite::format::Density::ONE)
-            .chain(pack.density_variants());
+            .chain(pack.density_variants().iter().copied());
         for d in densities {
             let name = if d == pixtuoid_core::sprite::format::Density::ONE {
                 MEETING_SOFA_NORTH_SPRITE.to_owned()

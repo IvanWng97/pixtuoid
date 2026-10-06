@@ -1074,8 +1074,8 @@ impl Pack {
     /// divides. Only a variant of a registered animation that redraws its base
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
-    pub fn density_variants(&self) -> Vec<Density> {
-        self.densities.clone()
+    pub fn density_variants(&self) -> &[Density] {
+        &self.densities
     }
 
     fn count_densities(&mut self) {
@@ -2762,7 +2762,7 @@ mod validation_floor_tests {
              [animations.\"plant@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         ));
-        assert_eq!(own.density_variants(), vec![d(2)]);
+        assert_eq!(own.density_variants(), [d(2)]);
         assert_eq!(own.max_density_variant(), d(2));
     }
 
