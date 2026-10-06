@@ -57,6 +57,9 @@ impl From<&pixtuoid_scene::cutaway::canvas::Dirty> for Painted {
 pub(crate) struct FrameSend {
     /// What of the scene it repainted.
     pub(crate) dirty: Painted,
+    /// Sent whole for a floor or slide the terminal had not shown, whatever
+    /// the scene repainted.
+    pub(crate) fresh: bool,
     /// The tiles whose pixels changed.
     pub(crate) changed: usize,
     /// The tiles written.
@@ -83,6 +86,7 @@ macro_rules! report {
             encode = ms(send.encode),
             write = ms(send.write),
             dirty = send.dirty.name(),
+            fresh = send.fresh,
             changed = send.changed,
             sent = send.sent,
             bytes = send.bytes,
@@ -237,6 +241,7 @@ mod tests {
             jank.record(Duration::from_millis(PAINT_FRAME_MS), None, None, t0);
             let send = FrameSend {
                 dirty: Painted::All,
+                fresh: true,
                 changed: 1275,
                 sent: 1275,
                 bytes: 1_400_000,
@@ -256,6 +261,7 @@ mod tests {
         );
         assert!(logged.contains("dirty=\"all\""), "{logged}");
         assert!(logged.contains("sent=1275"), "{logged}");
+        assert!(logged.contains("fresh=true"), "{logged}");
     }
 
     /// A frame past its interval but short of twice it is a debug `frame

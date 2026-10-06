@@ -236,11 +236,8 @@ impl TileCutaway {
         flash: FlashPhase,
         now: SystemTime,
     ) {
-        let dirty = if self.shown.replace(Shown::Floor(floor)) == Some(Shown::Floor(floor)) {
-            dirty
-        } else {
-            Dirty::All
-        };
+        let fresh = self.shown.replace(Shown::Floor(floor)) != Some(Shown::Floor(floor));
+        let dirty = if fresh { Dirty::All } else { dirty };
         let flashes = [flash; 2];
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&dirty);
@@ -252,7 +249,7 @@ impl TileCutaway {
             self.image.clone_from(frame);
             self.image_behind = false;
         }
-        self.stage(&dirty, flashes, now, fitted.scene.as_position());
+        self.stage(&dirty, fresh, flashes, now, fitted.scene.as_position());
     }
 
     /// Show both floors of `slide`, composed as it places them, and queue the
@@ -287,18 +284,27 @@ impl TileCutaway {
                 }
             }
         }
-        self.stage(&Dirty::All, flashes, now, fitted.scene.as_position());
+        self.stage(&Dirty::All, true, flashes, now, fitted.scene.as_position());
     }
 
     /// Queue the tiles of [`Self::image`], which shows `flashes`, that differ
     /// from what was sent, among those `dirty` reaches, once the cadence
     /// allows: at once for a new phase, so it shows as long as it lasts.
-    fn stage(&mut self, dirty: &Dirty, flashes: Flashes, now: SystemTime, origin: Position) {
+    /// `fresh` is reported as [`FrameSend::fresh`].
+    fn stage(
+        &mut self,
+        dirty: &Dirty,
+        fresh: bool,
+        flashes: Flashes,
+        now: SystemTime,
+        origin: Position,
+    ) {
         self.origin = origin;
         let changed =
             tracing::trace_span!("tiles.diff").in_scope(|| self.tiles.changed(&self.image, dirty));
         self.last = FrameSend {
             dirty: dirty.into(),
+            fresh,
             changed: changed.len(),
             ..FrameSend::default()
         };

@@ -313,6 +313,25 @@ fn a_frame_without_room_reports_no_transmits() {
     assert_eq!(cutaway(&r).sent, 0);
 }
 
+/// A whole send for a view the terminal had not shown says so, though the
+/// scene repainted nothing: a first frame, a floor, each slide frame.
+#[test]
+fn a_new_view_is_reported_fresh() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, _wire) = kitty(cols, rows);
+    let fresh = |r: &TuiRenderer<Window>| r.cutaway.as_ref().expect("a cutaway").last_send().fresh;
+    let scene = two_floor_scene();
+    let now = t0();
+    r.render(&scene, pack(), now).expect("render");
+    assert!(fresh(&r), "the first frame");
+    r.render(&scene, pack(), now).expect("render");
+    assert!(!fresh(&r), "the same floor again");
+    r.navigate_floor(1, now);
+    r.render(&scene, pack(), now + Duration::from_millis(1))
+        .expect("render");
+    assert!(r.transition().is_some() && fresh(&r), "a slide frame");
+}
+
 /// A frame the flash hold keeps back reports no transmits, not the last
 /// frame's, on a floor and sliding.
 #[test]
