@@ -102,11 +102,17 @@ def events(log, message):
 
 def causes(log):
     """The over-interval frames by what they were: Dirty kind, why the
-    cutaway repainted whole, and a strike."""
+    cutaway repainted whole, a view the terminal had not shown, and a
+    strike."""
     counts = {}
     for e in [*events(log, "frame slow"), *events(log, "frame jank")]:
         repaint = e.get("repaint", "None")
-        key = (e.get("dirty"), "repaint" if repaint != "None" else "-", "strike" if e.get("strike") == "true" else "-")
+        key = (
+            e.get("dirty"),
+            "repaint" if repaint != "None" else "-",
+            "fresh" if e.get("fresh") == "true" else "-",
+            "strike" if e.get("strike") == "true" else "-",
+        )
         counts[key] = counts.get(key, 0) + 1
     return sorted(counts.items(), key=lambda kv: -kv[1])
 
@@ -159,8 +165,8 @@ def main():
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} "
         f"run={args.run}: {frames} frames, worst window p99 {p99:.1f} ms, over {over} | log {log}"
     )
-    for (dirty, repaint, strike), n in causes(log):
-        print(f"  over-interval: {n:4} dirty={dirty} {repaint} {strike}")
+    for (dirty, *why), n in causes(log):
+        print(f"  over-interval: {n:4} dirty={dirty} {' '.join(why)}")
     failed = over > 0 or p99 > P99_MS
     print("FAIL" if failed else "PASS")
     sys.exit(1 if failed else 0)

@@ -298,6 +298,73 @@ fn the_encode_leaves_a_core_while_the_audio_handle_is_live() {
     assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 3);
 }
 
+/// A frame with no room for the image reports no transmits, not the last
+/// cutaway frame's.
+#[test]
+fn a_frame_without_room_reports_no_transmits() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.render(&office(), pack(), t0()).expect("render");
+    let cutaway = |r: &TuiRenderer<Window>| r.cutaway.as_ref().expect("a cutaway").last_send();
+    assert_ne!(cutaway(&r).sent, 0, "the first frame sent its tiles");
+    let (cols, rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(cols, rows);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_ne!(cutaway(&r).dirty, crate::tui::jank::Painted::All);
+    assert_eq!(cutaway(&r).sent, 0);
+}
+
+/// A whole send for a view the terminal had not shown says so, though the
+/// scene repainted nothing: a first frame, a floor, each slide frame.
+#[test]
+fn a_new_view_is_reported_fresh() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, _wire) = kitty(cols, rows);
+    let fresh = |r: &TuiRenderer<Window>| r.cutaway.as_ref().expect("a cutaway").last_send().fresh;
+    let scene = two_floor_scene();
+    let now = t0();
+    r.render(&scene, pack(), now).expect("render");
+    assert!(fresh(&r), "the first frame");
+    r.render(&scene, pack(), now).expect("render");
+    assert!(!fresh(&r), "the same floor again");
+    r.navigate_floor(1, now);
+    r.render(&scene, pack(), now + Duration::from_millis(1))
+        .expect("render");
+    assert!(r.transition().is_some() && fresh(&r), "a slide frame");
+}
+
+/// A frame the flash hold keeps back reports no transmits, not the last
+/// frame's, on a floor and sliding.
+#[test]
+fn a_held_frame_reports_no_transmits() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [dark, late, held, _] = held_frames(&strike);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let cutaway = |r: &TuiRenderer<Window>| r.cutaway.as_ref().expect("a cutaway").last_send();
+    for slide in [false, true] {
+        let (mut r, _wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
+        r.set_weather(strike.weather);
+        r.set_motion(pixtuoid_scene::anim::Motion::Full);
+        let scene = two_floor_scene();
+        if slide {
+            r.navigate_floor(1, dark);
+        }
+        for at in [dark, late] {
+            screen.at(at);
+            r.render(&scene, pack(), at).expect("render");
+        }
+        assert_ne!(cutaway(&r).sent, 0, "the late phase sent, slide {slide}");
+        screen.at(held);
+        r.render(&scene, pack(), held).expect("render");
+        assert_eq!(
+            cutaway(&r),
+            crate::tui::jank::FrameSend::default(),
+            "slide {slide}"
+        );
+        assert_eq!(r.transition().is_some(), slide);
+    }
+}
+
 /// Text and image never share a cell: the footer row stays text.
 #[test]
 fn placeholders_fill_the_scene_and_never_the_footer() {
