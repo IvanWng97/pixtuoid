@@ -242,10 +242,6 @@ Advisory backstops that surface risk but never gate:
   across branches swaps uplifted examples and builds one branch's types into
   another. Targets run to several GB each: check `df -h /` before parallel
   builds, and remove a PR's worktree and local branch once it merges.
-- **snapbox goldens escape a worktree** — `file!` resolves against the
-  outermost `Cargo.toml` ancestor, the main checkout (snapbox 1.2.2
-  `macros.rs:101-113`); run or overwrite them with
-  `CARGO_RUSTC_CURRENT_DIR=<worktree>`.
 - **Fold before opening** — a change to a surface an open PR already touches
   folds into it.
 - **The queue never idles** — it checks one batch at a time (`.mergify.yml`'s

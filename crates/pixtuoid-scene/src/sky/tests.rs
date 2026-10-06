@@ -1047,3 +1047,24 @@ fn a_strike_follows_every_start_on_a_moving_tier() {
         }
     }
 }
+
+/// The transition found starts at or after where the search did, opens on
+/// a pure weather, and is halfway into a different one at its middle.
+#[test]
+fn the_transition_found_changes_the_weather() {
+    let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let ms = |t: std::time::SystemTime| {
+        t.duration_since(std::time::UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_millis() as u64
+    };
+    for k in 0..40u64 {
+        let after = base + Duration::from_millis(k * 97_003);
+        let start = first_transition_after(after).expect("a transition");
+        assert!(start >= after, "{k}");
+        let before = WeatherPolicy::Clock.weather_at_ms(ms(start) - 1);
+        assert_eq!(before.from, before.to, "{k}: the slot ends pure");
+        let mid = WeatherPolicy::Clock.weather_at_ms(ms(start) + TRANSITION_MS / 2);
+        assert_ne!(mid.from, mid.to, "{k}: the weather changes");
+    }
+}

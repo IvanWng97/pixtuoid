@@ -883,47 +883,30 @@ mod tests {
         );
     }
 
+    /// A schema IS its committed contract. `just gen-contract` rewrites it and
+    /// the Raycast types generated from it.
+    fn assert_contract(schema: &schemars::Schema, file: &str) {
+        let generated = serde_json::to_string_pretty(schema).unwrap() + "\n";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../integrations/raycast/contract")
+            .join(file);
+        let committed = snapbox::Data::read_from(&path, Some(snapbox::data::DataFormat::Text));
+        snapbox::assert_data_eq!(generated, committed.raw());
+    }
+
     #[test]
     fn outcome_row_schema_matches_the_committed_contract() {
-        let schema = schemars::schema_for!(OutcomeRow);
-        let generated = serde_json::to_string_pretty(&schema).unwrap() + "\n";
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../integrations/raycast/contract/outcome-row.schema.json"
-        );
-        if std::env::var_os("UPDATE_CONTRACT_SCHEMA").is_some() {
-            let p = std::path::Path::new(path);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, &generated).unwrap();
-        }
-        let committed = std::fs::read_to_string(path).unwrap_or_default();
-        assert_eq!(
-            generated, committed,
-            "OutcomeRow schema drifted from the committed contract \
-             (integrations/raycast/contract/outcome-row.schema.json). \
-             Run `just gen-contract`, then regen + commit the raycast .d.ts."
+        assert_contract(
+            &schemars::schema_for!(OutcomeRow),
+            "outcome-row.schema.json",
         );
     }
 
     #[test]
     fn source_status_schema_matches_the_committed_contract() {
-        let schema = schemars::schema_for!(SourceStatus);
-        let generated = serde_json::to_string_pretty(&schema).unwrap() + "\n";
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../integrations/raycast/contract/source-status.schema.json"
-        );
-        if std::env::var_os("UPDATE_CONTRACT_SCHEMA").is_some() {
-            let p = std::path::Path::new(path);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, &generated).unwrap();
-        }
-        let committed = std::fs::read_to_string(path).unwrap_or_default();
-        assert_eq!(
-            generated, committed,
-            "SourceStatus schema drifted from the committed contract \
-             (integrations/raycast/contract/source-status.schema.json). \
-             Run `just gen-contract`, then regen + commit the raycast .d.ts."
+        assert_contract(
+            &schemars::schema_for!(SourceStatus),
+            "source-status.schema.json",
         );
     }
 

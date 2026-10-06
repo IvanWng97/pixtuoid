@@ -840,7 +840,7 @@ gen-readme:
 [doc('Regenerate the --json contract: the SourceStatus + OutcomeRow JSON Schemas (Rust) + the Raycast TS types')]
 [group('gen')]
 gen-contract:
-    UPDATE_CONTRACT_SCHEMA=1 just test -p pixtuoid --lib schema_matches_the_committed_contract
+    SNAPSHOTS=overwrite just test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
 # Regenerate the committed drift-surface fragments — what each crate declares it
@@ -852,13 +852,13 @@ gen-contract:
 [doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
 [group('gen')]
 gen-drift-surface:
-    UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
-    UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
+    SNAPSHOTS=overwrite just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
+    SNAPSHOTS=overwrite just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
 
 [doc("Regenerate the cutaway's pinned-frame digests (crates/pixtuoid-scene/src/cutaway/canvas.golden)")]
 [group('gen')]
 gen-cutaway-golden:
-    UPDATE_CUTAWAY_GOLDEN=1 just test -p pixtuoid-scene --lib the_canvas_paints_the_pinned_frames
+    SNAPSHOTS=overwrite just test -p pixtuoid-scene --lib the_canvas_paints_the_pinned_frames
 
 # Pure node:builtins — no npm ci.
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]

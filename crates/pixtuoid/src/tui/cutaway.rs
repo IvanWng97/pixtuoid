@@ -442,6 +442,12 @@ impl TileCutaway {
         self.flash = FlashHold::on(screen);
     }
 
+    /// Split a frame's encode across `cores` whatever the machine has.
+    #[cfg(test)]
+    pub(crate) fn split_across(&mut self, cores: usize) {
+        self.threads = cores;
+    }
+
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
     /// is drawn: kitty's placeholders, or for SIXEL and iTerm2 a
     /// [`SENTINEL`] ratatui's diff skips, so the flush never blanks the
@@ -523,6 +529,12 @@ impl TileCutaway {
 /// their encode.
 pub(crate) const TILES_PER_THREAD: usize = 32;
 
+/// The threads a frame of `tiles` splits across on `cores`: one a
+/// [`TILES_PER_THREAD`] share, never more than the cores.
+fn threads_for(tiles: usize, cores: usize) -> usize {
+    cores.min(tiles / TILES_PER_THREAD).max(1)
+}
+
 /// A frame's tiles to escapes, each independent of the others.
 #[derive(Clone, Copy)]
 struct Encoder<'a> {
@@ -539,7 +551,7 @@ impl Encoder<'_> {
     /// Each of `send`'s escapes, in its order, split across as many threads
     /// as it has [`TILES_PER_THREAD`] shares, up to the cores.
     fn encode_all(self, send: &[Changed]) -> Vec<Option<Vec<u8>>> {
-        let threads = self.threads.min(send.len() / TILES_PER_THREAD).max(1);
+        let threads = threads_for(send.len(), self.threads);
         if threads == 1 {
             return send.iter().map(|&c| self.encode(c)).collect();
         }
@@ -597,4 +609,20 @@ fn image_cell(buf: &mut Buffer, scene: Rect, col: u16, row: u16) -> Option<&mut 
         y: scene.y.saturating_add(row),
     };
     scene.contains(at).then(|| buf.cell_mut(at)).flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TILES_PER_THREAD, threads_for};
+
+    /// A frame of two shares splits across two cores, one share short of
+    /// that stays on one thread, and one core never splits: a serial
+    /// regression fails here, where an instruction count can't see it.
+    #[test]
+    fn a_frame_of_two_shares_splits_across_the_cores() {
+        assert_eq!(threads_for(2 * TILES_PER_THREAD, 8), 2);
+        assert_eq!(threads_for(2 * TILES_PER_THREAD - 1, 8), 1);
+        assert_eq!(threads_for(100 * TILES_PER_THREAD, 8), 8);
+        assert_eq!(threads_for(100 * TILES_PER_THREAD, 1), 1);
+    }
 }
