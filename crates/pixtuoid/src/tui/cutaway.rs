@@ -108,7 +108,8 @@ pub(crate) struct TileCutaway {
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
-    /// The cores a frame's encode may split across.
+    /// The cores a frame's encode may split across: all but one, which the
+    /// audio thread's track synthesis keeps.
     threads: usize,
 }
 
@@ -168,7 +169,8 @@ impl TileCutaway {
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             torn: false,
-            threads: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+            threads: std::thread::available_parallelism()
+                .map_or(1, |n| n.get().saturating_sub(1).max(1)),
         }
     }
 
