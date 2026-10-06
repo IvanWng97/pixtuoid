@@ -2,7 +2,7 @@ name: bench
 
 # ON-DEMAND only, mirroring mutants.yml: a dispatch runs ONLY this, and nothing
 # `needs:` it, so a slow run gates nothing. Shared-runner wall-clock is noise
-# (criterion's own FAQ says not to rely on CI numbers), so this exists for
+# (https://bheisler.github.io/criterion.rs/book/faq.html), so this exists for
 # trend evidence on request — the authoritative numbers are `just bench` runs
 # on a quiet local machine, recorded in commit messages. It still earns its
 # keep beside codspeed.yml: an x86 Linux wall-clock run is the one signal that
