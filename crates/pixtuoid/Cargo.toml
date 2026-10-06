@@ -67,6 +67,7 @@ which              = "8"
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
+semver             = "1"
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays
 # window-free): winit is the frameless always-on-top window + main-thread event
 # loop, softbuffer the CPU blit of the office RgbBuffer into it (no GPU).
@@ -183,12 +184,6 @@ assets = [
     ["../*/fonts/**/*.txt", "usr/share/doc/pixtuoid/licenses/", "644"],
 ]
 extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each running Claude Code session appears as an animated sprite in a top-down ASCII office."
-
-# The spike drives `ratatui-image` directly, so it only builds when the
-# dependency is in the graph.
-[[example]]
-name              = "graphics_spike"
-required-features = ["graphics"]
 
 [[example]]
 name              = "pacing"

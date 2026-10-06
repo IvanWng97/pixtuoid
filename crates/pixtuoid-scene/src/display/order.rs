@@ -1,32 +1,12 @@
-//! Back-to-front ordering for the display list.
+//! Back-to-front ordering for the display list: the painter's algorithm keyed
+//! on each piece's base row, then its [`Layer`].
 //!
-//! The painter's algorithm needs a total order, and the office does not hand it
-//! one: what it hands over is a set of PAIRWISE facts ("this desk is behind that
-//! walker"). Deriving the order from a dependency graph rather than from a
-//! single sort key is the standard treatment — a sprite is a node, "must be
-//! drawn behind" is an edge, and a topological sort produces the display list.
-//!
-//! ## Why not just sort by the base row
-//!
-//! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the
-//! base row and then the layer, a total order, so the graph is acyclic by
-//! construction and a plain sort produces the same list. The graph earns its
-//! place two other ways:
-//!
-//! - `check_order` (test-only) turns every pairwise fact into an assertion. While
-//!   [`Span::behind`] is acyclic it guards the sort itself; it becomes the
-//!   detector the day an edge can contradict the base-row order.
-//! - The relation is pairwise, so it still holds if the draw order ever stops
-//!   being a function of screen y (elevation would do that), where a single key
-//!   cannot express it.
-//!
-//! ## The one thing a graph cannot fix
+//! ## The one thing a key cannot fix
 //!
 //! A LONG object has no meaningful base row — a room's east wall runs the whole
 //! height of the room, so its south edge would sort it in front of everything
-//! inside. No predicate rescues that; the object has to be SPLIT into pieces
-//! each of which does have a base row (the canonical "split a block to prevent
-//! a cycle"). `compose.rs` splits wall runs; this module assumes it happened, and
+//! inside. The object has to be SPLIT into pieces each of which does have a
+//! base row. `compose.rs` splits wall runs; this module assumes it happened, and
 //! `no_wall_segment_is_taller_than_the_cast` pins that no segment is tall
 //! enough to straddle a figure.
 
@@ -124,110 +104,29 @@ impl Span {
     fn key(self) -> (u16, Layer) {
         (self.depth, self.layer)
     }
-
-    fn overlaps_x(self, other: Self) -> bool {
-        self.x0 <= other.x1 && other.x0 <= self.x1
-    }
-
-    /// Whether `self` must be drawn BEFORE `other` — i.e. it is further from the
-    /// viewer where their columns overlap.
-    ///
-    /// Pieces that do not overlap horizontally impose no constraint at all,
-    /// which is what keeps the graph sparse: a desk on the west wall and a
-    /// walker on the east one can be drawn in either order.
-    fn behind(self, other: Self) -> bool {
-        self.overlaps_x(other) && self.key() < other.key()
-    }
 }
 
-/// Order `items` back to front.
-///
-/// Kahn's algorithm over the [`Span::behind`] graph, with the ready set kept in
-/// (base row, layer) order so the result is deterministic (a topological order
-/// is not unique, and a render that reshuffles equal-depth pieces between
-/// frames flickers).
-///
-/// A cycle cannot arise from the current predicate, so the recovery arm is a
-/// backstop rather than a live path: the pieces still in the graph are emitted
-/// in (base row, layer) order. That degrades to a plain sort instead of
-/// dropping them, which is the one outcome a renderer must never have.
-pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
-    let n = items.len();
-    if n <= 1 {
-        return items.into_iter().map(|(_, t)| t).collect();
-    }
-    let spans: Vec<Span> = items.iter().map(|(s, _)| *s).collect();
-
-    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
-    let mut indegree = vec![0usize; n];
-    for a in 0..n {
-        for b in 0..n {
-            if a != b && spans[a].behind(spans[b]) {
-                edges[a].push(b);
-                indegree[b] += 1;
-            }
-        }
-    }
-
-    // A min-heap on (base row, layer, index): among pieces that are mutually
-    // unconstrained the shallower one wins, so the result matches the plain
-    // sort the office produces today; the index is the fn doc's determinism.
-    use std::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    let mut ready: BinaryHeap<Reverse<((u16, Layer), usize)>> = (0..n)
-        .filter(|&i| indegree[i] == 0)
-        .map(|i| Reverse((spans[i].key(), i)))
-        .collect();
-
-    let mut out = Vec::with_capacity(n);
-    let mut drawn = vec![false; n];
-    while let Some(Reverse((_, i))) = ready.pop() {
-        drawn[i] = true;
-        out.push(i);
-        for &j in &edges[i] {
-            indegree[j] -= 1;
-            if indegree[j] == 0 {
-                ready.push(Reverse((spans[j].key(), j)));
-            }
-        }
-    }
-
-    if out.len() < n {
-        // Unreachable with the current predicate; see the fn doc.
-        debug_assert!(
-            false,
-            "cutaway depth sort found a cycle among {} pieces",
-            n - out.len()
-        );
-        let mut rest: Vec<usize> = (0..n).filter(|&i| !drawn[i]).collect();
-        rest.sort_by_key(|&i| (spans[i].key(), i));
-        out.extend(rest);
-    }
-
-    let mut slots: Vec<Option<T>> = items.into_iter().map(|(_, t)| Some(t)).collect();
-    out.into_iter().filter_map(|i| slots[i].take()).collect()
+/// Order `items` back to front: by base row, then layer. The sort is stable, so
+/// pieces at one (row, layer) keep the order they were collected in — a render
+/// that reshuffled them between frames would flicker.
+pub(crate) fn depth_sort<T>(mut items: Vec<(Span, T)>) -> Vec<T> {
+    items.sort_by_key(|(span, _)| span.key());
+    items.into_iter().map(|(_, t)| t).collect()
 }
 
-/// Every pairwise "must be behind" fact the geometry states, checked against the
-/// order actually produced.
-///
-/// A correct sort satisfies every edge of an acyclic [`Span::behind`], so today
-/// this guards [`depth_sort`] itself; an edge a future predicate (elevation)
-/// leaves unsatisfied comes back as the returned pair, a failing test rather
-/// than a render nobody looks at.
-///
-/// Test-only deliberately. It is O(n²) on top of the sort's own O(n²), which is
-/// affordable once over a fixture and not per frame; `compose.rs`'s tests drive it over
-/// a REAL laid-out office, which is the case a synthetic fixture would miss.
+/// The first pair drawn in the wrong order where it can be seen: their columns
+/// overlap, yet the one further from the viewer is drawn last. `compose.rs`'s
+/// tests drive it over a REAL laid-out office.
 #[cfg(test)]
 pub(crate) fn check_order(spans: &[Span], order: &[usize]) -> Option<(usize, usize)> {
     let mut position = vec![0usize; spans.len()];
     for (slot, &i) in order.iter().enumerate() {
         position[i] = slot;
     }
+    let behind = |a: Span, b: Span| a.x0 <= b.x1 && b.x0 <= a.x1 && a.key() < b.key();
     for a in 0..spans.len() {
         for b in 0..spans.len() {
-            if a != b && spans[a].behind(spans[b]) && position[a] > position[b] {
+            if a != b && behind(spans[a], spans[b]) && position[a] > position[b] {
                 return Some((a, b));
             }
         }
@@ -238,14 +137,48 @@ pub(crate) fn check_order(spans: &[Span], order: &[usize]) -> Option<(usize, usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn span(x: u16, y: u16, w: u16, h: u16) -> Span {
         Span::new(x, y, w, h, 0)
     }
 
-    /// The canonical rule, stated as a test: the piece whose FEET are further
-    /// north is drawn first. Sorting by the sprite's top instead is the classic
-    /// error — a tall piece and a short one standing on the same row would swap.
+    fn any_span() -> impl Strategy<Value = Span> {
+        (0u16..60, 0u16..60, 1u16..12, 1u16..12, 0u16..3, 0u8..3).prop_map(
+            |(x, y, w, h, below, layer)| {
+                Span::new(x, y, w, h, below).with_layer(match layer {
+                    0 => Layer::Under,
+                    1 => Layer::Figure,
+                    _ => Layer::Over,
+                })
+            },
+        )
+    }
+
+    proptest! {
+        /// The order is fully determined: (base row, layer) ascending, pieces at
+        /// one key in the order they came — so every pair whose columns overlap
+        /// is drawn back to front.
+        #[test]
+        fn the_order_is_row_then_layer_then_arrival(
+            spans in prop::collection::vec(any_span(), 0..40),
+        ) {
+            let tagged: Vec<(Span, usize)> = spans.iter().copied().zip(0..).collect();
+            let order = depth_sort(tagged);
+            prop_assert_eq!(order.len(), spans.len());
+            for pair in order.windows(2) {
+                let (a, b) = (pair[0], pair[1]);
+                prop_assert!(
+                    (spans[a].key(), a) < (spans[b].key(), b),
+                    "{a} drawn before {b} out of (row, layer, arrival) order"
+                );
+            }
+            prop_assert_eq!(check_order(&spans, &order), None);
+        }
+    }
+
+    /// The piece whose FEET are further north is drawn first; sorting by the
+    /// sprite's top would swap a tall piece and a short one on the same row.
     #[test]
     fn a_piece_whose_feet_are_further_north_is_drawn_first() {
         // Same base row region, wildly different heights: only the feet matter.
@@ -253,43 +186,6 @@ mod tests {
         let short = span(10, 18, 4, 3); // feet at 20
         let out = depth_sort(vec![(short, "short"), (tall, "tall")]);
         assert_eq!(out, vec!["tall", "short"]);
-    }
-
-    #[test]
-    fn pieces_that_do_not_overlap_horizontally_impose_no_order() {
-        let west = span(0, 50, 4, 4);
-        let east = span(90, 0, 4, 4);
-        // West has the SOUTHERN feet, so a pure base-row sort would put it last.
-        // They never overlap, so either order renders identically — what the
-        // test pins is that the result is total.
-        let out = depth_sort(vec![(west, "west"), (east, "east")]);
-        assert_eq!(out.len(), 2);
-        assert!(out.contains(&"west") && out.contains(&"east"));
-    }
-
-    #[test]
-    fn every_pairwise_constraint_holds_for_a_dense_office() {
-        // A pod grid plus walkers between the rows — the shape the office
-        // actually produces, at a size that exercises real overlap.
-        let mut items = Vec::new();
-        let mut spans = Vec::new();
-        for row in 0..6u16 {
-            for col in 0..5u16 {
-                let s = span(col * 14, row * 17, 14, 8);
-                spans.push(s);
-                items.push((s, spans.len() - 1));
-                let w = span(col * 14 + 3, row * 17 + 4, 8, 12);
-                spans.push(w);
-                items.push((w, spans.len() - 1));
-            }
-        }
-        let order = depth_sort(items);
-        assert_eq!(order.len(), spans.len());
-        assert_eq!(
-            check_order(&spans, &order),
-            None,
-            "the produced order must satisfy every 'is behind' fact"
-        );
     }
 
     /// Why splitting is mandatory: a 40-row wall run and a thing standing halfway
