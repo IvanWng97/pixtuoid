@@ -117,6 +117,7 @@ unicode-segmentation = "1"
 clap               = { version = "4", features = ["derive"] }
 palette            = { version = "0.7", default-features = false, features = ["std"] }
 chrono             = { version = "0.4", default-features = false }
+foldhash           = { version = "0.2", default-features = false }
 image              = { version = "0.25", default-features = false, features = ["png"] }
 libc               = "0.2"
 # 0.61 to match the major tokio already pulls (via mio) on Windows — a second
