@@ -41,8 +41,8 @@ GEOMETRY = {
     "4": (214, 64, 4, 8),
     "classic": (202, 50, 17, 41),
 }
-# Local dusk, when `nightfall` starts (`sky::SUN_SET_H`), a few minutes early.
-DUSK = datetime.time(19, 55)
+# Local dusk, when `nightfall` starts (`sky::SUN_SET_H`).
+DUSK = datetime.time(20, 0)
 # The lead into the storm transition: a boot and some steady frames first.
 LEAD_S = 10
 
