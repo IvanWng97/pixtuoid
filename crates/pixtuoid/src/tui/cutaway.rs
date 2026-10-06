@@ -108,9 +108,10 @@ pub(crate) struct TileCutaway {
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
-    /// The cores a frame's encode may split across: all but one, which the
-    /// audio thread's track synthesis keeps.
-    threads: usize,
+    /// The machine's cores.
+    cores: usize,
+    /// Whether an audio thread is up to synthesize tracks beside the encode.
+    audio: bool,
 }
 
 /// A staged write: the tiles it sends and the flashes they show, so only a
@@ -169,8 +170,8 @@ impl TileCutaway {
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             torn: false,
-            threads: std::thread::available_parallelism()
-                .map_or(1, |n| n.get().saturating_sub(1).max(1)),
+            cores: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+            audio: false,
         }
     }
 
@@ -409,8 +410,14 @@ impl TileCutaway {
             base: self.base,
             tmux: self.tmux,
             origin: self.origin,
-            threads: self.threads,
+            threads: encode_cores(self.cores, self.audio),
         }
+    }
+
+    /// Whether an audio thread is up: while one is, the encode leaves it a
+    /// core.
+    pub(crate) fn share_with_audio(&mut self, audio: bool) {
+        self.audio = audio;
     }
 
     /// Set `in_grid` where the unwind would read the process's own.
@@ -429,7 +436,7 @@ impl TileCutaway {
     /// Split a frame's encode across `cores` whatever the machine has.
     #[cfg(test)]
     pub(crate) fn split_across(&mut self, cores: usize) {
-        self.threads = cores;
+        self.cores = cores;
     }
 
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
@@ -507,6 +514,17 @@ impl TileCutaway {
 /// A thread's least share of a frame's tiles: below it, its spawn outweighs
 /// their encode.
 pub(crate) const TILES_PER_THREAD: usize = 32;
+
+/// The cores a frame's encode may take of `cores`: all but one while an
+/// `audio` thread is up, which synthesizes a track for seconds at its start
+/// and at a swap.
+fn encode_cores(cores: usize, audio: bool) -> usize {
+    if audio {
+        cores.saturating_sub(1).max(1)
+    } else {
+        cores
+    }
+}
 
 /// The threads a frame of `tiles` splits across on `cores`: one a
 /// [`TILES_PER_THREAD`] share, never more than the cores.
@@ -592,7 +610,17 @@ fn image_cell(buf: &mut Buffer, scene: Rect, col: u16, row: u16) -> Option<&mut 
 
 #[cfg(test)]
 mod tests {
-    use super::{TILES_PER_THREAD, threads_for};
+    use super::{TILES_PER_THREAD, encode_cores, threads_for};
+
+    /// The encode leaves a core only to a live audio thread: a muted user,
+    /// who has none, keeps every core, two of them on a 2-core host.
+    #[test]
+    fn the_encode_leaves_a_core_only_to_live_audio() {
+        assert_eq!(encode_cores(2, false), 2);
+        assert_eq!(encode_cores(2, true), 1);
+        assert_eq!(encode_cores(10, true), 9);
+        assert_eq!(encode_cores(1, true), 1);
+    }
 
     /// A frame of two shares splits across two cores, one share short of
     /// that stays on one thread, and one core never splits: a serial

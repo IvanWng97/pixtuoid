@@ -59,6 +59,10 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     /// The pack every floor's raster draws with, which each frame's must be.
     pack: Arc<Pack>,
+    /// Encode as if an audio thread were up, as the pacing bench's lofi run
+    /// has one with no device.
+    #[cfg(feature = "graphics")]
+    audio_assumed: bool,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -224,6 +228,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             terminal,
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
+            #[cfg(feature = "graphics")]
+            audio_assumed: false,
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -260,6 +266,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     #[cfg(feature = "graphics")]
     pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
         self.cutaway = Some(cutaway);
+    }
+
+    /// Encode as if an audio thread were up, for the pacing bench.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn assume_audio(&mut self) {
+        self.audio_assumed = true;
     }
 
     /// Paint and send the next frame whole, for the pacing bench's worst case.
@@ -795,6 +807,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
+            cutaway.share_with_audio(self.chrome.audio.is_enabled() || self.audio_assumed);
             let size = self.terminal.size()?;
             let scene_area =
                 crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));
