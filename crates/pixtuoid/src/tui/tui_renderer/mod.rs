@@ -67,6 +67,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// A frame was dropped unwritten, though ratatui's diff counts its cells
     /// as shown: the next repaints everything.
     redraw_owed: bool,
+    /// The terminal refused the last frame: a run of refusals warns once.
+    refusing: bool,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -235,6 +237,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
             frame_out: None,
             redraw_owed: false,
+            refusing: false,
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -883,13 +886,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 cutaway.lost();
             }
         }
+        let refused = std::mem::replace(&mut self.refusing, presented.is_err());
         if let Err(e) = presented {
             // A full terminal: the frame is dropped, and the next repaints
             // every cell and every tile.
             if e.kind() != std::io::ErrorKind::WouldBlock {
                 return Err(e.into());
             }
-            tracing::warn!(error = %e, "frame write failed");
+            if refused {
+                tracing::debug!(error = %e, "frame write failed");
+            } else {
+                tracing::warn!(error = %e, "frame write failed");
+            }
             self.redraw_owed = true;
         }
         drawn?;

@@ -712,7 +712,7 @@ pub(crate) static IN_GRID: std::sync::atomic::AtomicBool =
 #[cfg(feature = "graphics")]
 pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
     if drew {
-        [kitty::ST, b"\x1b[2J"].concat()
+        [ST, b"\x1b[2J"].concat()
     } else {
         Vec::new()
     }

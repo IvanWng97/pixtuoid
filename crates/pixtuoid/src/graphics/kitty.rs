@@ -128,10 +128,8 @@ pub(crate) fn unwind() -> Vec<u8> {
 
 /// An ST that ends an escape a failed write cut short, then [`delete`].
 pub(crate) fn unwind_for(ids: RangeInclusive<u32>, tmux: bool) -> Vec<u8> {
-    [ST, &delete(ids, tmux)].concat()
+    [super::ST, &delete(ids, tmux)].concat()
 }
-
-pub(crate) use super::ST;
 
 /// Deletes the images `ids` names and frees their data ("Deleting images":
 /// `d=R` takes ids from `x` to `y`, both included).

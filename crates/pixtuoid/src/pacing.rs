@@ -333,6 +333,41 @@ mod tests {
         );
     }
 
+    /// A terminal that stays full warns once, not a line a frame.
+    #[test]
+    fn a_run_of_refused_frames_warns_once() {
+        let pack =
+            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("the pack"));
+        let (mut r, wire) = super::renderer(
+            Protocol::Kitty,
+            120,
+            40,
+            (8, 16),
+            vec![],
+            std::sync::Arc::clone(&pack),
+            false,
+        )
+        .expect("a cutaway");
+        let scene = pixtuoid_core::SceneState::uniform(8);
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let logged = crate::test_capture::capture(|| {
+            for _ in 0..3 {
+                wire.refuse_next();
+                r.render(&scene, &pack, now)
+                    .expect("a full terminal is no error");
+            }
+            r.render(&scene, &pack, now).expect("render");
+            wire.refuse_next();
+            r.render(&scene, &pack, now)
+                .expect("a full terminal is no error");
+        });
+        let warns = logged
+            .lines()
+            .filter(|l| l.contains("frame write failed") && l.contains(" WARN "))
+            .count();
+        assert_eq!(warns, 2, "one per run of refusals: {logged}");
+    }
+
     /// The bench measures every protocol the cutaway speaks: a new
     /// `ImageProtocol` fails to compile here until it has a `Protocol`, whose
     /// `ALL` entry, beside the enum, is by hand.
