@@ -448,7 +448,7 @@ fn dispatch_key(
     }
 }
 
-pub type Term = Terminal<CrosstermBackend<FrameOut>>;
+pub(crate) type Term = Terminal<CrosstermBackend<FrameOut>>;
 
 /// The terminal's output, held a frame at a time, from [`FrameOut::begin`] to
 /// [`FrameOut::present`]: the frame's text and images reach the terminal in
@@ -457,7 +457,7 @@ pub type Term = Terminal<CrosstermBackend<FrameOut>>;
 /// through. Clones share one buffer, so the text and the images interleave
 /// in the order they were written.
 #[derive(Clone)]
-pub struct FrameOut(Arc<std::sync::Mutex<Held>>);
+pub(crate) struct FrameOut(Arc<std::sync::Mutex<Held>>);
 
 impl std::fmt::Debug for FrameOut {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -489,7 +489,7 @@ const END_SYNC: &[u8] = b"\x1b[?2026l";
 
 impl FrameOut {
     /// `out`, a frame at a time; inside a synchronized update when `sync`.
-    pub fn new(out: impl std::io::Write + Send + 'static, sync: bool) -> Self {
+    pub(crate) fn new(out: impl std::io::Write + Send + 'static, sync: bool) -> Self {
         Self(Arc::new(std::sync::Mutex::new(Held {
             out: Box::new(out),
             frame: Vec::new(),
@@ -1537,7 +1537,9 @@ mod teardown_tests {
     }
 
     /// Every exit, the panic hook's included, first ends a synchronized
-    /// update a cut-short frame may have left open.
+    /// update a cut-short frame may have left open. Unix-only for the same
+    /// console-API reason as `LEAVE_ALT_SCREEN` above.
+    #[cfg(unix)]
     #[test]
     fn the_unwind_first_ends_a_synchronized_update() {
         let mut buf: Vec<u8> = Vec::new();

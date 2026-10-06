@@ -223,6 +223,7 @@ pub fn query_truecolor(timeout: std::time::Duration) -> Truecolor {
 /// answers the second, so its reply ends the wait either way
 /// (<https://github.com/contour-terminal/vt-extensions/blob/master/synchronized-output.md>,
 /// "Feature detection").
+#[cfg(unix)]
 const SYNC_OUTPUT_PROBE: &[u8] = b"\x1b[?2026$p\x1b[c";
 
 /// Whether the terminal holds a frame between `CSI ? 2026 h` and `CSI ? 2026 l`
@@ -248,6 +249,7 @@ pub(crate) fn query_sync_output(_timeout: std::time::Duration) -> bool {
 }
 
 /// A DA1 reply, `CSI ? Ps ; ... c`, has arrived.
+#[cfg(any(unix, test))]
 fn da1_answered(reply: &[u8]) -> bool {
     reply.windows(3).enumerate().any(|(i, w)| {
         w == b"\x1b[?"
@@ -259,6 +261,7 @@ fn da1_answered(reply: &[u8]) -> bool {
 }
 
 /// The reply carries mode 2026's DECRPM as set (1) or reset (2).
+#[cfg(any(unix, test))]
 fn sync_output_reported(reply: &[u8]) -> bool {
     [b"\x1b[?2026;1$y", b"\x1b[?2026;2$y"]
         .iter()
