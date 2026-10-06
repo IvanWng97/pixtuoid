@@ -727,14 +727,20 @@ mod tests {
     /// without a stride slides its feet too.
     #[test]
     fn a_creature_walk_without_a_stride_is_flagged() {
-        for (walk, stride) in [
-            ("cat_walk", "stride   = 2\n"),
-            ("lobster_walk", "stride   = 6\n"),
-        ] {
-            let manifest = format!(
-                "[animations.{walk}]\nframes   = [\"{walk}_0.sprite\", \"{walk}_1.sprite\"]\nframe_ms = 250\n"
-            );
-            let pack = test_pack_declaring(&format!("{manifest}{stride}"), &manifest);
+        for (walk, stride) in [("cat_walk", 2), ("lobster_walk", 6)] {
+            // its own table, header through stride: a build without
+            // `cutaway-assets` drops the density variant's after it
+            let line = format!("stride   = {stride}\n");
+            let from = BUNDLED_PACK_TOML
+                .find(&format!("[animations.{walk}]\n"))
+                .expect("the manifest declares the walk");
+            let to = from
+                + BUNDLED_PACK_TOML[from..]
+                    .find(&line)
+                    .expect("with its stride")
+                + line.len();
+            let table = &BUNDLED_PACK_TOML[from..to];
+            let pack = test_pack_declaring(table, &table.replacen(&line, "", 1));
             assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
         }
     }

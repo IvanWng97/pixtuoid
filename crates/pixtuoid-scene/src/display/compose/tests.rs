@@ -524,6 +524,7 @@ fn chair_over_person(
             0.0,
             Motion::Full.timing(std::time::UNIX_EPOCH),
         ),
+        &mut crate::clouds::CloudCache::default(),
     );
     let (person, person_span) = order
         .iter()
@@ -844,6 +845,7 @@ fn a_sitters_chair_casts_the_shadow_they_do_not() {
                 0.0,
                 Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
+            &mut crate::clouds::CloudCache::default(),
         ) {
             let PieceKind::Character {
                 ref figure,
@@ -1030,6 +1032,7 @@ pub(crate) fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> Di
         &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
         crate::floor::FloorMeta::ground(),
         quiet_board(),
+        &mut crate::clouds::CloudCache::default(),
     )
 }
 

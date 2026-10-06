@@ -766,13 +766,14 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         let list = crate::display::compose(
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
+            &mut crate::clouds::CloudCache::default(),
         );
         let anchors: Vec<_> = list.badges().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -926,7 +927,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1081,7 +1082,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1759,6 +1760,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         floor: crate::floor::FloorMeta::ground(),
         walks: &walks,
         debug_walkable: false,
+        cloud_cache: &mut crate::clouds::CloudCache::default(),
     };
     let lights = crate::lighting::Lights::of(
         layout,
@@ -3633,6 +3635,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            cloud_cache: &mut crate::clouds::CloudCache::default(),
         },
         &frame,
     );
@@ -3977,6 +3980,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                cloud_cache: &mut crate::clouds::CloudCache::default(),
             },
             &frame,
         );
@@ -5304,6 +5308,7 @@ fn paint_drawn(
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            cloud_cache: &mut crate::clouds::CloudCache::default(),
         },
         frame,
     )
@@ -6127,6 +6132,7 @@ fn the_outside_reaches_only_the_glass() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                cloud_cache: &mut crate::clouds::CloudCache::default(),
             },
             &frame,
         );
@@ -6151,6 +6157,7 @@ fn the_outside_reaches_only_the_glass() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            cloud_cache: &mut crate::clouds::CloudCache::default(),
         };
         let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
         let lights = Lights::of(
@@ -6270,6 +6277,7 @@ fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                cloud_cache: &mut crate::clouds::CloudCache::default(),
             },
             &frame,
         );

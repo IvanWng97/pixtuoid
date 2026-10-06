@@ -24,7 +24,7 @@ const _: () = assert!(2 * DESK_LAMP_RADIUS < crate::layout::desk_furniture_def()
 /// The desk lamp's pool at full dark, as a share of the lamp's own level.
 const DESK_LAMP_MAX: f32 = 0.42;
 /// The standby screen's ceiling. At parity with [`DESK_LAMP_MAX`] the lamp
-/// pool washes the desk's west half out.
+/// pool washes out the back-turned desk's east half, its lamp's side.
 pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
 /// Where each facing's desk lamp bulb hangs from its desk's point, as the 1x
 /// art the pack draws there marks it ([`crate::pack::desk_bulb_offset`]);
