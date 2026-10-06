@@ -31,7 +31,8 @@ use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
 use pixtuoid_core::sprite::format::{
-    DensityMismatch, FrameCountMismatch, MissingKey, MissingMark, load_pack,
+    DensityMismatch, FrameCountMismatch, MissingKey, MissingMark, OffBeatLoop, UnreadTiming,
+    load_pack,
 };
 use pixtuoid_core::sprite::format::{
     Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
@@ -86,6 +87,33 @@ fn walks() -> Vec<&'static str> {
         .collect()
 }
 
+/// The animations a painter loops on the beat, each with the frame its loop
+/// starts at: the looping fixtures, the appliances' busy loops
+/// ([`appliance_frame_index`]), the typists
+/// (`pose::typing_frame`), and every creature pose.
+fn looped_animations() -> Vec<(&'static str, usize)> {
+    let appliances =
+        [VENDING_MACHINE_SPRITE, PRINTER_SPRITE].map(|name| (name, lookup::APPLIANCE_IDLE_FRAMES));
+    let pets = crate::pet::PetKind::ALL
+        .iter()
+        .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
+    let mascots = pixtuoid_core::source::registry::registered_source_names()
+        .filter_map(crate::creatures::gateway_mascot_def)
+        .flat_map(|def| [def.walk, def.rest]);
+    [
+        FISH_TANK_SPRITE,
+        WATER_COOLER_SPRITE,
+        "typing",
+        "typing_back",
+    ]
+    .into_iter()
+    .chain(pets)
+    .chain(mascots)
+    .map(|name| (name, 0))
+    .chain(appliances)
+    .collect()
+}
+
 /// The marks every desk's first frame carries: the cup and the token tower
 /// stand there in both looks, and the cup's steam rises there — the
 /// cutaway's `push_desk_props` reads them, the classic and the steam through
@@ -104,7 +132,7 @@ const DESK_BULBS: [(&str, char); 2] = [
 ];
 
 /// [`validate_pack_animations`], against this crate's painters' art sets,
-/// walks, desk marks and desk bulbs.
+/// walks, desk marks, desk bulbs and loops on the Full beat.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
     validate_pack_animations(
         pack,
@@ -112,6 +140,8 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
             art_sets: &art_sets(),
             walks: &walks(),
             marks: &DESK_MARKS,
+            loops: &looped_animations(),
+            beat_ms: crate::anim::FULL_TICK_MS,
             keys: &DESK_BULBS,
         },
     )
@@ -141,10 +171,12 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         unmarked_heads: _,
         missing_hair_views: _,
         overhanging_hair: _,
-        walks_without_stride: _,
+        walks_without_stride,
         missing_marks,
         missing_keys,
         orphan_hairstyles,
+        unread_variant_timing,
+        off_beat_loops,
     } = &report;
     for name in missing_required {
         tracing::warn!(
@@ -203,6 +235,30 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             variant_frames,
             "custom sprite pack density variant has a different frame count from its base — \
              renderers skip it for the densest art that fits"
+        );
+    }
+    for name in walks_without_stride {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            "custom sprite pack walk has no stride — its feet slide as its pace changes"
+        );
+    }
+    for UnreadTiming { name, field } in unread_variant_timing {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            field = ?field,
+            "custom sprite pack density variant is timed apart from its base — \
+             renderers play the base's timing"
+        );
+    }
+    for OffBeatLoop { name, frame_ms } in off_beat_loops {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            frame_ms,
+            "custom sprite pack loop is not whole beats — the beat skips or stretches its frames"
         );
     }
     // the classic stands its desk props only on the art's marks, as the cutaway does
@@ -385,8 +441,8 @@ mod tests {
     use std::path::Path;
 
     /// Every loop the beat plays from the bundled pack holds each frame whole
-    /// Full beats, so the beat neither skips nor stretches one: the gap the
-    /// no-alias test on whole-tick loops leaves.
+    /// Full beats, so the beat neither skips nor stretches one, and every
+    /// variant keeps its base's timing, the one that plays.
     #[test]
     fn every_bundled_loop_holds_its_frames_whole_beats() {
         loops_hold_whole_beats("default", &test_default_pack());
@@ -406,44 +462,25 @@ mod tests {
     }
 
     fn loops_hold_whole_beats(pack_name: &str, pack: &Pack) {
-        use pixtuoid_core::sprite::format::density_variant_name;
-        let pets = crate::pet::PetKind::ALL
-            .iter()
-            .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
-        let mascots = pixtuoid_core::source::registry::REGISTRY
-            .iter()
-            .filter_map(|d| crate::creatures::gateway_mascot_def(d.name))
-            .flat_map(|def| [def.walk, def.rest]);
-        let fixtures = [
-            FISH_TANK_SPRITE,
-            WATER_COOLER_SPRITE,
-            VENDING_MACHINE_SPRITE,
-            PRINTER_SPRITE,
-        ];
-        // a typist keys on the art's own time (`pose::typing_frame`)
-        let typists = ["typing", "typing_back"];
-        let looped = fixtures
+        let report = validate_pack(pack);
+        assert_eq!(report.off_beat_loops, [], "{pack_name}");
+        assert_eq!(report.unread_variant_timing, [], "{pack_name}");
+    }
+
+    /// The beat check reaches every loop a painter plays: a typist off the
+    /// beat is reported.
+    #[test]
+    fn a_typist_off_the_beat_is_reported() {
+        let pack = test_pack_declaring(
+            "[animations.typing]\nframes   = [\"typing_0.sprite\", \"typing_1.sprite\"]\nframe_ms = 125\n",
+            "[animations.typing]\nframes   = [\"typing_0.sprite\", \"typing_1.sprite\"]\nframe_ms = 400\n",
+        );
+        let off: Vec<_> = validate_pack(&pack)
+            .off_beat_loops
             .into_iter()
-            .chain(typists)
-            .chain(pets)
-            .chain(mascots);
-        for base in looped {
-            let names = std::iter::once(base.to_string()).chain(
-                pack.density_variants()
-                    .iter()
-                    .map(|&d| density_variant_name(base, d)),
-            );
-            for name in names {
-                let Some(anim) = pack.animation(&name) else {
-                    continue;
-                };
-                let frame_ms = u64::from(anim.frame_ms());
-                assert!(
-                    anim.frames().len() < 2 || frame_ms % crate::anim::FULL_TICK_MS == 0,
-                    "{pack_name} {name}: {frame_ms} ms is not whole beats"
-                );
-            }
-        }
+            .map(|l| l.name)
+            .collect();
+        assert_eq!(off, ["typing"]);
     }
 
     #[test]
@@ -949,7 +986,10 @@ mod tests {
             .expect("pack loads");
             warns.load(std::sync::atomic::Ordering::SeqCst)
         };
-        assert_eq!(load_warns(), 0, "the fixture itself is clean");
+        // the fixture is the released skeleton: its typing is off the beat and
+        // its two walks have no stride
+        let own = load_warns();
+        assert_eq!(own, 3, "the fixture's own findings");
 
         let desk = test_default_pack()
             .animation("desk")
@@ -978,7 +1018,7 @@ mod tests {
             );
         toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
         fs::write(&toml_path, toml).expect("write pack.toml");
-        assert_eq!(load_warns(), 1, "the orphan desk@4x warns");
+        assert_eq!(load_warns(), own + 1, "the orphan desk@4x warns");
 
         fs::write(
             tmp.path().join("desk4x.sprite"),
@@ -987,7 +1027,7 @@ mod tests {
         .expect("write desk4x.sprite");
         assert_eq!(
             load_warns(),
-            3,
+            own + 3,
             "an unmarked desk@4x warns each mark it leaves out"
         );
     }
