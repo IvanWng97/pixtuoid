@@ -314,9 +314,6 @@ impl OutsideCache {
             crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
             return views.clone();
         }
-        // Dropped before the new are drawn, so two frames' views are never
-        // alive at once: the cache adds nothing to a frame's peak memory.
-        self.last = None;
         let views: Vec<_> = Outside::of(
             moment,
             pack,
