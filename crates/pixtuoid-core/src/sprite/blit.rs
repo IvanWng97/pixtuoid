@@ -4,6 +4,7 @@ use crate::sprite::{Frame, RgbBuffer};
 
 /// Blit a sprite frame into `dst` with top-left at `(dst_x, dst_y)`.
 pub fn blit_frame(frame: &Frame, dst_x: u16, dst_y: u16, dst: &mut RgbBuffer) {
+    let (xs, ys) = dst.writable();
     for fy in 0..frame.height {
         for fx in 0..frame.width {
             let i = (fy as usize) * (frame.width as usize) + (fx as usize);
@@ -12,7 +13,7 @@ pub fn blit_frame(frame: &Frame, dst_x: u16, dst_y: u16, dst: &mut RgbBuffer) {
             };
             let x = dst_x.saturating_add(fx);
             let y = dst_y.saturating_add(fy);
-            if x >= dst.width || y >= dst.height {
+            if !xs.contains(&x) || !ys.contains(&y) {
                 continue;
             }
             dst.put(x, y, rgb);
@@ -44,19 +45,24 @@ pub fn blit_frame_scaled(
     dst: &mut RgbBuffer,
 ) {
     let s = scale.get();
+    let (xs, ys) = dst.writable();
     for fy in 0..frame.height {
+        let by = dst_y.saturating_add(fy.saturating_mul(s));
+        // a source row whose block misses the writable rows paints nothing
+        if by >= ys.end || by.saturating_add(s) <= ys.start {
+            continue;
+        }
         for fx in 0..frame.width {
             let i = (fy as usize) * (frame.width as usize) + (fx as usize);
             let Some(rgb) = frame.as_slice()[i] else {
                 continue;
             };
             let bx = dst_x.saturating_add(fx.saturating_mul(s));
-            let by = dst_y.saturating_add(fy.saturating_mul(s));
             for sy in 0..s {
                 for sx in 0..s {
                     let x = bx.saturating_add(sx);
                     let y = by.saturating_add(sy);
-                    if x >= dst.width || y >= dst.height {
+                    if !xs.contains(&x) || !ys.contains(&y) {
                         continue;
                     }
                     dst.put(x, y, rgb);

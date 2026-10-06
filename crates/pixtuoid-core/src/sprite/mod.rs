@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use palette::color_difference::EuclideanDistance;
@@ -626,6 +627,9 @@ impl RecolorableFrame<'_> {
 pub struct RgbBuffer {
     pixels: Grid<Rgb>,
     writes: Option<Writes>,
+    /// The columns and rows writes are kept to, if any: see
+    /// [`with_clip`](Self::with_clip).
+    clip: Option<(Range<u16>, Range<u16>)>,
 }
 
 /// A write epoch of the one buffer whose [`RgbBuffer::begin_writes`] minted it.
@@ -668,6 +672,7 @@ impl RgbBuffer {
         RgbBuffer {
             pixels: Grid::filled(width, height, fill),
             writes: None,
+            clip: None,
         }
     }
 
@@ -676,6 +681,7 @@ impl RgbBuffer {
         RgbBuffer {
             pixels: Grid::from_vec(width, height, pixels),
             writes: None,
+            clip: None,
         }
     }
 
@@ -709,8 +715,74 @@ impl RgbBuffer {
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
     #[inline]
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
+        if self.clipped(x, y) {
+            return;
+        }
         let i = self.checked_index(x, y);
         self.write(i, rgb);
+    }
+
+    /// Run `paint` with every write kept to `columns × rows` within any clip
+    /// already set, and the clip as it was after: Skia's `save`, `clipRect`,
+    /// `restore`. A repaint of part of the buffer runs the whole paint and
+    /// lands only there; a bulk writer goes through
+    /// [`writable_rows_mut`](Self::writable_rows_mut), never
+    /// [`as_mut_slice`](Self::as_mut_slice).
+    pub fn with_clip<T>(
+        &mut self,
+        (columns, rows): (Range<u16>, Range<u16>),
+        paint: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let (xs, ys) = self.writable();
+        let clip = (
+            columns.start.max(xs.start)..columns.end.min(xs.end),
+            rows.start.max(ys.start)..rows.end.min(ys.end),
+        );
+        let was = self.clip.replace(clip);
+        let painted = paint(self);
+        self.clip = was;
+        painted
+    }
+
+    /// Each writable row as `(y, its first writable column, its writable
+    /// pixels)`: a bulk write that keeps to the clip by construction.
+    pub fn writable_rows_mut(&mut self) -> impl Iterator<Item = (u16, u16, &mut [Rgb])> {
+        let (xs, ys) = self.writable();
+        if let Some(w) = &mut self.writes {
+            w.note_all();
+        }
+        let width = usize::from(self.pixels.width).max(1);
+        self.pixels
+            .as_mut_slice()
+            .chunks_mut(width)
+            .zip(0u16..)
+            .skip(usize::from(ys.start))
+            .take(usize::from(ys.end.saturating_sub(ys.start)))
+            .map(move |(row, y)| {
+                let run = row
+                    .get_mut(usize::from(xs.start)..usize::from(xs.end))
+                    .unwrap_or_default();
+                (y, xs.start, run)
+            })
+    }
+
+    /// The columns and rows a write may land in: the clip, within the buffer.
+    pub fn writable(&self) -> (Range<u16>, Range<u16>) {
+        let (w, h) = (self.pixels.width, self.pixels.height);
+        match &self.clip {
+            Some((xs, ys)) => (
+                xs.start.min(w)..xs.end.min(w),
+                ys.start.min(h)..ys.end.min(h),
+            ),
+            None => (0..w, 0..h),
+        }
+    }
+
+    #[inline]
+    fn clipped(&self, x: u16, y: u16) -> bool {
+        self.clip
+            .as_ref()
+            .is_some_and(|(xs, ys)| !xs.contains(&x) || !ys.contains(&y))
     }
 
     /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
@@ -719,7 +791,7 @@ impl RgbBuffer {
     /// unchecked [`put`](Self::put).
     #[inline]
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
-        if x < self.pixels.width && y < self.pixels.height {
+        if x < self.pixels.width && y < self.pixels.height && !self.clipped(x, y) {
             let i = self.raw_index(x, y);
             self.write(i, rgb);
         }
