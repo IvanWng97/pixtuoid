@@ -12,7 +12,7 @@ set -uo pipefail
 # its entry now, but this suite also runs directly, and `submodule foreach`
 # exports GIT_DIR with no hook involved. It has to happen HERE, before anything
 # builds a repo; the suite's own GIT_* exports come later and are unaffected.
-# shellcheck disable=SC2046  # https://git-scm.com/docs/githooks's form — the list must word-split
+# shellcheck disable=SC2046  # the unset githooks(5) prescribes (https://git-scm.com/docs/githooks) — the list must word-split
 unset $(git rev-parse --local-env-vars)
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
