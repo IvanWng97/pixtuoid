@@ -37,27 +37,19 @@ impl NoiseStream {
     }
 }
 
-/// `(cos, sin)` rows, shared by every FFT of one table length.
-type Twiddles = std::rc::Rc<[(f32, f32)]>;
+/// `e^(−2πik/n)` for `k` in `0..n/2` as `(cos, sin)` rows, built per transform
+/// pair and dropped: a kept table for the longest beds pins megabytes.
+type Twiddles = Vec<(f32, f32)>;
 
-thread_local! {
-    static TWIDDLES: std::cell::RefCell<std::collections::HashMap<usize, Twiddles>> =
-        std::cell::RefCell::default();
-}
-
-/// `e^(−2πik/n)` for `k` in `0..n/2`, built once per `n` and in f64: a
-/// recurrence across a stage drifts by its length.
+/// [`Twiddles`] for `n`, in f64: a recurrence across a stage drifts by its
+/// length.
 fn twiddles(n: usize) -> Twiddles {
-    TWIDDLES.with_borrow_mut(|cache| {
-        std::rc::Rc::clone(cache.entry(n).or_insert_with(|| {
-            (0..n / 2)
-                .map(|k| {
-                    let a = -2.0 * std::f64::consts::PI * k as f64 / n as f64;
-                    (a.cos() as f32, a.sin() as f32)
-                })
-                .collect()
-        }))
-    })
+    (0..n / 2)
+        .map(|k| {
+            let a = -2.0 * std::f64::consts::PI * k as f64 / n as f64;
+            (a.cos() as f32, a.sin() as f32)
+        })
+        .collect()
 }
 
 /// In-place iterative radix-2 FFT (Cooley–Tukey), unscaled. `re`/`im` len
@@ -133,18 +125,18 @@ fn fft(re: &mut [f32], im: &mut [f32], tw: &[(f32, f32)], inverse: bool) {
     }
 }
 
-/// Bins `0..=n/2` of the spectrum of `buf` zero-padded to `n`, through one
-/// `n/2`-point complex FFT of its even and odd samples (a real signal's
-/// spectrum is conjugate-symmetric, so the upper half is redundant).
-fn spectrum(buf: &[f32], n: usize) -> (Vec<f32>, Vec<f32>) {
-    let m = n / 2;
-    let tw = twiddles(n);
+/// Bins `0..=n/2` of the spectrum of `buf` zero-padded to `n`, `tw` being
+/// [`twiddles`]`(n)`, through one `n/2`-point complex FFT of its even and odd
+/// samples (a real signal's spectrum is conjugate-symmetric, so the upper half
+/// is redundant).
+fn spectrum(buf: &[f32], tw: &[(f32, f32)]) -> (Vec<f32>, Vec<f32>) {
+    let m = tw.len();
     let (mut zr, mut zi) = (vec![0.0f32; m], vec![0.0f32; m]);
     for (k, pair) in buf.chunks(2).enumerate() {
         zr[k] = pair[0];
         zi[k] = pair.get(1).copied().unwrap_or(0.0);
     }
-    fft(&mut zr, &mut zi, &tw, false);
+    fft(&mut zr, &mut zi, tw, false);
     let (mut xr, mut xi) = (vec![0.0f32; m + 1], vec![0.0f32; m + 1]);
     for k in 0..=m {
         let (ar, ai) = (zr[k % m], zi[k % m]);
@@ -159,11 +151,10 @@ fn spectrum(buf: &[f32], n: usize) -> (Vec<f32>, Vec<f32>) {
     (xr, xi)
 }
 
-/// The `n`-sample real signal whose bins `0..=n/2` are `xr`/`xi`: [`spectrum`]
-/// inverted, scaled back to its input.
-fn signal(xr: &[f32], xi: &[f32], n: usize) -> Vec<f32> {
-    let m = n / 2;
-    let tw = twiddles(n);
+/// The `n`-sample real signal whose bins `0..=n/2` are `xr`/`xi`, `tw` being
+/// [`twiddles`]`(n)`: [`spectrum`] inverted, scaled back to its input.
+fn signal(xr: &[f32], xi: &[f32], tw: &[(f32, f32)]) -> Vec<f32> {
+    let m = tw.len();
     let (mut zr, mut zi) = (vec![0.0f32; m], vec![0.0f32; m]);
     for k in 0..m {
         let (ar, ai) = (xr[k], xi[k]);
@@ -174,7 +165,7 @@ fn signal(xr: &[f32], xi: &[f32], n: usize) -> Vec<f32> {
         let (or, oi) = (dr * wr + di * wi, di * wr - dr * wi);
         (zr[k], zi[k]) = (er - oi, ei + or);
     }
-    fft(&mut zr, &mut zi, &tw, true);
+    fft(&mut zr, &mut zi, tw, true);
     let scale = 1.0 / m as f32;
     zr.iter()
         .zip(&zi)
@@ -182,10 +173,13 @@ fn signal(xr: &[f32], xi: &[f32], n: usize) -> Vec<f32> {
         .collect()
 }
 
-fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, usize, f32) {
+/// `buf`'s half spectrum at the next power of two, with the twiddles it was
+/// taken with (half that length) for the [`signal`] back, and the bin width.
+fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, Twiddles, f32) {
     let n = buf.len().next_power_of_two().max(2);
-    let (re, im) = spectrum(buf, n);
-    (re, im, n, SAMPLE_RATE as f32 / n as f32)
+    let tw = twiddles(n);
+    let (re, im) = spectrum(buf, &tw);
+    (re, im, tw, SAMPLE_RATE as f32 / n as f32)
 }
 
 /// Mirror-aware frequency of FFT bin `k` in an `n`-point spectrum: bins above
@@ -199,7 +193,8 @@ fn bin_freq(k: usize, n: usize, hz_per_bin: f32) -> f32 {
 /// linear-phase FIR would be overkill for pre-rendered assets. Keeps
 /// `buf.len()` (internally pads to a power of 2).
 pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
-    let (mut re, mut im, n, hz_per_bin) = forward_spectrum(buf);
+    let (mut re, mut im, tw, hz_per_bin) = forward_spectrum(buf);
+    let n = 2 * tw.len();
     for (k, (r, i)) in re.iter_mut().zip(&mut im).enumerate() {
         let f = bin_freq(k, n, hz_per_bin);
         if f < lo_hz || f > hi_hz {
@@ -207,7 +202,7 @@ pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
             *i = 0.0;
         }
     }
-    let mut out = signal(&re, &im, n);
+    let mut out = signal(&re, &im, &tw);
     out.truncate(buf.len());
     out
 }
@@ -268,7 +263,8 @@ pub fn shaped_noise_loop(
         "a noise loop is a power-of-two block"
     );
     let noise: Vec<f32> = (0..n_pow2).map(|_| rng.norm()).collect();
-    let (mut re, mut im) = spectrum(&noise, n_pow2);
+    let tw = twiddles(n_pow2);
+    let (mut re, mut im) = spectrum(&noise, &tw);
     let hz_per_bin = SAMPLE_RATE as f32 / n_pow2 as f32;
     // per-bin amplitude gain: sqrt(band power share / band bin count)
     let mut gain = vec![0.0f32; n_pow2];
@@ -288,7 +284,7 @@ pub fn shaped_noise_loop(
         *r *= s;
         *i *= s;
     }
-    let mut out = signal(&re, &im, n_pow2);
+    let mut out = signal(&re, &im, &tw);
     let peak = out.iter().fold(0.0f32, |a, &v| a.max(v.abs())).max(1e-9);
     out.iter_mut().for_each(|v| *v /= peak);
     out
@@ -337,9 +333,9 @@ pub fn centroid_hz(buf: &[f32]) -> f32 {
 /// Fraction of spectral power inside `[lo_hz, hi_hz)`.
 #[cfg(test)]
 pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
-    let (re, im, n, hz_per_bin) = forward_spectrum(buf);
+    let (re, im, tw, hz_per_bin) = forward_spectrum(buf);
     let (mut band, mut total) = (0.0f64, 0.0f64);
-    for k in 1..=n / 2 {
+    for k in 1..=tw.len() {
         let p = f64::from(re[k] * re[k] + im[k] * im[k]);
         let f = k as f32 * hz_per_bin;
         total += p;
@@ -358,8 +354,9 @@ mod tests {
     fn fft_round_trips() {
         let mut rng = NoiseStream::new(1);
         let orig: Vec<f32> = (0..256).map(|_| rng.norm()).collect();
-        let (re, im) = spectrum(&orig, 256);
-        for (a, b) in orig.iter().zip(&signal(&re, &im, 256)) {
+        let tw = twiddles(256);
+        let (re, im) = spectrum(&orig, &tw);
+        for (a, b) in orig.iter().zip(&signal(&re, &im, &tw)) {
             assert!((a - b).abs() < 1e-4, "{a} vs {b}");
         }
     }
@@ -372,7 +369,8 @@ mod tests {
         for n in (1..=10).map(|e| 1usize << e) {
             let mut rng = NoiseStream::new(n as u64);
             let x: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
-            let (re, im) = spectrum(&x, n);
+            let tw = twiddles(n);
+            let (re, im) = spectrum(&x, &tw);
             for k in 0..=n / 2 {
                 let (mut dr, mut di) = (0.0f64, 0.0f64);
                 for (t, &v) in x.iter().enumerate() {
@@ -388,7 +386,7 @@ mod tests {
                     im[k]
                 );
             }
-            let back = signal(&re, &im, n);
+            let back = signal(&re, &im, &tw);
             assert!(
                 x.iter().zip(&back).all(|(a, b)| (a - b).abs() < 1e-4),
                 "n {n} round trip"
