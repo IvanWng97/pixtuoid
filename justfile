@@ -310,9 +310,9 @@ lint:
 
 # The regen recipes call it too. No plain `cargo test` fallback: its shared
 # process and nextest's per-test processes pass different suites (#1104's omp
-# hang showed under only one), so a fallback runs a suite CI never ran. No
-# `--workspace`: it overrides a `-p`, and the virtual root already selects every
-# member.
+# hang showed under only one), so a fallback runs a suite CI never ran. The
+# recipe adds no `--workspace`, which would override a caller's `-p`; a caller
+# meaning every member, like ci-tests.yml, passes it.
 [doc('Run the tests under cargo-nextest; forwards args (e.g. -p <crate> <filter>)')]
 [group('rust')]
 test *args:
@@ -573,7 +573,7 @@ mutants *args:
         echo "  Run from a branch touching mutable production Rust, or set MUTANTS_BASE." >&2
         exit 1
     fi
-    cargo mutants --in-diff target/mutants.diff "$@"
+    TZ={{ TEST_TZ }} cargo mutants --in-diff target/mutants.diff "$@"
 
 # Record a conformance fixture from bytes a real CLI actually sent. Hook-only
 # sources have no persistent corpus — hook events are transient — so their
