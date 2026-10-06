@@ -253,11 +253,49 @@ fn a_warmed_first_frame_draws_no_cloud() {
         pixtuoid_scene::sky::Weather::Overcast,
     ));
     let scene = office();
-    r.warm(&scene, pack(), t0());
-    let warmed = r.cloud_draws();
-    assert!(warmed > 0, "warming an overcast sky draws its masses");
-    r.render(&scene, pack(), t0()).expect("render");
-    assert_eq!(r.cloud_draws(), warmed, "the first frame drew a cloud");
+    assert!(
+        cloud_draws(|| r.warm(&scene, pack(), t0())) > 0,
+        "warming an overcast sky draws its masses"
+    );
+    let first = cloud_draws(|| r.render(&scene, pack(), t0()).expect("render"));
+    assert_eq!(first, 0, "the first frame drew a cloud");
+}
+
+/// The cloud rasters `f` draws: the `clouds.draw` spans it opens.
+fn cloud_draws(f: impl FnOnce()) -> usize {
+    use tracing_subscriber::layer::SubscriberExt;
+    #[derive(Clone, Default)]
+    struct Count(Arc<std::sync::atomic::AtomicUsize>);
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Count {
+        fn on_new_span(
+            &self,
+            span: &tracing::span::Attributes<'_>,
+            _: &tracing::span::Id,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if span.metadata().name() == "clouds.draw" {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+    let count = Count::default();
+    tracing::subscriber::with_default(tracing_subscriber::registry().with(count.clone()), f);
+    count.0.load(Ordering::Relaxed)
+}
+
+/// The renderer leaves the encode a core exactly while its audio handle has
+/// a thread up.
+#[test]
+fn the_encode_leaves_a_core_while_the_audio_handle_is_live() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.cutaway.as_mut().expect("a cutaway").split_across(4);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 4);
+    let audio = crate::audio::AudioHandle::disabled();
+    let _rx = audio.install_test_channel();
+    r.set_audio(audio);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 3);
 }
 
 /// Text and image never share a cell: the footer row stays text.

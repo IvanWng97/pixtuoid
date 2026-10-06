@@ -101,13 +101,6 @@ pub struct OfficeRaster {
 }
 
 impl OfficeRaster {
-    /// The cloud rasters drawn so far: a frame that draws none found its
-    /// clouds warm.
-    #[doc(hidden)]
-    pub fn cloud_draws(&self) -> usize {
-        self.cloud_cache.draws()
-    }
-
     /// Drop the cached art, after a theme change.
     pub fn reset(&mut self) {
         *self = Self::default();

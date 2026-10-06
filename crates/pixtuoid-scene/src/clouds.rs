@@ -816,15 +816,13 @@ const DRAWS_AHEAD: usize = 2;
 #[derive(Debug)]
 pub struct CloudCache {
     entries: lru::LruCache<RasterKey, std::sync::Arc<MassRaster>>,
-    /// Rasters drawn: what a warm cache spares a frame.
-    draws: usize,
 }
 
+// `LruCache` has no `Default`: its capacity is given.
 impl Default for CloudCache {
     fn default() -> Self {
         Self {
             entries: lru::LruCache::new(Self::CAPACITY),
-            draws: 0,
         }
     }
 }
@@ -834,11 +832,6 @@ impl CloudCache {
     /// mass drawn [`AHEAD`] of them (`the_cache_holds_a_transition_in_both_looks`):
     /// one office draws one wall per look.
     const CAPACITY: std::num::NonZeroUsize = std::num::NonZeroUsize::new(256).expect("nonzero");
-
-    /// Rasters drawn so far.
-    pub(crate) fn draws(&self) -> usize {
-        self.draws
-    }
 
     fn holds(&self, key: RasterKey) -> bool {
         self.entries.contains(&key)
@@ -855,7 +848,6 @@ impl CloudCache {
         draw: impl FnOnce() -> MassRaster,
     ) -> std::sync::Arc<MassRaster> {
         let raster = self.entries.get_or_insert(key, || {
-            self.draws += 1;
             std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw))
         });
         std::sync::Arc::clone(raster)
@@ -1734,6 +1726,48 @@ mod tests {
         Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default())
     }
 
+    /// The mass rasters `f` draws: the `clouds.draw` spans it opens.
+    fn draws(f: impl FnOnce()) -> usize {
+        struct Count(std::sync::atomic::AtomicUsize);
+        impl tracing::Subscriber for Count {
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                if span.metadata().name() == "clouds.draw" {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn event(&self, _: &tracing::Event<'_>) {}
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+        }
+        let count = std::sync::Arc::new(Count(std::sync::atomic::AtomicUsize::new(0)));
+        tracing::subscriber::with_default(std::sync::Arc::clone(&count), f);
+        count.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A mass's bands are drawn in its own undrifted frame, so the key leaves
+    /// the drift out and a step drawn ahead at drift 0 is the one the frame
+    /// it lands in would draw.
+    #[test]
+    fn a_mass_draws_the_same_bands_at_any_drift() {
+        for weather in Weather::ALL {
+            let sky = Sky::at_with(crate::localclock::at_hour(12), weather);
+            let (clouds, still) = Clouds::plan(&sky, 0.0, (SPAN, GLASS_H), 4);
+            let (_, drifted) = Clouds::plan(&sky, 4321.5, (SPAN, GLASS_H), 4);
+            assert_eq!(still.len(), drifted.len(), "{weather:?}");
+            for ((a, key_a), (b, key_b)) in still.iter().zip(&drifted) {
+                assert_eq!(key_a, key_b, "{weather:?}");
+                let glass = f32::from(GLASS_H);
+                assert_eq!(clouds.draw(a, glass), clouds.draw(b, glass), "{weather:?}");
+            }
+        }
+    }
+
     /// A transition's two fullest decks, on the classic's grid and the
     /// cutaway's, and all a look draws ahead of them, fit the cache: a frame
     /// never evicts a mass it draws or one drawn for a step to come.
@@ -1772,22 +1806,25 @@ mod tests {
                 Duration::from_secs(300),
             ),
         ];
+        // Each window opens `AHEAD` early: a step within `AHEAD` of the first
+        // frame has had no frames to be drawn ahead in.
+        let lead = (AHEAD.as_millis() / frame.as_millis()) as u32;
         for motion in [Motion::Full, Motion::Calm] {
             for (start, policy, length) in windows {
                 let mut cache = CloudCache::default();
                 let mut ahead_drawn = 0;
-                for n in 0..length.as_millis() / frame.as_millis() {
-                    let timing = motion.timing(start + frame * n as u32);
+                for n in 0..lead + (length.as_millis() / frame.as_millis()) as u32 {
+                    let timing = motion.timing(start - AHEAD + frame * n);
                     let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
                     let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
                     let missing = planned
                         .iter()
                         .filter(|&&(_, key)| !cache.holds(key))
                         .count();
-                    let before = cache.draws;
-                    Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
-                    let drawn = cache.draws - before;
-                    if n > 0 {
+                    let drawn = draws(|| {
+                        Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+                    });
+                    if n > lead {
                         assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");
                         assert!(
                             drawn <= DRAWS_AHEAD,
