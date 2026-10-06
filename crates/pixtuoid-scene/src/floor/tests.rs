@@ -440,6 +440,11 @@ fn light_eases_toward_min_after_debounce() {
     let mut dim = VacancyDim::new();
     let start = t0();
     dim.tick(true, start);
+    // the last full-light tick, so the fade below spans only its own second
+    dim.tick(
+        true,
+        start + Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS - 1),
+    );
     // 6 s: the debounce expired 1 s ago, ~1.25 tau of fade.
     let level = dim.tick(true, start + Duration::from_millis(6_000));
     assert!(level < 0.95, "no fade started after debounce: {level}");
@@ -1167,8 +1172,8 @@ fn neon_first_tick_snaps_to_the_mood() {
     }
 }
 
-/// The join is REAL: a room that once dimmed and was repopulated never eases back
-/// to a bit-exact 1.0, so the sign reads the room's VERDICT, not its level.
+/// A room that once dimmed and was repopulated keeps its sign lit when the last
+/// agent walks out: the sign reads the room's VERDICT, which the debounce holds.
 #[test]
 fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
     let mut dim = VacancyDim::new();
@@ -1186,7 +1191,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
     let (starved, _) = run(true, neon_mood(0, 0, 0), VacancyDim::EMPTY_DEBOUNCE_MS * 3);
     assert_eq!(starved, NeonLevels::EMPTY);
     let (_, level) = run(false, neon_mood(2, 0, 0), 60_000);
-    assert!(level < 1.0, "the premise: the f32 ease stalls short of 1.0");
+    assert_eq!(level, 1.0, "the ease lands on full light");
     // The last agent walks out: the tally is Empty, the room is lit and populated.
     let (walkout, _) = run(false, neon_mood(0, 0, 0), u64::from(NeonState::FADE_MS) * 2);
     assert_eq!(walkout, NeonLevels::CALM, "a lit room keeps its sign");
@@ -1618,6 +1623,47 @@ fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
     scene
 }
 
+/// The painters' office extent and the cutaway's scale over it.
+const PAINTED: crate::layout::Size = crate::layout::Size { w: 192, h: 80 };
+
+fn looks() -> [crate::look::Look; 2] {
+    let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
+    [
+        crate::look::Look::Classic,
+        crate::look::Look::Cutaway { scale },
+    ]
+}
+
+/// `session`'s pixels for `scene` on `floor` at `now`, in `look`.
+fn paint(
+    (session, pack): (&mut FloorSession, &Arc<Pack>),
+    look: crate::look::Look,
+    scene: &SceneState,
+    floor: FloorMeta,
+    pet: Option<&Pet>,
+    now: SystemTime,
+) -> Vec<Rgb> {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let inputs = crate::look::RenderInputs {
+        world: FloorInputs {
+            scene,
+            pack,
+            now,
+            floor,
+            pets: PetInputs { pet, petting: None },
+        },
+        theme,
+        size: PAINTED,
+        place: crate::look::Place {
+            gateway: crate::tally::office_gateway(scene),
+            floor: None,
+        },
+        debug_walkable: false,
+    };
+    session.render(look, inputs).expect("lays out");
+    session.buf().expect("a frame").as_slice().to_vec()
+}
+
 /// Both looks' pixels for `scene` on `floor` at `now`, each from fresh
 /// stores so only the instant differs.
 fn both_painters(
@@ -1627,32 +1673,9 @@ fn both_painters(
     now: SystemTime,
 ) -> (Vec<Rgb>, Vec<Rgb>) {
     let pack = Arc::new(crate::pack::test_default_pack());
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let inputs = crate::look::RenderInputs {
-        world: FloorInputs {
-            scene,
-            pack: &pack,
-            now,
-            floor,
-            pets: PetInputs { pet, petting: None },
-        },
-        theme,
-        size: crate::layout::Size { w: 192, h: 80 },
-        place: crate::look::Place {
-            gateway: crate::tally::office_gateway(scene),
-            floor: None,
-        },
-        debug_walkable: false,
-    };
-    let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
-    let [classic, cutaway_px] = [
-        crate::look::Look::Classic,
-        crate::look::Look::Cutaway { scale },
-    ]
-    .map(|look| {
+    let [classic, cutaway_px] = looks().map(|look| {
         let mut session = FloorSession::new(Arc::clone(&pack));
-        session.render(look, inputs).expect("lays out");
-        session.buf().expect("a frame").as_slice().to_vec()
+        paint((&mut session, &pack), look, scene, floor, pet, now)
     });
     (classic, cutaway_px)
 }
@@ -1692,6 +1715,130 @@ fn both_painters_paint_one_frame_per_beat() {
                 cutaway_px == later.1,
                 "{motion:?} {weather:?}: the cutaway moved"
             );
+        }
+    }
+}
+
+/// What lets a painter sleep to the next beat: through arrivals, wanders, a
+/// storm, the calm tier and a floor emptying, a frame after which the floor
+/// reports nothing off the beat is the frame painted until the beat turns.
+#[test]
+fn a_floor_still_off_the_beat_paints_one_frame_until_the_beat_turns() {
+    use crate::sky::{Weather, WeatherPolicy};
+    let cat = Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "cat".into(),
+    };
+    let t0 = crate::localclock::at_hour(23) + Duration::from_secs(5);
+    let lived_in = ambient_office(t0, false);
+    // no gateway: its mascot's walks would outlast the arrival's
+    let mut arriving = make_scene(3, 8);
+    for slot in arriving.agents.values_mut() {
+        (slot.created_at, slot.state_started_at, slot.last_event_at) = (t0, t0, t0);
+    }
+    let empty = make_scene(0, 8);
+    let frame = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
+    let switch = Duration::from_secs(2);
+    // a room of typists, then one turns to the user: the sign fades to its
+    // alert while nobody walks
+    let mut typing = lived_in.clone();
+    for slot in typing.agents.values_mut() {
+        slot.state = ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: pixtuoid_core::state::ToolKind::Edit,
+        };
+    }
+    let mut asking = typing.clone();
+    if let Some(slot) = asking.agents.values_mut().next() {
+        slot.state = ActivityState::Waiting {
+            reason: Arc::from("ok?"),
+        };
+        slot.state_started_at = t0 + switch;
+        slot.last_event_at = t0 + switch;
+    }
+    // past the switch, the debounce and the ease to a still room
+    let emptied =
+        switch + Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS + 6 * VacancyDim::FADE_TAU_MS);
+    // (case, tier, weather, pet, the scene before and after `switch`, window);
+    // the cat walks most of a window, so it rides only where nothing else must
+    let cases = [
+        (
+            "arrival",
+            Motion::Full,
+            Weather::Storm,
+            None,
+            &arriving,
+            &arriving,
+            Duration::from_secs(8),
+        ),
+        (
+            "calm",
+            Motion::Calm,
+            Weather::Clear,
+            Some(&cat),
+            &lived_in,
+            &lived_in,
+            Duration::from_secs(12),
+        ),
+        (
+            "emptying",
+            Motion::Full,
+            Weather::Clear,
+            None,
+            &lived_in,
+            &empty,
+            emptied,
+        ),
+        (
+            "asking",
+            Motion::Full,
+            Weather::Clear,
+            None,
+            &typing,
+            &asking,
+            Duration::from_secs(6),
+        ),
+    ];
+    // the beat is the cutaway's at every scale, so the cheapest checks it
+    let looks = [
+        crate::look::Look::Classic,
+        crate::look::Look::Cutaway {
+            scale: crate::render_scale::RenderScale::new(1).expect("nonzero"),
+        },
+    ];
+    let pack = Arc::new(crate::pack::test_default_pack());
+    for (case, motion, weather, pet, before, after, window) in cases {
+        let floor = FloorMeta::ground()
+            .with_weather(WeatherPolicy::Forced(weather))
+            .with_motion(motion);
+        for look in looks {
+            let mut session = FloorSession::new(Arc::clone(&pack));
+            let mut held: Option<(u64, Vec<Rgb>)> = None;
+            let (mut slept, mut ticks) = (0, 0);
+            while ticks * frame < window {
+                let now = t0 + ticks * frame;
+                let scene = if ticks * frame < switch {
+                    before
+                } else {
+                    after
+                };
+                let px = paint((&mut session, &pack), look, scene, floor, pet, now);
+                let beat = motion.timing(now).beat.ms();
+                if let Some((held_beat, held_px)) = &held
+                    && *held_beat == beat
+                {
+                    assert!(
+                        *held_px == px,
+                        "{case} {look:?}: the frame moved off the beat at {} ms",
+                        (ticks * frame).as_millis()
+                    );
+                }
+                held = (!session.moves_off_beat()).then_some((beat, px));
+                slept += usize::from(held.is_some());
+                ticks += 1;
+            }
+            assert!(slept > 0, "{case} {look:?}: never still off the beat");
         }
     }
 }

@@ -1091,22 +1091,21 @@ mod tests {
         let mut office = Office::new(192, 80);
         let scene = SceneState::default();
         let cat = Pet::defaulted(PetKind::Cat);
-        let resting = office
-            .frame(&scene, Some(&cat), None, 0)
-            .pet
-            .expect("drawn");
-        assert_ne!(resting.anim_name, PetKind::Cat.walk_anim());
-        assert!(!office.session.a_creature_walks(at(0)));
-        let walking_at = (0..120_000)
-            .step_by(PAINT_MS as usize)
-            .find(|&ms| {
-                office
-                    .frame(&scene, Some(&cat), None, ms)
-                    .pet
-                    .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim())
-            })
-            .expect("the cat sets off");
-        assert!(office.session.a_creature_walks(at(walking_at)));
+        let (mut rested, mut walked) = (false, false);
+        for ms in (0..120_000).step_by(PAINT_MS as usize) {
+            let walking = office
+                .frame(&scene, Some(&cat), None, ms)
+                .pet
+                .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim());
+            let told = office.session.moves_off_beat();
+            assert!(!walking || told, "the cat walks unseen at {ms} ms");
+            rested |= !walking && !told;
+            walked |= walking;
+        }
+        assert!(
+            rested && walked,
+            "the cat rests ({rested}) and sets off ({walked})"
+        );
     }
 
     /// A walking pet turns to where its leg heads, both ways; a resting one

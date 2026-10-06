@@ -142,6 +142,12 @@ impl Motion {
     /// Every tier.
     pub(crate) const ALL: [Motion; 3] = [Motion::Full, Motion::Calm, Motion::Still];
 
+    /// How often this tier's loops step on the wall clock; `None` at rest.
+    pub fn beat_period(self) -> Option<std::time::Duration> {
+        self.pace()
+            .map(|pace| std::time::Duration::from_millis(FULL_TICK_MS * pace))
+    }
+
     /// Wall-clock ms per ms of loop time; `None` at rest.
     pub(crate) const fn pace(self) -> Option<u64> {
         match self {

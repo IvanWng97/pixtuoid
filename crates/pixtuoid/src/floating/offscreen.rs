@@ -50,9 +50,9 @@ impl OfficeRenderer {
         }
     }
 
-    /// [`FloorSession::a_creature_walks`].
-    pub(crate) fn a_creature_walks(&self, now: std::time::SystemTime) -> bool {
-        self.session.a_creature_walks(now)
+    /// [`FloorSession::moves_off_beat`].
+    pub(crate) fn moves_off_beat(&self) -> bool {
+        self.session.moves_off_beat()
     }
 
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
@@ -644,7 +644,7 @@ mod tests {
             assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike,
         };
         let strike = storm_strike();
-        for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
+        for (frame, offset) in frame_grid(super::super::cadence::frame()) {
             let mut window = Window::new(strike.weather);
             let now = strike.start - lead(frame) + offset;
             let mut shown = window.present(now);
@@ -684,7 +684,7 @@ mod tests {
                 .map(|(x, y)| buf.get(x, y))
                 .collect()
         };
-        for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
+        for (frame, offset) in frame_grid(super::super::cadence::frame()) {
             let mut window = Window::new(stutter.weather);
             for at in stutter.setup {
                 window.present(at);
