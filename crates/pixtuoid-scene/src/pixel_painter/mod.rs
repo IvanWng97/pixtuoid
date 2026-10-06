@@ -132,15 +132,18 @@ pub(crate) struct PaintCtx<'a> {
     floor: crate::floor::FloorMeta,
     walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
     debug_walkable: bool,
+    /// The office's cloud masses, kept across frames.
+    cloud_cache: &'a mut crate::clouds::CloudCache,
 }
 
 impl<'a> PaintCtx<'a> {
-    /// The classic pass over `world` on `layout`, painting into `buf` with `caches`.
+    /// The classic pass over `world` on `layout`, painting into `buf` with the
+    /// floor's `caches` and the office's `cloud_cache`.
     pub(crate) fn classic(
         world: crate::floor::FloorInputs<'a>,
         layout: &'a SceneLayout,
         theme: &'a crate::theme::Theme,
-        caches: &'a mut ClassicCaches,
+        (caches, cloud_cache): (&'a mut ClassicCaches, &'a mut crate::clouds::CloudCache),
         buf: &'a mut RgbBuffer,
         walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
         debug_walkable: bool,
@@ -161,6 +164,7 @@ impl<'a> PaintCtx<'a> {
             floor: world.floor,
             walks,
             debug_walkable,
+            cloud_cache,
         }
     }
 
@@ -201,6 +205,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: ctx.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(ctx.pack),
         },
     );
     let top_wall_h = ctx.layout.wall_band_h();
@@ -220,6 +225,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
         outside.as_ref().unwrap_or(&moment),
         ctx.pack,
         ctx.theme,
+        ctx.cloud_cache,
     );
     for spill in &lights.spills {
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);
@@ -268,7 +274,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
     let mut drawn = Drawn::default();
-    let namesakes = crate::overlay::Namesakes::of(ctx.scene.agents.values());
+    let namesakes = crate::badge::Namesakes::of(ctx.scene.agents.values());
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
@@ -388,7 +394,8 @@ fn enqueue_gateway_mascots<'a>(
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
             hover: pack_frame_size(pack, m.anim_name, m.frame_idx)
-                .map(|size| Hover::figure(Pivot::Center, m.pos, size, m.target())),
+                .zip(m.target())
+                .map(|(size, target)| Hover::figure(Pivot::Center, m.pos, size, target)),
             kind: DrawableKind::GatewayMascot {
                 pos: m.pos,
                 anim_name: m.anim_name,

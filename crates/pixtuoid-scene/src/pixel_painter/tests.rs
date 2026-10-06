@@ -31,7 +31,7 @@ fn paint_whole_wall(
     let (at, size) = piece.visual();
     paint_wall(
         buf,
-        theme,
+        crate::glass::WallTrim::of(theme),
         piece,
         at.y..at.y + size.h,
         crate::display::pen::Pen::UNIT,
@@ -766,13 +766,14 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         let list = crate::display::compose(
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
+            &mut crate::clouds::CloudCache::default(),
         );
         let anchors: Vec<_> = list.badges().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -926,7 +927,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1081,7 +1082,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1759,6 +1760,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         floor: crate::floor::FloorMeta::ground(),
         walks: &walks,
         debug_walkable: false,
+        cloud_cache: &mut crate::clouds::CloudCache::default(),
     };
     let lights = crate::lighting::Lights::of(
         layout,
@@ -1770,6 +1772,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: ctx.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(ctx.pack),
         },
     );
     queue_fixtures(
@@ -2810,6 +2813,8 @@ struct OwnedSimStores {
     vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
+    creatures:
+        std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
 }
 
 impl OwnedSimStores {
@@ -2819,6 +2824,7 @@ impl OwnedSimStores {
             vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
+            creatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2831,6 +2837,7 @@ impl OwnedSimStores {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
+            creatures: &mut self.creatures,
         }
     }
 }
@@ -3137,7 +3144,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
 }
 
 #[test]
-fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_stands() {
     let (scene, layout, _, now0, pack) = sim_rig();
     let coffee = HashMap::new();
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
@@ -3182,10 +3189,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         "a roaming cat is not being petted"
     );
 
-    let clicked = Point { x: 40, y: 50 };
     let petting = crate::pet::PetState {
         petted_at: now0,
-        pet_pos: clicked,
         kind: pet.kind,
         floor_idx: floor.floor_idx,
     };
@@ -3194,31 +3199,15 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&petting),
     })
     .expect("the petted cat");
-    assert_eq!(held.pos, clicked);
+    assert_eq!(
+        held.pos, roaming.pos,
+        "held where it stands, not where the click landed"
+    );
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(
         hearts(&held),
         [0],
         "petted just now: its first heart leaves"
-    );
-
-    // Held in the canvas's corner, its frame is fitted back on.
-    let in_corner = crate::pet::PetState {
-        pet_pos: Point { x: 0, y: 0 },
-        ..petting
-    };
-    let cornered = step(PetInputs {
-        pet: Some(&pet),
-        petting: Some(&in_corner),
-    })
-    .expect("the petted cat");
-    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
-    assert_eq!(
-        cornered.pos,
-        Point {
-            x: size.w / 2,
-            y: size.h / 2
-        }
     );
 
     let upstairs = crate::pet::PetState {
@@ -3279,6 +3268,7 @@ fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
             degraded,
+            on_roster: true,
             effects: Vec::new(),
         };
         let mut drawables = Vec::new();
@@ -3645,6 +3635,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            cloud_cache: &mut crate::clouds::CloudCache::default(),
         },
         &frame,
     );
@@ -3989,6 +3980,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                cloud_cache: &mut crate::clouds::CloudCache::default(),
             },
             &frame,
         );
@@ -5036,6 +5028,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
     let mut escapes: Vec<String> = Vec::new();
+    let mut walking = 0;
     for port in 18900..18924u32 {
         // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
         // id — vary both, or the pet half of the sweep rides one trajectory.
@@ -5051,11 +5044,12 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
             boot,
         );
-        // Past the enter stagger + walk-in, then across several wander cycles so
-        // both the walking legs and the resting cells get sampled.
-        for step in 0..24u64 {
+        // One office's stores across the sweep: the creatures walk on state
+        // they keep. Past the enter stagger + walk-in, then across several roams,
+        // so both the walking legs and the resting cells get sampled.
+        let mut owned = OwnedSimStores::new();
+        for step in 0..48u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
-            let mut owned = OwnedSimStores::new();
             let frame = sim_step(
                 &mut owned.stores(),
                 SimInputs {
@@ -5074,6 +5068,17 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     door_anim_max_ms: 0,
                 },
             );
+            walking += frame
+                .mascots
+                .iter()
+                .filter(|m| m.anim_name.contains("walk"))
+                .count()
+                + usize::from(
+                    frame
+                        .pet
+                        .as_ref()
+                        .is_some_and(|p| p.anim_name.contains("walk")),
+                );
             for m in &frame.mascots {
                 let Size { w, h } = m.size;
                 if m.pos.x < w / 2
@@ -5108,6 +5113,10 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     assert!(
         escapes.is_empty(),
         "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+    assert!(
+        walking > 100,
+        "the sweep must catch them roaming, saw {walking}"
     );
 }
 
@@ -5299,6 +5308,7 @@ fn paint_drawn(
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            cloud_cache: &mut crate::clouds::CloudCache::default(),
         },
         frame,
     )
@@ -6122,6 +6132,7 @@ fn the_outside_reaches_only_the_glass() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                cloud_cache: &mut crate::clouds::CloudCache::default(),
             },
             &frame,
         );
@@ -6146,6 +6157,7 @@ fn the_outside_reaches_only_the_glass() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
+            cloud_cache: &mut crate::clouds::CloudCache::default(),
         };
         let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
         let lights = Lights::of(
@@ -6158,6 +6170,7 @@ fn the_outside_reaches_only_the_glass() {
                 indoor_scale: frame.indoor_scale,
                 neon: frame.neon,
                 beat: timing.beat,
+                bulbs: crate::lighting::DeskBulbs::of(&pack),
             },
         );
         let neon = crate::floor::neon_look(frame.neon, theme);
@@ -6264,6 +6277,7 @@ fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
+                cloud_cache: &mut crate::clouds::CloudCache::default(),
             },
             &frame,
         );

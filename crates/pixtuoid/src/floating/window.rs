@@ -176,7 +176,7 @@ impl FloatingApp {
                 theme: self.theme,
                 size: Size { w: buf_w, h: buf_h },
                 place: Place {
-                    gateway: pixtuoid_scene::board::office_gateway(&scene),
+                    gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
                 debug_walkable: false,
@@ -386,14 +386,15 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // (clock hands, weather, lightning, day/night, the wandering pet) still
         // advances, and a 0fps idle would freeze it into a dead-looking window.
         // A LIVE gateway daemon lives in `daemons`, not `agents`, and is a
-        // time-driven WANDERING mascot, so it too holds the fast cadence.
+        // time-driven WANDERING mascot, so it too holds the fast cadence, as
+        // does a walking pet, whose legs step by the ground it covers.
         let office_idle = self.live.as_ref().is_none_or(|live| {
             let scene = live.scene_rx.borrow();
             scene.agents.is_empty()
                 && scene
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
-        });
+        }) && !self.renderer.a_creature_walks(SystemTime::now());
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).

@@ -3,8 +3,8 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use pixtuoid_core::sprite::format::{
-    DensityMismatch, FrameCountMismatch, HairOverhang, MissingHairView, MissingOptional,
-    OrphanDerived, PartialSet, StandIn, UnmarkedHead, ValidationReport, load_pack,
+    DensityMismatch, FrameCountMismatch, HairOverhang, MissingHairView, MissingKey, MissingMark,
+    MissingOptional, OrphanDerived, PartialSet, StandIn, UnmarkedHead, ValidationReport, load_pack,
 };
 
 use crate::{cli_stdout, strip_control_chars};
@@ -41,6 +41,7 @@ fn missing_optional_line(m: &MissingOptional) -> String {
         StandIn::DefaultPack => "the default pack draws it, in its own style".to_string(),
         StandIn::OwnPiece(piece) => format!("the pack's own \"{piece}\" stands in"),
         StandIn::OwnPose => "another of the pack's poses stands in".to_string(),
+        StandIn::Bare(piece) => format!("the pack's own \"{piece}\" draws without it"),
     };
     format!(
         "WARN:  missing optional animation \"{}\" ({stand_in})",
@@ -67,6 +68,22 @@ fn walk_without_stride_line(name: &str) -> String {
     format!(
         "WARN:  \"{}\" has no stride: it steps on its clock, so its feet slide as its pace changes",
         strip_control_chars(name)
+    )
+}
+
+fn missing_mark_line(m: &MissingMark) -> String {
+    format!(
+        "WARN:  \"{}\" has no `@mark {}`: nothing stands there in either look",
+        strip_control_chars(&m.name),
+        m.mark
+    )
+}
+
+fn missing_key_line(m: &MissingKey) -> String {
+    format!(
+        "WARN:  \"{}\" draws no pixel in key '{}': no light rises there in either look",
+        strip_control_chars(&m.name),
+        strip_control_chars(&m.key.to_string())
     )
 }
 
@@ -188,6 +205,8 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         overhanging_hair,
         orphan_hairstyles,
         walks_without_stride,
+        missing_marks,
+        missing_keys,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it.
@@ -224,6 +243,12 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     }
     for name in walks_without_stride {
         writeln!(out, "{}", walk_without_stride_line(name))?;
+    }
+    for m in missing_marks {
+        writeln!(out, "{}", missing_mark_line(m))?;
+    }
+    for m in missing_keys {
+        writeln!(out, "{}", missing_key_line(m))?;
     }
     for u in unmarked_heads {
         writeln!(out, "{}", unmarked_head_line(u))?;
@@ -276,6 +301,9 @@ mod tests {
         );
         assert!(line("plant", StandIn::DefaultPack).contains("the default pack draws it"));
         assert!(line("walking_coffee", StandIn::OwnPose).contains("another of the pack's poses"));
+        assert!(
+            line("desk_front", StandIn::Bare("desk")).contains("own \"desk\" draws without it")
+        );
     }
 
     #[test]

@@ -364,66 +364,6 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
     }
 }
 
-/// Hovers `at` (logical pixels) on a frame where the cat, petted there, sits
-/// centred on `at`, and returns the frame's text.
-fn hover_a_cat_petted_at(
-    r: &mut TuiRenderer<TestBackend>,
-    scene: &SceneState,
-    at: pixtuoid_scene::layout::Point,
-    now: SystemTime,
-) -> String {
-    r.set_active_pet(Some(PetState {
-        petted_at: now,
-        pet_pos: at,
-        kind: PetKind::Cat,
-        floor_idx: 0,
-    }));
-    r.set_mouse_pos(Some((at.x, CellArea::row_of(at.y))));
-    r.render(scene, pack(), now).unwrap();
-    frame_text(r.frame_buffer())
-}
-
-#[test]
-fn a_pet_painted_over_an_agent_is_the_hover() {
-    let walker = active("/over/0.jsonl", 0, "Edit", t0());
-    let id = walker.agent_id;
-    let scene = scene_with(vec![walker], 16);
-    let mut r = build(140, 48, vec![PetKind::Cat]);
-    let now = t0() + Duration::from_millis(400);
-    r.render(&scene, pack(), now).unwrap();
-    let body = drawn(&r, &scene, id, now);
-    // On the walker's bottom row, so the cat's feet sort south of theirs.
-    let feet = pixtuoid_scene::layout::Point {
-        x: body.top_left.x + body.w / 2,
-        y: body.top_left.y + body.h - 1,
-    };
-    let text = hover_a_cat_petted_at(&mut r, &scene, feet, now);
-    assert!(
-        text.contains("purr") && !text.contains('\u{25b8}'),
-        "the cat over the walker is the hover; frame:\n{text}"
-    );
-}
-
-#[test]
-fn a_pet_over_the_coffee_machine_is_the_hover() {
-    let scene = scene_with(vec![idle("/over/cm.jsonl", 0, t0())], 16);
-    let mut r = build(140, 48, vec![PetKind::Cat]);
-    r.render(&scene, pack(), t0()).unwrap();
-    let machine = r
-        .cached_layout()
-        .and_then(|l| l.coffee_machine())
-        .expect("a 140x48 office has a coffee machine");
-    let centre = pixtuoid_scene::layout::Point {
-        x: machine.x + machine.width / 2,
-        y: machine.y + machine.height / 2,
-    };
-    let text = hover_a_cat_petted_at(&mut r, &scene, centre, t0());
-    assert!(
-        text.contains("purr") && !text.contains("coffee"),
-        "the cat over the coffee machine is the hover; frame:\n{text}"
-    );
-}
-
 /// A click on an agent focuses it and a click on the pet pets it, through the
 /// mouse handler itself.
 #[test]
@@ -489,13 +429,12 @@ where
             |_| panic!("the pet is no agent"),
             at,
         );
-        r.active_pet_ref().map(|p| (p.petted_at, p.pet_pos))
+        r.active_pet_ref().map(|p| p.petted_at)
     };
-    let centre = r.drawn_pet().expect("the cat").centre;
-    assert_eq!(pet(r, now), Some((now, centre)), "the click pets the cat");
+    assert_eq!(pet(r, now), Some(now), "the click pets the cat");
     assert_eq!(
         pet(r, now + Duration::from_millis(1)),
-        Some((now, centre)),
+        Some(now),
         "a second click while it purrs pets nothing new"
     );
 }
