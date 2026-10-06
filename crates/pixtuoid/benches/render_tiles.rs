@@ -1,10 +1,7 @@
 //! A whole frame through the real TUI painter at the owner's 16x: the scene
-//! repainted and every tile cut, compressed and encoded. CodSpeed counts its
-//! instructions per PR, so added encode work (a zlib level, an extra copy, a
-//! per-tile allocation) shows as a step in the trend. Lost parallelism does
-//! not, the instruction total being the same on one thread:
-//! `a_frame_of_two_shares_splits_across_the_cores` pins that, and wall time is
-//! `just pace-check`'s.
+//! repainted and every tile cut, compressed and encoded. Local only (`just
+//! bench`): CodSpeed's simulation counts instructions on one thread, blind to
+//! the cross-core encode, and doubled its job's time.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};

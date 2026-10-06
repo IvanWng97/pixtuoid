@@ -168,7 +168,7 @@ icy_sixel = "0.7"
 insta    = { workspace = true }
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
-# `benches/render_tiles.rs`, which CodSpeed instruments in CI.
+# `benches/render_tiles.rs`.
 criterion  = { workspace = true }
 
 [[example]]

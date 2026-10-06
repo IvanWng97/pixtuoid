@@ -319,7 +319,7 @@ test *args:
     @cargo nextest --version &>/dev/null || { echo 'error: cargo-nextest is not installed — run `just setup-tools`' >&2; exit 1; }
     @TZ={{ TEST_TZ }} cargo nextest run "$@"
 
-# The filter forwards to both targets, and one matching nothing in a target is
+# The filter forwards to every target, and one matching nothing in a target is
 # not an error: `just bench 360` runs every 360x240 case, `just bench hook` only
 # the hook-transport fold.
 [doc('Render-path + wire-path criterion benchmarks; forwards a filter')]
@@ -327,6 +327,7 @@ test *args:
 bench *args:
     cargo bench -p pixtuoid-scene --bench render_frame -- "$@"
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
+    cargo bench -p pixtuoid --bench render_tiles -- "$@"
 
 [doc('Frame pacing through the real TUI painter per protocol: frame time, budget overruns, interval jitter, bytes per frame')]
 [group('rust')]
