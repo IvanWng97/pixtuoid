@@ -271,3 +271,56 @@ fn a_frame_stepped_with_another_pack_is_refused() {
     assert!(render(&mut floor, office.stores(), Look::Classic, stepped(&other)).is_none());
     assert!(render(&mut floor, office.stores(), Look::Classic, stepped(&pack)).is_some());
 }
+
+/// A frame of another pack or theme empties the office's caches first, and
+/// one of the same keeps them.
+#[test]
+fn a_new_pack_or_theme_empties_the_office_caches() {
+    use crate::outside::{OutsideCache, Wall};
+    let normal = &crate::theme::NORMAL;
+    let cyberpunk = crate::theme::theme_by_name("cyberpunk").expect("a registry theme");
+    let one = Arc::new(crate::pack::test_default_pack());
+    // the curtain wall drops out of the near plane
+    let other = Arc::new(crate::pack::test_pack_declaring(
+        "planes = [\"mid\", \"near\"]",
+        "planes = [\"mid\"]",
+    ));
+    let now = crate::localclock::at_hour(12);
+    let views = |outside: &mut OutsideCache, pack: &Pack, theme| {
+        let moment = crate::atmosphere::Moment::resolve(
+            crate::sky::Sky::at_with(now, crate::sky::Weather::Overcast),
+            theme,
+            0.0,
+            crate::anim::Motion::Full.timing(now),
+        );
+        let w = crate::layout::WINDOW_W * 3;
+        outside.views(
+            &moment,
+            pack,
+            theme,
+            Wall {
+                size: (w, 32),
+                bays: crate::layout::window_slots(w).collect(),
+            },
+            pixtuoid_core::sprite::format::Density::ONE,
+            crate::glass_weather::GlassWeather::of(&moment),
+        )[0]
+        .1
+        .clone()
+    };
+    let mut raster = OfficeRaster::default();
+    raster.serve(&one, normal);
+    let first = views(&mut raster.outside, &one, normal);
+    raster.serve(&one, normal);
+    let kept = views(&mut raster.outside, &one, normal);
+    assert!(
+        Arc::ptr_eq(&first, &kept),
+        "one pack in one theme lost its views"
+    );
+    raster.serve(&one, cyberpunk);
+    let themed = views(&mut raster.outside, &one, cyberpunk);
+    assert!(!Arc::ptr_eq(&kept, &themed), "a new theme kept the views");
+    raster.serve(&other, cyberpunk);
+    let packed = views(&mut raster.outside, &other, cyberpunk);
+    assert!(!Arc::ptr_eq(&themed, &packed), "a new pack kept the views");
+}

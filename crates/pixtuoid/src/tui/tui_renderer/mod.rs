@@ -558,7 +558,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             for pf in &mut self.floors {
                 pf.raster.reset_sprite_cache();
             }
-            self.office.raster.reset();
         }
     }
 

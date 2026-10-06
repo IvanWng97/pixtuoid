@@ -123,7 +123,7 @@ pub(crate) struct PaintCtx<'a> {
     sky: crate::sky::Sky,
     /// The sky the windows look out on where a test parts it from the room's
     /// [`Self::sky`]; `None` for the room's.
-    outside: Option<crate::sky::Sky>,
+    window_sky: Option<crate::sky::Sky>,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
     base_fill: &'a mut background::BaseFillCache,
@@ -132,18 +132,18 @@ pub(crate) struct PaintCtx<'a> {
     floor: crate::floor::FloorMeta,
     walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
     debug_walkable: bool,
-    /// The office's cloud masses, kept across frames.
-    cloud_cache: &'a mut crate::clouds::CloudCache,
+    /// The office's outside, kept across frames.
+    outside: &'a mut crate::outside::OutsideCache,
 }
 
 impl<'a> PaintCtx<'a> {
     /// The classic pass over `world` on `layout`, painting into `buf` with the
-    /// floor's `caches` and the office's `cloud_cache`.
+    /// floor's `caches` and the office's `outside`.
     pub(crate) fn classic(
         world: crate::floor::FloorInputs<'a>,
         layout: &'a SceneLayout,
         theme: &'a crate::theme::Theme,
-        (caches, cloud_cache): (&'a mut ClassicCaches, &'a mut crate::clouds::CloudCache),
+        (caches, outside): (&'a mut ClassicCaches, &'a mut crate::outside::OutsideCache),
         buf: &'a mut RgbBuffer,
         walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
         debug_walkable: bool,
@@ -155,7 +155,7 @@ impl<'a> PaintCtx<'a> {
             pack: world.pack,
             timing,
             sky: crate::sky::Sky::at(timing, world.floor.weather),
-            outside: None,
+            window_sky: None,
             buf,
             cache: &mut caches.sprites,
             base_fill: &mut caches.base_fill,
@@ -164,7 +164,7 @@ impl<'a> PaintCtx<'a> {
             floor: world.floor,
             walks,
             debug_walkable,
-            cloud_cache,
+            outside,
         }
     }
 
@@ -215,17 +215,17 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
         "the classic pass draws layout units 1:1"
     );
     paint_ground_and_walls(ctx.base_fill, ctx.buf, top_wall_h, &moment, ctx.theme);
-    let outside = ctx
-        .outside
+    let window_moment = ctx
+        .window_sky
         .map(|sky| Moment::resolve(sky, ctx.theme, ctx.floor.altitude, ctx.timing));
     paint_windows(
         ctx.buf,
         top_wall_h,
         ctx.layout.window_bays(),
-        outside.as_ref().unwrap_or(&moment),
+        window_moment.as_ref().unwrap_or(&moment),
         ctx.pack,
         ctx.theme,
-        ctx.cloud_cache,
+        ctx.outside,
     );
     for spill in &lights.spills {
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);

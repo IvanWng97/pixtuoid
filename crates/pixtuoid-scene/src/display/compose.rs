@@ -140,7 +140,7 @@ pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
-    cloud_cache: &mut crate::clouds::CloudCache,
+    caches: (&mut LightCache, &mut crate::outside::OutsideCache),
 ) -> DisplayList<'a> {
     let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
@@ -149,7 +149,7 @@ pub(crate) fn compose<'a>(
         floor.altitude,
         timing,
     );
-    compose_at(frame, office, &moment, floor, board, cloud_cache)
+    compose_at(frame, office, &moment, floor, board, caches)
 }
 
 /// Compose `frame`'s [`DisplayList`] at `moment`, on `floor`. Every
@@ -161,13 +161,13 @@ pub(crate) fn compose_at<'a>(
     moment: &Moment,
     floor: crate::floor::FloorMeta,
     board: &crate::neon_sign::BoardModel,
-    cloud_cache: &mut crate::clouds::CloudCache,
+    (lights_cache, outside): (&mut LightCache, &mut crate::outside::OutsideCache),
 ) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
-    let mut collected = collect_pieces(frame, office, moment, cloud_cache);
+    let mut collected = collect_pieces(frame, office, moment, outside);
     collected.extend(signs(office, floor.floor_idx, board));
     let sorted = depth_sort(
         collected
@@ -185,7 +185,13 @@ pub(crate) fn compose_at<'a>(
         })
         .collect();
     DisplayList {
-        lights: lights(frame, office, moment, floor.floor_idx, ambient),
+        lights: lights(
+            frame,
+            office,
+            moment,
+            (floor.floor_idx, ambient),
+            lights_cache,
+        ),
         ambient,
         carpet: moment.look.carpet(theme),
         flash: crate::display::light::Flash::of(&moment.sky),
@@ -302,8 +308,8 @@ fn lights(
     frame: &SimFrame,
     office: Office<'_>,
     moment: &Moment,
-    floor_idx: usize,
-    ambient: crate::display::light::Ambient,
+    (floor_idx, ambient): (usize, crate::display::light::Ambient),
+    cache: &mut LightCache,
 ) -> Vec<LightPiece> {
     let Office {
         layout,
@@ -354,33 +360,67 @@ fn lights(
             }
         })
         .collect();
-    lights
+    let inputs = lights
         .spills
         .iter()
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
-        .filter_map(|e| {
-            crate::display::light::LightView::of(
-                e,
-                crate::display::light::tint_of(e.kind, theme, frame.neon),
-                ambient,
-                pen,
-                (layout.buf_w, layout.buf_h),
-            )
-        })
-        .map(|(span, view)| {
-            use std::hash::{Hash, Hasher};
-            let mut h = crate::display::list::fingerprint_hasher();
-            view.hash(&mut h);
-            LightPiece {
-                span,
-                fingerprint: h.finish(),
-                view,
-            }
-        })
-        .collect()
+        .map(|&emitter| crate::display::light::ViewInputs {
+            emitter,
+            tint: crate::display::light::tint_of(emitter.kind, theme, frame.neon),
+            ambient,
+            pen,
+            size: (layout.buf_w, layout.buf_h),
+        });
+    cache.resolve(inputs)
+}
+
+/// The last frame's lights beside what each was resolved from, which a frame
+/// resolving the same reuses as [`OutsideCache`](crate::outside::OutsideCache)
+/// does its views.
+#[derive(Debug, Default)]
+pub(crate) struct LightCache {
+    last: Vec<(crate::display::light::ViewInputs, Option<LightPiece>)>,
+}
+
+impl LightCache {
+    /// Each of `inputs`' light, in order, but those that lift no pixel a whole
+    /// step.
+    fn resolve(
+        &mut self,
+        inputs: impl Iterator<Item = crate::display::light::ViewInputs>,
+    ) -> Vec<LightPiece> {
+        let last = std::mem::take(&mut self.last);
+        let mut pieces = Vec::new();
+        for (i, inputs) in inputs.enumerate() {
+            // A frame's lights come in the last one's order unless one came
+            // or went.
+            let kept = last
+                .get(i)
+                .filter(|(was, _)| *was == inputs)
+                .or_else(|| last.iter().find(|(was, _)| *was == inputs))
+                .map(|(_, piece)| piece.clone());
+            let piece = kept.unwrap_or_else(|| light_piece(&inputs));
+            pieces.extend(piece.clone());
+            self.last.push((inputs, piece));
+        }
+        pieces
+    }
+}
+
+/// The light `inputs` resolve, fingerprinted.
+fn light_piece(inputs: &crate::display::light::ViewInputs) -> Option<LightPiece> {
+    use std::hash::{Hash, Hasher};
+    let (span, view) = crate::display::light::LightView::of(inputs)?;
+    let mut h = crate::display::list::fingerprint_hasher();
+    view.hash(&mut h);
+    Some(LightPiece {
+        span,
+        fingerprint: h.finish(),
+        view: std::sync::Arc::new(view),
+    })
 }
 
 /// Each desk art's bulb, scanned from its pixels the first time a frame asks
@@ -542,7 +582,7 @@ fn collect_pieces(
     frame: &SimFrame,
     office: Office<'_>,
     moment: &Moment,
-    cloud_cache: &mut crate::clouds::CloudCache,
+    outside: &mut crate::outside::OutsideCache,
 ) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let inputs = ComposeInputs {
@@ -556,7 +596,7 @@ fn collect_pieces(
         moment,
         &GlassWeather::of(moment),
         &mut order,
-        cloud_cache,
+        outside,
     );
     let carried = push_characters(frame, office, moment.timing.now, &mut order);
     push_bubbles(frame, office, &mut order);
@@ -1413,7 +1453,7 @@ pub(crate) fn push_windows(
     moment: &Moment,
     weather: &GlassWeather,
     order: &mut Vec<(Span, PieceKind)>,
-    cloud_cache: &mut crate::clouds::CloudCache,
+    outside: &mut crate::outside::OutsideCache,
 ) {
     let Office {
         layout,
@@ -1430,15 +1470,14 @@ pub(crate) fn push_windows(
         size: (layout.buf_w, layout.wall_band_h()),
         bays: layout.window_bays().collect(),
     };
-    let outside =
-        crate::outside::Outside::of(moment, pack, theme, wall, density, *weather, cloud_cache);
+    let views = outside.views(moment, pack, theme, wall, density, *weather);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
     let bolt = crate::display::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
-    for (bay, mut view) in outside.views() {
+    for (bay, mut view) in views {
         if bolt > 0 {
-            view.paint(|_, c| bolt_lift.of(c));
+            std::sync::Arc::make_mut(&mut view).paint(|_, c| bolt_lift.of(c));
         }
         order.push((
             Span::new(bay.x, rows.start, bay.w, rows.end - rows.start, 0).with_depth(0),

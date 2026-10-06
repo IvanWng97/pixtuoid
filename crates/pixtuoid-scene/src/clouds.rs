@@ -803,7 +803,7 @@ fn dequantize(k: u8, steps: f32) -> f32 {
     f32::from(k) / steps
 }
 
-/// How far ahead [`Clouds::of_ahead`] looks for a step: a step's every mass,
+/// How far ahead [`Clouds::draw_ahead`] looks for a step: a step's every mass,
 /// [`DRAWS_AHEAD`] a frame, is drawn before it lands.
 const AHEAD: std::time::Duration = std::time::Duration::from_secs(1);
 /// The masses a frame draws ahead at most: a transition's share and light
@@ -814,7 +814,7 @@ const DRAWS_AHEAD: usize = 2;
 /// `CloudCache::CAPACITY` of them: drawing a mass's bands is most of a
 /// cloudy frame's cost, and a drifting mass's bands don't change.
 #[derive(Debug)]
-pub struct CloudCache {
+pub(crate) struct CloudCache {
     entries: lru::LruCache<RasterKey, std::sync::Arc<MassRaster>>,
     /// The next frame draws all its [`AHEAD`] needs, not [`DRAWS_AHEAD`]:
     /// a boot frame, which no frame before it drew ahead for.
@@ -1009,18 +1009,11 @@ impl Clouds {
         clouds
     }
 
-    /// [`Self::of`], and then up to [`DRAWS_AHEAD`] of the masses the next
-    /// [`AHEAD`] needs and `cache` lacks, the soonest needed first: each
-    /// quantized step's bands drawn a few a frame before it lands, not all in
-    /// the frame it does.
-    pub(crate) fn of_ahead(
-        moment: &Moment,
-        size: (u16, u16),
-        d: u16,
-        panes: &[Range<u16>],
-        cache: &mut CloudCache,
-    ) -> Self {
-        let clouds = Self::of(moment, size, d, panes, cache);
+    /// Draw up to [`DRAWS_AHEAD`] of the masses the [`AHEAD`] of `moment`
+    /// needs and `cache` lacks, the soonest needed first: each quantized
+    /// step's bands drawn a few a frame before it lands, not all in the frame
+    /// it does. Its budget is a frame's, so every painted frame calls it.
+    pub(crate) fn draw_ahead(moment: &Moment, size: (u16, u16), d: u16, cache: &mut CloudCache) {
         let _ahead = tracing::trace_span!("clouds.ahead").entered();
         let frame = std::time::Duration::from_millis(crate::anim::PAINT_FRAME_MS);
         let mut budget = if std::mem::take(&mut cache.warming) {
@@ -1039,7 +1032,7 @@ impl Clouds {
             let (next, planned) = Self::plan(&sky, 0.0, size, d);
             for (mass, key) in planned {
                 if budget == 0 {
-                    return clouds;
+                    return;
                 }
                 if !cache.holds(key) {
                     cache.get_or_draw(key, || next.draw(&mass, f32::from(size.1)));
@@ -1047,7 +1040,6 @@ impl Clouds {
                 }
             }
         }
-        clouds
     }
 
     /// Mass `m`'s bands over glass `glass_h` tall on its grid, in its own
@@ -1786,7 +1778,8 @@ mod tests {
         assert!(steps > 0, "a step lands within the first second");
         let mut cache = CloudCache::default();
         cache.warm();
-        Clouds::of_ahead(&moment_at(0), (SPAN, GLASS_H), 4, RUN, &mut cache);
+        Clouds::of(&moment_at(0), (SPAN, GLASS_H), 4, RUN, &mut cache);
+        Clouds::draw_ahead(&moment_at(0), (SPAN, GLASS_H), 4, &mut cache);
         for n in 1..(AHEAD.as_millis() / frame.as_millis()) as u32 {
             let moment = moment_at(n);
             let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
@@ -1794,7 +1787,8 @@ mod tests {
                 planned.iter().all(|&(_, key)| cache.holds(key)),
                 "frame {n} drew on demand"
             );
-            Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+            Clouds::of(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+            Clouds::draw_ahead(&moment, (SPAN, GLASS_H), 4, &mut cache);
         }
     }
 
@@ -1833,9 +1827,12 @@ mod tests {
         );
     }
 
-    /// Frame by frame at the paint rate, on Full and Calm, through a weather
-    /// transition and across dusk, every frame but the first finds its every
-    /// mass already drawn, and draws at most [`DRAWS_AHEAD`] ahead.
+    /// Frame by frame at the paint rate through the office's
+    /// [`OutsideCache`](crate::outside::OutsideCache), on Full and Calm,
+    /// through a weather transition and across dusk, every frame but the
+    /// first finds its every mass already drawn, and draws at most
+    /// [`DRAWS_AHEAD`] ahead: a frame that reuses the last one's views draws
+    /// ahead all the same.
     #[test]
     fn every_step_is_drawn_ahead_of_it() {
         use crate::sky::WeatherPolicy;
@@ -1857,20 +1854,38 @@ mod tests {
         // Each window opens `AHEAD` early: a step within `AHEAD` of the first
         // frame has had no frames to be drawn ahead in.
         let lead = (AHEAD.as_millis() / frame.as_millis()) as u32;
+        let pack = crate::pack::test_default_pack();
+        let d = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
+        let wall = crate::outside::Wall {
+            size: (crate::layout::WINDOW_W * 3, 32),
+            bays: crate::layout::window_slots(crate::layout::WINDOW_W * 3).collect(),
+        };
+        let (run, glass_h) = wall.glass();
         for motion in [Motion::Full, Motion::Calm] {
             for (start, policy, length) in windows {
-                let mut cache = CloudCache::default();
+                let mut cache = crate::outside::OutsideCache::default();
                 let mut ahead_drawn = 0;
                 for n in 0..lead + (length.as_millis() / frame.as_millis()) as u32 {
                     let timing = motion.timing(start - AHEAD + frame * n);
                     let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
-                    let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
+                    let (_, planned) =
+                        Clouds::plan(&moment.sky, 0.0, (run.end - run.start, glass_h), d.get());
                     let missing = planned
                         .iter()
-                        .filter(|&&(_, key)| !cache.holds(key))
+                        .filter(|&&(_, key)| !cache.clouds.holds(key))
                         .count();
                     let drawn = draws(|| {
-                        Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+                        cache.views(
+                            &moment,
+                            &pack,
+                            theme,
+                            crate::outside::Wall {
+                                size: wall.size,
+                                bays: wall.bays.clone(),
+                            },
+                            d,
+                            crate::glass_weather::GlassWeather::of(&moment),
+                        );
                     });
                     if n > lead {
                         assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");

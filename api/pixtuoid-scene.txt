@@ -1137,8 +1137,6 @@ impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
 pub struct pixtuoid_scene::look::OfficeRaster
-impl pixtuoid_scene::look::OfficeRaster
-pub fn pixtuoid_scene::look::OfficeRaster::reset(&mut self)
 impl core::default::Default for pixtuoid_scene::look::OfficeRaster
 pub fn pixtuoid_scene::look::OfficeRaster::default() -> pixtuoid_scene::look::OfficeRaster
 impl core::fmt::Debug for pixtuoid_scene::look::OfficeRaster

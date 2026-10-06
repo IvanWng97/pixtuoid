@@ -524,7 +524,7 @@ fn chair_over_person(
             0.0,
             Motion::Full.timing(std::time::UNIX_EPOCH),
         ),
-        &mut crate::clouds::CloudCache::default(),
+        &mut crate::outside::OutsideCache::default(),
     );
     let (person, person_span) = order
         .iter()
@@ -845,7 +845,7 @@ fn a_sitters_chair_casts_the_shadow_they_do_not() {
                 0.0,
                 Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
-            &mut crate::clouds::CloudCache::default(),
+            &mut crate::outside::OutsideCache::default(),
         ) {
             let PieceKind::Character {
                 ref figure,
@@ -1032,7 +1032,10 @@ pub(crate) fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> Di
         &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
         crate::floor::FloorMeta::ground(),
         quiet_board(),
-        &mut crate::clouds::CloudCache::default(),
+        (
+            &mut crate::display::compose::LightCache::default(),
+            &mut crate::outside::OutsideCache::default(),
+        ),
     )
 }
 
@@ -1735,4 +1738,71 @@ fn the_classic_lamp_pool_centres_on_the_1x_bulb() {
             "{art}'s pool is off its bulb"
         );
     }
+}
+
+/// A frame composed on the inputs the last one's windows and lights were
+/// resolved from takes them from the memo; a beat later resolves the windows
+/// afresh.
+#[test]
+fn a_frame_on_unchanged_inputs_reuses_the_last_frames_windows_and_lights() {
+    use std::sync::Arc;
+    let pack = test_default_pack();
+    let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
+    let office = Office {
+        layout: &layout,
+        pack: &pack,
+        theme: &crate::theme::NORMAL,
+        scale: RenderScale::ONE,
+    };
+    let frame = empty_frame(&layout);
+    let (mut lights, mut outside) = (
+        LightCache::default(),
+        crate::outside::OutsideCache::default(),
+    );
+    let mut views = |now| {
+        let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
+        let list = compose_at(
+            &frame,
+            office,
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
+            crate::floor::FloorMeta::ground(),
+            quiet_board(),
+            (&mut lights, &mut outside),
+        );
+        let windows: Vec<_> = list
+            .pieces()
+            .iter()
+            .filter_map(|p| match &p.kind {
+                PieceKind::Window { view, .. } => Some(Arc::clone(view)),
+                _ => None,
+            })
+            .collect();
+        let lights: Vec<_> = list.lights().iter().map(|l| Arc::clone(&l.view)).collect();
+        (windows, lights)
+    };
+    fn same<T>(a: &[Arc<T>], b: &[Arc<T>]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(a, b)| Arc::ptr_eq(a, b))
+    }
+    let night = crate::localclock::at_hour(23);
+    let (windows, lights) = views(night);
+    assert!(
+        !windows.is_empty() && !lights.is_empty(),
+        "the office has windows and lights"
+    );
+    let (again_windows, again_lights) = views(night);
+    assert!(
+        same(&windows, &again_windows),
+        "the windows were resolved again"
+    );
+    assert!(
+        same(&lights, &again_lights),
+        "the lights were resolved again"
+    );
+    let (later, _) = views(night + std::time::Duration::from_secs(1));
+    assert!(
+        later
+            .iter()
+            .all(|v| windows.iter().all(|w| !Arc::ptr_eq(v, w))),
+        "a beat later took the last beat's windows"
+    );
 }
