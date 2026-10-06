@@ -231,6 +231,8 @@ impl TileCutaway {
         flash: FlashPhase,
         now: SystemTime,
     ) {
+        // A frame the flash hold keeps back sends nothing.
+        self.last = FrameSend::default();
         let dirty = if self.shown.replace(Shown::Floor(floor)) == Some(Shown::Floor(floor)) {
             dirty
         } else {
@@ -259,6 +261,7 @@ impl TileCutaway {
         theme: &'static Theme,
         now: SystemTime,
     ) {
+        self.last = FrameSend::default();
         let flashes = slide.flashes;
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&Dirty::All);

@@ -144,9 +144,11 @@ pub(crate) struct UiState {
 /// `$PIXTUOID_FAKE_NOW`'s clock, said once at warn: a stray export would
 /// otherwise skew the sky and the weather unseen.
 fn fake_now() -> Option<(Instant, SystemTime)> {
-    let secs: u64 = pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")?
-        .parse()
-        .ok()?;
+    let set = pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")?;
+    let Ok(secs) = set.trim().parse::<u64>() else {
+        tracing::warn!(value = ?set, "PIXTUOID_FAKE_NOW is not Unix seconds: the clock is now");
+        return None;
+    };
     tracing::warn!(secs, "the clock starts at PIXTUOID_FAKE_NOW, not now");
     Some((
         Instant::now(),

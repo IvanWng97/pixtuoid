@@ -1,7 +1,9 @@
 //! Frame-time telemetry, after Android's JankStats
-//! (<https://developer.android.com/topic/performance/jankstats>): every frame
-//! over twice the paint interval is reported with what it was drawn under, and
-//! once a minute the frames' spread is.
+//! (<https://developer.android.com/topic/performance/jankstats>): a frame past
+//! the loop's scheduled interval is a debug `frame slow`, one past twice it a
+//! debug `frame jank`, each with what it was drawn under; once a minute, and
+//! at exit, a `frame pacing` summary gives the spread, at warn when a frame
+//! janked.
 
 use std::time::{Duration, Instant};
 

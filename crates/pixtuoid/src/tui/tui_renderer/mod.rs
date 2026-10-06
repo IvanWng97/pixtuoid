@@ -283,10 +283,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let look = self.cutaway_look(scene_area).unwrap_or(classic);
         #[cfg(not(feature = "graphics"))]
         let look = classic;
-        let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
-        while self.floors.len() < nf {
-            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
-        }
+        let nf = self.grow_floors(scene);
         let floor_scene = project_floor_scene(scene, self.current_floor);
         let Frame { world, footer, .. } =
             self.chrome
@@ -308,6 +305,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 debug_walkable: false,
             },
         );
+    }
+
+    /// The floors `scene` fills, a raster each: what a frame, and the unseen
+    /// boot frame, both stand on.
+    fn grow_floors(&mut self, scene: &SceneState) -> usize {
+        let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
+        while self.floors.len() < nf {
+            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
+        }
+        nf
     }
 
     /// The cutaway's look and office extent over `scene_area`, as its next
@@ -866,11 +873,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.active_pet = None;
         }
 
-        let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
-
-        while self.floors.len() < nf {
-            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
-        }
+        let nf = self.grow_floors(scene);
 
         if let Some(ref tr) = self.transition
             && (tr.from_floor >= nf || tr.to_floor >= nf)
