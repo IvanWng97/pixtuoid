@@ -244,6 +244,45 @@ fn a_whole_frame_transmits_every_tile_once_in_order() {
     assert_eq!(ids, (first..first + ids.len() as u32).collect::<Vec<_>>());
 }
 
+/// Warmed at boot, the first frame shown draws no cloud: every mass of its
+/// sky is already cached.
+#[test]
+fn a_warmed_first_frame_draws_no_cloud() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.set_weather(pixtuoid_scene::sky::WeatherPolicy::Forced(
+        pixtuoid_scene::sky::Weather::Overcast,
+    ));
+    let scene = office();
+    assert!(
+        cloud_draws(|| r.warm(&scene, pack(), t0())) > 0,
+        "warming an overcast sky draws its masses"
+    );
+    let first = cloud_draws(|| r.render(&scene, pack(), t0()).expect("render"));
+    assert_eq!(first, 0, "the first frame drew a cloud");
+}
+
+/// The cloud rasters `f` draws: the `clouds.draw` spans it opens.
+fn cloud_draws(f: impl FnOnce()) -> usize {
+    use tracing_subscriber::layer::SubscriberExt;
+    #[derive(Clone, Default)]
+    struct Count(Arc<std::sync::atomic::AtomicUsize>);
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Count {
+        fn on_new_span(
+            &self,
+            span: &tracing::span::Attributes<'_>,
+            _: &tracing::span::Id,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if span.metadata().name() == "clouds.draw" {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+    let count = Count::default();
+    tracing::subscriber::with_default(tracing_subscriber::registry().with(count.clone()), f);
+    count.0.load(Ordering::Relaxed)
+}
+
 /// The renderer leaves the encode a core exactly while its audio handle has
 /// a thread up.
 #[test]
@@ -257,6 +296,21 @@ fn the_encode_leaves_a_core_while_the_audio_handle_is_live() {
     r.set_audio(audio);
     r.render(&office(), pack(), t0()).expect("render");
     assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 3);
+}
+
+/// A frame with no room for the image reports no transmits, not the last
+/// cutaway frame's.
+#[test]
+fn a_frame_without_room_reports_no_transmits() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.render(&office(), pack(), t0()).expect("render");
+    let cutaway = |r: &TuiRenderer<Window>| r.cutaway.as_ref().expect("a cutaway").last_send();
+    assert_ne!(cutaway(&r).sent, 0, "the first frame sent its tiles");
+    let (cols, rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(cols, rows);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_ne!(cutaway(&r).dirty, crate::tui::jank::Painted::All);
+    assert_eq!(cutaway(&r).sent, 0);
 }
 
 /// Text and image never share a cell: the footer row stays text.

@@ -4,6 +4,7 @@ pub(crate) mod cutaway;
 pub mod dashboard;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
+pub(crate) mod jank;
 pub mod renderer;
 pub mod tui_renderer;
 mod ui_state;
@@ -938,14 +939,11 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 }
 
 /// Hand `renderer` the painter `plan` names.
-#[cfg_attr(
-    not(feature = "graphics"),
-    expect(unused_variables, reason = "only a graphics build paints the cutaway")
-)]
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
 ) {
+    let (terminal, tmux_env) = crate::graphics::terminal_and_tmux();
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
@@ -954,14 +952,30 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             cell,
             tmux,
             ..
-        } => renderer.set_cutaway(cutaway::TileCutaway::new(
-            fit,
-            cell,
-            protocol,
-            tmux,
-            Box::new(stdout()),
-        )),
-        _ => tracing::info!(plan = ?plan, "painting classic"),
+        } => {
+            renderer.painted_by(jank::Painter {
+                look: protocol.name(),
+                scale: fit.scale().get(),
+                tmux,
+                terminal,
+            });
+            renderer.set_cutaway(cutaway::TileCutaway::new(
+                fit,
+                cell,
+                protocol,
+                tmux,
+                Box::new(stdout()),
+            ));
+        }
+        _ => {
+            renderer.painted_by(jank::Painter {
+                look: "classic",
+                scale: 1,
+                tmux: tmux_env,
+                terminal,
+            });
+            tracing::info!(plan = ?plan, "painting classic");
+        }
     }
 }
 
@@ -1022,9 +1036,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
+    renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 
     let tick = frame_tick();
+    renderer.scheduled_every(tick);
     let result: Result<()> = (async {
         let mut frames = frame_clock(tick);
         let mut events = EventStream::new();
@@ -1105,6 +1121,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     })
     .await;
 
+    renderer.finish_pacing();
     teardown_terminal(&mut renderer.terminal)?;
     result
 }

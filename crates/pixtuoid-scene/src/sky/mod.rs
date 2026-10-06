@@ -548,6 +548,14 @@ pub(crate) fn local_hour_frac(now: SystemTime) -> f32 {
     local.hour() as f32 + local.minute() as f32 / 60.0
 }
 
+/// When nightfall begins on `day`'s local date: where `just pace-check --run
+/// dusk` starts its clock. `None` where that local time doesn't exist.
+#[doc(hidden)]
+pub fn nightfall_on(day: SystemTime) -> Option<SystemTime> {
+    let minutes = (SUN_SET_H * 60.0).round() as u32;
+    crate::localclock::on_date_of(day, minutes / 60, minutes % 60)
+}
+
 /// How far into the night hour `h` is, 0..=1: zero by day, rising over
 /// [`NIGHTFALL_H`] after dusk and falling over it before dawn.
 fn nightfall(h: f32) -> f32 {
@@ -708,6 +716,17 @@ pub fn first_strike_after(after: SystemTime, motion: Motion) -> Option<SystemTim
 /// the weather: where the frame-pacing bench places its window.
 #[doc(hidden)]
 pub fn first_transition_after(after: SystemTime) -> Option<SystemTime> {
+    transition_after(after, |_| true)
+}
+
+/// [`first_transition_after`] into `into`: where `just pace-check` starts
+/// its clock, so a run crosses a transition and then the weather after it.
+#[doc(hidden)]
+pub fn first_transition_into(after: SystemTime, into: Weather) -> Option<SystemTime> {
+    transition_after(after, |to| to == into)
+}
+
+fn transition_after(after: SystemTime, wanted: impl Fn(Weather) -> bool) -> Option<SystemTime> {
     let ms = u64::try_from(
         after
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -716,15 +735,18 @@ pub fn first_transition_after(after: SystemTime) -> Option<SystemTime> {
     )
     .ok()?;
     (ms / WEATHER_CYCLE_MS..)
-        .take(256)
+        .take(TRANSITIONS_SEARCHED)
         .map(|slot| (slot + 1) * WEATHER_CYCLE_MS - TRANSITION_MS)
         .filter(|&start| start >= ms)
         .find(|&start| {
             let mid = WeatherPolicy::Clock.weather_at_ms(start + TRANSITION_MS / 2);
-            mid.from != mid.to
+            mid.from != mid.to && wanted(mid.to)
         })
         .map(|start| SystemTime::UNIX_EPOCH + Duration::from_millis(start))
 }
+
+/// The slots a transition is searched over: weeks of weather.
+const TRANSITIONS_SEARCHED: usize = 4096;
 
 /// The lightning bucket `beat` falls in: what seeds its strike's look.
 pub(crate) fn strike_bucket(beat: crate::anim::Beat) -> u64 {

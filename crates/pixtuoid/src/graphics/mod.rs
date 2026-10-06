@@ -237,6 +237,14 @@ fn env_set(name: &str) -> bool {
     pixtuoid_core::platform::path_env(name).is_some()
 }
 
+/// The terminal's own name and whether this runs inside tmux, read as the
+/// probe reads them: what a run's frame pacing is reported under.
+pub(crate) fn terminal_and_tmux() -> (Option<String>, bool) {
+    let env = TermEnv::read();
+    let tmux = env.tmux();
+    (env.term_program, tmux)
+}
+
 /// The terminal and the link to it as the environment names them: the probe
 /// and the motion default read these variables only through here.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

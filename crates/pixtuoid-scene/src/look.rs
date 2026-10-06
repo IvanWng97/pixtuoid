@@ -79,6 +79,21 @@ pub mod spans {
     pub const RASTERIZE: &str = "frame.rasterize";
 }
 
+/// What the last frame of a [`Raster`] was drawn under, for a painter's
+/// jank report.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameNote {
+    /// Why the cutaway painted it whole, when it did; `None` for the classic,
+    /// which paints every frame whole.
+    pub repaint: Option<crate::cutaway::canvas::Repaint>,
+    /// The weather it shows: the slot's, the next slot's, and the next one's
+    /// share of the clouds.
+    pub weather: (crate::sky::Weather, crate::sky::Weather, f32),
+    /// Whether a strike lit it.
+    pub strike: bool,
+}
+
 /// The office's raster state, shared by every floor and both looks: the
 /// cutaway's art and the clouds' masses.
 #[derive(Debug, Default)]
@@ -88,6 +103,14 @@ pub struct OfficeRaster {
 }
 
 impl OfficeRaster {
+    /// Have the next frame draw every cloud mass the coming second needs,
+    /// not a few a frame: the boot frame, which no frame before it drew
+    /// ahead for.
+    #[doc(hidden)]
+    pub fn warm(&mut self) {
+        self.cloud_cache.warm();
+    }
+
     /// Drop the cached art, after a theme change.
     pub fn reset(&mut self) {
         *self = Self::default();
@@ -105,6 +128,7 @@ pub struct Raster {
     cutaway: Option<CutawayCanvas>,
     /// The look of the last frame drawn; the first frame in another repaints whole.
     shown: Option<Look>,
+    note: Option<FrameNote>,
 }
 
 #[derive(Debug)]
@@ -142,6 +166,7 @@ impl Raster {
             classic: None,
             cutaway: None,
             shown: None,
+            note: None,
         }
     }
 
@@ -234,6 +259,12 @@ impl Raster {
         }
     }
 
+    /// What the last frame drawn was drawn under, `None` before the first.
+    #[doc(hidden)]
+    pub fn note(&self) -> Option<FrameNote> {
+        self.note
+    }
+
     /// The pixels of the last frame drawn, `None` before the first.
     pub fn pixels(&self) -> Option<&RgbBuffer> {
         match self.shown? {
@@ -290,6 +321,16 @@ pub fn render<'r>(
         world.floor.motion,
         world.now,
     );
+    let sky = crate::sky::Sky::at(world.floor.motion.timing(world.now), world.floor.weather);
+    raster.note = Some(FrameNote {
+        repaint: None,
+        weather: {
+            let mix = sky.weather();
+            let [from, to] = mix.ends();
+            (from, to, mix.incoming(crate::sky::Element::Cloud))
+        },
+        strike: sky.strike().is_some(),
+    });
     let (pixels, dirty, flash) = match look {
         Look::Classic => {
             let classic = raster.classic();
@@ -320,7 +361,12 @@ pub fn render<'r>(
             let canvas = raster
                 .cutaway
                 .get_or_insert_with(|| CutawayCanvas::new(Arc::clone(&raster.pack)));
-            let CanvasFrame { buf, dirty, flash } = canvas.frame(
+            let CanvasFrame {
+                buf,
+                dirty,
+                flash,
+                repaint,
+            } = canvas.frame(
                 &stepped,
                 theme,
                 scale,
@@ -331,6 +377,12 @@ pub fn render<'r>(
                 },
                 (&mut office.raster.cutaway, &mut office.raster.cloud_cache),
             );
+            if let Some(note) = &mut raster.note {
+                note.repaint = repaint.or(switched.then(|| crate::cutaway::canvas::Repaint {
+                    first: true,
+                    ..Default::default()
+                }));
+            }
             (buf, if switched { Dirty::All } else { dirty }, flash)
         }
     };

@@ -168,6 +168,8 @@ icy_sixel = "0.7"
 insta    = { workspace = true }
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
+# `benches/render_tiles.rs`, which CodSpeed instruments in CI.
+criterion  = { workspace = true }
 
 [[example]]
 name = "snapshot"
@@ -187,4 +189,9 @@ extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI
 
 [[example]]
 name              = "pacing"
+required-features = ["graphics"]
+
+[[bench]]
+name              = "render_tiles"
+harness           = false
 required-features = ["graphics"]

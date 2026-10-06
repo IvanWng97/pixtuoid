@@ -333,6 +333,14 @@ bench *args:
 bench-pacing:
     cargo run --release -p pixtuoid --example pacing -- target/pacing/report.json
 
+# Local only, never CI: a shared runner's wall clock is too noisy for a frame
+# budget. `--live` runs in this terminal, the only run a real parser sees.
+[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail on p99 over 20 ms or a frame past the paint interval')]
+[group('rust')]
+pace-check *args:
+    cargo build --release -p pixtuoid --bins --example pacing
+    python3 scripts/pace-check.py "$@"
+
 # Catches code that silently only builds with `native` on (the wasm core builds
 # without it). `--no-dev-deps check` builds no test, so scene's no-default tests
 # lint and run on their own.
