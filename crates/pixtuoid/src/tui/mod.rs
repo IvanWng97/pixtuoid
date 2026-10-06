@@ -874,9 +874,20 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
 /// subscription mid-gap, and an external SIGINT would then hit the default disposition and
 /// kill the process mid-altscreen with mouse reporting still on, leaving the shell unusable
 /// until `reset`. BOXED so a registration failure can disarm the arm by swapping in a
-/// pending future — a resolved future must never be polled again.
+/// pending future — a resolved future must never be polled again. On unix the handler is
+/// installed at the call, not the first poll as `tokio::signal::ctrl_c` does, so a caller
+/// can arm it before the alt-screen goes up.
 fn pin_ctrl_c() -> std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>
 {
+    #[cfg(unix)]
+    {
+        let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
+        Box::pin(async move {
+            sig?.recv().await;
+            Ok(())
+        })
+    }
+    #[cfg(not(unix))]
     Box::pin(tokio::signal::ctrl_c())
 }
 
@@ -960,6 +971,13 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
+    // Both quit arms armed before the alt-screen goes up: a signal in between
+    // would otherwise kill the process with it still on.
+    let mut ctrl_c = pin_ctrl_c();
+    #[cfg(unix)]
+    let terminate = terminate_signal();
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
@@ -989,11 +1007,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     let tick = frame_tick();
     let result: Result<()> = (async {
-        let mut ctrl_c = pin_ctrl_c();
-        #[cfg(unix)]
-        let terminate = terminate_signal();
-        #[cfg(not(unix))]
-        let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
         let mut frames = frame_clock(tick);
         let mut events = EventStream::new();
@@ -1280,6 +1293,24 @@ mod teardown_tests {
             err.to_string().contains("terminal gone"),
             "the first failure is reported, got: {err:#}"
         );
+    }
+}
+
+/// Both quit arms catch a signal raised after they are made and before they
+/// are first polled — the window `run_tui` arms them across.
+#[cfg(all(test, unix))]
+mod quit_arms {
+    #[tokio::test]
+    async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
+        let ctrl_c = super::pin_ctrl_c();
+        let terminate = super::terminate_signal();
+        // SAFETY: raising a signal this process handles from here on.
+        unsafe {
+            libc::raise(libc::SIGINT);
+            libc::raise(libc::SIGTERM);
+        }
+        ctrl_c.await.expect("the SIGINT arm resolves");
+        terminate.await;
     }
 }
 
