@@ -607,6 +607,18 @@ impl RecolorableFrame<'_> {
         }
         self.indexed.resolve(&palette.resolved())
     }
+
+    /// Which of the frame's pixels, row by row, it draws in one of `keys`:
+    /// those that go transparent when the keys are blanked.
+    pub fn drawn_in(&self, keys: &[char]) -> Vec<bool> {
+        let art = self.recolored(&[]);
+        let blank = self.recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
+        let opaque = |f: &Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
+        (0..art.height())
+            .flat_map(|y| (0..art.width()).map(move |x| (x, y)))
+            .map(|(x, y)| opaque(&art, x, y) && !opaque(&blank, x, y))
+            .collect()
+    }
 }
 
 /// A flat RGB buffer used as a blit target.

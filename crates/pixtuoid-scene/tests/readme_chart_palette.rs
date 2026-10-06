@@ -4,8 +4,9 @@
 //! guard, the same shape as `site_badge_colors.rs`.
 //!
 //! Reads the JSON at RUNTIME because `include_str!` of a path outside the
-//! crate breaks `cargo publish`'s verify. Workspace-only test, excluded from the
-//! published package (`Cargo.toml` `exclude`).
+//! crate fails `cargo test` on the extracted .crate (no workspace tree).
+//! Workspace-only test, excluded from the published package (`Cargo.toml`
+//! `exclude`).
 
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_scene::theme::{Theme, theme_by_name};

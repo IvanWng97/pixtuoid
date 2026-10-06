@@ -79,10 +79,12 @@ pub mod spans {
     pub const RASTERIZE: &str = "frame.rasterize";
 }
 
-/// The office's raster state, shared by every floor: the cutaway's art.
+/// The office's raster state, shared by every floor and both looks: the
+/// cutaway's art and the clouds' masses.
 #[derive(Debug, Default)]
 pub struct OfficeRaster {
-    cutaway: crate::cutaway::paint::CutawayCache,
+    pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
+    pub(crate) cloud_cache: crate::clouds::CloudCache,
 }
 
 impl OfficeRaster {
@@ -290,7 +292,7 @@ pub fn render<'r>(
                 world,
                 &stepped.layout,
                 theme,
-                &mut classic.caches,
+                (&mut classic.caches, &mut office.raster.cloud_cache),
                 &mut classic.buf,
                 &ctx.walks,
                 debug_walkable,
@@ -319,7 +321,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                &mut office.raster.cutaway,
+                (&mut office.raster.cutaway, &mut office.raster.cloud_cache),
             );
             (buf, if switched { Dirty::All } else { dirty }, flash)
         }
