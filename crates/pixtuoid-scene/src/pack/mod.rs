@@ -512,15 +512,14 @@ mod tests {
 
     /// The sprites `toml` loads without: the ones nothing it registers draws.
     fn undrawn<'a>(toml: &str, srcs: &[(&'a str, &'a str)]) -> Vec<&'a str> {
-        // Every leave-one-out load below errors when the whole set does, which
-        // would report nothing undrawn.
-        load_pack_from_strings(toml, srcs).expect("the whole set loads");
+        let read: std::collections::HashSet<String> =
+            pixtuoid_core::sprite::format::frames_read_by(toml, srcs)
+                .expect("the whole set loads")
+                .into_iter()
+                .collect();
         srcs.iter()
             .map(|&(name, _)| name)
-            .filter(|&name| {
-                let without: Vec<_> = srcs.iter().copied().filter(|&(n, _)| n != name).collect();
-                load_pack_from_strings(toml, &without).is_ok()
-            })
+            .filter(|&name| !read.contains(name))
             .collect()
     }
 
