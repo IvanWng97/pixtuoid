@@ -11,13 +11,17 @@ pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, DESK_CUP_SPRITE,
-    DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE, MEETING_TABLE_SPRITE,
-    NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE,
-    TOKEN_TOWER_SPRITE, VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at,
-    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
-    desk_sprite_name, drawn_in, fixture_overrides, frame_at, looping_frame_index,
+    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
+    DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE,
+    MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, PropMark, SCREEN_GLASS_KEY,
+    SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
+    WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
+    appliance_sprite, bulb_cell, desk_art, desk_art_name, desk_art_top, desk_bulb_offset,
+    desk_front, desk_mark, desk_prop_overrides, desk_props_mirrored, drawn_in, fixture_overrides,
+    frame_at, looping_frame_index, prop_left,
 };
+#[cfg(test)]
+pub(crate) use lookup::{MONITOR_KEYS, desk_sprite_name};
 
 #[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
@@ -26,9 +30,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
-use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, load_pack};
 use pixtuoid_core::sprite::format::{
-    Pack, ValidationReport, load_pack_from_strings, validate_pack_animations,
+    DensityMismatch, FrameCountMismatch, MissingKey, MissingMark, load_pack,
+};
+use pixtuoid_core::sprite::format::{
+    Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a
@@ -80,10 +86,35 @@ fn walks() -> Vec<&'static str> {
         .collect()
 }
 
-/// [`validate_pack_animations`], against this crate's painters' art sets and
-/// walks.
+/// The marks every desk's first frame carries: the cup and the token tower
+/// stand there in both looks, and the cup's steam rises there — the
+/// cutaway's `push_desk_props` reads them, the classic and the steam through
+/// [`desk_mark`]. A desk that mirrors its props ([`desk_props_mirrored`])
+/// marks each one's bottom-right cell.
+const DESK_MARKS: [(&str, &[&str]); 2] = [
+    (lookup::DESK_SPRITE, &[CUP_MARK, TOWER_MARK]),
+    (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
+];
+
+/// The key every desk draws its lamp's bulb in: its pool centres there
+/// ([`bulb_cell`]).
+const DESK_BULBS: [(&str, char); 2] = [
+    (lookup::DESK_SPRITE, DESK_BULB_KEY),
+    (lookup::DESK_NORTH_SPRITE, DESK_BULB_KEY),
+];
+
+/// [`validate_pack_animations`], against this crate's painters' art sets,
+/// walks, desk marks and desk bulbs.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets(), &walks())
+    validate_pack_animations(
+        pack,
+        &PackContract {
+            art_sets: &art_sets(),
+            walks: &walks(),
+            marks: &DESK_MARKS,
+            keys: &DESK_BULBS,
+        },
+    )
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -111,6 +142,8 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         missing_hair_views: _,
         overhanging_hair: _,
         walks_without_stride: _,
+        missing_marks,
+        missing_keys,
         orphan_hairstyles,
     } = &report;
     for name in missing_required {
@@ -170,6 +203,23 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             variant_frames,
             "custom sprite pack density variant has a different frame count from its base — \
              renderers skip it for the densest art that fits"
+        );
+    }
+    // the classic stands its desk props only on the art's marks, as the cutaway does
+    for MissingMark { name, mark } in missing_marks {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            mark,
+            "custom sprite pack art leaves out a mark — nothing stands there, in either look"
+        );
+    }
+    for MissingKey { name, key } in missing_keys {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            key = %key,
+            "custom sprite pack art draws no pixel in a light's key — no light rises there"
         );
     }
     for style in orphan_hairstyles {
@@ -327,6 +377,7 @@ mod comments;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render_scale::RenderScale;
     use pixtuoid_core::sprite::format::Density;
     #[cfg(feature = "native")]
     use std::fs;
@@ -469,6 +520,39 @@ mod tests {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
+    /// Every key the desk props take a theme colour in is one their art draws,
+    /// at every density: a key renamed in the pack would stop the theme
+    /// reaching the prop.
+    #[test]
+    fn the_desk_props_draw_the_keys_the_theme_recolours() {
+        let pack = test_default_pack();
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = crate::render_scale::RenderScale::new(s).expect("nonzero");
+            for (sprite, frame, keys) in [
+                (
+                    DESK_CUP_SPRITE,
+                    0,
+                    &[lookup::CUP_KEY, lookup::CUP_SHADE_KEY][..],
+                ),
+                (
+                    TOKEN_TOWER_SPRITE,
+                    0,
+                    &[lookup::PAPER_KEY, lookup::PAPER_SHADE_KEY],
+                ),
+                (TOKEN_SHEET_SPRITE, 0, &[lookup::PAPER_KEY]),
+            ] {
+                let art = densest_frame(&pack, sprite, frame, scale)
+                    .expect("the bundled pack draws the prop");
+                for &key in keys {
+                    assert!(
+                        drawn_in(&art, &[key]).contains(&true),
+                        "{sprite} at scale {s} draws no {key:?}"
+                    );
+                }
+            }
+        }
+    }
+
     /// The bundled pack is the one no user validates: a mis-sized `@Nx` variant
     /// in it silently falls back to the upscaled base.
     #[test]
@@ -481,18 +565,145 @@ mod tests {
         assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
+    /// A pack that ships no back-turned desk draws its back-turned desks from
+    /// `desk`: it stands their props at `desk`'s marks and lights `desk`'s lamp.
+    #[test]
+    fn a_pack_without_desk_north_stands_its_props_on_desk() {
+        use crate::layout::{Facing, Point};
+        // the base table alone, whichever density variants a build ships
+        let north = "[animations.desk_north]\nframes   = [\"desk_north.sprite\"]\nframe_ms = 600\n";
+        let pack = test_pack_declaring(north, "");
+        let desk = Point { x: 20, y: 30 };
+        for mark in [CUP_MARK, TOWER_MARK] {
+            let at = |facing| desk_mark(&pack, desk, facing, mark);
+            assert!(
+                at(Facing::North).is_some(),
+                "the back-turned {mark} vanished"
+            );
+            assert_eq!(at(Facing::North), at(Facing::South), "{mark}");
+        }
+        let bulb = |facing| desk_bulb_offset(&pack, facing);
+        assert!(
+            bulb(Facing::North).is_some(),
+            "the back-turned lamp went dark"
+        );
+        assert_eq!(bulb(Facing::North), bulb(Facing::South));
+    }
+
+    /// A desk's front is its own art, cut down: on the desk's canvas, every
+    /// pixel it draws the desk's, so a desk with no props in front of its
+    /// front paints as it always did.
+    #[test]
+    fn a_desk_front_is_its_desk_cut_down() {
+        let pack = test_default_pack();
+        let front = desk_front(&pack, lookup::DESK_SPRITE).expect("the bundled desk has a front");
+        for scale in [
+            RenderScale::ONE,
+            RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+        ] {
+            let desk = densest_frame(&pack, lookup::DESK_SPRITE, 0, scale).expect("the desk");
+            let over = densest_frame(&pack, front, 0, scale).expect("the front");
+            assert_eq!(
+                (over.frame.width(), over.frame.height(), over.blit_at),
+                (desk.frame.width(), desk.frame.height(), desk.blit_at),
+                "at {scale:?}, the front keeps its desk's canvas"
+            );
+            let mut drawn = 0;
+            for y in 0..desk.frame.height() {
+                for x in 0..desk.frame.width() {
+                    if let Some(px) = over.frame.get(x, y).copied().flatten() {
+                        drawn += 1;
+                        assert_eq!(
+                            desk.frame.get(x, y).copied().flatten(),
+                            Some(px),
+                            "at {scale:?}, the front differs from its desk at ({x}, {y})"
+                        );
+                    }
+                }
+            }
+            assert!(drawn > 0, "at {scale:?}, the front draws something");
+        }
+        assert_eq!(
+            desk_front(&pack, lookup::DESK_NORTH_SPRITE),
+            None,
+            "nothing stands before a back-turned sitter's props"
+        );
+    }
+
+    /// A back-turned desk's mirrored tower teeters off its west wing: every
+    /// such desk the layout places leaves it the room, so none loses its tower.
+    #[test]
+    fn every_back_turned_desk_has_room_for_its_teeter() {
+        use crate::layout::{Facing, SceneLayout};
+        let pack = test_default_pack();
+        let tower = densest_frame(&pack, TOKEN_TOWER_SPRITE, 0, RenderScale::ONE)
+            .expect("the tower")
+            .frame
+            .width();
+        let mut desks = 0;
+        for (w, h) in [(60, 40), (100, 60), (160, 96), (240, 144), (400, 240)] {
+            for seed in 0..4 {
+                let Some(layout) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    continue;
+                };
+                for &desk in &layout.home_desks {
+                    if layout.desk_facing_at(desk) != Facing::North {
+                        continue;
+                    }
+                    desks += 1;
+                    let mark = desk_mark(&pack, desk, Facing::North, TOWER_MARK).expect("a mark");
+                    assert!(mark.mirrored, "the back-turned desk mirrors its props");
+                    assert!(
+                        mark.left(tower).is_some(),
+                        "{w}x{h} seed {seed}: the desk at {desk:?} has no room for its tower"
+                    );
+                }
+            }
+        }
+        assert!(desks > 0, "the sample must place back-turned desks");
+    }
+
+    /// The pack authors' guide names the desk's contract by the keys and marks
+    /// the painters read: a rename here fails until the guide follows.
+    #[test]
+    fn the_guide_names_the_desk_contract() {
+        // Read at runtime: `include_str!` of a path outside the crate fails
+        // `cargo test` on the extracted crate, which has no workspace to read
+        // the guide from.
+        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+        if !root.join("Cargo.toml").exists() {
+            return;
+        }
+        let path = root.join("docs/CONFIGURATION.md");
+        let guide = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        for needle in [
+            format!("@mark {CUP_MARK} <x> <y>"),
+            format!("@mark {TOWER_MARK} <x> <y>"),
+            format!("palette key `{DESK_BULB_KEY}`"),
+        ] {
+            assert!(guide.contains(&needle), "CONFIGURATION.md lost {needle:?}");
+        }
+    }
+
     /// A creature's walk steps by the ground like a person's, so a pack's
     /// without a stride slides its feet too.
     #[test]
     fn a_creature_walk_without_a_stride_is_flagged() {
-        for (walk, stride) in [
-            ("cat_walk", "stride   = 2\n"),
-            ("lobster_walk", "stride   = 6\n"),
-        ] {
-            let manifest = format!(
-                "[animations.{walk}]\nframes   = [\"{walk}_0.sprite\", \"{walk}_1.sprite\"]\nframe_ms = 250\n"
-            );
-            let pack = test_pack_declaring(&format!("{manifest}{stride}"), &manifest);
+        for (walk, stride) in [("cat_walk", 2), ("lobster_walk", 6)] {
+            // its own table, header through stride: a build without
+            // `cutaway-assets` drops the density variant's after it
+            let line = format!("stride   = {stride}\n");
+            let from = BUNDLED_PACK_TOML
+                .find(&format!("[animations.{walk}]\n"))
+                .expect("the manifest declares the walk");
+            let to = from
+                + BUNDLED_PACK_TOML[from..]
+                    .find(&line)
+                    .expect("with its stride")
+                + line.len();
+            let table = &BUNDLED_PACK_TOML[from..to];
+            let pack = test_pack_declaring(table, &table.replacen(&line, "", 1));
             assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
         }
     }
@@ -610,6 +821,9 @@ mod tests {
             .filter(|name| {
                 let base = name.split('@').next().unwrap_or(name);
                 pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+                    && !pixtuoid_core::sprite::format::OVERLAY_PIECES
+                        .iter()
+                        .any(|&(overlay, _)| overlay == base)
             })
             .filter(|name| {
                 pack.animation(name).is_some_and(|s| {
@@ -743,17 +957,39 @@ mod tests {
             .frames()[0]
             .clone();
         let row = vec!["W"; usize::from(desk.width()) * 4].join(" ");
-        let rows = vec![row; usize::from(desk.height()) * 4].join("\n");
+        // lit and marked, so the orphan is its only finding
+        let rows = [format!("{DESK_BULB_KEY}{}", &row[1..])]
+            .into_iter()
+            .chain(vec![row; usize::from(desk.height()) * 4 - 1])
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(
+            tmp.path().join("desk4x.sprite"),
+            format!("@frame 0\n@mark {CUP_MARK} 0 0\n@mark {TOWER_MARK} 0 0\n{rows}\n"),
+        )
+        .expect("write desk4x.sprite");
+        let toml_path = tmp.path().join("pack.toml");
+        let mut toml = fs::read_to_string(&toml_path)
+            .expect("read pack.toml")
+            .replacen(
+                "[palette]\n",
+                &format!("[palette]\n\"{DESK_BULB_KEY}\" = \"#fff4c0\"\n"),
+                1,
+            );
+        toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
+        fs::write(&toml_path, toml).expect("write pack.toml");
+        assert_eq!(load_warns(), 1, "the orphan desk@4x warns");
+
         fs::write(
             tmp.path().join("desk4x.sprite"),
             format!("@frame 0\n{rows}\n"),
         )
         .expect("write desk4x.sprite");
-        let toml_path = tmp.path().join("pack.toml");
-        let mut toml = fs::read_to_string(&toml_path).expect("read pack.toml");
-        toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
-        fs::write(&toml_path, toml).expect("write pack.toml");
-        assert_eq!(load_warns(), 1, "the orphan desk@4x warns");
+        assert_eq!(
+            load_warns(),
+            3,
+            "an unmarked desk@4x warns each mark it leaves out"
+        );
     }
 
     #[test]
@@ -780,8 +1016,9 @@ mod tests {
         );
     }
 
-    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`.
-    /// Checked on the edge COLUMNS the monitor never covers — the middle legitimately differs.
+    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`,
+    /// and below it the same desk mirrored, as its arrangement mirrors the lamp. Checked on the
+    /// edge COLUMNS the monitor never covers — the middle legitimately differs.
     #[test]
     fn both_desk_variants_are_the_same_desk_below_the_monitor() {
         let pack = test_default_pack();
@@ -802,11 +1039,11 @@ mod tests {
         for x in edges {
             for dy in 0..(base.height() - raise) {
                 let b = base.get(x, raise + dy);
-                let n = north.get(x, raise + lift + dy);
+                let n = north.get(base.width() - 1 - x, raise + lift + dy);
                 assert_eq!(
                     b, n,
                     "column {x} differs at desk.y+{dy}: the two variants must be \
-                     the same desk below the monitor"
+                     the same desk, mirrored, below the monitor"
                 );
             }
         }

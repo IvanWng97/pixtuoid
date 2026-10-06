@@ -1106,7 +1106,9 @@ impl Pack {
             .iter()
             .filter(|(name, _)| RegisteredKey::parse(name).is_some_and(RegisteredKey::is_inherited))
             .filter(|(name, _)| {
-                !self.animations.contains_key(*name) && self.own_redrawn_piece(name).is_none()
+                !self.animations.contains_key(*name)
+                    && self.own_redrawn_piece(name).is_none()
+                    && self.own_overlaid_piece(name).is_none()
             })
             .map(|(name, sprite)| (name.clone(), sprite.clone()))
             .collect();
@@ -1128,6 +1130,19 @@ impl Pack {
     fn own_redrawn_piece<'n>(&self, name: &'n str) -> Option<&'n str> {
         redrawn_pieces(name).find(|piece| self.animations.contains_key(*piece))
     }
+
+    /// The piece of this pack's own that the overlay `name` (or one of its
+    /// density variants) draws over, at any density: the default's overlay at
+    /// any density would draw the default's art over it, since a painter falls
+    /// back from a density the pack lacks to one it has.
+    fn own_overlaid_piece(&self, name: &str) -> Option<&'static str> {
+        let base = split_density_variant(name).map_or(name, |(b, _)| b);
+        let piece = overlaid_piece(base)?;
+        self.animations
+            .keys()
+            .any(|own| split_density_variant(own).map_or(own.as_str(), |(b, _)| b) == piece)
+            .then_some(piece)
+    }
 }
 
 /// Furniture drawn to match another piece (`desk_north` is `desk` with its
@@ -1137,6 +1152,20 @@ const DERIVED_PIECES: &[(&str, &str)] = &[
     ("desk_north", "desk"),
     ("meeting_sofa_north", "meeting_sofa"),
 ];
+
+/// Art drawn over another piece on that piece's canvas, as `(overlay, piece)`:
+/// `desk_front` is what of `desk` stands nearer the viewer than its sitter's
+/// props. An overlay comes only with its piece's art and never stands in, and
+/// keeps that piece's canvas rather than grounding on its own bottom row.
+pub const OVERLAY_PIECES: &[(&str, &str)] = &[("desk_front", "desk")];
+
+/// The piece `piece` draws over, if it is an overlay.
+fn overlaid_piece(piece: &str) -> Option<&'static str> {
+    OVERLAY_PIECES
+        .iter()
+        .find(|&&(overlay, _)| overlay == piece)
+        .map(|&(_, under)| under)
+}
 
 /// The piece `piece` is drawn to match, if it is a derived one.
 fn derived_source(piece: &str) -> Option<&'static str> {
@@ -1760,6 +1789,7 @@ impl RegisteredKey {
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "desk_north",
+    "desk_front",
     "filing_cabinet",
     "plant",
     "plant_tall",
@@ -1895,6 +1925,9 @@ pub enum StandIn {
     /// Another of the pack's own poses: character animations are never
     /// inherited.
     OwnPose,
+    /// Nothing: an overlay is never stood in for, so the pack's own piece it
+    /// would cover (`desk` for `desk_front`) draws bare.
+    Bare(&'static str),
 }
 
 /// An optional animation absent from a pack.
@@ -2005,6 +2038,46 @@ pub struct ValidationReport {
     /// Each of the caller's walks the pack ships without a `stride`: it steps
     /// on its clock, so its feet slide whenever its pace changes.
     pub walks_without_stride: Vec<String>,
+    /// Each mark a piece the caller stands props on leaves out: nothing stands
+    /// there, in either look.
+    pub missing_marks: Vec<MissingMark>,
+    /// Each palette key a piece the caller lights leaves undrawn: no light
+    /// rises there, in either look.
+    pub missing_keys: Vec<MissingKey>,
+}
+
+/// A palette key a piece's first frame draws no pixel in, at one of its
+/// densities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingKey {
+    /// The animation, e.g. `desk@4x`.
+    pub name: String,
+    /// The key it leaves undrawn.
+    pub key: char,
+}
+
+/// A mark a piece's first frame leaves out, at one of its densities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingMark {
+    /// The animation, e.g. `desk@4x`.
+    pub name: String,
+    /// The mark it leaves out, e.g. `cup`.
+    pub mark: &'static str,
+}
+
+/// What only the caller knows of a pack.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackContract<'a> {
+    /// The sets of pieces a pack should ship whole.
+    pub art_sets: &'a [Vec<&'static str>],
+    /// The animations the caller steps by [`Sprite::stride`].
+    pub walks: &'a [&'static str],
+    /// Each piece the caller stands props on, with the marks its first frame
+    /// carries at every density.
+    pub marks: &'a [(&'static str, &'static [&'static str])],
+    /// Each piece the caller lights, with the palette key its first frame
+    /// draws the light's source in at every density.
+    pub keys: &'a [(&'static str, char)],
 }
 
 impl ValidationReport {
@@ -2027,6 +2100,8 @@ impl ValidationReport {
             overhanging_hair: _,
             orphan_hairstyles,
             walks_without_stride: _,
+            missing_marks: _,
+            missing_keys: _,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
@@ -2055,6 +2130,8 @@ impl ValidationReport {
             overhanging_hair,
             orphan_hairstyles: _,
             walks_without_stride,
+            missing_marks,
+            missing_keys,
         } = self;
         missing_optional.len()
             + partial_sets.len()
@@ -2063,6 +2140,8 @@ impl ValidationReport {
             + missing_hair_views.len()
             + overhanging_hair.len()
             + walks_without_stride.len()
+            + missing_marks.len()
+            + missing_keys.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -2073,17 +2152,18 @@ impl ValidationReport {
 
 /// Check a pack's animations against the required/optional/multi-frame
 /// registries, each density variant against its base, each derived piece
-/// against its source, and against what only the caller knows: `art_sets`,
-/// the sets of pieces a pack should ship whole, and `walks`, the animations it
-/// steps by [`Sprite::stride`].
+/// against its source, and against what only the caller knows
+/// ([`PackContract`]).
 ///
 /// An unauthored variant is not reported missing: a pack that has not been
 /// redrawn at a density is the normal case, not a gap.
-pub fn validate_pack_animations(
-    pack: &Pack,
-    art_sets: &[Vec<&'static str>],
-    walks: &[&'static str],
-) -> ValidationReport {
+pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> ValidationReport {
+    let PackContract {
+        art_sets,
+        walks,
+        marks,
+        keys,
+    } = *contract;
     let mut report = ValidationReport {
         walks_without_stride: walks
             .iter()
@@ -2127,9 +2207,12 @@ pub fn validate_pack_animations(
         .iter()
         .map(|&name| (name, StandIn::OwnPose))
         .chain(inherited_animation_names().map(|name| {
-            let stand_in = pack
-                .own_redrawn_piece(name)
-                .map_or(StandIn::DefaultPack, StandIn::OwnPiece);
+            let stand_in = match pack.own_overlaid_piece(name) {
+                Some(piece) => StandIn::Bare(piece),
+                None => pack
+                    .own_redrawn_piece(name)
+                    .map_or(StandIn::DefaultPack, StandIn::OwnPiece),
+            };
             (name, stand_in)
         }))
         .filter(|&(name, _)| pack.animation(name).is_none() && !named_elsewhere(name))
@@ -2145,6 +2228,44 @@ pub fn validate_pack_animations(
             Some((name.as_str(), variant, base, density?))
         })
         .collect();
+
+    // A piece's art at its base and at each of its density variants.
+    let at_each_density = |piece: &'static str| {
+        let densities = variants
+            .iter()
+            .filter(move |v| v.2 == piece)
+            .map(|v| (v.0, v.1));
+        pack.animation(piece)
+            .map(|s| (piece, s))
+            .into_iter()
+            .chain(densities)
+    };
+    for &(piece, wanted) in marks {
+        for (name, sprite) in at_each_density(piece) {
+            for &mark in wanted {
+                if !sprite.marks(0).iter().any(|m| m.name() == mark) {
+                    report.missing_marks.push(MissingMark {
+                        name: name.to_owned(),
+                        mark,
+                    });
+                }
+            }
+        }
+    }
+
+    for &(piece, key) in keys {
+        for (name, sprite) in at_each_density(piece) {
+            let draws = sprite
+                .recolorable(0)
+                .is_some_and(|f| f.drawn_in(&[key]).contains(&true));
+            if !draws {
+                report.missing_keys.push(MissingKey {
+                    name: name.to_owned(),
+                    key,
+                });
+            }
+        }
+    }
 
     let mut check_frames = |name: &str, requirement_key: &str| {
         let min_frames = MULTI_FRAME_REQUIREMENTS
@@ -2347,11 +2468,17 @@ mod validation_floor_tests {
             "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.cat_walk]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n",
         );
-        let report = validate_pack_animations(&pack, &[], &["walking", "cat_walk", "dog_walk"]);
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                walks: &["walking", "cat_walk", "dog_walk"],
+                ..PackContract::default()
+            },
+        );
         assert_eq!(report.walks_without_stride, vec!["walking".to_string()]);
         assert_eq!(
             report.error_count(),
-            validate_pack_animations(&pack, &[], &[]).error_count(),
+            validate_pack_animations(&pack, &PackContract::default()).error_count(),
             "a clock walk still renders: no error"
         );
     }
@@ -2435,7 +2562,7 @@ mod validation_floor_tests {
             SIZED_FRAMES,
         );
         assert_eq!(
-            validate_pack_animations(&pack, &[], &[]).unknown,
+            validate_pack_animations(&pack, &PackContract::default()).unknown,
             vec!["desk@02x".to_string()]
         );
         assert_eq!(pack.max_density_variant(), Density::ONE);
@@ -2488,6 +2615,59 @@ mod validation_floor_tests {
         assert!(custom.animation("desk@4x").is_none());
     }
 
+    /// An overlay comes only with its piece's own art: over a pack's own desk,
+    /// at either density, the default's `desk_front` would draw the default's
+    /// monitor.
+    #[test]
+    fn an_overlay_is_inherited_only_with_the_piece_it_covers() {
+        let base = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.desk_front]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk_front@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        let mut plant = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        plant.merge_from(&base);
+        assert!(
+            plant.animation("desk_front").is_some(),
+            "with the default desk"
+        );
+        assert!(plant.animation("desk_front@4x").is_some());
+        for own in ["desk", "\"desk@4x\""] {
+            let mut custom = pack_with(&format!(
+                "[animations.{own}]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
+            ));
+            custom.merge_from(&base);
+            for front in ["desk_front", "desk_front@4x"] {
+                assert!(
+                    custom.animation(front).is_none(),
+                    "over its own {own}, no {front}"
+                );
+            }
+        }
+        let mut desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        desk.merge_from(&base);
+        assert!(
+            desk.animation("desk_front").is_none(),
+            "over its own desk, no front"
+        );
+    }
+
+    /// An overlay never stands in: a pack's own desk without its front draws
+    /// bare, and nothing draws the front in its place.
+    #[test]
+    fn a_missing_overlay_leaves_its_piece_bare() {
+        let desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert!(desk.animation_or_source("desk_front").is_none());
+        let report = validate_pack_animations(&desk, &PackContract::default());
+        let front = report
+            .missing_optional
+            .iter()
+            .find(|m| m.name == "desk_front")
+            .expect("desk_front is optional");
+        assert_eq!(front.stand_in, StandIn::Bare("desk"));
+    }
+
     #[test]
     fn every_derived_piece_and_its_source_are_registered_furniture() {
         let furniture = |name| RegisteredKey::parse(name).is_some_and(RegisteredKey::is_inherited);
@@ -2530,7 +2710,7 @@ mod validation_floor_tests {
              [animations.\"typing_back@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report.unknown.is_empty()
                 && report.mismatched_density.is_empty()
@@ -2594,7 +2774,7 @@ mod validation_floor_tests {
              [animations.\"typing@2x\"]\nframes=[\"two.sprite\", \"three.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(
             report.mismatched_density,
             vec![DensityMismatch {
@@ -2615,7 +2795,7 @@ mod validation_floor_tests {
              [animations.\"typing@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(
             report.mismatched_frame_counts,
             vec![FrameCountMismatch {
@@ -2640,7 +2820,7 @@ mod validation_floor_tests {
              [animations.\"typing@2x\"]\nframes=[\"three.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(report.mismatched_frame_counts.len(), 1, "{report:?}");
         assert_eq!(
             report.mismatched_density,
@@ -2666,7 +2846,7 @@ mod validation_floor_tests {
         );
         let anim = |n| pack.animation(n).expect("in the pack");
         assert!(variant_redraws(anim("walking"), d(2), anim("walking@2x")));
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(report.mismatched_density.is_empty(), "{report:?}");
         assert_eq!(
             report.mismatched_frame_counts,
@@ -2693,7 +2873,7 @@ mod validation_floor_tests {
              [animations.\"standing@2x\"]\nframes=[]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         for (name, base, redraws) in [
             ("typing@2x", "typing", true),
             ("walking@2x", "walking", false),
@@ -2718,7 +2898,7 @@ mod validation_floor_tests {
             "[animations.\"typing_back@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(report.orphan_variants, vec!["typing_back@2x".to_string()]);
         assert!(report.unknown.is_empty(), "{:?}", report.unknown);
     }
@@ -2768,7 +2948,13 @@ mod validation_floor_tests {
     }
 
     fn validate(animations: &str) -> ValidationReport {
-        validate_pack_animations(&pack_with(animations), &sets(), &[])
+        validate_pack_animations(
+            &pack_with(animations),
+            &PackContract {
+                art_sets: &sets(),
+                ..PackContract::default()
+            },
+        )
     }
 
     const ONE: &str = "frames=[\"f.sprite\"]\nframe_ms=100\n";
@@ -2937,9 +3123,74 @@ mod validation_floor_tests {
             }],
             orphan_hairstyles: vec!["mop@2x".to_string()],
             walks_without_stride: vec!["walking".to_string()],
+            missing_marks: vec![MissingMark {
+                name: "desk@4x".to_string(),
+                mark: "cup",
+            }],
+            missing_keys: vec![MissingKey {
+                name: "desk".to_string(),
+                key: '9',
+            }],
         };
         assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 7);
+        assert_eq!(report.warning_count(), 9);
+    }
+
+    /// A piece the caller lights, at any of its densities, draws no pixel in
+    /// its light's key: no light would rise there.
+    #[test]
+    fn a_lit_piece_without_its_key_is_flagged_at_each_density() {
+        let pack = pack_with_frames(
+            "\"9\"=\"#fff000\"\n\
+             [animations.desk]\nframes=[\"lit.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"dark.sprite\"]\nframe_ms=100\n",
+            &[
+                ("lit.sprite", "@frame 0\n9"),
+                ("dark.sprite", "@frame 0\nA A\nA A"),
+            ],
+        );
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                keys: &[("desk", '9')],
+                ..PackContract::default()
+            },
+        );
+        assert_eq!(
+            report.missing_keys,
+            vec![MissingKey {
+                name: "desk@2x".to_string(),
+                key: '9',
+            }]
+        );
+    }
+
+    /// A piece the caller stands props on, at any of its densities, leaves out
+    /// a mark: nothing would stand there.
+    #[test]
+    fn a_desk_without_its_prop_marks_is_flagged_at_each_density() {
+        let pack = pack_with_frames(
+            "[animations.desk]\nframes=[\"m.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"b.sprite\"]\nframe_ms=100\n",
+            &[
+                ("m.sprite", "@frame 0\n@mark cup 0 0\n@mark tower 0 0\nA"),
+                ("b.sprite", "@frame 0\n@mark tower 0 0\nA A\nA A"),
+            ],
+        );
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                marks: &[("desk", &["cup", "tower"])],
+                ..PackContract::default()
+            },
+        );
+        assert_eq!(
+            report.missing_marks,
+            [MissingMark {
+                name: "desk@2x".to_string(),
+                mark: "cup",
+            }]
+        );
     }
 
     /// Pins the frame-count check's empty case.
@@ -3014,7 +3265,7 @@ mod validation_floor_tests {
                 ("four.sprite", "@frame 0\nA A A A"),
             ],
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(
             report.mismatched_density,
             vec![DensityMismatch {
@@ -3057,7 +3308,7 @@ mod validation_floor_tests {
              [animations.\"desk@2x\"]\nframes=[\"variant.sprite\"]\nframe_ms=100\n",
             &[("base.sprite", &base), ("variant.sprite", &variant)],
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         let m = report
             .mismatched_density
             .first()
@@ -3073,7 +3324,7 @@ mod validation_floor_tests {
             "[animations.\"desk@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n",
             &[("four.sprite", "@frame 0\nA A A A")],
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(report.orphan_variants, vec!["desk@4x".to_string()]);
         assert!(
             report.mismatched_density.is_empty(),
@@ -3085,7 +3336,7 @@ mod validation_floor_tests {
     #[test]
     fn empty_frames_on_a_required_animation_fails_validation() {
         let pack = pack_with_animation("seated", "[]");
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report
                 .insufficient_frames
@@ -3102,7 +3353,7 @@ mod validation_floor_tests {
     #[test]
     fn empty_frames_on_an_optional_furniture_animation_fails_validation() {
         let pack = pack_with_animation("desk", "[]");
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report
                 .insufficient_frames
@@ -3116,7 +3367,7 @@ mod validation_floor_tests {
     #[test]
     fn one_frame_on_a_plain_known_animation_passes_validation() {
         let pack = pack_with_animation("seated", "[\"f.sprite\"]");
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report.insufficient_frames.is_empty(),
             "a 1-frame seated must not be flagged; got {:?}",
@@ -3145,14 +3396,15 @@ mod validation_floor_tests {
     const MOP: &str = "[hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n";
 
     fn hair_findings(pack: &Pack) -> ValidationReport {
-        let report = validate_pack_animations(pack, &[], &[]);
+        let report = validate_pack_animations(pack, &PackContract::default());
         assert!(report.orphan_variants.is_empty() && report.mismatched_density.is_empty());
         report
     }
 
     /// `report`'s errors and warnings past those of the same pack undressed.
     fn hair_counts(report: &ValidationReport) -> (usize, usize) {
-        let bare = validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &[], &[]);
+        let bare =
+            validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &PackContract::default());
         (
             report.error_count() - bare.error_count(),
             report.warning_count() - bare.warning_count(),
