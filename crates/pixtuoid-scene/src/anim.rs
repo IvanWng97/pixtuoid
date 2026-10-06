@@ -142,12 +142,6 @@ impl Motion {
     /// Every tier.
     pub(crate) const ALL: [Motion; 3] = [Motion::Full, Motion::Calm, Motion::Still];
 
-    /// How often this tier's loops step on the wall clock; `None` at rest.
-    pub fn beat_period(self) -> Option<std::time::Duration> {
-        self.pace()
-            .map(|pace| std::time::Duration::from_millis(FULL_TICK_MS * pace))
-    }
-
     /// Wall-clock ms per ms of loop time; `None` at rest.
     pub(crate) const fn pace(self) -> Option<u64> {
         match self {
@@ -176,6 +170,17 @@ impl Motion {
             now,
             beat: self.beat(now),
         }
+    }
+
+    /// How long after `wall` this tier's [`beat`](Self::beat) next turns, as
+    /// [`loop_time`] steps; `None` at rest, which never turns.
+    pub fn until_next_beat(self, wall: SystemTime) -> Option<std::time::Duration> {
+        let period = FULL_TICK_MS * self.pace()?;
+        let turn = (epoch_ms(wall) / period + 1) * period;
+        let since = wall
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        Some(std::time::Duration::from_millis(turn).saturating_sub(since))
     }
 }
 
@@ -277,6 +282,31 @@ pub fn eased_progress(
 mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
+
+    /// A tier's beat holds until the instant `until_next_beat` names, and
+    /// turns at it.
+    #[test]
+    fn the_beat_turns_when_until_next_beat_says() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
+        for motion in [Motion::Full, Motion::Calm] {
+            for off in [0, 1, 62, 124, 125, 499, 777].map(Duration::from_millis) {
+                let wall = base + off;
+                let until = motion.until_next_beat(wall).expect("a moving tier turns");
+                let turn = wall + until;
+                assert_eq!(
+                    motion.beat(wall),
+                    motion.beat(turn - Duration::from_nanos(1)),
+                    "{motion:?} turned before {off:?} + {until:?}"
+                );
+                assert_ne!(
+                    motion.beat(wall),
+                    motion.beat(turn),
+                    "{motion:?} held past {off:?} + {until:?}"
+                );
+            }
+        }
+        assert_eq!(Motion::Still.until_next_beat(base), None);
+    }
 
     /// A timing taken later on a tier is the one the tier gives that instant.
     #[test]

@@ -36,14 +36,11 @@ pub(super) fn frame() -> Duration {
 /// (docs.unity3d.com/ScriptReference/Rendering.OnDemandRendering.html). At
 /// rest, a [`REST_FPS`] tick.
 fn until_beat(wall: SystemTime, motion: Motion) -> Duration {
-    let Some(beat) = motion.beat_period() else {
-        return Duration::from_secs(1) / REST_FPS;
-    };
-    let since = wall
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let into = since.as_nanos() % beat.as_nanos();
-    beat.saturating_sub(Duration::from_nanos(u64::try_from(into).unwrap_or(0))) + PAST_THE_TURN
+    motion
+        .until_next_beat(wall)
+        .map_or(Duration::from_secs(1) / REST_FPS, |until| {
+            until + PAST_THE_TURN
+        })
 }
 
 pub(crate) struct FrameClock {
@@ -113,13 +110,6 @@ mod tests {
         painted
     }
 
-    fn into_beat(wall: SystemTime, beat: Duration) -> Duration {
-        let since = wall
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("after the epoch");
-        Duration::from_nanos((since.as_nanos() % beat.as_nanos()) as u64)
-    }
-
     #[test]
     fn the_first_pass_paints_so_the_window_is_never_blank() {
         let t0 = Instant::now();
@@ -151,7 +141,10 @@ mod tests {
     fn an_empty_office_paints_each_beat_just_past_its_turn() {
         let span = Duration::from_secs(3);
         for motion in [Motion::Full, Motion::Calm] {
-            let beat = motion.beat_period().expect("a moving tier beats");
+            // `wall_at(0)` is on a turn of every tier, so the wait is a beat.
+            let beat = motion
+                .until_next_beat(wall_at(0))
+                .expect("a moving tier beats");
             let painted = paints_over(motion, true, span, Duration::from_millis(1));
             let beats = (span.as_millis() / beat.as_millis()) as usize;
             assert!(
@@ -160,10 +153,11 @@ mod tests {
                 painted.len()
             );
             for wall in &painted[1..] {
+                let left = motion.until_next_beat(*wall).expect("a moving tier beats");
                 assert!(
-                    into_beat(*wall, beat) <= PAST_THE_TURN + Duration::from_millis(1),
+                    beat - left <= PAST_THE_TURN + Duration::from_millis(1),
                     "{motion:?} painted {:?} into its beat",
-                    into_beat(*wall, beat)
+                    beat - left
                 );
             }
         }
