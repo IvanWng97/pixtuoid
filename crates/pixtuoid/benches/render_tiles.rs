@@ -15,6 +15,9 @@ const TERMINAL: (u16, u16) = (202, 50);
 const CELL: (u16, u16) = (17, 41);
 /// Desks on the floor.
 const DESKS: usize = 8;
+/// Longer than any protocol's cadence: frames this far apart each send, where
+/// SIXEL's and iTerm2's would otherwise hold every frame after the first.
+const APART: Duration = Duration::from_secs(1);
 
 fn whole_frame(c: &mut Criterion) {
     let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("the bundled pack"));
@@ -33,10 +36,13 @@ fn whole_frame(c: &mut Criterion) {
         )
         .expect("a 16x cutaway");
         warm(&mut r, &scene, &pack, now);
+        let mut later = false;
         group.bench_function(format!("{}_whole_frame_16x", protocol.name()), |b| {
             b.iter(|| {
                 forget_frame(&mut r);
-                r.render(&scene, &pack, now).expect("render");
+                later = !later;
+                let at = if later { now + APART } else { now };
+                r.render(&scene, &pack, at).expect("render");
             });
         });
     }

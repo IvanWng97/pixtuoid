@@ -57,27 +57,46 @@ pub(crate) fn transmit(image: &TileImage, origin: Position) -> Vec<u8> {
         let _ = write!(out, "#{i};2;{r};{g};{b}");
     }
     let rows: Vec<&[usize]> = indices.chunks(width.max(1)).collect();
+    // One pass a band sets every colour's sixels, as libsixel's encoder does
+    // (`src/tosixel.c`, `sixel_encode_body`): testing each colour against
+    // every pixel of the band costs as many passes as it has colours.
+    let mut slot = vec![None; palette.len()];
+    let mut colours = Vec::new();
+    let mut sixels: Vec<u8> = Vec::new();
     for (n, band) in rows.chunks(BAND).enumerate() {
         if n > 0 {
             out.push('-');
         }
-        let mut colours: Vec<usize> = band.iter().flat_map(|row| row.iter().copied()).collect();
+        colours.clear();
+        for &colour in band.iter().flat_map(|row| row.iter()) {
+            if slot[colour].is_none() {
+                slot[colour] = Some(0);
+                colours.push(colour);
+            }
+        }
         colours.sort_unstable();
-        colours.dedup();
         for (m, &colour) in colours.iter().enumerate() {
+            slot[colour] = Some(m);
+        }
+        sixels.clear();
+        sixels.resize(colours.len() * width, 0);
+        for (y, row) in band.iter().enumerate() {
+            for (x, &colour) in row.iter().enumerate() {
+                if let Some(m) = slot[colour] {
+                    sixels[m * width + x] |= 1 << y;
+                }
+            }
+        }
+        for (m, (&colour, line)) in colours.iter().zip(sixels.chunks(width.max(1))).enumerate() {
+            slot[colour] = None;
             if m > 0 {
                 out.push('$');
             }
             let _ = write!(out, "#{colour}");
-            let sixel = |x: usize| {
-                band.iter()
-                    .enumerate()
-                    .fold(0, |bits, (y, row)| bits | u8::from(row[x] == colour) << y)
-            };
             let mut x = 0;
             while x < width {
-                let bits = sixel(x);
-                let run = (x..width).take_while(|&x| sixel(x) == bits).count();
+                let bits = line[x];
+                let run = line[x..].iter().take_while(|&&b| b == bits).count();
                 let ch = char::from(SIXEL_BIAS + bits);
                 if run >= MIN_REPEAT {
                     let _ = write!(out, "!{run}{ch}");
@@ -106,9 +125,13 @@ fn to_cube(v: u8) -> u8 {
 
 /// The distinct colours of `pixels` in first-seen order, and each pixel's
 /// index among them.
+///
+/// Hashed with foldhash, not std's SipHash: this map is hot in the encode and
+/// its keys are our own pixels, so HashDoS resistance buys nothing
+/// (perf-book, "Hashing"). The order is first-seen, whatever the hasher.
 fn indexed(pixels: &[[u8; 3]]) -> (Vec<[u8; 3]>, Vec<usize>) {
     let mut palette = Vec::new();
-    let mut seen = HashMap::new();
+    let mut seen = HashMap::with_hasher(foldhash::fast::FixedState::default());
     let indices = pixels
         .iter()
         .map(|&c| {
@@ -282,5 +305,99 @@ mod tests {
             [0, 9, 10, 29, 30, 100].map(to_cube),
             [0, 0, 20, 20, 40, 100]
         );
+    }
+
+    /// The encoder as it was before its one-pass bands, kept as the reference
+    /// the new one must match byte for byte.
+    fn before_one_pass(image: &TileImage, origin: Position) -> Vec<u8> {
+        let percent: Vec<[u8; 3]> = image
+            .rgb
+            .as_chunks()
+            .0
+            .iter()
+            .map(|p| p.map(to_percent))
+            .collect();
+        let (palette, indices) = match indexed(&percent) {
+            exact if exact.0.len() <= REGISTERS => exact,
+            _ => indexed(&percent.iter().map(|c| c.map(to_cube)).collect::<Vec<_>>()),
+        };
+        let width = image.width as usize;
+        let mut out = image.tile.cursor_to(origin);
+        let _ = write!(out, "\x1bP9;1q\"1;1;{};{}", image.width, image.height);
+        for (i, [r, g, b]) in palette.iter().enumerate() {
+            let _ = write!(out, "#{i};2;{r};{g};{b}");
+        }
+        let rows: Vec<&[usize]> = indices.chunks(width.max(1)).collect();
+        for (n, band) in rows.chunks(BAND).enumerate() {
+            if n > 0 {
+                out.push('-');
+            }
+            let mut colours: Vec<usize> = band.iter().flat_map(|row| row.iter().copied()).collect();
+            colours.sort_unstable();
+            colours.dedup();
+            for (m, &colour) in colours.iter().enumerate() {
+                if m > 0 {
+                    out.push('$');
+                }
+                let _ = write!(out, "#{colour}");
+                let sixel = |x: usize| {
+                    band.iter()
+                        .enumerate()
+                        .fold(0, |bits, (y, row)| bits | u8::from(row[x] == colour) << y)
+                };
+                let mut x = 0;
+                while x < width {
+                    let bits = sixel(x);
+                    let run = (x..width).take_while(|&x| sixel(x) == bits).count();
+                    let ch = char::from(SIXEL_BIAS + bits);
+                    if run >= MIN_REPEAT {
+                        let _ = write!(out, "!{run}{ch}");
+                    } else {
+                        out.extend(std::iter::repeat_n(ch, run));
+                    }
+                    x += run;
+                }
+            }
+        }
+        out.push_str("\x1b\\");
+        out.into_bytes()
+    }
+
+    /// A small xorshift, so the tiles below are the same every run.
+    fn noise(seed: &mut u64) -> u64 {
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        *seed
+    }
+
+    /// The one-pass bands write exactly what the encoder wrote before them,
+    /// over tiles of every band remainder (the owner's 41 px cell gives
+    /// 164 px tiles, two short of a band), a few colours and past
+    /// [`REGISTERS`].
+    #[test]
+    fn one_pass_bands_write_what_the_encoder_wrote_before() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15;
+        for height in (1..=13).chain([41, 82, 164, 166]) {
+            for width in [1, 4, 17, 136] {
+                for colours in [1, 2, 7, 64, 300] {
+                    let palette: Vec<[u8; 3]> = (0..colours)
+                        .map(|_| {
+                            let v = noise(&mut seed);
+                            [v as u8, (v >> 8) as u8, (v >> 16) as u8]
+                        })
+                        .collect();
+                    let rgb: Vec<u8> = (0..width * height)
+                        .flat_map(|_| palette[noise(&mut seed) as usize % colours])
+                        .collect();
+                    let tile = image(width as u32, height as u32, rgb);
+                    assert_eq!(
+                        transmit(&tile, Position::new(3, 2)),
+                        before_one_pass(&tile, Position::new(3, 2)),
+                        "{width}x{height}, {colours} colours"
+                    );
+                }
+            }
+        }
     }
 }
