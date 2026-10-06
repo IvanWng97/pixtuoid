@@ -448,7 +448,137 @@ fn dispatch_key(
     }
 }
 
-pub type Term = Terminal<CrosstermBackend<Stdout>>;
+pub type Term = Terminal<CrosstermBackend<FrameOut>>;
+
+/// The terminal's output, held a frame at a time, from [`FrameOut::begin`] to
+/// [`FrameOut::present`]: the frame's text and images reach the terminal in
+/// one write, inside a synchronized update (mode 2026) where it has one, so
+/// it never shows a frame half drawn. Outside a frame writes pass straight
+/// through. Clones share one buffer, so the text and the images interleave
+/// in the order they were written.
+pub struct FrameOut<W: std::io::Write = Stdout>(Arc<std::sync::Mutex<Held<W>>>);
+
+impl<W: std::io::Write> Clone for FrameOut<W> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<W: std::io::Write> std::fmt::Debug for FrameOut<W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let held = self.held();
+        f.debug_struct("FrameOut")
+            .field("holding", &held.holding)
+            .field("sync", &held.sync)
+            .field("torn", &held.torn)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What holds a frame's output and presents it whole: a [`FrameOut`], of
+/// whatever it writes to.
+pub(crate) trait Presents: std::fmt::Debug {
+    /// Hold what is written from here.
+    fn begin(&self);
+    /// Write what was held, in one write.
+    fn present(&self) -> std::io::Result<()>;
+}
+
+impl<W: std::io::Write> Presents for FrameOut<W> {
+    fn begin(&self) {
+        FrameOut::begin(self);
+    }
+    fn present(&self) -> std::io::Result<()> {
+        FrameOut::present(self)
+    }
+}
+
+struct Held<W> {
+    out: W,
+    /// This frame's bytes; its capacity kept across frames.
+    frame: Vec<u8>,
+    holding: bool,
+    /// Wrap each frame in `CSI ? 2026 h` / `l`.
+    sync: bool,
+    /// The last present failed, perhaps mid-escape: the next opens with ST.
+    torn: bool,
+}
+
+/// Begin and end synchronized update
+/// (<https://github.com/contour-terminal/vt-extensions/blob/master/synchronized-output.md>).
+const BEGIN_SYNC: &[u8] = b"\x1b[?2026h";
+const END_SYNC: &[u8] = b"\x1b[?2026l";
+
+impl<W: std::io::Write> FrameOut<W> {
+    /// `out`, a frame at a time; inside a synchronized update when `sync`.
+    pub fn new(out: W, sync: bool) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(Held {
+            out,
+            frame: Vec::new(),
+            holding: false,
+            sync,
+            torn: false,
+        })))
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, Held<W>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Hold what is written until [`Self::present`].
+    pub(crate) fn begin(&self) {
+        let mut held = self.held();
+        held.holding = true;
+        held.frame.clear();
+        if held.torn {
+            held.frame.extend_from_slice(crate::graphics::ST);
+        }
+        if held.sync {
+            held.frame.extend_from_slice(BEGIN_SYNC);
+        }
+    }
+
+    /// Write what was held since [`Self::begin`] in one write, and flush.
+    ///
+    /// # Errors
+    ///
+    /// If the write or the flush fails; the next frame then opens with ST.
+    pub(crate) fn present(&self) -> std::io::Result<()> {
+        let mut held = self.held();
+        held.holding = false;
+        if held.sync {
+            held.frame.extend_from_slice(END_SYNC);
+        }
+        let Held { out, frame, .. } = &mut *held;
+        let wrote = out.write_all(frame).and_then(|()| out.flush());
+        held.torn = wrote.is_err();
+        held.frame.clear();
+        wrote
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for FrameOut<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut held = self.held();
+        if held.holding {
+            held.frame.extend_from_slice(buf);
+            Ok(buf.len())
+        } else {
+            held.out.write(buf)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut held = self.held();
+        if held.holding {
+            Ok(())
+        } else {
+            held.out.flush()
+        }
+    }
+}
 
 /// Enters raw mode + the alternate screen ATOMICALLY: a failure after raw mode is on rolls
 /// the terminal all the way back, or the error path strands the user's shell echo-less
@@ -457,7 +587,7 @@ pub type Term = Terminal<CrosstermBackend<Stdout>>;
 /// # Errors
 ///
 /// If the Windows console lacks VT support, or enabling raw mode, the alternate screen or mouse capture fails, or the terminal size query fails.
-pub fn setup_terminal() -> Result<Term> {
+pub fn setup_terminal(out: FrameOut) -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
     #[cfg(windows)]
@@ -468,7 +598,7 @@ pub fn setup_terminal() -> Result<Term> {
         );
     }
     enable_raw_mode()?;
-    let mut out = stdout();
+    let mut out = out;
     // Mouse capture drives the hover tooltip: terminals emit MouseEventKind::Moved on
     // cursor motion only while it is on.
     if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
@@ -907,9 +1037,14 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 }
 
 /// Hand `renderer` the painter `plan` names.
+#[cfg_attr(
+    not(feature = "graphics"),
+    expect(unused_variables, reason = "only the cutaway writes images into `out`")
+)]
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
+    out: &FrameOut,
 ) {
     let (terminal, tmux_env) = crate::graphics::terminal_and_tmux();
     match plan {
@@ -932,7 +1067,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
                 cell,
                 protocol,
                 tmux,
-                Box::new(stdout()),
+                Box::new(out.clone()),
             ));
         }
         _ => {
@@ -974,10 +1109,17 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
-    let term = setup_terminal()?;
+    // Asked before raw mode is on: the query takes the terminal's own for
+    // its reply.
+    let out = FrameOut::new(
+        stdout(),
+        crate::term::query_sync_output(crate::term::TRUECOLOR_PROBE_TIMEOUT),
+    );
+    let term = setup_terminal(out.clone())?;
     let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
-    paint_plan(&mut renderer, plan);
+    paint_plan(&mut renderer, plan, &out);
+    renderer.present_through(Box::new(out));
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
@@ -1103,6 +1245,78 @@ pub(crate) fn frame_clock(period: Duration) -> tokio::time::Interval {
     let mut frames = tokio::time::interval(period);
     frames.set_missed_tick_behavior(MissedTickBehavior::Skip);
     frames
+}
+
+#[cfg(test)]
+mod frame_out_tests {
+    use super::{BEGIN_SYNC, END_SYNC, FrameOut};
+    use std::io::Write;
+
+    /// A terminal that records each write it gets, and fails while `full`.
+    #[derive(Default)]
+    struct Tty {
+        writes: Vec<Vec<u8>>,
+        full: bool,
+    }
+
+    impl Write for Tty {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.full {
+                return Err(std::io::ErrorKind::WouldBlock.into());
+            }
+            self.writes.push(buf.to_vec());
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn frame(out: &mut FrameOut<Tty>, parts: &[&[u8]]) -> std::io::Result<()> {
+        out.begin();
+        for part in parts {
+            out.write_all(part).expect("held");
+            out.flush().expect("held");
+        }
+        out.present()
+    }
+
+    /// A frame's writes reach the terminal as one, inside a synchronized
+    /// update when it has one and bare when not; outside a frame they pass.
+    #[test]
+    fn a_frame_reaches_the_terminal_in_one_write() {
+        for sync in [true, false] {
+            let mut out = FrameOut::new(Tty::default(), sync);
+            frame(&mut out, &[b"tiles", b"text"]).expect("presented");
+            let wrapped = [BEGIN_SYNC, b"tiles", b"text", END_SYNC].concat();
+            let bare = b"tilestext".to_vec();
+            assert_eq!(
+                out.held().out.writes,
+                vec![if sync { wrapped } else { bare }]
+            );
+            out.write_all(b"teardown").expect("passes");
+            assert_eq!(
+                out.held().out.writes.len(),
+                2,
+                "outside a frame: straight through"
+            );
+        }
+    }
+
+    /// A frame the terminal refused leaves the next one opening with ST, so
+    /// an escape it cut short ends before the next frame's bytes.
+    #[test]
+    fn a_refused_frame_opens_the_next_with_st() {
+        let mut out = FrameOut::new(Tty::default(), false);
+        out.held().out.full = true;
+        assert!(frame(&mut out, &[b"\x1b_Ga=T"]).is_err());
+        out.held().out.full = false;
+        frame(&mut out, &[b"next"]).expect("presented");
+        assert_eq!(
+            out.held().out.writes,
+            vec![[crate::graphics::ST, b"next"].concat()]
+        );
+    }
 }
 
 #[cfg(test)]

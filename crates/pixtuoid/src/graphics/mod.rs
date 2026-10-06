@@ -18,6 +18,9 @@ use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
+/// String Terminator: ends any APC or DCS a cut-short write left open.
+pub(crate) const ST: &[u8] = b"\x1b\\";
+
 #[cfg(feature = "graphics")]
 pub(crate) mod iterm2;
 #[cfg(feature = "graphics")]

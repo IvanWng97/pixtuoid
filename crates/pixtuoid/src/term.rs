@@ -214,6 +214,53 @@ pub fn query_truecolor(timeout: std::time::Duration) -> Truecolor {
     }
 }
 
+/// DECRQM for synchronized output (mode 2026), then DA1: a terminal that
+/// doesn't know the mode answers nothing to the first, and every terminal
+/// answers the second, so its reply ends the wait either way
+/// (<https://github.com/contour-terminal/vt-extensions/blob/master/synchronized-output.md>,
+/// "Feature detection").
+const SYNC_OUTPUT_PROBE: &[u8] = b"\x1b[?2026$p\x1b[c";
+
+/// Whether the terminal holds a frame between `CSI ? 2026 h` and `CSI ? 2026 l`
+/// and shows it whole: its DECRPM for mode 2026 is set (1) or reset (2).
+#[cfg(unix)]
+pub(crate) fn query_sync_output(timeout: std::time::Duration) -> bool {
+    let mut reply = Vec::new();
+    let asked = query_tty(
+        SYNC_OUTPUT_PROBE,
+        timeout,
+        MAX_DECRQSS_RESPONSE_BYTES,
+        |chunk| {
+            reply.extend_from_slice(chunk);
+            da1_answered(&reply)
+        },
+    );
+    asked.is_some() && sync_output_reported(&reply)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn query_sync_output(_timeout: std::time::Duration) -> bool {
+    false
+}
+
+/// A DA1 reply, `CSI ? Ps ; ... c`, has arrived.
+fn da1_answered(reply: &[u8]) -> bool {
+    reply.windows(3).enumerate().any(|(i, w)| {
+        w == b"\x1b[?"
+            && reply[i + 3..]
+                .iter()
+                .find(|b| !(b.is_ascii_digit() || **b == b';'))
+                .is_some_and(|&b| b == b'c')
+    })
+}
+
+/// The reply carries mode 2026's DECRPM as set (1) or reset (2).
+fn sync_output_reported(reply: &[u8]) -> bool {
+    [b"\x1b[?2026;1$y", b"\x1b[?2026;2$y"]
+        .iter()
+        .any(|answer| reply.windows(answer.len()).any(|w| w == *answer))
+}
+
 /// Write `query` to the controlling terminal and hand each chunk of its reply
 /// to `on_reply` until that returns `true`. `Some(true)` when it did;
 /// `Some(false)` when the reply never completed — `timeout` elapsed, more than
@@ -394,6 +441,29 @@ pub fn query_truecolor(_timeout: std::time::Duration) -> Truecolor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mode 2026 counts as supported when reported set or reset, not when
+    /// unknown (0) or permanently reset (4), and the DA1 reply ends the wait
+    /// with or without it.
+    #[test]
+    fn sync_output_is_read_off_its_decrpm() {
+        let da1 = b"\x1b[?62;22c";
+        for (decrpm, supported) in [
+            (&b"\x1b[?2026;2$y"[..], true),
+            (b"\x1b[?2026;1$y", true),
+            (b"\x1b[?2026;0$y", false),
+            (b"\x1b[?2026;4$y", false),
+            (b"", false),
+        ] {
+            let reply = [decrpm, da1].concat();
+            assert!(da1_answered(&reply), "{reply:?}");
+            assert_eq!(sync_output_reported(&reply), supported, "{reply:?}");
+        }
+        assert!(
+            !da1_answered(b"\x1b[?2026;2$y"),
+            "a DECRPM alone doesn't end the wait"
+        );
+    }
 
     #[test]
     fn colorterm_truecolor_tokens() {

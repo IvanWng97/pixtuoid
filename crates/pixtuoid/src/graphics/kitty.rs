@@ -131,8 +131,7 @@ pub(crate) fn unwind_for(ids: RangeInclusive<u32>, tmux: bool) -> Vec<u8> {
     [ST, &delete(ids, tmux)].concat()
 }
 
-/// String Terminator: ends any APC or DCS left open.
-pub(crate) const ST: &[u8] = b"\x1b\\";
+pub(crate) use super::ST;
 
 /// Deletes the images `ids` names and frees their data ("Deleting images":
 /// `d=R` takes ids from `x` to `y`, both included).

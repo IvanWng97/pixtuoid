@@ -61,6 +61,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pack: Arc<Pack>,
     /// The frames' times and janks.
     jank: crate::tui::jank::Jank,
+    /// What holds each frame's output and presents it whole; `None` writes
+    /// straight to the backend.
+    frame_out: Option<Box<dyn crate::tui::Presents>>,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -227,6 +230,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
             jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
+            frame_out: None,
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -338,6 +342,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// is judged against.
     pub(crate) fn scheduled_every(&mut self, interval: std::time::Duration) {
         self.jank.scheduled_every(interval);
+    }
+
+    /// Hold each frame's output in `out` and present it whole.
+    pub(crate) fn present_through(&mut self, out: Box<dyn crate::tui::Presents>) {
+        self.frame_out = Some(out);
     }
 
     /// Name what draws the frames, for their pacing summaries.
@@ -838,8 +847,25 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// If querying the terminal size or drawing the frame to the backend fails.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         let begun = std::time::Instant::now();
-        self.draw_frame(scene, pack, now)?;
+        if let Some(out) = &self.frame_out {
+            out.begin();
+        }
+        let drawn = self.draw_frame(scene, pack, now);
         self.follow_resize();
+        // Presented even when the draw failed, so nothing stays held.
+        if let Some(Err(e)) = self.frame_out.as_ref().map(|out| out.present()) {
+            // A full terminal: the frame is dropped, and each tile is owed
+            // again, as when one of its own writes failed.
+            if e.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(e.into());
+            }
+            tracing::warn!(error = %e, "frame write failed");
+            #[cfg(feature = "graphics")]
+            if let Some(cutaway) = &mut self.cutaway {
+                cutaway.forget();
+            }
+        }
+        drawn?;
         #[cfg(feature = "graphics")]
         let send = self
             .cutaway
