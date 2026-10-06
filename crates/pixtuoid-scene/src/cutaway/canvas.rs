@@ -1220,15 +1220,10 @@ mod tests {
                 }
             }
         }
-        if std::env::var_os("UPDATE_CUTAWAY_GOLDEN").is_some() {
-            std::fs::write(PINNED, &digests).expect("writes the golden");
-            return;
-        }
-        let pinned = std::fs::read_to_string(PINNED).expect("reads the golden");
-        assert_eq!(
-            digests, pinned,
-            "these frames are not the pixels {PINNED} pins; run \
-             `just gen-cutaway-golden` if the look changed on purpose"
+        let pinned = snapbox::Data::read_from(
+            std::path::Path::new(PINNED),
+            Some(snapbox::data::DataFormat::Text),
         );
+        snapbox::assert_data_eq!(digests, pinned.raw());
     }
 }
