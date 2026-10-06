@@ -258,6 +258,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// Paint `cutaway` from the next frame on.
     #[cfg(feature = "graphics")]
+    /// The cutaway, for the pacing bench.
+    pub(crate) fn cutaway(&self) -> Option<&crate::tui::cutaway::TileCutaway> {
+        self.cutaway.as_ref()
+    }
+
     pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
         self.cutaway = Some(cutaway);
     }

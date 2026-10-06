@@ -336,7 +336,386 @@ fn stats(xs: &[Duration]) -> serde_json::Value {
     })
 }
 
+/// What the hitch probe saw in one frame: each span's time and count, and
+/// each event's last fields by message.
+#[derive(Clone, Default)]
+struct Probe(Arc<Mutex<Seen>>);
+
+#[derive(Default)]
+struct Seen {
+    spans: HashMap<&'static str, (Duration, u32)>,
+    events: HashMap<String, serde_json::Map<String, serde_json::Value>>,
+}
+
+impl Probe {
+    fn take(&self) -> Seen {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+#[derive(Default)]
+struct Fields {
+    message: String,
+    map: serde_json::Map<String, serde_json::Value>,
+}
+
+impl tracing::field::Visit for Fields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        let v = format!("{value:?}");
+        if field.name() == "message" {
+            self.message = v;
+        } else {
+            self.map.insert(field.name().into(), v.into());
+        }
+    }
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.map.insert(field.name().into(), value.into());
+    }
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.map.insert(field.name().into(), value.into());
+    }
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.map.insert(field.name().into(), value.into());
+    }
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.map.insert(field.name().into(), value.into());
+    }
+}
+
+impl<S> tracing_subscriber::Layer<S> for Probe
+where
+    S: tracing::Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_enter(&self, id: &tracing::span::Id, ctx: LayerContext<'_, S>) {
+        if let Some(span) = ctx.span(id) {
+            span.extensions_mut().replace(Entered(Instant::now()));
+        }
+    }
+
+    fn on_exit(&self, id: &tracing::span::Id, ctx: LayerContext<'_, S>) {
+        let Some(span) = ctx.span(id) else { return };
+        let Some(Entered(at)) = span.extensions_mut().remove::<Entered>() else {
+            return;
+        };
+        let mut seen = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let e = seen.spans.entry(span.name()).or_default();
+        e.0 += at.elapsed();
+        e.1 += 1;
+    }
+
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: LayerContext<'_, S>) {
+        let mut f = Fields::default();
+        event.record(&mut f);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .events
+            .insert(f.message, f.map);
+    }
+}
+
+/// The owner's terminal: kitty in Ghostty, a 17x41 cell, a 214x125 office.
+const OWNER_CELL: (u16, u16) = (17, 41);
+const OWNER_OFFICE: (u16, u16) = (214, 125);
+
+struct HitchRun {
+    name: &'static str,
+    weather: WeatherPolicy,
+    /// `None`: the wall clock, waiting out each paint interval.
+    start: Option<SystemTime>,
+    step: Duration,
+    length: Duration,
+}
+
+/// A terminal the hitch runs draw on.
+struct Term {
+    name: &'static str,
+    protocol: Protocol,
+    cols: u16,
+    rows: u16,
+    cell: (u16, u16),
+}
+
+fn hitch(path: &Path) -> Result<()> {
+    let probe = Probe::default();
+    let targets = tracing_subscriber::filter::Targets::new()
+        .with_target("pixtuoid_scene", tracing::Level::TRACE)
+        .with_target("pixtuoid", tracing::Level::TRACE);
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(probe.clone())
+            .with(targets),
+    )?;
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
+    let (cols, rows) = (1..=400u16)
+        .flat_map(|c| (1..=200u16).map(move |r| (c, r)))
+        .find(|&(c, r)| {
+            pixtuoid::pacing::cutaway_office(c, r, OWNER_CELL, &pack)
+                .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE)
+        })
+        .context("no terminal fits the owner's office")?;
+    let tick = Duration::from_secs(1) / PAINT_FPS;
+    let real_secs = pixtuoid_core::platform::text_env("HITCH_REAL_SECS")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(600);
+    let only = pixtuoid_core::platform::text_env("HITCH_ONLY");
+    let shrink: u32 = pixtuoid_core::platform::text_env("HITCH_SHRINK")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let noon = pixtuoid_scene::localclock::at_hour(12);
+    let dusk = pixtuoid_scene::localclock::at_hour_min(19, 55);
+    let sweeps = [
+        HitchRun {
+            name: "noon clear",
+            weather: WeatherPolicy::Forced(Weather::Clear),
+            start: Some(noon),
+            step: tick,
+            length: Duration::from_secs(60),
+        },
+        HitchRun {
+            name: "noon overcast",
+            weather: WeatherPolicy::Forced(Weather::Overcast),
+            start: Some(noon),
+            step: tick,
+            length: Duration::from_secs(60),
+        },
+        HitchRun {
+            name: "noon storm",
+            weather: WeatherPolicy::Forced(Weather::Storm),
+            start: Some(noon),
+            step: tick,
+            length: Duration::from_secs(120),
+        },
+        HitchRun {
+            name: "dusk ff 1s/frame",
+            weather: WeatherPolicy::Forced(Weather::Clear),
+            start: Some(dusk),
+            step: Duration::from_secs(1),
+            length: Duration::from_secs(3600),
+        },
+        HitchRun {
+            name: "clock weather ff 1s/frame",
+            weather: WeatherPolicy::Clock,
+            start: Some(noon),
+            step: Duration::from_secs(1),
+            length: Duration::from_secs(1800),
+        },
+    ];
+    let real = HitchRun {
+        name: "real clock 10 min, clock weather",
+        weather: WeatherPolicy::Clock,
+        start: None,
+        step: tick,
+        length: Duration::from_secs(real_secs),
+    };
+    let owner = |protocol, name| Term {
+        name,
+        protocol,
+        cols,
+        rows,
+        cell: OWNER_CELL,
+    };
+    let mid = |protocol, name| Term {
+        name,
+        protocol,
+        cols: 160,
+        rows: 45,
+        cell: (9, 18),
+    };
+    let terms = [
+        owner(Protocol::Kitty, "owner kitty 17x41"),
+        owner(Protocol::Sixel, "owner sixel 17x41"),
+        owner(Protocol::Iterm2, "owner iterm2 17x41"),
+        owner(Protocol::HalfBlock, "owner half-block"),
+        mid(Protocol::Kitty, "mid kitty 9x18"),
+        mid(Protocol::Sixel, "mid sixel 9x18"),
+        mid(Protocol::Iterm2, "mid iterm2 9x18"),
+        mid(Protocol::HalfBlock, "mid half-block"),
+    ];
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut stdout = std::io::stdout().lock();
+    for t in &terms {
+        let office_of = pixtuoid::pacing::cutaway_office(t.cols, t.rows, t.cell, &pack);
+        let _ = writeln!(
+            stdout,
+            "{}: {}x{} cells of {:?} px, cutaway office/scale {office_of:?}",
+            t.name, t.cols, t.rows, t.cell
+        );
+    }
+    let mut plan: Vec<(&Term, &HitchRun)> = terms
+        .iter()
+        .flat_map(|t| sweeps.iter().map(move |r| (t, r)))
+        .collect();
+    plan.insert(0, (&terms[0], &real));
+    for (term, run) in plan {
+        if only
+            .as_deref()
+            .is_some_and(|o| !term.name.contains(o) && !run.name.contains(o))
+        {
+            continue;
+        }
+        let pets = vec![Pet::defaulted(PetKind::Cat), Pet::defaulted(PetKind::Dog)];
+        let (mut r, wire) = renderer(
+            term.protocol,
+            term.cols,
+            term.rows,
+            term.cell,
+            pets,
+            Arc::clone(&pack),
+        )?;
+        r.set_weather(run.weather);
+        r.set_motion(Motion::Full);
+        let wall = Instant::now();
+        let start = run.start.unwrap_or_else(SystemTime::now);
+        let scene = office(start);
+        let mut totals = Vec::new();
+        let mut n = 0u64;
+        loop {
+            let offset = match run.start {
+                None => wall.elapsed(),
+                Some(_) => run.step * u32::try_from(n)?,
+            };
+            if offset >= run.length / shrink {
+                break;
+            }
+            let now = start + offset;
+            wire.take();
+            probe.take();
+            let begun = Instant::now();
+            r.render(&scene, &pack, now)?;
+            let total = begun.elapsed();
+            let (bytes, write_ns) = wire.take();
+            let seen = probe.take();
+            let span = |name: &str| seen.spans.get(name).copied().unwrap_or_default();
+            let ms_of = |name: &str| ms(span(name).0);
+            let known = [
+                spans::COMPOSE,
+                spans::RASTERIZE,
+                "tiles.diff",
+                "tile.encode",
+            ]
+            .iter()
+            .map(|n| span(n).0)
+            .sum::<Duration>()
+                + Duration::from_nanos(write_ns);
+            let mut line = serde_json::json!({
+                "term": term.name,
+                "run": run.name,
+                "n": n,
+                "offset_s": offset.as_secs_f64(),
+                "total_ms": ms(total),
+                "sim_ms": ms_of(spans::COMPOSE),
+                "list_ms": ms_of("canvas.compose"),
+                "paint_ms": ms_of("canvas.paint"),
+                "clouds_draw": { "ms": ms_of("clouds.draw"), "n": span("clouds.draw").1 },
+                "diff_ms": ms_of("tiles.diff"),
+                "cut_ms": ms_of("tile.cut"),
+                "zlib_ms": ms_of("tile.zlib"),
+                "base64_ms": ms_of("tile.base64"),
+                "tiles_sent": span("tile.encode").1,
+                "encode_ms": ms_of("tile.encode"),
+                "tile_write_ms": ms_of("tile.write"),
+                "rasterize_ms": ms_of(spans::RASTERIZE),
+                "write_ms": ms(Duration::from_nanos(write_ns)),
+                "other_ms": ms(total.saturating_sub(known)),
+                "bytes": bytes,
+            });
+            if let Some(obj) = line.as_object_mut() {
+                for (msg, key) in [
+                    ("tiles.stage", "stage"),
+                    ("canvas.epoch", "epoch"),
+                    ("sky.at", "sky"),
+                ] {
+                    if let Some(f) = seen.events.get(msg) {
+                        obj.insert(key.into(), serde_json::Value::Object(f.clone()));
+                    }
+                }
+            }
+            serde_json::to_writer(&mut out, &line)?;
+            writeln!(out)?;
+            totals.push(total);
+            n += 1;
+            if run.start.is_none() {
+                let next = begun + tick;
+                if let Some(wait) = next.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(wait);
+                }
+            }
+        }
+        let over = totals.iter().filter(|&&t| t > tick).count();
+        let _ = writeln!(
+            stdout,
+            "{:<20} {:<32} frames {:>6}  p50 {:>6.2}  p99 {:>6.2}  max {:>7.2} ms  over {:.1} ms: {}",
+            term.name,
+            run.name,
+            totals.len(),
+            ms(pct(&totals, 50.0)),
+            ms(pct(&totals, 99.0)),
+            ms(totals.iter().copied().max().unwrap_or_default()),
+            ms(tick),
+            over
+        );
+    }
+    out.flush()?;
+    let _ = writeln!(stdout, "frames: {}", path.display());
+    Ok(())
+}
+
+/// The kitty transports at the owner's 16x: a full resend, and walk frames.
+fn transport() -> Result<()> {
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
+    let (cols, rows) = (1..=400u16)
+        .flat_map(|c| (1..=200u16).map(move |r| (c, r)))
+        .find(|&(c, r)| {
+            pixtuoid::pacing::cutaway_office(c, r, OWNER_CELL, &pack)
+                .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE)
+        })
+        .context("no terminal fits the owner's office")?;
+    let tick = Duration::from_secs(1) / PAINT_FPS;
+    let pets = vec![Pet::defaulted(PetKind::Cat), Pet::defaulted(PetKind::Dog)];
+    let (mut r, _wire) = renderer(
+        Protocol::Kitty,
+        cols,
+        rows,
+        OWNER_CELL,
+        pets,
+        Arc::clone(&pack),
+    )?;
+    r.set_weather(WeatherPolicy::Forced(Weather::Clear));
+    r.set_motion(Motion::Full);
+    let start = pixtuoid_scene::localclock::at_hour(12);
+    let scene = office(start);
+    let mut stdout = std::io::stdout().lock();
+    let mut prev = None;
+    for n in 0..90u32 {
+        r.render(&scene, &pack, start + tick * n)?;
+        let cur = pixtuoid::pacing::cutaway_image(&r);
+        if n == 0 {
+            let full =
+                pixtuoid::pacing::kitty_transports(&r, None, 7).context("a kitty cutaway")?;
+            let _ = writeln!(stdout, "full {}", serde_json::to_string(&full)?);
+        } else if n % 15 == 0 {
+            let walk = pixtuoid::pacing::kitty_transports(&r, prev.as_ref(), 7)
+                .context("a kitty cutaway")?;
+            let _ = writeln!(stdout, "walk@{n} {}", serde_json::to_string(&walk)?);
+        }
+        prev = cur;
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("transport") {
+        return transport();
+    }
+    if std::env::args().nth(1).as_deref() == Some("hitch") {
+        let path = PathBuf::from(
+            std::env::args()
+                .nth(2)
+                .context("usage: pacing hitch <frames.jsonl>")?,
+        );
+        return hitch(&path);
+    }
     let clock = SpanClock::default();
     let subscriber = tracing_subscriber::registry().with(clock.clone()).with(
         tracing_subscriber::filter::Targets::new()

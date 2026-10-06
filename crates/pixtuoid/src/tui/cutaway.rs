@@ -280,7 +280,29 @@ impl TileCutaway {
     /// allows: at once for a new phase, so it shows as long as it lasts.
     fn stage(&mut self, dirty: &Dirty, flashes: Flashes, now: SystemTime, origin: Position) {
         self.origin = origin;
-        let changed = self.tiles.changed(&self.image, dirty);
+        let changed =
+            tracing::trace_span!("tiles.diff").in_scope(|| self.tiles.changed(&self.image, dirty));
+        tracing::trace!(
+            dirty = match dirty {
+                Dirty::All => "all",
+                Dirty::Rects(_) => "rects",
+                Dirty::Unchanged => "unchanged",
+            },
+            rects = match dirty {
+                Dirty::Rects(r) => r.as_slice().len(),
+                _ => 0,
+            },
+            rect_px = match dirty {
+                Dirty::Rects(r) => r
+                    .as_slice()
+                    .iter()
+                    .map(|b| u64::from(b.width) * u64::from(b.height))
+                    .sum::<u64>(),
+                _ => 0,
+            },
+            changed = changed.len(),
+            "tiles.stage"
+        );
         let due = self.flash.changes(flashes)
             || self.sent_at.is_none_or(|at| {
                 now.duration_since(at)
@@ -352,8 +374,8 @@ impl TileCutaway {
             if wrote.is_err() {
                 break;
             }
-            if let Some(bytes) = self.encode(c) {
-                wrote = self.out.write_all(&bytes);
+            if let Some(bytes) = tracing::trace_span!("tile.encode").in_scope(|| self.encode(c)) {
+                wrote = tracing::trace_span!("tile.write").in_scope(|| self.out.write_all(&bytes));
                 sent.push(c);
             }
         }
@@ -373,7 +395,8 @@ impl TileCutaway {
 
     /// `c`'s tile in the protocol's escape; `None` where it has none.
     fn encode(&self, c: Changed) -> Option<Vec<u8>> {
-        let image = self.tiles.image(&self.image, c.tile);
+        let image =
+            tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(&self.image, c.tile));
         match self.protocol {
             ImageProtocol::Kitty => {
                 kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
@@ -462,6 +485,11 @@ impl TileCutaway {
             }
         }
         covered
+    }
+
+    /// The last image and its fit, for the pacing bench.
+    pub(crate) fn shown_image(&self) -> Option<(&RgbBuffer, Fitted)> {
+        Some((&self.image, self.fitted?))
     }
 
     /// Owe every tile again: the terminal may have dropped them.

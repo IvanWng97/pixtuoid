@@ -765,14 +765,17 @@ impl Sky {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
+        let weather = policy.weather_at(now);
+        let strike = strike_phase_at(timing.beat, policy);
+        tracing::trace!(weather = ?weather, strike = ?strike, nightfall, "sky.at");
         Self {
             policy,
-            weather: policy.weather_at(now),
+            weather,
             body: body_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            strike: strike_phase_at(timing.beat, policy),
+            strike,
         }
     }
 
