@@ -39,6 +39,7 @@ pub(crate) enum Glow {
 
 /// Each buffer pixel's [`Glow`], set by the last piece that painted it, so a
 /// piece in front of a screen takes the room's light over it.
+#[derive(Debug)]
 pub(crate) struct Emission {
     w: u16,
     glow: Vec<Glow>,
@@ -50,6 +51,26 @@ impl Emission {
         Self {
             w,
             glow: vec![Glow::Lit; usize::from(w) * usize::from(h)],
+        }
+    }
+
+    /// Whether it is a `w`×`h` buffer's.
+    pub(crate) fn fits(&self, w: u16, h: u16) -> bool {
+        self.w == w && self.glow.len() == usize::from(w) * usize::from(h)
+    }
+
+    /// Every pixel of `xs × ys` back to [`Glow::Lit`]: a repaint resets only
+    /// what it paints.
+    pub(crate) fn reset(&mut self, xs: std::ops::Range<u16>, ys: std::ops::Range<u16>) {
+        let w = usize::from(self.w);
+        for y in ys {
+            let row = usize::from(y) * w;
+            if let Some(cells) = self
+                .glow
+                .get_mut(row + usize::from(xs.start)..row + usize::from(xs.end))
+            {
+                cells.fill(Glow::Lit);
+            }
         }
     }
 
@@ -125,14 +146,23 @@ pub(crate) fn net_pass(
         }
     }
     let (bx0, by0) = (pen.buffer(rect.x).0, pen.buffer(rect.y).0);
-    let bx1 = bx0.saturating_add(pen.buffer(rect.w).0).min(buf.width());
-    let by1 = by0.saturating_add(pen.buffer(rect.h).0).min(buf.height());
+    let bx1 = bx0.saturating_add(pen.buffer(rect.w).0);
+    let by1 = by0.saturating_add(pen.buffer(rect.h).0);
     let bw = usize::from(buf.width());
-    let pixels = buf.as_mut_slice();
-    debug_assert_eq!(emission.glow.len(), pixels.len(), "one class per pixel");
-    for by in by0..by1 {
+    debug_assert_eq!(
+        emission.glow.len(),
+        bw * usize::from(buf.height()),
+        "one class per pixel"
+    );
+    for (by, first, row) in buf.writable_rows_mut() {
+        if !(by0..by1).contains(&by) {
+            continue;
+        }
         let art_row = usize::from(pen.art_of_buffer(BufferPx(by)).0 - rect.y.0) * w;
-        for bx in bx0..bx1 {
+        for (bx, px) in (first..).zip(row.iter_mut()) {
+            if !(bx0..bx1).contains(&bx) {
+                continue;
+            }
             let a = art_row + usize::from(pen.art_of_buffer(BufferPx(bx)).0 - rect.x.0);
             // A miss is a pen-arithmetic bug: loud in tests, a skipped pixel in release.
             debug_assert!(
@@ -146,11 +176,8 @@ pub(crate) fn net_pass(
                 continue;
             }
             let i = usize::from(by) * bw + usize::from(bx);
-            debug_assert!(i < pixels.len(), "buffer pixel {i} outside the frame");
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
-            if let Some(px) = pixels.get_mut(i) {
-                *px = memo.of(*px, glow, lift, tint, (ambient, flash));
-            }
+            *px = memo.of(*px, glow, lift, tint, (ambient, flash));
         }
     }
 }
@@ -243,6 +270,24 @@ mod tests {
     use crate::display::light::tests::{lamp, pen, view};
     use crate::display::pen::ArtPx;
     use crate::layout::Point;
+
+    /// A repaint's reset takes its rect back to lit and leaves the rest as
+    /// the last frame marked it.
+    #[test]
+    fn a_reset_lights_only_its_rect() {
+        let mut emission = Emission::new(4, 3);
+        for y in 0..3 {
+            for x in 0..4 {
+                emission.set(x, y, Glow::Emissive);
+            }
+        }
+        emission.reset(1..3, 1..2);
+        let lit: Vec<(u16, u16)> = (0..3)
+            .flat_map(|y| (0..4).map(move |x| (x, y)))
+            .filter(|&(x, y)| emission.get(x, y) == Glow::Lit)
+            .collect();
+        assert_eq!(lit, [(1, 1), (2, 1)]);
+    }
 
     const FLOOR: Rgb = Rgb {
         r: 110,

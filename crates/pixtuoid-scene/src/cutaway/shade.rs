@@ -82,16 +82,9 @@ pub(crate) fn slab(
 
 /// Paint a solid rect, clipped to the buffer.
 pub(crate) fn fill(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, c: Rgb) {
-    for dy in 0..h {
-        let py = y.saturating_add(dy);
-        if py >= buf.height() {
-            break;
-        }
-        for dx in 0..w {
-            let px = x.saturating_add(dx);
-            if px >= buf.width() {
-                break;
-            }
+    let (xs, ys) = buf.writable();
+    for py in y.max(ys.start)..y.saturating_add(h).min(ys.end) {
+        for px in x.max(xs.start)..x.saturating_add(w).min(xs.end) {
             buf.put(px, py, c);
         }
     }

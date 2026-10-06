@@ -1,5 +1,7 @@
 //! Painting on the [`Pen`]'s art grid.
 
+use std::ops::Range;
+
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::shade::fill;
@@ -7,6 +9,16 @@ use crate::display::pen::{ArtPx, ArtRect, BufferPx, Pen};
 use crate::dither::Stepped;
 
 impl Pen {
+    /// The art columns and rows over `buf`'s writable part: all of it, or a
+    /// repaint's clip. A painter that walks art pixels walks only these.
+    pub(crate) fn writable_art(self, buf: &RgbBuffer) -> (Range<u16>, Range<u16>) {
+        let (xs, ys) = buf.writable();
+        (
+            self.art_of_buffer(BufferPx(xs.start)).0..self.art_covering(BufferPx(xs.end)).0,
+            self.art_of_buffer(BufferPx(ys.start)).0..self.art_covering(BufferPx(ys.end)).0,
+        )
+    }
+
     /// Copy `from`'s art pixel onto `buf` wherever `take` holds for it.
     pub(crate) fn take_where(
         self,
@@ -14,8 +26,9 @@ impl Pen {
         from: &RgbBuffer,
         take: impl Fn(ArtPx, ArtPx) -> bool,
     ) {
-        for y in 0..buf.height().min(from.height()) {
-            for x in 0..buf.width().min(from.width()) {
+        let (xs, ys) = buf.writable();
+        for y in ys.start..ys.end.min(from.height()) {
+            for x in xs.start..xs.end.min(from.width()) {
                 if take(
                     self.art_of_buffer(BufferPx(x)),
                     self.art_of_buffer(BufferPx(y)),
@@ -71,11 +84,12 @@ impl Pen {
     /// buffer: a tone relative to what is already painted there, not a colour
     /// of its own. An art pixel that was one colour stays one.
     fn shade(self, buf: &mut RgbBuffer, r: ArtRect, stepped: &mut Stepped) {
+        let (xs, ys) = buf.writable();
         let (x0, y0) = (self.buffer(r.x).0, self.buffer(r.y).0);
-        let x1 = x0.saturating_add(self.buffer(r.w).0).min(buf.width());
-        let y1 = y0.saturating_add(self.buffer(r.h).0).min(buf.height());
-        for y in y0..y1 {
-            for x in x0..x1 {
+        let x1 = x0.saturating_add(self.buffer(r.w).0).min(xs.end);
+        let y1 = y0.saturating_add(self.buffer(r.h).0).min(ys.end);
+        for y in y0.max(ys.start)..y1 {
+            for x in x0.max(xs.start)..x1 {
                 let c = stepped.of(buf.get(x, y));
                 buf.put(x, y, c);
             }
@@ -91,8 +105,12 @@ impl Pen {
         r: ArtRect,
         mut f: impl FnMut(u16, u16, Rgb) -> Rgb,
     ) {
-        for dy in 0..r.h.0 {
-            for dx in 0..r.w.0 {
+        let (art_xs, art_ys) = self.writable_art(buf);
+        let offsets = |from: u16, len: u16, on: &Range<u16>| {
+            on.start.saturating_sub(from).min(len)..on.end.saturating_sub(from).min(len)
+        };
+        for dy in offsets(r.y.0, r.h.0, &art_ys) {
+            for dx in offsets(r.x.0, r.w.0, &art_xs) {
                 let at = ArtRect {
                     x: ArtPx(r.x.0 + dx),
                     y: ArtPx(r.y.0 + dy),
@@ -128,10 +146,11 @@ impl Pen {
             return;
         }
         let span = u32::from(y1.0 - y0.0);
-        let columns = self.art_covering(BufferPx(buf.width())).0;
-        for y in y0.0..y1.0 {
+        let (columns, art_ys) = self.writable_art(buf);
+        let rows = y0.0.max(art_ys.start)..y1.0.min(art_ys.end);
+        for y in rows {
             let through = f32::from(y - y0.0) / span as f32;
-            for x in 0..columns {
+            for x in columns.clone() {
                 let c = if crate::dither::takes_next(x, y, through) {
                     dark
                 } else {
