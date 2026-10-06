@@ -11,7 +11,15 @@ use std::time::SystemTime;
 fn paint_band(buf: &mut RgbBuffer, top_wall_h: u16, moment: &Moment, theme: &crate::theme::Theme) {
     paint_ground_and_walls(&mut BaseFillCache::new(), buf, top_wall_h, moment, theme);
     let bays = window_bays(buf.width(), 0..0);
-    paint_windows(buf, top_wall_h, bays, moment, &test_default_pack(), theme);
+    paint_windows(
+        buf,
+        top_wall_h,
+        bays,
+        moment,
+        &test_default_pack(),
+        theme,
+        &mut crate::clouds::CloudCache::default(),
+    );
 }
 
 #[test]
@@ -35,11 +43,14 @@ fn lightning_flash_lights_the_room_mid_strike_only() {
     };
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(1.0));
+    paint_lightning_flash(
+        &mut b,
+        &Sky::at_with(now, Weather::Storm).with_strike(Some(crate::sky::StrikePhase::Primary)),
+    );
     assert!(b.get(0, 0).r > 10, "storm strike should brighten the room");
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(0.0));
+    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_strike(None));
     assert_eq!(b.get(0, 0), quiet_fill, "no flash between strikes");
 }
 #[test]
@@ -47,8 +58,8 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let now = SystemTime::UNIX_EPOCH;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (buf_w, top_wall_h) = (60, 30);
-    let render_lum = |flash: f32| -> u64 {
-        let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
+    let render_lum = |strike| -> u64 {
+        let sky = Sky::at_with(now, Weather::Storm).with_strike(strike);
         let mut buf = RgbBuffer::filled(buf_w, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_band(
             &mut buf,
@@ -64,8 +75,8 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             })
             .sum()
     };
-    let flashing = render_lum(1.0);
-    let quiet = render_lum(0.0);
+    let flashing = render_lum(Some(crate::sky::StrikePhase::Primary));
+    let quiet = render_lum(None);
     assert!(
         flashing > quiet,
         "the on-glass bolt must brighten the storm glass during the flash \
@@ -258,15 +269,22 @@ fn count_cool_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
         .count()
 }
 
-/// Count faint-white STAR pixels in the same sky-only top-third band. The base
-/// night sky never gets close to this threshold on its own — only a `STAR_COLOR`
-/// blend lifts a pixel this bright.
-fn count_faint_white(buf: &RgbBuffer, top_wall_h: u16) -> usize {
+/// Count STAR pixels in the same sky-only top-third band: bright cells with
+/// no bright neighbour. Only a `STAR_COLOR` blend lifts a lone cell this
+/// bright; a moonlit cloud's edge is bright too, but never alone.
+fn count_stars(buf: &RgbBuffer, top_wall_h: u16) -> usize {
+    let bright = |x: u16, y: u16| {
+        let p = buf.get(x, y);
+        p.r > 90 && p.g > 90 && p.b > 90
+    };
     (1..(top_wall_h / 3).max(2))
-        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .flat_map(|y| (1..buf.width() - 1).map(move |x| (x, y)))
         .filter(|&(x, y)| {
-            let p = buf.get(x, y);
-            p.r > 90 && p.g > 90 && p.b > 90
+            bright(x, y)
+                && !bright(x - 1, y)
+                && !bright(x + 1, y)
+                && !bright(x, y - 1)
+                && !bright(x, y + 1)
         })
         .count()
 }
@@ -467,8 +485,8 @@ fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
     for (day, hour) in [moonless, high_moon] {
         let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
         let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
-        let clear_n = count_faint_white(&clear, top_wall_h);
-        let overcast_n = count_faint_white(&overcast, top_wall_h);
+        let clear_n = count_stars(&clear, top_wall_h);
+        let overcast_n = count_stars(&overcast, top_wall_h);
         assert!(
             clear_n >= 3,
             "day {day} {hour}:00: a clear night should show some stars, got {clear_n}"
@@ -938,7 +956,8 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
 
 #[test]
 fn lightning_flash_matches_the_per_pixel_blend_reference() {
-    let sky = Sky::at_with(SystemTime::UNIX_EPOCH, Weather::Storm).with_flash(1.0);
+    let sky = Sky::at_with(SystemTime::UNIX_EPOCH, Weather::Storm)
+        .with_strike(Some(crate::sky::StrikePhase::Primary));
     let mut lcg = 0xC0FFEEu32;
     let mut next = || {
         lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);

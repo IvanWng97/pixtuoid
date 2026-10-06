@@ -200,16 +200,16 @@ mod tests {
     fn a_flash_phase_is_the_frames_strike_level_and_catch() {
         let now = at(0);
         let sky =
-            |level| crate::sky::Sky::at_with(now, crate::sky::Weather::Storm).with_flash(level);
+            |strike| crate::sky::Sky::at_with(now, crate::sky::Weather::Storm).with_strike(strike);
         let layout = crate::display::compose::tests::lively_office();
         let mut frame = crate::display::compose::tests::empty_frame(&layout);
-        assert_eq!(FlashPhase::of(&sky(0.0), &frame), FlashPhase::default());
+        assert_eq!(FlashPhase::of(&sky(None), &frame), FlashPhase::default());
         let (dim, bright) = (
-            FlashPhase::of(&sky(0.25), &frame),
-            FlashPhase::of(&sky(0.5), &frame),
+            FlashPhase::of(&sky(Some(crate::sky::StrikePhase::Dim)), &frame),
+            FlashPhase::of(&sky(Some(crate::sky::StrikePhase::After)), &frame),
         );
         assert!(dim != bright && dim != FlashPhase::default());
         frame.neon_stutter = true;
-        assert_ne!(FlashPhase::of(&sky(0.0), &frame), FlashPhase::default());
+        assert_ne!(FlashPhase::of(&sky(None), &frame), FlashPhase::default());
     }
 }
