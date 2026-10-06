@@ -272,6 +272,23 @@ mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
 
+    /// A timing taken later on a tier is the one the tier gives that instant.
+    #[test]
+    fn a_later_timing_is_the_tiers_own_then() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
+        for motion in Motion::ALL {
+            for by in [1, PAINT_FRAME_MS, 499, 1000, 60_000].map(Duration::from_millis) {
+                let later = motion.timing(base).later(by);
+                let then = motion.timing(base + by);
+                assert_eq!(
+                    (later.now, later.beat),
+                    (then.now, then.beat),
+                    "{motion:?} {by:?}"
+                );
+            }
+        }
+    }
+
     /// `flashes` square flashes, one each `period_ms`: up at its start, down
     /// halfway through.
     fn square(flashes: u64, period_ms: u64) -> Vec<(u64, f32)> {

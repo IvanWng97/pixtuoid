@@ -1751,9 +1751,9 @@ mod tests {
         );
     }
 
-    /// Frame by frame at the paint rate through a weather transition and
-    /// across dusk, no frame but the first draws more than [`DRAWS_AHEAD`]
-    /// masses' bands: every quantized step's are drawn ahead of it.
+    /// Frame by frame at the paint rate, on Full and Calm, through a weather
+    /// transition and across dusk, every frame but the first finds its every
+    /// mass already drawn, and draws at most [`DRAWS_AHEAD`] ahead.
     #[test]
     fn every_step_is_drawn_ahead_of_it() {
         use crate::sky::WeatherPolicy;
@@ -1772,24 +1772,32 @@ mod tests {
                 Duration::from_secs(300),
             ),
         ];
-        for (start, policy, length) in windows {
-            let mut cache = CloudCache::default();
-            let mut ahead_drawn = 0;
-            for n in 0..length.as_millis() / frame.as_millis() {
-                let timing = Motion::Full.timing(start + frame * n as u32);
-                let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
-                let before = cache.draws;
-                Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
-                let drawn = cache.draws - before;
-                if n > 0 {
-                    assert!(
-                        drawn <= DRAWS_AHEAD,
-                        "{policy:?} frame {n} drew {drawn} masses"
-                    );
-                    ahead_drawn += drawn;
+        for motion in [Motion::Full, Motion::Calm] {
+            for (start, policy, length) in windows {
+                let mut cache = CloudCache::default();
+                let mut ahead_drawn = 0;
+                for n in 0..length.as_millis() / frame.as_millis() {
+                    let timing = motion.timing(start + frame * n as u32);
+                    let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
+                    let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
+                    let missing = planned
+                        .iter()
+                        .filter(|&&(_, key)| !cache.holds(key))
+                        .count();
+                    let before = cache.draws;
+                    Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+                    let drawn = cache.draws - before;
+                    if n > 0 {
+                        assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");
+                        assert!(
+                            drawn <= DRAWS_AHEAD,
+                            "{motion:?} {policy:?} frame {n}: {drawn}"
+                        );
+                        ahead_drawn += drawn;
+                    }
                 }
+                assert!(ahead_drawn > 0, "{policy:?}: the window crossed no step");
             }
-            assert!(ahead_drawn > 0, "{policy:?}: the window crossed no step");
         }
     }
 
