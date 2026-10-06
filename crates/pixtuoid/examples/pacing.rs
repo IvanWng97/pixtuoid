@@ -516,7 +516,10 @@ fn hitch(path: &Path) -> Result<()> {
         HitchRun {
             name: "a weather transition, 33 ms",
             weather: WeatherPolicy::Clock,
-            start: pixtuoid_scene::sky::first_transition_after(noon),
+            start: Some(
+                pixtuoid_scene::sky::first_transition_after(noon)
+                    .context("the clock's weather never changes")?,
+            ),
             step: tick,
             length: Duration::from_secs(120),
             whole: false,
