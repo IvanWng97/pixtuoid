@@ -515,6 +515,25 @@ mod tests {
         )
     }
 
+    /// `$PIXTUOID_FAKE_NOW`'s clock runs on from its instant, and holds still
+    /// while paused, as the wall clock does: pace-check's sky rests on both.
+    #[test]
+    fn a_fake_clock_runs_from_its_instant_and_holds_when_paused() {
+        let mut ui = ui();
+        let at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        ui.fake_now = Some((Instant::now(), at));
+        let first = ui.now();
+        assert!(first >= at && first < at + std::time::Duration::from_secs(60));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let later = ui.now();
+        assert!(later > first, "it advances");
+        ui.toggle_pause();
+        let held = ui.now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert_eq!(ui.now(), held, "it holds while paused");
+        assert!(held >= later);
+    }
+
     #[test]
     fn modal_projection_mirrors_each_surface_open_flag() {
         let mut ui = ui();

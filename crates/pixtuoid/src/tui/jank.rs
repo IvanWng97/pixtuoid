@@ -14,11 +14,47 @@ const WINDOW: Duration = Duration::from_secs(60);
 /// oldest are overwritten.
 const RING: usize = 2 * (WINDOW.as_millis() / PAINT_FRAME_MS as u128) as usize;
 
+/// What of the scene a frame repainted, as its report names it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Painted {
+    /// Nothing: the frame was the last one.
+    #[default]
+    Unchanged,
+    /// Only inside dirty rects.
+    Rects,
+    /// Whole.
+    All,
+    /// The half-blocks, which have no transmits to say.
+    Classic,
+}
+
+impl Painted {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Unchanged => "unchanged",
+            Self::Rects => "rects",
+            Self::All => "all",
+            Self::Classic => "classic",
+        }
+    }
+}
+
+impl From<&pixtuoid_scene::cutaway::canvas::Dirty> for Painted {
+    fn from(dirty: &pixtuoid_scene::cutaway::canvas::Dirty) -> Self {
+        use pixtuoid_scene::cutaway::canvas::Dirty;
+        match dirty {
+            Dirty::All => Self::All,
+            Dirty::Rects(_) => Self::Rects,
+            Dirty::Unchanged => Self::Unchanged,
+        }
+    }
+}
+
 /// What a frame's image transmits did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct FrameSend {
-    /// Whether the scene repainted whole, in rects, or not at all.
-    pub(crate) dirty: &'static str,
+    /// What of the scene it repainted.
+    pub(crate) dirty: Painted,
     /// The tiles whose pixels changed.
     pub(crate) changed: usize,
     /// The tiles written.
@@ -44,7 +80,7 @@ macro_rules! report {
             produce = ms(total.saturating_sub(send.encode + send.write)),
             encode = ms(send.encode),
             write = ms(send.write),
-            dirty = send.dirty,
+            dirty = send.dirty.name(),
             changed = send.changed,
             sent = send.sent,
             bytes = send.bytes,
@@ -127,9 +163,8 @@ impl Jank {
         self.len = (self.len + 1).min(RING);
         if total > self.interval {
             self.over += 1;
-            // No transmits: the half-blocks, which the text flush draws.
             let send = send.unwrap_or(FrameSend {
-                dirty: "classic",
+                dirty: Painted::Classic,
                 ..FrameSend::default()
             });
             if total > 2 * self.interval {
@@ -199,7 +234,7 @@ mod tests {
             let mut jank = Jank::new(t0);
             jank.record(Duration::from_millis(PAINT_FRAME_MS), None, None, t0);
             let send = FrameSend {
-                dirty: "all",
+                dirty: Painted::All,
                 changed: 1275,
                 sent: 1275,
                 bytes: 1_400_000,

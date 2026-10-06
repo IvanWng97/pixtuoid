@@ -84,7 +84,8 @@ pub mod spans {
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameNote {
-    /// Why the cutaway painted it whole, when it did; the classic always does.
+    /// Why the cutaway painted it whole, when it did; `None` for the classic,
+    /// which paints every frame whole.
     pub repaint: Option<crate::cutaway::canvas::Repaint>,
     /// The weather it shows: the slot's, the next slot's, and the next one's
     /// share of the clouds.

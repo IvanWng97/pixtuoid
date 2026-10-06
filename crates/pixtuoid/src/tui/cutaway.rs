@@ -293,16 +293,12 @@ impl TileCutaway {
         let changed =
             tracing::trace_span!("tiles.diff").in_scope(|| self.tiles.changed(&self.image, dirty));
         self.last = FrameSend {
-            dirty: match dirty {
-                Dirty::All => "all",
-                Dirty::Rects(_) => "rects",
-                Dirty::Unchanged => "unchanged",
-            },
+            dirty: dirty.into(),
             changed: changed.len(),
             ..FrameSend::default()
         };
         tracing::trace!(
-            dirty = self.last.dirty,
+            dirty = ?self.last.dirty,
             rects = match dirty {
                 Dirty::Rects(r) => r.as_slice().len(),
                 _ => 0,
