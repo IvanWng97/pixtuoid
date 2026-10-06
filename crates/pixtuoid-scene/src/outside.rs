@@ -314,6 +314,9 @@ impl OutsideCache {
             crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
             return views.clone();
         }
+        // Dropped before the new are drawn, so two frames' views are never
+        // alive at once: the cache adds nothing to a frame's peak memory.
+        self.last = None;
         let views: Vec<_> = Outside::of(
             moment,
             pack,
@@ -740,7 +743,8 @@ pub(crate) mod tests {
         // key that drops it serves the first frame's to the second.
         let noon = crate::localclock::at_hour(12);
         let at = |mix, secs: u64| moment(mix, noon + std::time::Duration::from_secs(secs), 0.0);
-        let (one, dense) = (Density::ONE, pack.max_density_variant());
+        // a grid of its own whatever variants the pack draws
+        let (one, dense) = (Density::ONE, Density::new(4).expect("nonzero"));
         let overcast = WeatherMix::pure(Weather::Overcast);
         let fog = WeatherMix::pure(Weather::Fog);
         let raining = Moment::resolve(
