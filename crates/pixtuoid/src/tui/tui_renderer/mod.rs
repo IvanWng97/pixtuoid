@@ -258,6 +258,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// Paint `cutaway` from the next frame on.
     #[cfg(feature = "graphics")]
+    /// Paint and send the next frame whole, for the pacing bench's worst case.
+    pub(crate) fn forget_frame(&mut self) {
+        for floor in &mut self.floors {
+            floor.raster.forget_shown();
+        }
+        if let Some(cutaway) = &mut self.cutaway {
+            cutaway.forget();
+        }
+    }
+
     /// The cutaway, for the pacing bench.
     pub(crate) fn cutaway(&self) -> Option<&crate::tui::cutaway::TileCutaway> {
         self.cutaway.as_ref()

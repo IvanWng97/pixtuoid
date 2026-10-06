@@ -194,6 +194,11 @@ impl CutawayCanvas {
         }
     }
 
+    /// Forget what was shown, so the next frame paints whole.
+    pub(crate) fn forget(&mut self) {
+        self.shown = None;
+    }
+
     /// The last frame painted, empty before the first.
     pub(crate) fn buf(&self) -> &RgbBuffer {
         &self.buf

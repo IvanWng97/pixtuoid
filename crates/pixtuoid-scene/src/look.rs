@@ -226,6 +226,14 @@ impl Raster {
         }
     }
 
+    /// Paint the next cutaway frame whole: the frame-pacing bench's worst case.
+    #[doc(hidden)]
+    pub fn forget_shown(&mut self) {
+        if let Some(cutaway) = &mut self.cutaway {
+            cutaway.forget();
+        }
+    }
+
     /// The pixels of the last frame drawn, `None` before the first.
     pub fn pixels(&self) -> Option<&RgbBuffer> {
         match self.shown? {

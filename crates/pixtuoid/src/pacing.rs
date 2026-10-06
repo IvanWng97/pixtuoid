@@ -222,6 +222,11 @@ pub fn cutaway_office(
     Some((fit.logical().w, fit.logical().h, fit.scale().get()))
 }
 
+/// Paint and send `r`'s next frame whole.
+pub fn forget_frame(r: &mut TuiRenderer<PacedBackend>) {
+    r.forget_frame();
+}
+
 /// The last image the cutaway of `r` showed, `None` while classic paints.
 pub fn cutaway_image(r: &TuiRenderer<PacedBackend>) -> Option<pixtuoid_core::sprite::RgbBuffer> {
     r.cutaway()?.shown_image().map(|(img, _)| img.clone())

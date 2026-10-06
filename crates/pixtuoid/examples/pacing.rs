@@ -425,6 +425,11 @@ struct HitchRun {
     start: Option<SystemTime>,
     step: Duration,
     length: Duration,
+    /// Paint and send every frame whole: the worst case.
+    whole: bool,
+    /// Synthesize lofi track beds on a thread throughout, as a track swap
+    /// does: the audio's heaviest load.
+    lofi: bool,
 }
 
 /// A terminal the hitch runs draw on.
@@ -463,6 +468,19 @@ fn hitch(path: &Path) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
     let noon = pixtuoid_scene::localclock::at_hour(12);
+    if pixtuoid_core::platform::text_env("HITCH_LOFI_BASELINE").is_some() {
+        use pixtuoid_scene::audio::{BUILD_SEED, TrackId, bank::TrackBeds, dsp::NoiseStream};
+        let mut rng = NoiseStream::new(BUILD_SEED);
+        for track in [TrackId::GenDay(0), TrackId::GenNight(1)] {
+            let at = Instant::now();
+            std::hint::black_box(TrackBeds::build(&mut rng, track));
+            let _ = writeln!(
+                std::io::stdout(),
+                "lofi build alone {track:?}: {:.2}s",
+                at.elapsed().as_secs_f64()
+            );
+        }
+    }
     let dusk = pixtuoid_scene::localclock::at_hour_min(19, 55);
     let sweeps = [
         HitchRun {
@@ -471,6 +489,8 @@ fn hitch(path: &Path) -> Result<()> {
             start: Some(noon),
             step: tick,
             length: Duration::from_secs(60),
+            whole: false,
+            lofi: false,
         },
         HitchRun {
             name: "noon overcast",
@@ -478,6 +498,8 @@ fn hitch(path: &Path) -> Result<()> {
             start: Some(noon),
             step: tick,
             length: Duration::from_secs(60),
+            whole: false,
+            lofi: false,
         },
         HitchRun {
             name: "noon storm",
@@ -485,6 +507,8 @@ fn hitch(path: &Path) -> Result<()> {
             start: Some(noon),
             step: tick,
             length: Duration::from_secs(120),
+            whole: false,
+            lofi: false,
         },
         HitchRun {
             name: "dusk ff 1s/frame",
@@ -492,6 +516,35 @@ fn hitch(path: &Path) -> Result<()> {
             start: Some(dusk),
             step: Duration::from_secs(1),
             length: Duration::from_secs(3600),
+            whole: false,
+            lofi: false,
+        },
+        HitchRun {
+            name: "a weather transition, 33 ms",
+            weather: WeatherPolicy::Clock,
+            start: pixtuoid_scene::sky::first_transition_after(noon),
+            step: tick,
+            length: Duration::from_secs(120),
+            whole: false,
+            lofi: false,
+        },
+        HitchRun {
+            name: "stress: storm, every frame whole",
+            weather: WeatherPolicy::Forced(Weather::Storm),
+            start: Some(noon),
+            step: tick,
+            length: Duration::from_secs(30),
+            whole: true,
+            lofi: false,
+        },
+        HitchRun {
+            name: "stress: storm, every frame whole, lofi building",
+            weather: WeatherPolicy::Forced(Weather::Storm),
+            start: Some(noon),
+            step: tick,
+            length: Duration::from_secs(30),
+            whole: true,
+            lofi: true,
         },
         HitchRun {
             name: "clock weather ff 1s/frame",
@@ -499,6 +552,8 @@ fn hitch(path: &Path) -> Result<()> {
             start: Some(noon),
             step: Duration::from_secs(1),
             length: Duration::from_secs(1800),
+            whole: false,
+            lofi: false,
         },
     ];
     let real = HitchRun {
@@ -507,6 +562,8 @@ fn hitch(path: &Path) -> Result<()> {
         start: None,
         step: tick,
         length: Duration::from_secs(real_secs),
+        whole: false,
+        lofi: false,
     };
     let owner = |protocol, name| Term {
         name,
@@ -548,10 +605,10 @@ fn hitch(path: &Path) -> Result<()> {
         .collect();
     plan.insert(0, (&terms[0], &real));
     for (term, run) in plan {
-        if only
-            .as_deref()
-            .is_some_and(|o| !term.name.contains(o) && !run.name.contains(o))
-        {
+        if only.as_deref().is_some_and(|o| {
+            !o.split('|')
+                .all(|part| term.name.contains(part) || run.name.contains(part))
+        }) {
             continue;
         }
         let pets = vec![Pet::defaulted(PetKind::Cat), Pet::defaulted(PetKind::Dog)];
@@ -565,6 +622,30 @@ fn hitch(path: &Path) -> Result<()> {
         )?;
         r.set_weather(run.weather);
         r.set_motion(Motion::Full);
+        let lofi_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let lofi = run.lofi.then(|| {
+            let stop = Arc::clone(&lofi_stop);
+            std::thread::spawn(move || {
+                use pixtuoid_scene::audio::{
+                    BUILD_SEED, TrackId, bank::TrackBeds, dsp::NoiseStream,
+                };
+                let mut rng = NoiseStream::new(BUILD_SEED);
+                let mut builds = Vec::new();
+                let mut n = 0u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let track = if n.is_multiple_of(2) {
+                        TrackId::GenDay(n)
+                    } else {
+                        TrackId::GenNight(n)
+                    };
+                    let at = Instant::now();
+                    std::hint::black_box(TrackBeds::build(&mut rng, track));
+                    builds.push(at.elapsed());
+                    n += 1;
+                }
+                builds
+            })
+        });
         let wall = Instant::now();
         let start = run.start.unwrap_or_else(SystemTime::now);
         let scene = office(start);
@@ -579,6 +660,9 @@ fn hitch(path: &Path) -> Result<()> {
                 break;
             }
             let now = start + offset;
+            if run.whole {
+                pixtuoid::pacing::forget_frame(&mut r);
+            }
             wire.take();
             probe.take();
             let begun = Instant::now();
@@ -592,7 +676,7 @@ fn hitch(path: &Path) -> Result<()> {
                 spans::COMPOSE,
                 spans::RASTERIZE,
                 "tiles.diff",
-                "tile.encode",
+                "tiles.encode",
             ]
             .iter()
             .map(|n| span(n).0)
@@ -613,7 +697,8 @@ fn hitch(path: &Path) -> Result<()> {
                 "zlib_ms": ms_of("tile.zlib"),
                 "base64_ms": ms_of("tile.base64"),
                 "tiles_sent": span("tile.encode").1,
-                "encode_ms": ms_of("tile.encode"),
+                "encode_ms": ms_of("tiles.encode"),
+                "encode_cpu_ms": ms_of("tile.encode"),
                 "tile_write_ms": ms_of("tile.write"),
                 "rasterize_ms": ms_of(spans::RASTERIZE),
                 "write_ms": ms(Duration::from_nanos(write_ns)),
@@ -641,6 +726,18 @@ fn hitch(path: &Path) -> Result<()> {
                     std::thread::sleep(wait);
                 }
             }
+        }
+        lofi_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(builds) = lofi.and_then(|h| h.join().ok()) {
+            let _ = writeln!(
+                stdout,
+                "  lofi track builds alongside: {} took {:?}",
+                builds.len(),
+                builds
+                    .iter()
+                    .map(|d| format!("{:.2}s", d.as_secs_f64()))
+                    .collect::<Vec<_>>()
+            );
         }
         let over = totals.iter().filter(|&&t| t > tick).count();
         let _ = writeln!(
