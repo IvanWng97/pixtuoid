@@ -1806,12 +1806,15 @@ mod tests {
                 Duration::from_secs(300),
             ),
         ];
+        // Each window opens `AHEAD` early: a step within `AHEAD` of the first
+        // frame has had no frames to be drawn ahead in.
+        let lead = (AHEAD.as_millis() / frame.as_millis()) as u32;
         for motion in [Motion::Full, Motion::Calm] {
             for (start, policy, length) in windows {
                 let mut cache = CloudCache::default();
                 let mut ahead_drawn = 0;
-                for n in 0..length.as_millis() / frame.as_millis() {
-                    let timing = motion.timing(start + frame * n as u32);
+                for n in 0..lead + (length.as_millis() / frame.as_millis()) as u32 {
+                    let timing = motion.timing(start - AHEAD + frame * n);
                     let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
                     let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
                     let missing = planned
@@ -1821,7 +1824,7 @@ mod tests {
                     let drawn = draws(|| {
                         Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
                     });
-                    if n > 0 {
+                    if n > lead {
                         assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");
                         assert!(
                             drawn <= DRAWS_AHEAD,
