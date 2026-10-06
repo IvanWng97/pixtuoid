@@ -99,7 +99,7 @@ pub struct FrameNote {
 #[derive(Debug, Default)]
 pub struct OfficeRaster {
     pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
-    pub(crate) cloud_cache: crate::clouds::CloudCache,
+    pub(crate) outside: crate::outside::OutsideCache,
 }
 
 impl OfficeRaster {
@@ -108,7 +108,7 @@ impl OfficeRaster {
     /// ahead for.
     #[doc(hidden)]
     pub fn warm(&mut self) {
-        self.cloud_cache.warm();
+        self.outside.warm();
     }
 
     /// Drop the cached art, after a theme change.
@@ -341,7 +341,7 @@ pub fn render<'r>(
                 world,
                 &stepped.layout,
                 theme,
-                (&mut classic.caches, &mut office.raster.cloud_cache),
+                (&mut classic.caches, &mut office.raster.outside),
                 &mut classic.buf,
                 &ctx.walks,
                 debug_walkable,
@@ -375,7 +375,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                (&mut office.raster.cutaway, &mut office.raster.cloud_cache),
+                (&mut office.raster.cutaway, &mut office.raster.outside),
             );
             if let Some(note) = &mut raster.note {
                 note.repaint = repaint.or(switched.then(|| crate::cutaway::canvas::Repaint {

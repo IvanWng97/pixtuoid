@@ -23,7 +23,6 @@ use crate::atmosphere::Moment;
 use crate::dither::Dithered;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{WindowBay, wall_trim_row, window_posts, window_rows};
-use crate::outside::Outside;
 use crate::sky::Sky;
 use crate::theme::Theme;
 
@@ -152,28 +151,27 @@ pub(super) fn paint_windows(
     bays: impl IntoIterator<Item = WindowBay>,
     moment: &Moment,
     pack: &Pack,
-    theme: &Theme,
-    cloud_cache: &mut crate::clouds::CloudCache,
+    theme: &'static Theme,
+    outside: &mut crate::outside::OutsideCache,
 ) {
     let wall = crate::outside::Wall {
         size: (buf.width(), top_wall_h),
         bays: bays.into_iter().collect(),
     };
-    let outside = Outside::of(
+    let views = outside.views(
         moment,
         pack,
         theme,
         wall,
         pixtuoid_core::sprite::format::Density::ONE,
         GlassWeather::of(moment),
-        cloud_cache,
     );
     // The bolt, the strike's source, lights the glass in lockstep with
     // `paint_lightning_flash`, over all it shows.
     let bolt = BOLT_ALPHA * moment.sky.flash();
-    for (_, mut view) in outside.views() {
+    for (_, mut view) in views {
         if bolt > 0.0 {
-            view.paint(|_, c| blend_rgb(c, WHITE, bolt));
+            std::sync::Arc::make_mut(&mut view).paint(|_, c| blend_rgb(c, WHITE, bolt));
         }
         for ((x, y), c) in view.every() {
             buf.put_checked(x, y, c.unwrap_or(theme.surface.window_frame));

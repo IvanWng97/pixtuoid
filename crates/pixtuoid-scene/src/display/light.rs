@@ -119,16 +119,29 @@ pub(crate) struct LightView {
     rank: (u8, u16, u16, (u8, u8, u8)),
 }
 
+/// All [`LightView::of`] reads: two equal ones resolve equal views.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ViewInputs {
+    pub(crate) emitter: Emitter,
+    pub(crate) tint: Option<Rgb>,
+    pub(crate) ambient: Ambient,
+    pub(crate) pen: Pen,
+    /// The office's `buf_w`×`buf_h`, which clips it.
+    pub(crate) size: (u16, u16),
+}
+
 impl LightView {
-    /// `emitter` on `pen`'s grid under `ambient`, clipped to a `buf_w`×`buf_h`
-    /// office, with its [`Span`]; `None` where it lifts no pixel a whole step,
+    /// `emitter` on `pen`'s grid under `ambient`, clipped to the office's
+    /// `size`, with its [`Span`]; `None` where it lifts no pixel a whole step,
     /// since a light with no solid band is only its seam's speckle.
     pub(crate) fn of(
-        emitter: &Emitter,
-        tint: Option<Rgb>,
-        ambient: Ambient,
-        pen: Pen,
-        (buf_w, buf_h): (u16, u16),
+        &ViewInputs {
+            ref emitter,
+            tint,
+            ambient,
+            pen,
+            size: (buf_w, buf_h),
+        }: &ViewInputs,
     ) -> Option<(Span, Self)> {
         let ((x0, y0), (x1, y1)) = emitter.bounds();
         let (x1, y1) = (x1.min(buf_w), y1.min(buf_h));
@@ -285,8 +298,18 @@ pub(crate) mod tests {
         Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4")
     }
 
+    fn inputs(emitter: Emitter, tint: Option<Rgb>, ambient: Ambient) -> ViewInputs {
+        ViewInputs {
+            emitter,
+            tint,
+            ambient,
+            pen: pen(),
+            size: (40, 16),
+        }
+    }
+
     pub(crate) fn view(e: &Emitter, tint: Option<Rgb>, ambient: Ambient) -> LightView {
-        LightView::of(e, tint, ambient, pen(), (40, 16))
+        LightView::of(&inputs(*e, tint, ambient))
             .expect("it lifts")
             .1
     }
@@ -308,6 +331,6 @@ pub(crate) mod tests {
     #[test]
     fn a_light_with_no_solid_band_is_left_out() {
         let faint = lamp(0.1, Point { x: 10, y: 8 });
-        assert!(LightView::of(&faint, None, Ambient(0), pen(), (40, 16)).is_none());
+        assert!(LightView::of(&inputs(faint, None, Ambient(0))).is_none());
     }
 }

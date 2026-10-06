@@ -94,10 +94,15 @@ pub fn render_cutaway(
     frame: &SimFrame,
     office: Office<'_>,
     showing: Showing<'_>,
-    (cache, cloud_cache): (&mut CutawayCache, &mut crate::clouds::CloudCache),
+    (cache, outside): (&mut CutawayCache, &mut crate::outside::OutsideCache),
     buf: &mut RgbBuffer,
 ) {
-    let list = compose(frame, office, showing, cloud_cache);
+    let list = compose(
+        frame,
+        office,
+        showing,
+        (&mut crate::display::compose::LightCache::default(), outside),
+    );
     paint(&list, cache, buf);
 }
 
@@ -150,7 +155,7 @@ pub(crate) fn paint_list(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: 
     );
     let emission = paint_pieces(list, cache, buf);
     let lights: Vec<&crate::display::light::LightView> =
-        list.lights().iter().map(|l| &l.view).collect();
+        list.lights().iter().map(|l| &*l.view).collect();
     let (art_xs, art_ys) = pen.writable_art(buf);
     let lit = ArtRect {
         x: ArtPx(art_xs.start),
@@ -2158,7 +2163,10 @@ mod tests {
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
-            &mut crate::clouds::CloudCache::default(),
+            (
+                &mut crate::display::compose::LightCache::default(),
+                &mut crate::outside::OutsideCache::default(),
+            ),
         );
         let mut cast = 0;
         for piece in list.pieces() {
@@ -2234,7 +2242,7 @@ mod tests {
                 &moment,
                 &GlassWeather::of(&moment),
                 &mut order,
-                &mut crate::clouds::CloudCache::default(),
+                &mut crate::outside::OutsideCache::default(),
             );
             let mut again = Vec::new();
             push_windows(
@@ -2242,7 +2250,7 @@ mod tests {
                 &moment,
                 &GlassWeather::of(&moment),
                 &mut again,
-                &mut crate::clouds::CloudCache::default(),
+                &mut crate::outside::OutsideCache::default(),
             );
             let prints = |o: &[(Span, PieceKind)]| -> Vec<u64> {
                 o.iter().map(|(_, kind)| fingerprint(kind)).collect()
@@ -2467,7 +2475,10 @@ mod tests {
                     &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
-                    &mut crate::clouds::CloudCache::default(),
+                    (
+                        &mut crate::display::compose::LightCache::default(),
+                        &mut crate::outside::OutsideCache::default(),
+                    ),
                 );
                 let mut buf = RgbBuffer::filled(
                     scale.to_buffer(layout.buf_w),
@@ -2685,7 +2696,7 @@ mod tests {
         );
         paint_list(&list, &mut cache, &mut night);
         let lights: Vec<&crate::display::light::LightView> =
-            list.lights().iter().map(|l| &l.view).collect();
+            list.lights().iter().map(|l| &*l.view).collect();
         let k = scale.get() / Pen::for_pack(scale, &pack).art(1).0;
         let walls: Vec<Span> = list
             .pieces()
@@ -2758,7 +2769,7 @@ mod tests {
                     crate::floor::FloorMeta::ground(),
                     crate::localclock::at_hour(hour),
                 ),
-                (&mut cache, &mut crate::clouds::CloudCache::default()),
+                (&mut cache, &mut crate::outside::OutsideCache::default()),
                 &mut buf,
             );
             buf.as_slice()
@@ -3588,7 +3599,7 @@ mod tests {
         frame: &SimFrame,
         layout: &SceneLayout,
         pack: &Pack,
-        theme: &Theme,
+        theme: &'static Theme,
         s: u16,
     ) -> RgbBuffer {
         let scale = RenderScale::new(s).expect("nonzero");
@@ -3610,7 +3621,7 @@ mod tests {
                 crate::floor::FloorMeta::ground(),
                 std::time::SystemTime::UNIX_EPOCH,
             ),
-            (&mut cache, &mut crate::clouds::CloudCache::default()),
+            (&mut cache, &mut crate::outside::OutsideCache::default()),
             &mut buf,
         );
         buf
@@ -3823,7 +3834,10 @@ mod tests {
                 crate::floor::FloorMeta::ground(),
                 std::time::SystemTime::UNIX_EPOCH,
             ),
-            &mut crate::clouds::CloudCache::default(),
+            (
+                &mut crate::display::compose::LightCache::default(),
+                &mut crate::outside::OutsideCache::default(),
+            ),
         );
         let plate = list
             .pieces()
@@ -3919,7 +3933,10 @@ mod tests {
                     shown,
                     FloorMeta::ground(),
                     quiet_board(),
-                    &mut crate::clouds::CloudCache::default(),
+                    (
+                        &mut crate::display::compose::LightCache::default(),
+                        &mut crate::outside::OutsideCache::default(),
+                    ),
                 )
             };
             let frames = |weathered: &crate::outside::tests::Weathered| {
@@ -3932,7 +3949,7 @@ mod tests {
                     &plain,
                     &GlassWeather::of(&plain),
                     &mut views,
-                    &mut crate::clouds::CloudCache::default(),
+                    &mut crate::outside::OutsideCache::default(),
                 );
                 for piece in bare.pieces_mut() {
                     if let PieceKind::Window { .. } = piece.kind {
@@ -4077,12 +4094,12 @@ mod tests {
             moment,
             weather,
             &mut order,
-            &mut crate::clouds::CloudCache::default(),
+            &mut crate::outside::OutsideCache::default(),
         );
         order
             .into_iter()
             .map(|(_, kind)| match kind {
-                PieceKind::Window { view, .. } => view,
+                PieceKind::Window { view, .. } => std::sync::Arc::unwrap_or_clone(view),
                 other => panic!("only windows: {other:?}"),
             })
             .collect()
@@ -4143,7 +4160,7 @@ mod tests {
                     .into_iter()
                     .map(|view| {
                         fingerprint(&PieceKind::Window {
-                            view,
+                            view: std::sync::Arc::new(view),
                             frame: crate::theme::NORMAL.surface.window_frame,
                         })
                     })
@@ -4170,7 +4187,7 @@ mod tests {
         // checked once on one pack and canvas is checked for every frame.
         let mut checked = std::collections::HashSet::new();
         // keyed by grid and light, so one cache serves every pack and canvas
-        let mut clouds = crate::clouds::CloudCache::default();
+        let mut clouds = crate::outside::OutsideCache::default();
         let mut check = |pack_label: &str,
                          pack: &Pack,
                          frame: &SimFrame,
@@ -4196,7 +4213,10 @@ mod tests {
                     &moment,
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
-                    &mut clouds,
+                    (
+                        &mut crate::display::compose::LightCache::default(),
+                        &mut clouds,
+                    ),
                 );
                 for &Piece { span, ref kind, .. } in list.pieces() {
                     if only_people
@@ -4718,7 +4738,10 @@ mod tests {
                 &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
-                &mut crate::clouds::CloudCache::default(),
+                (
+                    &mut crate::display::compose::LightCache::default(),
+                    &mut crate::outside::OutsideCache::default(),
+                ),
             );
             (list.carpet(), carpet)
         };
@@ -4898,7 +4921,10 @@ mod tests {
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
-                        &mut crate::clouds::CloudCache::default(),
+                        (
+                            &mut crate::display::compose::LightCache::default(),
+                            &mut crate::outside::OutsideCache::default(),
+                        ),
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
@@ -4953,7 +4979,10 @@ mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
-                &mut crate::clouds::CloudCache::default(),
+                (
+                    &mut crate::display::compose::LightCache::default(),
+                    &mut crate::outside::OutsideCache::default(),
+                ),
             );
             let is_window = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
             same_fingerprint_same_pixels(painted, &list, &layout, is_window);
@@ -5026,7 +5055,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(w, h, list.backdrop().tones.bg);
         let pen = Pen::for_pack(list.scale(), list.pack());
         let lights: Vec<&crate::display::light::LightView> =
-            list.lights().iter().map(|l| &l.view).collect();
+            list.lights().iter().map(|l| &*l.view).collect();
         crate::cutaway::light::net_pass(
             ArtRect {
                 x: pen.art(rect.x0),
@@ -5368,7 +5397,7 @@ mod tests {
         list.pieces_mut().push(Piece {
             span: Span::new(desk.x, desk.y, 4, 4, 0),
             kind: PieceKind::Window {
-                view,
+                view: std::sync::Arc::new(view),
                 frame: theme.surface.window_frame,
             },
             shadow: None,
@@ -5499,7 +5528,10 @@ mod tests {
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
-                        &mut crate::clouds::CloudCache::default(),
+                        (
+                            &mut crate::display::compose::LightCache::default(),
+                            &mut crate::outside::OutsideCache::default(),
+                        ),
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
@@ -5564,7 +5596,10 @@ mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
-                &mut crate::clouds::CloudCache::default()
+                (
+                    &mut crate::display::compose::LightCache::default(),
+                    &mut crate::outside::OutsideCache::default()
+                )
             )),
             summary(&compose_at(
                 frame,
@@ -5582,7 +5617,10 @@ mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
-                &mut crate::clouds::CloudCache::default()
+                (
+                    &mut crate::display::compose::LightCache::default(),
+                    &mut crate::outside::OutsideCache::default()
+                )
             )),
         );
     }
@@ -5610,7 +5648,10 @@ mod tests {
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
-                &mut crate::clouds::CloudCache::default(),
+                (
+                    &mut crate::display::compose::LightCache::default(),
+                    &mut crate::outside::OutsideCache::default(),
+                ),
             );
             let pieces: Vec<&Piece> = list
                 .pieces()
@@ -5731,7 +5772,10 @@ mod tests {
             &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
-            &mut crate::clouds::CloudCache::default(),
+            (
+                &mut crate::display::compose::LightCache::default(),
+                &mut crate::outside::OutsideCache::default(),
+            ),
         )
     }
 

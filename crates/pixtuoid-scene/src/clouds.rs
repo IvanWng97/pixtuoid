@@ -814,7 +814,7 @@ const DRAWS_AHEAD: usize = 2;
 /// `CloudCache::CAPACITY` of them: drawing a mass's bands is most of a
 /// cloudy frame's cost, and a drifting mass's bands don't change.
 #[derive(Debug)]
-pub struct CloudCache {
+pub(crate) struct CloudCache {
     entries: lru::LruCache<RasterKey, std::sync::Arc<MassRaster>>,
     /// The next frame draws all its [`AHEAD`] needs, not [`DRAWS_AHEAD`]:
     /// a boot frame, which no frame before it drew ahead for.

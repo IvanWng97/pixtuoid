@@ -40,8 +40,6 @@ pub(crate) mod celestial;
 pub(crate) mod character;
 pub mod chitchat;
 pub(crate) mod clouds;
-#[doc(hidden)]
-pub use clouds::CloudCache;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
@@ -70,6 +68,8 @@ pub mod look;
 #[doc(hidden)]
 pub mod neon_sign;
 pub(crate) mod outside;
+#[doc(hidden)]
+pub use outside::OutsideCache;
 pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
