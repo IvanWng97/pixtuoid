@@ -3,8 +3,9 @@
 //! `pixtuoid-web` constructs its `Office` on `NORMAL`.
 //!
 //! Reads the manifest at RUNTIME because `include_str!` of a path outside the
-//! crate breaks `cargo publish`'s verify. Workspace-only test, excluded from the
-//! published package (`Cargo.toml` `exclude`).
+//! crate fails `cargo test` on the extracted .crate (no workspace tree).
+//! Workspace-only test, excluded from the published package (`Cargo.toml`
+//! `exclude`).
 
 use pixtuoid_scene::theme::theme_by_name;
 
