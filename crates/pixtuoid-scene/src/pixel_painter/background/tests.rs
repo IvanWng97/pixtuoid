@@ -8,12 +8,7 @@ use std::time::SystemTime;
 
 /// The ground, the wall band `top_wall_h` tall and every window a wall as wide
 /// as `buf` shows, at `moment`.
-fn paint_band(
-    buf: &mut RgbBuffer,
-    top_wall_h: u16,
-    moment: &Moment,
-    theme: &'static crate::theme::Theme,
-) {
+fn paint_band(buf: &mut RgbBuffer, top_wall_h: u16, moment: &Moment, theme: &crate::theme::Theme) {
     paint_ground_and_walls(&mut BaseFillCache::new(), buf, top_wall_h, moment, theme);
     let bays = window_bays(buf.width(), 0..0);
     paint_windows(

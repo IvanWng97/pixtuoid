@@ -128,7 +128,7 @@ pub(crate) struct PaintCtx<'a> {
     cache: &'a mut FrameCache,
     base_fill: &'a mut background::BaseFillCache,
     shadows: &'a mut crate::ground::DepthsCache,
-    theme: &'static crate::theme::Theme,
+    theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
     walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
     debug_walkable: bool,
@@ -142,7 +142,7 @@ impl<'a> PaintCtx<'a> {
     pub(crate) fn classic(
         world: crate::floor::FloorInputs<'a>,
         layout: &'a SceneLayout,
-        theme: &'static crate::theme::Theme,
+        theme: &'a crate::theme::Theme,
         (caches, outside): (&'a mut ClassicCaches, &'a mut crate::outside::OutsideCache),
         buf: &'a mut RgbBuffer,
         walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,

@@ -117,7 +117,7 @@ pub struct Office<'a> {
     /// The art that draws it.
     pub pack: &'a Pack,
     /// Its colours.
-    pub theme: &'static Theme,
+    pub theme: &'a Theme,
     /// Buffer pixels per logical unit.
     pub scale: RenderScale,
 }

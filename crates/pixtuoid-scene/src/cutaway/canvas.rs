@@ -156,7 +156,7 @@ impl CutawayCanvas {
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
-        theme: &'static crate::theme::Theme,
+        theme: &crate::theme::Theme,
         scale: RenderScale,
         showing: Showing<'_>,
         (cache, outside): (

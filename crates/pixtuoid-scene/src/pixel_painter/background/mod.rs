@@ -151,7 +151,7 @@ pub(super) fn paint_windows(
     bays: impl IntoIterator<Item = WindowBay>,
     moment: &Moment,
     pack: &Pack,
-    theme: &'static Theme,
+    theme: &Theme,
     outside: &mut crate::outside::OutsideCache,
 ) {
     let wall = crate::outside::Wall {

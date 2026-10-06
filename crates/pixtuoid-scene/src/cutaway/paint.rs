@@ -3599,7 +3599,7 @@ mod tests {
         frame: &SimFrame,
         layout: &SceneLayout,
         pack: &Pack,
-        theme: &'static Theme,
+        theme: &Theme,
         s: u16,
     ) -> RgbBuffer {
         let scale = RenderScale::new(s).expect("nonzero");

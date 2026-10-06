@@ -247,41 +247,30 @@ impl Wall {
     }
 }
 
-/// The outside's state across frames: the clouds' masses, and the last
-/// frame's views beside what `Outside::of` drew them from, which a frame
-/// given the same reuses ([Blink's display-item cache](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/paint/README.md#display-item-caching)).
+/// The outside's state across frames, for one pack in one theme (the
+/// [`OfficeRaster`](crate::look::OfficeRaster) that holds it empties it for
+/// another): the clouds' masses, and the last frame's views beside what
+/// `Outside::of` drew them from, which a frame given the same reuses
+/// ([Blink's display-item cache](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/paint/README.md#display-item-caching)).
 #[derive(Debug, Default)]
 pub struct OutsideCache {
     pub(crate) clouds: crate::clouds::CloudCache,
-    last: Option<(Drawn, Views)>,
+    last: Option<(OutsideKey, Views)>,
 }
 
 /// Each of a wall's bays, and what its glass shows.
 pub(crate) type Views = Vec<(WindowBay, Arc<WindowView>)>;
 
-/// All [`Outside::of`] reads of its arguments, which leaves the moment's
-/// `now` out.
+/// All [`Outside::of`] reads of its arguments but the pack and the theme,
+/// which are the cache's own, and the moment's `now`, which it never reads.
 #[derive(Debug, PartialEq)]
-struct Drawn {
+struct OutsideKey {
     sky: crate::sky::Sky,
     altitude: f32,
     beat: crate::anim::Beat,
-    /// Its address, which names it: an office's raster draws one pack.
-    pack: usize,
-    theme: ThemeId,
     wall: Wall,
     density: Density,
     weather: GlassWeather,
-}
-
-/// A registry theme, by identity: every theme a frame is drawn in is one.
-#[derive(Debug, Clone, Copy)]
-struct ThemeId(&'static Theme);
-
-impl PartialEq for ThemeId {
-    fn eq(&self, other: &Self) -> bool {
-        std::ptr::eq(self.0, other.0)
-    }
 }
 
 impl OutsideCache {
@@ -291,17 +280,15 @@ impl OutsideCache {
         &mut self,
         moment: &Moment,
         pack: &Pack,
-        theme: &'static Theme,
+        theme: &Theme,
         wall: Wall,
         density: Density,
         weather: GlassWeather,
     ) -> Views {
-        let drawn = Drawn {
+        let drawn = OutsideKey {
             sky: moment.sky,
             altitude: moment.altitude,
             beat: moment.timing.beat,
-            pack: std::ptr::from_ref(pack).addr(),
-            theme: ThemeId(theme),
             wall,
             density,
             weather,
@@ -660,27 +647,25 @@ pub(crate) mod tests {
     /// without it, byte for byte: as the masses drift and the light steps
     /// through an evening, in every weather and across transitions, at both
     /// densities on one cache; after a frame that differs from it in any one
-    /// of [`Outside::of`]'s arguments alone; and a drift alone draws no mass
-    /// anew.
+    /// of [`Outside::of`]'s arguments alone but the cache's own pack and
+    /// theme; and a drift alone draws no mass anew.
     #[test]
     fn the_outside_cache_draws_what_a_fresh_frame_draws() {
         use crate::sky::WeatherMix;
         let pack = crate::pack::test_default_pack();
         let wall = (crate::layout::WINDOW_W * 3, 32);
-        struct Frame<'p> {
+        struct Frame {
             moment: Moment,
             weather: GlassWeather,
-            pack: &'p Pack,
-            theme: &'static Theme,
             wall: (u16, u16),
             d: Density,
         }
-        let pixels = |f: &Frame<'_>, cache: &mut OutsideCache| {
+        let pixels = |f: &Frame, cache: &mut OutsideCache| {
             cache
                 .views(
                     &f.moment,
-                    f.pack,
-                    f.theme,
+                    &pack,
+                    &crate::theme::NORMAL,
                     Wall {
                         size: f.wall,
                         bays: slots(f.wall.0),
@@ -703,8 +688,6 @@ pub(crate) mod tests {
         let frame = |moment: Moment, wall, d| Frame {
             weather: GlassWeather::of(&moment),
             moment,
-            pack: &pack,
-            theme: &crate::theme::NORMAL,
             wall,
             d,
         };
@@ -755,9 +738,6 @@ pub(crate) mod tests {
         let wide = (crate::layout::WINDOW_W * 5, 32);
         let tall = (crate::layout::WINDOW_W * 3, 40);
         let base = || frame(at(overcast, 0), wall, one);
-        // the curtain wall drops out of the near plane
-        let other_pack =
-            crate::pack::test_pack_declaring("planes = [\"mid\", \"near\"]", "planes = [\"mid\"]");
         let pairs = [
             ("span", base(), frame(at(overcast, 0), wide, one)),
             ("glass", base(), frame(at(overcast, 0), tall, one)),
@@ -808,22 +788,6 @@ pub(crate) mod tests {
                 base(),
                 Frame {
                     weather: GlassWeather::of(&raining),
-                    ..base()
-                },
-            ),
-            (
-                "theme",
-                base(),
-                Frame {
-                    theme: crate::theme::theme_by_name("cyberpunk").expect("a registry theme"),
-                    ..base()
-                },
-            ),
-            (
-                "pack",
-                base(),
-                Frame {
-                    pack: &other_pack,
                     ..base()
                 },
             ),

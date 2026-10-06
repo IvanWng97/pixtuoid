@@ -100,6 +100,9 @@ pub struct FrameNote {
 pub struct OfficeRaster {
     pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
     pub(crate) outside: crate::outside::OutsideCache,
+    /// The pack and the theme every cache holds art of, by identity: the
+    /// `Arc` keeps the pack's address its own while it is held.
+    serving: Option<(Arc<Pack>, &'static Theme)>,
 }
 
 impl OfficeRaster {
@@ -111,9 +114,25 @@ impl OfficeRaster {
         self.outside.clouds.warm();
     }
 
-    /// Drop the cached art, after a theme change.
+    /// Drop the cached art.
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// Draw `pack` in `theme` from now on: every cache holds one pack's art
+    /// in one theme's colours, so a frame of another empties them first.
+    fn serve(&mut self, pack: &Arc<Pack>, theme: &'static Theme) {
+        match &self.serving {
+            Some((p, t)) if Arc::ptr_eq(p, pack) && std::ptr::eq(*t, theme) => {}
+            Some(_) => {
+                *self = Self {
+                    serving: Some((Arc::clone(pack), theme)),
+                    ..Self::default()
+                }
+            }
+            // A warm before the first frame is for this one.
+            None => self.serving = Some((Arc::clone(pack), theme)),
+        }
     }
 }
 
@@ -295,6 +314,7 @@ pub fn render<'r>(
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
         return None;
     }
+    office.raster.serve(&raster.pack, theme);
     let stepped = tracing::trace_span!(spans::COMPOSE)
         .in_scope(|| step_floor(ctx, office.coffee, office.chitchat, world, size));
     let Some(stepped) = stepped else {
