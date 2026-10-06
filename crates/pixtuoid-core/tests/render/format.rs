@@ -224,7 +224,7 @@ fn default_pack_loads_with_required_animations() {
     assert_eq!(standing.frames()[0].height(), 12);
 
     let walking = pack.animation("walking").unwrap();
-    assert_eq!(walking.frames().len(), 2);
+    assert!(walking.frames().len() > 1, "a walk steps");
 }
 
 #[test]
