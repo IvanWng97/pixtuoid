@@ -220,6 +220,29 @@ fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
     assert_eq!(wire.take(), "");
 }
 
+/// A frame encoded across threads still reaches the wire as one transmit
+/// per tile, in the grid's order.
+#[test]
+fn a_whole_frame_transmits_every_tile_once_in_order() {
+    let (mut r, wire) = kitty(120, 40);
+    r.render(&office(), pack(), t0()).expect("render");
+    let ids: Vec<u32> = wire
+        .take()
+        .split(TRANSMIT)
+        .skip(1)
+        .filter_map(|keys| {
+            keys.split(',')
+                .find_map(|k| k.strip_prefix("i=")?.parse().ok())
+        })
+        .collect();
+    let first = *ids.first().expect("a transmit");
+    assert!(
+        ids.len() > 2 * crate::tui::cutaway::TILES_PER_THREAD,
+        "more than one thread's share"
+    );
+    assert_eq!(ids, (first..first + ids.len() as u32).collect::<Vec<_>>());
+}
+
 /// Text and image never share a cell: the footer row stays text.
 #[test]
 fn placeholders_fill_the_scene_and_never_the_footer() {

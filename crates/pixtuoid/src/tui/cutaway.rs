@@ -108,6 +108,8 @@ pub(crate) struct TileCutaway {
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
+    /// The cores a frame's encode may split across.
+    threads: usize,
 }
 
 /// A staged write: the tiles it sends and the flashes they show, so only a
@@ -166,6 +168,7 @@ impl TileCutaway {
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             torn: false,
+            threads: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         }
     }
 
@@ -369,12 +372,14 @@ impl TileCutaway {
         } else {
             Ok(())
         };
+        let encoded =
+            tracing::trace_span!("tiles.encode").in_scope(|| self.encoder().encode_all(&send));
         let mut sent = Vec::with_capacity(send.len());
-        for c in send {
+        for (c, bytes) in send.into_iter().zip(encoded) {
             if wrote.is_err() {
                 break;
             }
-            if let Some(bytes) = tracing::trace_span!("tile.encode").in_scope(|| self.encode(c)) {
+            if let Some(bytes) = bytes {
                 wrote = tracing::trace_span!("tile.write").in_scope(|| self.out.write_all(&bytes));
                 sent.push(c);
             }
@@ -393,18 +398,16 @@ impl TileCutaway {
         }
     }
 
-    /// `c`'s tile in the protocol's escape; `None` where it has none.
-    fn encode(&self, c: Changed) -> Option<Vec<u8>> {
-        let image =
-            tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(&self.image, c.tile));
-        match self.protocol {
-            ImageProtocol::Kitty => {
-                kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
-            }
-            ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
-            ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
-                .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
-                .ok(),
+    /// What encodes this frame's tiles, apart from the sink no thread shares.
+    fn encoder(&self) -> Encoder<'_> {
+        Encoder {
+            tiles: &self.tiles,
+            image: &self.image,
+            protocol: self.protocol,
+            base: self.base,
+            tmux: self.tmux,
+            origin: self.origin,
+            threads: self.threads,
         }
     }
 
@@ -495,6 +498,65 @@ impl TileCutaway {
     /// Owe every tile again: the terminal may have dropped them.
     pub(crate) fn forget(&mut self) {
         self.tiles.forget();
+    }
+}
+
+/// A thread's least share of a frame's tiles: below it, its spawn outweighs
+/// their encode.
+pub(crate) const TILES_PER_THREAD: usize = 32;
+
+/// A frame's tiles to escapes, each independent of the others.
+#[derive(Clone, Copy)]
+struct Encoder<'a> {
+    tiles: &'a Tiles,
+    image: &'a RgbBuffer,
+    protocol: ImageProtocol,
+    base: u32,
+    tmux: bool,
+    origin: Position,
+    threads: usize,
+}
+
+impl Encoder<'_> {
+    /// Each of `send`'s escapes, in its order, split across as many threads
+    /// as it has [`TILES_PER_THREAD`] shares, up to the cores.
+    fn encode_all(self, send: &[Changed]) -> Vec<Option<Vec<u8>>> {
+        let threads = self.threads.min(send.len() / TILES_PER_THREAD).max(1);
+        if threads == 1 {
+            return send.iter().map(|&c| self.encode(c)).collect();
+        }
+        std::thread::scope(|s| {
+            let shares: Vec<_> = send
+                .chunks(send.len().div_ceil(threads))
+                .map(|share| {
+                    s.spawn(move || share.iter().map(|&c| self.encode(c)).collect::<Vec<_>>())
+                })
+                .collect();
+            shares
+                .into_iter()
+                .flat_map(|share| {
+                    share
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                })
+                .collect()
+        })
+    }
+
+    /// `c`'s tile in the protocol's escape; `None` where it has none.
+    fn encode(self, c: Changed) -> Option<Vec<u8>> {
+        let _encode = tracing::trace_span!("tile.encode").entered();
+        let image =
+            tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(self.image, c.tile));
+        match self.protocol {
+            ImageProtocol::Kitty => {
+                kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
+            }
+            ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
+            ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
+                .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
+                .ok(),
+        }
     }
 }
 
