@@ -101,6 +101,13 @@ pub struct OfficeRaster {
 }
 
 impl OfficeRaster {
+    /// Have the next frame draw every cloud mass the coming second needs,
+    /// not a few a frame: the boot frame, which no frame before it drew
+    /// ahead for.
+    pub fn warm(&mut self) {
+        self.cloud_cache.warm();
+    }
+
     /// Drop the cached art, after a theme change.
     pub fn reset(&mut self) {
         *self = Self::default();

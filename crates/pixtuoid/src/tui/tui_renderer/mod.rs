@@ -294,6 +294,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     self.chrome
                         .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
                 let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
+                self.office.raster.warm();
                 let _ = pixtuoid_scene::look::render(
                     &mut self.floors[self.current_floor],
                     self.office.stores(),
