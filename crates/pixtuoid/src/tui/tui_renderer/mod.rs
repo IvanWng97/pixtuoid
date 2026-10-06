@@ -59,6 +59,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     /// The pack every floor's raster draws with, which each frame's must be.
     pack: Arc<Pack>,
+    /// The frames' times and janks.
+    jank: crate::tui::jank::Jank,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -224,6 +226,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             terminal,
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
+            jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -260,6 +263,93 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     #[cfg(feature = "graphics")]
     pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
         self.cutaway = Some(cutaway);
+    }
+
+    /// Draw the first frame of `scene` unseen, in the look the first frame
+    /// shown will take, so the caches it fills (the cloud rasters above all)
+    /// are warm when it is shown; what it shows is unchanged.
+    pub(crate) fn warm(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) {
+        let Ok(size) = self.terminal.size() else {
+            return;
+        };
+        let full = Rect::new(0, 0, size.width, size.height);
+        let scene_area = crate::tui::renderer::scene_rect(full);
+        if crate::tui::renderer::scene_too_small(scene_area) {
+            return;
+        }
+        let (buf_w, buf_h) = crate::tui::renderer::scene_buf_size(size.width, size.height);
+        let classic = (Look::Classic, Size { w: buf_w, h: buf_h });
+        #[cfg(feature = "graphics")]
+        let look = self.cutaway_look(scene_area).unwrap_or(classic);
+        #[cfg(not(feature = "graphics"))]
+        let look = classic;
+        let nf = self.grow_floors(scene);
+        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let Frame { world, footer, .. } =
+            self.chrome
+                .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+        let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
+        self.office.raster.warm();
+        let _ = pixtuoid_scene::look::render(
+            &mut self.floors[self.current_floor],
+            self.office.stores(),
+            look.0,
+            RenderInputs {
+                world,
+                theme: self.chrome.theme,
+                size: look.1,
+                place: Place {
+                    gateway: footer.context.gateway,
+                    floor: footer.context.floor,
+                },
+                debug_walkable: false,
+            },
+        );
+    }
+
+    /// The floors `scene` fills, a raster each: what a frame, and the unseen
+    /// boot frame, both stand on.
+    fn grow_floors(&mut self, scene: &SceneState) -> usize {
+        let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
+        while self.floors.len() < nf {
+            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
+        }
+        nf
+    }
+
+    /// The cutaway's look and office extent over `scene_area`, as its next
+    /// frame fits them; `None` while classic paints.
+    #[cfg(feature = "graphics")]
+    fn cutaway_look(&mut self, scene_area: Rect) -> Option<(Look, Size)> {
+        let window = self
+            .terminal
+            .backend_mut()
+            .window_size()
+            .ok()
+            .and_then(crate::graphics::CellSize::of_window);
+        let fitted = self.cutaway.as_mut()?.fit_to(scene_area, window)?;
+        Some((
+            Look::Cutaway {
+                scale: fitted.fit.render_scale(),
+            },
+            fitted.fit.logical(),
+        ))
+    }
+
+    /// Report the frames since the last pacing summary, at exit.
+    pub(crate) fn finish_pacing(&self) {
+        self.jank.finish();
+    }
+
+    /// The interval the loop now schedules frames at: what a frame's pacing
+    /// is judged against.
+    pub(crate) fn scheduled_every(&mut self, interval: std::time::Duration) {
+        self.jank.scheduled_every(interval);
+    }
+
+    /// Name what draws the frames, for their pacing summaries.
+    pub(crate) fn painted_by(&mut self, painter: crate::tui::jank::Painter) {
+        self.jank.painted_by(painter);
     }
 
     /// Paint and send the next frame whole, for the pacing bench's worst case.
@@ -754,8 +844,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ///
     /// If querying the terminal size or drawing the frame to the backend fails.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+        let begun = std::time::Instant::now();
         self.draw_frame(scene, pack, now)?;
         self.follow_resize();
+        #[cfg(feature = "graphics")]
+        let send = self
+            .cutaway
+            .as_ref()
+            .map(crate::tui::cutaway::TileCutaway::last_send);
+        #[cfg(not(feature = "graphics"))]
+        let send = None;
+        let note = self
+            .floors
+            .get(self.current_floor)
+            .and_then(|f| f.raster.note());
+        self.jank
+            .record(begun.elapsed(), send, note, std::time::Instant::now());
         Ok(())
     }
 
@@ -769,11 +873,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.active_pet = None;
         }
 
-        let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
-
-        while self.floors.len() < nf {
-            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
-        }
+        let nf = self.grow_floors(scene);
 
         if let Some(ref tr) = self.transition
             && (tr.from_floor >= nf || tr.to_floor >= nf)
@@ -795,6 +895,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
+            cutaway.begin_frame();
             cutaway.share_with_audio(self.chrome.audio.is_enabled());
             let size = self.terminal.size()?;
             let scene_area =

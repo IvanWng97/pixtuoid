@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::state::SceneState;
 use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
 use ratatui::layout::{Position, Rect, Size};
@@ -223,6 +224,16 @@ pub fn cutaway_office(
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
     let fit = Fit::new(cell, area, pack.max_density_variant())?;
     Some((fit.logical().w, fit.logical().h, fit.scale().get()))
+}
+
+/// Warm `r`'s caches on `scene` at `now`, as the TUI does at boot.
+pub fn warm(
+    r: &mut TuiRenderer<PacedBackend>,
+    scene: &SceneState,
+    pack: &Pack,
+    now: std::time::SystemTime,
+) {
+    r.warm(scene, pack, now);
 }
 
 /// Paint and send `r`'s next frame whole.

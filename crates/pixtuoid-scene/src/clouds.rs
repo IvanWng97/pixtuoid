@@ -816,6 +816,9 @@ const DRAWS_AHEAD: usize = 2;
 #[derive(Debug)]
 pub struct CloudCache {
     entries: lru::LruCache<RasterKey, std::sync::Arc<MassRaster>>,
+    /// The next frame draws all its [`AHEAD`] needs, not [`DRAWS_AHEAD`]:
+    /// a boot frame, which no frame before it drew ahead for.
+    warming: bool,
 }
 
 // `LruCache` has no `Default`: its capacity is given.
@@ -823,6 +826,7 @@ impl Default for CloudCache {
     fn default() -> Self {
         Self {
             entries: lru::LruCache::new(Self::CAPACITY),
+            warming: false,
         }
     }
 }
@@ -832,6 +836,11 @@ impl CloudCache {
     /// mass drawn [`AHEAD`] of them (`the_cache_holds_a_transition_in_both_looks`):
     /// one office draws one wall per look.
     const CAPACITY: std::num::NonZeroUsize = std::num::NonZeroUsize::new(256).expect("nonzero");
+
+    /// Have the next frame draw every mass its [`AHEAD`] needs.
+    pub(crate) fn warm(&mut self) {
+        self.warming = true;
+    }
 
     fn holds(&self, key: RasterKey) -> bool {
         self.entries.contains(&key)
@@ -1014,7 +1023,11 @@ impl Clouds {
         let clouds = Self::of(moment, size, d, panes, cache);
         let _ahead = tracing::trace_span!("clouds.ahead").entered();
         let frame = std::time::Duration::from_millis(crate::anim::PAINT_FRAME_MS);
-        let mut budget = DRAWS_AHEAD;
+        let mut budget = if std::mem::take(&mut cache.warming) {
+            usize::MAX
+        } else {
+            DRAWS_AHEAD
+        };
         let mut was = Self::keyed(&moment.sky);
         for k in 1..=AHEAD.as_millis() / frame.as_millis() {
             let sky = Sky::at(moment.timing.later(frame * k as u32), moment.sky.policy());
@@ -1748,6 +1761,41 @@ mod tests {
         let count = std::sync::Arc::new(Count(std::sync::atomic::AtomicUsize::new(0)));
         tracing::subscriber::with_default(std::sync::Arc::clone(&count), f);
         count.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A cache warmed before the first frame draws all of that frame's
+    /// `AHEAD`, so a step landing within it draws nothing on demand.
+    #[test]
+    fn a_warmed_cache_draws_the_first_second_ahead() {
+        use crate::sky::WeatherPolicy;
+        let theme = &crate::theme::NORMAL;
+        let frame = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
+        let start = crate::sky::first_transition_after(
+            std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        )
+        .expect("a transition");
+        let moment_at = |n: u32| {
+            let timing = Motion::Full.timing(start + frame * n);
+            Moment::resolve(Sky::at(timing, WeatherPolicy::Clock), theme, 0.0, timing)
+        };
+        let steps = (1..AHEAD.as_millis() / frame.as_millis())
+            .filter(|&n| {
+                Clouds::keyed(&moment_at(n as u32).sky) != Clouds::keyed(&moment_at(0).sky)
+            })
+            .count();
+        assert!(steps > 0, "a step lands within the first second");
+        let mut cache = CloudCache::default();
+        cache.warm();
+        Clouds::of_ahead(&moment_at(0), (SPAN, GLASS_H), 4, RUN, &mut cache);
+        for n in 1..(AHEAD.as_millis() / frame.as_millis()) as u32 {
+            let moment = moment_at(n);
+            let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
+            assert!(
+                planned.iter().all(|&(_, key)| cache.holds(key)),
+                "frame {n} drew on demand"
+            );
+            Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+        }
     }
 
     /// A mass's bands are drawn in its own undrifted frame, so the key leaves
