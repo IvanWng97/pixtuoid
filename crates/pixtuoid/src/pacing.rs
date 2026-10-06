@@ -163,8 +163,8 @@ impl Backend for PacedBackend {
 }
 
 /// A renderer drawing the office over `protocol` into a `cols`×`rows`
-/// terminal of `cell_px` cells, with `pets`, and the wire every byte it writes
-/// crosses.
+/// terminal of `cell_px` cells, with `pets`, encoding as beside a live audio
+/// thread when `audio`, and the wire every byte it writes crosses.
 pub fn renderer(
     protocol: Protocol,
     cols: u16,
@@ -172,6 +172,7 @@ pub fn renderer(
     cell_px: (u16, u16),
     pets: Vec<pixtuoid_scene::pet::Pet>,
     pack: Arc<Pack>,
+    audio: bool,
 ) -> Result<(TuiRenderer<PacedBackend>, Wire)> {
     let wire = Wire::default();
     let cell = CellSize {
@@ -194,13 +195,15 @@ pub fn renderer(
         let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
         let fit = Fit::new(cell, area, pack.max_density_variant())
             .context("the cell is too small for the cutaway")?;
-        r.set_cutaway(crate::tui::cutaway::TileCutaway::new(
-            fit,
-            cell,
-            image,
-            false,
-            Box::new(wire.clone()),
-        ));
+        let mut cutaway =
+            crate::tui::cutaway::TileCutaway::new(fit, cell, image, false, Box::new(wire.clone()));
+        // A live audio thread's spare core, which a renderer reads off its
+        // audio handle: the bench synthesizes with no device to open one.
+        if audio {
+            let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+            cutaway.split_across(cores.saturating_sub(1).max(1));
+        }
+        r.set_cutaway(cutaway);
     }
     Ok((r, wire))
 }

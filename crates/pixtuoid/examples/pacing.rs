@@ -220,6 +220,7 @@ fn run(
         case.cell,
         pets,
         Arc::clone(pack),
+        false,
     )?;
     r.set_weather(WeatherPolicy::Forced(Weather::Storm));
     r.set_motion(case.motion);
@@ -283,6 +284,7 @@ fn real_clock(
         HALF_BLOCK_CELL,
         vec![Pet::defaulted(PetKind::Cat)],
         Arc::clone(pack),
+        false,
     )?;
     r.set_weather(WeatherPolicy::Forced(Weather::Storm));
     r.set_motion(Motion::Full);
@@ -607,6 +609,7 @@ fn hitch(path: &Path) -> Result<()> {
             term.cell,
             pets,
             Arc::clone(&pack),
+            run.lofi,
         )?;
         r.set_weather(run.weather);
         r.set_motion(Motion::Full);
@@ -680,6 +683,7 @@ fn hitch(path: &Path) -> Result<()> {
                 "list_ms": ms_of("canvas.compose"),
                 "paint_ms": ms_of("canvas.paint"),
                 "clouds_draw": { "ms": ms_of("clouds.draw"), "n": span("clouds.draw").1 },
+                "clouds_ahead_ms": ms_of("clouds.ahead"),
                 "diff_ms": ms_of("tiles.diff"),
                 "cut_ms": ms_of("tile.cut"),
                 "zlib_ms": ms_of("tile.zlib"),

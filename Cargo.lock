@@ -2747,6 +2747,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "codspeed-criterion-compat",
+ "lru",
  "pixtuoid-core",
  "proc-macro2",
  "proptest",

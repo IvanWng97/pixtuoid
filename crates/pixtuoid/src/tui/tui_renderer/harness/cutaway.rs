@@ -244,6 +244,21 @@ fn a_whole_frame_transmits_every_tile_once_in_order() {
     assert_eq!(ids, (first..first + ids.len() as u32).collect::<Vec<_>>());
 }
 
+/// The renderer leaves the encode a core exactly while its audio handle has
+/// a thread up.
+#[test]
+fn the_encode_leaves_a_core_while_the_audio_handle_is_live() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.cutaway.as_mut().expect("a cutaway").split_across(4);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 4);
+    let audio = crate::audio::AudioHandle::disabled();
+    let _rx = audio.install_test_channel();
+    r.set_audio(audio);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 3);
+}
+
 /// Text and image never share a cell: the footer row stays text.
 #[test]
 fn placeholders_fill_the_scene_and_never_the_footer() {

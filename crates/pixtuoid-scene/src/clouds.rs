@@ -14,7 +14,7 @@ use pixtuoid_core::sprite::Rgb;
 use crate::atmosphere::Moment;
 use crate::outside::{Cell, WindowView};
 
-use crate::sky::{Element, StrikePhase, Weather};
+use crate::sky::{Element, Sky, StrikePhase, Weather};
 
 /// A deterministic stream of `0..1` draws: [`crate::splitmix_draw`]'s.
 struct Rng {
@@ -803,19 +803,39 @@ fn dequantize(k: u8, steps: f32) -> f32 {
     f32::from(k) / steps
 }
 
+/// How far ahead [`Clouds::of_ahead`] looks for a step: a step's every mass,
+/// [`DRAWS_AHEAD`] a frame, is drawn before it lands.
+const AHEAD: std::time::Duration = std::time::Duration::from_secs(1);
+/// The masses a frame draws ahead at most: a transition's share and light
+/// steps can land a second apart, each a deck's masses.
+const DRAWS_AHEAD: usize = 2;
+
 /// The office's mass rasters, the most recently used first and at most
 /// `CloudCache::CAPACITY` of them: drawing a mass's bands is most of a
 /// cloudy frame's cost, and a drifting mass's bands don't change.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CloudCache {
-    entries: std::collections::VecDeque<(RasterKey, std::sync::Arc<MassRaster>)>,
+    entries: lru::LruCache<RasterKey, std::sync::Arc<MassRaster>>,
+}
+
+// `LruCache` has no `Default`: its capacity is given.
+impl Default for CloudCache {
+    fn default() -> Self {
+        Self {
+            entries: lru::LruCache::new(Self::CAPACITY),
+        }
+    }
 }
 
 impl CloudCache {
-    /// Room for a transition's two decks on both looks' grids
-    /// (`the_cache_holds_a_transition_in_both_looks`): one office draws one
-    /// wall per look.
-    const CAPACITY: usize = 64;
+    /// Room for a transition's two decks on both looks' grids, and every
+    /// mass drawn [`AHEAD`] of them (`the_cache_holds_a_transition_in_both_looks`):
+    /// one office draws one wall per look.
+    const CAPACITY: std::num::NonZeroUsize = std::num::NonZeroUsize::new(256).expect("nonzero");
+
+    fn holds(&self, key: RasterKey) -> bool {
+        self.entries.contains(&key)
+    }
 
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
@@ -827,17 +847,10 @@ impl CloudCache {
         key: RasterKey,
         draw: impl FnOnce() -> MassRaster,
     ) -> std::sync::Arc<MassRaster> {
-        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
-            let hit = self.entries.remove(i).expect("found above");
-            let raster = std::sync::Arc::clone(&hit.1);
-            self.entries.push_front(hit);
-            return raster;
-        }
-        let raster = std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw));
-        self.entries
-            .push_front((key, std::sync::Arc::clone(&raster)));
-        self.entries.truncate(Self::CAPACITY);
-        raster
+        let raster = self.entries.get_or_insert(key, || {
+            std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw))
+        });
+        std::sync::Arc::clone(raster)
     }
 }
 
@@ -861,32 +874,40 @@ pub(crate) struct Clouds {
 }
 
 impl Clouds {
-    /// The clouds of `moment` over a window run `span` units wide and glass
-    /// `glass_h` tall, drawn on a grid `d` to the unit; `cache` keeps the
-    /// masses' bands across frames, and an empty one draws them afresh.
-    pub(crate) fn of(
-        moment: &Moment,
-        (span, glass_h): (u16, u16),
-        d: u16,
-        panes: &[Range<u16>],
-        cache: &mut CloudCache,
-    ) -> Self {
-        let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
-        let d = d.max(1);
-        let weather = moment.sky.weather();
-        // f64: an epoch-scale beat in f32 steps in minutes, freezing then jumping the deck
-        let secs = moment.timing.beat.ms() as f64 / 1000.0;
-        let body = moment.sky.body();
+    /// What every mass of `sky`'s clouds is drawn under, quantized: two skies
+    /// with one draw the same bands.
+    fn keyed(sky: &Sky) -> (LightKey, Vec<(Weather, u8)>) {
+        let weather = sky.weather();
+        let body = sky.body();
         let night = match body.kind {
             crate::sky::BodyKind::Sun => 1.0 - ease(body.altitude / FULL_DAY_ALTITUDE),
             crate::sky::BodyKind::Moon => 1.0,
         };
         let light = LightKey {
             night: quantize(night, LIGHT_STEPS),
-            sunset: quantize(moment.look.golden_hour, LIGHT_STEPS),
+            sunset: quantize(crate::atmosphere::golden_hour(sky), LIGHT_STEPS),
             heaviness: quantize(weather.lerp(Element::Cloud, heaviness), LIGHT_STEPS),
             storm: quantize(weather.share(Element::Cloud, Weather::Storm), LIGHT_STEPS),
         };
+        let shares = weather
+            .parts(Element::Cloud)
+            .map(|(w, share)| (w, quantize(ease(share), SHARE_STEPS)))
+            .collect();
+        (light, shares)
+    }
+
+    /// The clouds of `sky`, `secs` into their drift, their masses not yet
+    /// drawn, and each mass with the key its bands are drawn under.
+    fn plan(
+        sky: &Sky,
+        secs: f64,
+        (span, glass_h): (u16, u16),
+        d: u16,
+    ) -> (Self, Vec<(Mass, RasterKey)>) {
+        let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
+        let d = d.max(1);
+        let weather = sky.weather();
+        let (light, shares) = Self::keyed(sky);
         let night = dequantize(light.night, LIGHT_STEPS);
         let sunset = dequantize(light.sunset, LIGHT_STEPS);
         let day = (1.0 - night - sunset).max(0.0);
@@ -903,7 +924,7 @@ impl Clouds {
                 (w, t)
             })
             .collect();
-        let mut clouds = Self {
+        let clouds = Self {
             masses: Vec::new(),
             rasters: Vec::new(),
             d,
@@ -923,9 +944,8 @@ impl Clouds {
                 + STORM_VIRGA * weather.share(Element::Precipitation, Weather::Storm),
             strike: None,
         };
-        let mut drawn = Vec::new();
-        for (w, share) in weather.parts(Element::Cloud) {
-            let share = quantize(ease(share), SHARE_STEPS);
+        let mut planned = Vec::new();
+        for (w, share) in shares {
             for m in deck(w, span_f, glass_h_f) {
                 let mass = m.grown(dequantize(share, SHARE_STEPS), m.drift_at(secs, span_f));
                 let key = RasterKey {
@@ -937,11 +957,33 @@ impl Clouds {
                     share,
                     light,
                 };
-                let draw = || clouds.draw(&mass, glass_h_f);
-                let raster = cache.get_or_draw(key, draw);
-                drawn.push((mass, raster));
+                planned.push((mass, key));
             }
         }
+        (clouds, planned)
+    }
+
+    /// The clouds of `moment` over a window run `span` units wide and glass
+    /// `glass_h` tall, drawn on a grid `d` to the unit; `cache` keeps the
+    /// masses' bands across frames, and an empty one draws them afresh.
+    pub(crate) fn of(
+        moment: &Moment,
+        (span, glass_h): (u16, u16),
+        d: u16,
+        panes: &[Range<u16>],
+        cache: &mut CloudCache,
+    ) -> Self {
+        let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
+        // f64: an epoch-scale beat in f32 steps in minutes, freezing then jumping the deck
+        let secs = moment.timing.beat.ms() as f64 / 1000.0;
+        let (mut clouds, planned) = Self::plan(&moment.sky, secs, (span, glass_h), d);
+        let mut drawn: Vec<_> = planned
+            .into_iter()
+            .map(|(mass, key)| {
+                let raster = cache.get_or_draw(key, || clouds.draw(&mass, glass_h_f));
+                (mass, raster)
+            })
+            .collect();
         // far to near, each mass beside its own bands: the nearest wins
         drawn.sort_by_key(|(m, _)| m.layer);
         (clouds.masses, clouds.rasters) = drawn.into_iter().unzip();
@@ -954,6 +996,43 @@ impl Clouds {
                 crate::sky::strike_start_ms(beat) as f64 / 1000.0,
                 panes,
             );
+        }
+        clouds
+    }
+
+    /// [`Self::of`], and then up to [`DRAWS_AHEAD`] of the masses the next
+    /// [`AHEAD`] needs and `cache` lacks, the soonest needed first: each
+    /// quantized step's bands drawn a few a frame before it lands, not all in
+    /// the frame it does.
+    pub(crate) fn of_ahead(
+        moment: &Moment,
+        size: (u16, u16),
+        d: u16,
+        panes: &[Range<u16>],
+        cache: &mut CloudCache,
+    ) -> Self {
+        let clouds = Self::of(moment, size, d, panes, cache);
+        let _ahead = tracing::trace_span!("clouds.ahead").entered();
+        let frame = std::time::Duration::from_millis(crate::anim::PAINT_FRAME_MS);
+        let mut budget = DRAWS_AHEAD;
+        let mut was = Self::keyed(&moment.sky);
+        for k in 1..=AHEAD.as_millis() / frame.as_millis() {
+            let sky = Sky::at(moment.timing.later(frame * k as u32), moment.sky.policy());
+            let keyed = Self::keyed(&sky);
+            if keyed == was {
+                continue;
+            }
+            was = keyed;
+            let (next, planned) = Self::plan(&sky, 0.0, size, d);
+            for (mass, key) in planned {
+                if budget == 0 {
+                    return clouds;
+                }
+                if !cache.holds(key) {
+                    cache.get_or_draw(key, || next.draw(&mass, f32::from(size.1)));
+                    budget -= 1;
+                }
+            }
         }
         clouds
     }
@@ -1647,8 +1726,51 @@ mod tests {
         Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default())
     }
 
+    /// The mass rasters `f` draws: the `clouds.draw` spans it opens.
+    fn draws(f: impl FnOnce()) -> usize {
+        struct Count(std::sync::atomic::AtomicUsize);
+        impl tracing::Subscriber for Count {
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                if span.metadata().name() == "clouds.draw" {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn event(&self, _: &tracing::Event<'_>) {}
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+        }
+        let count = std::sync::Arc::new(Count(std::sync::atomic::AtomicUsize::new(0)));
+        tracing::subscriber::with_default(std::sync::Arc::clone(&count), f);
+        count.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A mass's bands are drawn in its own undrifted frame, so the key leaves
+    /// the drift out and a step drawn ahead at drift 0 is the one the frame
+    /// it lands in would draw.
+    #[test]
+    fn a_mass_draws_the_same_bands_at_any_drift() {
+        for weather in Weather::ALL {
+            let sky = Sky::at_with(crate::localclock::at_hour(12), weather);
+            let (clouds, still) = Clouds::plan(&sky, 0.0, (SPAN, GLASS_H), 4);
+            let (_, drifted) = Clouds::plan(&sky, 4321.5, (SPAN, GLASS_H), 4);
+            assert_eq!(still.len(), drifted.len(), "{weather:?}");
+            for ((a, key_a), (b, key_b)) in still.iter().zip(&drifted) {
+                assert_eq!(key_a, key_b, "{weather:?}");
+                let glass = f32::from(GLASS_H);
+                assert_eq!(clouds.draw(a, glass), clouds.draw(b, glass), "{weather:?}");
+            }
+        }
+    }
+
     /// A transition's two fullest decks, on the classic's grid and the
-    /// cutaway's, fit the cache: a frame never evicts a mass it draws.
+    /// cutaway's, and all a look draws ahead of them, fit the cache: a frame
+    /// never evicts a mass it draws or one drawn for a step to come.
     #[test]
     fn the_cache_holds_a_transition_in_both_looks() {
         let fullest = Weather::ALL
@@ -1656,10 +1778,64 @@ mod tests {
             .into_iter()
             .max()
             .unwrap_or(0);
+        let ahead = (AHEAD.as_millis() / u128::from(crate::anim::PAINT_FRAME_MS)) as usize;
         assert!(
-            CloudCache::CAPACITY >= 2 * 2 * fullest,
+            CloudCache::CAPACITY.get() >= 2 * (2 * fullest + ahead * DRAWS_AHEAD),
             "{fullest} masses a deck"
         );
+    }
+
+    /// Frame by frame at the paint rate, on Full and Calm, through a weather
+    /// transition and across dusk, every frame but the first finds its every
+    /// mass already drawn, and draws at most [`DRAWS_AHEAD`] ahead.
+    #[test]
+    fn every_step_is_drawn_ahead_of_it() {
+        use crate::sky::WeatherPolicy;
+        let theme = &crate::theme::NORMAL;
+        let frame = Duration::from_millis(crate::anim::PAINT_FRAME_MS);
+        let noon = crate::localclock::at_hour(12);
+        let windows = [
+            (
+                crate::sky::first_transition_after(noon).expect("a transition"),
+                WeatherPolicy::Clock,
+                Duration::from_millis(crate::sky::TRANSITION_MS),
+            ),
+            (
+                crate::localclock::at_hour_min(19, 30),
+                WeatherPolicy::Forced(Weather::Clear),
+                Duration::from_secs(300),
+            ),
+        ];
+        // Each window opens `AHEAD` early: a step within `AHEAD` of the first
+        // frame has had no frames to be drawn ahead in.
+        let lead = (AHEAD.as_millis() / frame.as_millis()) as u32;
+        for motion in [Motion::Full, Motion::Calm] {
+            for (start, policy, length) in windows {
+                let mut cache = CloudCache::default();
+                let mut ahead_drawn = 0;
+                for n in 0..lead + (length.as_millis() / frame.as_millis()) as u32 {
+                    let timing = motion.timing(start - AHEAD + frame * n);
+                    let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
+                    let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
+                    let missing = planned
+                        .iter()
+                        .filter(|&&(_, key)| !cache.holds(key))
+                        .count();
+                    let drawn = draws(|| {
+                        Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+                    });
+                    if n > lead {
+                        assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");
+                        assert!(
+                            drawn <= DRAWS_AHEAD,
+                            "{motion:?} {policy:?} frame {n}: {drawn}"
+                        );
+                        ahead_drawn += drawn;
+                    }
+                }
+                assert!(ahead_drawn > 0, "{policy:?}: the window crossed no step");
+            }
+        }
     }
 
     /// Laying the masses far to near leaves each cell the band the nearest

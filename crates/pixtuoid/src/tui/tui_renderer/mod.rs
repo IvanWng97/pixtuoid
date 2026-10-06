@@ -795,6 +795,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
+            cutaway.share_with_audio(self.chrome.audio.is_enabled());
             let size = self.terminal.size()?;
             let scene_area =
                 crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));
