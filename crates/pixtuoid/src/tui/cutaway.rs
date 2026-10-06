@@ -13,7 +13,7 @@
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -28,6 +28,7 @@ use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::tui::geometry::SceneGeometry;
 use crate::tui::geometry::slide_offsets;
+use crate::tui::jank::FrameSend;
 use crate::tui::renderer::set_half_block;
 
 /// A floor slide's two floors' frames at progress `t` of a
@@ -108,6 +109,8 @@ pub(crate) struct TileCutaway {
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
+    /// What the last frame's transmits did, for its jank report.
+    last: FrameSend,
     /// The machine's cores.
     cores: usize,
     /// Whether an audio thread is up to synthesize tracks beside the encode.
@@ -170,6 +173,7 @@ impl TileCutaway {
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             torn: false,
+            last: FrameSend::default(),
             cores: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
             audio: false,
         }
@@ -184,6 +188,11 @@ impl TileCutaway {
         let cell = self.cell_under(window);
         let Some(fit) = Fit::new(cell, scene.as_size(), self.density) else {
             self.fitted = None;
+            // The classic paints this frame: it transmits nothing.
+            self.last = FrameSend {
+                dirty: crate::tui::jank::Painted::Classic,
+                ..FrameSend::default()
+            };
             return None;
         };
         let fitted = Fitted { scene, cell, fit };
@@ -227,11 +236,8 @@ impl TileCutaway {
         flash: FlashPhase,
         now: SystemTime,
     ) {
-        let dirty = if self.shown.replace(Shown::Floor(floor)) == Some(Shown::Floor(floor)) {
-            dirty
-        } else {
-            Dirty::All
-        };
+        let fresh = self.shown.replace(Shown::Floor(floor)) != Some(Shown::Floor(floor));
+        let dirty = if fresh { Dirty::All } else { dirty };
         let flashes = [flash; 2];
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&dirty);
@@ -243,7 +249,7 @@ impl TileCutaway {
             self.image.clone_from(frame);
             self.image_behind = false;
         }
-        self.stage(&dirty, flashes, now, fitted.scene.as_position());
+        self.stage(&dirty, fresh, flashes, now, fitted.scene.as_position());
     }
 
     /// Show both floors of `slide`, composed as it places them, and queue the
@@ -278,22 +284,32 @@ impl TileCutaway {
                 }
             }
         }
-        self.stage(&Dirty::All, flashes, now, fitted.scene.as_position());
+        self.stage(&Dirty::All, true, flashes, now, fitted.scene.as_position());
     }
 
     /// Queue the tiles of [`Self::image`], which shows `flashes`, that differ
     /// from what was sent, among those `dirty` reaches, once the cadence
     /// allows: at once for a new phase, so it shows as long as it lasts.
-    fn stage(&mut self, dirty: &Dirty, flashes: Flashes, now: SystemTime, origin: Position) {
+    /// `fresh` is reported as [`FrameSend::fresh`].
+    fn stage(
+        &mut self,
+        dirty: &Dirty,
+        fresh: bool,
+        flashes: Flashes,
+        now: SystemTime,
+        origin: Position,
+    ) {
         self.origin = origin;
         let changed =
             tracing::trace_span!("tiles.diff").in_scope(|| self.tiles.changed(&self.image, dirty));
+        self.last = FrameSend {
+            dirty: dirty.into(),
+            fresh,
+            changed: changed.len(),
+            ..FrameSend::default()
+        };
         tracing::trace!(
-            dirty = match dirty {
-                Dirty::All => "all",
-                Dirty::Rects(_) => "rects",
-                Dirty::Unchanged => "unchanged",
-            },
+            dirty = ?self.last.dirty,
             rects = match dirty {
                 Dirty::Rects(r) => r.as_slice().len(),
                 _ => 0,
@@ -375,8 +391,11 @@ impl TileCutaway {
         } else {
             Ok(())
         };
+        let begun = Instant::now();
         let encoded =
             tracing::trace_span!("tiles.encode").in_scope(|| self.encoder().encode_all(&send));
+        self.last.encode = begun.elapsed();
+        let begun = Instant::now();
         let mut sent = Vec::with_capacity(send.len());
         for (c, bytes) in send.into_iter().zip(encoded) {
             if wrote.is_err() {
@@ -384,10 +403,14 @@ impl TileCutaway {
             }
             if let Some(bytes) = bytes {
                 wrote = tracing::trace_span!("tile.write").in_scope(|| self.out.write_all(&bytes));
+                self.last.bytes += bytes.len() as u64;
                 sent.push(c);
             }
         }
-        match wrote.and_then(|()| self.out.flush()) {
+        let flushed = wrote.and_then(|()| self.out.flush());
+        self.last.write = begun.elapsed();
+        self.last.sent = sent.len();
+        match flushed {
             Ok(()) => {
                 self.torn = false;
                 self.sent_at = Some(now);
@@ -418,6 +441,11 @@ impl TileCutaway {
     /// core.
     pub(crate) fn share_with_audio(&mut self, audio: bool) {
         self.audio = audio;
+    }
+
+    /// A new frame, which has transmitted nothing until it paints.
+    pub(crate) fn begin_frame(&mut self) {
+        self.last = FrameSend::default();
     }
 
     /// Set `in_grid` where the unwind would read the process's own.
@@ -508,6 +536,11 @@ impl TileCutaway {
             }
         }
         covered
+    }
+
+    /// What the last frame's transmits did.
+    pub(crate) fn last_send(&self) -> FrameSend {
+        self.last
     }
 
     /// Owe every tile again: the terminal may have dropped them.

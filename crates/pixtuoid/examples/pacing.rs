@@ -11,6 +11,11 @@
 //! one `real-clock` case runs the production loop's shape on the wall clock
 //! to check that model once.
 //!
+//! `pacing next-storm` and `pacing dusk` print the Unix second the clock's
+//! next transition into a storm and today's nightfall start, and `pacing
+//! terminal [4|16]` the cells and cell pixels that give the owner's office at
+//! that scale: what `just pace-check` runs on.
+//!
 //! `pacing hitch <frames.jsonl>` instead logs every frame of each terminal ×
 //! clock run with what made it slow: each stage's time, the Dirty kind, tiles
 //! and bytes sent, the canvas epoch field that changed, a cloud-raster miss,
@@ -429,6 +434,23 @@ where
 /// The owner's terminal: kitty in Ghostty, a 17x41 cell, a 214x125 office.
 const OWNER_CELL: (u16, u16) = (17, 41);
 const OWNER_OFFICE: (u16, u16) = (214, 125);
+/// A cell whose natural scale is the art's own 4x, upscaled not at all.
+const FOUR_X_CELL: (u16, u16) = (4, 8);
+
+/// The smallest terminal whose office on `cell` holds the owner's: exactly
+/// it at 16x, a row taller at 4x, whose cell halves the rows.
+fn owner_terminal(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    cell: (u16, u16),
+) -> Result<(u16, u16)> {
+    (1..=1000u16)
+        .flat_map(|c| (1..=400u16).map(move |r| (c, r)))
+        .find(|&(c, r)| {
+            pixtuoid::pacing::cutaway_office(c, r, cell, pack)
+                .is_some_and(|(w, h, _)| w >= OWNER_OFFICE.0 && h >= OWNER_OFFICE.1)
+        })
+        .context("no terminal fits the owner's office")
+}
 
 struct HitchRun {
     name: &'static str,
@@ -464,13 +486,12 @@ fn hitch(path: &Path) -> Result<()> {
             .with(targets),
     )?;
     let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
-    let (cols, rows) = (1..=400u16)
-        .flat_map(|c| (1..=200u16).map(move |r| (c, r)))
-        .find(|&(c, r)| {
-            pixtuoid::pacing::cutaway_office(c, r, OWNER_CELL, &pack)
-                .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE)
-        })
-        .context("no terminal fits the owner's office")?;
+    let (cols, rows) = owner_terminal(&pack, OWNER_CELL)?;
+    anyhow::ensure!(
+        pixtuoid::pacing::cutaway_office(cols, rows, OWNER_CELL, &pack)
+            .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE),
+        "the owner's terminal no longer gives the owner's office exactly: its runs stop being comparable"
+    );
     let tick = Duration::from_secs(1) / PAINT_FPS;
     let real_secs = pixtuoid_core::platform::text_env("HITCH_REAL_SECS")
         .and_then(|s| s.parse().ok())
@@ -640,6 +661,7 @@ fn hitch(path: &Path) -> Result<()> {
         let wall = Instant::now();
         let start = run.start.unwrap_or_else(SystemTime::now);
         let scene = office(start);
+        pixtuoid::pacing::warm(&mut r, &scene, &pack, start);
         let mut totals = Vec::new();
         let mut n = 0u64;
         loop {
@@ -751,6 +773,30 @@ fn hitch(path: &Path) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("dusk") {
+        let start = pixtuoid_scene::sky::nightfall_on(SystemTime::now())
+            .context("no nightfall in today's local time")?;
+        let secs = start.duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+        let _ = writeln!(std::io::stdout(), "{secs}");
+        return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("terminal") {
+        let pack = pixtuoid_scene::pack::load_bundled_pack()?;
+        let cell = match std::env::args().nth(2).as_deref() {
+            Some("4") => FOUR_X_CELL,
+            _ => OWNER_CELL,
+        };
+        let (cols, rows) = owner_terminal(&pack, cell)?;
+        let _ = writeln!(std::io::stdout(), "{cols} {rows} {} {}", cell.0, cell.1);
+        return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("next-storm") {
+        let start = pixtuoid_scene::sky::first_transition_into(SystemTime::now(), Weather::Storm)
+            .context("no storm in the clock's weeks ahead")?;
+        let secs = start.duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+        let _ = writeln!(std::io::stdout(), "{secs}");
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("hitch") {
         let path = PathBuf::from(
             std::env::args()

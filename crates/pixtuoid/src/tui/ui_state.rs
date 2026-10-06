@@ -125,6 +125,10 @@ pub(crate) struct UiState {
     /// clock-driven animation (and the dashboard marquee) holds still.
     paused: bool,
     frozen_now: Option<SystemTime>,
+    /// `$PIXTUOID_FAKE_NOW`'s instant, Unix seconds, and when it was read:
+    /// the clock `just pace-check` starts at a transition or at dusk, read
+    /// nowhere else.
+    fake_now: Option<(Instant, SystemTime)>,
     /// Theme picker: `Some(preview index)` while open; `saved_theme_idx` is
     /// the committed selection the quit/cancel paths revert to.
     pub(crate) theme_picker: Option<usize>,
@@ -135,6 +139,22 @@ pub(crate) struct UiState {
     socket_path: std::path::PathBuf,
     /// The warn-floor log path the drift re-scan reads (`None` = no surfacing).
     log_path: Option<std::path::PathBuf>,
+}
+
+/// `$PIXTUOID_FAKE_NOW`'s clock, said once at warn: a stray export would
+/// otherwise skew the sky and the weather unseen.
+fn fake_now() -> Option<(Instant, SystemTime)> {
+    let set = pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")?;
+    let Some(at) =
+        set.trim().parse::<u64>().ok().and_then(|secs| {
+            SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(secs))
+        })
+    else {
+        tracing::warn!(value = ?set, "PIXTUOID_FAKE_NOW is not a Unix second this clock holds: the clock is now");
+        return None;
+    };
+    tracing::warn!(at = ?at, "the clock starts at PIXTUOID_FAKE_NOW, not now");
+    Some((Instant::now(), at))
 }
 
 impl UiState {
@@ -158,6 +178,7 @@ impl UiState {
             help_open: false,
             paused: false,
             frozen_now: None,
+            fake_now: fake_now(),
             theme_picker: None,
             saved_theme_idx,
             dashboard: DashboardUi::default(),
@@ -185,11 +206,15 @@ impl UiState {
 
     /// This frame's wall clock: real time, or the frozen instant while paused.
     pub(crate) fn now(&mut self) -> SystemTime {
+        let wall = self
+            .fake_now
+            .and_then(|(read, at)| at.checked_add(read.elapsed()))
+            .unwrap_or_else(SystemTime::now);
         if self.paused {
-            *self.frozen_now.get_or_insert(SystemTime::now())
+            *self.frozen_now.get_or_insert(wall)
         } else {
             self.frozen_now = None;
-            SystemTime::now()
+            wall
         }
     }
 
@@ -492,6 +517,37 @@ mod tests {
             std::path::PathBuf::from("/tmp/sock"),
             None,
         )
+    }
+
+    /// A fake instant past what `SystemTime` holds takes the real clock, as an
+    /// unparseable one does, not a panic.
+    #[test]
+    fn a_fake_clock_past_the_end_of_time_is_the_real_clock() {
+        temp_env::with_var("PIXTUOID_FAKE_NOW", Some(u64::MAX.to_string()), || {
+            assert_eq!(fake_now(), None);
+        });
+        temp_env::with_var("PIXTUOID_FAKE_NOW", Some("tomorrow"), || {
+            assert_eq!(fake_now(), None);
+        });
+    }
+
+    /// `$PIXTUOID_FAKE_NOW`'s clock runs on from its instant, and holds still
+    /// while paused, as the wall clock does: pace-check's sky rests on both.
+    #[test]
+    fn a_fake_clock_runs_from_its_instant_and_holds_when_paused() {
+        let mut ui = ui();
+        let at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        ui.fake_now = Some((Instant::now(), at));
+        let first = ui.now();
+        assert!(first >= at && first < at + std::time::Duration::from_secs(60));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let later = ui.now();
+        assert!(later > first, "it advances");
+        ui.toggle_pause();
+        let held = ui.now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert_eq!(ui.now(), held, "it holds while paused");
+        assert!(held >= later);
     }
 
     #[test]

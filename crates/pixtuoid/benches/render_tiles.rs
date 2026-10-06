@@ -1,0 +1,54 @@
+//! A whole frame through the real TUI painter at the owner's 16x: the scene
+//! repainted and every tile cut, compressed and encoded. Local only (`just
+//! bench`): CodSpeed's simulation counts instructions on one thread, blind to
+//! the cross-core encode.
+
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use criterion::{Criterion, criterion_main};
+use pixtuoid::pacing::{Protocol, forget_frame, renderer, warm};
+use pixtuoid_core::SceneState;
+
+/// The owner's terminal: 202x50 cells of 17x41 px, a 214x125 office at 16x.
+const TERMINAL: (u16, u16) = (202, 50);
+const CELL: (u16, u16) = (17, 41);
+/// Desks on the floor.
+const DESKS: usize = 8;
+
+fn whole_frame(c: &mut Criterion) {
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("the bundled pack"));
+    let scene = SceneState::uniform(DESKS);
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut group = c.benchmark_group("render_tiles");
+    for protocol in [Protocol::Kitty, Protocol::Sixel, Protocol::Iterm2] {
+        let (mut r, _wire) = renderer(
+            protocol,
+            TERMINAL.0,
+            TERMINAL.1,
+            CELL,
+            vec![],
+            Arc::clone(&pack),
+            false,
+        )
+        .expect("a 16x cutaway");
+        warm(&mut r, &scene, &pack, now);
+        group.bench_function(format!("{}_whole_frame_16x", protocol.name()), |b| {
+            b.iter(|| {
+                forget_frame(&mut r);
+                r.render(&scene, &pack, now).expect("render");
+            });
+        });
+    }
+    group.finish();
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "codspeed's `criterion_group!` reads CODSPEED_ENV and CODSPEED_CARGO_WORKSPACE_ROOT with `env::var`"
+)]
+mod group {
+    use super::whole_frame;
+    criterion::criterion_group!(benches, whole_frame);
+}
+criterion_main!(group::benches);
