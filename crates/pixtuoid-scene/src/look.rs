@@ -114,11 +114,6 @@ impl OfficeRaster {
         self.outside.clouds.warm();
     }
 
-    /// Drop the cached art.
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-
     /// Draw `pack` in `theme` from now on: every cache holds one pack's art
     /// in one theme's colours, so a frame of another empties them first.
     fn serve(&mut self, pack: &Arc<Pack>, theme: &'static Theme) {
