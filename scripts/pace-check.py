@@ -162,7 +162,7 @@ def main():
     frames = sum(int(w.get("frames", 0)) for w in windows)
     terminal = w0.get("terminal") if args.live else "pty"
     print(
-        f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} "
+        f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
         f"run={args.run}: {frames} frames, worst window p99 {p99:.1f} ms, over {over} | log {log}"
     )
     for (dirty, *why), n in causes(log):

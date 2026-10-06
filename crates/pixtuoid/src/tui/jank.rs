@@ -68,23 +68,22 @@ pub(crate) struct FrameSend {
     pub(crate) bytes: u64,
     /// Cutting and encoding them.
     pub(crate) encode: Duration,
-    /// Writing and flushing them.
-    pub(crate) write: Duration,
 }
 
 /// One over-interval frame's report at `level`, with what drew it.
 macro_rules! report {
-    ($level:ident, $message:literal, $total:expr, $send:expr, $note:expr) => {{
-        let (total, send, note): (Duration, FrameSend, Option<FrameNote>) = ($total, $send, $note);
+    ($level:ident, $message:literal, $total:expr, $present:expr, $send:expr, $note:expr) => {{
+        let (total, present, send, note): (Duration, Duration, FrameSend, Option<FrameNote>) =
+            ($total, $present, $send, $note);
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         let (from, to, share) = note.map_or((None, None, 0.0), |n| {
             (Some(n.weather.0), Some(n.weather.1), n.weather.2)
         });
         tracing::$level!(
             total = ms(total),
-            produce = ms(total.saturating_sub(send.encode + send.write)),
+            produce = ms(total.saturating_sub(send.encode + present)),
             encode = ms(send.encode),
-            write = ms(send.write),
+            present = ms(present),
             dirty = send.dirty.name(),
             fresh = send.fresh,
             changed = send.changed,
@@ -126,6 +125,8 @@ pub(crate) struct Painter {
     pub(crate) tmux: bool,
     /// `$TERM_PROGRAM`, the terminal's own name for itself.
     pub(crate) terminal: Option<String>,
+    /// Each frame goes out inside a synchronized update.
+    pub(crate) sync: bool,
 }
 
 impl Jank {
@@ -153,13 +154,15 @@ impl Jank {
         self.painter = painter;
     }
 
-    /// Count a frame that took `total`, reported past its interval and twice
+    /// Count a frame that took `total`, `present` of it writing the held frame
+    /// out, reported past its interval and twice
     /// past it; the window's spread once `now` closes it. The per-frame
     /// reports are debug, so a slow terminal can't grow the log a line a
     /// frame; a window that janked warns once, in its summary.
     pub(crate) fn record(
         &mut self,
         total: Duration,
+        present: Duration,
         send: Option<FrameSend>,
         note: Option<FrameNote>,
         now: Instant,
@@ -175,9 +178,9 @@ impl Jank {
             });
             if total > 2 * self.interval {
                 self.janks += 1;
-                report!(debug, "frame jank", total, send, note);
+                report!(debug, "frame jank", total, present, send, note);
             } else {
-                report!(debug, "frame slow", total, send, note);
+                report!(debug, "frame slow", total, present, send, note);
             }
         }
         if now.duration_since(self.since) >= WINDOW {
@@ -214,11 +217,12 @@ impl Jank {
             scale,
             tmux,
             terminal,
+            sync,
         } = &self.painter;
         if janks > 0 {
-            tracing::warn!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::warn!(look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
         } else {
-            tracing::info!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::info!(look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
         }
     }
 }
@@ -238,7 +242,13 @@ mod tests {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
             let mut jank = Jank::new(t0);
-            jank.record(Duration::from_millis(PAINT_FRAME_MS), None, None, t0);
+            jank.record(
+                Duration::from_millis(PAINT_FRAME_MS),
+                Duration::ZERO,
+                None,
+                None,
+                t0,
+            );
             let send = FrameSend {
                 dirty: Painted::All,
                 fresh: true,
@@ -246,9 +256,8 @@ mod tests {
                 sent: 1275,
                 bytes: 1_400_000,
                 encode: Duration::from_millis(30),
-                write: Duration::from_millis(5),
             };
-            jank.record(slow(), Some(send), None, t0);
+            jank.record(slow(), Duration::from_millis(7), Some(send), None, t0);
         });
         assert_eq!(logged.matches("frame jank").count(), 1, "{logged}");
         let line = logged
@@ -262,6 +271,12 @@ mod tests {
         assert!(logged.contains("dirty=\"all\""), "{logged}");
         assert!(logged.contains("sent=1275"), "{logged}");
         assert!(logged.contains("fresh=true"), "{logged}");
+        assert!(logged.contains("present=7"), "{logged}");
+        let produce = slow() - Duration::from_millis(30 + 7);
+        assert!(
+            logged.contains(&format!("produce={}", produce.as_secs_f64() * 1000.0)),
+            "the present is not the scene's: {logged}"
+        );
     }
 
     /// A frame past its interval but short of twice it is a debug `frame
@@ -272,8 +287,8 @@ mod tests {
         let logged = crate::test_capture::capture(|| {
             let mut jank = Jank::new(t0);
             jank.scheduled_every(Duration::from_millis(125));
-            jank.record(Duration::from_millis(100), None, None, t0);
-            jank.record(Duration::from_millis(150), None, None, t0);
+            jank.record(Duration::from_millis(100), Duration::ZERO, None, None, t0);
+            jank.record(Duration::from_millis(150), Duration::ZERO, None, None, t0);
             jank.finish();
         });
         assert_eq!(logged.matches("frame slow").count(), 1, "{logged}");
@@ -294,12 +309,19 @@ mod tests {
                 scale: 16,
                 tmux: true,
                 terminal: Some("ghostty".into()),
+                sync: true,
             });
             for _ in 0..99 {
-                jank.record(Duration::from_millis(10), None, None, t0);
+                jank.record(Duration::from_millis(10), Duration::ZERO, None, None, t0);
             }
-            jank.record(slow(), None, None, t0 + WINDOW);
-            jank.record(Duration::from_millis(10), None, None, t0 + WINDOW);
+            jank.record(slow(), Duration::ZERO, None, None, t0 + WINDOW);
+            jank.record(
+                Duration::from_millis(10),
+                Duration::ZERO,
+                None,
+                None,
+                t0 + WINDOW,
+            );
         });
         let summaries: Vec<&str> = logged
             .lines()
@@ -312,6 +334,7 @@ mod tests {
         assert!(line.contains("over=1"), "{line}");
         assert!(line.contains("look=\"kitty\""), "{line}");
         assert!(line.contains("tmux=true"), "{line}");
+        assert!(line.contains("sync=true"), "{line}");
         assert!(line.contains("p50=10"), "{line}");
         assert!(
             line.contains(" WARN "),
@@ -325,7 +348,7 @@ mod tests {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
             let mut jank = Jank::new(t0);
-            jank.record(Duration::from_millis(10), None, None, t0);
+            jank.record(Duration::from_millis(10), Duration::ZERO, None, None, t0);
             jank.finish();
         });
         assert!(logged.contains("frame pacing"), "{logged}");
