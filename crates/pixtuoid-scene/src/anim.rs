@@ -193,7 +193,7 @@ impl Timing {
         Self {
             now,
             beat: match self.beat.loop_ms {
-                Some(_) => Beat::looping(loop_time(now, self.beat.pace), self.beat.pace),
+                Some(_) => Beat::looping(self.beat.loop_at(now), self.beat.pace),
                 None => self.beat,
             },
         }
