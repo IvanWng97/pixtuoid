@@ -4,6 +4,7 @@ pub(crate) mod cutaway;
 pub mod dashboard;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
+pub(crate) mod jank;
 pub mod renderer;
 pub mod tui_renderer;
 mod ui_state;

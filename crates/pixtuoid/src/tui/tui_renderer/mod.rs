@@ -59,6 +59,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     /// The pack every floor's raster draws with, which each frame's must be.
     pack: Arc<Pack>,
+    /// The frames' times and janks.
+    jank: crate::tui::jank::Jank,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -224,6 +226,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             terminal,
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
+            jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -753,8 +756,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ///
     /// If querying the terminal size or drawing the frame to the backend fails.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+        let begun = std::time::Instant::now();
         self.draw_frame(scene, pack, now)?;
         self.follow_resize();
+        #[cfg(feature = "graphics")]
+        let send = self
+            .cutaway
+            .as_ref()
+            .map(crate::tui::cutaway::TileCutaway::last_send);
+        #[cfg(not(feature = "graphics"))]
+        let send = None;
+        let note = self
+            .floors
+            .get(self.current_floor)
+            .and_then(|f| f.raster.note());
+        self.jank
+            .record(begun.elapsed(), send, note, std::time::Instant::now());
         Ok(())
     }
 

@@ -36,6 +36,50 @@ pub struct CanvasFrame<'a> {
     pub dirty: Dirty,
     /// What of it flashes.
     pub flash: crate::flash::FlashPhase,
+    /// Why it painted whole, when it did.
+    pub repaint: Option<Repaint>,
+}
+
+/// Why a frame painted whole: the first, or which inputs every pixel is
+/// painted under changed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Repaint {
+    /// Nothing was shown before it.
+    pub first: bool,
+    /// The office's walls, windows or floor coverings.
+    pub backdrop: bool,
+    /// The per-agent palettes.
+    pub recolours: bool,
+    /// The render scale.
+    pub scale: bool,
+    /// The room's light.
+    pub ambient: bool,
+    /// The carpet's weather tint.
+    pub carpet: bool,
+    /// A strike's lift of the room.
+    pub flash: bool,
+}
+
+impl Repaint {
+    /// Why a frame under `now` paints whole after one under `was`; `None`
+    /// when it need not.
+    fn between(was: Option<&Epoch>, now: &Epoch) -> Option<Self> {
+        let Some(was) = was else {
+            return Some(Self {
+                first: true,
+                ..Self::default()
+            });
+        };
+        (was != now).then(|| Self {
+            first: false,
+            backdrop: was.backdrop != now.backdrop,
+            recolours: was.recolours != now.recolours,
+            scale: was.scale != now.scale,
+            ambient: was.ambient != now.ambient,
+            carpet: was.carpet != now.carpet,
+            flash: was.flash != now.flash,
+        })
+    }
 }
 
 /// Where a frame's pixels may differ from the frame before.
@@ -142,19 +186,16 @@ impl CutawayCanvas {
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
-        if tracing::enabled!(tracing::Level::TRACE) {
-            let was = self.shown.as_ref().map(|s| &s.epoch);
-            let differs = |f: fn(&Epoch) -> String| was.is_some_and(|w| f(w) != f(&epoch));
+        let repaint = Repaint::between(self.shown.as_ref().map(|s| &s.epoch), &epoch);
+        if let Some(r) = repaint {
             tracing::trace!(
-                first = was.is_none(),
-                backdrop = differs(|e| format!("{:?}", e.backdrop)),
-                recolours = differs(|e| format!("{:?}", e.recolours)),
-                scale = differs(|e| format!("{:?}", e.scale)),
-                ambient = differs(|e| format!("{:?}", e.ambient)),
-                carpet = differs(|e| format!("{:?}", e.carpet)),
-                flash = differs(|e| format!("{:?}", e.flash)),
-                ambient_now = ?epoch.ambient,
-                flash_now = ?epoch.flash,
+                first = r.first,
+                backdrop = r.backdrop,
+                recolours = r.recolours,
+                scale = r.scale,
+                ambient = r.ambient,
+                carpet = r.carpet,
+                flash = r.flash,
                 "canvas.epoch"
             );
         }
@@ -191,6 +232,7 @@ impl CutawayCanvas {
             buf: &self.buf,
             dirty,
             flash: list.flash_phase(),
+            repaint,
         }
     }
 
