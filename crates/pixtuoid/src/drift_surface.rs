@@ -9,15 +9,11 @@
 //! decoded fragment to mark HOOK names; most is transcript vocabulary.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
-/// Where the committed fragment lives, relative to the workspace root.
-const FRAGMENT: &str = "crates/pixtuoid/drift-surface.json";
-
-/// Set when regenerating: `just gen-drift-surface`.
-const UPDATE_ENV: &str = "UPDATE_DRIFT_SURFACE";
+/// The committed fragment, by absolute path so a worktree writes its own.
+const FRAGMENT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/drift-surface.json");
 
 fn surface() -> Value {
     // BTreeMap so the emitted order is key order, not hash order — the committed
@@ -122,12 +118,6 @@ fn omp_extension_reads() -> Vec<String> {
     names
 }
 
-fn fragment_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(FRAGMENT)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,20 +130,12 @@ mod tests {
     /// failure that cannot announce itself.
     #[test]
     fn the_committed_fragment_matches_what_we_register() {
-        let want = serde_json::to_string_pretty(&surface()).expect("surface serializes");
-        let path = fragment_path();
-        if std::env::var_os(UPDATE_ENV).is_some() {
-            std::fs::write(&path, format!("{want}\n")).expect("fragment is writable");
-            return;
-        }
-        let got = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("{FRAGMENT} is missing ({e}); regenerate with {UPDATE_ENV}=1")
-        });
-        assert_eq!(
-            got.trim_end(),
-            want,
-            "{FRAGMENT} is stale — regenerate with `just gen-drift-surface`",
+        let want = serde_json::to_string_pretty(&surface()).expect("surface serializes") + "\n";
+        let committed = snapbox::Data::read_from(
+            std::path::Path::new(FRAGMENT),
+            Some(snapbox::data::DataFormat::Text),
         );
+        snapbox::assert_data_eq!(want, committed.raw());
     }
 
     /// The port reader finds the shipped literal, and refuses a shape it cannot
