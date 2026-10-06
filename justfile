@@ -60,6 +60,13 @@ API_PUBLIC_API := "0.52.0"
 # it builds C (`cargo doc` still runs build scripts).
 DOC_TARGETS := "x86_64-pc-windows-msvc aarch64-apple-darwin"
 
+# The zone every test run reads the clock in, so a test anchored to its
+# writer's own zone fails on their machine, not first in CI (#1377). Its +05:45
+# is neither UTC nor a whole hour, so epoch and local hours never coincide.
+# chrono reads `TZ` on Unix only (chrono 0.4.45 `src/offset/local/unix.rs:92`);
+# Windows tests keep the runner's own zone.
+TEST_TZ := "Asia/Kathmandu"
+
 # List available recipes.
 default:
     @just --list
@@ -310,7 +317,7 @@ lint:
 [group('rust')]
 test *args:
     @cargo nextest --version &>/dev/null || { echo 'error: cargo-nextest is not installed — run `just setup-tools`' >&2; exit 1; }
-    @cargo nextest run "$@"
+    @TZ={{ TEST_TZ }} cargo nextest run "$@"
 
 # The filter forwards to both targets, and one matching nothing in a target is
 # not an error: `just bench 360` runs every 360x240 case, `just bench hook` only
@@ -509,7 +516,7 @@ _doc-targets:
 [doc('Coverage + JUnit XML — the exact command ci-tests.yml runs on the full tier (needs llvm-cov + nextest)')]
 [group('rust')]
 coverage:
-    cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
+    TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
 
 # Runs the suite under nextest and FAILS on a
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
@@ -521,7 +528,7 @@ coverage:
 [doc('Snapshot hygiene (cargo-insta): fail on pending OR orphan snapshots — CI-only')]
 [group('rust')]
 snapshots:
-    cargo insta test --check --unreferenced=reject --test-runner nextest --workspace
+    TZ={{ TEST_TZ }} cargo insta test --check --unreferenced=reject --test-runner nextest --workspace
 
 # Injects bugs into the CHANGED lines and checks the tests catch them — the
 # "do your assertions have TEETH?" dimension that
