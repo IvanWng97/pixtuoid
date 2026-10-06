@@ -919,3 +919,119 @@ fn a_walk_steps_by_the_ground_it_covers() {
         }
     }
 }
+
+/// A base-art walker is the base art's standing person with only its feet
+/// and hands moved: the same head, neck, shirt and leg rows, so a sit,
+/// stand or walk never reshapes them. A hand may hang beside the hips, a
+/// foot may step out a column or clear the ground.
+#[test]
+fn a_base_walker_keeps_the_standing_figure() {
+    let pack = crate::pack::test_default_pack();
+    let opaque = |f: &pixtuoid_core::sprite::Frame, y: u16| -> Vec<u16> {
+        (0..f.width())
+            .filter(|&x| f.get(x, y).copied().flatten().is_some())
+            .collect()
+    };
+    let stand = &pack
+        .animation("standing")
+        .expect("the standing art")
+        .frames()[0];
+    let (w, h) = (stand.width(), stand.height());
+    // a dropped hand hangs past the shirt's last full-width row
+    let hips = 1
+        + (0..h)
+            .rev()
+            .find(|&y| opaque(stand, y).len() == usize::from(w))
+            .expect("a full-width row");
+    let ground = h - 1;
+    let sides = [0, w - 1];
+    for name in crate::sim::WALKS {
+        for (i, f) in pack
+            .animation(name)
+            .expect("a walk")
+            .frames()
+            .iter()
+            .enumerate()
+        {
+            assert_eq!((f.width(), f.height()), (w, h), "{name} {i}");
+            for y in 0..h {
+                let (walk, rest) = (opaque(f, y), opaque(stand, y));
+                if y == hips {
+                    let extra: Vec<u16> =
+                        walk.iter().filter(|x| !rest.contains(x)).copied().collect();
+                    assert!(
+                        extra.iter().all(|x| sides.contains(x)),
+                        "{name} {i}: hips {walk:?}"
+                    );
+                    assert!(
+                        rest.iter().all(|x| walk.contains(x)),
+                        "{name} {i}: hips {walk:?}"
+                    );
+                } else if y == ground {
+                    let steps = |x: &u16| rest.iter().any(|r| r.abs_diff(*x) <= 1);
+                    assert!(walk.iter().all(steps), "{name} {i}: feet {walk:?}");
+                } else {
+                    assert_eq!(walk, rest, "{name} {i}: row {y}");
+                }
+            }
+        }
+    }
+}
+
+/// A walker's dust rises under a foot on the ground, in every frame of its
+/// walk, heading east or mirrored west; on a passing frame, where only one
+/// foot touches the ground, under that one.
+#[test]
+fn a_walker_s_dust_rises_under_its_planted_foot() {
+    let pack = crate::pack::test_default_pack();
+    let mut passing = 0;
+    for name in crate::sim::WALKS {
+        let frames = pack.animation(name).expect("a walk").frames();
+        for (i, f) in frames.iter().enumerate() {
+            for flip in [false, true] {
+                let ground = f.height() - 1;
+                let on_ground = |foot: usize| {
+                    let x =
+                        crate::effects::look::walking_dust_foot(Point { x: 0, y: 0 }, foot as u64)
+                            .x;
+                    let art_x = if flip { f.width() - 1 - x } else { x };
+                    f.get(art_x, ground).copied().flatten().is_some()
+                };
+                let foot = crate::effects::planted_foot(i, frames.len(), flip);
+                assert!(
+                    on_ground(foot),
+                    "{name} {i} (flip {flip}): dust under a lifted foot"
+                );
+                if !on_ground(1 - foot) {
+                    passing += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        passing > 0,
+        "the walks must pass a foot to tell the feet apart"
+    );
+}
+
+/// A walk bears its weight on the art's east foot from the strike that opens
+/// its cycle and on its west from the one halfway; mirrored, the other.
+#[test]
+fn the_planted_foot_changes_at_the_halfway_strike() {
+    let cycles: [&[usize]; 2] = [&[0, 1], &[0, 0, 0, 0, 1, 1, 1, 1]];
+    for east in cycles {
+        let frames = east.len();
+        for (i, &foot) in east.iter().enumerate() {
+            assert_eq!(
+                crate::effects::planted_foot(i, frames, false),
+                foot,
+                "{i} of {frames}"
+            );
+            assert_eq!(
+                crate::effects::planted_foot(i, frames, true),
+                1 - foot,
+                "{i} of {frames}, mirrored"
+            );
+        }
+    }
+}
