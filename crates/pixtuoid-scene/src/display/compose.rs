@@ -386,7 +386,7 @@ fn lights(
 /// Each desk art's bulb, scanned from its pixels the first time a frame asks
 /// for it: a frame's desks share a handful of arts.
 #[derive(Default)]
-pub(crate) struct DeskBulbCells<'p> {
+struct DeskBulbCells<'p> {
     seen: Vec<(&'p str, Option<(u16, u16)>)>,
 }
 
@@ -395,7 +395,7 @@ impl<'p> DeskBulbCells<'p> {
     /// draws at `scale`: the middle of its
     /// [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY) pixels, or `None` for art
     /// that draws no bulb.
-    pub(crate) fn at(
+    fn at(
         &mut self,
         at: crate::layout::Point,
         art_name: &'p str,
