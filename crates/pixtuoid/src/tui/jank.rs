@@ -128,6 +128,8 @@ pub(crate) struct Painter {
     pub(crate) tmux: bool,
     /// `$TERM_PROGRAM`, the terminal's own name for itself.
     pub(crate) terminal: Option<String>,
+    /// Each frame goes out inside a synchronized update.
+    pub(crate) sync: bool,
 }
 
 impl Jank {
@@ -218,11 +220,12 @@ impl Jank {
             scale,
             tmux,
             terminal,
+            sync,
         } = &self.painter;
         if janks > 0 {
-            tracing::warn!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::warn!(look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
         } else {
-            tracing::info!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::info!(look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
         }
     }
 }
@@ -310,6 +313,7 @@ mod tests {
                 scale: 16,
                 tmux: true,
                 terminal: Some("ghostty".into()),
+                sync: true,
             });
             for _ in 0..99 {
                 jank.record(Duration::from_millis(10), Duration::ZERO, None, None, t0);
@@ -334,6 +338,7 @@ mod tests {
         assert!(line.contains("over=1"), "{line}");
         assert!(line.contains("look=\"kitty\""), "{line}");
         assert!(line.contains("tmux=true"), "{line}");
+        assert!(line.contains("sync=true"), "{line}");
         assert!(line.contains("p50=10"), "{line}");
         assert!(
             line.contains(" WARN "),

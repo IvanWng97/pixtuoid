@@ -527,6 +527,11 @@ impl<W: std::io::Write> FrameOut<W> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Each frame goes out inside a synchronized update.
+    pub(crate) fn synchronized(&self) -> bool {
+        self.held().sync
+    }
+
     /// Hold what is written until [`Self::present`].
     pub(crate) fn begin(&self) {
         let mut held = self.held();
@@ -1069,10 +1074,6 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 }
 
 /// Hand `renderer` the painter `plan` names.
-#[cfg_attr(
-    not(feature = "graphics"),
-    expect(unused_variables, reason = "only the cutaway writes images into `out`")
-)]
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
@@ -1093,6 +1094,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
                 scale: fit.scale().get(),
                 tmux,
                 terminal,
+                sync: out.synchronized(),
             });
             renderer.set_cutaway(cutaway::TileCutaway::new(
                 fit,
@@ -1108,6 +1110,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
                 scale: 1,
                 tmux: tmux_env,
                 terminal,
+                sync: out.synchronized(),
             });
             tracing::info!(plan = ?plan, "painting classic");
         }
