@@ -8,9 +8,6 @@ use std::time::{Duration, Instant};
 use pixtuoid_scene::anim::PAINT_FRAME_MS;
 use pixtuoid_scene::look::FrameNote;
 
-/// A frame past the paint interval, in the window's microseconds.
-const OVER_US: u32 = (PAINT_FRAME_MS * 1000) as u32;
-
 /// How often the spread is reported.
 const WINDOW: Duration = Duration::from_secs(60);
 /// A window's frames twice over, room for a loop that runs hot: past it the
@@ -34,6 +31,33 @@ pub(crate) struct FrameSend {
     pub(crate) write: Duration,
 }
 
+/// One over-interval frame's report at `level`, with what drew it.
+macro_rules! report {
+    ($level:ident, $message:literal, $total:expr, $send:expr, $note:expr) => {{
+        let (total, send, note): (Duration, FrameSend, Option<FrameNote>) = ($total, $send, $note);
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        let (from, to, share) = note.map_or((None, None, 0.0), |n| {
+            (Some(n.weather.0), Some(n.weather.1), n.weather.2)
+        });
+        tracing::$level!(
+            total = ms(total),
+            produce = ms(total.saturating_sub(send.encode + send.write)),
+            encode = ms(send.encode),
+            write = ms(send.write),
+            dirty = send.dirty,
+            changed = send.changed,
+            sent = send.sent,
+            bytes = send.bytes,
+            repaint = ?note.and_then(|n| n.repaint),
+            weather_from = ?from,
+            weather_to = ?to,
+            weather_share = share,
+            strike = note.is_some_and(|n| n.strike),
+            $message
+        );
+    }};
+}
+
 /// The frame times of the current window, and its janks.
 #[derive(Debug)]
 pub(crate) struct Jank {
@@ -41,8 +65,12 @@ pub(crate) struct Jank {
     len: usize,
     next: usize,
     janks: u32,
+    /// Frames past their interval.
+    over: u32,
     since: Instant,
     painter: Painter,
+    /// The interval the loop schedules frames at.
+    interval: Duration,
 }
 
 /// What draws the frames a summary spreads: one matrix cell of a run.
@@ -65,9 +93,17 @@ impl Jank {
             len: 0,
             next: 0,
             janks: 0,
+            over: 0,
             since: now,
             painter: Painter::default(),
+            interval: Duration::from_millis(PAINT_FRAME_MS),
         }
+    }
+
+    /// The interval frames are scheduled at from now on, which a frame is
+    /// slow past and janks at twice.
+    pub(crate) fn scheduled_every(&mut self, interval: Duration) {
+        self.interval = interval;
     }
 
     /// Name what draws the frames from now on.
@@ -75,8 +111,8 @@ impl Jank {
         self.painter = painter;
     }
 
-    /// Count a frame that took `total`, reporting it when it janked and the
-    /// window's spread once `now` closes it.
+    /// Count a frame that took `total`: reported past its interval (debug),
+    /// and twice past it (warn), and the window's spread once `now` closes it.
     pub(crate) fn record(
         &mut self,
         total: Duration,
@@ -87,15 +123,22 @@ impl Jank {
         self.micros[self.next] = u32::try_from(total.as_micros()).unwrap_or(u32::MAX);
         self.next = (self.next + 1) % RING;
         self.len = (self.len + 1).min(RING);
-        if total > 2 * Duration::from_millis(PAINT_FRAME_MS) {
-            self.janks += 1;
-            report(total, send.unwrap_or_default(), note);
+        if total > self.interval {
+            self.over += 1;
+            let send = send.unwrap_or_default();
+            if total > 2 * self.interval {
+                self.janks += 1;
+                report!(warn, "frame jank", total, send, note);
+            } else {
+                report!(debug, "frame slow", total, send, note);
+            }
         }
         if now.duration_since(self.since) >= WINDOW {
             self.summarize();
             self.len = 0;
             self.next = 0;
             self.janks = 0;
+            self.over = 0;
             self.since = now;
         }
     }
@@ -118,7 +161,7 @@ impl Jank {
         let (p50, p99, max) = (ms(at(50)), ms(at(99)), ms(window.last()));
         let frames = self.len;
         let janks = self.janks;
-        let over = window.iter().filter(|&&us| us > OVER_US).count();
+        let over = self.over;
         let Painter {
             look,
             scale,
@@ -131,30 +174,6 @@ impl Jank {
             tracing::info!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
         }
     }
-}
-
-fn report(total: Duration, send: FrameSend, note: Option<FrameNote>) {
-    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
-    let repaint = note.and_then(|n| n.repaint);
-    let (from, to, share) = note.map_or((None, None, 0.0), |n| {
-        (Some(n.weather.0), Some(n.weather.1), n.weather.2)
-    });
-    tracing::warn!(
-        total = ms(total),
-        produce = ms(total.saturating_sub(send.encode + send.write)),
-        encode = ms(send.encode),
-        write = ms(send.write),
-        dirty = send.dirty,
-        changed = send.changed,
-        sent = send.sent,
-        bytes = send.bytes,
-        repaint = ?repaint,
-        weather_from = ?from,
-        weather_to = ?to,
-        weather_share = share,
-        strike = note.is_some_and(|n| n.strike),
-        "frame jank"
-    );
 }
 
 #[cfg(test)]
@@ -186,6 +205,24 @@ mod tests {
         assert_eq!(logged.matches("frame jank").count(), 1, "{logged}");
         assert!(logged.contains("dirty=\"all\""), "{logged}");
         assert!(logged.contains("sent=1275"), "{logged}");
+    }
+
+    /// A frame past its interval but short of twice it is a debug `frame
+    /// slow`, not a jank, and counts as over; the interval is the schedule's.
+    #[test]
+    fn a_frame_past_its_scheduled_interval_is_slow() {
+        let t0 = Instant::now();
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = Jank::new(t0);
+            jank.scheduled_every(Duration::from_millis(125));
+            jank.record(Duration::from_millis(100), None, None, t0);
+            jank.record(Duration::from_millis(150), None, None, t0);
+            jank.finish();
+        });
+        assert_eq!(logged.matches("frame slow").count(), 1, "{logged}");
+        assert_eq!(logged.matches("frame jank").count(), 0, "{logged}");
+        assert!(logged.contains("over=1"), "{logged}");
+        assert!(logged.contains("janks=0"), "{logged}");
     }
 
     /// A window that closes reports its frames' spread and janks, then starts

@@ -92,10 +92,21 @@ def run_live(argv, env, secs):
 FIELD = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
 
-def summaries(log):
+def events(log, message):
     for line in log.read_text(errors="replace").splitlines():
-        if "frame pacing" in line:
+        if message in line:
             yield {k: v.strip('"') for k, v in FIELD.findall(line)}
+
+
+def causes(log):
+    """The over-interval frames by what they were: Dirty kind, why the
+    cutaway repainted whole, and a strike."""
+    counts = {}
+    for e in [*events(log, "frame slow"), *events(log, "frame jank")]:
+        repaint = e.get("repaint", "None")
+        key = (e.get("dirty"), "repaint" if repaint != "None" else "-", "strike" if e.get("strike") == "true" else "-")
+        counts[key] = counts.get(key, 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])
 
 
 def main():
@@ -108,7 +119,13 @@ def main():
     args = ap.parse_args()
 
     log = Path(tempfile.mkstemp(prefix="pace-check-", suffix=".log")[1])
-    env = dict(os.environ, PIXTUOID_FAKE_NOW=str(start_at(args.run)), PIXTUOID_LOG=str(log))
+    env = dict(
+        os.environ,
+        PIXTUOID_FAKE_NOW=str(start_at(args.run)),
+        PIXTUOID_LOG=str(log),
+        # `frame slow` is debug: every frame past its interval, with its state.
+        RUST_LOG="info,pixtuoid::tui::jank=debug",
+    )
     graphics = "off" if args.scale == "classic" else args.graphics
     argv = [str(BIN), "--log-level", "info", "run", "--graphics", graphics]
     if args.live:
@@ -120,7 +137,7 @@ def main():
         env.pop("TMUX", None)
         run_pty(argv, env, GEOMETRY[args.scale], args.secs)
 
-    windows = list(summaries(log))
+    windows = list(events(log, "frame pacing"))
     if not windows:
         sys.exit(f"pace-check: no `frame pacing` summary in {log}")
     w0 = windows[0]
@@ -132,6 +149,8 @@ def main():
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} "
         f"run={args.run}: {frames} frames, worst window p99 {p99:.1f} ms, over {over} | log {log}"
     )
+    for (dirty, repaint, strike), n in causes(log):
+        print(f"  over-interval: {n:4} dirty={dirty} {repaint} {strike}")
     failed = over > 0 or p99 > P99_MS
     print("FAIL" if failed else "PASS")
     sys.exit(1 if failed else 0)

@@ -1004,6 +1004,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let mut cap_sweep = FloorCapacitySweep::new();
 
     let tick = frame_tick();
+    renderer.scheduled_every(tick);
     let result: Result<()> = (async {
         let mut ctrl_c = pin_ctrl_c();
         #[cfg(unix)]

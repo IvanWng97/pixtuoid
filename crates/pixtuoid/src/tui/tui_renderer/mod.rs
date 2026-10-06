@@ -322,6 +322,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.jank.finish();
     }
 
+    /// The interval the loop now schedules frames at: what a frame's pacing
+    /// is judged against.
+    pub(crate) fn scheduled_every(&mut self, interval: std::time::Duration) {
+        self.jank.scheduled_every(interval);
+    }
+
     /// Name what draws the frames, for their pacing summaries.
     pub(crate) fn painted_by(&mut self, painter: crate::tui::jank::Painter) {
         self.jank.painted_by(painter);
