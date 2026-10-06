@@ -784,6 +784,9 @@ pub struct Pack {
     city_materials: Option<CityMaterials>,
     hairstyles: BTreeMap<String, Hairstyle>,
     character_outline: Option<Rgb>,
+    /// [`Pack::density_variants`], counted whenever `animations` changes: a
+    /// painter asks for it every frame.
+    densities: Vec<Density>,
 }
 
 /// A material a `[buildings]` sprite is drawn in. A painter gives each its
@@ -1060,10 +1063,7 @@ impl Pack {
     /// The densest of [`Pack::density_variants`], or [`Density::ONE`] when the
     /// pack ships none.
     pub fn max_density_variant(&self) -> Density {
-        self.density_variants()
-            .first()
-            .copied()
-            .unwrap_or(Density::ONE)
+        self.densities.first().copied().unwrap_or(Density::ONE)
     }
 
     /// The densities this pack's variants are drawn at, densest first, each
@@ -1074,7 +1074,11 @@ impl Pack {
     /// divides. Only a variant of a registered animation that redraws its base
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
-    pub fn density_variants(&self) -> Vec<Density> {
+    pub fn density_variants(&self) -> &[Density] {
+        &self.densities
+    }
+
+    fn count_densities(&mut self) {
         let densities: BTreeSet<Density> = self
             .animations
             .iter()
@@ -1084,7 +1088,7 @@ impl Pack {
                 variant_redraws(self.animation(base)?, density, variant).then_some(density)
             })
             .collect();
-        densities.into_iter().rev().collect()
+        self.densities = densities.into_iter().rev().collect();
     }
 
     /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] and [`OPTIONAL_CREATURE_ANIMATIONS`]
@@ -1109,6 +1113,7 @@ impl Pack {
             .map(|(name, sprite)| (name.clone(), sprite.clone()))
             .collect();
         self.animations.extend(inherited);
+        self.count_densities();
         // A city comes whole or not at all: its buildings are drawn in its own
         // `[city]` materials, which a pack with a city of its own renames.
         if self.buildings.is_empty() {
@@ -1359,7 +1364,7 @@ fn build_pack(
         });
     }
 
-    Ok(Pack {
+    let mut pack = Pack {
         name: parsed.pack.name,
         version: parsed.pack.version,
         palette,
@@ -1368,7 +1373,10 @@ fn build_pack(
         city_materials,
         hairstyles,
         character_outline,
-    })
+        densities: Vec::new(),
+    };
+    pack.count_densities();
+    Ok(pack)
 }
 
 /// A building's one-frame sprite `fname`, checked to draw only in the
@@ -1518,11 +1526,34 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
 ///
 /// If `pack_toml` does not parse, a frame it names is absent from `frames`, or the pack fails validation.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
+    load_from_strings(pack_toml, frames, &mut |_| {})
+}
+
+/// The frame files [`load_pack_from_strings`] reads, in the order it reads
+/// them: every one it reads it needs, so a file missing from them is one the
+/// manifest never draws.
+///
+/// # Errors
+///
+/// As [`load_pack_from_strings`].
+#[doc(hidden)]
+pub fn frames_read_by(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Vec<String>> {
+    let mut read = Vec::new();
+    load_from_strings(pack_toml, frames, &mut |fname| read.push(fname.to_owned()))?;
+    Ok(read)
+}
+
+fn load_from_strings(
+    pack_toml: &str,
+    frames: &[(&str, &str)],
+    on_read: &mut dyn FnMut(&str),
+) -> Result<Pack> {
     let parsed: PackToml =
         toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
 
     build_pack(parsed, &mut |fname| {
+        on_read(fname);
         frame_lookup
             .get(fname)
             .map(|s| s.to_string())
@@ -2387,6 +2418,30 @@ mod validation_floor_tests {
         Density::new(n).expect("nonzero")
     }
 
+    /// Each frame [`frames_read_by`] reports is one the pack fails to load
+    /// without, and each other is one it loads without: the read set is the
+    /// needed set a leave-one-out load would find.
+    #[test]
+    fn the_frames_read_are_the_frames_needed() {
+        let toml = "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+                    [animations.idle]\nframes=[\"a.sprite\", \"b.sprite\"]\nframe_ms=100\n";
+        let frames = [
+            ("a.sprite", "@frame 0\nA"),
+            ("b.sprite", "@frame 0\nA"),
+            ("stray.sprite", "@frame 0\nA"),
+        ];
+        let read = frames_read_by(toml, &frames).expect("the whole set loads");
+        assert_eq!(read, ["a.sprite", "b.sprite"]);
+        for (name, _) in frames {
+            let without: Vec<_> = frames.iter().copied().filter(|&(n, _)| n != name).collect();
+            assert_eq!(
+                read.iter().any(|r| r == name),
+                load_pack_from_strings(toml, &without).is_err(),
+                "{name}"
+            );
+        }
+    }
+
     /// A pack of `animations` whose frame files are `frames`.
     fn pack_with_frames(animations: &str, frames: &[(&str, &str)]) -> Pack {
         let toml = format!(
@@ -2691,6 +2746,24 @@ mod validation_floor_tests {
         assert_eq!(pack.max_density_variant(), d(4));
         let plain = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert!(plain.density_variants().is_empty());
+    }
+
+    /// A density inherited through [`Pack::merge_from`] counts in
+    /// [`Pack::density_variants`], which the pack keeps rather than recounts.
+    #[test]
+    fn an_inherited_variant_counts_in_the_densities() {
+        let mut own = pack_with_frames(
+            "[animations.typing]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
+            SIZED_FRAMES,
+        );
+        assert!(own.density_variants().is_empty());
+        own.merge_from(&pack_with_frames(
+            "[animations.plant]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+             [animations.\"plant@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
+            SIZED_FRAMES,
+        ));
+        assert_eq!(own.density_variants(), [d(2)]);
+        assert_eq!(own.max_density_variant(), d(2));
     }
 
     /// Pins [`variant_redraws`]' every-frame proof.
