@@ -16,7 +16,8 @@ pub(crate) enum EffectKind {
     SleepZ,
     /// The waiting-for-you mark over a figure; still.
     WaitingMark,
-    /// The puff a walker's stride kicks up; its walk's frame.
+    /// The puff a walker's stride kicks up; the foot it rises under
+    /// ([`planted_foot`]).
     WalkingDust,
     /// The flame crowning a burning head; which of its two frames shows.
     FlameCrown,
@@ -72,13 +73,20 @@ pub(crate) fn waiting_mark(at: Point) -> Effect {
     }
 }
 
-/// The dust under the walker at `at`, on its walk's frame `frame`.
-pub(crate) fn walking_dust(at: Point, frame: usize) -> Effect {
+/// The dust under the walker at `at`, at its planted foot `foot` ([`planted_foot`]).
+pub(crate) fn walking_dust(at: Point, foot: usize) -> Effect {
     Effect {
         kind: EffectKind::WalkingDust,
         at,
-        phase: frame as u64,
+        phase: foot as u64,
     }
+}
+
+/// The foot, east (0) or west (1) as drawn, that a walk on `frame` of
+/// `frames`, mirrored when `flip`, bears its weight on: the art's east foot
+/// from the strike that opens its cycle, its west from the one halfway.
+pub(crate) fn planted_foot(frame: usize, frames: usize, flip: bool) -> usize {
+    usize::from(frame * 2 >= frames) ^ usize::from(flip)
 }
 
 /// How long the flame crown holds each of its two frames: whole Full beats,
