@@ -1,8 +1,8 @@
-//! Minimal DSP kernel for the procedural synth — a radix-2 FFT, brickwall
+//! Minimal DSP kernel for the procedural synth — a real-input FFT, brickwall
 //! band filters, spectral-envelope noise shaping, and a deterministic noise
-//! stream. Deliberately dependency-free: everything runs ONCE at startup to
-//! pre-render sample buffers (`synth.rs`), never per audio frame, so clarity
-//! beats throughput here.
+//! stream. Everything runs ONCE per track to pre-render sample buffers
+//! (`synth.rs`), never per audio frame. Dependency-free on purpose: the site's
+//! wasm ships this module, and an FFT crate is a download every visitor pays.
 
 /// The one sample rate every buffer in this module uses (CD-standard mono).
 pub const SAMPLE_RATE: u32 = 44_100;
@@ -37,12 +37,27 @@ impl NoiseStream {
     }
 }
 
-/// In-place iterative radix-2 FFT (Cooley–Tukey). `re`/`im` len must be a
-/// power of two. `inverse` includes the 1/n scale.
-fn fft(re: &mut [f32], im: &mut [f32], inverse: bool) {
+/// `e^(−2πik/n)` for `k` in `0..n/2` as `(cos, sin)` rows, built per transform
+/// pair and dropped: a kept table for the longest beds pins megabytes.
+type Twiddles = Vec<(f32, f32)>;
+
+/// [`Twiddles`] for `n`, in f64: a recurrence across a stage drifts by its
+/// length.
+fn twiddles(n: usize) -> Twiddles {
+    (0..n / 2)
+        .map(|k| {
+            let a = -2.0 * std::f64::consts::PI * k as f64 / n as f64;
+            (a.cos() as f32, a.sin() as f32)
+        })
+        .collect()
+}
+
+/// In-place iterative radix-2 FFT (Cooley–Tukey), unscaled. `re`/`im` len
+/// must be a power of two no longer than the table: `tw` is [`twiddles`] for
+/// a power of two at least `re.len()`.
+fn fft(re: &mut [f32], im: &mut [f32], tw: &[(f32, f32)], inverse: bool) {
     let n = re.len();
-    debug_assert!(n.is_power_of_two() && im.len() == n);
-    // bit-reversal permutation
+    debug_assert!(n.is_power_of_two() && im.len() == n && 2 * tw.len() >= n);
     let mut j = 0usize;
     for i in 1..n {
         let mut bit = n >> 1;
@@ -56,50 +71,115 @@ fn fft(re: &mut [f32], im: &mut [f32], inverse: bool) {
             im.swap(i, j);
         }
     }
-    let sign = if inverse { 1.0f64 } else { -1.0f64 };
+    let sign = if inverse { -1.0f32 } else { 1.0 };
     let mut len = 2;
-    while len <= n {
-        let ang = sign * 2.0 * std::f64::consts::PI / len as f64;
-        let (wr, wi) = (ang.cos() as f32, ang.sin() as f32);
-        for start in (0..n).step_by(len) {
-            let (mut cr, mut ci) = (1.0f32, 0.0f32);
-            for k in 0..len / 2 {
-                let (ur, ui) = (re[start + k], im[start + k]);
-                let (vr0, vi0) = (re[start + k + len / 2], im[start + k + len / 2]);
-                let vr = vr0 * cr - vi0 * ci;
-                let vi = vr0 * ci + vi0 * cr;
-                re[start + k] = ur + vr;
-                im[start + k] = ui + vi;
-                re[start + k + len / 2] = ur - vr;
-                im[start + k + len / 2] = ui - vi;
-                let ncr = cr * wr - ci * wi;
-                ci = cr * wi + ci * wr;
-                cr = ncr;
+    // Two radix-2 stages per pass where two remain (radix-2²): half the passes
+    // over a buffer that outgrows the cache, and the second stage's odd
+    // twiddles are the even ones turned a quarter.
+    while 2 * len <= n {
+        let h = len / 2;
+        let (step1, step2) = (2 * tw.len() / len, tw.len() / len);
+        for (re, im) in re
+            .chunks_exact_mut(2 * len)
+            .zip(im.chunks_exact_mut(2 * len))
+        {
+            for k in 0..h {
+                let (w1r, w1i) = tw[k * step1];
+                let (w2r, w2i) = tw[k * step2];
+                let (w1i, w2i) = (sign * w1i, sign * w2i);
+                let [i0, i1, i2, i3] = [k, k + h, k + 2 * h, k + 3 * h];
+                let (t1r, t1i) = (re[i1] * w1r - im[i1] * w1i, re[i1] * w1i + im[i1] * w1r);
+                let (t3r, t3i) = (re[i3] * w1r - im[i3] * w1i, re[i3] * w1i + im[i3] * w1r);
+                let (y0r, y0i) = (re[i0] + t1r, im[i0] + t1i);
+                let (y1r, y1i) = (re[i0] - t1r, im[i0] - t1i);
+                let (y2r, y2i) = (re[i2] + t3r, im[i2] + t3i);
+                let (y3r, y3i) = (re[i2] - t3r, im[i2] - t3i);
+                let (u2r, u2i) = (y2r * w2r - y2i * w2i, y2r * w2i + y2i * w2r);
+                // w2 · e^(∓iπ/2): the twiddle `h` further along the stage
+                let (u3r, u3i) = {
+                    let (ar, ai) = (y3r * w2r - y3i * w2i, y3r * w2i + y3i * w2r);
+                    (sign * ai, -sign * ar)
+                };
+                (re[i0], im[i0]) = (y0r + u2r, y0i + u2i);
+                (re[i2], im[i2]) = (y0r - u2r, y0i - u2i);
+                (re[i1], im[i1]) = (y1r + u3r, y1i + u3i);
+                (re[i3], im[i3]) = (y1r - u3r, y1i - u3i);
             }
         }
-        len <<= 1;
+        len <<= 2;
     }
-    if inverse {
-        let scale = 1.0 / n as f32;
-        for v in re.iter_mut() {
-            *v *= scale;
-        }
-        for v in im.iter_mut() {
-            *v *= scale;
+    if len <= n {
+        let half = len / 2;
+        let step = 2 * tw.len() / len;
+        for (re, im) in re.chunks_exact_mut(len).zip(im.chunks_exact_mut(len)) {
+            let (ur, vr) = re.split_at_mut(half);
+            let (ui, vi) = im.split_at_mut(half);
+            let w = tw.iter().step_by(step);
+            for ((((ur, ui), vr), vi), &(wr, wi)) in ur.iter_mut().zip(ui).zip(vr).zip(vi).zip(w) {
+                let wi = sign * wi;
+                let (tr, ti) = (*vr * wr - *vi * wi, *vr * wi + *vi * wr);
+                (*vr, *vi) = (*ur - tr, *ui - ti);
+                (*ur, *ui) = (*ur + tr, *ui + ti);
+            }
         }
     }
 }
 
-/// Zero-pad `buf` to a power-of-two length, forward-FFT it, and return
-/// `(re, im, n, hz_per_bin)`.
-fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, usize, f32) {
+/// Bins `0..=n/2` of the spectrum of `buf` zero-padded to `n`, `tw` being
+/// [`twiddles`]`(n)`, through one `n/2`-point complex FFT of its even and odd
+/// samples (a real signal's spectrum is conjugate-symmetric, so the upper half
+/// is redundant).
+fn spectrum(buf: &[f32], tw: &[(f32, f32)]) -> (Vec<f32>, Vec<f32>) {
+    let m = tw.len();
+    let (mut zr, mut zi) = (vec![0.0f32; m], vec![0.0f32; m]);
+    for (k, pair) in buf.chunks(2).enumerate() {
+        zr[k] = pair[0];
+        zi[k] = pair.get(1).copied().unwrap_or(0.0);
+    }
+    fft(&mut zr, &mut zi, tw, false);
+    let (mut xr, mut xi) = (vec![0.0f32; m + 1], vec![0.0f32; m + 1]);
+    for k in 0..=m {
+        let (ar, ai) = (zr[k % m], zi[k % m]);
+        let (br, bi) = (zr[(m - k) % m], -zi[(m - k) % m]);
+        // the even samples' spectrum, and the odd samples'
+        let (er, ei) = (f32::midpoint(ar, br), f32::midpoint(ai, bi));
+        let (or, oi) = ((ai - bi) * 0.5, (br - ar) * 0.5);
+        let (wr, wi) = tw.get(k).copied().unwrap_or((-1.0, 0.0));
+        xr[k] = er + wr * or - wi * oi;
+        xi[k] = ei + wr * oi + wi * or;
+    }
+    (xr, xi)
+}
+
+/// The `n`-sample real signal whose bins `0..=n/2` are `xr`/`xi`, `tw` being
+/// [`twiddles`]`(n)`: [`spectrum`] inverted, scaled back to its input.
+fn signal(xr: &[f32], xi: &[f32], tw: &[(f32, f32)]) -> Vec<f32> {
+    let m = tw.len();
+    let (mut zr, mut zi) = (vec![0.0f32; m], vec![0.0f32; m]);
+    for k in 0..m {
+        let (ar, ai) = (xr[k], xi[k]);
+        let (br, bi) = (xr[m - k], -xi[m - k]);
+        let (er, ei) = (f32::midpoint(ar, br), f32::midpoint(ai, bi));
+        let (dr, di) = ((ar - br) * 0.5, (ai - bi) * 0.5);
+        let (wr, wi) = tw[k];
+        let (or, oi) = (dr * wr + di * wi, di * wr - dr * wi);
+        (zr[k], zi[k]) = (er - oi, ei + or);
+    }
+    fft(&mut zr, &mut zi, tw, true);
+    let scale = 1.0 / m as f32;
+    zr.iter()
+        .zip(&zi)
+        .flat_map(|(&e, &o)| [e * scale, o * scale])
+        .collect()
+}
+
+/// `buf`'s half spectrum at the next power of two, with the twiddles it was
+/// taken with (half that length) for the [`signal`] back, and the bin width.
+fn forward_spectrum(buf: &[f32]) -> (Vec<f32>, Vec<f32>, Twiddles, f32) {
     let n = buf.len().next_power_of_two().max(2);
-    let mut re = vec![0.0f32; n];
-    re[..buf.len()].copy_from_slice(buf);
-    let mut im = vec![0.0f32; n];
-    fft(&mut re, &mut im, false);
-    let hz_per_bin = SAMPLE_RATE as f32 / n as f32;
-    (re, im, n, hz_per_bin)
+    let tw = twiddles(n);
+    let (re, im) = spectrum(buf, &tw);
+    (re, im, tw, SAMPLE_RATE as f32 / n as f32)
 }
 
 /// Mirror-aware frequency of FFT bin `k` in an `n`-point spectrum: bins above
@@ -113,7 +193,8 @@ fn bin_freq(k: usize, n: usize, hz_per_bin: f32) -> f32 {
 /// linear-phase FIR would be overkill for pre-rendered assets. Keeps
 /// `buf.len()` (internally pads to a power of 2).
 pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
-    let (mut re, mut im, n, hz_per_bin) = forward_spectrum(buf);
+    let (mut re, mut im, tw, hz_per_bin) = forward_spectrum(buf);
+    let n = 2 * tw.len();
     for (k, (r, i)) in re.iter_mut().zip(&mut im).enumerate() {
         let f = bin_freq(k, n, hz_per_bin);
         if f < lo_hz || f > hi_hz {
@@ -121,9 +202,9 @@ pub fn bandpass(buf: &[f32], lo_hz: f32, hi_hz: f32) -> Vec<f32> {
             *i = 0.0;
         }
     }
-    fft(&mut re, &mut im, true);
-    re.truncate(buf.len());
-    re
+    let mut out = signal(&re, &im, &tw);
+    out.truncate(buf.len());
+    out
 }
 
 pub fn lowpass(buf: &[f32], cutoff_hz: f32) -> Vec<f32> {
@@ -181,9 +262,9 @@ pub fn shaped_noise_loop(
         n_pow2.is_power_of_two(),
         "a noise loop is a power-of-two block"
     );
-    let mut re: Vec<f32> = (0..n_pow2).map(|_| rng.norm()).collect();
-    let mut im = vec![0.0f32; n_pow2];
-    fft(&mut re, &mut im, false);
+    let noise: Vec<f32> = (0..n_pow2).map(|_| rng.norm()).collect();
+    let tw = twiddles(n_pow2);
+    let (mut re, mut im) = spectrum(&noise, &tw);
     let hz_per_bin = SAMPLE_RATE as f32 / n_pow2 as f32;
     // per-bin amplitude gain: sqrt(band power share / band bin count)
     let mut gain = vec![0.0f32; n_pow2];
@@ -203,10 +284,10 @@ pub fn shaped_noise_loop(
         *r *= s;
         *i *= s;
     }
-    fft(&mut re, &mut im, true);
-    let peak = re.iter().fold(0.0f32, |a, &v| a.max(v.abs())).max(1e-9);
-    re.iter_mut().for_each(|v| *v /= peak);
-    re
+    let mut out = signal(&re, &im, &tw);
+    let peak = out.iter().fold(0.0f32, |a, &v| a.max(v.abs())).max(1e-9);
+    out.iter_mut().for_each(|v| *v /= peak);
+    out
 }
 
 fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
@@ -239,9 +320,9 @@ fn moving_average(x: &[f32], window: usize) -> Vec<f32> {
 /// items are invisible cross-crate, and the binary's `run_loop` composition test
 /// reads this (as the web driver's tests will).
 pub fn centroid_hz(buf: &[f32]) -> f32 {
-    let (re, im, n, hz_per_bin) = forward_spectrum(buf);
+    let (re, im, _, hz_per_bin) = forward_spectrum(buf);
     let (mut num, mut den) = (0.0f64, 0.0f64);
-    for (k, (r, i)) in re.iter().zip(&im).take(n / 2 + 1).enumerate() {
+    for (k, (r, i)) in re.iter().zip(&im).enumerate() {
         let p = f64::from(r * r + i * i);
         num += k as f64 * f64::from(hz_per_bin) * p;
         den += p;
@@ -252,9 +333,9 @@ pub fn centroid_hz(buf: &[f32]) -> f32 {
 /// Fraction of spectral power inside `[lo_hz, hi_hz)`.
 #[cfg(test)]
 pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
-    let (re, im, n, hz_per_bin) = forward_spectrum(buf);
+    let (re, im, tw, hz_per_bin) = forward_spectrum(buf);
     let (mut band, mut total) = (0.0f64, 0.0f64);
-    for k in 1..=n / 2 {
+    for k in 1..=tw.len() {
         let p = f64::from(re[k] * re[k] + im[k] * im[k]);
         let f = k as f32 * hz_per_bin;
         total += p;
@@ -273,12 +354,43 @@ mod tests {
     fn fft_round_trips() {
         let mut rng = NoiseStream::new(1);
         let orig: Vec<f32> = (0..256).map(|_| rng.norm()).collect();
-        let mut re = orig.clone();
-        let mut im = vec![0.0f32; 256];
-        fft(&mut re, &mut im, false);
-        fft(&mut re, &mut im, true);
-        for (a, b) in orig.iter().zip(&re) {
+        let tw = twiddles(256);
+        let (re, im) = spectrum(&orig, &tw);
+        for (a, b) in orig.iter().zip(&signal(&re, &im, &tw)) {
             assert!((a - b).abs() < 1e-4, "{a} vs {b}");
+        }
+    }
+
+    /// Every power of two, odd and even exponents alike (the radix-2² passes
+    /// end on a lone radix-2 stage only for the odd ones), against the DFT's
+    /// own sum.
+    #[test]
+    fn the_spectrum_is_the_direct_dft_at_every_length() {
+        for n in (1..=10).map(|e| 1usize << e) {
+            let mut rng = NoiseStream::new(n as u64);
+            let x: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
+            let tw = twiddles(n);
+            let (re, im) = spectrum(&x, &tw);
+            for k in 0..=n / 2 {
+                let (mut dr, mut di) = (0.0f64, 0.0f64);
+                for (t, &v) in x.iter().enumerate() {
+                    let a = -2.0 * std::f64::consts::PI * (k * t) as f64 / n as f64;
+                    dr += f64::from(v) * a.cos();
+                    di += f64::from(v) * a.sin();
+                }
+                let tol = 1e-3 * (n as f64).sqrt();
+                assert!(
+                    (f64::from(re[k]) - dr).abs() < tol && (f64::from(im[k]) - di).abs() < tol,
+                    "n {n} bin {k}: ({}, {}) vs ({dr}, {di})",
+                    re[k],
+                    im[k]
+                );
+            }
+            let back = signal(&re, &im, &tw);
+            assert!(
+                x.iter().zip(&back).all(|(a, b)| (a - b).abs() < 1e-4),
+                "n {n} round trip"
+            );
         }
     }
 

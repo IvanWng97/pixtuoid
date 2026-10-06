@@ -16,8 +16,11 @@ use pixtuoid_core::source::jsonl::{JsonlWatcher, ProbeSnapshot, force_polling_ba
 /// Idempotent / set-once. Call at the top of any test that drives a real
 /// `JsonlWatcher`/`Source::run`.
 fn fast_watch() {
-    force_polling_backend_for_tests(Duration::from_millis(25));
+    force_polling_backend_for_tests(POLL);
 }
+
+/// [`fast_watch`]'s scan period.
+const POLL: Duration = Duration::from_millis(25);
 
 /// A HEALTHY probe snapshot vouching exactly `ids`, each bound to this live
 /// process's pid — a placeholder that can never spuriously instant-exit. The
