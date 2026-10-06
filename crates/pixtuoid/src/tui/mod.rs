@@ -521,7 +521,7 @@ fn unwind_after<W: std::io::Write>(
 /// # Errors
 ///
 /// If restoring the terminal modes or showing the cursor fails.
-pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+pub(crate) fn teardown_terminal(term: &mut Term) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
     let cursor = term.show_cursor();
