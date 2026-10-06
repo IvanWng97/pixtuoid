@@ -303,11 +303,12 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// The hasher every display fingerprint is taken with. Seeded alike on every
-/// call, so one frame built twice hashes alike (`one_frame_builds_one_list`);
-/// foldhash's quality hasher, not std's SipHash, which bought HashDoS
-/// resistance a frame-to-frame comparison never needs at most of compose's
-/// time (perf-book "Hashing").
+/// The hasher every display fingerprint is taken with, seeded alike on every
+/// call so one frame built twice hashes alike (`one_frame_builds_one_list`).
+/// foldhash's quality hasher, not std's SipHash: a fingerprint only tells this
+/// frame's piece from the last frame's in one process, so HashDoS resistance
+/// buys it nothing (perf-book "Hashing"); and not foldhash's `fast`, since a
+/// collision is a missed repaint.
 pub(crate) fn fingerprint_hasher() -> impl std::hash::Hasher {
     use std::hash::BuildHasher;
     foldhash::quality::FixedState::with_seed(0).build_hasher()
