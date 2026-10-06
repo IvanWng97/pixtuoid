@@ -1072,6 +1072,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             protocol,
             cell,
             tmux,
+            medium,
             ..
         } => {
             renderer.painted_by(jank::Painter {
@@ -1081,13 +1082,10 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
                 terminal,
                 sync: out.synchronized(),
             });
-            renderer.set_cutaway(cutaway::TileCutaway::new(
-                fit,
-                cell,
-                protocol,
-                tmux,
-                Box::new(out.clone()),
-            ));
+            renderer.set_cutaway(
+                cutaway::TileCutaway::new(fit, cell, protocol, tmux, Box::new(out.clone()))
+                    .through(medium),
+            );
         }
         _ => {
             renderer.painted_by(jank::Painter {
