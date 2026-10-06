@@ -456,7 +456,7 @@ pub type Term = Terminal<CrosstermBackend<Stdout>>;
 /// # Errors
 ///
 /// If the Windows console lacks VT support, or enabling raw mode, the alternate screen or mouse capture fails, or the terminal size query fails.
-pub fn setup_terminal() -> Result<Term> {
+pub(crate) fn setup_terminal(_armed: &QuitArms) -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
     #[cfg(windows)]
@@ -870,15 +870,36 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
     }
 }
 
+/// A boxed `select!` quit arm.
+type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+
+/// Both quit arms, their handlers installed: [`setup_terminal`] takes them, so no
+/// SIGINT or SIGTERM can land between the alt-screen going up and the loop
+/// listening for it.
+pub(crate) struct QuitArms {
+    ctrl_c: QuitArm<std::io::Result<()>>,
+    terminate: QuitArm<()>,
+}
+
+impl QuitArms {
+    pub(crate) fn arm() -> Self {
+        Self {
+            ctrl_c: pin_ctrl_c(),
+            #[cfg(unix)]
+            terminate: Box::pin(terminate_signal()),
+            #[cfg(not(unix))]
+            terminate: Box::pin(std::future::pending()),
+        }
+    }
+}
+
 /// The SIGINT arm, pinned ONCE outside the frame loop: a per-iteration `ctrl_c()` drops the
 /// subscription mid-gap, and an external SIGINT would then hit the default disposition and
 /// kill the process mid-altscreen with mouse reporting still on, leaving the shell unusable
 /// until `reset`. BOXED so a registration failure can disarm the arm by swapping in a
 /// pending future — a resolved future must never be polled again. On unix the handler is
-/// installed at the call, not the first poll as `tokio::signal::ctrl_c` does, so a caller
-/// can arm it before the alt-screen goes up.
-fn pin_ctrl_c() -> std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>
-{
+/// installed at the call, not the first poll as `tokio::signal::ctrl_c` does.
+fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
     #[cfg(unix)]
     {
         let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
@@ -971,14 +992,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
-    // Both quit arms armed before the alt-screen goes up: a signal in between
-    // would otherwise kill the process with it still on.
-    let mut ctrl_c = pin_ctrl_c();
-    #[cfg(unix)]
-    let terminate = terminate_signal();
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    let term = setup_terminal()?;
+    let arms = QuitArms::arm();
+    let term = setup_terminal(&arms)?;
+    let QuitArms {
+        mut ctrl_c,
+        mut terminate,
+    } = arms;
     let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
     paint_plan(&mut renderer, plan);
@@ -1007,7 +1026,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     let tick = frame_tick();
     let result: Result<()> = (async {
-        tokio::pin!(terminate);
         let mut frames = frame_clock(tick);
         let mut events = EventStream::new();
         let mut snapshot = scene_rx.borrow().clone();
@@ -1296,14 +1314,13 @@ mod teardown_tests {
     }
 }
 
-/// Both quit arms catch a signal raised after they are made and before they
-/// are first polled — the window `run_tui` arms them across.
+/// Armed quit arms catch a signal raised before they are first polled — the
+/// window between [`setup_terminal`](super::setup_terminal) and the loop.
 #[cfg(all(test, unix))]
 mod quit_arms {
     #[tokio::test]
     async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
-        let ctrl_c = super::pin_ctrl_c();
-        let terminate = super::terminate_signal();
+        let super::QuitArms { ctrl_c, terminate } = super::QuitArms::arm();
         // SAFETY: raising a signal this process handles from here on.
         unsafe {
             libc::raise(libc::SIGINT);
