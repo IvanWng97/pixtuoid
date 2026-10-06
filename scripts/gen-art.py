@@ -30,6 +30,7 @@ import random
 import sys
 import tempfile
 import tomllib
+from typing import NamedTuple
 
 S = 4  # the cutaway art's density
 
@@ -1074,31 +1075,83 @@ def elbows_typing(frame):
     return draw
 
 
-def legs(g, dy, stride, view):
-    """Hips, two legs and shoes: the stepping foot reaches the canvas foot a
-    little outward, the other lifts its heel."""
+# ---- the walk -------------------------------------------------------------------
+# One gait drives both densities, each drawn in its own figure's proportions: the
+# pets' 4x was drawn to scale down to their 1x, the people's chibi was not, so the
+# table is shared and the shapes are per density.
+class Foot(NamedTuple):
+    lift: int  # art pixels clear of the ground
+    out: int  # pixels stepped outward
+    toe: bool  # heel up, standing on its toe
+
+
+PLANT, LEAD, HEEL = Foot(0, 0, False), Foot(0, 1, False), Foot(1, 0, True)
+
+
+def swinging(lift):
+    return Foot(lift, 0, False)
+
+
+class Step(NamedTuple):
+    phase: str
+    bob: int  # art rows the body sinks
+    west: Foot
+    east: Foot
+    swing: int  # the west hand's, forward positive; the east hand swings opposite
+
+
+# The struck foot holds the ground through the next three frames while the other
+# swings past it, so no foot slides back while it is planted.
+WALK_CYCLE = [
+    Step("the east foot strikes, the west trails on its toe", 1, HEEL, LEAD, 2),
+    Step("the west foot lifts", 0, swinging(1), PLANT, 1),
+    Step("the west foot passes", 0, swinging(2), PLANT, 0),
+    Step("the west foot reaches", 0, swinging(1), PLANT, -1),
+    Step("the west foot strikes, the east trails on its toe", 1, LEAD, HEEL, -2),
+    Step("the east foot lifts", 0, PLANT, swinging(1), -1),
+    Step("the east foot passes", 0, PLANT, swinging(2), 0),
+    Step("the east foot reaches", 0, PLANT, swinging(1), 1),
+]
+STAND = Step("standing", 0, PLANT, PLANT, 0)
+
+
+def legs(g, dy, step, view):
+    """Hips, two legs and shoes: a lifted foot rides up its leg with the ground
+    showing under it, the leading foot plants a pixel outward, a heel-up foot
+    shows only its toe (front) or its sole (back)."""
     rect(g, 8, BELT_Y + dy, 24, BELT_Y + 2 + dy, PANTS)
-    for side, x0 in ((-1, 8), (1, 17)):
-        out = stride == side
-        foot = STANDING_ROWS * S - (2 if stride != 0 and not out else 0)
-        dx = side if out else 0
-        rect(g, x0 + dx, BELT_Y + 2 + dy, x0 + 7 + dx, foot - 3 + dy, PANTS)
-        rect(g, x0 + 5 + dx, BELT_Y + dy, x0 + 7 + dx, foot - 3 + dy, PANTS_SH)
-        rect(g, x0 - 1 + dx, foot - 3 + dy, x0 + 7 + dx, foot + dy, SHOE)
+    for (side, x0), foot in zip(((-1, 8), (1, 17)), (step.west, step.east)):
+        x0 += side * foot.out
+        ground = STANDING_ROWS * S - foot.lift
+        top = ground - (2 if foot.toe else 3)
+        rect(g, x0, BELT_Y + 2 + dy, x0 + 7, top, PANTS)
+        rect(g, x0 + 5, BELT_Y + dy, x0 + 7, top, PANTS_SH)
+        rect(g, x0 - 1, top, x0 + 7, ground, SHOE)
         if view == "front":
-            rect(g, x0 + dx, foot - 3 + dy, x0 + 6 + dx, foot - 2 + dy, SHOE_HI)
+            rect(g, x0, top, x0 + 6, top + 1, SHOE_HI)
+        elif foot.toe:
+            rect(g, x0, ground - 1, x0 + 6, ground, SHOE_HI)
 
 
-def arms_hanging(g, dy, stride):
-    """Sleeves down the sides; a walker's arms swing against their legs, so the
-    forward hand hangs lower."""
-    for side, x0 in ((-1, 4), (1, 24)):
-        drop = 0 if stride == 0 else (2 if side != stride else -1)
+def arms_swinging(g, dy, swing, mug_east=False):
+    """Sleeves down the sides; a hand swinging forward hangs lower and comes a
+    pixel in toward the body, one swinging back rises and goes a pixel out. A
+    mug held east keeps that arm still."""
+    for (side, x0), sw in zip(((-1, 4), (1, 24)), (swing, -swing)):
+        if side > 0 and mug_east:
+            continue
+        x0 -= side * ((sw > 0) - (sw < 0))
         rect(g, x0 + (1 if side < 0 else 0), SHOULDER_Y + 2 + dy, x0 + (4 if side < 0 else 3),
-             CUFF_Y + drop + dy, SHIRT if side < 0 else SHIRT_SH)
+             CUFF_Y + sw + dy,
+             SHIRT if side < 0 else SHIRT_SH)
         if side < 0:
-            rect(g, x0 + 1, SHOULDER_Y + 2 + dy, x0 + 2, CUFF_Y + drop + dy, SHIRT_LT)
-        mitt(g, x0, CUFF_Y + drop + dy)
+            rect(g, x0 + 1, SHOULDER_Y + 2 + dy, x0 + 2, CUFF_Y + sw + dy, SHIRT_LT)
+        mitt(g, x0, CUFF_Y + sw + dy)
+    if mug_east:
+        rect(g, 24, SHOULDER_Y + 2 + dy, 27, 32 + dy, SHIRT_SH)
+        rect(g, 21, 29 + dy, 26, 33 + dy, SHIRT_SH)
+        mug(g, 16, 27 + dy)
+        mitt(g, 21, 29 + dy)
 
 
 def mug(g, x, y):
@@ -1112,7 +1165,7 @@ def mug(g, x, y):
         g[y + sy][x + sx] = OFFWHITE
 
 
-def arms_mug_both(g, dy, stride):
+def arms_mug_both(g, dy):
     for x0 in (5, 25):  # upper arms bent in at the elbow
         rect(g, x0, SHOULDER_Y + 2 + dy, x0 + 3, 32 + dy, SHIRT if x0 < 16 else SHIRT_SH)
     rect(g, 7, 31 + dy, 12, 35 + dy, SHIRT)
@@ -1120,17 +1173,6 @@ def arms_mug_both(g, dy, stride):
     mug(g, 13, 29 + dy)
     mitt(g, 10, 31 + dy)
     mitt(g, 19, 31 + dy)
-
-
-def arms_mug_east(g, dy, stride):
-    drop = 2 if stride == 1 else -1
-    rect(g, 5, SHOULDER_Y + 2 + dy, 8, CUFF_Y + drop + dy, SHIRT)
-    rect(g, 5, SHOULDER_Y + 2 + dy, 6, CUFF_Y + drop + dy, SHIRT_LT)
-    mitt(g, 4, CUFF_Y + drop + dy)
-    rect(g, 24, SHOULDER_Y + 2 + dy, 27, 32 + dy, SHIRT_SH)
-    rect(g, 21, 29 + dy, 26, 33 + dy, SHIRT_SH)
-    mug(g, 16, 27 + dy)
-    mitt(g, 21, 29 + dy)
 
 
 def side_body(g, dy):
@@ -1179,10 +1221,17 @@ def seated_rear(hands):
     return lambda g, dy: (shirt(g, dy, SEAT_Y, back=True), hands(g, dy))
 
 
-def standing_body(stride, view, arms=arms_hanging):
-    return lambda g, dy: (legs(g, dy, stride, view),
-                          shirt(g, dy, BELT_Y, back=view == "back", sleeves=False),
-                          arms(g, dy, stride))
+def standing_body(view, step=STAND, arms=None, mug_east=False):
+    """On its feet at `step` of the gait, its arms swinging with it unless `arms`
+    holds them."""
+    def draw(g, dy):
+        legs(g, dy, step, view)
+        shirt(g, dy, BELT_Y, back=view == "back", sleeves=False)
+        if arms:
+            arms(g, dy)
+        else:
+            arms_swinging(g, dy, step.swing, mug_east)
+    return draw
 
 
 def couch_back(g, dy):
@@ -1209,22 +1258,10 @@ POSES = {
         "Back view, typing, frame 1."),
     "back_couch": (COUCH_ROWS, "back", couch_back,
         "On the couch, facing the windows: shoulders square over the seat back."),
-    "standing": (STANDING_ROWS, "front", standing_body(0, "front"),
+    "standing": (STANDING_ROWS, "front", standing_body("front"),
         "Standing: arms at the sides."),
-    "walking_0": (STANDING_ROWS, "front", standing_body(-1, "front"),
-        "Walking, frame 0: the west foot out."),
-    "walking_1": (STANDING_ROWS, "front", standing_body(1, "front"),
-        "Walking, frame 1: the east foot out."),
-    "walking_back_0": (STANDING_ROWS, "back", standing_body(-1, "back"),
-        "Walking away, frame 0."),
-    "walking_back_1": (STANDING_ROWS, "back", standing_body(1, "back"),
-        "Walking away, frame 1."),
-    "holding_coffee": (STANDING_ROWS, "front", standing_body(0, "front", arms_mug_both),
+    "holding_coffee": (STANDING_ROWS, "front", standing_body("front", arms=arms_mug_both),
         "Standing with a steaming mug in both hands."),
-    "walking_coffee_0": (STANDING_ROWS, "front", standing_body(-1, "front", arms_mug_east),
-        "Walking with a mug, frame 0."),
-    "walking_coffee_1": (STANDING_ROWS, "front", standing_body(1, "front", arms_mug_east),
-        "Walking with a mug, frame 1."),
     "side_seated": (SEATED_ROWS, "side", lambda g, dy: side_body(g, dy),
         "Seated in profile, facing east, one arm reaching forward."),
     "seated_sleeping": (SEATED_ROWS, "crown", lambda g, dy: asleep_body(g, dy, 0),
@@ -1232,6 +1269,118 @@ POSES = {
     "seated_sleeping_alt": (SEATED_ROWS, "crown", lambda g, dy: asleep_body(g, dy, 3),
         "Dozed off, slumped east."),
 }
+# The walks: name -> (view, holds a mug east, title).
+WALKS = {
+    "walking": ("front", False, "Walking"),
+    "walking_back": ("back", False, "Walking away"),
+    "walking_coffee": ("front", True, "Walking with a mug"),
+}
+POSES |= {
+    f"{name}_{i}": (STANDING_ROWS, view, standing_body(view, step, mug_east=mug),
+                    f"{title}, frame {i}: {step.phase}.")
+    for name, (view, mug, title) in WALKS.items()
+    for i, step in enumerate(WALK_CYCLE)
+}
+# How far each pose's body sinks below its canvas top, its head mark with it.
+POSE_BOB = {f"{name}_{i}": step.bob for name in WALKS for i, step in enumerate(WALK_CYCLE)}
+
+
+# ---- the base art's person ----------------------------------------------------------
+def figure_1x():
+    """The base art's person, standing: shirt on top, pants below the waist, hands
+    at the arms' ends so the arms read as hanging at the sides."""
+    return master("""
+        .nHHHHn.
+        nHHHHHHn
+        HHSSSSHH
+        HSeSSeSH
+        .SSSmSS.
+        .nSSSSn.
+        .BBBBBB.
+        BBBBBBBB
+        SBBBBBBS
+        .PPPPPP.
+        .PPPPPP.
+        .P....P.
+    """)
+
+
+def back_head_1x():
+    """The base art's head from behind: hair where the face was."""
+    return master("""
+        .nHHHHn.
+        nHHHHHHn
+        HHHHHHHH
+        HHHHHHHH
+        .HHHHHH.
+        .nHHHHn.
+    """)
+
+
+def walk_1x(view, step, mug_east=False):
+    """The base art's person at `step` of the gait: the 4x walk's feet and hands
+    quantized to the 1x cell. A foot lifted half a cell or more clears the ground
+    row, the leading foot steps out a column, a hand at half a cell's swing or
+    more moves a row; the bob, a quarter cell, settles away."""
+    g = figure_1x()
+    if view == "back":
+        head = back_head_1x()
+        g[: len(head)] = head
+    ground, hands = len(g) - 1, CUFF_Y // S
+    feet = [x for x, k in enumerate(g[ground]) if k != T]
+    for (side, x), foot in zip(zip((-1, 1), feet), (step.west, step.east)):
+        if foot.lift * 2 >= S:
+            g[ground][x] = T
+        if foot.out:
+            g[ground][x + side] = PANTS
+    sides = [x for x, k in enumerate(g[hands]) if k == SKIN]
+    for (side, x), sw in zip(zip((-1, 1), sides), (step.swing, -step.swing)):
+        if (side > 0 and mug_east) or abs(sw) * 2 < S:
+            continue
+        g[hands][x] = SHIRT
+        g[hands + (1 if sw > 0 else -1)][x] = SKIN
+    if mug_east:
+        for y in (hands - 1, hands):
+            g[y][4:6] = [MUG, MUG]
+    return g
+
+
+def gait_of(pose):
+    """The step `pose`'s 4x frame draws, measured off its pixels against the
+    standing frame's: each foot's lift, outward step and toe, and the west
+    hand's swing."""
+    def feet(g):
+        found = []
+        for half in (range(FIG_W // 2), range(FIG_W // 2, FIG_W)):
+            shoe = [(x, y) for y, row in enumerate(g) for x in half if row[x] in (SHOE, SHOE_HI)]
+            found.append((max(y for _, y in shoe), min(y for _, y in shoe),
+                          min(x for x, _ in shoe), max(x for x, _ in shoe)))
+        return found
+
+    def west_hand(g):
+        return max(y for y, row in enumerate(g) for x in range(FIG_W // 4)
+                   if y > SHOULDER_Y and row[x] in (SKIN, SKIN_SH))
+
+    rest, _ = body_frame("standing")
+    g, _ = body_frame(pose)
+    measured = []
+    for side, (low, top, x0, x1), (rlow, rtop, rx0, rx1) in zip((-1, 1), feet(g), feet(rest)):
+        out = (rx0 - x0) if side < 0 else (x1 - rx1)
+        measured.append(Foot(rlow - low, out, (low - top) < (rlow - rtop)))
+    swing = west_hand(g) - west_hand(rest) - POSE_BOB.get(pose, 0)
+    return Step("measured", POSE_BOB.get(pose, 0), measured[0], measured[1], swing)
+
+
+def check_walks():
+    """Every walk's 1x frame shows what its 4x frame draws, quantized: the two
+    densities share the gait, so neither may be drawn off it."""
+    for name, (view, mug, _) in WALKS.items():
+        for i, step in enumerate(WALK_CYCLE):
+            drawn = gait_of(f"{name}_{i}")
+            require(walk_1x(view, drawn, mug) == walk_1x(view, step, mug),
+                    f"{name}_{i}: its 4x draws {drawn}, not {step}")
+
+
 # Where a face-down head lies, as an offset from the crown's rest.
 CROWN_SHIFT = {"seated_sleeping": (0, 0), "seated_sleeping_alt": (1, 1)}
 
@@ -1260,10 +1409,11 @@ def body_frame(pose):
     g = canvas(FIG_W, rows * S)
     # The head, then the body in front of it: a collar over the neck, a raised
     # mug and its steam over the chin.
-    bald_head(view, g, 0)
-    body(g, 0)
+    bob = POSE_BOB.get(pose, 0)
+    bald_head(view, g, bob)
+    body(g, bob)
     dx, dy = CROWN_SHIFT.get(pose, (0, 0))
-    return g, (view, HEAD_MARK[0] + dx, HEAD_MARK[1] + dy)
+    return g, (view, HEAD_MARK[0] + dx, HEAD_MARK[1] + dy + bob)
 
 
 def finished(lyr, skin, cover):
@@ -4864,6 +5014,15 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + LIFT)],
                     )
+    check_walks()
+    sprites["standing.sprite"] = render_sprite(figure_1x.__doc__, [figure_1x()])
+    for name, (view, mug, title) in WALKS.items():
+        for i, step in enumerate(WALK_CYCLE):
+            sprites[f"{name}_{i}.sprite"] = render_sprite(
+                f"{title}, frame {i}: {step.phase}. "
+                "The base art's person (`standing`) at this step.",
+                [walk_1x(view, step, mug)],
+            )
     classic_marks = {
         "desk": desk_marks_1x("desk"),
         "desk_north": desk_marks_1x("desk_north"),
