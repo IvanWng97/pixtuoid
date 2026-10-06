@@ -587,7 +587,7 @@ impl<W: std::io::Write> std::io::Write for FrameOut<W> {
 /// # Errors
 ///
 /// If the Windows console lacks VT support, or enabling raw mode, the alternate screen or mouse capture fails, or the terminal size query fails.
-pub fn setup_terminal(out: FrameOut) -> Result<Term> {
+pub(crate) fn setup_terminal(out: FrameOut, _armed: &QuitArms) -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
     #[cfg(windows)]
@@ -652,7 +652,7 @@ fn unwind_after<W: std::io::Write>(
 /// # Errors
 ///
 /// If restoring the terminal modes or showing the cursor fails.
-pub fn teardown_terminal(term: &mut Term) -> Result<()> {
+pub(crate) fn teardown_terminal(term: &mut Term) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
     let cursor = term.show_cursor();
@@ -1001,13 +1001,45 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
     }
 }
 
+/// A boxed `select!` quit arm.
+type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+
+/// Both quit arms, their handlers installed: [`setup_terminal`] takes them, so no
+/// SIGINT or SIGTERM can land between the alt-screen going up and the loop
+/// listening for it.
+pub(crate) struct QuitArms {
+    ctrl_c: QuitArm<std::io::Result<()>>,
+    terminate: QuitArm<()>,
+}
+
+impl QuitArms {
+    pub(crate) fn arm() -> Self {
+        Self {
+            ctrl_c: pin_ctrl_c(),
+            #[cfg(unix)]
+            terminate: Box::pin(terminate_signal()),
+            #[cfg(not(unix))]
+            terminate: Box::pin(std::future::pending()),
+        }
+    }
+}
+
 /// The SIGINT arm, pinned ONCE outside the frame loop: a per-iteration `ctrl_c()` drops the
 /// subscription mid-gap, and an external SIGINT would then hit the default disposition and
 /// kill the process mid-altscreen with mouse reporting still on, leaving the shell unusable
 /// until `reset`. BOXED so a registration failure can disarm the arm by swapping in a
-/// pending future — a resolved future must never be polled again.
-fn pin_ctrl_c() -> std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>
-{
+/// pending future — a resolved future must never be polled again. On unix the handler is
+/// installed at the call, not the first poll as `tokio::signal::ctrl_c` does.
+fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
+    #[cfg(unix)]
+    {
+        let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
+        Box::pin(async move {
+            sig?.recv().await;
+            Ok(())
+        })
+    }
+    #[cfg(not(unix))]
     Box::pin(tokio::signal::ctrl_c())
 }
 
@@ -1109,13 +1141,18 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
+    let arms = QuitArms::arm();
     // Asked before raw mode is on: the query takes the terminal's own for
     // its reply.
     let out = FrameOut::new(
         stdout(),
         crate::term::query_sync_output(crate::term::TRUECOLOR_PROBE_TIMEOUT),
     );
-    let term = setup_terminal(out.clone())?;
+    let term = setup_terminal(out.clone(), &arms)?;
+    let QuitArms {
+        mut ctrl_c,
+        mut terminate,
+    } = arms;
     let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
     paint_plan(&mut renderer, plan, &out);
@@ -1147,12 +1184,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let tick = frame_tick();
     renderer.scheduled_every(tick);
     let result: Result<()> = (async {
-        let mut ctrl_c = pin_ctrl_c();
-        #[cfg(unix)]
-        let terminate = terminate_signal();
-        #[cfg(not(unix))]
-        let terminate = std::future::pending::<()>();
-        tokio::pin!(terminate);
         let mut frames = frame_clock(tick);
         let mut events = EventStream::new();
         let mut snapshot = scene_rx.borrow().clone();
@@ -1511,6 +1542,23 @@ mod teardown_tests {
             err.to_string().contains("terminal gone"),
             "the first failure is reported, got: {err:#}"
         );
+    }
+}
+
+/// Armed quit arms catch a signal raised before they are first polled — the
+/// window between [`setup_terminal`](super::setup_terminal) and the loop.
+#[cfg(all(test, unix))]
+mod quit_arms {
+    #[tokio::test]
+    async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
+        let super::QuitArms { ctrl_c, terminate } = super::QuitArms::arm();
+        // SAFETY: raising a signal this process handles from here on.
+        unsafe {
+            libc::raise(libc::SIGINT);
+            libc::raise(libc::SIGTERM);
+        }
+        ctrl_c.await.expect("the SIGINT arm resolves");
+        terminate.await;
     }
 }
 

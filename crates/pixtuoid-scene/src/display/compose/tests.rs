@@ -1608,7 +1608,12 @@ fn every_desk_follows_the_one_arrangement() {
                 "{art}'s {mark} stands in another column at {dense:?}"
             );
         }
-        let bulb = |scale| desk_bulb(desk, art, &pack, scale).expect("a bulb").x;
+        let bulb = |scale| {
+            DeskBulbCells::default()
+                .at(desk, art, &pack, scale)
+                .expect("a bulb")
+                .x
+        };
         assert_eq!(
             bulb(dense),
             bulb(RenderScale::ONE),
@@ -1627,7 +1632,8 @@ fn every_desk_follows_the_one_arrangement() {
                 .expect("a mark")
                 .x()
         };
-        let bulb = desk_bulb(desk, art, &pack, RenderScale::ONE)
+        let bulb = DeskBulbCells::default()
+            .at(desk, art, &pack, RenderScale::ONE)
             .expect("a bulb")
             .x
             - desk.x;
@@ -1685,6 +1691,30 @@ fn the_cup_stands_on_the_sitters_side() {
     }
 }
 
+/// One frame's bulbs, asked art after art and back again, are each art's
+/// own: the scan a frame keeps is keyed by the art it scanned.
+#[test]
+fn a_frames_bulbs_are_each_desk_arts_own() {
+    use crate::layout::{Facing, Point};
+    let pack = test_default_pack();
+    let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let desk = Point { x: 40, y: 30 };
+    let arts = [Facing::South, Facing::North].map(crate::pack::desk_sprite_name);
+    let fresh = arts.map(|art| DeskBulbCells::default().at(desk, art, &pack, scale));
+    assert_ne!(
+        fresh[0], fresh[1],
+        "the premise: the two arts' bulbs differ"
+    );
+    let mut kept = DeskBulbCells::default();
+    for (art, want) in arts
+        .into_iter()
+        .zip(fresh)
+        .chain(arts.into_iter().zip(fresh))
+    {
+        assert_eq!(kept.at(desk, art, &pack, scale), want, "{art}");
+    }
+}
+
 /// The classic lights each desk's lamp where its 1x art draws the bulb, in
 /// either facing.
 #[test]
@@ -1701,7 +1731,7 @@ fn the_classic_lamp_pool_centres_on_the_1x_bulb() {
         };
         assert_eq!(
             Some(centre),
-            desk_bulb(desk, art, &pack, RenderScale::ONE),
+            DeskBulbCells::default().at(desk, art, &pack, RenderScale::ONE),
             "{art}'s pool is off its bulb"
         );
     }

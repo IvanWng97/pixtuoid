@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use palette::color_difference::EuclideanDistance;
@@ -626,6 +627,9 @@ impl RecolorableFrame<'_> {
 pub struct RgbBuffer {
     pixels: Grid<Rgb>,
     writes: Option<Writes>,
+    /// The columns and rows writes are kept to, if any: see
+    /// [`with_clip`](Self::with_clip).
+    clip: Option<(Range<u16>, Range<u16>)>,
 }
 
 /// A write epoch of the one buffer whose [`RgbBuffer::begin_writes`] minted it.
@@ -668,6 +672,7 @@ impl RgbBuffer {
         RgbBuffer {
             pixels: Grid::filled(width, height, fill),
             writes: None,
+            clip: None,
         }
     }
 
@@ -676,6 +681,7 @@ impl RgbBuffer {
         RgbBuffer {
             pixels: Grid::from_vec(width, height, pixels),
             writes: None,
+            clip: None,
         }
     }
 
@@ -705,21 +711,93 @@ impl RgbBuffer {
         self.pixels.as_slice()[self.checked_index(x, y)]
     }
 
-    /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
+    /// Write `rgb` at `(x, y)`, unless a [`with_clip`](Self::with_clip) keeps
+    /// it out. Debug-asserts the point is in bounds; use
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
     #[inline]
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
+        if self.clipped(x, y) {
+            return;
+        }
         let i = self.checked_index(x, y);
         self.write(i, rgb);
     }
 
-    /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
-    /// THE clip primitive for per-pixel scatter (glyphs, particles) that can't
-    /// pre-clip; the hot blit path clips its loop bounds once and keeps the
-    /// unchecked [`put`](Self::put).
+    /// Run `paint` with every write kept to `columns × rows` within any clip
+    /// already set, and the clip as it was after: Skia's `save`, `clipRect`,
+    /// `restore`. A repaint of part of the buffer runs the whole paint and
+    /// lands only there; a bulk writer goes through
+    /// [`writable_rows_mut`](Self::writable_rows_mut), never
+    /// [`as_mut_slice`](Self::as_mut_slice). A painter's mechanism, not
+    /// core's contract.
+    #[doc(hidden)]
+    pub fn with_clip<T>(
+        &mut self,
+        (columns, rows): (Range<u16>, Range<u16>),
+        paint: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let (xs, ys) = self.writable();
+        let clip = (
+            columns.start.max(xs.start)..columns.end.min(xs.end),
+            rows.start.max(ys.start)..rows.end.min(ys.end),
+        );
+        let was = self.clip.replace(clip);
+        let painted = paint(self);
+        self.clip = was;
+        painted
+    }
+
+    /// Each writable row as `(y, its first writable column, its writable
+    /// pixels)`: a bulk write that keeps to the clip by construction.
+    #[doc(hidden)]
+    pub fn writable_rows_mut(&mut self) -> impl Iterator<Item = (u16, u16, &mut [Rgb])> {
+        let (xs, ys) = self.writable();
+        if let Some(w) = &mut self.writes {
+            w.note_all();
+        }
+        let width = usize::from(self.pixels.width).max(1);
+        self.pixels
+            .as_mut_slice()
+            .chunks_mut(width)
+            .zip(0u16..)
+            .skip(usize::from(ys.start))
+            .take(usize::from(ys.end.saturating_sub(ys.start)))
+            .map(move |(row, y)| {
+                let run = row
+                    .get_mut(usize::from(xs.start)..usize::from(xs.end))
+                    .unwrap_or_default();
+                (y, xs.start, run)
+            })
+    }
+
+    /// The columns and rows a write may land in: the clip, within the buffer.
+    #[doc(hidden)]
+    pub fn writable(&self) -> (Range<u16>, Range<u16>) {
+        let (w, h) = (self.pixels.width, self.pixels.height);
+        match &self.clip {
+            Some((xs, ys)) => (
+                xs.start.min(w)..xs.end.min(w),
+                ys.start.min(h)..ys.end.min(h),
+            ),
+            None => (0..w, 0..h),
+        }
+    }
+
+    #[inline]
+    fn clipped(&self, x: u16, y: u16) -> bool {
+        self.clip
+            .as_ref()
+            .is_some_and(|(xs, ys)| !xs.contains(&x) || !ys.contains(&y))
+    }
+
+    /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer or
+    /// a [`with_clip`](Self::with_clip). The bounds check for per-pixel scatter
+    /// (glyphs, particles) that can't pre-clip; the hot blit path clips its
+    /// loop bounds to [`writable`](Self::writable) once and keeps
+    /// [`put`](Self::put).
     #[inline]
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
-        if x < self.pixels.width && y < self.pixels.height {
+        if x < self.pixels.width && y < self.pixels.height && !self.clipped(x, y) {
             let i = self.raw_index(x, y);
             self.write(i, rgb);
         }
@@ -727,8 +805,14 @@ impl RgbBuffer {
 
     /// Every pixel, row-major, to write in bulk. While
     /// [`begin_writes`](Self::begin_writes) tracks, the whole buffer counts as
-    /// written this epoch, since a bulk write may touch any of it.
+    /// written this epoch, since a bulk write may touch any of it. Outside any
+    /// [`with_clip`](Self::with_clip) only: it hands out the whole buffer, so a
+    /// clipped bulk write goes through [`writable_rows_mut`](Self::writable_rows_mut).
     pub fn as_mut_slice(&mut self) -> &mut [Rgb] {
+        debug_assert!(
+            self.clip.is_none(),
+            "a clipped bulk write goes through writable_rows_mut"
+        );
         if let Some(w) = &mut self.writes {
             w.note_all();
         }
@@ -800,6 +884,70 @@ mod tests {
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
+    }
+
+    /// The buffer's pixels as rows of 0/1 against `bg`.
+    fn drawn(buf: &RgbBuffer, bg: Rgb) -> Vec<String> {
+        (0..buf.height())
+            .map(|y| {
+                (0..buf.width())
+                    .map(|x| if buf.get(x, y) == bg { '0' } else { '1' })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// A clip within a clip keeps to both, and each closure leaves the clip as
+    /// it found it; one wider than the buffer keeps to the buffer.
+    #[test]
+    fn a_clip_nests_by_intersection_and_restores() {
+        let (bg, ink) = (rgb(0, 0, 0), rgb(9, 9, 9));
+        let mut buf = RgbBuffer::filled(6, 4, bg);
+        buf.with_clip((1..5, 0..9), |buf| {
+            assert_eq!(
+                buf.writable(),
+                (1..5, 0..4),
+                "the buffer bounds a wide clip"
+            );
+            buf.with_clip((3..9, 1..3), |buf| {
+                assert_eq!(buf.writable(), (3..5, 1..3));
+                for y in 0..4 {
+                    for x in 0..6 {
+                        buf.put(x, y, ink);
+                        buf.put_checked(x + 1, y, ink);
+                    }
+                }
+            });
+            assert_eq!(buf.writable(), (1..5, 0..4), "the inner clip is lifted");
+        });
+        assert_eq!(buf.writable(), (0..6, 0..4), "and the outer one");
+        assert_eq!(drawn(&buf, bg), ["000000", "000110", "000110", "000000"]);
+    }
+
+    /// A clipped bulk write sees exactly the clip's rows and columns, and an
+    /// empty clip's rows no pixels.
+    #[test]
+    fn the_writable_rows_are_the_clips_and_no_more() {
+        let (bg, ink) = (rgb(0, 0, 0), rgb(9, 9, 9));
+        let mut buf = RgbBuffer::filled(5, 4, bg);
+        buf.with_clip((1..3, 2..4), |buf| {
+            let rows: Vec<(u16, u16, usize)> = buf
+                .writable_rows_mut()
+                .map(|(y, first, row)| {
+                    row.fill(ink);
+                    (y, first, row.len())
+                })
+                .collect();
+            assert_eq!(rows, [(2, 1, 2), (3, 1, 2)]);
+        });
+        assert_eq!(drawn(&buf, bg), ["00000", "00000", "01100", "01100"]);
+        buf.with_clip((3..3, 0..4), |buf| {
+            let runs: Vec<usize> = buf
+                .writable_rows_mut()
+                .map(|(_, _, row)| row.len())
+                .collect();
+            assert_eq!(runs, [0; 4]);
+        });
     }
 
     #[test]

@@ -210,12 +210,32 @@ impl CutawayCanvas {
             ),
             _ => Dirty::All,
         };
-        if dirty != Dirty::Unchanged {
-            if (self.buf.width(), self.buf.height()) != size {
-                self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
+        tracing::trace_span!("canvas.paint").in_scope(|| match &dirty {
+            Dirty::All => {
+                if (self.buf.width(), self.buf.height()) != size {
+                    self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
+                }
+                paint(&list, cache, &mut self.buf);
             }
-            tracing::trace_span!("canvas.paint").in_scope(|| paint(&list, cache, &mut self.buf));
-        }
+            // The same paint once, kept to the rects' bounding box: outside it
+            // the frame is the last one, so nothing there is painted, or lit,
+            // twice. One pass, not one a rect: a pass's fixed cost times a
+            // frame of many small rects outran the whole repaint.
+            Dirty::Rects(rects) => {
+                // a new size changes the epoch's backdrop, so it paints whole
+                debug_assert_eq!((self.buf.width(), self.buf.height()), size);
+                let r = rects.as_slice();
+                let span = |start: fn(&Bounds) -> u16, end: fn(&Bounds) -> u16| {
+                    r.iter().map(start).min().unwrap_or(0)..r.iter().map(end).max().unwrap_or(0)
+                };
+                let clip = (
+                    span(|b| b.x, |b| b.x + b.width),
+                    span(|b| b.y, |b| b.y + b.height),
+                );
+                self.buf.with_clip(clip, |buf| paint(&list, cache, buf));
+            }
+            Dirty::Unchanged => {}
+        });
         self.shown = Some(Shown {
             epoch,
             footprints,

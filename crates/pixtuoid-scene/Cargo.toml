@@ -41,6 +41,7 @@ unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
 # `clock` gives Local::now() w/ system timezone for the wall clock.
 chrono        = { workspace = true, features = ["clock"] }
+foldhash      = { workspace = true }
 
 [build-dependencies]
 toml_edit = { workspace = true }

@@ -151,14 +151,15 @@ pub(crate) fn paint_list(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: 
     let emission = paint_pieces(list, cache, buf);
     let lights: Vec<&crate::display::light::LightView> =
         list.lights().iter().map(|l| &l.view).collect();
-    let whole = ArtRect {
-        x: ArtPx(0),
-        y: ArtPx(0),
-        w: pen.art(list.scale().logical(buf.width()).saturating_add(1)),
-        h: pen.art(list.scale().logical(buf.height()).saturating_add(1)),
+    let (art_xs, art_ys) = pen.writable_art(buf);
+    let lit = ArtRect {
+        x: ArtPx(art_xs.start),
+        y: ArtPx(art_ys.start),
+        w: ArtPx(art_xs.end - art_xs.start),
+        h: ArtPx(art_ys.end - art_ys.start),
     };
     crate::cutaway::light::net_pass(
-        whole,
+        lit,
         &lights,
         (list.ambient(), list.flash()),
         &emission,
@@ -166,6 +167,7 @@ pub(crate) fn paint_list(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: 
         &mut cache.net_colours,
         buf,
     );
+    cache.emission = Some(emission);
 }
 
 /// Paint every piece but the lights, back to front as by day, and return the
@@ -176,16 +178,33 @@ fn paint_pieces(
     buf: &mut RgbBuffer,
 ) -> crate::cutaway::light::Emission {
     use crate::cutaway::light::{Emission, Glow};
-    let mut emission = Emission::new(buf.width(), buf.height());
-    let mut marks = RgbBuffer::filled(buf.width(), buf.height(), NO_MARK);
+    let (w, h) = (buf.width(), buf.height());
+    let (xs, ys) = buf.writable();
+    let mut emission = cache
+        .emission
+        .take()
+        .filter(|e| e.fits(w, h))
+        .unwrap_or_else(|| Emission::new(w, h));
+    emission.reset(xs.clone(), ys.clone());
+    let mut marks = cache
+        .marks
+        .take()
+        .filter(|m| (m.width(), m.height()) == (w, h))
+        .unwrap_or_else(|| RgbBuffer::filled(w, h, NO_MARK));
     let pen = Pen::for_pack(list.scale(), list.pack());
     for piece in list.pieces() {
         let (x0, y0) = (
             list.scale().to_buffer(piece.span.x0),
             list.scale().to_buffer(piece.span.y0),
         );
-        let x1 = list.scale().to_buffer(piece.span.x1 + 1).min(buf.width());
-        let y1 = list.scale().to_buffer(piece.span.y1 + 1).min(buf.height());
+        let x1 = list.scale().to_buffer(piece.span.x1 + 1).min(w);
+        let y1 = list.scale().to_buffer(piece.span.y1 + 1).min(h);
+        // what it can write here: a piece off a repaint's clip paints nothing
+        let (cx0, cx1) = (x0.max(xs.start), x1.min(xs.end));
+        let (cy0, cy1) = (y0.max(ys.start), y1.min(ys.end));
+        if cx0 >= cx1 || cy0 >= cy1 {
+            continue;
+        }
         let epoch = buf.begin_writes();
         paint_piece(
             &piece.kind,
@@ -201,8 +220,8 @@ fn paint_pieces(
             &mut cache.art,
             &mut marks,
         );
-        for y in y0..y1 {
-            for x in x0..x1 {
+        for y in cy0..cy1 {
+            for x in cx0..cx1 {
                 if !buf.written_in(x, y, epoch) {
                     continue;
                 }
@@ -236,6 +255,7 @@ fn paint_pieces(
         }
     }
     buf.end_writes();
+    cache.marks = Some(marks);
     emission
 }
 
@@ -389,6 +409,12 @@ pub struct CutawayCache {
     figures: crate::frame_cache::FrameCache,
     art: ArtCache,
     net_colours: crate::cutaway::light::NetMemo,
+    /// [`paint_pieces`]'s frame-sized scratch, kept so a repaint of a few
+    /// rects allocates and clears none of it whole.
+    emission: Option<crate::cutaway::light::Emission>,
+    /// Every pixel [`NO_MARK`] between pieces: each glowing piece clears the
+    /// span it marked.
+    marks: Option<RgbBuffer>,
 }
 
 /// Art found by recolouring, kept across frames; keyed by sprite name, so one
@@ -450,11 +476,27 @@ fn paint_ground_shadows(
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let Some(depths) = crate::ground::Depths::of(shadows, pen.art(1).0) else {
+    // a shadow off the writable art darkens none of it, so a repaint of a few
+    // rects builds only theirs
+    let (art_xs, art_ys) = pen.writable_art(buf);
+    let per = pen.art(1).0;
+    let near = shadows.filter(|c| {
+        let ((x0, y0), (x1, y1)) = c.bounds();
+        let cells = |a: u16, b: u16| a.saturating_mul(per)..b.saturating_mul(per);
+        let (cx, cy) = (cells(x0, x1), cells(y0, y1));
+        cx.start < art_xs.end
+            && art_xs.start < cx.end
+            && cy.start < art_ys.end
+            && art_ys.start < cy.end
+    });
+    let Some(depths) = crate::ground::Depths::of(near, per) else {
         return;
     };
     let mut stepped: Vec<crate::dither::Stepped> = Vec::new();
     for (ax, ay, depth) in depths.cells() {
+        if !art_xs.contains(&ax) || !art_ys.contains(&ay) {
+            continue;
+        }
         let level = crate::dither::nearest(depth * strength * SHADOW_STOPS_PER_STRENGTH, ax, ay);
         if level == 0 {
             continue;
@@ -827,8 +869,9 @@ fn paint_rug(
     // Mirrored about the rug's centre column, so it sits square in the field.
     let motif = rug_field.ramp(RUG_MOTIF_LEVEL);
     let lattice = inset(trim + 3);
-    for y in lattice.y.0..lattice.y.0 + lattice.h.0 {
-        for x in lattice.x.0..lattice.x.0 + lattice.w.0 {
+    let (art_xs, art_ys) = pen.writable_art(buf);
+    for y in lattice.y.0.max(art_ys.start)..(lattice.y.0 + lattice.h.0).min(art_ys.end) {
+        for x in lattice.x.0.max(art_xs.start)..(lattice.x.0 + lattice.w.0).min(art_xs.end) {
             let (dx, dy) = (x - x0, y - y0);
             if (dx + dy).is_multiple_of(RUG_LATTICE)
                 || (w - 1 - dx + dy).is_multiple_of(RUG_LATTICE)
@@ -1368,8 +1411,12 @@ fn paint_runner(
         },
         runner_base,
     );
-    for dy in 1..h.saturating_sub(1) {
-        for dx in 0..w {
+    let (art_xs, art_ys) = pen.writable_art(buf);
+    let dxs = art_xs.start.saturating_sub(x0).min(w)..art_xs.end.saturating_sub(x0).min(w);
+    let dys = art_ys.start.saturating_sub(y0).max(1)
+        ..art_ys.end.saturating_sub(y0).min(h.saturating_sub(1));
+    for dy in dys {
+        for dx in dxs.clone() {
             let (i, j) = (i32::from(dx), i32::from(dy));
             if (i + j) % pitch == 0 || (i - j).rem_euclid(pitch) == 0 {
                 px(buf, x0 + dx, y0 + dy, runner_stripe);
