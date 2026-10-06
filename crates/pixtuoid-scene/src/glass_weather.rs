@@ -15,7 +15,7 @@ use crate::sky::{Element, Weather, WeatherMix, WeatherPolicy};
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
 /// Its policy, `weather` and `beat` are its whole key: two equal keys place
 /// equal marks.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
     veil: Dithered<Option<(Rgb, f32)>>,

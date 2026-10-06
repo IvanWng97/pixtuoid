@@ -315,7 +315,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
             theme.surface.bg_fallback,
         );
         let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
-        let mut cloud_cache = pixtuoid_scene::CloudCache::default();
+        let mut outside = pixtuoid_scene::OutsideCache::default();
         let mut i = 0;
         group.bench_function(&name, |b| {
             b.iter(|| {
@@ -330,7 +330,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     frame,
                     office(layout),
                     showing,
-                    (&mut cache, &mut cloud_cache),
+                    (&mut cache, &mut outside),
                     &mut buf,
                 )
             });
@@ -342,7 +342,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
         // change what the office shows.
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
         let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
-        let mut cloud_cache = pixtuoid_scene::CloudCache::default();
+        let mut outside = pixtuoid_scene::OutsideCache::default();
         let mut i = 0;
         group.bench_function(format!("{name}_canvas"), |b| {
             b.iter(|| {
@@ -354,7 +354,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     board,
                 };
                 canvas
-                    .frame(floor, theme, scale, showing, (&mut cache, &mut cloud_cache))
+                    .frame(floor, theme, scale, showing, (&mut cache, &mut outside))
                     .dirty
             });
         });

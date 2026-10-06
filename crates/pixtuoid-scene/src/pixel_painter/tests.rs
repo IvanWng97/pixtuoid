@@ -766,14 +766,17 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
-            (&mut cache, &mut crate::clouds::CloudCache::default()),
+            (&mut cache, &mut crate::outside::OutsideCache::default()),
             &mut buf,
         );
         let list = crate::display::compose(
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),
-            &mut crate::clouds::CloudCache::default(),
+            (
+                &mut crate::display::compose::LightCache::default(),
+                &mut crate::outside::OutsideCache::default(),
+            ),
         );
         let anchors: Vec<_> = list.badges().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -927,7 +930,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            (&mut cache, &mut crate::clouds::CloudCache::default()),
+            (&mut cache, &mut crate::outside::OutsideCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1082,7 +1085,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
-            (&mut cache, &mut crate::clouds::CloudCache::default()),
+            (&mut cache, &mut crate::outside::OutsideCache::default()),
             &mut buf,
         );
         buf.as_slice().to_vec()
@@ -1751,7 +1754,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         pack: &pack,
         timing: Motion::Full.timing(now),
         sky: crate::sky::Sky::clock(now),
-        outside: None,
+        window_sky: None,
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
@@ -1760,7 +1763,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         floor: crate::floor::FloorMeta::ground(),
         walks: &walks,
         debug_walkable: false,
-        cloud_cache: &mut crate::clouds::CloudCache::default(),
+        outside: &mut crate::outside::OutsideCache::default(),
     };
     let lights = crate::lighting::Lights::of(
         layout,
@@ -3626,7 +3629,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             pack: &pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
-            outside: None,
+            window_sky: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3635,7 +3638,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
-            cloud_cache: &mut crate::clouds::CloudCache::default(),
+            outside: &mut crate::outside::OutsideCache::default(),
         },
         &frame,
     );
@@ -3971,7 +3974,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 pack: &pack,
                 timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
-                outside: None,
+                window_sky: None,
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -3980,7 +3983,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
-                cloud_cache: &mut crate::clouds::CloudCache::default(),
+                outside: &mut crate::outside::OutsideCache::default(),
             },
             &frame,
         );
@@ -5299,7 +5302,7 @@ fn paint_drawn(
             pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
-            outside: None,
+            window_sky: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -5308,7 +5311,7 @@ fn paint_drawn(
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
-            cloud_cache: &mut crate::clouds::CloudCache::default(),
+            outside: &mut crate::outside::OutsideCache::default(),
         },
         frame,
     )
@@ -6114,7 +6117,7 @@ fn the_outside_reaches_only_the_glass() {
         },
     );
     let (w, h) = (layout.buf_w, layout.buf_h);
-    let paint = |weathered: &crate::outside::tests::Weathered, outside| {
+    let paint = |weathered: &crate::outside::tests::Weathered, window_sky| {
         let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
         paint_frame(
             &mut PaintCtx {
@@ -6123,7 +6126,7 @@ fn the_outside_reaches_only_the_glass() {
                 pack: &pack,
                 timing: Motion::Full.timing(weathered.now),
                 sky: weathered.sky,
-                outside,
+                window_sky,
                 buf: &mut buf,
                 cache: &mut FrameCache::new(),
                 base_fill: &mut BaseFillCache::new(),
@@ -6132,7 +6135,7 @@ fn the_outside_reaches_only_the_glass() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
-                cloud_cache: &mut crate::clouds::CloudCache::default(),
+                outside: &mut crate::outside::OutsideCache::default(),
             },
             &frame,
         );
@@ -6148,7 +6151,7 @@ fn the_outside_reaches_only_the_glass() {
             pack: &pack,
             timing,
             sky: weathered.sky,
-            outside: None,
+            window_sky: None,
             buf: &mut scratch,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -6157,7 +6160,7 @@ fn the_outside_reaches_only_the_glass() {
             floor: crate::floor::FloorMeta::ground(),
             walks: &owned.route.walks,
             debug_walkable: false,
-            cloud_cache: &mut crate::clouds::CloudCache::default(),
+            outside: &mut crate::outside::OutsideCache::default(),
         };
         let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
         let lights = Lights::of(
@@ -6268,7 +6271,7 @@ fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
                 pack: &pack,
                 timing: Motion::Full.timing(night),
                 sky: crate::sky::Sky::at_with(night, crate::sky::Weather::Clear),
-                outside: None,
+                window_sky: None,
                 buf: &mut buf,
                 cache: &mut FrameCache::new(),
                 base_fill: &mut BaseFillCache::new(),
@@ -6277,7 +6280,7 @@ fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
                 floor: crate::floor::FloorMeta::ground(),
                 walks: &owned.route.walks,
                 debug_walkable: false,
-                cloud_cache: &mut crate::clouds::CloudCache::default(),
+                outside: &mut crate::outside::OutsideCache::default(),
             },
             &frame,
         );

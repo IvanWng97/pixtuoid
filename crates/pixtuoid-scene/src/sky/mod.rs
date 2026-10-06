@@ -424,7 +424,7 @@ pub(crate) enum BodyKind {
 /// nothing, while it is below the horizon). Luminance + warmth follow altitude
 /// (low body = longer air path = dimmer + warmer). The ONE source the interior
 /// light, the disc and the spill derive from.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SkyBody {
     pub(crate) kind: BodyKind,
     /// 0 horizon .. 1 apex.
@@ -792,7 +792,7 @@ pub(crate) struct InteriorLight {
 }
 
 /// The sky at one instant, sampled once per frame.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Sky {
     policy: WeatherPolicy,
     weather: WeatherMix,

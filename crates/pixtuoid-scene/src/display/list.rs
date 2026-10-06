@@ -155,9 +155,12 @@ impl Piece {
 /// One of the room's lights: what it lifts, over which cells. A change repaints
 /// its span from every light that meets it, which alone light a rect as the
 /// whole frame does.
+#[derive(Debug, Clone)]
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
-    pub(crate) view: crate::display::light::LightView,
+    /// Shared with the [`LightCache`](crate::display::compose::LightCache)
+    /// that keeps it for the next frame.
+    pub(crate) view: std::sync::Arc<crate::display::light::LightView>,
     pub(crate) fingerprint: u64,
 }
 
@@ -415,7 +418,8 @@ impl PieceKind {
 pub(crate) enum PieceKind {
     /// One window: its glass, then its joinery in `frame`.
     Window {
-        view: WindowView,
+        /// Shared as [`LightPiece::view`] is.
+        view: std::sync::Arc<WindowView>,
         frame: pixtuoid_core::sprite::Rgb,
     },
     /// Decor hung on the north band, blitted at its top-left `at`.
