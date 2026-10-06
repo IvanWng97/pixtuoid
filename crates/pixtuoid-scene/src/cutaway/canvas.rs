@@ -179,6 +179,8 @@ impl CutawayCanvas {
             // twice. One pass, not one a rect: a pass's fixed cost times a
             // frame of many small rects outran the whole repaint.
             Dirty::Rects(rects) => {
+                // a new size changes the epoch's backdrop, so it paints whole
+                debug_assert_eq!((self.buf.width(), self.buf.height()), size);
                 let r = rects.as_slice();
                 let span = |start: fn(&Bounds) -> u16, end: fn(&Bounds) -> u16| {
                     r.iter().map(start).min().unwrap_or(0)..r.iter().map(end).max().unwrap_or(0)

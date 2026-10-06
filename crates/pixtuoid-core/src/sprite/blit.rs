@@ -86,6 +86,22 @@ mod tests {
         Frame::from_pixels(2, 2, vec![Some(RED), None, None, Some(RED)])
     }
 
+    /// A scaled block straddling a clip's edge lands only its pixels inside:
+    /// the row whose block ends on the clip's first row is skipped whole, the
+    /// next one painted from that row on.
+    #[test]
+    fn a_scaled_blit_keeps_to_a_clip_through_a_block() {
+        let f = Frame::from_pixels(1, 3, vec![Some(RED), Some(RED), Some(RED)]);
+        let mut buf = RgbBuffer::filled(2, 6, BG);
+        let two = NonZeroU16::new(2).expect("nonzero");
+        buf.with_clip((1..2, 2..5), |buf| blit_frame_scaled(&f, 0, 0, two, buf));
+        let painted: Vec<(u16, u16)> = (0..6)
+            .flat_map(|y| (0..2).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf.get(x, y) == RED)
+            .collect();
+        assert_eq!(painted, [(1, 2), (1, 3), (1, 4)]);
+    }
+
     /// The load-bearing property: the classic path must be untouched by the
     /// existence of the scaled one.
     #[test]

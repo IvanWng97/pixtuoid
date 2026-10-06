@@ -271,6 +271,24 @@ mod tests {
     use crate::display::pen::ArtPx;
     use crate::layout::Point;
 
+    /// A repaint's reset takes its rect back to lit and leaves the rest as
+    /// the last frame marked it.
+    #[test]
+    fn a_reset_lights_only_its_rect() {
+        let mut emission = Emission::new(4, 3);
+        for y in 0..3 {
+            for x in 0..4 {
+                emission.set(x, y, Glow::Emissive);
+            }
+        }
+        emission.reset(1..3, 1..2);
+        let lit: Vec<(u16, u16)> = (0..3)
+            .flat_map(|y| (0..4).map(move |x| (x, y)))
+            .filter(|&(x, y)| emission.get(x, y) == Glow::Lit)
+            .collect();
+        assert_eq!(lit, [(1, 1), (2, 1)]);
+    }
+
     const FLOOR: Rgb = Rgb {
         r: 110,
         g: 96,
