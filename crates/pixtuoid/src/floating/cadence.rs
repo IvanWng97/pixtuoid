@@ -6,8 +6,8 @@
 //! there leaves a redraw pending whenever the loop reaches its wait — the
 //! `ControlFlow::WaitUntil` deadline set beside it then never sleeps, and the
 //! window renders + presents back-to-back at 100% of a CPU core. Gating the
-//! redraw REQUEST on a deadline, not just arming the wait, is what makes the FPS
-//! constants below take effect.
+//! redraw REQUEST on a deadline, not just arming the wait, is what makes the
+//! cadence below take effect.
 
 use std::time::{Duration, Instant, SystemTime};
 

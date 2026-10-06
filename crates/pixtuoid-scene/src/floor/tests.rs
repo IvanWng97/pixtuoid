@@ -1488,8 +1488,7 @@ fn neon_a_starved_tube_never_flashes_at_rest() {
 }
 
 /// A painter stepping further than a flash can't draw it: a still (one tick)
-/// and the floating window's ambient cadence get the steady tube, never a
-/// held flash.
+/// gets the steady tube, never a held flash.
 #[test]
 fn neon_a_painter_slower_than_a_flash_never_shows_one() {
     let shortest = Duration::from_millis(NeonState::shortest_flash_ms());

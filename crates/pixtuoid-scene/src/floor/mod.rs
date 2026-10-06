@@ -1004,9 +1004,9 @@ impl NeonState {
     }
 
     /// The longest loop-time step a flash can still be drawn across: the
-    /// shortest flash. A painter stepping further — a still, the floating
-    /// window's ambient cadence — would skip some flashes and hold others, so
-    /// it gets the steady starved tube instead.
+    /// shortest flash. A painter stepping further, such as a still, would skip
+    /// some flashes and hold others, so it gets the steady starved tube
+    /// instead.
     fn shortest_flash_ms() -> u64 {
         Self::STUTTER_FLASHES_MS
             .iter()
