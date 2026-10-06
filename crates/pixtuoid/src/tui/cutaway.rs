@@ -188,6 +188,11 @@ impl TileCutaway {
         let cell = self.cell_under(window);
         let Some(fit) = Fit::new(cell, scene.as_size(), self.density) else {
             self.fitted = None;
+            // The classic paints this frame: it transmits nothing.
+            self.last = FrameSend {
+                dirty: crate::tui::jank::Painted::Classic,
+                ..FrameSend::default()
+            };
             return None;
         };
         let fitted = Fitted { scene, cell, fit };
@@ -433,6 +438,11 @@ impl TileCutaway {
     /// core.
     pub(crate) fn share_with_audio(&mut self, audio: bool) {
         self.audio = audio;
+    }
+
+    /// A new frame, which has transmitted nothing until it paints.
+    pub(crate) fn begin_frame(&mut self) {
+        self.last = FrameSend::default();
     }
 
     /// Set `in_grid` where the unwind would read the process's own.

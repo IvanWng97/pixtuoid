@@ -196,6 +196,8 @@ impl CutawayCanvas {
                 ambient = r.ambient,
                 carpet = r.carpet,
                 flash = r.flash,
+                ambient_now = ?epoch.ambient,
+                flash_now = ?epoch.flash,
                 "canvas.epoch"
             );
         }

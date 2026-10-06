@@ -298,6 +298,21 @@ fn the_encode_leaves_a_core_while_the_audio_handle_is_live() {
     assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 3);
 }
 
+/// A frame with no room for the image reports no transmits, not the last
+/// cutaway frame's.
+#[test]
+fn a_frame_without_room_reports_no_transmits() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.render(&office(), pack(), t0()).expect("render");
+    let cutaway = |r: &TuiRenderer<Window>| r.cutaway.as_ref().expect("a cutaway").last_send();
+    assert_ne!(cutaway(&r).sent, 0, "the first frame sent its tiles");
+    let (cols, rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(cols, rows);
+    r.render(&office(), pack(), t0()).expect("render");
+    assert_ne!(cutaway(&r).dirty, crate::tui::jank::Painted::All);
+    assert_eq!(cutaway(&r).sent, 0);
+}
+
 /// Text and image never share a cell: the footer row stays text.
 #[test]
 fn placeholders_fill_the_scene_and_never_the_footer() {

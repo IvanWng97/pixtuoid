@@ -145,15 +145,16 @@ pub(crate) struct UiState {
 /// otherwise skew the sky and the weather unseen.
 fn fake_now() -> Option<(Instant, SystemTime)> {
     let set = pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")?;
-    let Ok(secs) = set.trim().parse::<u64>() else {
-        tracing::warn!(value = ?set, "PIXTUOID_FAKE_NOW is not Unix seconds: the clock is now");
+    let Some(at) =
+        set.trim().parse::<u64>().ok().and_then(|secs| {
+            SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(secs))
+        })
+    else {
+        tracing::warn!(value = ?set, "PIXTUOID_FAKE_NOW is not a Unix second this clock holds: the clock is now");
         return None;
     };
-    tracing::warn!(secs, "the clock starts at PIXTUOID_FAKE_NOW, not now");
-    Some((
-        Instant::now(),
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
-    ))
+    tracing::warn!(at = ?at, "the clock starts at PIXTUOID_FAKE_NOW, not now");
+    Some((Instant::now(), at))
 }
 
 impl UiState {
@@ -207,7 +208,8 @@ impl UiState {
     pub(crate) fn now(&mut self) -> SystemTime {
         let wall = self
             .fake_now
-            .map_or_else(SystemTime::now, |(read, at)| at + read.elapsed());
+            .and_then(|(read, at)| at.checked_add(read.elapsed()))
+            .unwrap_or_else(SystemTime::now);
         if self.paused {
             *self.frozen_now.get_or_insert(wall)
         } else {
@@ -515,6 +517,18 @@ mod tests {
             std::path::PathBuf::from("/tmp/sock"),
             None,
         )
+    }
+
+    /// A fake instant past what `SystemTime` holds takes the real clock, as an
+    /// unparseable one does, not a panic.
+    #[test]
+    fn a_fake_clock_past_the_end_of_time_is_the_real_clock() {
+        temp_env::with_var("PIXTUOID_FAKE_NOW", Some(u64::MAX.to_string()), || {
+            assert_eq!(fake_now(), None);
+        });
+        temp_env::with_var("PIXTUOID_FAKE_NOW", Some("tomorrow"), || {
+            assert_eq!(fake_now(), None);
+        });
     }
 
     /// `$PIXTUOID_FAKE_NOW`'s clock runs on from its instant, and holds still
