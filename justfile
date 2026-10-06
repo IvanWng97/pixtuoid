@@ -331,7 +331,7 @@ bench-pacing:
 [doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail on p99 over 20 ms or a frame past the paint interval')]
 [group('rust')]
 pace-check *args:
-    cargo build --release -p pixtuoid
+    cargo build --release -p pixtuoid --bins --example pacing
     python3 scripts/pace-check.py {{ args }}
 
 # Catches code that silently only builds with `native` on (the wasm core builds

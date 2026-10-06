@@ -265,56 +265,68 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
-    /// Draw the cutaway's first frame of `scene` unseen, so the caches it
-    /// fills (the cloud rasters above all) are warm when the first frame is
-    /// shown; what that frame shows is unchanged.
-    #[cfg(feature = "graphics")]
+    /// Draw the first frame of `scene` unseen, in the look the first frame
+    /// shown will take, so the caches it fills (the cloud rasters above all)
+    /// are warm when it is shown; what it shows is unchanged.
     pub(crate) fn warm(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) {
-        let Some(mut cutaway) = self.cutaway.take() else {
+        let Ok(size) = self.terminal.size() else {
             return;
         };
-        if let Ok(size) = self.terminal.size() {
-            let scene_area =
-                crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));
-            let window = self
-                .terminal
-                .backend_mut()
-                .window_size()
-                .ok()
-                .and_then(crate::graphics::CellSize::of_window);
-            if let Some(fitted) = cutaway.fit_to(scene_area, window)
-                && !crate::tui::renderer::scene_too_small(scene_area)
-            {
-                let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
-                while self.floors.len() < nf {
-                    self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
-                }
-                let floor_scene = project_floor_scene(scene, self.current_floor);
-                let Frame { world, footer, .. } =
-                    self.chrome
-                        .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
-                let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
-                self.office.raster.warm();
-                let _ = pixtuoid_scene::look::render(
-                    &mut self.floors[self.current_floor],
-                    self.office.stores(),
-                    Look::Cutaway {
-                        scale: fitted.fit.render_scale(),
-                    },
-                    RenderInputs {
-                        world,
-                        theme: self.chrome.theme,
-                        size: fitted.fit.logical(),
-                        place: Place {
-                            gateway: footer.context.gateway,
-                            floor: footer.context.floor,
-                        },
-                        debug_walkable: false,
-                    },
-                );
-            }
+        let full = Rect::new(0, 0, size.width, size.height);
+        let scene_area = crate::tui::renderer::scene_rect(full);
+        if crate::tui::renderer::scene_too_small(scene_area) {
+            return;
         }
-        self.cutaway = Some(cutaway);
+        let (buf_w, buf_h) = crate::tui::renderer::scene_buf_size(size.width, size.height);
+        let classic = (Look::Classic, Size { w: buf_w, h: buf_h });
+        #[cfg(feature = "graphics")]
+        let look = self.cutaway_look(scene_area).unwrap_or(classic);
+        #[cfg(not(feature = "graphics"))]
+        let look = classic;
+        let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
+        while self.floors.len() < nf {
+            self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
+        }
+        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let Frame { world, footer, .. } =
+            self.chrome
+                .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+        let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
+        self.office.raster.warm();
+        let _ = pixtuoid_scene::look::render(
+            &mut self.floors[self.current_floor],
+            self.office.stores(),
+            look.0,
+            RenderInputs {
+                world,
+                theme: self.chrome.theme,
+                size: look.1,
+                place: Place {
+                    gateway: footer.context.gateway,
+                    floor: footer.context.floor,
+                },
+                debug_walkable: false,
+            },
+        );
+    }
+
+    /// The cutaway's look and office extent over `scene_area`, as its next
+    /// frame fits them; `None` while classic paints.
+    #[cfg(feature = "graphics")]
+    fn cutaway_look(&mut self, scene_area: Rect) -> Option<(Look, Size)> {
+        let window = self
+            .terminal
+            .backend_mut()
+            .window_size()
+            .ok()
+            .and_then(crate::graphics::CellSize::of_window);
+        let fitted = self.cutaway.as_mut()?.fit_to(scene_area, window)?;
+        Some((
+            Look::Cutaway {
+                scale: fitted.fit.render_scale(),
+            },
+            fitted.fit.logical(),
+        ))
     }
 
     /// Report the frames since the last pacing summary, at exit.

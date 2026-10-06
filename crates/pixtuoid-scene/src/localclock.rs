@@ -32,6 +32,14 @@ fn local(day: u32, h: u32, m: u32) -> SystemTime {
     try_local(day, h, m).expect("a fixed January local time is valid and unambiguous in every zone")
 }
 
+/// Local `h:m` on `day`'s own local date, not the reference day: a run on
+/// today's sky. `None` where that local time doesn't exist.
+pub fn on_date_of(day: SystemTime, h: u32, m: u32) -> Option<SystemTime> {
+    let date = chrono::DateTime::<chrono::Local>::from(day).date_naive();
+    let local = chrono::Local.from_local_datetime(&date.and_hms_opt(h, m, 0)?);
+    local.single().map(Into::into)
+}
+
 /// Local `h:00` on the reference day.
 pub fn at_hour(h: u32) -> SystemTime {
     local(0, h, 0)

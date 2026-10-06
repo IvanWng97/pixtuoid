@@ -1072,3 +1072,14 @@ fn the_transition_found_changes_the_weather() {
         assert_eq!(into.to, Weather::Storm, "{k}");
     }
 }
+
+/// Nightfall begins at the instant `nightfall_on` names: none a minute
+/// before, some a minute after.
+#[test]
+fn nightfall_begins_when_nightfall_on_says() {
+    let day = crate::localclock::at_hour(9);
+    let start = nightfall_on(day).expect("a local evening");
+    let minute = Duration::from_secs(60);
+    assert_eq!(nightfall(local_hour_frac(start - minute)), 0.0);
+    assert!(nightfall(local_hour_frac(start + minute)) > 0.0);
+}

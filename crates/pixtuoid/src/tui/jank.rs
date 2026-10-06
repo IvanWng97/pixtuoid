@@ -125,7 +125,11 @@ impl Jank {
         self.len = (self.len + 1).min(RING);
         if total > self.interval {
             self.over += 1;
-            let send = send.unwrap_or_default();
+            // No transmits: the half-blocks, which the text flush draws.
+            let send = send.unwrap_or(FrameSend {
+                dirty: "classic",
+                ..FrameSend::default()
+            });
             if total > 2 * self.interval {
                 self.janks += 1;
                 report!(warn, "frame jank", total, send, note);

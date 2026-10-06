@@ -911,7 +911,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
 ) {
-    let terminal = pixtuoid_core::platform::text_env("TERM_PROGRAM");
+    let (terminal, tmux_env) = crate::graphics::terminal_and_tmux();
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
@@ -939,7 +939,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             renderer.painted_by(jank::Painter {
                 look: "classic",
                 scale: 1,
-                tmux: pixtuoid_core::platform::text_env("TMUX").is_some(),
+                tmux: tmux_env,
                 terminal,
             });
             tracing::info!(plan = ?plan, "painting classic");
@@ -999,7 +999,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
-    #[cfg(feature = "graphics")]
     renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 

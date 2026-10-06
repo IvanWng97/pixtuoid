@@ -2665,6 +2665,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
+ "codspeed-criterion-compat",
  "crossterm",
  "futures-util",
  "icy_sixel 0.7.0",
