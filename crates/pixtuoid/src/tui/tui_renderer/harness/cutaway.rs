@@ -16,8 +16,9 @@ const TRANSMIT: &str = "\x1b_Ga=T,";
 const SIXEL: &str = "\x1bP9;1q";
 const ITERM2: &str = "\x1b]1337;File=";
 
-/// The terminal's side of the transmits; set `fail` to make it refuse them,
-/// full, or `slow` to make a flush take that long on a screen clock.
+/// The terminal's side of the transmits; set `fail` to make it refuse writes
+/// as a full terminal does (`WouldBlock`), or `slow` to make a flush take that
+/// long on a screen clock.
 #[derive(Clone, Default)]
 struct Wire {
     bytes: Arc<Mutex<Vec<u8>>>,

@@ -858,7 +858,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ///
     /// # Errors
     ///
-    /// If querying the terminal size or drawing the frame to the backend fails.
+    /// If querying the terminal size, drawing the frame to the backend, or
+    /// writing the held frame fails; a full terminal (`WouldBlock`) drops the
+    /// frame instead.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         let begun = std::time::Instant::now();
         if let Some(out) = &self.frame_out {
