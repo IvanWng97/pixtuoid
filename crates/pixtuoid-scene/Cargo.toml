@@ -36,6 +36,7 @@ cutaway-assets = []
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-features = false }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
+lru           = { workspace = true }
 unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
 # `clock` gives Local::now() w/ system timezone for the wall clock.

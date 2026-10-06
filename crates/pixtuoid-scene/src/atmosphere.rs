@@ -206,7 +206,7 @@ impl SkyTones {
             glass_veil: dithered(weather, Element::Cloud, |w| {
                 glass_veil(w).map(|(color, alpha)| (lit(color, veil), alpha))
             }),
-            golden_hour: golden_hour_blaze(body, &sky.transmission()),
+            golden_hour: golden_hour(sky),
             star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
         }
     }
@@ -340,6 +340,11 @@ const NIGHT_VEIL_MIN: f32 = 0.35;
 /// colour does too), and folding them in would darken a stormy noon twice.
 fn veil_lum(e: &SkyBody) -> f32 {
     NIGHT_VEIL_MIN + (1.0 - NIGHT_VEIL_MIN) * e.lum.clamp(0.0, 1.0)
+}
+
+/// `sky`'s [`golden_hour_blaze`], whatever the theme.
+pub(crate) fn golden_hour(sky: &Sky) -> f32 {
+    golden_hour_blaze(sky.body(), &sky.transmission())
 }
 
 /// Golden-hour blaze strength in the sky around the city — SUN-only: a low moon
