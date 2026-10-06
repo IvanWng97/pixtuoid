@@ -17,7 +17,7 @@ const SIXEL: &str = "\x1bP9;1q";
 const ITERM2: &str = "\x1b]1337;File=";
 
 /// The terminal's side of the transmits; set `fail` to make it refuse them,
-/// or `slow` to make a flush take that long on a screen clock.
+/// full, or `slow` to make a flush take that long on a screen clock.
 #[derive(Clone, Default)]
 struct Wire {
     bytes: Arc<Mutex<Vec<u8>>>,
@@ -28,7 +28,7 @@ struct Wire {
 impl Write for Wire {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.fail.load(Ordering::Relaxed) {
-            return Err(std::io::Error::other("terminal gone"));
+            return Err(std::io::ErrorKind::WouldBlock.into());
         }
         self.bytes.lock().expect("lock").extend_from_slice(buf);
         Ok(buf.len())
@@ -182,15 +182,11 @@ fn armed(
         pack_arc(),
     );
     let (wire, in_grid) = (Wire::default(), Box::leak(Box::new(AtomicBool::new(false))));
+    // As the TUI does: the transmits land with their frame.
+    let out = crate::tui::FrameOut::new(wire.clone(), false);
+    r.present_through(out.clone());
     r.set_cutaway(
-        TileCutaway::new(
-            fit(cols, rows),
-            CELL,
-            protocol,
-            false,
-            Box::new(wire.clone()),
-        )
-        .arming(in_grid),
+        TileCutaway::new(fit(cols, rows), CELL, protocol, false, Box::new(out)).arming(in_grid),
     );
     (r, wire, in_grid)
 }

@@ -61,6 +61,7 @@ impl Protocol {
 struct Carried {
     bytes: AtomicU64,
     write_ns: AtomicU64,
+    #[cfg(test)]
     writes: AtomicU64,
     /// Refuse the next write, as a full terminal does.
     #[cfg(test)]
@@ -75,7 +76,8 @@ pub struct Wire(Arc<Carried>);
 impl Wire {
     /// The writes since the last take, zeroing them: a frame presented whole
     /// is one.
-    pub fn take_writes(&self) -> u64 {
+    #[cfg(test)]
+    fn take_writes(&self) -> u64 {
         self.0.writes.swap(0, Ordering::Relaxed)
     }
 
@@ -109,6 +111,7 @@ impl Write for Wire {
             return Err(std::io::ErrorKind::WouldBlock.into());
         }
         self.timed(|| {
+            #[cfg(test)]
             self.0.writes.fetch_add(1, Ordering::Relaxed);
             self.0.bytes.fetch_add(buf.len() as u64, Ordering::Relaxed);
             std::hint::black_box(buf);

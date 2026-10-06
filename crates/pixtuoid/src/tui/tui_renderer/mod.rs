@@ -870,9 +870,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.follow_resize();
         // Presented even when the draw failed, so nothing stays held.
         let presenting = std::time::Instant::now();
-        let presented = self.frame_out.as_ref().map(|out| out.present());
+        let presented = self
+            .frame_out
+            .as_ref()
+            .map_or(Ok(()), crate::tui::FrameOut::present);
         let present = presenting.elapsed();
-        if let Some(Err(e)) = presented {
+        #[cfg(feature = "graphics")]
+        if let Some(cutaway) = &mut self.cutaway {
+            if presented.is_ok() {
+                cutaway.landed();
+            } else {
+                cutaway.lost();
+            }
+        }
+        if let Err(e) = presented {
             // A full terminal: the frame is dropped, and the next repaints
             // every cell and every tile.
             if e.kind() != std::io::ErrorKind::WouldBlock {
