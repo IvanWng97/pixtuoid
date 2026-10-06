@@ -220,6 +220,7 @@ fn run(
         case.cell,
         pets,
         Arc::clone(pack),
+        false,
     )?;
     r.set_weather(WeatherPolicy::Forced(Weather::Storm));
     r.set_motion(case.motion);
@@ -283,6 +284,7 @@ fn real_clock(
         HALF_BLOCK_CELL,
         vec![Pet::defaulted(PetKind::Cat)],
         Arc::clone(pack),
+        false,
     )?;
     r.set_weather(WeatherPolicy::Forced(Weather::Storm));
     r.set_motion(Motion::Full);
@@ -607,12 +609,10 @@ fn hitch(path: &Path) -> Result<()> {
             term.cell,
             pets,
             Arc::clone(&pack),
+            run.lofi,
         )?;
         r.set_weather(run.weather);
         r.set_motion(Motion::Full);
-        if run.lofi {
-            pixtuoid::pacing::assume_audio(&mut r);
-        }
         let lofi_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let lofi = run.lofi.then(|| {
             let stop = Arc::clone(&lofi_stop);

@@ -434,9 +434,14 @@ impl TileCutaway {
     }
 
     /// Split a frame's encode across `cores` whatever the machine has.
-    #[cfg(test)]
     pub(crate) fn split_across(&mut self, cores: usize) {
         self.cores = cores;
+    }
+
+    /// The threads a frame's encode may take now.
+    #[cfg(test)]
+    pub(crate) fn encode_threads(&self) -> usize {
+        encode_cores(self.cores, self.audio)
     }
 
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
