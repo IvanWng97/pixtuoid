@@ -244,6 +244,22 @@ fn a_whole_frame_transmits_every_tile_once_in_order() {
     assert_eq!(ids, (first..first + ids.len() as u32).collect::<Vec<_>>());
 }
 
+/// Warmed at boot, the first frame shown draws no cloud: every mass of its
+/// sky is already cached.
+#[test]
+fn a_warmed_first_frame_draws_no_cloud() {
+    let (mut r, _wire) = kitty(120, 40);
+    r.set_weather(pixtuoid_scene::sky::WeatherPolicy::Forced(
+        pixtuoid_scene::sky::Weather::Overcast,
+    ));
+    let scene = office();
+    r.warm(&scene, pack(), t0());
+    let warmed = r.cloud_draws();
+    assert!(warmed > 0, "warming an overcast sky draws its masses");
+    r.render(&scene, pack(), t0()).expect("render");
+    assert_eq!(r.cloud_draws(), warmed, "the first frame drew a cloud");
+}
+
 /// Text and image never share a cell: the footer row stays text.
 #[test]
 fn placeholders_fill_the_scene_and_never_the_footer() {

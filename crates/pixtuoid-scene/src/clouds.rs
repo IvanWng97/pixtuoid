@@ -816,8 +816,7 @@ const DRAWS_AHEAD: usize = 2;
 #[derive(Debug, Default)]
 pub struct CloudCache {
     entries: std::collections::VecDeque<(RasterKey, std::sync::Arc<MassRaster>)>,
-    /// Rasters drawn, for the tests that bound a frame's.
-    #[cfg(test)]
+    /// Rasters drawn: what a warm cache spares a frame.
     draws: usize,
 }
 
@@ -826,6 +825,11 @@ impl CloudCache {
     /// mass drawn [`AHEAD`] of them (`the_cache_holds_a_transition_in_both_looks`):
     /// one office draws one wall per look.
     const CAPACITY: usize = 256;
+
+    /// Rasters drawn so far.
+    pub(crate) fn draws(&self) -> usize {
+        self.draws
+    }
 
     fn holds(&self, key: RasterKey) -> bool {
         self.entries.iter().any(|(k, _)| *k == key)
@@ -848,10 +852,7 @@ impl CloudCache {
             return raster;
         }
         let raster = std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw));
-        #[cfg(test)]
-        {
-            self.draws += 1;
-        }
+        self.draws += 1;
         self.entries
             .push_front((key, std::sync::Arc::clone(&raster)));
         self.entries.truncate(Self::CAPACITY);

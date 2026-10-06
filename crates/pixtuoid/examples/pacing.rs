@@ -637,6 +637,7 @@ fn hitch(path: &Path) -> Result<()> {
         let wall = Instant::now();
         let start = run.start.unwrap_or_else(SystemTime::now);
         let scene = office(start);
+        pixtuoid::pacing::warm(&mut r, &scene, &pack, start);
         let mut totals = Vec::new();
         let mut n = 0u64;
         loop {

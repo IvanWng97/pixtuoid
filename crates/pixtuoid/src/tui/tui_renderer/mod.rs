@@ -265,6 +265,63 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
+    /// Draw the cutaway's first frame of `scene` unseen, so the caches it
+    /// fills (the cloud rasters above all) are warm when the first frame is
+    /// shown; what that frame shows is unchanged.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn warm(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) {
+        let Some(mut cutaway) = self.cutaway.take() else {
+            return;
+        };
+        if let Ok(size) = self.terminal.size() {
+            let scene_area =
+                crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));
+            let window = self
+                .terminal
+                .backend_mut()
+                .window_size()
+                .ok()
+                .and_then(crate::graphics::CellSize::of_window);
+            if let Some(fitted) = cutaway.fit_to(scene_area, window)
+                && !crate::tui::renderer::scene_too_small(scene_area)
+            {
+                let nf = num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS);
+                while self.floors.len() < nf {
+                    self.floors.push(PerFloor::new(Arc::clone(&self.pack)));
+                }
+                let floor_scene = project_floor_scene(scene, self.current_floor);
+                let Frame { world, footer, .. } =
+                    self.chrome
+                        .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+                let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
+                let _ = pixtuoid_scene::look::render(
+                    &mut self.floors[self.current_floor],
+                    self.office.stores(),
+                    Look::Cutaway {
+                        scale: fitted.fit.render_scale(),
+                    },
+                    RenderInputs {
+                        world,
+                        theme: self.chrome.theme,
+                        size: fitted.fit.logical(),
+                        place: Place {
+                            gateway: footer.context.gateway,
+                            floor: footer.context.floor,
+                        },
+                        debug_walkable: false,
+                    },
+                );
+            }
+        }
+        self.cutaway = Some(cutaway);
+    }
+
+    /// The cloud rasters the office has drawn so far.
+    #[cfg(test)]
+    pub(crate) fn cloud_draws(&self) -> usize {
+        self.office.raster.cloud_draws()
+    }
+
     /// Paint and send the next frame whole, for the pacing bench's worst case.
     #[cfg(feature = "graphics")]
     pub(crate) fn forget_frame(&mut self) {

@@ -986,6 +986,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
+    #[cfg(feature = "graphics")]
+    renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 
     let tick = frame_tick();
