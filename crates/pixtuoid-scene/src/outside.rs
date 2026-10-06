@@ -275,7 +275,7 @@ impl Outside {
             .collect();
         Self {
             sky: SkyView::of(moment, buf_w, band_h, theme),
-            clouds: crate::clouds::Clouds::of(
+            clouds: crate::clouds::Clouds::of_ahead(
                 moment,
                 (run.end - run.start, glass_h),
                 density.get(),
@@ -687,12 +687,17 @@ pub(crate) mod tests {
             );
         }
 
+        // the policy's own overcast: the frames ahead see what this one does
+        let forced = |now| {
+            let timing = crate::anim::Motion::Full.timing(now);
+            Moment::resolve(Sky::at_with(now, Weather::Overcast), theme, 0.0, timing)
+        };
         let mut cache = crate::clouds::CloudCache::default();
-        let _ = pixels(&moment(overcast, noon), wall, Density::ONE, &mut cache);
+        let _ = pixels(&forced(noon), wall, Density::ONE, &mut cache);
         let drawn = cache.len();
         assert!(drawn > 0, "an overcast deck draws its masses");
         let later = noon + std::time::Duration::from_secs(60);
-        let _ = pixels(&moment(overcast, later), wall, Density::ONE, &mut cache);
+        let _ = pixels(&forced(later), wall, Density::ONE, &mut cache);
         assert_eq!(cache.len(), drawn, "a drift redrew a mass");
     }
 

@@ -186,6 +186,20 @@ pub(crate) struct Timing {
     pub(crate) beat: Beat,
 }
 
+impl Timing {
+    /// The timing `by` later on the same tier.
+    pub(crate) fn later(self, by: std::time::Duration) -> Self {
+        let now = self.now + by;
+        Self {
+            now,
+            beat: match self.beat.loop_ms {
+                Some(_) => Beat::looping(loop_time(now, self.beat.pace), self.beat.pace),
+                None => self.beat,
+            },
+        }
+    }
+}
+
 /// The clock every ambient loop reads instead of the wall clock, so two
 /// instants on one beat paint the same frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
