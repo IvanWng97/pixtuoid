@@ -17,6 +17,10 @@
 /// this once at startup.
 pub const TRUECOLOR_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 
+/// The synchronized-output probe's budget: [`TRUECOLOR_PROBE_TIMEOUT`]'s, for
+/// the same round trip. Its DA1 ends the wait as soon as the terminal answers.
+pub(crate) const SYNC_OUTPUT_PROBE_TIMEOUT: std::time::Duration = TRUECOLOR_PROBE_TIMEOUT;
+
 /// True iff `$COLORTERM` advertises 24-bit color (`truecolor` or `24bit`).
 /// Case-sensitive, as S-Lang matches them (<https://github.com/termstandard/colors#checking-for-colorterm>).
 fn colorterm_is_truecolor(colorterm: Option<&str>) -> bool {

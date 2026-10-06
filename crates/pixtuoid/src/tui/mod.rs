@@ -477,7 +477,8 @@ struct Held {
     holding: bool,
     /// Wrap each frame in `CSI ? 2026 h` / `l`.
     sync: bool,
-    /// The last present failed, perhaps mid-escape: the next opens with ST.
+    /// The last present failed, perhaps mid-escape or inside its update: the
+    /// next opens with ST, and ends that update.
     torn: bool,
 }
 
@@ -516,6 +517,9 @@ impl FrameOut {
         held.frame.clear();
         if held.torn {
             held.frame.extend_from_slice(crate::graphics::ST);
+            if held.sync {
+                held.frame.extend_from_slice(END_SYNC);
+            }
         }
         if held.sync {
             held.frame.extend_from_slice(BEGIN_SYNC);
@@ -1130,7 +1134,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // its reply.
     let out = FrameOut::new(
         stdout(),
-        crate::term::query_sync_output(crate::term::TRUECOLOR_PROBE_TIMEOUT),
+        crate::term::query_sync_output(crate::term::SYNC_OUTPUT_PROBE_TIMEOUT),
     );
     let term = setup_terminal(out.clone(), &arms)?;
     let QuitArms {
@@ -1328,19 +1332,24 @@ mod frame_out_tests {
     }
 
     /// A frame the terminal refused leaves the next one opening with ST, so
-    /// an escape it cut short ends before the next frame's bytes.
+    /// an escape it cut short ends before the next frame's bytes, and with
+    /// the end of the update it may have left open.
     #[test]
     fn a_refused_frame_opens_the_next_with_st() {
-        let tty = Tty::default();
-        let mut out = FrameOut::new(tty.clone(), false);
-        tty.seen().full = true;
-        assert!(frame(&mut out, &[b"\x1b_Ga=T"]).is_err());
-        tty.seen().full = false;
-        frame(&mut out, &[b"next"]).expect("presented");
-        assert_eq!(
-            tty.seen().writes,
-            vec![[crate::graphics::ST, b"next"].concat()]
-        );
+        for sync in [false, true] {
+            let tty = Tty::default();
+            let mut out = FrameOut::new(tty.clone(), sync);
+            tty.seen().full = true;
+            assert!(frame(&mut out, &[b"\x1b_Ga=T"]).is_err());
+            tty.seen().full = false;
+            frame(&mut out, &[b"next"]).expect("presented");
+            let opening: &[&[u8]] = if sync {
+                &[crate::graphics::ST, END_SYNC, BEGIN_SYNC, b"next", END_SYNC]
+            } else {
+                &[crate::graphics::ST, b"next"]
+            };
+            assert_eq!(tty.seen().writes, vec![opening.concat()], "sync {sync}");
+        }
     }
 }
 
