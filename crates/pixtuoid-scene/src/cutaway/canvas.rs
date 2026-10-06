@@ -125,7 +125,8 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let list = compose(&stepped.frame, office, showing, cloud_cache);
+        let list = tracing::trace_span!("canvas.compose")
+            .in_scope(|| compose(&stepped.frame, office, showing, cloud_cache));
         let epoch = Epoch {
             backdrop: list.backdrop().clone(),
             recolours: list.recolours().clone(),
@@ -141,6 +142,22 @@ impl CutawayCanvas {
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let was = self.shown.as_ref().map(|s| &s.epoch);
+            let differs = |f: fn(&Epoch) -> String| was.is_some_and(|w| f(w) != f(&epoch));
+            tracing::trace!(
+                first = was.is_none(),
+                backdrop = differs(|e| format!("{:?}", e.backdrop)),
+                recolours = differs(|e| format!("{:?}", e.recolours)),
+                scale = differs(|e| format!("{:?}", e.scale)),
+                ambient = differs(|e| format!("{:?}", e.ambient)),
+                carpet = differs(|e| format!("{:?}", e.carpet)),
+                flash = differs(|e| format!("{:?}", e.flash)),
+                ambient_now = ?epoch.ambient,
+                flash_now = ?epoch.flash,
+                "canvas.epoch"
+            );
+        }
         let dirty = match self.shown.take() {
             Some(shown) if shown.epoch == epoch => Dirty::within(
                 changed(&shown.footprints, &footprints)
@@ -154,7 +171,7 @@ impl CutawayCanvas {
             if (self.buf.width(), self.buf.height()) != size {
                 self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
             }
-            paint(&list, cache, &mut self.buf);
+            tracing::trace_span!("canvas.paint").in_scope(|| paint(&list, cache, &mut self.buf));
         }
         self.shown = Some(Shown {
             epoch,
@@ -175,6 +192,11 @@ impl CutawayCanvas {
             dirty,
             flash: list.flash_phase(),
         }
+    }
+
+    /// Forget what was shown, so the next frame paints whole.
+    pub(crate) fn forget(&mut self) {
+        self.shown = None;
     }
 
     /// The last frame painted, empty before the first.
