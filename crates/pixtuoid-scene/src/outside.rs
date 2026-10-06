@@ -235,6 +235,18 @@ pub(crate) struct Wall {
     pub(crate) bays: Vec<WindowBay>,
 }
 
+impl Wall {
+    /// The run of glass its windows cut, in units, and the glass's height:
+    /// the span the clouds are drawn across.
+    pub(crate) fn glass(&self) -> (Range<u16>, u16) {
+        let rows = window_rows(self.size.1);
+        (
+            window_run(self.size.0),
+            crate::layout::glass_rows(rows.end - rows.start),
+        )
+    }
+}
+
 /// The outside's state across frames: the clouds' masses, and the last
 /// frame's views beside what `Outside::of` drew them from, which a frame
 /// given the same reuses ([Blink's display-item cache](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/paint/README.md#display-item-caching)).
@@ -247,8 +259,8 @@ pub struct OutsideCache {
 /// Each of a wall's bays, and what its glass shows.
 pub(crate) type Views = Vec<(WindowBay, Arc<WindowView>)>;
 
-/// All [`Outside::of`] reads of its arguments but the moment's `now`, which it
-/// reads only to draw clouds ahead into the cache.
+/// All [`Outside::of`] reads of its arguments, which leaves the moment's
+/// `now` out.
 #[derive(Debug, PartialEq)]
 struct Drawn {
     sky: crate::sky::Sky,
@@ -273,13 +285,6 @@ impl PartialEq for ThemeId {
 }
 
 impl OutsideCache {
-    /// Have the next frame draw the outside afresh, and every cloud mass the
-    /// coming second needs with it.
-    pub(crate) fn warm(&mut self) {
-        self.last = None;
-        self.clouds.warm();
-    }
-
     /// Each of `wall`'s bays and what its glass shows, as
     /// [`Outside::of`]`(..).views()` gives them.
     pub(crate) fn views(
@@ -301,9 +306,12 @@ impl OutsideCache {
             density,
             weather,
         };
+        let (run, glass_h) = drawn.wall.glass();
+        let glass = (run.end - run.start, glass_h);
         if let Some((last, views)) = &self.last
             && *last == drawn
         {
+            crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
             return views.clone();
         }
         let views: Vec<_> = Outside::of(
@@ -321,6 +329,7 @@ impl OutsideCache {
         .views()
         .map(|(bay, view)| (bay, Arc::new(view)))
         .collect();
+        crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
         self.last = Some((drawn, views.clone()));
         views
     }
@@ -353,13 +362,12 @@ impl Outside {
         weather: GlassWeather,
         clouds: &mut crate::clouds::CloudCache,
     ) -> Self {
+        let (run, glass_h) = wall.glass();
         let Wall {
             size: (buf_w, band_h),
             bays,
         } = wall;
         let rows = window_rows(band_h);
-        let run = window_run(buf_w);
-        let glass_h = crate::layout::glass_rows(rows.end - rows.start);
         let panes: Vec<Range<u16>> = bays
             .iter()
             .copied()
@@ -368,7 +376,7 @@ impl Outside {
             .collect();
         Self {
             sky: SkyView::of(moment, buf_w, band_h, theme),
-            clouds: crate::clouds::Clouds::of_ahead(
+            clouds: crate::clouds::Clouds::of(
                 moment,
                 (run.end - run.start, glass_h),
                 density.get(),
@@ -852,41 +860,6 @@ pub(crate) mod tests {
         let later = noon + std::time::Duration::from_secs(60);
         let _ = pixels(&forced(later), &mut cache);
         assert_eq!(cache.clouds.len(), drawn, "a drift redrew a mass");
-    }
-
-    /// A warmed cache draws the next frame afresh, and the clouds ahead with
-    /// it, though the last frame was drawn from the same.
-    #[test]
-    fn a_warmed_cache_draws_the_next_frame_afresh() {
-        let pack = crate::pack::test_default_pack();
-        let now = crate::localclock::at_hour(12);
-        let moment = Moment::resolve(
-            Sky::at_with(now, Weather::Overcast),
-            &crate::theme::NORMAL,
-            0.0,
-            crate::anim::Motion::Full.timing(now),
-        );
-        let mut cache = OutsideCache::default();
-        let views = |cache: &mut OutsideCache| {
-            cache.views(
-                &moment,
-                &pack,
-                &crate::theme::NORMAL,
-                Wall {
-                    size: (crate::layout::WINDOW_W * 3, 32),
-                    bays: slots(crate::layout::WINDOW_W * 3),
-                },
-                Density::ONE,
-                GlassWeather::of(&moment),
-            )
-        };
-        let first = views(&mut cache);
-        cache.warm();
-        let warmed = views(&mut cache);
-        assert!(
-            !Arc::ptr_eq(&first[0].1, &warmed[0].1),
-            "the warmed frame took the last one's views"
-        );
     }
 
     #[test]

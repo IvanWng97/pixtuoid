@@ -108,7 +108,7 @@ impl OfficeRaster {
     /// ahead for.
     #[doc(hidden)]
     pub fn warm(&mut self) {
-        self.outside.warm();
+        self.outside.clouds.warm();
     }
 
     /// Drop the cached art, after a theme change.
