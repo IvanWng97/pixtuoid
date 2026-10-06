@@ -34,7 +34,7 @@ pub enum Look {
 /// board's gateway chip and breadcrumb.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Place {
-    /// The office's [`office_gateway`](crate::board::office_gateway).
+    /// The office's [`office_gateway`](crate::tally::office_gateway).
     pub gateway: Option<DaemonState>,
     /// Where the floor sits, `None` in a one-floor office.
     pub floor: Option<FooterFloor>,
@@ -70,10 +70,21 @@ pub struct Rendered<'r> {
     pub flash: crate::flash::FlashPhase,
 }
 
-/// The office's raster state, shared by every floor: the cutaway's art.
+/// The frame entry's `tracing` span names, for a profiler's subscriber.
+#[doc(hidden)]
+pub mod spans {
+    /// Stepping the floor's model.
+    pub const COMPOSE: &str = "frame.compose";
+    /// Drawing the stepped floor in its look.
+    pub const RASTERIZE: &str = "frame.rasterize";
+}
+
+/// The office's raster state, shared by every floor and both looks: the
+/// cutaway's art and the clouds' masses.
 #[derive(Debug, Default)]
 pub struct OfficeRaster {
-    cutaway: crate::cutaway::paint::CutawayCache,
+    pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
+    pub(crate) cloud_cache: crate::clouds::CloudCache,
 }
 
 impl OfficeRaster {
@@ -215,6 +226,14 @@ impl Raster {
         }
     }
 
+    /// Paint the next cutaway frame whole: the frame-pacing bench's worst case.
+    #[doc(hidden)]
+    pub fn forget_shown(&mut self) {
+        if let Some(cutaway) = &mut self.cutaway {
+            cutaway.forget();
+        }
+    }
+
     /// The pixels of the last frame drawn, `None` before the first.
     pub fn pixels(&self) -> Option<&RgbBuffer> {
         match self.shown? {
@@ -245,7 +264,9 @@ pub fn render<'r>(
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
         return None;
     }
-    let Some(stepped) = step_floor(ctx, office.coffee, office.chitchat, world, size) else {
+    let stepped = tracing::trace_span!(spans::COMPOSE)
+        .in_scope(|| step_floor(ctx, office.coffee, office.chitchat, world, size));
+    let Some(stepped) = stepped else {
         if look == Look::Classic {
             let classic = raster.classic();
             classic
@@ -261,7 +282,8 @@ pub fn render<'r>(
         .shown
         .replace(look)
         .is_none_or(|was| std::mem::discriminant(&was) != std::mem::discriminant(&look));
-    let board = crate::board::wall_board(
+    let _rasterize = tracing::trace_span!(spans::RASTERIZE).entered();
+    let board = crate::neon_sign::wall_board(
         world.scene,
         place.gateway,
         place.floor,
@@ -278,7 +300,7 @@ pub fn render<'r>(
                 world,
                 &stepped.layout,
                 theme,
-                &mut classic.caches,
+                (&mut classic.caches, &mut office.raster.cloud_cache),
                 &mut classic.buf,
                 &ctx.walks,
                 debug_walkable,
@@ -307,7 +329,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                &mut office.raster.cutaway,
+                (&mut office.raster.cutaway, &mut office.raster.cloud_cache),
             );
             (buf, if switched { Dirty::All } else { dirty }, flash)
         }

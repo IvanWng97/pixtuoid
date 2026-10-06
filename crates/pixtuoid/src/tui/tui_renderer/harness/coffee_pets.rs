@@ -170,13 +170,13 @@ fn pet_present_when_enabled() {
 }
 
 #[test]
-fn pet_position_varies_over_its_cycle() {
+fn pet_position_varies_over_its_roam() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(100, 40, vec![PetKind::Cat]);
     let mut seen = std::collections::HashSet::new();
-    for i in 0..5 {
-        let now = t0() + Duration::from_secs(i * 10);
-        r.render(&scene, pack(), now).unwrap();
+    for step in 0..(pixtuoid_scene::PET_LONGEST_REST_MS + 10_000) / 500 {
+        r.render(&scene, pack(), t0() + Duration::from_millis(step * 500))
+            .unwrap();
         if let Some(PetHover {
             centre: pos, anim, ..
         }) = r.drawn_pet()
@@ -186,7 +186,7 @@ fn pet_position_varies_over_its_cycle() {
     }
     assert!(
         seen.len() >= 2,
-        "pet should move/animate across its 40s cycle, saw {} distinct states",
+        "pet should move/animate as it roams, saw {} distinct states",
         seen.len()
     );
 }
@@ -201,7 +201,6 @@ fn petting_freezes_pet_position() {
     } = r.drawn_pet().expect("pet placed");
     r.set_active_pet(Some(PetState {
         petted_at: t0(),
-        pet_pos: pos,
         kind,
         floor_idx: 0,
     }));
@@ -214,77 +213,62 @@ fn petting_freezes_pet_position() {
 #[test]
 fn pet_walk_is_frame_stable() {
     let scene = scene_with(vec![active("/pstab/0.jsonl", 0, "Edit", t0())], 16);
-    let now = t0() + Duration::from_millis(5_000); // mid walk-phase of cycle 0
     let mut r1 = build(160, 80, vec![PetKind::Cat]);
     let mut r2 = build(160, 80, vec![PetKind::Cat]);
-    r1.render(&scene, pack(), now).unwrap();
-    r2.render(&scene, pack(), now).unwrap();
-    assert_eq!(
-        r1.drawn_pet().map(|f| (f.centre.x, f.centre.y)),
-        r2.drawn_pet().map(|f| (f.centre.x, f.centre.y)),
-        "identical `now` must give identical pet position (no flash)"
-    );
+    for step in 0..(pixtuoid_scene::PET_LONGEST_REST_MS + 10_000) / 500 {
+        let now = t0() + Duration::from_millis(step * 500);
+        r1.render(&scene, pack(), now).unwrap();
+        r2.render(&scene, pack(), now).unwrap();
+        assert_eq!(
+            r1.drawn_pet().map(|f| (f.centre.x, f.centre.y, f.anim)),
+            r2.drawn_pet().map(|f| (f.centre.x, f.centre.y, f.anim)),
+            "identical frames must give an identical pet (no flash), step {step}"
+        );
+    }
 }
 
 #[test]
-fn pet_walk_never_clips_through_furniture() {
+fn pet_walks_routed_ground_and_rests_on_walkable_floor() {
     let scene = scene_with(vec![active("/pwalk/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(160, 80, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout after prime").clone();
-    for cycle in 0u64..4 {
-        for step in 0..35u64 {
-            let now =
-                t0() + Duration::from_millis(cycle * pixtuoid_scene::PET_CYCLE_MS + step * 400);
-            r.render(&scene, pack(), now).unwrap();
-            if let Some(PetHover {
-                centre: pos, anim, ..
-            }) = r.drawn_pet()
-                && anim == PetKind::Cat.walk_anim()
-            {
-                // Coarse-cell walkable is the predicate A* itself guarantees;
-                // per-pixel `is_walkable` is stricter than the router delivers
-                // and would hold the pet to a higher bar than the agents.
-                assert!(
-                    pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
-                    "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
-                    pos.x,
-                    pos.y
-                );
-            }
+    let (mut walking, mut resting) = (0, 0);
+    for step in 0..3 * pixtuoid_scene::PET_LONGEST_REST_MS / 400 {
+        r.render(&scene, pack(), t0() + Duration::from_millis(step * 400))
+            .unwrap();
+        let Some(PetHover {
+            centre: pos, anim, ..
+        }) = r.drawn_pet()
+        else {
+            continue;
+        };
+        if anim == PetKind::Cat.walk_anim() {
+            // Coarse-cell walkable is the predicate A* itself guarantees;
+            // per-pixel `is_walkable` is stricter than the router delivers
+            // and would hold the pet to a higher bar than the agents.
+            assert!(
+                pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
+                "walking pet at ({},{}) is in a blocked routing cell (step={step})",
+                pos.x,
+                pos.y
+            );
+            walking += 1;
+        } else {
+            // A rest is a snapped cell center, so the per-pixel check applies.
+            assert!(
+                layout.walkable.is_walkable(pos.x, pos.y),
+                "resting pet at ({},{}) is on a blocked cell (step={step})",
+                pos.x,
+                pos.y
+            );
+            resting += 1;
         }
     }
-}
-
-#[test]
-fn pet_rest_pos_is_walkable() {
-    let scene = scene_with(vec![active("/prest/0.jsonl", 0, "Edit", t0())], 16);
-    let mut r = build(160, 80, vec![PetKind::Cat]);
-    r.render(&scene, pack(), t0()).unwrap();
-    let layout = r.cached_layout().expect("layout after prime").clone();
-    for cycle in 0u64..4 {
-        for step in 0..10u64 {
-            let now = t0()
-                + Duration::from_millis(
-                    cycle * pixtuoid_scene::PET_CYCLE_MS + 14_200 + step * 2_600,
-                );
-            r.render(&scene, pack(), now).unwrap();
-            if let Some(PetHover {
-                centre: pos, anim, ..
-            }) = r.drawn_pet()
-                && anim != PetKind::Cat.walk_anim()
-            {
-                // Rest pose is a snapped cell center, so the stronger per-pixel
-                // check applies here (unlike the walk phase above).
-                assert!(
-                    layout.walkable.is_walkable(pos.x, pos.y),
-                    "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
-                    pos.x,
-                    pos.y
-                );
-            }
-        }
-    }
+    assert!(
+        walking > 0 && resting > 0,
+        "the sample must walk and rest: {walking}/{resting}"
+    );
 }
 
 #[test]
@@ -318,7 +302,6 @@ fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
         let PetHover { centre: pos, .. } = r.drawn_pet().expect("pet placed");
         r.set_active_pet(Some(PetState {
             petted_at: t0(),
-            pet_pos: pos,
             kind,
             floor_idx: 0,
         }));

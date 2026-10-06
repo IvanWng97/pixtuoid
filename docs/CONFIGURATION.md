@@ -87,7 +87,17 @@ face derived under it. The recolor keys and `[ramps]` apply at every density.
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
-A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
+A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, and draws its lamp's bulb in palette key `9`, at every density: the lamp's pool centres on those pixels. Without the marks neither look stands the props, without the bulb neither look lights the lamp, and `validate-pack` warns of each.
+
+`desk_north` is `desk` seen from its sitter's side, so it stands its props
+mirrored, each mark naming the prop's bottom-right cell instead of its
+bottom-left; a `desk_north` marked before this needs its marks moved there. `desk_front` is drawn over a `desk`'s props on the desk's own
+canvas: whatever of the desk stands between the viewer and its sitter's props,
+the bundled one its monitor. It comes only with the desk it covers, so a pack
+with a `desk` of its own and no `desk_front` draws its props over the desk.
+
+A walk (a person's `walking`, `walking_back` and `walking_coffee`, a pet's
+`cat_walk` and `dog_walk`, the gateway mascot's `lobster_walk`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full
 cycle of its frames. Its frames, and its `@Nx` variants', then step by the
 ground covered, not by `frame_ms`. A walk without one steps on its `frame_ms`,

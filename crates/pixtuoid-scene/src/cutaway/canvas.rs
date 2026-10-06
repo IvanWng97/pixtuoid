@@ -11,11 +11,10 @@ use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::paint::paint;
 use crate::display::light::Ambient;
-use crate::display::{Hovers, Office, Showing, Span, compose};
+use crate::display::{Backdrop, Hovers, Office, Recolours, Showing, Span, compose};
 use crate::floor::SteppedFloor;
-use crate::layout::{Bounds, SceneLayout};
+use crate::layout::Bounds;
 use crate::render_scale::RenderScale;
-use crate::theme::Theme;
 
 /// A cutaway painter's frame buffer and what it shows, for one pack.
 #[derive(Debug)]
@@ -74,29 +73,16 @@ impl Dirty {
     }
 }
 
-/// What every pixel of a frame is painted under, beyond its display list and
-/// the canvas's pack.
-#[derive(Debug)]
+/// What every pixel of a frame is painted under, beyond its pieces and the
+/// canvas's pack.
+#[derive(Debug, PartialEq)]
 struct Epoch {
-    // Held, so a later layout cannot reuse its address.
-    layout: Arc<SceneLayout>,
-    // A static, so its address is its identity.
-    theme: &'static Theme,
+    backdrop: Backdrop,
+    recolours: Recolours,
     scale: RenderScale,
     ambient: Ambient,
     carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
     flash: crate::display::light::Flash,
-}
-
-impl PartialEq for Epoch {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.layout, &other.layout)
-            && std::ptr::eq(self.theme, other.theme)
-            && self.scale == other.scale
-            && self.ambient == other.ambient
-            && self.carpet == other.carpet
-            && self.flash == other.flash
-    }
 }
 
 #[derive(Debug)]
@@ -124,10 +110,13 @@ impl CutawayCanvas {
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
-        theme: &'static Theme,
+        theme: &crate::theme::Theme,
         scale: RenderScale,
         showing: Showing<'_>,
-        cache: &mut crate::cutaway::paint::CutawayCache,
+        (cache, cloud_cache): (
+            &mut crate::cutaway::paint::CutawayCache,
+            &mut crate::clouds::CloudCache,
+        ),
     ) -> CanvasFrame<'_> {
         let layout = &stepped.layout;
         let office = Office {
@@ -136,10 +125,11 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let list = compose(&stepped.frame, office, showing);
+        let list = tracing::trace_span!("canvas.compose")
+            .in_scope(|| compose(&stepped.frame, office, showing, cloud_cache));
         let epoch = Epoch {
-            layout: Arc::clone(layout),
-            theme,
+            backdrop: list.backdrop().clone(),
+            recolours: list.recolours().clone(),
             scale,
             ambient: list.ambient(),
             carpet: list.carpet(),
@@ -152,6 +142,22 @@ impl CutawayCanvas {
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let was = self.shown.as_ref().map(|s| &s.epoch);
+            let differs = |f: fn(&Epoch) -> String| was.is_some_and(|w| f(w) != f(&epoch));
+            tracing::trace!(
+                first = was.is_none(),
+                backdrop = differs(|e| format!("{:?}", e.backdrop)),
+                recolours = differs(|e| format!("{:?}", e.recolours)),
+                scale = differs(|e| format!("{:?}", e.scale)),
+                ambient = differs(|e| format!("{:?}", e.ambient)),
+                carpet = differs(|e| format!("{:?}", e.carpet)),
+                flash = differs(|e| format!("{:?}", e.flash)),
+                ambient_now = ?epoch.ambient,
+                flash_now = ?epoch.flash,
+                "canvas.epoch"
+            );
+        }
         let dirty = match self.shown.take() {
             Some(shown) if shown.epoch == epoch => Dirty::within(
                 changed(&shown.footprints, &footprints)
@@ -163,9 +169,9 @@ impl CutawayCanvas {
         };
         if dirty != Dirty::Unchanged {
             if (self.buf.width(), self.buf.height()) != size {
-                self.buf = RgbBuffer::filled(size.0, size.1, theme.surface.bg_fallback);
+                self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
             }
-            paint(layout, &list, cache, &mut self.buf);
+            tracing::trace_span!("canvas.paint").in_scope(|| paint(&list, cache, &mut self.buf));
         }
         self.shown = Some(Shown {
             epoch,
@@ -186,6 +192,11 @@ impl CutawayCanvas {
             dirty,
             flash: list.flash_phase(),
         }
+    }
+
+    /// Forget what was shown, so the next frame paints whole.
+    pub(crate) fn forget(&mut self) {
+        self.shown = None;
     }
 
     /// The last frame painted, empty before the first.
@@ -253,8 +264,10 @@ mod tests {
     use crate::display::compose::tests::{empty_frame, lively_office, sit_down};
     use crate::display::{HoverTarget, PieceKind};
     use crate::floor::FloorMeta;
+    use crate::layout::SceneLayout;
     use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
+    use crate::theme::Theme;
 
     /// The ground floor under a clear sky: rain or snow on the glass moves
     /// every tick, so the clock's weather would decide what a tick repaints.
@@ -304,7 +317,7 @@ mod tests {
             frame,
             office,
             crate::display::compose::tests::showing(floor, now),
-            &mut cache,
+            (&mut cache, &mut crate::clouds::CloudCache::default()),
             &mut buf,
         );
         buf
@@ -342,7 +355,10 @@ mod tests {
                 .any(|r| (r.x..r.x + r.width).contains(&x) && (r.y..r.y + r.height).contains(&y))
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
-        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let (mut cache, mut cloud_cache) = (
+            crate::cutaway::paint::CutawayCache::default(),
+            crate::clouds::CloudCache::default(),
+        );
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
@@ -351,6 +367,7 @@ mod tests {
                 frame,
                 office,
                 crate::display::compose::tests::showing(floor, *now),
+                &mut crate::clouds::CloudCache::default(),
             );
             let spans: Vec<(Span, u64)> = list
                 .pieces()
@@ -367,7 +384,7 @@ mod tests {
                 theme,
                 scale,
                 crate::display::compose::tests::showing(floor, *now),
-                &mut cache,
+                (&mut cache, &mut cloud_cache),
             );
             assert!(
                 shown.buf.as_slice() == full.as_slice(),
@@ -526,7 +543,10 @@ mod tests {
             layout,
         };
         let now = crate::localclock::at_hour(12);
-        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let (mut cache, mut cloud_cache) = (
+            crate::cutaway::paint::CutawayCache::default(),
+            crate::clouds::CloudCache::default(),
+        );
         let mut canvas = CutawayCanvas::new(Arc::new(test_default_pack()));
         let other = crate::theme::ALL_THEMES
             .iter()
@@ -541,7 +561,7 @@ mod tests {
                     theme,
                     scale,
                     crate::display::compose::tests::showing(clear_ground(), now),
-                    &mut cache,
+                    (&mut cache, &mut cloud_cache),
                 )
                 .dirty
         };
@@ -592,6 +612,7 @@ mod tests {
                 frame,
                 office,
                 crate::display::compose::tests::showing(clear_ground(), Self::now()),
+                &mut crate::clouds::CloudCache::default(),
             );
             list.pieces()
                 .iter()
@@ -611,13 +632,16 @@ mod tests {
                 layout: Arc::clone(&self.layout),
                 frame: frame.clone(),
             };
-            let mut cache = crate::cutaway::paint::CutawayCache::default();
+            let (mut cache, mut cloud_cache) = (
+                crate::cutaway::paint::CutawayCache::default(),
+                crate::clouds::CloudCache::default(),
+            );
             canvas.frame(
                 &stepped,
                 normal(),
                 self.scale,
                 crate::display::compose::tests::showing(clear_ground(), Self::now()),
-                &mut cache,
+                (&mut cache, &mut cloud_cache),
             );
             canvas.hovers().expect("a frame").clone()
         }
@@ -772,6 +796,7 @@ mod tests {
                     &both,
                     office,
                     crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+                    &mut crate::clouds::CloudCache::default(),
                 );
                 list.pieces().iter().find(|p| {
                     matches!(&p.kind, crate::display::PieceKind::Text { run } if run.role == crate::display::TextRole::Badge(b.agent_id))
@@ -821,6 +846,7 @@ mod tests {
                 frame,
                 office,
                 crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+                &mut crate::clouds::CloudCache::default(),
             );
             list.pieces()
                 .iter()
@@ -836,7 +862,10 @@ mod tests {
             layout: Arc::clone(&h.layout),
             frame: renamed.clone(),
         };
-        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let (mut cache, mut cloud_cache) = (
+            crate::cutaway::paint::CutawayCache::default(),
+            crate::clouds::CloudCache::default(),
+        );
         let size = (
             h.scale.to_buffer(h.layout.buf_w),
             h.scale.to_buffer(h.layout.buf_h),
@@ -847,7 +876,7 @@ mod tests {
                 normal(),
                 h.scale,
                 crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
-                &mut cache,
+                (&mut cache, &mut cloud_cache),
             )
             .dirty;
         let spans = [plate(seated).0, plate(&renamed).0];
@@ -889,7 +918,10 @@ mod tests {
                 normal(),
                 scale,
                 showing,
-                &mut crate::cutaway::paint::CutawayCache::default(),
+                (
+                    &mut crate::cutaway::paint::CutawayCache::default(),
+                    &mut crate::clouds::CloudCache::default(),
+                ),
             );
             let office = Office {
                 layout: &stepped.layout,
@@ -897,15 +929,20 @@ mod tests {
                 theme: normal(),
                 scale,
             };
-            let drawn = compose(&stepped.frame, office, showing)
-                .texts()
-                .find(|run| run.role == TextRole::Star)
-                .map(|run| {
-                    crate::display::compose::run_box(
-                        run,
-                        crate::display::pen::Pen::for_pack(scale, &pack),
-                    )
-                });
+            let drawn = compose(
+                &stepped.frame,
+                office,
+                showing,
+                &mut crate::clouds::CloudCache::default(),
+            )
+            .texts()
+            .find(|run| run.role == TextRole::Star)
+            .map(|run| {
+                crate::display::compose::run_box(
+                    run,
+                    crate::display::pen::Pen::for_pack(scale, &pack),
+                )
+            });
             assert_eq!(drawn.is_some(), s == d, "at scale {s} the star is drawn");
             assert_eq!(canvas.star(), drawn, "at scale {s}");
         }
@@ -918,12 +955,13 @@ mod tests {
         let h = Hovering::new();
         let seated = h.frames.last().expect("a seated frame");
         let quiet = crate::display::compose::tests::showing(clear_ground(), Hovering::now());
-        let counts = crate::board::StateCounts {
+        let counts = crate::tally::StateCounts {
             active: 3,
             total: 3,
-            ..crate::board::StateCounts::default()
+            ..crate::tally::StateCounts::default()
         };
-        let busy = crate::board::build_board(counts, 60, None, None, Motion::Full, Hovering::now());
+        let busy =
+            crate::neon_sign::build_board(counts, 60, None, None, Motion::Full, Hovering::now());
         let busy = Showing {
             board: &busy,
             ..quiet
@@ -936,15 +974,20 @@ mod tests {
                 theme: normal(),
                 scale: h.scale,
             };
-            compose(seated, office, showing)
-                .pieces()
-                .iter()
-                .filter(|p| {
-                    matches!(&p.kind, PieceKind::Text { run }
+            compose(
+                seated,
+                office,
+                showing,
+                &mut crate::clouds::CloudCache::default(),
+            )
+            .pieces()
+            .iter()
+            .filter(|p| {
+                matches!(&p.kind, PieceKind::Text { run }
                         if matches!(run.role, TextRole::Brand | TextRole::Star | TextRole::Board))
-                })
-                .map(|p| (p.span, p.fingerprint))
-                .collect()
+            })
+            .map(|p| (p.span, p.fingerprint))
+            .collect()
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         h.show(&mut canvas, seated);
@@ -952,9 +995,18 @@ mod tests {
             layout: Arc::clone(&h.layout),
             frame: seated.clone(),
         };
-        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let (mut cache, mut cloud_cache) = (
+            crate::cutaway::paint::CutawayCache::default(),
+            crate::clouds::CloudCache::default(),
+        );
         let dirty = canvas
-            .frame(&stepped, normal(), h.scale, busy, &mut cache)
+            .frame(
+                &stepped,
+                normal(),
+                h.scale,
+                busy,
+                (&mut cache, &mut cloud_cache),
+            )
             .dirty;
         let size = (
             h.scale.to_buffer(h.layout.buf_w),
@@ -997,14 +1049,18 @@ mod tests {
         assert_eq!(rects.as_slice(), [b]);
     }
 
-    /// A new layout of the same size repaints everything, even one built after
-    /// the last was dropped, where the allocator may hand back its address.
+    /// A new layout of the same size shows whole, and the same one laid out
+    /// again shows nothing new: the epoch compares the backdrop by value, so
+    /// no address the allocator hands back decides either.
     #[test]
     fn a_new_layout_repaints_everything() {
         let pack = Arc::new(test_default_pack());
         let scale = RenderScale::new(2).expect("nonzero");
         let now = crate::localclock::at_hour(12);
-        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let (mut cache, mut cloud_cache) = (
+            crate::cutaway::paint::CutawayCache::default(),
+            crate::clouds::CloudCache::default(),
+        );
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
         let stepped = |seed| {
             let layout = SceneLayout::compute_with_seed(160, 96, None, seed).expect("lays out");
@@ -1019,7 +1075,19 @@ mod tests {
             normal(),
             scale,
             crate::display::compose::tests::showing(floor, now),
-            &mut cache,
+            (&mut cache, &mut cloud_cache),
+        );
+        let again = canvas.frame(
+            &stepped(0),
+            normal(),
+            scale,
+            crate::display::compose::tests::showing(floor, now),
+            (&mut cache, &mut cloud_cache),
+        );
+        assert_eq!(
+            again.dirty,
+            Dirty::Unchanged,
+            "the same layout, laid out again"
         );
         let b = stepped(1);
         let shown = canvas.frame(
@@ -1027,7 +1095,7 @@ mod tests {
             normal(),
             scale,
             crate::display::compose::tests::showing(floor, now),
-            &mut cache,
+            (&mut cache, &mut cloud_cache),
         );
         assert_eq!(shown.dirty, Dirty::All);
         assert!(
@@ -1129,7 +1197,10 @@ mod tests {
                             floor,
                             crate::localclock::on_day(new_moon, hour),
                         ),
-                        &mut crate::cutaway::paint::CutawayCache::default(),
+                        (
+                            &mut crate::cutaway::paint::CutawayCache::default(),
+                            &mut crate::clouds::CloudCache::default(),
+                        ),
                     );
                     let digest = shown.buf.as_slice().iter().fold(
                         u64::from(shown.buf.width()) << 16 | u64::from(shown.buf.height()),
@@ -1149,15 +1220,10 @@ mod tests {
                 }
             }
         }
-        if std::env::var_os("UPDATE_CUTAWAY_GOLDEN").is_some() {
-            std::fs::write(PINNED, &digests).expect("writes the golden");
-            return;
-        }
-        let pinned = std::fs::read_to_string(PINNED).expect("reads the golden");
-        assert_eq!(
-            digests, pinned,
-            "these frames are not the pixels {PINNED} pins; run \
-             `just gen-cutaway-golden` if the look changed on purpose"
+        let pinned = snapbox::Data::read_from(
+            std::path::Path::new(PINNED),
+            Some(snapbox::data::DataFormat::Text),
         );
+        snapbox::assert_data_eq!(digests, pinned.raw());
     }
 }

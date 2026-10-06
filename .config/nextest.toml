@@ -33,9 +33,8 @@ threads-required = "num-cpus"
 # `[profile.dev.package.pixtuoid-scene] opt-level = 2` in the workspace
 # Cargo.toml. Don't re-raise their cap: headroom only hides the next regression.
 
-# A layout sweep: every floor height up to the band where door walls crossed
-# routes, on every seed, so the coverage-instrumented Windows run outlasts the
-# default budget while a plain run fits it.
+# A layout sweep that splits its floors across the cores, so it holds every
+# test slot while it runs.
 [[profile.default.overrides]]
 filter = 'test(no_route_on_a_short_floor_passes_through_a_wall)'
-slow-timeout = { period = "60s", terminate-after = 6 }
+threads-required = "num-test-threads"
