@@ -258,10 +258,7 @@ impl<'a> DisplayList<'a> {
 /// `_`.
 pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     use std::hash::{Hash, Hasher};
-    // `DefaultHasher::new` starts from the same keys on every call, so one frame
-    // built twice hashes alike (`one_frame_builds_one_list`); a `RandomState`
-    // would not.
-    let mut h = std::hash::DefaultHasher::new();
+    let mut h = fingerprint_hasher();
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
         PieceKind::WallSeg { piece, rows, trim } => (piece, rows, trim).hash(&mut h),
@@ -304,6 +301,16 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Effect(riding) => riding.hash(&mut h),
     }
     h.finish()
+}
+
+/// The hasher every display fingerprint is taken with. Seeded alike on every
+/// call, so one frame built twice hashes alike (`one_frame_builds_one_list`);
+/// foldhash's quality hasher, not std's SipHash, which bought HashDoS
+/// resistance a frame-to-frame comparison never needs at most of compose's
+/// time (perf-book "Hashing").
+pub(crate) fn fingerprint_hasher() -> impl std::hash::Hasher {
+    use std::hash::BuildHasher;
+    foldhash::quality::FixedState::with_seed(0).build_hasher()
 }
 
 /// How a piece takes the room's light, which the cutaway's emission pass

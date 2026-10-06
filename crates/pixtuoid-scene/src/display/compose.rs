@@ -325,6 +325,8 @@ fn lights(
         },
     );
     let pen = Pen::for_pack(scale, pack);
+    // each desk art's bulb, scanned from its pixels once a frame, not a desk
+    let mut bulbs = std::collections::HashMap::new();
     // Each desk's lamp shines from the bulb its art draws, which the cutaway's
     // art stands on the side the desk faces; the model's is the classic's.
     let lamps: Vec<crate::lighting::Emitter> = lights
@@ -337,7 +339,12 @@ fn lights(
                 .home_desks
                 .get(i)
                 .zip(crate::pack::desk_art_name(pack, facing))
-                .and_then(|(&at, art)| desk_bulb(at, art, pack, scale));
+                .and_then(|(&at, art)| {
+                    let cell = *bulbs
+                        .entry(art)
+                        .or_insert_with(|| bulb_in(art, pack, scale));
+                    bulb_at(at, art, cell?, pack, scale)
+                });
             match (bulb, d.lamp.light) {
                 (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
                     crate::lighting::Emitter {
@@ -371,7 +378,7 @@ fn lights(
         })
         .map(|(span, view)| {
             use std::hash::{Hash, Hasher};
-            let mut h = std::hash::DefaultHasher::new();
+            let mut h = crate::display::list::fingerprint_hasher();
             view.hash(&mut h);
             LightPiece {
                 span,
@@ -385,14 +392,30 @@ fn lights(
 /// The layout cell of the desk lamp's bulb the desk `art_name` at `at` draws at
 /// `scale`: the middle of its [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY)
 /// pixels, or `None` for art that draws no bulb.
+#[cfg(test)]
 fn desk_bulb(
     at: crate::layout::Point,
     art_name: &str,
     pack: &Pack,
     scale: RenderScale,
 ) -> Option<crate::layout::Point> {
+    bulb_at(at, art_name, bulb_in(art_name, pack, scale)?, pack, scale)
+}
+
+/// Where in `art_name` at `scale` its bulb is, in cells.
+fn bulb_in(art_name: &str, pack: &Pack, scale: RenderScale) -> Option<(u16, u16)> {
+    crate::pack::bulb_cell(&crate::pack::densest_frame(pack, art_name, 0, scale)?)
+}
+
+/// [`desk_bulb`] given [`bulb_in`]'s cell.
+fn bulb_at(
+    at: crate::layout::Point,
+    art_name: &str,
+    (x, y): (u16, u16),
+    pack: &Pack,
+    scale: RenderScale,
+) -> Option<crate::layout::Point> {
     let span = desk_span(pack, art_name, at, scale)?;
-    let (x, y) = crate::pack::bulb_cell(&crate::pack::densest_frame(pack, art_name, 0, scale)?)?;
     Some(crate::layout::Point {
         x: span.x0 + x,
         y: span.y0 + y,
