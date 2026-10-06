@@ -61,6 +61,10 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pack: Arc<Pack>,
     /// The frames' times and janks.
     jank: crate::tui::jank::Jank,
+    /// Encode as if an audio thread were up, as the pacing bench's lofi run
+    /// has one with no device.
+    #[cfg(feature = "graphics")]
+    audio_assumed: bool,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -227,6 +231,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
             jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
+            #[cfg(feature = "graphics")]
+            audio_assumed: false,
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -317,9 +323,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// The cloud rasters the office has drawn so far.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "graphics"))]
     pub(crate) fn cloud_draws(&self) -> usize {
         self.office.raster.cloud_draws()
+    }
+
+    /// Encode as if an audio thread were up, for the pacing bench.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn assume_audio(&mut self) {
+        self.audio_assumed = true;
     }
 
     /// Paint and send the next frame whole, for the pacing bench's worst case.
@@ -869,6 +881,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
+            cutaway.share_with_audio(self.chrome.audio.is_enabled() || self.audio_assumed);
             let size = self.terminal.size()?;
             let scene_area =
                 crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));

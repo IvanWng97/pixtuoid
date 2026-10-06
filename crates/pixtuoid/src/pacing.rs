@@ -233,6 +233,11 @@ pub fn warm(
     r.warm(scene, pack, now);
 }
 
+/// Encode as if an audio thread were up beside `r`.
+pub fn assume_audio(r: &mut TuiRenderer<PacedBackend>) {
+    r.assume_audio();
+}
+
 /// Paint and send `r`'s next frame whole.
 pub fn forget_frame(r: &mut TuiRenderer<PacedBackend>) {
     r.forget_frame();

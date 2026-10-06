@@ -813,18 +813,27 @@ const DRAWS_AHEAD: usize = 2;
 /// The office's mass rasters, the most recently used first and at most
 /// `CloudCache::CAPACITY` of them: drawing a mass's bands is most of a
 /// cloudy frame's cost, and a drifting mass's bands don't change.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CloudCache {
-    entries: std::collections::VecDeque<(RasterKey, std::sync::Arc<MassRaster>)>,
+    entries: lru::LruCache<RasterKey, std::sync::Arc<MassRaster>>,
     /// Rasters drawn: what a warm cache spares a frame.
     draws: usize,
+}
+
+impl Default for CloudCache {
+    fn default() -> Self {
+        Self {
+            entries: lru::LruCache::new(Self::CAPACITY),
+            draws: 0,
+        }
+    }
 }
 
 impl CloudCache {
     /// Room for a transition's two decks on both looks' grids, and every
     /// mass drawn [`AHEAD`] of them (`the_cache_holds_a_transition_in_both_looks`):
     /// one office draws one wall per look.
-    const CAPACITY: usize = 256;
+    const CAPACITY: std::num::NonZeroUsize = std::num::NonZeroUsize::new(256).expect("nonzero");
 
     /// Rasters drawn so far.
     pub(crate) fn draws(&self) -> usize {
@@ -832,7 +841,7 @@ impl CloudCache {
     }
 
     fn holds(&self, key: RasterKey) -> bool {
-        self.entries.iter().any(|(k, _)| *k == key)
+        self.entries.contains(&key)
     }
 
     #[cfg(test)]
@@ -845,18 +854,11 @@ impl CloudCache {
         key: RasterKey,
         draw: impl FnOnce() -> MassRaster,
     ) -> std::sync::Arc<MassRaster> {
-        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
-            let hit = self.entries.remove(i).expect("found above");
-            let raster = std::sync::Arc::clone(&hit.1);
-            self.entries.push_front(hit);
-            return raster;
-        }
-        let raster = std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw));
-        self.draws += 1;
-        self.entries
-            .push_front((key, std::sync::Arc::clone(&raster)));
-        self.entries.truncate(Self::CAPACITY);
-        raster
+        let raster = self.entries.get_or_insert(key, || {
+            self.draws += 1;
+            std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw))
+        });
+        std::sync::Arc::clone(raster)
     }
 }
 
@@ -1744,14 +1746,14 @@ mod tests {
             .unwrap_or(0);
         let ahead = (AHEAD.as_millis() / u128::from(crate::anim::PAINT_FRAME_MS)) as usize;
         assert!(
-            CloudCache::CAPACITY >= 2 * (2 * fullest + ahead * DRAWS_AHEAD),
+            CloudCache::CAPACITY.get() >= 2 * (2 * fullest + ahead * DRAWS_AHEAD),
             "{fullest} masses a deck"
         );
     }
 
-    /// Frame by frame at the paint rate through a weather transition and
-    /// across dusk, no frame but the first draws more than [`DRAWS_AHEAD`]
-    /// masses' bands: every quantized step's are drawn ahead of it.
+    /// Frame by frame at the paint rate, on Full and Calm, through a weather
+    /// transition and across dusk, every frame but the first finds its every
+    /// mass already drawn, and draws at most [`DRAWS_AHEAD`] ahead.
     #[test]
     fn every_step_is_drawn_ahead_of_it() {
         use crate::sky::WeatherPolicy;
@@ -1770,24 +1772,32 @@ mod tests {
                 Duration::from_secs(300),
             ),
         ];
-        for (start, policy, length) in windows {
-            let mut cache = CloudCache::default();
-            let mut ahead_drawn = 0;
-            for n in 0..length.as_millis() / frame.as_millis() {
-                let timing = Motion::Full.timing(start + frame * n as u32);
-                let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
-                let before = cache.draws;
-                Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
-                let drawn = cache.draws - before;
-                if n > 0 {
-                    assert!(
-                        drawn <= DRAWS_AHEAD,
-                        "{policy:?} frame {n} drew {drawn} masses"
-                    );
-                    ahead_drawn += drawn;
+        for motion in [Motion::Full, Motion::Calm] {
+            for (start, policy, length) in windows {
+                let mut cache = CloudCache::default();
+                let mut ahead_drawn = 0;
+                for n in 0..length.as_millis() / frame.as_millis() {
+                    let timing = motion.timing(start + frame * n as u32);
+                    let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
+                    let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
+                    let missing = planned
+                        .iter()
+                        .filter(|&&(_, key)| !cache.holds(key))
+                        .count();
+                    let before = cache.draws;
+                    Clouds::of_ahead(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+                    let drawn = cache.draws - before;
+                    if n > 0 {
+                        assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");
+                        assert!(
+                            drawn <= DRAWS_AHEAD,
+                            "{motion:?} {policy:?} frame {n}: {drawn}"
+                        );
+                        ahead_drawn += drawn;
+                    }
                 }
+                assert!(ahead_drawn > 0, "{policy:?}: the window crossed no step");
             }
-            assert!(ahead_drawn > 0, "{policy:?}: the window crossed no step");
         }
     }
 

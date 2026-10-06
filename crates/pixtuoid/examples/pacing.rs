@@ -610,6 +610,9 @@ fn hitch(path: &Path) -> Result<()> {
         )?;
         r.set_weather(run.weather);
         r.set_motion(Motion::Full);
+        if run.lofi {
+            pixtuoid::pacing::assume_audio(&mut r);
+        }
         let lofi_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let lofi = run.lofi.then(|| {
             let stop = Arc::clone(&lofi_stop);
