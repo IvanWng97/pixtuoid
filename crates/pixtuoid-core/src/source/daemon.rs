@@ -185,11 +185,10 @@ impl DaemonPresence {
     /// pid whose `gateway_start` is missed can't re-adopt via `PidSeen` (None-only)
     /// and the instant abrupt-down rung silently disarms until the presence sweep.
     ///
-    /// `last_seen` is anchored to `now` HERE because the renderer times the
-    /// walk-out off it (`down_age = now - last_seen`, gone at `MASCOT_LEAVE_MS`)
-    /// and the sweep removes the entry on the same clock — on an abrupt death,
-    /// where `last_seen` can be minutes stale, the mascot would otherwise vanish
-    /// with no walk-out. Taking `now` makes entering Down without anchoring the
+    /// `last_seen` is anchored to `now` HERE because the sweep removes a Down
+    /// entry on that clock: on an abrupt death, where `last_seen` can be
+    /// minutes stale, the entry would be swept before any frame showed the
+    /// gateway Down. Taking `now` makes entering Down without anchoring the
     /// clock unrepresentable.
     fn enter_down(&mut self, now: SystemTime) {
         self.liveness = DaemonLiveness::Down;
@@ -300,8 +299,9 @@ pub fn apply_presence(
             }
         }
     }
-    // Re-anchor the enter animation on a Down → up resurrection; Idle↔Busy leaves
-    // it, so the steady wander clock stays continuous.
+    // Re-anchor the walk-in on a Down → up resurrection (the sim walks the
+    // mascot in from `entered_at`); Idle↔Busy leaves it, so a mascot already in
+    // the room does not walk in again.
     if was_down && p.liveness != DaemonLiveness::Down {
         p.entered_at = now;
     }

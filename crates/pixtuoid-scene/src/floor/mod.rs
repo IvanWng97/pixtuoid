@@ -131,6 +131,8 @@ pub struct FloorCtx {
     pub(crate) neon: NeonState,
     /// Per-agent walk state (physics profiles for entry/exit/wander).
     pub walks: HashMap<AgentId, WalkState>,
+    /// The pet's and the gateway mascots' walks.
+    pub(crate) creatures: HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -157,6 +159,7 @@ impl FloorCtx {
             vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
             walks: HashMap::new(),
+            creatures: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
         }
@@ -175,6 +178,7 @@ impl FloorCtx {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
+            creatures: &mut self.creatures,
         }
     }
 
@@ -442,7 +446,7 @@ impl AudioObserver {
         }
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
-        let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
+        let counts = crate::tally::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
         let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
@@ -614,20 +618,27 @@ impl FloorSession {
         self.floor.raster.classic_signs()
     }
 
-    /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.
+    /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.
     pub fn board(
         &self,
         scene: &SceneState,
         motion: crate::anim::Motion,
         now: SystemTime,
-    ) -> crate::board::BoardModel {
-        crate::board::wall_board(
+    ) -> crate::neon_sign::BoardModel {
+        crate::neon_sign::wall_board(
             scene,
-            crate::board::office_gateway(scene),
+            crate::tally::office_gateway(scene),
             None,
             motion,
             now,
         )
+    }
+
+    /// Whether a creature on this floor is mid-walk at `now`: a painter that
+    /// slows while the office is idle keeps its pace while one walks, or its
+    /// legs freeze as it glides.
+    pub fn a_creature_walks(&self, now: SystemTime) -> bool {
+        self.floor.ctx.creatures.values().any(|w| w.walks_at(now))
     }
 
     /// The last frame's pixels, `None` before the first `render`.
@@ -977,11 +988,11 @@ impl NeonState {
     /// out of a lit room, can't drop the sign.
     pub(crate) fn tick(
         &mut self,
-        mood: crate::board::OfficeMood,
+        mood: crate::neon_sign::OfficeMood,
         room_dimmed: bool,
         timing: crate::anim::Timing,
     ) -> NeonLevels {
-        use crate::board::OfficeMood;
+        use crate::neon_sign::OfficeMood;
         let now = timing.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,

@@ -11,9 +11,7 @@ use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 use pixtuoid_scene::display::{Badge, TextRun};
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, FloorSession};
-use pixtuoid_scene::footer::{
-    FooterContext, FooterInputs, FooterModel, build_footer, footer_tone_rgb,
-};
+use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::look::{Look, RenderInputs};
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;
@@ -50,6 +48,11 @@ impl OfficeRenderer {
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             rendered: (FlashPhase::default(), (0, 0)),
         }
+    }
+
+    /// [`FloorSession::a_creature_walks`].
+    pub(crate) fn a_creature_walks(&self, now: std::time::SystemTime) -> bool {
+        self.session.a_creature_walks(now)
     }
 
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
@@ -313,7 +316,7 @@ impl<'a> XrgbSurface<'a> {
 /// office-buffer space → multiply by `scale` for screen space; the badge is
 /// centered horizontally over it and sits just above the head.
 pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[Badge], scale: i32) {
-    let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+    let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
     let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
     for Badge {
         at,
@@ -397,7 +400,7 @@ pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, 
     let y = (sb.h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FOOTER_MARGIN_PX).max(0);
     let mut x = FOOTER_MARGIN_PX;
     for seg in &model.segments {
-        let color = pack_xrgb(footer_tone_rgb(seg.tone, theme));
+        let color = pack_xrgb(seg.tone.rgb(theme));
         sb.draw_shadowed_text(&seg.text, x, y, LABEL_FONT_PX, color);
         x += crate::aa_text::text_width(&seg.text, LABEL_FONT_PX);
     }
@@ -414,10 +417,10 @@ mod tests {
     fn badge(
         at: pixtuoid_scene::layout::Point,
         name: &str,
-        tone: pixtuoid_scene::overlay::LabelTone,
+        tone: pixtuoid_scene::badge::BadgeTone,
         theme: &Theme,
     ) -> Badge {
-        let ink = pixtuoid_scene::overlay::badge_ink(name, tone, theme);
+        let ink = pixtuoid_scene::badge::badge_ink(name, tone, theme);
         Badge {
             agent: pixtuoid_core::AgentId::from_transcript_path("/badge/0.jsonl"),
             at,
@@ -913,8 +916,8 @@ mod tests {
     /// the text draws over it.
     #[test]
     fn a_badge_sits_on_its_plate_in_the_window() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let plate = Rgb { r: 1, g: 2, b: 3 };
         let badge = Badge {
@@ -922,7 +925,7 @@ mod tests {
             ..badge(
                 Point { x: 40, y: 30 },
                 "cc\u{b7}api",
-                LabelTone::Idle,
+                BadgeTone::Idle,
                 theme,
             )
         };
@@ -934,7 +937,7 @@ mod tests {
             scale,
         );
         // The text's box, as `paint_labels_into_surface` lays it.
-        let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
         let tw = crate::aa_text::text_width(&marker, LABEL_FONT_PX)
             + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);
         let (cx, cy) = (
@@ -966,8 +969,8 @@ mod tests {
 
     #[test]
     fn paint_labels_uses_the_right_color_per_tone() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let as_u32 = |c: Rgb| u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b);
         let badge_dot = |tone| {
@@ -975,10 +978,10 @@ mod tests {
             vec![badge(Point { x: 20, y: 20 }, "\u{25cf}cc", tone, theme)]
         };
         for (tone, expected) in [
-            (LabelTone::Active, theme.ui.label_active),
-            (LabelTone::Waiting, theme.ui.label_waiting),
-            (LabelTone::Idle, theme.ui.label_idle),
-            (LabelTone::Exiting, theme.ui.label_exiting),
+            (BadgeTone::Active, theme.ui.label_active),
+            (BadgeTone::Waiting, theme.ui.label_waiting),
+            (BadgeTone::Idle, theme.ui.label_idle),
+            (BadgeTone::Exiting, theme.ui.label_exiting),
         ] {
             let mut sb = vec![0u32; 100 * 100];
             paint_labels_into_surface(
@@ -997,8 +1000,8 @@ mod tests {
     /// is already the sprite's top-centre, so any extra offset walks it off the sprite.
     #[test]
     fn a_badge_centres_its_ink_on_the_scaled_anchor() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let (w, h, scale) = (240usize, 60usize, 3i32);
         let ground = 0x0080_8080u32;
@@ -1006,7 +1009,7 @@ mod tests {
         let anchor = Point { x: 40, y: 15 };
         paint_labels_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge(anchor, "idle-x", LabelTone::Idle, theme)],
+            &[badge(anchor, "idle-x", BadgeTone::Idle, theme)],
             scale,
         );
         let cols: Vec<i32> = (0..w)
@@ -1028,17 +1031,17 @@ mod tests {
     #[test]
     fn paint_labels_ink_the_marker_and_the_name_as_the_model_says() {
         // A registered prefix (`cc·`), so the marker's ink differs from the name's.
+        use pixtuoid_scene::badge::{BADGE_MARKER, BadgeTone, badge_ink};
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{BADGE_MARKER, LabelTone, badge_ink};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let text = "cc\u{b7}api";
-        let ink = badge_ink(text, LabelTone::Idle, theme);
+        let ink = badge_ink(text, BadgeTone::Idle, theme);
         assert_ne!(ink.marker, ink.name, "premise: the two parts differ");
         let (w, h, scale, anchor) = (120usize, 120usize, 2, Point { x: 20, y: 20 });
         let mut sb = vec![0u32; w * h];
         paint_labels_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge(anchor, text, LabelTone::Idle, theme)],
+            &[badge(anchor, text, BadgeTone::Idle, theme)],
             scale,
         );
         // The marker's columns, then the name's, as `paint_labels_into_surface`
@@ -1068,8 +1071,8 @@ mod tests {
 
     #[test]
     fn paint_labels_render_antialiased_partial_coverage_not_binary_pixels() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         // A WHITE ground: AA edges land STRICTLY between the ground and any fully-lit ink.
         let white = 0x00FF_FFFFu32;
@@ -1077,7 +1080,7 @@ mod tests {
         let active = vec![badge(
             Point { x: 20, y: 20 },
             "active",
-            LabelTone::Active,
+            BadgeTone::Active,
             theme,
         )];
         paint_labels_into_surface(
@@ -1102,14 +1105,14 @@ mod tests {
     fn wall_board_paints_brand_and_mood_tones_into_the_panel() {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         // A generous scale, so full-coverage stroke interiors reach the exact tone colors.
-        let counts = pixtuoid_scene::board::StateCounts {
+        let counts = pixtuoid_scene::tally::StateCounts {
             active: 2,
             waiting: 1,
             idle: 1,
             exiting: 0,
             total: 4,
         };
-        let board = pixtuoid_scene::board::build_board(
+        let board = pixtuoid_scene::neon_sign::build_board(
             counts,
             90,
             None,
@@ -1227,7 +1230,7 @@ mod tests {
         assert!(!frames.is_empty(), "an enabled handle receives frames");
         let stems = frames.last().unwrap().stems;
         let moderate = pixtuoid_scene::audio::stem_levels(
-            &pixtuoid_scene::board::StateCounts {
+            &pixtuoid_scene::tally::StateCounts {
                 active: 1,
                 waiting: 0,
                 idle: 0,
@@ -1273,10 +1276,7 @@ mod tests {
             "the footer stays in the bottom band"
         );
         assert!(
-            sb.contains(&pack_xrgb(footer_tone_rgb(
-                FooterTone::Rung(RungKind::Active),
-                theme
-            ))),
+            sb.contains(&pack_xrgb(FooterTone::Rung(RungKind::Active).rgb(theme))),
             "the ●A rung paints the shared label_active hue"
         );
     }
@@ -1476,7 +1476,7 @@ mod tests {
             badges,
             scale,
         );
-        let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
         for badge in badges {
             let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
             let tw = mw + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);

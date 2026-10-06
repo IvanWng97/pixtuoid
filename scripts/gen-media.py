@@ -13,8 +13,7 @@ Theme/weather lists are read from site/src/{themes,weather}.json (`@themes.json`
   just gen-media-check     # → gen-media.py --check --only docs (evidence on a PR)
 
 --check renders to a temp dir and pixel-diffs every committed PNG of the
-selected targets (threshold 0,
-via scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated
+selected targets (scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated
 demo.gif are presence-checked only, since ffmpeg/gifsicle output is not
 byte-stable across versions. Exits non-zero on any drift.
 

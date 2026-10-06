@@ -2682,6 +2682,7 @@ dependencies = [
  "rodio",
  "saphyr",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "skrifa",

@@ -4,15 +4,7 @@
 #
 # Set up once per clone with:
 #   git config core.hooksPath .githooks
-#
-# Bypass with `--no-verify` or `SKIP_PREFLIGHT=1 git push`.
 set -euo pipefail
-
-# Ahead of the scrub, so that bypass still covers everything below it.
-if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
-    printf '\033[33m[pre-push] SKIP_PREFLIGHT=1 — skipping preflight\033[0m\n' >&2
-    exit 0
-fi
 
 # Resolved before the scrub drops GIT_DIR: when the hook's CWD is outside the
 # worktree (`git --git-dir=… push` from elsewhere) that is the only locator.
@@ -20,8 +12,9 @@ toplevel=$(git rev-parse --show-toplevel)
 
 # A LINKED worktree's hook exports GIT_DIR to its children, and it outranks
 # `git -C <dir>`: anything preflight runs that builds a throwaway repo then
-# silently writes into THIS one (#893) — githooks(5)'s idiom, applied here
-# rather than per-script so nothing downstream has to remember it.
+# silently writes into THIS one (#893) — the unset githooks(5) prescribes
+# (https://git-scm.com/docs/githooks), applied here rather than per-script so
+# nothing downstream has to remember it.
 # A failed or empty list would leave the scrub silently not happening, and
 # `unset $(...)` discards the substitution's status so `set -e` never sees it.
 if ! scrub=$(git rev-parse --local-env-vars) || [ -z "$scrub" ]; then

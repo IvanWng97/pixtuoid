@@ -193,6 +193,14 @@ impl WindowView {
             ),
         }
     }
+
+    /// The glass's top-left cell on the painter's grid.
+    pub(crate) fn glass_origin(&self) -> (u16, u16) {
+        (
+            self.glass_box.x.saturating_mul(self.d),
+            self.glass_box.y.saturating_mul(self.d),
+        )
+    }
 }
 
 /// Where a window's cells stand on a painter's grid: the window's top-left,
@@ -217,47 +225,83 @@ impl Origin {
     }
 }
 
+/// A wall's windows: the band they're cut in, `buf_w` by `band_h`, and the
+/// bays its painter draws: a strike lands on their panes, and
+/// [`Outside::views`] paints exactly these.
+pub(crate) struct Wall {
+    pub(crate) size: (u16, u16),
+    pub(crate) bays: Vec<WindowBay>,
+}
+
 /// Everything one frame's windows look out on, the same through every one,
 /// on one painter's grid.
 pub(crate) struct Outside {
     sky: SkyView,
+    clouds: crate::clouds::Clouds,
     city: CityStrip,
     /// The column, in units, the city's west end stands at.
     run_x0: u16,
     weather: GlassWeather,
     rows: Range<u16>,
     d: u16,
+    bays: Vec<WindowBay>,
 }
 
 impl Outside {
-    /// The outside at `moment` of a wall `buf_w` wide and `band_h` tall under
-    /// `weather`, at `density`.
+    /// The outside at `moment` of `wall` under `weather`, at `density`, a
+    /// strike landing only on the glass of its bays; `cloud_cache` keeps
+    /// the clouds' masses across frames, and an empty one draws them afresh.
     pub(crate) fn of(
         moment: &Moment,
         pack: &Pack,
         theme: &Theme,
-        (buf_w, band_h): (u16, u16),
+        wall: Wall,
         density: Density,
         weather: GlassWeather,
+        cloud_cache: &mut crate::clouds::CloudCache,
     ) -> Self {
+        let Wall {
+            size: (buf_w, band_h),
+            bays,
+        } = wall;
         let rows = window_rows(band_h);
         let run = window_run(buf_w);
         let glass_h = crate::layout::glass_rows(rows.end - rows.start);
+        let panes: Vec<Range<u16>> = bays
+            .iter()
+            .copied()
+            .flat_map(WindowBay::panes)
+            .map(|p| p.start - run.start..p.end - run.start)
+            .collect();
         Self {
             sky: SkyView::of(moment, buf_w, band_h, theme),
+            clouds: crate::clouds::Clouds::of(
+                moment,
+                (run.end - run.start, glass_h),
+                density.get(),
+                &panes,
+                cloud_cache,
+            ),
             city: CityStrip::draw(pack, (run.end - run.start, glass_h), moment, theme, density),
             run_x0: run.start,
             weather,
             rows,
             d: density.get(),
+            bays,
         }
+    }
+
+    /// Each of the wall's bays, and what its glass shows.
+    pub(crate) fn views(&self) -> impl Iterator<Item = (WindowBay, WindowView)> + '_ {
+        self.bays.iter().map(|&bay| (bay, self.through(bay)))
     }
 
     /// What `bay`'s glass shows: each part of the outside, back to front, in
     /// the one order every painter draws it in.
-    pub(crate) fn through(&self, bay: WindowBay) -> WindowView {
+    fn through(&self, bay: WindowBay) -> WindowView {
         let front = self.city.front(self.run_x0, self.d);
-        let mut view = self.sky.window(bay, self.rows.clone(), self.d, front);
+        let mut view = self.sky.window(bay, self.rows.clone(), self.d, &front);
+        self.clouds.paint(&mut view, self.run_x0, &front);
         self.weather.paint(&mut view);
         view
     }
@@ -268,6 +312,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::sky::{Sky, Weather};
     use pixtuoid_core::sprite::RgbBuffer;
+
+    /// The windows a wall `buf_w` wide has.
+    fn slots(buf_w: u16) -> Vec<WindowBay> {
+        crate::layout::window_slots(buf_w).collect()
+    }
 
     /// One sky a painter's frame is drawn under, beside the no-weather sky of
     /// its instant, which its windows show in the frame it is held against.
@@ -286,15 +335,15 @@ pub(crate) mod tests {
             let now = crate::localclock::at_hour(hour);
             for w in Weather::ALL {
                 let strikes = if w == Weather::Storm {
-                    [0.0, 1.0].as_slice()
+                    [None, Some(crate::sky::StrikePhase::Primary)].as_slice()
                 } else {
-                    &[0.0]
+                    &[None]
                 };
-                for &flash in strikes {
+                for &strike in strikes {
                     skies.push(Weathered {
-                        name: format!("{w:?} at {hour}h, flash {flash}"),
+                        name: format!("{w:?} at {hour}h, strike {strike:?}"),
                         now,
-                        sky: Sky::at_with(now, w).with_flash(flash),
+                        sky: Sky::at_with(now, w).with_strike(strike),
                         bare: Sky::at_with(now, Weather::Clear),
                         changes_glass: w != Weather::Clear,
                     });
@@ -463,6 +512,190 @@ pub(crate) mod tests {
         );
     }
 
+    /// Whatever the sky outside draws (its clouds, a strike's flash and bolt,
+    /// the weather on the glass), the window's joinery is the frame's alone.
+    #[test]
+    fn nothing_outside_reaches_the_joinery() {
+        let theme = &crate::theme::NORMAL;
+        let pack = crate::pack::test_default_pack();
+        let wall = (crate::layout::WINDOW_W * 3, 32);
+        for s in every_sky() {
+            let moment =
+                Moment::resolve(s.sky, theme, 0.0, crate::anim::Motion::Full.timing(s.now));
+            for d in [Density::ONE, pack.max_density_variant()] {
+                let outside = Outside::of(
+                    &moment,
+                    &pack,
+                    theme,
+                    Wall {
+                        size: wall,
+                        bays: slots(wall.0),
+                    },
+                    d,
+                    GlassWeather::of(&moment),
+                    &mut crate::clouds::CloudCache::default(),
+                );
+                let rows = window_rows(wall.1);
+                for x in [0, crate::layout::WINDOW_W, 2 * crate::layout::WINDOW_W] {
+                    let bay = WindowBay {
+                        x,
+                        w: crate::layout::WINDOW_W,
+                        idx: 0,
+                    };
+                    let bare =
+                        WindowView::new(bay, rows.clone(), d.get(), |_| Rgb { r: 0, g: 0, b: 0 });
+                    assert_eq!(
+                        outside.through(bay).joinery().collect::<Vec<_>>(),
+                        bare.joinery().collect::<Vec<_>>(),
+                        "{} at {d:?}: the joinery moved",
+                        s.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// A frame drawn through the office's cloud cache is the frame drawn
+    /// without it, byte for byte: as the masses drift and the light steps
+    /// through an evening, in every weather and across transitions, at both
+    /// densities on one cache; after a frame that differs from it in any one
+    /// of the raster's inputs alone; and a drift alone draws nothing new.
+    #[test]
+    fn the_cloud_cache_draws_what_a_fresh_frame_draws() {
+        use crate::sky::WeatherMix;
+        let theme = &crate::theme::NORMAL;
+        let pack = crate::pack::test_default_pack();
+        let wall = (crate::layout::WINDOW_W * 3, 32);
+        let pixels = |moment: &Moment,
+                      wall: (u16, u16),
+                      d: Density,
+                      cache: &mut crate::clouds::CloudCache| {
+            let outside = Outside::of(
+                moment,
+                &pack,
+                theme,
+                Wall {
+                    size: wall,
+                    bays: slots(wall.0),
+                },
+                d,
+                GlassWeather::of(moment),
+                cache,
+            );
+            (0..wall.0)
+                .step_by(usize::from(crate::layout::WINDOW_W))
+                .map(|x| {
+                    let bay = WindowBay {
+                        x,
+                        w: crate::layout::WINDOW_W,
+                        idx: 0,
+                    };
+                    outside.through(bay).cells().collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let moment = |weather: WeatherMix, now: std::time::SystemTime| {
+            Moment::resolve(
+                Sky::at_with(now, Weather::Clear).with_weather(weather),
+                theme,
+                0.0,
+                crate::anim::Motion::Full.timing(now),
+            )
+        };
+        let transitions = [
+            (Weather::Clear, Weather::Rain),
+            (Weather::Overcast, Weather::Storm),
+            (Weather::Storm, Weather::Clear),
+        ];
+        let skies =
+            Weather::ALL
+                .map(WeatherMix::pure)
+                .into_iter()
+                .chain(transitions.into_iter().flat_map(|(from, to)| {
+                    [0.2, 0.4, 0.6, 0.8].map(|p| WeatherMix::toward(from, to, p))
+                }));
+        let mut cache = crate::clouds::CloudCache::default();
+        let evening = crate::localclock::at_hour(17);
+        for weather in skies {
+            for minutes in [0, 1, 120, 300] {
+                let now = evening + std::time::Duration::from_secs(minutes * 60);
+                let moment = moment(weather, now);
+                for d in [Density::ONE, pack.max_density_variant()] {
+                    assert_eq!(
+                        pixels(&moment, wall, d, &mut cache),
+                        pixels(&moment, wall, d, &mut crate::clouds::CloudCache::default()),
+                        "{weather:?} at 17h+{minutes}m, {d:?}"
+                    );
+                }
+            }
+        }
+
+        // Each pair differs in one input: a key that drops it serves the
+        // first frame's rasters to the second.
+        let noon = crate::localclock::at_hour(12);
+        let frame = |mix, hours: u64, wall, d| {
+            let now = noon + std::time::Duration::from_secs(hours * 3600);
+            (moment(mix, now), wall, d)
+        };
+        let (one, dense) = (Density::ONE, pack.max_density_variant());
+        let overcast = WeatherMix::pure(Weather::Overcast);
+        let fog = WeatherMix::pure(Weather::Fog);
+        // one heaviness bucket all the way across
+        let fogging = |p| WeatherMix::toward(Weather::Overcast, Weather::Fog, p);
+        let wide = (crate::layout::WINDOW_W * 5, 32);
+        let tall = (crate::layout::WINDOW_W * 3, 40);
+        let pairs = [
+            (
+                "span",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 0, wide, one),
+            ),
+            (
+                "glass",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 0, tall, one),
+            ),
+            (
+                "density",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 0, wall, dense),
+            ),
+            // one deck kind, one light bucket
+            (
+                "weather",
+                frame(overcast, 0, wall, one),
+                frame(fog, 0, wall, one),
+            ),
+            (
+                "share",
+                frame(fogging(0.3), 0, wall, one),
+                frame(fogging(0.6), 0, wall, one),
+            ),
+            (
+                "light",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 7, wall, one),
+            ),
+        ];
+        for (input, (a, wall_a, d_a), (b, wall_b, d_b)) in &pairs {
+            let mut cache = crate::clouds::CloudCache::default();
+            let _ = pixels(a, *wall_a, *d_a, &mut cache);
+            assert_eq!(
+                pixels(b, *wall_b, *d_b, &mut cache),
+                pixels(b, *wall_b, *d_b, &mut crate::clouds::CloudCache::default()),
+                "a frame apart in its {input} drew the other's clouds"
+            );
+        }
+
+        let mut cache = crate::clouds::CloudCache::default();
+        let _ = pixels(&moment(overcast, noon), wall, Density::ONE, &mut cache);
+        let drawn = cache.len();
+        assert!(drawn > 0, "an overcast deck draws its masses");
+        let later = noon + std::time::Duration::from_secs(60);
+        let _ = pixels(&moment(overcast, later), wall, Density::ONE, &mut cache);
+        assert_eq!(cache.len(), drawn, "a drift redrew a mass");
+    }
+
     #[test]
     fn a_window_shows_the_city_strip_from_its_own_column() {
         // Overcast noon: no stars and no disc, which key on the screen column,
@@ -482,9 +715,13 @@ pub(crate) mod tests {
             &moment,
             &crate::pack::test_default_pack(),
             theme,
-            (crate::layout::WINDOW_W * 3, 32),
+            Wall {
+                size: (crate::layout::WINDOW_W * 3, 32),
+                bays: slots(crate::layout::WINDOW_W * 3),
+            },
             Density::ONE,
             GlassWeather::of(&moment),
+            &mut crate::clouds::CloudCache::default(),
         );
         let mut pane = |x: u16, run_x0: u16| {
             outside.run_x0 = run_x0;
@@ -506,5 +743,95 @@ pub(crate) mod tests {
             west,
             "a pane {dx} columns east shows a different stretch of city"
         );
+    }
+
+    /// A storm's bolt lands on the glass where its trunk starts, the run's
+    /// west end counted in, at both densities, and never over the city.
+    #[test]
+    fn a_bolt_lands_under_its_trunk_and_behind_the_city() {
+        let theme = &crate::theme::NORMAL;
+        let pack = crate::pack::test_default_pack();
+        let wall = (crate::layout::WINDOW_W * 3, 32);
+        let bays = slots(wall.0);
+        for d in [Density::ONE, pack.max_density_variant()] {
+            let mut bolts = 0;
+            for k in 0..60u64 {
+                let then = crate::localclock::at_hour(12) + std::time::Duration::from_secs(k * 15);
+                let beat = crate::anim::Motion::Full.timing(then).beat;
+                let start = crate::sky::strike_start_ms(beat) - beat.ms();
+                let now = then + std::time::Duration::from_millis(start);
+                let at = |weather| {
+                    let sky = Sky::at_with(now, weather)
+                        .with_strike(Some(crate::sky::StrikePhase::Primary));
+                    Moment::resolve(sky, theme, 0.0, crate::anim::Motion::Full.timing(now))
+                };
+                let mut outside = Outside::of(
+                    &at(Weather::Storm),
+                    &pack,
+                    theme,
+                    Wall {
+                        size: wall,
+                        bays: bays.clone(),
+                    },
+                    d,
+                    // a clear pane's glass: no veil or rain over the bolt
+                    GlassWeather::of(&at(Weather::Clear)),
+                    &mut crate::clouds::CloudCache::default(),
+                );
+                assert!(outside.run_x0 > 0, "a run off the wall's west edge");
+                let Some((x, y)) = outside.clouds.bolt_top() else {
+                    continue;
+                };
+                let col = x as u16 + outside.run_x0;
+                let Some(&bay) = bays.iter().find(|b| (b.x..b.x + b.w).contains(&col)) else {
+                    continue;
+                };
+                // what the bolt alone changes, its flash lifting nothing
+                outside.clouds.only_bolt(true);
+                let struck = outside.through(bay);
+                outside.clouds.only_bolt(false);
+                let bare = outside.through(bay);
+                let lit: Vec<Cell> = struck
+                    .grid()
+                    .zip(bare.grid())
+                    .filter(|((_, a), (_, b))| a != b)
+                    .map(|((cell, _), _)| cell)
+                    .collect();
+                let front = outside.city.front(outside.run_x0, outside.d);
+                for &cell in &lit {
+                    assert!(
+                        front(cell).is_none(),
+                        "d {d:?}, strike {k}: a bolt over the city"
+                    );
+                }
+                let Some(top) = lit.iter().map(|c| c.glass_offset.1).min() else {
+                    continue;
+                };
+                let df = f32::from(d.get());
+                let want = (
+                    ((x + f32::from(outside.run_x0)) * df) as u16,
+                    (y * df) as u16,
+                );
+                let starts: Vec<u16> = lit
+                    .iter()
+                    .filter(|c| c.glass_offset.1 == top)
+                    .map(|c| c.at.0)
+                    .collect();
+                assert_eq!(
+                    top, want.1,
+                    "d {d:?}, strike {k}: the bolt starts at its trunk's row"
+                );
+                assert!(
+                    starts.contains(&want.0),
+                    "d {d:?}, strike {k}: the bolt starts at {starts:?}, its trunk at {}",
+                    want.0
+                );
+                bolts += 1;
+            }
+            assert!(
+                bolts > 0,
+                "d {d:?}: the sample must strike a bolt on the glass"
+            );
+        }
     }
 }

@@ -64,7 +64,7 @@ impl Pen {
     /// (`the_bundled_pack_draws_every_variant_at_one_density`).
     pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
         pack.density_variants()
-            .into_iter()
+            .iter()
             .find_map(|d| Self::new(scale, d.get()))
             .unwrap_or(Self {
                 d: NonZeroU16::MIN,
