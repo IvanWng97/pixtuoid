@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 use pixtuoid_scene::anim::PAINT_FRAME_MS;
 use pixtuoid_scene::look::FrameNote;
 
+/// A frame past the paint interval, in the window's microseconds.
+const OVER_US: u32 = (PAINT_FRAME_MS * 1000) as u32;
+
 /// How often the spread is reported.
 const WINDOW: Duration = Duration::from_secs(60);
 /// A window's frames twice over, room for a loop that runs hot: past it the
@@ -39,6 +42,20 @@ pub(crate) struct Jank {
     next: usize,
     janks: u32,
     since: Instant,
+    painter: Painter,
+}
+
+/// What draws the frames a summary spreads: one matrix cell of a run.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Painter {
+    /// The image protocol, or `classic` for the half-blocks.
+    pub(crate) look: &'static str,
+    /// Buffer pixels per layout unit; 1 for the half-blocks.
+    pub(crate) scale: u16,
+    /// Inside tmux.
+    pub(crate) tmux: bool,
+    /// `$TERM_PROGRAM`, the terminal's own name for itself.
+    pub(crate) terminal: Option<String>,
 }
 
 impl Jank {
@@ -49,7 +66,13 @@ impl Jank {
             next: 0,
             janks: 0,
             since: now,
+            painter: Painter::default(),
         }
+    }
+
+    /// Name what draws the frames from now on.
+    pub(crate) fn painted_by(&mut self, painter: Painter) {
+        self.painter = painter;
     }
 
     /// Count a frame that took `total`, reporting it when it janked and the
@@ -87,10 +110,17 @@ impl Jank {
         let (p50, p99, max) = (ms(at(50)), ms(at(99)), ms(window.last()));
         let frames = self.len;
         let janks = self.janks;
+        let over = window.iter().filter(|&&us| us > OVER_US).count();
+        let Painter {
+            look,
+            scale,
+            tmux,
+            terminal,
+        } = &self.painter;
         if janks > 0 {
-            tracing::warn!(frames, janks, p50, p99, max, "frame pacing");
+            tracing::warn!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
         } else {
-            tracing::info!(frames, janks, p50, p99, max, "frame pacing");
+            tracing::info!(look, scale, tmux, terminal = ?terminal, frames, over, janks, p50, p99, max, "frame pacing");
         }
     }
 }
@@ -157,6 +187,12 @@ mod tests {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
             let mut jank = Jank::new(t0);
+            jank.painted_by(Painter {
+                look: "kitty",
+                scale: 16,
+                tmux: true,
+                terminal: Some("ghostty".into()),
+            });
             for _ in 0..99 {
                 jank.record(Duration::from_millis(10), None, None, t0);
             }
@@ -171,6 +207,9 @@ mod tests {
         let line = summaries[0];
         assert!(line.contains("frames=100"), "{line}");
         assert!(line.contains("janks=1"), "{line}");
+        assert!(line.contains("over=1"), "{line}");
+        assert!(line.contains("look=\"kitty\""), "{line}");
+        assert!(line.contains("tmux=true"), "{line}");
         assert!(line.contains("p50=10"), "{line}");
         assert!(
             line.contains(" WARN "),

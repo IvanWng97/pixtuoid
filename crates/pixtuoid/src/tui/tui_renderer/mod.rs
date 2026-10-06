@@ -317,6 +317,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
+    /// Name what draws the frames, for their pacing summaries.
+    pub(crate) fn painted_by(&mut self, painter: crate::tui::jank::Painter) {
+        self.jank.painted_by(painter);
+    }
+
     /// Paint and send the next frame whole, for the pacing bench's worst case.
     #[cfg(feature = "graphics")]
     pub(crate) fn forget_frame(&mut self) {

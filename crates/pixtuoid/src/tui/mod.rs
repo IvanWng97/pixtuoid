@@ -907,14 +907,11 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 }
 
 /// Hand `renderer` the painter `plan` names.
-#[cfg_attr(
-    not(feature = "graphics"),
-    expect(unused_variables, reason = "only a graphics build paints the cutaway")
-)]
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
 ) {
+    let terminal = pixtuoid_core::platform::text_env("TERM_PROGRAM");
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
@@ -923,14 +920,30 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             cell,
             tmux,
             ..
-        } => renderer.set_cutaway(cutaway::TileCutaway::new(
-            fit,
-            cell,
-            protocol,
-            tmux,
-            Box::new(stdout()),
-        )),
-        _ => tracing::info!(plan = ?plan, "painting classic"),
+        } => {
+            renderer.painted_by(jank::Painter {
+                look: protocol.name(),
+                scale: fit.scale().get(),
+                tmux,
+                terminal,
+            });
+            renderer.set_cutaway(cutaway::TileCutaway::new(
+                fit,
+                cell,
+                protocol,
+                tmux,
+                Box::new(stdout()),
+            ));
+        }
+        _ => {
+            renderer.painted_by(jank::Painter {
+                look: "classic",
+                scale: 1,
+                tmux: pixtuoid_core::platform::text_env("TMUX").is_some(),
+                terminal,
+            });
+            tracing::info!(plan = ?plan, "painting classic");
+        }
     }
 }
 
