@@ -4,14 +4,7 @@
 #
 # Set up once per clone with:
 #   git config core.hooksPath .githooks
-#
-# Bypass with `--no-verify` or `SKIP_PREFLIGHT=1`.
 set -euo pipefail
-
-if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
-    printf '\033[33m[pre-commit] SKIP_PREFLIGHT=1 — skipping\033[0m\n' >&2
-    exit 0
-fi
 
 cd "$(git rev-parse --show-toplevel)"
 

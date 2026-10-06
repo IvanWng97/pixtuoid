@@ -18,7 +18,7 @@
 pub const TRUECOLOR_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// True iff `$COLORTERM` advertises 24-bit color (`truecolor` or `24bit`).
-/// Case-sensitive on purpose: the advertised tokens are lowercase by convention.
+/// Case-sensitive, as S-Lang matches them (<https://github.com/termstandard/colors#checking-for-colorterm>).
 fn colorterm_is_truecolor(colorterm: Option<&str>) -> bool {
     matches!(colorterm, Some(v) if v.contains("truecolor") || v.contains("24bit"))
 }

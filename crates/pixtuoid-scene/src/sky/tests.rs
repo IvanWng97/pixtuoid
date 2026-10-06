@@ -1023,3 +1023,48 @@ fn rain_at_maps_audible_rain_under_its_policy() {
         assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent");
     }
 }
+
+/// From any start, a full storm on a moving tier has a strike to find, and the
+/// instant found flashes; at rest it has none.
+#[test]
+fn a_strike_follows_every_start_on_a_moving_tier() {
+    use crate::anim::Motion;
+    let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    for motion in Motion::ALL {
+        for start in (0..LIGHTNING_PERIOD_MS * 3).step_by(97) {
+            let after = base + Duration::from_millis(start);
+            let strike = first_strike_after(after, motion);
+            if motion.pace().is_none() {
+                assert_eq!(strike, None, "{motion:?}");
+            } else {
+                let storm = WeatherPolicy::Forced(Weather::Storm);
+                assert!(
+                    strike
+                        .is_some_and(|t| t >= after && flash_level_at(motion.beat(t), storm) > 0.0),
+                    "{motion:?} from {start} ms"
+                );
+            }
+        }
+    }
+}
+
+/// The transition found starts at or after where the search did, opens on
+/// a pure weather, and is halfway into a different one at its middle.
+#[test]
+fn the_transition_found_changes_the_weather() {
+    let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let ms = |t: std::time::SystemTime| {
+        t.duration_since(std::time::UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_millis() as u64
+    };
+    for k in 0..40u64 {
+        let after = base + Duration::from_millis(k * 97_003);
+        let start = first_transition_after(after).expect("a transition");
+        assert!(start >= after, "{k}");
+        let before = WeatherPolicy::Clock.weather_at_ms(ms(start) - 1);
+        assert_eq!(before.from, before.to, "{k}: the slot ends pure");
+        let mid = WeatherPolicy::Clock.weather_at_ms(ms(start) + TRANSITION_MS / 2);
+        assert_ne!(mid.from, mid.to, "{k}: the weather changes");
+    }
+}

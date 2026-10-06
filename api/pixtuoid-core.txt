@@ -1394,7 +1394,7 @@ pub fn pixtuoid_core::sprite::format::Pack::animation_or_source(&self, &str) -> 
 pub fn pixtuoid_core::sprite::format::Pack::buildings(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Building>
 pub fn pixtuoid_core::sprite::format::Pack::character_outline(&self) -> core::option::Option<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::format::Pack::city_materials(&self) -> core::option::Option<&pixtuoid_core::sprite::format::CityMaterials>
-pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> alloc::vec::Vec<pixtuoid_core::sprite::format::Density>
+pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> &[pixtuoid_core::sprite::format::Density]
 pub fn pixtuoid_core::sprite::format::Pack::hairstyle(&self, &str, pixtuoid_core::sprite::format::Density) -> core::option::Option<&pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::hairstyles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> pixtuoid_core::sprite::format::Density
