@@ -1,7 +1,7 @@
 //! A whole frame through the real TUI painter at the owner's 16x: the scene
 //! repainted and every tile cut, compressed and encoded. Local only (`just
 //! bench`): CodSpeed's simulation counts instructions on one thread, blind to
-//! the cross-core encode, and doubled its job's time.
+//! the cross-core encode.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
