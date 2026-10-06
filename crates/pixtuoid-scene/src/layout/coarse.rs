@@ -120,19 +120,19 @@ pub(crate) fn cell_walkable(
     cx: u16,
     cy: u16,
 ) -> bool {
-    walk_piece(mask, overlay, cx, cy).count_ones() >= u32::from(COARSE_CELL_WALKABLE_MIN)
+    piece_walkable(walk_piece(mask, overlay, cx, cy))
+}
+
+/// Is a cell whose [`walk_piece`] is `piece` walkable?
+fn piece_walkable(piece: CellBits) -> bool {
+    piece.count_ones() >= u32::from(COARSE_CELL_WALKABLE_MIN)
 }
 
 /// Can a walker cross from coarse cell `a` into the orthogonally adjacent `b`
 /// — does some pixel of `a`'s [`walk_piece`] on their shared edge face one of
 /// `b`'s? Both cells can be half open with the open halves on opposite sides,
 /// meeting only at a pixel corner a straight leg between them cuts.
-fn crossable(
-    mask: &WalkableMask,
-    overlay: &OccupancyOverlay,
-    a: (u16, u16),
-    b: (u16, u16),
-) -> bool {
+fn crossable((a, a_piece): ((u16, u16), CellBits), (b, b_piece): ((u16, u16), CellBits)) -> bool {
     let edge = |from: u16, to: u16| {
         let near = from * COARSE_CELL_SIZE;
         if to > from {
@@ -141,14 +141,13 @@ fn crossable(
             (near, near - 1)
         }
     };
-    let on_piece = |cell: (u16, u16)| {
-        let bits = walk_piece(mask, overlay, cell.0, cell.1);
+    let on_piece = |cell: (u16, u16), bits: CellBits| {
         move |x: u16, y: u16| {
             let (dx, dy) = (x - cell.0 * COARSE_CELL_SIZE, y - cell.1 * COARSE_CELL_SIZE);
             bits & (1 << (dy * COARSE_CELL_SIZE + dx)) != 0
         }
     };
-    let (on_a, on_b) = (on_piece(a), on_piece(b));
+    let (on_a, on_b) = (on_piece(a, a_piece), on_piece(b, b_piece));
     if a.1 == b.1 {
         let (xa, xb) = edge(a.0, b.0);
         let y0 = a.1 * COARSE_CELL_SIZE;
@@ -169,14 +168,14 @@ enum Memo {
 }
 
 /// One search's view of the coarse grid over a `mask` and an `overlay`: each
-/// cell's walkability and each edge's crossability is computed at most once,
-/// then read by every step. The A\* expansion and the reach BFS both step
+/// cell's [`walk_piece`] and each edge's crossability is computed at most
+/// once, then read by every step. The A\* expansion and the reach BFS both step
 /// through [`CoarseGrid::neighbors`], so "reachable" and "routable" share ONE
 /// neighbour rule.
 pub(crate) struct CoarseGrid<'a> {
     mask: &'a WalkableMask,
     overlay: &'a OccupancyOverlay,
-    walkable: Grid<Memo>,
+    pieces: Grid<Option<CellBits>>,
     /// Crossability from each cell to its east neighbour.
     east: Grid<Memo>,
     /// Crossability from each cell to its south neighbour.
@@ -192,28 +191,30 @@ impl<'a> CoarseGrid<'a> {
         CoarseGrid {
             mask,
             overlay,
-            walkable: Grid::filled(w, h, Memo::Unknown),
+            pieces: Grid::filled(w, h, None),
             east: Grid::filled(w, h, Memo::Unknown),
             south: Grid::filled(w, h, Memo::Unknown),
         }
     }
 
-    fn walkable(&mut self, (cx, cy): (u16, u16)) -> bool {
-        let (mask, overlay) = (self.mask, self.overlay);
-        memo(&mut self.walkable, cx, cy, || {
-            cell_walkable(mask, overlay, cx, cy)
-        })
+    fn piece(&mut self, (cx, cy): (u16, u16)) -> CellBits {
+        if let Some(piece) = self.pieces.get_or(cx, cy, None) {
+            return piece;
+        }
+        let piece = walk_piece(self.mask, self.overlay, cx, cy);
+        self.pieces.set(cx, cy, Some(piece));
+        piece
     }
 
     fn crossable(&mut self, a: (u16, u16), b: (u16, u16)) -> bool {
-        let (mask, overlay) = (self.mask, self.overlay);
+        let (a_piece, b_piece) = (self.piece(a), self.piece(b));
         let (lo, edges) = match (a.1 == b.1, a < b) {
             (true, true) => (a, &mut self.east),
             (true, false) => (b, &mut self.east),
             (false, true) => (a, &mut self.south),
             (false, false) => (b, &mut self.south),
         };
-        memo(edges, lo.0, lo.1, || crossable(mask, overlay, a, b))
+        memo(edges, lo.0, lo.1, || crossable((a, a_piece), (b, b_piece)))
     }
 
     /// The 8-neighbours of `cell` a walker can step to, each flagged `true`
@@ -252,8 +253,8 @@ impl<'a> CoarseGrid<'a> {
             u16::try_from(i32::from(from.0) + dx).ok()?,
             u16::try_from(i32::from(from.1) + dy).ok()?,
         );
-        let in_grid = to.0 < self.walkable.width() && to.1 < self.walkable.height();
-        (in_grid && self.walkable(to) && self.crossable(from, to)).then_some(to)
+        let in_grid = to.0 < self.pieces.width() && to.1 < self.pieces.height();
+        (in_grid && piece_walkable(self.piece(to)) && self.crossable(from, to)).then_some(to)
     }
 }
 

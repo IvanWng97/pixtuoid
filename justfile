@@ -23,8 +23,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments
 
 # ── variables ─────────────────────────────────────────────────────
-# just evaluates these globally regardless of position; kept at the top (the
-# idiom) so the file's config lives in one place.
+# just evaluates these globally regardless of position; kept at the top so the
+# file's config lives in one place.
 
 # The published API surface: the ONLY two crates whose public API is a contract
 # (the binary lib target is not). Single-sourced here so both gates over it —
@@ -320,6 +320,11 @@ test *args:
 bench *args:
     cargo bench -p pixtuoid-scene --bench render_frame -- "$@"
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
+
+[doc('Frame pacing through the real TUI painter per protocol: frame time, budget overruns, interval jitter, bytes per frame')]
+[group('rust')]
+bench-pacing:
+    cargo run --release -p pixtuoid --example pacing -- target/pacing/report.json
 
 # Catches code that silently only builds with `native` on (the wasm core builds
 # without it). `--no-dev-deps check` builds no test, so scene's no-default tests
@@ -835,7 +840,7 @@ gen-readme:
 [doc('Regenerate the --json contract: the SourceStatus + OutcomeRow JSON Schemas (Rust) + the Raycast TS types')]
 [group('gen')]
 gen-contract:
-    UPDATE_CONTRACT_SCHEMA=1 just test -p pixtuoid --lib schema_matches_the_committed_contract
+    SNAPSHOTS=overwrite just test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
 # Regenerate the committed drift-surface fragments — what each crate declares it
@@ -847,13 +852,13 @@ gen-contract:
 [doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
 [group('gen')]
 gen-drift-surface:
-    UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
-    UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
+    SNAPSHOTS=overwrite just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
+    SNAPSHOTS=overwrite just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
 
 [doc("Regenerate the cutaway's pinned-frame digests (crates/pixtuoid-scene/src/cutaway/canvas.golden)")]
 [group('gen')]
 gen-cutaway-golden:
-    UPDATE_CUTAWAY_GOLDEN=1 just test -p pixtuoid-scene --lib the_canvas_paints_the_pinned_frames
+    SNAPSHOTS=overwrite just test -p pixtuoid-scene --lib the_canvas_paints_the_pinned_frames
 
 # Pure node:builtins — no npm ci.
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]

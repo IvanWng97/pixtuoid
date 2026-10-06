@@ -159,6 +159,10 @@ version = "1"
 "Ţ" = { of = "t", level = 2 }    # the cat's fur, lit
 "ƭ" = { of = "x", level = -2 }   # the dog's coat, shaded
 "Ƭ" = { of = "x", level = 2 }    # the dog's coat, lit
+"ȼ" = { of = "o", level = -2 }   # the lobster's shell, shaded
+"Ȼ" = { of = "o", level = 2 }    # the lobster's shell, lit
+"ǩ" = { of = "A", level = -2 }   # the lobster's claws, shaded
+"Ǩ" = { of = "A", level = 2 }    # the lobster's claws, lit
 "γ" = { of = "щ", level = -2 }   # the third
 "η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
 "ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
@@ -261,6 +265,17 @@ frame_ms = 600
 
 [animations."desk_north@4x"]
 frames   = ["desk_north@4x.sprite"]
+frame_ms = 600
+
+# What of `desk` stands nearer the viewer than its sitter's props, drawn over
+# them on the desk's own canvas: its monitor. OPTIONAL — it comes only with the
+# desk it covers, and a desk without it draws its props on top.
+[animations.desk_front]
+frames   = ["desk_front.sprite"]
+frame_ms = 600
+
+[animations."desk_front@4x"]
+frames   = ["desk_front@4x.sprite"]
 frame_ms = 600
 
 [animations.plant]
@@ -374,12 +389,12 @@ frames   = ["filing_cabinet@4x.sprite"]
 frame_ms = 600
 
 [animations.cat_walk]
-frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
+frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite", "cat_walk_2.sprite", "cat_walk_3.sprite", "cat_walk_4.sprite", "cat_walk_5.sprite", "cat_walk_6.sprite", "cat_walk_7.sprite"]
 frame_ms = 250
 stride   = 2
 
 [animations."cat_walk@4x"]
-frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
+frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite", "cat_walk_2@4x.sprite", "cat_walk_3@4x.sprite", "cat_walk_4@4x.sprite", "cat_walk_5@4x.sprite", "cat_walk_6@4x.sprite", "cat_walk_7@4x.sprite"]
 frame_ms = 250
 
 [animations.cat_sit]
@@ -399,12 +414,12 @@ frames   = ["cat_sleep_0@4x.sprite", "cat_sleep_1@4x.sprite", "cat_sleep_2@4x.sp
 frame_ms = 750
 
 [animations.dog_walk]
-frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
+frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite", "dog_walk_2.sprite", "dog_walk_3.sprite", "dog_walk_4.sprite", "dog_walk_5.sprite", "dog_walk_6.sprite", "dog_walk_7.sprite"]
 frame_ms = 250
 stride   = 2
 
 [animations."dog_walk@4x"]
-frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
+frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite", "dog_walk_2@4x.sprite", "dog_walk_3@4x.sprite", "dog_walk_4@4x.sprite", "dog_walk_5@4x.sprite", "dog_walk_6@4x.sprite", "dog_walk_7@4x.sprite"]
 frame_ms = 250
 
 [animations.dog_sit]
@@ -424,13 +439,21 @@ frames   = ["dog_sleep_0@4x.sprite", "dog_sleep_1@4x.sprite", "dog_sleep_2@4x.sp
 frame_ms = 750
 
 [animations.lobster_walk]
-frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
+frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite", "lobster_walk_2.sprite", "lobster_walk_3.sprite"]
 frame_ms = 250
 stride   = 6
 
+[animations."lobster_walk@4x"]
+frames   = ["lobster_walk_0@4x.sprite", "lobster_walk_1@4x.sprite", "lobster_walk_2@4x.sprite", "lobster_walk_3@4x.sprite"]
+frame_ms = 250
+
 [animations.lobster_rest]
-frames   = ["lobster_rest.sprite"]
-frame_ms = 600
+frames   = ["lobster_rest_0.sprite", "lobster_rest_1.sprite", "lobster_rest_2.sprite", "lobster_rest_3.sprite"]
+frame_ms = 375
+
+[animations."lobster_rest@4x"]
+frames   = ["lobster_rest_0@4x.sprite", "lobster_rest_1@4x.sprite", "lobster_rest_2@4x.sprite", "lobster_rest_3@4x.sprite"]
+frame_ms = 375
 
 [animations.meeting_sofa]
 # The front view. The classic painter also draws the back view with it, flipped:

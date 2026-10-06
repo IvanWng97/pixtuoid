@@ -102,28 +102,15 @@ pub(crate) struct Recolours {
     pub(crate) desk_props: [(char, pixtuoid_core::sprite::Pixel); 4],
 }
 
-/// The pack keys the desk props draw their cup's body and shadow in.
-pub(crate) const CUP_KEY: char = 'V';
-pub(crate) const CUP_SHADE_KEY: char = '%';
-/// The pack keys the token tower and its sheet draw their paper in.
-pub(crate) const PAPER_KEY: char = '¤';
-pub(crate) const PAPER_SHADE_KEY: char = '!';
-
 impl Recolours {
     /// `theme`'s colours for the keys art takes from it.
     pub(crate) fn of(theme: &Theme) -> Self {
-        let f = &theme.furniture;
         Self {
             art: crate::pack::appliance_overrides(&theme.appliance)
                 .into_iter()
                 .chain(crate::pack::fixture_overrides(theme))
                 .collect(),
-            desk_props: [
-                (CUP_KEY, Some(f.coffee_cup)),
-                (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
-                (PAPER_KEY, Some(f.paper)),
-                (PAPER_SHADE_KEY, Some(f.paper_shade)),
-            ],
+            desk_props: crate::pack::desk_prop_overrides(theme),
         }
     }
 }
@@ -278,7 +265,9 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
         PieceKind::WallSeg { piece, rows, trim } => (piece, rows, trim).hash(&mut h),
-        PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
+        PieceKind::Desk { at, art, screen } | PieceKind::DeskFront { at, art, screen } => {
+            (at, art, screen).hash(&mut h);
+        }
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
         PieceKind::Creature {
@@ -353,6 +342,7 @@ impl PieceKind {
             PieceKind::WallSeg { .. }
             | PieceKind::Chair { .. }
             | PieceKind::DeskProp(_)
+            | PieceKind::DeskFront { .. }
             | PieceKind::Creature { .. }
             | PieceKind::PropBand { .. }
             | PieceKind::Table { .. }
@@ -395,6 +385,7 @@ impl PieceKind {
             | PieceKind::Clock { .. }
             | PieceKind::Window { .. }
             | PieceKind::Desk { .. }
+            | PieceKind::DeskFront { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
@@ -434,7 +425,16 @@ pub(crate) enum PieceKind {
     },
     Desk {
         at: crate::layout::Point,
-        /// The facing's art (see [`desk_art`](crate::display::compose::desk_art)).
+        /// The facing's art ([`desk_art_name`](crate::pack::desk_art_name)).
+        art: &'static str,
+        screen: Screen,
+    },
+    /// What of the desk at `at` stands nearer the viewer than its props
+    /// ([`desk_front`](crate::pack::desk_front)), drawn over them as the desk
+    /// is drawn.
+    DeskFront {
+        at: crate::layout::Point,
+        /// The desk's art, which the front covers.
         art: &'static str,
         screen: Screen,
     },
@@ -509,12 +509,13 @@ pub(crate) enum PieceKind {
 }
 
 /// One desk prop: frame `frame` of `sprite`, its art's top-left at buffer pixel
-/// `at`, where the desk art's mark for it stands it.
+/// `at`, where the desk art's mark for it stands it, turned as its desk turns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StoodProp {
     pub(crate) sprite: &'static str,
     pub(crate) frame: usize,
     pub(crate) at: (u16, u16),
+    pub(crate) flip: Flip,
 }
 
 /// Which art a prop draws: a sprite's frame, turned.

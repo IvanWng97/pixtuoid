@@ -108,6 +108,8 @@ pub(crate) struct TileCutaway {
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
+    /// The cores a frame's encode may split across.
+    threads: usize,
 }
 
 /// A staged write: the tiles it sends and the flashes they show, so only a
@@ -166,6 +168,7 @@ impl TileCutaway {
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             torn: false,
+            threads: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         }
     }
 
@@ -280,7 +283,29 @@ impl TileCutaway {
     /// allows: at once for a new phase, so it shows as long as it lasts.
     fn stage(&mut self, dirty: &Dirty, flashes: Flashes, now: SystemTime, origin: Position) {
         self.origin = origin;
-        let changed = self.tiles.changed(&self.image, dirty);
+        let changed =
+            tracing::trace_span!("tiles.diff").in_scope(|| self.tiles.changed(&self.image, dirty));
+        tracing::trace!(
+            dirty = match dirty {
+                Dirty::All => "all",
+                Dirty::Rects(_) => "rects",
+                Dirty::Unchanged => "unchanged",
+            },
+            rects = match dirty {
+                Dirty::Rects(r) => r.as_slice().len(),
+                _ => 0,
+            },
+            rect_px = match dirty {
+                Dirty::Rects(r) => r
+                    .as_slice()
+                    .iter()
+                    .map(|b| u64::from(b.width) * u64::from(b.height))
+                    .sum::<u64>(),
+                _ => 0,
+            },
+            changed = changed.len(),
+            "tiles.stage"
+        );
         let due = self.flash.changes(flashes)
             || self.sent_at.is_none_or(|at| {
                 now.duration_since(at)
@@ -347,13 +372,15 @@ impl TileCutaway {
         } else {
             Ok(())
         };
+        let encoded =
+            tracing::trace_span!("tiles.encode").in_scope(|| self.encoder().encode_all(&send));
         let mut sent = Vec::with_capacity(send.len());
-        for c in send {
+        for (c, bytes) in send.into_iter().zip(encoded) {
             if wrote.is_err() {
                 break;
             }
-            if let Some(bytes) = self.encode(c) {
-                wrote = self.out.write_all(&bytes);
+            if let Some(bytes) = bytes {
+                wrote = tracing::trace_span!("tile.write").in_scope(|| self.out.write_all(&bytes));
                 sent.push(c);
             }
         }
@@ -371,17 +398,16 @@ impl TileCutaway {
         }
     }
 
-    /// `c`'s tile in the protocol's escape; `None` where it has none.
-    fn encode(&self, c: Changed) -> Option<Vec<u8>> {
-        let image = self.tiles.image(&self.image, c.tile);
-        match self.protocol {
-            ImageProtocol::Kitty => {
-                kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
-            }
-            ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
-            ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
-                .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
-                .ok(),
+    /// What encodes this frame's tiles, apart from the sink no thread shares.
+    fn encoder(&self) -> Encoder<'_> {
+        Encoder {
+            tiles: &self.tiles,
+            image: &self.image,
+            protocol: self.protocol,
+            base: self.base,
+            tmux: self.tmux,
+            origin: self.origin,
+            threads: self.threads,
         }
     }
 
@@ -396,6 +422,12 @@ impl TileCutaway {
     #[cfg(test)]
     pub(crate) fn hold_on(&mut self, screen: pixtuoid_scene::flash::ScreenClock) {
         self.flash = FlashHold::on(screen);
+    }
+
+    /// Split a frame's encode across `cores` whatever the machine has.
+    #[cfg(test)]
+    pub(crate) fn split_across(&mut self, cores: usize) {
+        self.threads = cores;
     }
 
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
@@ -470,6 +502,71 @@ impl TileCutaway {
     }
 }
 
+/// A thread's least share of a frame's tiles: below it, its spawn outweighs
+/// their encode.
+pub(crate) const TILES_PER_THREAD: usize = 32;
+
+/// The threads a frame of `tiles` splits across on `cores`: one a
+/// [`TILES_PER_THREAD`] share, never more than the cores.
+fn threads_for(tiles: usize, cores: usize) -> usize {
+    cores.min(tiles / TILES_PER_THREAD).max(1)
+}
+
+/// A frame's tiles to escapes, each independent of the others.
+#[derive(Clone, Copy)]
+struct Encoder<'a> {
+    tiles: &'a Tiles,
+    image: &'a RgbBuffer,
+    protocol: ImageProtocol,
+    base: u32,
+    tmux: bool,
+    origin: Position,
+    threads: usize,
+}
+
+impl Encoder<'_> {
+    /// Each of `send`'s escapes, in its order, split across as many threads
+    /// as it has [`TILES_PER_THREAD`] shares, up to the cores.
+    fn encode_all(self, send: &[Changed]) -> Vec<Option<Vec<u8>>> {
+        let threads = threads_for(send.len(), self.threads);
+        if threads == 1 {
+            return send.iter().map(|&c| self.encode(c)).collect();
+        }
+        std::thread::scope(|s| {
+            let shares: Vec<_> = send
+                .chunks(send.len().div_ceil(threads))
+                .map(|share| {
+                    s.spawn(move || share.iter().map(|&c| self.encode(c)).collect::<Vec<_>>())
+                })
+                .collect();
+            shares
+                .into_iter()
+                .flat_map(|share| {
+                    share
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                })
+                .collect()
+        })
+    }
+
+    /// `c`'s tile in the protocol's escape; `None` where it has none.
+    fn encode(self, c: Changed) -> Option<Vec<u8>> {
+        let _encode = tracing::trace_span!("tile.encode").entered();
+        let image =
+            tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(self.image, c.tile));
+        match self.protocol {
+            ImageProtocol::Kitty => {
+                kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
+            }
+            ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
+            ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
+                .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
+                .ok(),
+        }
+    }
+}
+
 fn sentinel() -> Cell {
     let mut cell = Cell::new(SENTINEL);
     cell.set_diff_option(CellDiffOption::Skip);
@@ -489,4 +586,20 @@ fn image_cell(buf: &mut Buffer, scene: Rect, col: u16, row: u16) -> Option<&mut 
         y: scene.y.saturating_add(row),
     };
     scene.contains(at).then(|| buf.cell_mut(at)).flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TILES_PER_THREAD, threads_for};
+
+    /// A frame of two shares splits across two cores, one share short of
+    /// that stays on one thread, and one core never splits: a serial
+    /// regression fails here, where an instruction count can't see it.
+    #[test]
+    fn a_frame_of_two_shares_splits_across_the_cores() {
+        assert_eq!(threads_for(2 * TILES_PER_THREAD, 8), 2);
+        assert_eq!(threads_for(2 * TILES_PER_THREAD - 1, 8), 1);
+        assert_eq!(threads_for(100 * TILES_PER_THREAD, 8), 8);
+        assert_eq!(threads_for(100 * TILES_PER_THREAD, 1), 1);
+    }
 }

@@ -833,7 +833,7 @@ impl CloudCache {
             self.entries.push_front(hit);
             return raster;
         }
-        let raster = std::sync::Arc::new(draw());
+        let raster = std::sync::Arc::new(tracing::trace_span!("clouds.draw").in_scope(draw));
         self.entries
             .push_front((key, std::sync::Arc::clone(&raster)));
         self.entries.truncate(Self::CAPACITY);

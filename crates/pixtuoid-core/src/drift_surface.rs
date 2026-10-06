@@ -11,7 +11,6 @@
 //! organisational split.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
@@ -20,11 +19,8 @@ use crate::source::codex::{
     RI_RESUME, RI_SEARCH, RI_TOOL_START, TURN_CONTEXT,
 };
 
-/// Where the committed fragment lives, relative to the workspace root.
-const FRAGMENT: &str = "crates/pixtuoid-core/drift-surface.json";
-
-/// Set when regenerating: `just gen-drift-surface`.
-const UPDATE_ENV: &str = "UPDATE_DRIFT_SURFACE";
+/// The committed fragment, by absolute path so a worktree writes its own.
+const FRAGMENT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/drift-surface.json");
 
 fn surface() -> Value {
     // A BTreeMap so the emitted order is the key order, not a hash order — the
@@ -119,13 +115,6 @@ fn surface() -> Value {
     json!(root)
 }
 
-fn fragment_path() -> PathBuf {
-    // CARGO_MANIFEST_DIR is this crate; the fragment path is workspace-relative.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(FRAGMENT)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,20 +127,12 @@ mod tests {
     /// which is precisely the failure that cannot announce itself.
     #[test]
     fn the_committed_fragment_matches_what_the_decoders_read() {
-        let want = serde_json::to_string_pretty(&surface()).expect("surface serializes");
-        let path = fragment_path();
-        if std::env::var_os(UPDATE_ENV).is_some() {
-            std::fs::write(&path, format!("{want}\n")).expect("fragment is writable");
-            return;
-        }
-        let got = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("{FRAGMENT} is missing ({e}); regenerate with {UPDATE_ENV}=1")
-        });
-        assert_eq!(
-            got.trim_end(),
-            want,
-            "{FRAGMENT} is stale — regenerate with `just gen-drift-surface`",
+        let want = serde_json::to_string_pretty(&surface()).expect("surface serializes") + "\n";
+        let committed = snapbox::Data::read_from(
+            std::path::Path::new(FRAGMENT),
+            Some(snapbox::data::DataFormat::Text),
         );
+        snapbox::assert_data_eq!(want, committed.raw());
     }
 
     /// Every value in the fragment is a non-empty name, and no set is empty: an

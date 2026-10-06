@@ -7,7 +7,7 @@ use pixtuoid_core::sprite::format::Pack;
 use crate::atmosphere::Carpet;
 use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
-use crate::display::compose::{art_size, desk_art, desk_front_h};
+use crate::display::compose::{art_size, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, BufferPx, Pen};
 use crate::display::{
     Align, Art, Backdrop, Covering, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind,
@@ -279,6 +279,7 @@ fn mark(
         | PieceKind::WallSeg { .. }
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
+        | PieceKind::DeskFront { .. }
         | PieceKind::Creature { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
@@ -485,6 +486,9 @@ fn paint_piece(
         PieceKind::Desk { at, art, screen } => {
             paint_desk(at, art, screen, (pack, scale), &mut cache.art, buf);
         }
+        PieceKind::DeskFront { at, art, screen } => {
+            paint_desk_front(at, art, screen, (pack, scale), &mut cache.art, buf);
+        }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => {
             paint_desk_prop(prop, pack, &recolours.desk_props, scale, buf);
@@ -591,7 +595,7 @@ pub(crate) fn assert_variant_desk_foot(
     let feet: Vec<(u16, u16, u16)> = (0..layout.home_desks.len())
         .filter_map(|i| {
             let d = layout.home_desks[i];
-            let art = desk_art(
+            let art = crate::pack::desk_art_name(
                 base_pack,
                 layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
             )?;
@@ -879,6 +883,35 @@ fn paint_desk(
     );
 }
 
+/// The front of the desk art `art_name` draws at `at`, over its props: drawn
+/// on the desk's canvas as [`paint_desk`] draws the desk.
+fn paint_desk_front(
+    at: crate::layout::Point,
+    art_name: &'static str,
+    screen: Screen,
+    (pack, scale): (&Pack, RenderScale),
+    art: &mut ArtCache,
+    buf: &mut RgbBuffer,
+) {
+    let Some(front) = crate::pack::desk_front(pack, art_name) else {
+        return;
+    };
+    let (Some(span), Some(f)) = (
+        desk_span(pack, art_name, at, scale),
+        crate::pack::densest_frame(pack, front, 0, scale),
+    ) else {
+        return;
+    };
+    let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
+    blit_frame_scaled(
+        art.desk(front, &f, screen).unwrap_or(f.frame),
+        x,
+        top_y,
+        f.blit_at,
+        buf,
+    );
+}
+
 /// `rows` of front face under `art` drawn at `top_left`, in the material of its
 /// bottom row ([`dominant_opaque_row`]).
 fn paint_derived_face(
@@ -1126,7 +1159,7 @@ fn paint_creature(
     blit_frame_scaled(&shown, x, y, dense.blit_at, buf);
 }
 
-/// A desk prop in the theme's cup and paper.
+/// A desk prop in the theme's cup and paper, turned as its desk turns it.
 fn paint_desk_prop(
     prop: StoodProp,
     pack: &Pack,
@@ -1138,7 +1171,13 @@ fn paint_desk_prop(
         return;
     };
     let f_themed = f.recolorable.recolored(recolours);
-    blit_frame_scaled(&f_themed, prop.at.0, prop.at.1, f.blit_at, buf);
+    blit_frame_scaled(
+        &prop.flip.turn(f_themed),
+        prop.at.0,
+        prop.at.1,
+        f.blit_at,
+        buf,
+    );
 }
 
 fn paint_door(at: Point, frame: usize, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
@@ -1413,9 +1452,7 @@ mod tests {
         quiet_board, showing, sit_down, sit_down_as, sit_down_in,
     };
     use crate::display::compose::{compose_at, ground_shadow, push_windows};
-    use crate::display::{
-        CUP_KEY, CUP_SHADE_KEY, PAPER_KEY, PAPER_SHADE_KEY, Piece, Span, fingerprint,
-    };
+    use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
     use crate::layout::{FixtureKind, SceneLayout};
     use crate::theme::Theme;
@@ -1425,10 +1462,7 @@ mod tests {
         let f = &theme.furniture;
         [f.rug_trim, f.rug_accent, f.rug_field]
     }
-    use crate::pack::{
-        DESK_CUP_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, TOKEN_SHEET_SPRITE,
-        TOKEN_TOWER_SPRITE, test_default_pack,
-    };
+    use crate::pack::{MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, test_default_pack};
 
     /// Relighting recolors the screen KEYS and nothing else — not even a pixel
     /// of another key the same colour as the glass — so the glow is exactly the
@@ -1473,111 +1507,178 @@ mod tests {
     }
 
     /// Each prop stands with its foot on the cell its desk art marks for it, at
-    /// every density, the cup at 1x on the classic's own cell, and a sheet one
-    /// sheet's fall short of landing hangs that many rows over the tower.
+    /// every density and either facing, the cup on the cell its steam rises
+    /// from, and a sheet one sheet's fall short of landing hangs that many rows
+    /// over the tower.
     #[test]
     fn the_desk_props_stand_on_their_marks() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
-        let mut frame = frames.last().expect("a seated frame").clone();
-        for d in &mut frame.desks {
-            d.cup = Some(crate::sim::Cup::Steaming);
-            d.token_tier = crate::token_meter::MAX_TIER;
-            d.sheet_fall = Some(1);
-        }
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            let office = Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale,
-            };
-            let list = list_at(&frame, office, 12);
-            let pieces = list.pieces();
-            let mut stood = 0;
-            for (i, p) in pieces.iter().enumerate() {
-                let PieceKind::Desk { at, art, .. } = p.kind else {
-                    continue;
-                };
-                let desk = crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
-                let k = desk.blit_at.get();
-                let mark = |name: &str| {
-                    let m = desk
-                        .marks
-                        .iter()
-                        .find(|m| m.name() == name)
-                        .expect("a mark");
-                    (
-                        scale.to_buffer(p.span.x0) + m.x() * k,
-                        scale.to_buffer(p.span.y0) + m.y() * k,
-                    )
-                };
-                // This desk's props follow it in the list: cup, tower, sheet.
-                let props: Vec<StoodProp> = pieces[i + 1..]
-                    .iter()
-                    .map_while(|q| match q.kind {
-                        PieceKind::DeskProp(prop) => Some(prop),
-                        _ => None,
-                    })
-                    .collect();
-                let [cup, tower, sheet] = props[..] else {
-                    panic!("desk at {at:?} stood {props:?}");
-                };
-                let foot = |prop: StoodProp| {
-                    let f = crate::pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
-                        .expect("prop art");
-                    let b = f.blit_at.get();
-                    (prop.at.0, prop.at.1 + (f.frame.height() - 1) * b, b)
-                };
-                for (prop, name) in [(cup, "cup"), (tower, "tower")] {
-                    let (x, y, b) = foot(prop);
-                    let (mx, my) = mark(name);
-                    assert_eq!(
-                        (x, y),
-                        (mx, my + k - b),
-                        "at scale {s}, the {name} is off its mark"
-                    );
-                }
-                if s == 1 {
-                    assert_eq!(
-                        (cup.at.0, cup.at.1),
-                        (crate::sim::desk_cup_at(at).x, crate::sim::desk_cup_at(at).y),
-                        "the 1x cup is off the classic's cell"
-                    );
-                }
-                let rest = crate::token_meter::SHEET_FALL_PX - 1;
-                assert_eq!(
-                    (sheet.at.0, sheet.at.1),
-                    (tower.at.0, tower.at.1 - rest * s),
-                    "at scale {s}, the sheet hangs off its fall"
-                );
-                stood += 1;
+        use crate::layout::Facing;
+        for facing in [Facing::North, Facing::South] {
+            let theme = crate::theme::theme_by_name("normal").expect("theme");
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            let mut frame = frames.last().expect("a seated frame").clone();
+            for d in &mut frame.desks {
+                d.cup = Some(crate::sim::Cup::Steaming);
+                d.token_tier = crate::token_meter::MAX_TIER;
+                d.sheet_fall = Some(1);
             }
-            assert!(stood > 0, "no desk stood its props");
+            for s in [1, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = list_at(&frame, office, 12);
+                let pieces = list.pieces();
+                let mut stood = 0;
+                for (i, p) in pieces.iter().enumerate() {
+                    let PieceKind::Desk { at, art, .. } = p.kind else {
+                        continue;
+                    };
+                    let desk = crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
+                    let k = desk.blit_at.get();
+                    let mark = |name: &str| {
+                        let m = desk
+                            .marks
+                            .iter()
+                            .find(|m| m.name() == name)
+                            .expect("a mark");
+                        (
+                            scale.to_buffer(p.span.x0) + m.x() * k,
+                            scale.to_buffer(p.span.y0) + m.y() * k,
+                        )
+                    };
+                    // This desk's props follow it in the list: cup, tower, sheet.
+                    let props: Vec<StoodProp> = pieces[i + 1..]
+                        .iter()
+                        .map_while(|q| match q.kind {
+                            PieceKind::DeskProp(prop) => Some(prop),
+                            _ => None,
+                        })
+                        .collect();
+                    let [cup, tower, sheet] = props[..] else {
+                        panic!("desk at {at:?} stood {props:?}");
+                    };
+                    // A prop stands with its west edge on its mark's cell, or, on
+                    // a desk that mirrors its props, turned, its east edge.
+                    let mirrored = crate::pack::desk_props_mirrored(art);
+                    let turn = if mirrored {
+                        Flip::Horizontal
+                    } else {
+                        Flip::None
+                    };
+                    let foot = |prop: StoodProp| {
+                        let f = crate::pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
+                            .expect("prop art");
+                        let b = f.blit_at.get();
+                        let east = prop.at.0 + f.frame.width() * b;
+                        let edge = if mirrored { east } else { prop.at.0 };
+                        (edge, prop.at.1 + (f.frame.height() - 1) * b, b)
+                    };
+                    let edge_of = |mx: u16| if mirrored { mx + k } else { mx };
+                    for (prop, name) in [(cup, "cup"), (tower, "tower")] {
+                        let (x, y, b) = foot(prop);
+                        let (mx, my) = mark(name);
+                        assert_eq!(
+                            (x, y),
+                            (edge_of(mx), my + k - b),
+                            "at scale {s}, the {art} {name} is off its mark"
+                        );
+                        assert_eq!(prop.flip, turn, "at scale {s}, the {art} {name} turned");
+                    }
+                    // The steam rises from `desk_cup_at`, in either look.
+                    let facing = if art == crate::pack::desk_sprite_name(Facing::North) {
+                        Facing::North
+                    } else {
+                        Facing::South
+                    };
+                    let steam = crate::sim::desk_cup_at(&pack, at, facing).expect("a cup cell");
+                    assert_eq!(
+                        (cup.at.0 / s, cup.at.1 / s),
+                        (steam.x, steam.y),
+                        "at scale {s}, the {art} cup is off the cell its steam rises from"
+                    );
+                    let rest = crate::token_meter::SHEET_FALL_PX - 1;
+                    assert_eq!(
+                        (foot(sheet).0, sheet.at.1),
+                        (edge_of(mark("tower").0), tower.at.1 - rest * s),
+                        "at scale {s}, the {art} sheet hangs off its fall"
+                    );
+                    stood += 1;
+                }
+                assert!(stood > 0, "no desk stood its props");
+            }
         }
     }
 
-    /// Every key the desk props take a theme colour in is one their art draws,
-    /// at every density: a key renamed in the pack would stop the theme
-    /// reaching the prop.
+    /// No prop covers the monitor in the cutaway, in either facing, at every
+    /// density and tier, cup or none: its cells paint as the bare desk's.
     #[test]
-    fn the_desk_props_draw_the_keys_the_theme_recolours() {
-        let pack = test_default_pack();
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            for (sprite, frame, keys) in [
-                (DESK_CUP_SPRITE, 0, &[CUP_KEY, CUP_SHADE_KEY][..]),
-                (TOKEN_TOWER_SPRITE, 0, &[PAPER_KEY, PAPER_SHADE_KEY]),
-                (TOKEN_SHEET_SPRITE, 0, &[PAPER_KEY]),
-            ] {
-                let art = crate::pack::densest_frame(&pack, sprite, frame, scale)
-                    .expect("the bundled pack draws the prop");
-                for &key in keys {
-                    assert!(
-                        drawn_in(&art, &[key]).contains(&true),
-                        "{sprite} at scale {s} draws no {key:?}"
+    fn no_prop_covers_the_monitor_in_the_cutaway() {
+        use crate::layout::Facing;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        for facing in [Facing::North, Facing::South] {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            let seated = frames.last().expect("a seated frame");
+            for s in [1, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let render = |cup, tier| {
+                    let mut frame = seated.clone();
+                    for d in &mut frame.desks {
+                        (d.cup, d.token_tier, d.sheet_fall) = (cup, tier, None);
+                    }
+                    let list = list_at(&frame, office, 12);
+                    let mut buf = RgbBuffer::filled(
+                        scale.to_buffer(layout.buf_w),
+                        scale.to_buffer(layout.buf_h),
+                        theme.surface.bg_fallback,
                     );
+                    paint(&list, &mut CutawayCache::default(), &mut buf);
+                    let monitors: Vec<(u16, u16)> = list
+                        .pieces()
+                        .iter()
+                        .filter_map(|p| match p.kind {
+                            PieceKind::Desk { art, .. } => Some((art, p.span)),
+                            _ => None,
+                        })
+                        .flat_map(|(art, span)| {
+                            let desk =
+                                crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
+                            let (w, b) = (usize::from(desk.frame.width()), desk.blit_at.get());
+                            let (x0, y0) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
+                            crate::pack::drawn_in(&desk, &crate::pack::MONITOR_KEYS)
+                                .into_iter()
+                                .enumerate()
+                                .filter(|&(_, m)| m)
+                                .map(move |(i, _)| {
+                                    (x0 + (i % w) as u16 * b, y0 + (i / w) as u16 * b)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .collect();
+                    (buf, monitors)
+                };
+                let (bare, monitors) = render(None, 0);
+                assert!(!monitors.is_empty(), "the desks draw monitors");
+                for tier in 0..=crate::token_meter::MAX_TIER {
+                    for cup in [None, Some(crate::sim::Cup::Cold)] {
+                        let (buf, _) = render(cup, tier);
+                        for &(x, y) in &monitors {
+                            assert_eq!(
+                                buf.get(x, y),
+                                bare.get(x, y),
+                                "{facing:?} at scale {s}, tier {tier}, cup {cup:?}: a prop covers the monitor at ({x}, {y})"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -1592,7 +1693,8 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     fn the_bundled_back_turned_desk_draws_its_screen_in_the_screen_keys() {
         let pack = test_default_pack();
-        let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+        let art =
+            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
         let sentinel = pixtuoid_core::sprite::Rgb {
             r: 255,
             g: 0,
@@ -2717,8 +2819,18 @@ mod tests {
         theme: &Theme,
         scale: RenderScale,
     ) -> Option<(u16, u16)> {
-        let w = scale.to_buffer(layout.buf_w);
-        let [a, b] = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+        let painted = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+        stray_pixel_of(kind, span, scale.to_buffer(layout.buf_w), scale, &painted)
+    }
+
+    /// [`stray_pixel`] over `kind`'s [`painted_over_two_fills`], `w` wide.
+    fn stray_pixel_of(
+        kind: &PieceKind,
+        span: Span,
+        w: u16,
+        scale: RenderScale,
+        [a, b]: &[RgbBuffer; 2],
+    ) -> Option<(u16, u16)> {
         // A pixel that is neither the same over both fills nor left alone is a
         // recolouring of what lay under it.
         let recoloured = a
@@ -2815,13 +2927,11 @@ mod tests {
 
     fn lowest_painted_row(
         kind: &PieceKind,
-        layout: &SceneLayout,
-        pack: &Pack,
-        theme: &Theme,
+        w: u16,
         scale: RenderScale,
+        [a, b]: &[RgbBuffer; 2],
     ) -> Option<u16> {
-        let w = usize::from(scale.to_buffer(layout.buf_w));
-        let [a, b] = painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+        let w = usize::from(w);
         a.as_slice()
             .iter()
             .zip(b.as_slice())
@@ -3538,8 +3648,10 @@ mod tests {
     fn a_back_turned_desk_grows_upward_and_keeps_its_base_row() {
         let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
-        let north = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
-        let south = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
+        let north =
+            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
+        let south =
+            crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
         assert_ne!(north, south, "the bundled pack ships the raised art");
         let plain = desk_span(&pack, south, desk, RenderScale::ONE).expect("desk");
         let raised = desk_span(&pack, north, desk, RenderScale::ONE).expect("desk_north");
@@ -3562,7 +3674,10 @@ mod tests {
             &[("one.sprite", "@frame 0\nA")],
         )
         .expect("pack builds");
-        assert_eq!(desk_art(&pack, crate::layout::Facing::North), Some("desk"));
+        assert_eq!(
+            crate::pack::desk_art_name(&pack, crate::layout::Facing::North),
+            Some("desk")
+        );
     }
 
     /// A desk's shadow centres on the row just under the one it sorts on: the
@@ -3573,7 +3688,7 @@ mod tests {
         let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
-            let art = desk_art(&pack, facing).expect("desk art");
+            let art = crate::pack::desk_art_name(&pack, facing).expect("desk art");
             for s in [1, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let span = desk_span(&pack, art, desk, scale).expect("desk");
@@ -3599,7 +3714,8 @@ mod tests {
     #[test]
     fn a_lit_screens_scanline_is_on_the_models_column() {
         let pack = test_default_pack();
-        let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+        let art =
+            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
         let glow = pixtuoid_core::sprite::Rgb {
             r: 40,
             g: 180,
@@ -3668,7 +3784,8 @@ mod tests {
             .find(|p| matches!(p.kind, PieceKind::Text { .. }))
             .expect("the sitter has a badge")
             .span;
-        let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+        let art =
+            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
         let top = desk_span(&pack, art, desk, RenderScale::ONE)
             .expect("desk")
             .y0;
@@ -4001,7 +4118,15 @@ mod tests {
             std::collections::BTreeSet::new(),
             std::collections::BTreeSet::new(),
         );
-        let mut check = |pack: &Pack, frame: &SimFrame, layout: &SceneLayout, only_people: bool| {
+        // One span and fingerprint always paint the same pixels at one scale
+        // (`one_span_and_fingerprint_always_paint_the_same_pixels`), so a piece
+        // checked once on one pack and canvas is checked for every frame.
+        let mut checked = std::collections::HashSet::new();
+        let mut check = |pack_label: &str,
+                         pack: &Pack,
+                         frame: &SimFrame,
+                         layout: &SceneLayout,
+                         only_people: bool| {
             for s in [1, 3, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let office = Office {
@@ -4039,8 +4164,16 @@ mod tests {
                     if let PieceKind::Prop { art, .. } | PieceKind::Animated { art, .. } = kind {
                         props.insert(art.sprite);
                     }
+                    let canvas = (layout.buf_w, layout.buf_h);
+                    if !checked.insert((pack_label.to_owned(), s, canvas, span, fingerprint(kind)))
+                    {
+                        continue;
+                    }
+                    let painted =
+                        painted_over_two_fills(kind, layout, pack, &Recolours::of(theme), scale);
+                    let w = scale.to_buffer(layout.buf_w);
                     assert_eq!(
-                        stray_pixel(kind, span, layout, pack, theme, scale),
+                        stray_pixel_of(kind, span, w, scale, &painted),
                         None,
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
@@ -4049,7 +4182,7 @@ mod tests {
                         && ground_shadow(span, kind, pack).is_some()
                     {
                         assert_eq!(
-                            lowest_painted_row(kind, layout, pack, theme, scale),
+                            lowest_painted_row(kind, w, scale, &painted),
                             Some(span.y1),
                             "{kind:?} at scale {s} is grounded on a row it doesn't reach: {span:?}"
                         );
@@ -4061,11 +4194,12 @@ mod tests {
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
             let (layout, pack, frames, _) = sit_down(facing, 2);
             for frame in &frames {
-                check(&pack, frame, &layout, true);
+                check("default", &pack, frame, &layout, true);
             }
             // ...the office around them once, a lit screen and a carried chair
             // included...
             check(
+                "default",
                 &pack,
                 frames.last().expect("a seated frame"),
                 &layout,
@@ -4079,22 +4213,24 @@ mod tests {
             .map(|s| s.name().to_owned())
             .collect();
         let mut worn = std::collections::BTreeSet::new();
+        let base = test_default_pack();
         for i in 0..1000 {
-            let pack = test_default_pack();
+            let pack = &base;
             let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
             let dense =
-                crate::pack::densest_frame(&pack, "walking", 0, scale).expect("the walk's art");
+                crate::pack::densest_frame(pack, "walking", 0, scale).expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
             let style =
-                crate::character::dress_for(&pack, id, dense.frame, dense.head, dense.density)
+                crate::character::dress_for(pack, id, dense.frame, dense.head, dense.density)
                     .and_then(|d| d.style);
             let Some(style) = style.filter(|s| !worn.contains(s)) else {
                 continue;
             };
             worn.insert(style);
-            let (layout, pack, frames, _) = sit_down_as(pack, crate::layout::Facing::South, 0, id);
+            let (layout, pack, frames, _) =
+                sit_down_as(base.clone(), crate::layout::Facing::South, 0, id);
             for frame in &frames {
-                check(&pack, frame, &layout, true);
+                check("default", &pack, frame, &layout, true);
             }
             if worn == styles {
                 break;
@@ -4107,7 +4243,7 @@ mod tests {
             for c in &mut frame.characters {
                 c.effects = every_effect(c.top_left);
             }
-            check(&pack, &frame, &layout, true);
+            check("default", &pack, &frame, &layout, true);
         }
         // ...every desk prop, each tower tier with a sheet mid-fall, both ways
         // a desk faces...
@@ -4119,7 +4255,7 @@ mod tests {
                 d.token_tier = (i % usize::from(crate::token_meter::MAX_TIER + 1)) as u8;
                 d.sheet_fall = Some(1);
             }
-            check(&pack, &frame, &layout, false);
+            check("default", &pack, &frame, &layout, false);
         }
         // ...a walk whose frames differ in size, so a span sized from the wrong
         // frame shows...
@@ -4142,7 +4278,7 @@ mod tests {
         let uneven = crate::pack::test_pack_with(&[("walking_1.sprite", LONG_STRIDE)]);
         let (layout, uneven, frames, _) = sit_down_in(uneven, crate::layout::Facing::South, 0);
         for frame in &frames {
-            check(&uneven, frame, &layout, true);
+            check("uneven", &uneven, frame, &layout, true);
         }
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         let pack = test_default_pack();
@@ -4159,7 +4295,7 @@ mod tests {
                     crate::layout::Size { w, h },
                 )
                 .expect("lays out");
-            check(&pack, &stepped.frame, &stepped.layout, false);
+            check("default", &pack, &stepped.frame, &stepped.layout, false);
         }
         assert_eq!(
             kinds.into_iter().collect::<Vec<_>>(),
@@ -4169,6 +4305,7 @@ mod tests {
                 "character",
                 "clock",
                 "desk",
+                "desk front",
                 "desk prop",
                 "door",
                 "effect",
@@ -5101,7 +5238,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, &at)| {
-                    let art = desk_art(
+                    let art = crate::pack::desk_art_name(
                         &pack,
                         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
                     )?;
@@ -5556,7 +5693,7 @@ mod tests {
     fn the_north_sofas_backrest_starts_on_its_lit_ridge() {
         let pack = test_default_pack();
         let densities = std::iter::once(pixtuoid_core::sprite::format::Density::ONE)
-            .chain(pack.density_variants());
+            .chain(pack.density_variants().iter().copied());
         for d in densities {
             let name = if d == pixtuoid_core::sprite::format::Density::ONE {
                 MEETING_SOFA_NORTH_SPRITE.to_owned()

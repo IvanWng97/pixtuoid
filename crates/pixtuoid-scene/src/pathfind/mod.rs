@@ -10,6 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 
+use pixtuoid_core::grid::Grid;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 use crate::layout::{
@@ -247,14 +248,21 @@ pub fn find_path(
     let goal = snap(mask, overlay, cell_of(to), cell_w, cell_h, MAX_SNAP_RADIUS)?;
 
     if start == goal {
-        return Some(reconstruct(mask, &HashMap::new(), start, from, to));
+        return Some(reconstruct(
+            mask,
+            &Grid::filled(0, 0, None),
+            start,
+            from,
+            to,
+        ));
     }
 
     let mut coarse = CoarseGrid::new(mask, overlay);
     let mut open: BinaryHeap<Node> = BinaryHeap::new();
-    let mut came_from: HashMap<(u16, u16), (u16, u16)> = HashMap::new();
-    let mut g_score: HashMap<(u16, u16), u32> = HashMap::new();
-    g_score.insert(start, 0);
+    // indexed by cell: a cell's lookups run on every expansion
+    let mut came_from: Grid<Option<(u16, u16)>> = Grid::filled(cell_w, cell_h, None);
+    let mut g_score: Grid<u32> = Grid::filled(cell_w, cell_h, u32::MAX);
+    g_score.set(start.0, start.1, 0);
     open.push(Node {
         f: heuristic(start, goal),
         g: 0,
@@ -265,7 +273,7 @@ pub fn find_path(
         if current.cell == goal {
             return Some(reconstruct(mask, &came_from, goal, from, to));
         }
-        if current.g > *g_score.get(&current.cell).unwrap_or(&u32::MAX) {
+        if current.g > g_score.get_or(current.cell.0, current.cell.1, u32::MAX) {
             continue;
         }
         for ((nx, ny), diagonal) in coarse.neighbors(current.cell) {
@@ -280,9 +288,9 @@ pub fn find_path(
                 base_step
             };
             let tentative = current.g + step;
-            if tentative < *g_score.get(&(nx, ny)).unwrap_or(&u32::MAX) {
-                came_from.insert((nx, ny), current.cell);
-                g_score.insert((nx, ny), tentative);
+            if tentative < g_score.get_or(nx, ny, u32::MAX) {
+                came_from.set(nx, ny, Some(current.cell));
+                g_score.set(nx, ny, tentative);
                 open.push(Node {
                     f: tentative + heuristic((nx, ny), goal),
                     g: tentative,
@@ -321,14 +329,14 @@ pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
 
 fn reconstruct(
     mask: &WalkableMask,
-    came_from: &HashMap<(u16, u16), (u16, u16)>,
+    came_from: &Grid<Option<(u16, u16)>>,
     end: (u16, u16),
     from: Point,
     to: Point,
 ) -> Vec<Point> {
     let mut cells = vec![end];
     let mut cur = end;
-    while let Some(&prev) = came_from.get(&cur) {
+    while let Some(prev) = came_from.get_or(cur.0, cur.1, None) {
         cells.push(prev);
         cur = prev;
     }

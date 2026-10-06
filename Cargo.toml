@@ -30,6 +30,8 @@ categories   = ["command-line-utilities", "visualization"]
 [workspace.lints.rust]
 unreachable_pub = "warn"
 missing_debug_implementations = "warn"
+# cargo-llvm-cov's own cfg (its README's recommended declaration).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
 # An `allow` outlives the warning it silenced; an `expect` fails once its lint
 # stops firing, and a `reason` says why the suppression exists.
@@ -121,6 +123,7 @@ libc               = "0.2"
 windows-sys        = "0.61"
 criterion          = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
 insta              = "1"
+snapbox            = "1"
 proptest           = "1"
 tempfile           = "3"
 # Dev-only: every test that sets or unsets an env var goes through it, behind
