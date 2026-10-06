@@ -114,6 +114,7 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
         protocol: queried.or_else(|| hints.iterm2()),
         cell: answered_cell.or(window_cell),
         tmux: hints.env.tmux(),
+        shm: false,
     }
 }
 
@@ -179,8 +180,56 @@ pub(crate) fn probe(ask: bool) -> Probe {
     ) {
         None => Probe::NotQueried,
         Some(false) => unanswered(&hints, window_cell()),
-        Some(true) => Probe::Answered(detected(&responses, &hints, window_cell())),
+        Some(true) => {
+            let mut d = detected(&responses, &hints, window_cell());
+            // Never through tmux: see `resolve`.
+            d.shm = d.protocol == Some(ImageProtocol::Kitty) && !d.tmux && reads_shared_memory();
+            Probe::Answered(d)
+        }
     }
+}
+
+/// Whether the terminal reads kitty images from this host's shared memory:
+/// `a=q` with `t=s` has it load a 1x1 image from an object we publish without
+/// storing it, and answer `OK` or an error (kitty's graphics protocol,
+/// "Querying support and available transmission mediums"); a device-status
+/// request ends the reply, as in [`probe`].
+fn reads_shared_memory() -> bool {
+    let Ok(name) = super::shm::publish(&[0; 3], std::time::Instant::now()) else {
+        return false;
+    };
+    let id = super::kitty::process_base();
+    let mut reply = Vec::new();
+    let answered = crate::term::query_tty(
+        shm_query(id, &name).as_bytes(),
+        super::GRAPHICS_PROBE_TIMEOUT,
+        MAX_REPLY_BYTES,
+        |chunk| {
+            reply.extend_from_slice(chunk);
+            reply.windows(DSR_OK.len()).any(|w| w == DSR_OK)
+        },
+    );
+    // The terminal unlinks what it read; this unlinks what it didn't.
+    super::shm::unlink_all();
+    answered == Some(true) && shm_ok(id, &reply)
+}
+
+/// The device-status reply that ends [`shm_query`]'s answer.
+const DSR_OK: &[u8] = b"\x1b[0n";
+
+/// The query for a 1x1 RGB image from the shared-memory object `name`, as
+/// image `id`, then a device-status request.
+fn shm_query(id: u32, name: &str) -> String {
+    format!(
+        "\x1b_Gi={id},a=q,t=s,f=24,s=1,v=1,S=3;{}\x1b\\\x1b[5n",
+        base64_simd::STANDARD.encode_to_string(name)
+    )
+}
+
+/// Whether `reply` holds image `id`'s `OK`.
+fn shm_ok(id: u32, reply: &[u8]) -> bool {
+    let ok = format!("\x1b_Gi={id};OK\x1b\\");
+    reply.windows(ok.len()).any(|w| w == ok.as_bytes())
 }
 
 /// Our pane's `allow-passthrough`, inherited value included (tmux(1)
@@ -265,6 +314,25 @@ mod tests {
         assert!(take_reply(&mut parser, &mut responses, tail));
     }
 
+    /// Only the query's own id answering `OK` reads shared memory: an error,
+    /// or another image's `OK`, does not.
+    #[test]
+    fn shared_memory_is_read_only_where_the_query_s_own_id_answers_ok() {
+        assert!(shm_ok(7, b"\x1b_Gi=7;OK\x1b\\\x1b[0n"));
+        assert!(!shm_ok(
+            7,
+            b"\x1b_Gi=7;EBADF:Failed to read image\x1b\\\x1b[0n"
+        ));
+        assert!(!shm_ok(7, b"\x1b_Gi=31;OK\x1b\\\x1b[0n"));
+        assert!(!shm_ok(7, b"\x1b[0n"));
+        let query = shm_query(7, "/pxt1-0");
+        assert!(
+            query.starts_with("\x1b_Gi=7,a=q,t=s,f=24,s=1,v=1,S=3;"),
+            "{query:?}"
+        );
+        assert!(query.ends_with("\x1b\\\x1b[5n"));
+    }
+
     #[test]
     fn a_terminal_that_answers_without_a_cell_size_falls_back_to_the_window() {
         let window = Some(CellSize { w: 9, h: 18 });
@@ -329,6 +397,7 @@ mod tests {
                 protocol: Some(ImageProtocol::Iterm2),
                 cell: window,
                 tmux: false,
+                shm: false,
             })
         );
         assert_eq!(
