@@ -234,7 +234,7 @@ entry are listed `NOT COVERED`, never skipped silently).
 Advisory backstops that surface risk but never gate:
 `scripts/check_upstream_drift.py` (wire-format drift) · `just fixture-age`
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
-`just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
+`just bench` / `just bench-pacing` / CodSpeed (local numbers authoritative; CI benches advisory).
 
 ### Parallel sessions
 

@@ -262,6 +262,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
+    /// Paint and send the next frame whole, for the pacing bench's worst case.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn forget_frame(&mut self) {
+        for floor in &mut self.floors {
+            floor.raster.forget_shown();
+        }
+        if let Some(cutaway) = &mut self.cutaway {
+            cutaway.forget();
+        }
+    }
+
     /// Clear the terminal and repaint every cell and every image.
     pub(crate) fn redraw(&mut self) -> Result<()> {
         #[cfg(feature = "graphics")]

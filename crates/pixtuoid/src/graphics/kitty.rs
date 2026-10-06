@@ -71,7 +71,8 @@ fn base_for(seed: u64) -> u32 {
 ///
 /// `q=2` on every chunk: a reply would arrive as input mid-frame.
 pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
-    let zlib = compress_to_vec_zlib(&image.rgb, CompressionLevel::BestSpeed as u8);
+    let zlib = tracing::trace_span!("tile.zlib")
+        .in_scope(|| compress_to_vec_zlib(&image.rgb, CompressionLevel::BestSpeed as u8));
     let TileImage {
         tile,
         width,
@@ -82,11 +83,9 @@ pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
         "a=T,U=1,i={id},f=24,o=z,s={width},v={height},c={},r={},",
         tile.cols, tile.rows
     );
-    chunked(
-        &keys,
-        base64_simd::STANDARD.encode_to_string(zlib).as_bytes(),
-        tmux,
-    )
+    let b64 = tracing::trace_span!("tile.base64")
+        .in_scope(|| base64_simd::STANDARD.encode_to_string(zlib));
+    chunked(&keys, b64.as_bytes(), tmux)
 }
 
 fn chunked(keys: &str, payload: &[u8], tmux: bool) -> Vec<u8> {

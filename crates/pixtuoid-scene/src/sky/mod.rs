@@ -691,6 +691,41 @@ fn strikes(bucket: u64, storm: f32) -> bool {
     (draw as f32) < storm * (1u64 << f32::MANTISSA_DIGITS) as f32
 }
 
+/// The first instant from `after` at which a full storm lights a strike under
+/// `motion`, or `None` at rest: where the frame-pacing bench places its window.
+#[doc(hidden)]
+pub fn first_strike_after(after: SystemTime, motion: Motion) -> Option<SystemTime> {
+    let pace = motion.pace()?;
+    let storm = WeatherPolicy::Forced(Weather::Storm);
+    // Two periods: the strike of the bucket `after` falls in can be behind it,
+    // and the next bucket's can land as late as its end.
+    (0..=2 * LIGHTNING_PERIOD_MS * pace / crate::anim::FULL_TICK_MS)
+        .map(|n| after + Duration::from_millis(n * crate::anim::FULL_TICK_MS))
+        .find(|&t| strike_phase_at(motion.beat(t), storm).is_some())
+}
+
+/// The start of the first clock-weather transition from `after` that changes
+/// the weather: where the frame-pacing bench places its window.
+#[doc(hidden)]
+pub fn first_transition_after(after: SystemTime) -> Option<SystemTime> {
+    let ms = u64::try_from(
+        after
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()?
+            .as_millis(),
+    )
+    .ok()?;
+    (ms / WEATHER_CYCLE_MS..)
+        .take(256)
+        .map(|slot| (slot + 1) * WEATHER_CYCLE_MS - TRANSITION_MS)
+        .filter(|&start| start >= ms)
+        .find(|&start| {
+            let mid = WeatherPolicy::Clock.weather_at_ms(start + TRANSITION_MS / 2);
+            mid.from != mid.to
+        })
+        .map(|start| SystemTime::UNIX_EPOCH + Duration::from_millis(start))
+}
+
 /// The lightning bucket `beat` falls in: what seeds its strike's look.
 pub(crate) fn strike_bucket(beat: crate::anim::Beat) -> u64 {
     beat.ms() / LIGHTNING_PERIOD_MS
@@ -752,14 +787,17 @@ impl Sky {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
+        let weather = policy.weather_at(now);
+        let strike = strike_phase_at(timing.beat, policy);
+        tracing::trace!(weather = ?weather, strike = ?strike, nightfall, "sky.at");
         Self {
             policy,
-            weather: policy.weather_at(now),
+            weather,
             body: body_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            strike: strike_phase_at(timing.beat, policy),
+            strike,
         }
     }
 
