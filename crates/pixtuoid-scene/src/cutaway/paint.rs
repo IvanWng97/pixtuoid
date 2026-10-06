@@ -4122,6 +4122,8 @@ mod tests {
         // (`one_span_and_fingerprint_always_paint_the_same_pixels`), so a piece
         // checked once on one pack and canvas is checked for every frame.
         let mut checked = std::collections::HashSet::new();
+        // keyed by grid and light, so one cache serves every pack and canvas
+        let mut clouds = crate::clouds::CloudCache::default();
         let mut check = |pack_label: &str,
                          pack: &Pack,
                          frame: &SimFrame,
@@ -4147,7 +4149,7 @@ mod tests {
                     &moment,
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
-                    &mut crate::clouds::CloudCache::default(),
+                    &mut clouds,
                 );
                 for &Piece { span, ref kind, .. } in list.pieces() {
                     if only_people

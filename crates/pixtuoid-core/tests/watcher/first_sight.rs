@@ -1012,7 +1012,7 @@ async fn the_registry_row_filters_the_workflow_journal_and_the_builder_overrides
         true
     }
 
-    async fn first_sight_starts(root: std::path::PathBuf, admit_all: bool) -> usize {
+    async fn first_sight_starts(root: std::path::PathBuf, admit_all: bool, want: usize) -> usize {
         let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
         let mut watcher = JsonlWatcher::new(
             root,
@@ -1026,12 +1026,17 @@ async fn the_registry_row_filters_the_workflow_journal_and_the_builder_overrides
         let handle = tokio::spawn(async move { watcher.run(tx).await });
 
         let mut starts = 0;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+        let mut deadline = tokio::time::Instant::now() + Duration::from_secs(4);
         while tokio::time::Instant::now() < deadline {
             if let Ok(Some((_, AgentEvent::SessionStart { .. }))) =
                 tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
             {
                 starts += 1;
+                // both files exist before the first scan: a start past `want`
+                // lands within a few more scans, not seconds later
+                if starts == want {
+                    deadline = tokio::time::Instant::now() + 20 * super::POLL;
+                }
             }
         }
         handle.abort();
@@ -1064,13 +1069,13 @@ async fn the_registry_row_filters_the_workflow_journal_and_the_builder_overrides
     .await;
 
     assert_eq!(
-        first_sight_starts(dir.path().to_path_buf(), false).await,
+        first_sight_starts(dir.path().to_path_buf(), false, 1).await,
         1,
         "the claude-code row's path_filter must exclude journal.jsonl — only the \
          real subagent transcript first-sights"
     );
     assert_eq!(
-        first_sight_starts(dir.path().to_path_buf(), true).await,
+        first_sight_starts(dir.path().to_path_buf(), true, 2).await,
         2,
         "an explicit with_path_filter must OVERRIDE the row (both files first-sight)"
     );
