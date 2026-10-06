@@ -156,6 +156,36 @@ DESK_LEG_W = 2
 # where the classic painter's glow lands (`pixel_painter::effects`'s `SCREEN_*`).
 DESK_MONITOR_X0, DESK_MONITOR_X1 = 3, 11
 DESK_GLASS_Y0, DESK_CHIN_Y = 2, 4
+# The one arrangement every desk places its lamp and props by, in 1x columns
+# from the art's west edge as the viewer-facing desk shows them: the lamp's
+# bulb, the cup's and the token tower's west columns. The lamp is west, the cup
+# beside it and the tower on the east wing. Each density draws its own rows.
+# `display::compose`'s `every_desk_follows_the_one_arrangement` holds both
+# densities to it.
+DESK_ARRANGEMENT = {"bulb": 1, "cup": 2, "tower": 11}
+# The desks seen from the sitter's side, the same desk turned round: their
+# arrangement mirrors the one above, their props stand mirrored, and each prop's
+# mark is its bottom-RIGHT cell (`pack::desk_props_mirrored`).
+DESK_PROPS_MIRRORED = {"desk_north"}
+
+
+def desk_arrangement(base):
+    """`base`'s columns for its lamp's bulb and each prop's west edge."""
+    if base not in DESK_PROPS_MIRRORED:
+        return DESK_ARRANGEMENT
+    bulb = DESK_ART_W - 1 - DESK_ARRANGEMENT["bulb"]
+    return {"bulb": bulb} | {
+        prop: DESK_ART_W - DESK_ARRANGEMENT[prop] - w for prop, w in DESK_PROP_W_1X.items()
+    }
+
+
+def desk_prop_mark_col(base, prop, scale):
+    """The column `base`'s mark for `prop` names, on a grid `scale` to the 1x
+    column: the prop's west column, or its east on a desk that mirrors it."""
+    col = desk_arrangement(base)[prop]
+    if base in DESK_PROPS_MIRRORED:
+        return (col + DESK_PROP_W_1X[prop]) * scale - 1
+    return col * scale
 
 
 def desk_rows(lift):
@@ -167,11 +197,12 @@ def desk_rows(lift):
     return top, lip, legs, legs + DESK_LEG_ROWS
 
 
-def desk_1x(lift):
+def desk_1x(lift, base):
     """The classic desk's wood: a lit back edge, a bright front lip, and legs
     dark on their inner side, with open floor between them so the carpet and
-    anyone walking behind the desk show through, and the task lamp on its west
-    wing: a two-cell shade over its bulb. The cup and the paper tower are
+    anyone walking behind the desk show through, and the task lamp on the wing
+    `desk_arrangement(base)` puts it on: a two-cell shade over its bulb, the
+    shade's second cell toward the desk's edge. The cup and the paper tower are
     pieces of their own, stood at the art's marks."""
     top, lip, legs, h = desk_rows(lift)
     g = canvas(DESK_ART_W, h)
@@ -181,9 +212,10 @@ def desk_1x(lift):
     for x0, inner in ((0, DESK_LEG_W - 1), (DESK_ART_W - DESK_LEG_W, DESK_ART_W - DESK_LEG_W)):
         rect(g, x0, legs, x0 + DESK_LEG_W, h, WOOD_SH)
         rect(g, inner, legs, inner + 1, h, WOOD_DK)
-    # `lighting`'s `DESK_LAMP_BULB`: the bulb a cell east and south of the shade.
-    rect(g, 0, top, 2, top + 1, LAMP_HI)
-    put(g, 1, top + 1, BULB)
+    bulb = desk_arrangement(base)["bulb"]
+    edge = -1 if bulb < DESK_ART_W // 2 else 1
+    rect(g, min(bulb, bulb + edge), top, max(bulb, bulb + edge) + 1, top + 1, LAMP_HI)
+    put(g, bulb, top + 1, BULB)
     return g
 
 
@@ -194,16 +226,37 @@ def monitor_stand_1x(g):
         put(g, x, DESK_CHIN_Y, SHADOW)
 
 
+def south_monitor_1x(g):
+    """The viewer-facing desk's monitor at 1x: its back, lit along its top edge,
+    on its stand."""
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, DESK_CHIN_Y, BEZEL)
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 1, SLATE)
+    monitor_stand_1x(g)
+
+
 def desk_south_1x():
     """The viewer-facing desk at 1x: the monitor's back, lit along its top
     edge. Its glass rows stay casing: a viewer-facing seat never shows a
     screen, though the glow still lights them where a pack ships no
     `desk_north` and this art stands in for it."""
-    g = desk_1x(0)
-    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, DESK_CHIN_Y, BEZEL)
-    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 1, SLATE)
-    monitor_stand_1x(g)
+    g = desk_1x(0, "desk")
+    south_monitor_1x(g)
     return g
+
+
+def front_layer(art, monitor):
+    """`art` where `monitor` paints on a blank canvas its size, clear elsewhere:
+    what of a desk stands between the viewer and the sitter's props, drawn over
+    them on the desk's own canvas (`pack::desk_front`)."""
+    m = canvas(len(art[0]), len(art))
+    monitor(m)
+    return [[c if k != T else T for c, k in zip(row, mrow)] for row, mrow in zip(art, m)]
+
+
+def desk_front_1x():
+    """The viewer-facing desk's front at 1x: its monitor, which hides the part
+    of a sitter's cup behind it."""
+    return front_layer(desk_south_1x(), south_monitor_1x)
 
 
 def desk_north_1x():
@@ -211,7 +264,7 @@ def desk_north_1x():
     grey so it reads against a dark carpet, two lines of dim text on its glass,
     and a keyboard a row clear of the stand so the two never merge into one
     dark base."""
-    g = desk_1x(DESK_NORTH_LIFT)
+    g = desk_1x(DESK_NORTH_LIFT, "desk_north")
     x0, x1 = DESK_MONITOR_X0, DESK_MONITOR_X1
     rect(g, x0, 0, x1, DESK_CHIN_Y, SLATE)
     rect(g, x0 + 1, 1, x1 - 1, DESK_CHIN_Y, BEZEL)
@@ -226,27 +279,32 @@ def desk_north_1x():
     return g
 
 
-# The desk props the cutaway stands on a desk's art at its marks, each mark the
-# cell the prop's bottom-left lands on: the cup at `pixel_painter::drawable`'s
-# `desk_cup_at`, the token tower at its `STACK_X_OFF`/`STACK_BASE_DY`, both
-# from the desk's point, one row under the art's top (`DESK_BEZEL_RAISE`).
-DESK_CUP_1X = (2, 2 + 1)
-DESK_TOWER_1X = (11, 3)
+# The row each prop's foot stands on at 1x, from the art's top, per view: the
+# cup on the sitter's side of the monitor, behind it as they face the viewer and
+# before it once they turn their back; the tower beside the monitor.
+DESK_PROP_FOOT_1X = {
+    "desk": {"cup": 2, "tower": 4},
+    "desk_north": {"cup": 6, "tower": 6},
+}
 # `token_meter`'s `MAX_TIER`: the tower's frames, one per tier.
 TOKEN_MAX_TIER = 3
-# `pixel_painter::drawable`'s `STACK_W` and `STACK_PX_PER_TIER`.
+# The 1x tower's width and rows a tier, which both looks blit.
 TOKEN_W_1X, TOKEN_ROWS_PER_TIER_1X = 3, 2
 
 
-def desk_marks_1x(lift):
-    """A 1x desk's prop marks, `lift` rows taller above."""
-    (cx, cy), (tx, ty) = DESK_CUP_1X, DESK_TOWER_1X
-    return [("cup", cx, cy + 1 + lift), ("tower", tx, ty + 1 + lift)]
+def desk_marks_1x(base):
+    """A 1x desk's prop marks."""
+    return [(prop, desk_prop_mark_col(base, prop, 1), row)
+            for prop, row in DESK_PROP_FOOT_1X[base].items()]
 
 
 def desk_cup_1x():
     """The desk's coffee cup at 1x: its rim over its shadowed body."""
     return [[MUG, MUG], [MUG_SH, MUG_SH]]
+
+
+# Each prop's 1x columns, which a mirrored desk's arrangement and marks turn on.
+DESK_PROP_W_1X = {"cup": len(desk_cup_1x()[0]), "tower": TOKEN_W_1X}
 
 
 def token_tower_1x():
@@ -1346,6 +1404,19 @@ def lamp_pool(g, cx, cy, rx, ry, y_min):
                     g[y][x] = WOOD_LT
 
 
+def lamp_base_x(base):
+    """The `@Nx` lamp's base column for `desk_arrangement(base)`: its shade,
+    tipped toward the desk's middle, hangs the bulb in the arrangement's cell."""
+    bulb = desk_arrangement(base)["bulb"]
+    return bulb * S + (1 if bulb < DESK_ART_W // 2 else 2)
+
+
+# The back-turned desk's mouse, in art pixels across.
+DESK_MOUSE_W = 4
+# How far the lamp's pool lies from its base, toward the desk's middle.
+LAMP_POOL_DX = 4
+
+
 def desk_lamp(g, bx, by, facing):
     """A black articulated lamp standing at (bx, by): a weighted base, a jointed
     arm, a shade tipped toward `facing` (-1 west, 1 east) with its bulb glowing
@@ -1365,15 +1436,24 @@ def desk_lamp(g, bx, by, facing):
     return sx, ey
 
 
-# The props' marks on the `@Nx` desks, each the art pixel the prop's outlined
-# bottom-left lands on: the cup and tower east of a viewer-facing monitor, west
-# of a back-turned one, clear of the lamp either way.
+# The rows, from the wood's top, each `@Nx` prop's outlined foot stands on, per
+# view, on the sides `DESK_PROP_FOOT_1X` puts them.
+DESK_PROP_ROWS = {
+    "desk": {"cup": 9, "tower": 12},
+    "desk_north": {"cup": 18, "tower": 12},
+}
+
+
+def desk_marks(base, lift):
+    """An `@Nx` desk's prop marks at its arrangement's columns, `lift` rows
+    taller above."""
+    return [(prop, desk_prop_mark_col(base, prop, S), (DESK_BEZEL_RAISE + lift) * S + row)
+            for prop, row in DESK_PROP_ROWS[base].items()]
+
+
 DESK_MARKS = {
-    "desk": [("cup", 45, (DESK_BEZEL_RAISE * S) + 18), ("tower", 43, (DESK_BEZEL_RAISE * S) + 12)],
-    "desk_north": [
-        ("cup", 3, (DESK_BEZEL_RAISE + DESK_NORTH_LIFT) * S + 19),
-        ("tower", 2, (DESK_BEZEL_RAISE + DESK_NORTH_LIFT) * S + 13),
-    ],
+    "desk": desk_marks("desk", 0),
+    "desk_north": desk_marks("desk_north", DESK_NORTH_LIFT),
 }
 # The `@Nx` tower's reams fill its frame, `S` times the 1x tier's rows: the
 # bottom ream gives up the outline's two rows.
@@ -1438,12 +1518,22 @@ def monitor_stand(g, mid, chin):
 
 def desk_south():
     """The viewer-facing desk: the monitor turns its back to us (casing, vents,
-    a badge) on its stand, a lamp west pooling light on the wood, papers and a
-    mug east."""
+    a badge) on its stand, a lamp west pooling light on the wood; the cup and
+    papers stand where its arrangement marks them."""
     g, (w, h, ty, ly, gy) = desk_wood(0, 5)
+    bx = lamp_base_x("desk")
+    lamp_pool(g, bx + LAMP_POOL_DX, ty + 9, 11, 6, ty + 1)
+    south_monitor(g)
+    desk_lamp(g, bx, ty + 10, 1)
+    union_outline(g)
+    return g
+
+
+def south_monitor(g):
+    """The viewer-facing desk's monitor: its back (casing, vents, a badge) on
+    its stand."""
     mx0, mx1, chin = DESK_MONITOR_X0 * S, DESK_MONITOR_X1 * S, DESK_CHIN_Y * S
     mid = (mx0 + mx1) // 2
-    lamp_pool(g, 9, ty + 9, 11, 6, ty + 1)
     rect(g, mx0, 0, mx1, chin - 1, BEZEL)
     rect(g, mx0, 0, mx1, 1, SLATE)
     rect(g, mx0, 0, mx0 + 1, chin - 1, SLATE)
@@ -1452,18 +1542,23 @@ def desk_south():
         rect(g, mx0 + 8, vy, mx1 - 8, vy + 1, SHADOW)
     rect(g, mid - 2, 9, mid + 2, 11, SLATE)
     monitor_stand(g, mid, chin - 1)
-    desk_lamp(g, 5, ty + 10, 1)
-    union_outline(g)
-    return g
+
+
+def desk_front():
+    """The viewer-facing desk's front: its monitor, which hides the part of a
+    sitter's cup behind it."""
+    return front_layer(desk_south(), south_monitor)
 
 
 def desk_north():
     """The back-turned desk: its raised monitor's glass with a few lines of
-    code, a keyboard and mouse before it, a lamp east, papers and a mug west."""
+    code, a keyboard and mouse before it, a lamp east; the cup and papers stand
+    where its arrangement marks them."""
     g, (w, h, ty, ly, gy) = desk_wood(DESK_NORTH_LIFT, 3)
     mx0, mx1, chin = DESK_MONITOR_X0 * S, DESK_MONITOR_X1 * S, DESK_CHIN_Y * S
     mid = (mx0 + mx1) // 2
-    lamp_pool(g, 47, ty + 11, 11, 6, ty + 1)
+    bx = lamp_base_x("desk_north")
+    lamp_pool(g, bx - LAMP_POOL_DX, ty + 11, 11, 6, ty + 1)
     rect(g, mx0, 0, mx1, chin, BEZEL)
     rect(g, mx0, 0, mx1, 1, SLATE)
     rect(g, mx0 + 2, 2, mx1 - 2, chin - 2, GLASS)
@@ -1472,10 +1567,12 @@ def desk_north():
     rect(g, mx0, chin - 1, mx1, chin, SHADOW)
     monitor_stand(g, mid, chin)
     ky = chin + 6
-    rect(g, mx0 + 3, ky, mx1 - 5, ky + 3, KEY_DK)
-    rect(g, mx0 + 4, ky + 1, mx1 - 6, ky + 2, KEYCAP)
-    rect(g, mx1 - 2, ky, mx1 + 1, ky + 3, KEYCAP)
-    desk_lamp(g, 49, ty + 12, -1)
+    # the mouse just west of the cup, the keyboard a column short of it
+    mouse = desk_arrangement("desk_north")["cup"] * S - DESK_MOUSE_W
+    rect(g, mx0 + 3, ky, mouse - 1, ky + 3, KEY_DK)
+    rect(g, mx0 + 4, ky + 1, mouse - 2, ky + 2, KEYCAP)
+    rect(g, mouse, ky, mouse + DESK_MOUSE_W - 1, ky + 3, KEYCAP)
+    desk_lamp(g, bx, ty + 12, -1)
     union_outline(g)
     return g
 
@@ -4767,13 +4864,23 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + LIFT)],
                     )
-    classic_marks = {"desk": desk_marks_1x(0), "desk_north": desk_marks_1x(DESK_NORTH_LIFT)}
+    classic_marks = {
+        "desk": desk_marks_1x("desk"),
+        "desk_north": desk_marks_1x("desk_north"),
+    }
     sprites |= {
         f"{base}.sprite": render_sprite(
             header, grounded(frames), marks=classic_marks.get(base, ())
         )
         for base, (header, frames) in classic.items()
     }
+    # A front layer is drawn at its desk's top-left on the desk's own canvas, so
+    # it is not grounded on its own rows, and the desk under it must not move.
+    for desk, front, suffix in ((desk_south_1x, desk_front_1x, ""),
+                                (desk_south, desk_front, f"@{S}x")):
+        art = desk()
+        require(grounded([art]) == [art], f"desk{suffix} moves when grounded")
+        sprites[f"desk_front{suffix}.sprite"] = render_sprite(front.__doc__, [front()])
     for anim, (header, texts) in CREATURES.items():
         for i, g in enumerate(grounded([master(t) for t in texts])):
             sprites[f"{anim}_{i}@{S}x.sprite"] = render_sprite(header, [g])
