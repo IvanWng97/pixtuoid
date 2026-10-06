@@ -20,7 +20,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, UnidentifiedImageError
 
 
-def compare_images(ref_path, cand_path, diff_path, threshold_percent=0.0):
+def compare_images(ref_path, cand_path, diff_path):
     """Returns an exit code (see module docstring)."""
     ref_path = Path(ref_path)
     cand_path = Path(cand_path)
@@ -74,18 +74,7 @@ def compare_images(ref_path, cand_path, diff_path, threshold_percent=0.0):
     diff_path.parent.mkdir(parents=True, exist_ok=True)
     out.save(diff_path)
     print(f"Difference highlight image saved to: {diff_path}")
-
-    # The render is byte-deterministic, so the default tolerance is zero; a
-    # nonzero threshold must be an explicit choice at the call site.
-    if percent > threshold_percent:
-        print(
-            f"ERROR: Mismatch {percent:.4f}% exceeds "
-            f"the allowed threshold of {threshold_percent}%."
-        )
-        return 1
-
-    print("SUCCESS: Mismatch is within the acceptable threshold.")
-    return 0
+    return 1
 
 
 def _selftest():
@@ -128,29 +117,12 @@ def _selftest():
 
         check("missing file must ERROR", compare_images(td / "nope.png", rgb_a, diff_out), 2)
 
-        # One differing pixel in 100 is 1%, so 0.5% fails and 2% passes.
         spotted = Image.new("RGB", (10, 10), black)
         spotted.putpixel((0, 0), white)
         spot = td / "spot.png"
         spotted.save(spot)
         flat = write("flat.png", "RGB", black, size=(10, 10))
-        check(
-            "1% diff under a 0.5% threshold must FAIL",
-            compare_images(flat, spot, diff_out, 0.5),
-            1,
-        )
-        check(
-            "1% diff under a 2% threshold must PASS",
-            compare_images(flat, spot, diff_out, 2.0),
-            0,
-        )
-        # ON the boundary, so `>` vs `>=` is observable — both cases above sit
-        # off it, which let a flipped operator survive.
-        check(
-            "1% diff exactly AT a 1% threshold must PASS",
-            compare_images(flat, spot, diff_out, 1.0),
-            0,
-        )
+        check("a single differing pixel must FAIL", compare_images(flat, spot, diff_out), 1)
 
         # The consumers subprocess this module rather than importing it, so argv
         # handling and the exit-code mapping need their own exercise.
@@ -165,6 +137,10 @@ def _selftest():
         check("CLI: differing images exit 1", cli_bad.returncode, 1)
         cli_usage = subprocess.run([*argv, str(rgb_a)], capture_output=True)
         check("CLI: wrong arity exits 2", cli_usage.returncode, 2)
+        cli_extra = subprocess.run(
+            [*argv, str(rgb_a), str(rgb_a), str(diff_out), "1.0"], capture_output=True
+        )
+        check("CLI: a fourth argument exits 2", cli_extra.returncode, 2)
 
     failed = [(n, got, want) for n, got, want in checks if got != want]
     for name, got, want in failed:
@@ -183,12 +159,9 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv[1:]:
         sys.exit(_selftest())
 
-    if len(sys.argv) not in (4, 5):
-        print(
-            "Usage: compare-screenshots.py <reference> <candidate> <diff_out> [threshold_percent]"
-        )
+    if len(sys.argv) != 4:
+        print("Usage: compare-screenshots.py <reference> <candidate> <diff_out>")
         print("       compare-screenshots.py --selftest")
         sys.exit(2)
 
-    threshold = float(sys.argv[4]) if len(sys.argv) == 5 else 0.0
-    sys.exit(compare_images(sys.argv[1], sys.argv[2], sys.argv[3], threshold))
+    sys.exit(compare_images(sys.argv[1], sys.argv[2], sys.argv[3]))
