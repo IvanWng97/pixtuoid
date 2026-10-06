@@ -854,12 +854,11 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 Some(SceneHit::Coffee) => {
                     let _ = open::that("https://buymeacoffee.com/IvanWng97");
                 }
-                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { centre, kind, .. })))
+                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, .. })))
                     if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) =>
                 {
                     renderer.set_active_pet(Some(renderer::PetState {
                         petted_at: now,
-                        pet_pos: centre,
                         kind,
                         floor_idx: renderer.current_floor(),
                     }));

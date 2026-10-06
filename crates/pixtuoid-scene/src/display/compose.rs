@@ -18,7 +18,7 @@ use crate::layout::{
 };
 use crate::pack::{
     DESK_CUP_SPRITE, DOOR_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS,
-    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, drawn_in,
+    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE,
 };
 use crate::render_scale::RenderScale;
 use crate::sim::SimFrame;
@@ -131,8 +131,8 @@ pub struct Showing<'a> {
     /// The wall-clock instant: the sky, the room's light, the board's flap.
     pub now: std::time::SystemTime,
     /// The wall board, the classic painter's
-    /// ([`build_board`](crate::board::build_board)).
-    pub board: &'a crate::board::BoardModel,
+    /// ([`build_board`](crate::neon_sign::build_board)).
+    pub board: &'a crate::neon_sign::BoardModel,
 }
 
 /// `frame`'s [`DisplayList`] as `showing` says.
@@ -140,6 +140,7 @@ pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) -> DisplayList<'a> {
     let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
@@ -148,7 +149,7 @@ pub(crate) fn compose<'a>(
         floor.altitude,
         timing,
     );
-    compose_at(frame, office, &moment, floor, board)
+    compose_at(frame, office, &moment, floor, board, cloud_cache)
 }
 
 /// Compose `frame`'s [`DisplayList`] at `moment`, on `floor`. Every
@@ -159,13 +160,14 @@ pub(crate) fn compose_at<'a>(
     office: Office<'a>,
     moment: &Moment,
     floor: crate::floor::FloorMeta,
-    board: &crate::board::BoardModel,
+    board: &crate::neon_sign::BoardModel,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
-    let mut collected = collect_pieces(frame, office, moment);
+    let mut collected = collect_pieces(frame, office, moment, cloud_cache);
     collected.extend(signs(office, floor.floor_idx, board));
     let sorted = depth_sort(
         collected
@@ -190,8 +192,9 @@ pub(crate) fn compose_at<'a>(
         flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
+        backdrop: crate::display::Backdrop::of(office.layout, theme),
+        recolours: crate::display::Recolours::of(theme),
         pack,
-        theme,
         scale,
     }
 }
@@ -237,7 +240,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             flip,
             false,
             &p.effects,
-            p.target(),
+            Some(p.target()),
         )
     });
     let mascots = frame.mascots.iter().map(|m| {
@@ -285,8 +288,9 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
                 effect,
                 head: None,
                 pen,
+                inks: crate::effects::look::Inks::of(theme),
             };
-            if let Some(s) = riding.span(theme, depth) {
+            if let Some(s) = riding.span(depth) {
                 order.push((s, PieceKind::Effect(riding)));
             }
         }
@@ -317,6 +321,7 @@ fn lights(
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: moment.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(pack),
         },
     );
     let pen = Pen::for_pack(scale, pack);
@@ -331,7 +336,7 @@ fn lights(
             let bulb = layout
                 .home_desks
                 .get(i)
-                .zip(desk_art(pack, facing))
+                .zip(crate::pack::desk_art_name(pack, facing))
                 .and_then(|(&at, art)| desk_bulb(at, art, pack, scale));
             match (bulb, d.lamp.light) {
                 (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
@@ -387,27 +392,10 @@ fn desk_bulb(
     scale: RenderScale,
 ) -> Option<crate::layout::Point> {
     let span = desk_span(pack, art_name, at, scale)?;
-    let desk = crate::pack::densest_frame(pack, art_name, 0, scale)?;
-    let w = usize::from(desk.frame.width());
-    let (mut n, mut sx, mut sy) = (0u32, 0u32, 0u32);
-    for (i, _) in drawn_in(&desk, &[crate::pack::DESK_BULB_KEY])
-        .iter()
-        .enumerate()
-        .filter(|&(_, &b)| b)
-    {
-        n += 1;
-        sx += (i % w) as u32;
-        sy += (i / w) as u32;
-    }
-    if n == 0 {
-        return None;
-    }
-    // An art pixel's middle, in cells of the layout, rounded to the cell it lies in.
-    let d = f32::from(desk.density.get());
-    let cell = |sum: u32| ((sum as f32 / n as f32 + 0.5) / d) as u16;
+    let (x, y) = crate::pack::bulb_cell(&crate::pack::densest_frame(pack, art_name, 0, scale)?)?;
     Some(crate::layout::Point {
-        x: span.x0 + cell(sx),
-        y: span.y0 + cell(sy),
+        x: span.x0 + x,
+        y: span.y0 + y,
     })
 }
 
@@ -431,6 +419,7 @@ pub(crate) fn ground_shadow(
     match *kind {
         PieceKind::WallSeg { .. }
         | PieceKind::Window { .. }
+        | PieceKind::DeskFront { .. }
         | PieceKind::Hung { .. }
         | PieceKind::Door { .. }
         | PieceKind::Neon { .. }
@@ -470,7 +459,7 @@ pub(crate) fn ground_shadow(
 fn signs(
     office: Office<'_>,
     floor_idx: usize,
-    board: &crate::board::BoardModel,
+    board: &crate::neon_sign::BoardModel,
 ) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
     let indicator = TextRun::indicator(office.layout.door, floor_idx + 1, office.theme);
@@ -514,7 +503,12 @@ fn meets(a: ArtRect, b: ArtRect) -> bool {
 
 /// Every piece of the office, each with its [`Span`]. At one depth and layer,
 /// push order breaks the tie, so it is part of the result.
-fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
+fn collect_pieces(
+    frame: &SimFrame,
+    office: Office<'_>,
+    moment: &Moment,
+    cloud_cache: &mut crate::clouds::CloudCache,
+) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let inputs = ComposeInputs {
         frame,
@@ -522,14 +516,20 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
         moment,
     };
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
-    push_windows(office, moment, &GlassWeather::of(moment), &mut order);
+    push_windows(
+        office,
+        moment,
+        &GlassWeather::of(moment),
+        &mut order,
+        cloud_cache,
+    );
     let carried = push_characters(frame, office, moment.timing.now, &mut order);
     push_bubbles(frame, office, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
-    wall_segments(layout, &mut order);
+    wall_segments(layout, crate::glass::WallTrim::of(office.theme), &mut order);
     order
 }
 
@@ -847,10 +847,11 @@ fn push_fixture(
                 PieceKind::Clock {
                     at: top_left,
                     reading: crate::sky::clock_reading(moment.timing.now),
+                    hand: theme.office.clock_hand,
                 },
             ));
         }
-        // The backdrop lays them ([`covering`]).
+        // The backdrop lays them ([`Covering`](crate::display::Covering)).
         K::MeetingRug { .. }
         | K::LoungeRug
         | K::Doormat { .. }
@@ -952,7 +953,7 @@ fn push_desk(
         return;
     };
     let facing = layout.desk_facing(i);
-    let Some(art) = desk_art(pack, facing) else {
+    let Some(art) = crate::pack::desk_art_name(pack, facing) else {
         return;
     };
     let props = frame.desk(i);
@@ -971,6 +972,9 @@ fn push_desk(
         let span = span.with_depth(depth);
         order.push((span, PieceKind::Desk { at: d, art, screen }));
         push_desk_props(&props, (art, span), office, order);
+        if crate::pack::desk_front(pack, art).is_some() {
+            order.push((span, PieceKind::DeskFront { at: d, art, screen }));
+        }
     }
 }
 
@@ -994,11 +998,14 @@ fn push_desk_props(
         let m = desk.marks.iter().find(|m| m.name() == name)?;
         Some((x0 + m.x() * k, y0 + (m.y() + 1) * k))
     };
-    // Stand frame `frame` of `sprite` on `(x, foot)`; where its top lands.
+    let mirrored = crate::pack::desk_props_mirrored(art);
+    // Stand frame `frame` of `sprite` on the mark cell at `(x, foot)`, turned as
+    // its desk turns it; where its top lands.
     let mut stand = |sprite: &'static str, frame: usize, (x, foot): (u16, u16)| {
         let f = crate::pack::densest_frame(pack, sprite, frame, scale)?;
         let b = f.blit_at.get();
         let (w, h) = (f.frame.width() * b, f.frame.height() * b);
+        let x = crate::pack::prop_left(x, k, w, mirrored)?;
         let y = foot.checked_sub(h)?;
         let s = scale.get();
         let cells = |at: u16, len: u16| (at / s, (at + len - 1) / s - at / s + 1);
@@ -1007,6 +1014,11 @@ fn push_desk_props(
             sprite,
             frame,
             at: (x, y),
+            flip: if mirrored {
+                Flip::Horizontal
+            } else {
+                Flip::None
+            },
         };
         order.push((
             Span::new(cx, cy, cw, ch, 0)
@@ -1016,14 +1028,14 @@ fn push_desk_props(
         ));
         Some(y)
     };
-    if let (Some(_), Some(at)) = (props.cup, mark("cup")) {
+    if let (Some(_), Some(at)) = (props.cup, mark(crate::pack::CUP_MARK)) {
         stand(DESK_CUP_SPRITE, 0, at);
     }
     let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
         return;
     };
-    let Some((x, top)) =
-        mark("tower").and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
+    let Some((x, top)) = mark(crate::pack::TOWER_MARK)
+        .and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
     else {
         return;
     };
@@ -1038,12 +1050,6 @@ fn push_desk_props(
             stand(TOKEN_SHEET_SPRITE, 0, (x, foot));
         }
     }
-}
-
-/// The pack's desk art for a seat facing `facing`: the facing's own when the
-/// pack ships it, else what [`Pack::piece_or_source`] draws in its place.
-pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
-    pack.piece_or_source(crate::pack::desk_sprite_name(facing))
 }
 
 /// The box a desk drawn with `art` at `desk` occupies at `scale`: the art and
@@ -1116,7 +1122,7 @@ fn push_characters(
         scale,
     } = office;
     let pen = Pen::for_pack(scale, pack);
-    let namesakes = crate::overlay::Namesakes::of(&frame.agents);
+    let namesakes = crate::badge::Namesakes::of(&frame.agents);
     let mut carried = Vec::new();
     for c in &frame.characters {
         let Some(agent) = frame.agents.get(c.agent_idx) else {
@@ -1140,7 +1146,7 @@ fn push_characters(
             carried.push(d);
         }
         let badge_ceiling = seat.and_then(|(d, facing)| {
-            desk_span(pack, desk_art(pack, facing)?, d, scale).map(|s| s.y0)
+            desk_span(pack, crate::pack::desk_art_name(pack, facing)?, d, scale).map(|s| s.y0)
         });
         let at = cutaway_top_left(c);
         let shadow = !c.seated;
@@ -1158,11 +1164,17 @@ fn push_characters(
             c.sort_row,
             chair.map(|(span, _)| span),
         );
-        let riders = riders(c, &key, (w, at), scale);
+        let riders = riders(
+            c,
+            &key,
+            (w, at),
+            scale,
+            crate::effects::look::Inks::of(theme),
+        );
         // Dust lies on the ground under its walker; the rest ride over them.
         let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
             for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
-                if let Some(s) = r.span(theme, span.depth) {
+                if let Some(s) = r.span(span.depth) {
                     order.push((s, PieceKind::Effect(*r)));
                 }
             }
@@ -1198,6 +1210,7 @@ fn riders(
     key: &crate::character::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
+    inks: crate::effects::look::Inks,
 ) -> Vec<crate::display::effects::Riding> {
     let d = key.frame.density.get();
     let Some(pen) = Pen::new(scale, d) else {
@@ -1222,7 +1235,12 @@ fn riders(
     };
     c.effects
         .iter()
-        .map(|&effect| crate::display::effects::Riding { effect, head, pen })
+        .map(|&effect| crate::display::effects::Riding {
+            effect,
+            head,
+            pen,
+            inks,
+        })
         .collect()
 }
 
@@ -1303,7 +1321,11 @@ fn push_sofa(
 
 /// Queue every room wall's [sort bands](crate::layout::WallPiece::sort_bands) as
 /// pieces: the long-object case [`crate::display::order`] documents.
-fn wall_segments(layout: &SceneLayout, order: &mut Vec<(Span, PieceKind)>) {
+fn wall_segments(
+    layout: &SceneLayout,
+    trim: crate::glass::WallTrim,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
     for &piece in &layout.wall_pieces {
         let (at, size) = piece.visual();
         for (rows, depth) in piece.sort_bands() {
@@ -1314,6 +1336,7 @@ fn wall_segments(layout: &SceneLayout, order: &mut Vec<(Span, PieceKind)>) {
                 PieceKind::WallSeg {
                     piece,
                     rows: (rows.start, rows.end),
+                    trim,
                 },
             ));
         }
@@ -1355,6 +1378,7 @@ pub(crate) fn push_windows(
     moment: &Moment,
     weather: &GlassWeather,
     order: &mut Vec<(Span, PieceKind)>,
+    cloud_cache: &mut crate::clouds::CloudCache,
 ) {
     let Office {
         layout,
@@ -1367,20 +1391,17 @@ pub(crate) fn push_windows(
     else {
         return;
     };
-    let outside = crate::outside::Outside::of(
-        moment,
-        pack,
-        theme,
-        (layout.buf_w, layout.wall_band_h()),
-        density,
-        *weather,
-    );
+    let wall = crate::outside::Wall {
+        size: (layout.buf_w, layout.wall_band_h()),
+        bays: layout.window_bays().collect(),
+    };
+    let outside =
+        crate::outside::Outside::of(moment, pack, theme, wall, density, *weather, cloud_cache);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
     let bolt = crate::display::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
-    for bay in layout.window_bays() {
-        let mut view = outside.through(bay);
+    for (bay, mut view) in outside.views() {
         if bolt > 0 {
             view.paint(|_, c| bolt_lift.of(c));
         }

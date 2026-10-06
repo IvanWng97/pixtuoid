@@ -6,13 +6,12 @@ use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::display::effects::Riding;
 use crate::display::pen::{ArtPx, ArtRect};
-use crate::theme::Theme;
 
 impl Riding {
     /// Paint it into `buf`.
-    pub(crate) fn paint(&self, theme: &Theme, buf: &mut RgbBuffer) {
+    pub(crate) fn paint(&self, buf: &mut RgbBuffer) {
         let pen = self.pen;
-        self.look(theme, &mut |at, size, c, coverage| {
+        self.look(&mut |at, size, c, coverage| {
             let (Ok(x), Ok(y), Ok(side)) = (
                 u16::try_from(at.x),
                 u16::try_from(at.y),
@@ -61,9 +60,10 @@ mod tests {
                 },
                 head: None,
                 pen,
+                inks: crate::effects::look::Inks::of(theme),
             };
             let mut buf = RgbBuffer::filled(32, 32, bg);
-            heart.paint(theme, &mut buf);
+            heart.paint(&mut buf);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
         let life = crate::effects::HEART_LIFE_MS;

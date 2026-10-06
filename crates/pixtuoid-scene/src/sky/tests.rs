@@ -1,6 +1,12 @@
 use super::*;
+
 use crate::localclock::{at_hour_min, on_day};
 use std::time::Duration;
+
+/// The level [`strike_phase_at`] lights the sky with at `beat`, 0 with no strike.
+fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
+    strike_phase_at(beat, policy).map_or(0.0, StrikePhase::level)
+}
 
 #[test]
 fn the_clock_picks_every_weather_within_a_week() {
@@ -372,8 +378,8 @@ fn no_strike_flashes_at_rest() {
 }
 
 /// The one pin on the clock-to-flash path through [`Sky::at`], and on the
-/// flash being the storm's alone; painter tests inject the flash with
-/// [`Sky::with_flash`].
+/// flash being the storm's alone; painter tests inject the strike with
+/// [`Sky::with_strike`].
 #[test]
 fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
     for bucket in 0..24u64 {

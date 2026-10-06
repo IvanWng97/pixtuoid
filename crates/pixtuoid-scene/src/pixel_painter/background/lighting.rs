@@ -365,6 +365,7 @@ mod tests {
                 indoor_scale: 1.0,
                 neon: NeonLevels::FLASH,
                 beat: Beat::at_ms(0),
+                bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_default_pack()),
             },
         );
         let patch = Emitter {

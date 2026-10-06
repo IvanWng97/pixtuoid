@@ -2,6 +2,7 @@
 //! composed model-side from an [`Office`] and what it is [`Showing`], for a
 //! rasterizer to draw.
 
+mod backdrop;
 pub(crate) mod compose;
 pub(crate) mod effects;
 mod hover;
@@ -12,13 +13,14 @@ pub(crate) mod pen;
 pub mod text;
 
 pub use crate::creatures::GatewayCard;
+pub(crate) use backdrop::{Backdrop, Covering};
 pub use compose::{Office, Showing};
 pub(crate) use compose::{PLATE_PAD, compose, desk_span, face_rows, run_rect};
 pub(crate) use hover::Hover;
 pub use hover::{HoverTarget, Hovers, PetHover};
 pub(crate) use list::{
-    Art, DisplayList, Emits, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp,
-    fingerprint,
+    Art, DisplayList, Emits, Figure, Flip, LightPiece, Piece, PieceKind, Recolours, Screen,
+    StoodProp, fingerprint,
 };
 #[cfg(test)]
 pub(crate) use order::check_order;

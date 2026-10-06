@@ -30,6 +30,8 @@ categories   = ["command-line-utilities", "visualization"]
 [workspace.lints.rust]
 unreachable_pub = "warn"
 missing_debug_implementations = "warn"
+# cargo-llvm-cov's own cfg (its README's recommended declaration).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
 # An `allow` outlives the warning it silenced; an `expect` fails once its lint
 # stops firing, and a `reason` says why the suppression exists.
