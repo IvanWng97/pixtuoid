@@ -220,11 +220,12 @@ fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
     assert_eq!(wire.take(), "");
 }
 
-/// A frame encoded across threads still reaches the wire as one transmit
-/// per tile, in the grid's order.
+/// A frame encoded across four threads, on any machine, still reaches the
+/// wire as one transmit per tile, in the grid's order.
 #[test]
 fn a_whole_frame_transmits_every_tile_once_in_order() {
     let (mut r, wire) = kitty(120, 40);
+    r.cutaway.as_mut().expect("a cutaway").split_across(4);
     r.render(&office(), pack(), t0()).expect("render");
     let ids: Vec<u32> = wire
         .take()
