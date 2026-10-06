@@ -142,6 +142,8 @@ def main():
         geometry = tuple(int(n) for n in pacing("terminal", "16" if args.scale == "classic" else args.scale))
         run_pty(argv, env, geometry, args.secs)
 
+    if not any(events(log, "the clock starts at PIXTUOID_FAKE_NOW")):
+        sys.exit(f"pace-check: the binary ran on the real clock, not the run's: {log}")
     windows = list(events(log, "frame pacing"))
     if not windows:
         sys.exit(f"pace-check: no `frame pacing` summary in {log}")
