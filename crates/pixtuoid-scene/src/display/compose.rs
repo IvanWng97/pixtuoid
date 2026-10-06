@@ -325,8 +325,7 @@ fn lights(
         },
     );
     let pen = Pen::for_pack(scale, pack);
-    // each desk art's bulb, scanned from its pixels once a frame, not a desk
-    let mut bulbs = std::collections::HashMap::new();
+    let mut bulbs = DeskBulbCells::default();
     // Each desk's lamp shines from the bulb its art draws, which the cutaway's
     // art stands on the side the desk faces; the model's is the classic's.
     let lamps: Vec<crate::lighting::Emitter> = lights
@@ -339,12 +338,7 @@ fn lights(
                 .home_desks
                 .get(i)
                 .zip(crate::pack::desk_art_name(pack, facing))
-                .and_then(|(&at, art)| {
-                    let cell = *bulbs
-                        .entry(art)
-                        .or_insert_with(|| bulb_in(art, pack, scale));
-                    bulb_at(at, art, cell?, pack, scale)
-                });
+                .and_then(|(&at, art)| bulbs.at(at, art, pack, scale));
             match (bulb, d.lamp.light) {
                 (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
                     crate::lighting::Emitter {
@@ -389,17 +383,35 @@ fn lights(
         .collect()
 }
 
-/// The layout cell of the desk lamp's bulb the desk `art_name` at `at` draws at
-/// `scale`: the middle of its [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY)
-/// pixels, or `None` for art that draws no bulb.
-#[cfg(test)]
-fn desk_bulb(
-    at: crate::layout::Point,
-    art_name: &str,
-    pack: &Pack,
-    scale: RenderScale,
-) -> Option<crate::layout::Point> {
-    bulb_at(at, art_name, bulb_in(art_name, pack, scale)?, pack, scale)
+/// Each desk art's bulb, scanned from its pixels the first time a frame asks
+/// for it: a frame's desks share a handful of arts.
+#[derive(Default)]
+pub(crate) struct DeskBulbCells<'p> {
+    seen: Vec<(&'p str, Option<(u16, u16)>)>,
+}
+
+impl<'p> DeskBulbCells<'p> {
+    /// The layout cell of the desk lamp's bulb the desk `art_name` at `at`
+    /// draws at `scale`: the middle of its
+    /// [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY) pixels, or `None` for art
+    /// that draws no bulb.
+    pub(crate) fn at(
+        &mut self,
+        at: crate::layout::Point,
+        art_name: &'p str,
+        pack: &Pack,
+        scale: RenderScale,
+    ) -> Option<crate::layout::Point> {
+        let cell = match self.seen.iter().find(|(art, _)| *art == art_name) {
+            Some(&(_, cell)) => cell,
+            None => {
+                let cell = bulb_in(art_name, pack, scale);
+                self.seen.push((art_name, cell));
+                cell
+            }
+        };
+        bulb_at(at, art_name, cell?, pack, scale)
+    }
 }
 
 /// Where in `art_name` at `scale` its bulb is, in cells.
@@ -407,7 +419,7 @@ fn bulb_in(art_name: &str, pack: &Pack, scale: RenderScale) -> Option<(u16, u16)
     crate::pack::bulb_cell(&crate::pack::densest_frame(pack, art_name, 0, scale)?)
 }
 
-/// [`desk_bulb`] given [`bulb_in`]'s cell.
+/// [`DeskBulbCells::at`] given [`bulb_in`]'s cell.
 fn bulb_at(
     at: crate::layout::Point,
     art_name: &str,
