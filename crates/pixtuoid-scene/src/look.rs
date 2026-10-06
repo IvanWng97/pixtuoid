@@ -95,7 +95,7 @@ pub struct FrameNote {
 }
 
 /// The office's raster state, shared by every floor and both looks: the
-/// cutaway's art and the clouds' masses.
+/// cutaway's art, and the outside's clouds and last views.
 #[derive(Debug, Default)]
 pub struct OfficeRaster {
     pub(crate) cutaway: crate::cutaway::paint::CutawayCache,
