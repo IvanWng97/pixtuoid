@@ -125,6 +125,10 @@ pub(crate) struct UiState {
     /// clock-driven animation (and the dashboard marquee) holds still.
     paused: bool,
     frozen_now: Option<SystemTime>,
+    /// `$PIXTUOID_FAKE_NOW`'s instant, Unix seconds, and when it was read:
+    /// the clock `just pace-check` starts at a transition or at dusk, read
+    /// nowhere else.
+    fake_now: Option<(Instant, SystemTime)>,
     /// Theme picker: `Some(preview index)` while open; `saved_theme_idx` is
     /// the committed selection the quit/cancel paths revert to.
     pub(crate) theme_picker: Option<usize>,
@@ -158,6 +162,14 @@ impl UiState {
             help_open: false,
             paused: false,
             frozen_now: None,
+            fake_now: pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")
+                .and_then(|s| s.parse().ok())
+                .map(|secs| {
+                    (
+                        Instant::now(),
+                        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+                    )
+                }),
             theme_picker: None,
             saved_theme_idx,
             dashboard: DashboardUi::default(),
@@ -185,11 +197,14 @@ impl UiState {
 
     /// This frame's wall clock: real time, or the frozen instant while paused.
     pub(crate) fn now(&mut self) -> SystemTime {
+        let wall = self
+            .fake_now
+            .map_or_else(SystemTime::now, |(read, at)| at + read.elapsed());
         if self.paused {
-            *self.frozen_now.get_or_insert(SystemTime::now())
+            *self.frozen_now.get_or_insert(wall)
         } else {
             self.frozen_now = None;
-            SystemTime::now()
+            wall
         }
     }
 

@@ -1090,6 +1090,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     })
     .await;
 
+    renderer.finish_pacing();
     teardown_terminal(&mut renderer.terminal)?;
     result
 }

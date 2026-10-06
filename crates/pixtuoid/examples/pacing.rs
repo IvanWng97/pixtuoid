@@ -11,6 +11,9 @@
 //! one `real-clock` case runs the production loop's shape on the wall clock
 //! to check that model once.
 //!
+//! `pacing next-storm` prints the Unix second the clock's next transition
+//! into a storm starts, for `just pace-check`'s clock.
+//!
 //! `pacing hitch <frames.jsonl>` instead logs every frame of each terminal ×
 //! clock run with what made it slow: each stage's time, the Dirty kind, tiles
 //! and bytes sent, the canvas epoch field that changed, a cloud-raster miss,
@@ -752,6 +755,13 @@ fn hitch(path: &Path) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("next-storm") {
+        let start = pixtuoid_scene::sky::first_transition_into(SystemTime::now(), Weather::Storm)
+            .context("no storm in the clock's weeks ahead")?;
+        let secs = start.duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+        let _ = writeln!(std::io::stdout(), "{secs}");
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("hitch") {
         let path = PathBuf::from(
             std::env::args()

@@ -1066,5 +1066,9 @@ fn the_transition_found_changes_the_weather() {
         assert_eq!(before.from, before.to, "{k}: the slot ends pure");
         let mid = WeatherPolicy::Clock.weather_at_ms(ms(start) + TRANSITION_MS / 2);
         assert_ne!(mid.from, mid.to, "{k}: the weather changes");
+        let storm = first_transition_into(after, Weather::Storm).expect("a storm comes");
+        assert!(storm >= start, "{k}");
+        let into = WeatherPolicy::Clock.weather_at_ms(ms(storm) + TRANSITION_MS / 2);
+        assert_eq!(into.to, Weather::Storm, "{k}");
     }
 }

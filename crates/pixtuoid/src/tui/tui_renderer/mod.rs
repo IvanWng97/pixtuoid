@@ -317,6 +317,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
+    /// Report the frames since the last pacing summary, at exit.
+    pub(crate) fn finish_pacing(&self) {
+        self.jank.finish();
+    }
+
     /// Name what draws the frames, for their pacing summaries.
     pub(crate) fn painted_by(&mut self, painter: crate::tui::jank::Painter) {
         self.jank.painted_by(painter);

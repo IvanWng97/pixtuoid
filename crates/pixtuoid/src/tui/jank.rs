@@ -100,6 +100,14 @@ impl Jank {
         }
     }
 
+    /// Report the window so far, at exit: a run shorter than [`WINDOW`]
+    /// still has its summary.
+    pub(crate) fn finish(&self) {
+        if self.len > 0 {
+            self.summarize();
+        }
+    }
+
     fn summarize(&self) {
         let mut sorted = self.micros;
         let window = &mut sorted[..self.len];
@@ -215,5 +223,18 @@ mod tests {
             line.contains(" WARN "),
             "a window with a jank warns: {line}"
         );
+    }
+
+    /// A run that ends inside a window still reports it.
+    #[test]
+    fn an_unfinished_window_is_reported_at_exit() {
+        let t0 = Instant::now();
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = Jank::new(t0);
+            jank.record(Duration::from_millis(10), None, None, t0);
+            jank.finish();
+        });
+        assert!(logged.contains("frame pacing"), "{logged}");
+        assert!(logged.contains("frames=1"), "{logged}");
     }
 }
