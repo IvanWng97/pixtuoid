@@ -64,7 +64,11 @@ def run_pty(argv, env, geometry, secs):
     cols, rows, cell_w, cell_h = geometry
     pid, fd = pty.fork()
     if pid == 0:
-        os.execve(argv[0], argv, env)
+        try:
+            os.execve(argv[0], argv, env)
+        finally:
+            # An exec that fails must not go on running this script as a child.
+            os._exit(127)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, cols * cell_w, rows * cell_h))
     os.kill(pid, signal.SIGWINCH)
     # `cat` drains the pty: a reader slower than the binary's writes would
@@ -115,6 +119,8 @@ def main():
     ap.add_argument("--run", choices=["storm", "dusk"], default="storm")
     ap.add_argument("--secs", type=float, default=200.0)
     args = ap.parse_args()
+    if not os.access(BIN, os.X_OK):
+        sys.exit(f"pace-check: no {BIN}: run it as `just pace-check`, which builds it")
 
     log = Path(tempfile.mkstemp(prefix="pace-check-", suffix=".log")[1])
     env = dict(

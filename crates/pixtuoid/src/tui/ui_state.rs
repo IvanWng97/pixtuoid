@@ -141,6 +141,19 @@ pub(crate) struct UiState {
     log_path: Option<std::path::PathBuf>,
 }
 
+/// `$PIXTUOID_FAKE_NOW`'s clock, said once at warn: a stray export would
+/// otherwise skew the sky and the weather unseen.
+fn fake_now() -> Option<(Instant, SystemTime)> {
+    let secs: u64 = pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")?
+        .parse()
+        .ok()?;
+    tracing::warn!(secs, "the clock starts at PIXTUOID_FAKE_NOW, not now");
+    Some((
+        Instant::now(),
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+    ))
+}
+
 impl UiState {
     pub(crate) fn new(
         boot_theme: &'static theme::Theme,
@@ -162,14 +175,7 @@ impl UiState {
             help_open: false,
             paused: false,
             frozen_now: None,
-            fake_now: pixtuoid_core::platform::text_env("PIXTUOID_FAKE_NOW")
-                .and_then(|s| s.parse().ok())
-                .map(|secs| {
-                    (
-                        Instant::now(),
-                        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
-                    )
-                }),
+            fake_now: fake_now(),
             theme_picker: None,
             saved_theme_idx,
             dashboard: DashboardUi::default(),

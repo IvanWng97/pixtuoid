@@ -487,6 +487,11 @@ fn hitch(path: &Path) -> Result<()> {
     )?;
     let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     let (cols, rows) = owner_terminal(&pack, OWNER_CELL)?;
+    anyhow::ensure!(
+        pixtuoid::pacing::cutaway_office(cols, rows, OWNER_CELL, &pack)
+            .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE),
+        "the owner's terminal no longer gives the owner's office exactly: its runs stop being comparable"
+    );
     let tick = Duration::from_secs(1) / PAINT_FPS;
     let real_secs = pixtuoid_core::platform::text_env("HITCH_REAL_SECS")
         .and_then(|s| s.parse().ok())
