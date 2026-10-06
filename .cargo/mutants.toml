@@ -2,7 +2,10 @@
 # mutant is NOISE, never where it is killable. Rationale for each entry lives in
 # the commit that added it. `test_workspace` stays at its default, the mutated
 # package's tests only, so the binary's harness may kill a core/scene survivor:
-# re-run it with `--test-workspace=true` before acting on it.
+# re-run it with `--test-workspace=true` before acting on it. A
+# `--timeout-multiplier` passed through keeps cargo-mutants' timeout above
+# nextest's `[profile.default] slow-timeout`, or a real hang files as `timeout`,
+# not `caught`.
 test_tool = "nextest"
 
 exclude_globs = [
@@ -22,6 +25,9 @@ exclude_globs = [
     "crates/pixtuoid-core/src/source/hook/windows.rs",
 ]
 
+# Never a regex for a cfg-twin survivor (proc_start.rs `imp`, grok/native.rs
+# `live_grok_session_ids`): its description is the killable twin's too, so the
+# regex would hide both.
 exclude_re = [
     # Equivalent mutants — each verified UNOBSERVABLE by hand, not merely untested.
     'unclaim\.rs.*replace < with <= in ChildEndUnclaims',       # same-instant monotonic reads
