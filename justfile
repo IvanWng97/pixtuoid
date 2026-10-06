@@ -327,7 +327,7 @@ test *args:
 bench *args:
     cargo bench -p pixtuoid-scene --bench render_frame -- "$@"
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
-    cargo bench -p pixtuoid --bench render_tiles -- "$@"
+    cargo bench -p pixtuoid --no-default-features --features graphics --bench render_tiles -- "$@"
 
 [doc('Frame pacing through the real TUI painter per protocol: frame time, budget overruns, interval jitter, bytes per frame')]
 [group('rust')]
