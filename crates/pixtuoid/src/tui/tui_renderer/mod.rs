@@ -61,6 +61,14 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pack: Arc<Pack>,
     /// The frames' times and janks.
     jank: crate::tui::jank::Jank,
+    /// What holds each frame's output and presents it whole; `None` writes
+    /// straight to the backend.
+    frame_out: Option<crate::tui::FrameOut>,
+    /// A frame was dropped unwritten, though ratatui's diff counts its cells
+    /// as shown: the next repaints everything.
+    redraw_owed: bool,
+    /// The terminal refused the last frame: a run of refusals warns once.
+    refusing: bool,
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
@@ -227,6 +235,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
             jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
+            frame_out: None,
+            redraw_owed: false,
+            refusing: false,
             current_floor: 0,
             transition: None,
             last_extent: None,
@@ -345,6 +356,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// is judged against.
     pub(crate) fn scheduled_every(&mut self, interval: std::time::Duration) {
         self.jank.scheduled_every(interval);
+    }
+
+    /// Hold each frame's output in `out` and present it whole.
+    pub(crate) fn present_through(&mut self, out: crate::tui::FrameOut) {
+        self.frame_out = Some(out);
     }
 
     /// Name what draws the frames, for their pacing summaries.
@@ -842,11 +858,51 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ///
     /// # Errors
     ///
-    /// If querying the terminal size or drawing the frame to the backend fails.
+    /// If querying the terminal size, drawing the frame to the backend, or
+    /// writing the held frame fails; a full terminal (`WouldBlock`) drops the
+    /// frame instead.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         let begun = std::time::Instant::now();
-        self.draw_frame(scene, pack, now)?;
+        if let Some(out) = &self.frame_out {
+            out.begin();
+        }
+        let redrawn = if std::mem::take(&mut self.redraw_owed) {
+            self.redraw()
+        } else {
+            Ok(())
+        };
+        let drawn = redrawn.and_then(|()| self.draw_frame(scene, pack, now));
         self.follow_resize();
+        // Presented even when the draw failed, so nothing stays held.
+        let presenting = std::time::Instant::now();
+        let presented = self
+            .frame_out
+            .as_ref()
+            .map_or(Ok(()), crate::tui::FrameOut::present);
+        let present = presenting.elapsed();
+        #[cfg(feature = "graphics")]
+        if let Some(cutaway) = &mut self.cutaway {
+            if presented.is_ok() {
+                cutaway.landed();
+            } else {
+                cutaway.lost();
+            }
+        }
+        let refused = std::mem::replace(&mut self.refusing, presented.is_err());
+        if let Err(e) = presented {
+            // A full terminal: the frame is dropped, and the next repaints
+            // every cell and every tile.
+            if e.kind() != std::io::ErrorKind::WouldBlock {
+                return Err(e.into());
+            }
+            if refused {
+                tracing::debug!(error = %e, "frame write failed");
+            } else {
+                tracing::warn!(error = %e, "frame write failed");
+            }
+            self.redraw_owed = true;
+        }
+        drawn?;
         #[cfg(feature = "graphics")]
         let send = self
             .cutaway
@@ -858,8 +914,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .floors
             .get(self.current_floor)
             .and_then(|f| f.raster.note());
-        self.jank
-            .record(begun.elapsed(), send, note, std::time::Instant::now());
+        self.jank.record(
+            begun.elapsed(),
+            present,
+            send,
+            note,
+            std::time::Instant::now(),
+        );
         Ok(())
     }
 

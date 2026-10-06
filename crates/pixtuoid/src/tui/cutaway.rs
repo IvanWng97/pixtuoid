@@ -106,9 +106,9 @@ pub(crate) struct TileCutaway {
     sent_at: Option<SystemTime>,
     /// The flashes the terminal shows.
     flash: FlashHold<Flashes, Option<Fitted>>,
-    /// A write failed, perhaps mid-escape: the next one opens with
-    /// [`kitty::ST`].
-    torn: bool,
+    /// This frame's written transmits, counted as shown once the frame
+    /// lands ([`Self::landed`]).
+    landing: Option<Landing>,
     /// What the last frame's transmits did, for its jank report.
     last: FrameSend,
     /// The machine's cores.
@@ -124,6 +124,14 @@ struct Pending {
     flashes: Flashes,
 }
 
+/// Transmits written into the frame, and the flashes they show; the cadence
+/// restarts from `at` when there were any.
+struct Landing {
+    sent: Vec<Changed>,
+    flashes: Flashes,
+    at: Option<SystemTime>,
+}
+
 impl std::fmt::Debug for TileCutaway {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TileCutaway")
@@ -133,7 +141,7 @@ impl std::fmt::Debug for TileCutaway {
             .field("tmux", &self.tmux)
             .field("origin", &self.origin)
             .field("pending", &self.pending.as_ref().map(|p| p.tiles.len()))
-            .field("torn", &self.torn)
+            .field("landing", &self.landing.as_ref().map(|l| l.sent.len()))
             .finish_non_exhaustive()
     }
 }
@@ -172,7 +180,7 @@ impl TileCutaway {
             in_grid: &crate::graphics::IN_GRID,
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            torn: false,
+            landing: None,
             last: FrameSend::default(),
             cores: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
             audio: false,
@@ -357,8 +365,9 @@ impl TileCutaway {
         self.send(covered, now);
     }
 
-    /// Encode and write the queued tiles but the `covered` ones. A failed
-    /// write is logged and leaves its tiles owed, and its flashes unshown.
+    /// Encode and write the queued tiles but the `covered` ones, to land with
+    /// the frame. A write the sink refuses is logged and leaves its tiles
+    /// owed, and its flashes unshown.
     fn send(&mut self, covered: &[u32], now: SystemTime) {
         let Some(Pending {
             tiles: mut send,
@@ -369,7 +378,11 @@ impl TileCutaway {
         };
         send.retain(|c| !covered.contains(&c.tile.index));
         if send.is_empty() {
-            self.flash.shown(flashes, self.fitted);
+            self.landing = Some(Landing {
+                sent: send,
+                flashes,
+                at: None,
+            });
             return;
         }
         match self.protocol {
@@ -386,16 +399,11 @@ impl TileCutaway {
                 self.in_grid.store(true, Ordering::Relaxed)
             }
         }
-        let mut wrote = if self.torn {
-            self.out.write_all(kitty::ST)
-        } else {
-            Ok(())
-        };
+        let mut wrote = Ok(());
         let begun = Instant::now();
         let encoded =
             tracing::trace_span!("tiles.encode").in_scope(|| self.encoder().encode_all(&send));
         self.last.encode = begun.elapsed();
-        let begun = Instant::now();
         let mut sent = Vec::with_capacity(send.len());
         for (c, bytes) in send.into_iter().zip(encoded) {
             if wrote.is_err() {
@@ -408,20 +416,34 @@ impl TileCutaway {
             }
         }
         let flushed = wrote.and_then(|()| self.out.flush());
-        self.last.write = begun.elapsed();
         self.last.sent = sent.len();
         match flushed {
             Ok(()) => {
-                self.torn = false;
-                self.sent_at = Some(now);
-                self.tiles.sent(&sent);
-                self.flash.shown(flashes, self.fitted);
+                self.landing = Some(Landing {
+                    sent,
+                    flashes,
+                    at: Some(now),
+                });
             }
-            Err(e) => {
-                self.torn = true;
-                tracing::warn!(error = %e, "image transmit failed");
-            }
+            Err(e) => tracing::warn!(error = %e, "image transmit failed"),
         }
+    }
+
+    /// The frame reached the terminal: its transmits are shown, and a flash
+    /// phase's floor runs from now.
+    pub(crate) fn landed(&mut self) {
+        if let Some(Landing { sent, flashes, at }) = self.landing.take() {
+            if at.is_some() {
+                self.sent_at = at;
+            }
+            self.tiles.sent(&sent);
+            self.flash.shown(flashes, self.fitted);
+        }
+    }
+
+    /// The frame never reached the terminal: nothing it wrote is shown.
+    pub(crate) fn lost(&mut self) {
+        self.landing = None;
     }
 
     /// What encodes this frame's tiles, apart from the sink no thread shares.
