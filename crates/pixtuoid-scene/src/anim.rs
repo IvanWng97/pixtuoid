@@ -293,9 +293,11 @@ mod tests {
                 let wall = base + off;
                 let until = motion.until_next_beat(wall).expect("a moving tier turns");
                 let turn = wall + until;
+                // A whole ms before: the beat floors whole ms, and Windows'
+                // clock holds 100 ns ticks, so a nanosecond before rounds away.
                 assert_eq!(
                     motion.beat(wall),
-                    motion.beat(turn - Duration::from_nanos(1)),
+                    motion.beat(turn - Duration::from_millis(1)),
                     "{motion:?} turned before {off:?} + {until:?}"
                 );
                 assert_ne!(
