@@ -1,4 +1,4 @@
-//! Whole-frame render benchmark over two axes: the two SIZES issue #900
+//! Whole-frame render benchmarks. `render_floor` runs two axes: the SIZES #900
 //! measured (12 agents, busy and idle), and OCCUPANCY at the larger of them.
 //! Size is the near-linear axis — #900 measured frame cost tracking pixel
 //! count — so occupancy is the one that still teaches something: the per-agent
@@ -9,14 +9,14 @@
 //! `cargo bench -p pixtuoid-scene --bench render_frame -- --profile-time 10`
 //! under `samply record`. Numbers are LOCAL statistical evidence: shared-CI
 //! wall-clock is noise, so CI runs this advisory-only.
-//! A second group, `render_cutaway`, costs the 2.5D painter alone: the sim
-//! window is stepped up front, so each iteration is paint only — what the
-//! cutaway adds on top of the shared sim — at the pack's densest art, once at
-//! noon and once at night, when the dark room recolours every pixel; an idle
-//! office both ways too, painted whole and through `CutawayCanvas`.
-//! A third, `render_floor_scaling`, asks how frame cost scales with buffer
-//! pixels at the rich-graphics (Kitty/iTerm2/SIXEL) sizes: its throughput is
-//! pixels, so criterion reports each size's pixels per second.
+//! `render_cutaway` costs the 2.5D painter alone: the sim window is stepped up
+//! front, so each iteration is paint only — what the cutaway adds on top of the
+//! shared sim — at the pack's densest art, once at noon and once at night, when
+//! the dark room recolours every pixel; an idle office both ways too, painted
+//! whole and through `CutawayCanvas`.
+//! `render_floor_scaling` asks how frame cost scales with buffer pixels at the
+//! rich-graphics (Kitty/iTerm2/SIXEL) sizes: its throughput is pixels, so
+//! criterion reports each size's pixels per second.
 
 use std::path::Path;
 use std::sync::Arc;
