@@ -1108,6 +1108,42 @@ mod tests {
         );
     }
 
+    /// Stepped only as each beat turns, as a painter of an idle office steps
+    /// it, a creature that rests at a step walks at no instant before the
+    /// next: a roam sets off in a step, never between two, so a painter that
+    /// sleeps to the beat while nothing moves off it shows every leg from its
+    /// first step.
+    #[test]
+    fn a_resting_creature_sets_off_only_in_a_step() {
+        let mut office = Office::new(192, 80);
+        let scene = SceneState::default();
+        let cat = Pet::defaulted(PetKind::Cat);
+        let beat = crate::anim::FULL_TICK_MS;
+        let mut set_off = 0;
+        for turn in 0..120_000 / beat {
+            let ms = turn * beat + 1;
+            office.frame(&scene, Some(&cat), None, ms);
+            if office.session.moves_off_beat() {
+                set_off += 1;
+                continue;
+            }
+            for into in (10..beat).step_by(10) {
+                let walks = office
+                    .session
+                    .floor
+                    .ctx
+                    .creatures
+                    .values()
+                    .any(|w| w.walks_at(at(ms + into)));
+                assert!(
+                    !walks,
+                    "the cat set off {into} ms after the step at {ms} ms"
+                );
+            }
+        }
+        assert!(set_off > 0, "the cat never set off");
+    }
+
     /// A walking pet turns to where its leg heads, both ways; a resting one
     /// in an office of idlers sleeps.
     #[test]
