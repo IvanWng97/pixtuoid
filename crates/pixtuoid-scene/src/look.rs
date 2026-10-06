@@ -81,6 +81,7 @@ pub mod spans {
 
 /// What the last frame of a [`Raster`] was drawn under, for a painter's
 /// jank report.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameNote {
     /// Why the cutaway painted it whole, when it did; the classic always does.
@@ -104,6 +105,7 @@ impl OfficeRaster {
     /// Have the next frame draw every cloud mass the coming second needs,
     /// not a few a frame: the boot frame, which no frame before it drew
     /// ahead for.
+    #[doc(hidden)]
     pub fn warm(&mut self) {
         self.cloud_cache.warm();
     }
@@ -257,6 +259,7 @@ impl Raster {
     }
 
     /// What the last frame drawn was drawn under, `None` before the first.
+    #[doc(hidden)]
     pub fn note(&self) -> Option<FrameNote> {
         self.note
     }

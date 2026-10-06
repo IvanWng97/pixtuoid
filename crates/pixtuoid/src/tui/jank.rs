@@ -111,8 +111,10 @@ impl Jank {
         self.painter = painter;
     }
 
-    /// Count a frame that took `total`: reported past its interval (debug),
-    /// and twice past it (warn), and the window's spread once `now` closes it.
+    /// Count a frame that took `total`, reported past its interval and twice
+    /// past it; the window's spread once `now` closes it. The per-frame
+    /// reports are debug, so a slow terminal can't grow the log a line a
+    /// frame; a window that janked warns once, in its summary.
     pub(crate) fn record(
         &mut self,
         total: Duration,
@@ -132,7 +134,7 @@ impl Jank {
             });
             if total > 2 * self.interval {
                 self.janks += 1;
-                report!(warn, "frame jank", total, send, note);
+                report!(debug, "frame jank", total, send, note);
             } else {
                 report!(debug, "frame slow", total, send, note);
             }
@@ -188,8 +190,8 @@ mod tests {
         2 * Duration::from_millis(PAINT_FRAME_MS) + Duration::from_millis(1)
     }
 
-    /// A frame over twice the interval is reported, with its transmits; one
-    /// within it is not.
+    /// A frame over twice the interval is reported at debug, with its
+    /// transmits; one within it is not.
     #[test]
     fn a_frame_over_twice_the_interval_is_reported() {
         let t0 = Instant::now();
@@ -207,6 +209,14 @@ mod tests {
             jank.record(slow(), Some(send), None, t0);
         });
         assert_eq!(logged.matches("frame jank").count(), 1, "{logged}");
+        let line = logged
+            .lines()
+            .find(|l| l.contains("frame jank"))
+            .unwrap_or_default();
+        assert!(
+            line.contains(" DEBUG "),
+            "a frame's own report never reaches the warn log: {line}"
+        );
         assert!(logged.contains("dirty=\"all\""), "{logged}");
         assert!(logged.contains("sent=1275"), "{logged}");
     }

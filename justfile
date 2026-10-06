@@ -339,7 +339,7 @@ bench-pacing:
 [group('rust')]
 pace-check *args:
     cargo build --release -p pixtuoid --bins --example pacing
-    python3 scripts/pace-check.py {{ args }}
+    python3 scripts/pace-check.py "$@"
 
 # Catches code that silently only builds with `native` on (the wasm core builds
 # without it). `--no-dev-deps check` builds no test, so scene's no-default tests

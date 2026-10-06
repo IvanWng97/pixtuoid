@@ -1136,29 +1136,9 @@ impl<'a> core::marker::Unpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
-pub struct pixtuoid_scene::look::FrameNote
-pub pixtuoid_scene::look::FrameNote::repaint: core::option::Option<crate::cutaway::canvas::Repaint>
-pub pixtuoid_scene::look::FrameNote::strike: bool
-pub pixtuoid_scene::look::FrameNote::weather: (pixtuoid_scene::sky::Weather, pixtuoid_scene::sky::Weather, f32)
-impl core::clone::Clone for pixtuoid_scene::look::FrameNote
-pub fn pixtuoid_scene::look::FrameNote::clone(&self) -> pixtuoid_scene::look::FrameNote
-impl core::cmp::PartialEq for pixtuoid_scene::look::FrameNote
-pub fn pixtuoid_scene::look::FrameNote::eq(&self, &pixtuoid_scene::look::FrameNote) -> bool
-impl core::fmt::Debug for pixtuoid_scene::look::FrameNote
-pub fn pixtuoid_scene::look::FrameNote::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::look::FrameNote
-impl core::marker::StructuralPartialEq for pixtuoid_scene::look::FrameNote
-impl core::marker::Freeze for pixtuoid_scene::look::FrameNote
-impl core::marker::Send for pixtuoid_scene::look::FrameNote
-impl core::marker::Sync for pixtuoid_scene::look::FrameNote
-impl core::marker::Unpin for pixtuoid_scene::look::FrameNote
-impl core::marker::UnsafeUnpin for pixtuoid_scene::look::FrameNote
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::FrameNote
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::FrameNote
 pub struct pixtuoid_scene::look::OfficeRaster
 impl pixtuoid_scene::look::OfficeRaster
 pub fn pixtuoid_scene::look::OfficeRaster::reset(&mut self)
-pub fn pixtuoid_scene::look::OfficeRaster::warm(&mut self)
 impl core::default::Default for pixtuoid_scene::look::OfficeRaster
 pub fn pixtuoid_scene::look::OfficeRaster::default() -> pixtuoid_scene::look::OfficeRaster
 impl core::fmt::Debug for pixtuoid_scene::look::OfficeRaster
@@ -1191,7 +1171,6 @@ pub struct pixtuoid_scene::look::Raster
 impl pixtuoid_scene::look::Raster
 pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::Option<pixtuoid_scene::look::ClassicDrawn<'_>>
 pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
-pub fn pixtuoid_scene::look::Raster::note(&self) -> core::option::Option<pixtuoid_scene::look::FrameNote>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
 pub fn pixtuoid_scene::look::Raster::star(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
