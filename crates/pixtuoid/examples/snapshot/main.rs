@@ -545,14 +545,13 @@ fn main() -> Result<()> {
             pixtuoid_core::source::manager::SourceDeath::new(src, "forced for screenshot"),
         ])
     });
-    let drifted: Vec<String> = args
+    let drifted: Vec<&str> = args
         .drift_warning
         .as_deref()
         .map(|s| {
             s.split(',')
                 .map(str::trim)
                 .filter(|p| !p.is_empty())
-                .map(str::to_string)
                 .collect()
         })
         .unwrap_or_default();

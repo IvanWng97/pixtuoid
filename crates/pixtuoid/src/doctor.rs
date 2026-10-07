@@ -32,7 +32,7 @@ use crate::strip_control_chars as sanitize;
 
 struct DriftLine<'a> {
     source: &'a str,
-    kind: &'a str,
+    kind: drift::DriftKind,
     /// The fields segment AFTER the `target:` marker, so a span field of the
     /// same name (rendered BEFORE the target) can't be picked up.
     fields: &'a str,
@@ -50,8 +50,8 @@ fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
     }
     let fields = &line[at + marker.len()..];
     Some(DriftLine {
-        source: field_value(fields, "source")?,
-        kind: field_value(fields, "kind")?,
+        source: field_value(fields, drift::SOURCE_FIELD)?,
+        kind: field_value(fields, drift::KIND_FIELD)?.parse().ok()?,
         fields,
     })
 }
@@ -115,17 +115,16 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
             continue;
         }
         match p.kind {
-            "unknown_event" => {
+            drift::DriftKind::UnknownEvent => {
                 r.unknown_event += 1;
                 push_sample(&mut r.samples, field_value(p.fields, "name"));
             }
-            "missing_field" => r.missing_field += 1,
-            "unknown_dispatch" => {
+            drift::DriftKind::MissingField => r.missing_field += 1,
+            drift::DriftKind::UnknownDispatch => {
                 r.unknown_dispatch += 1;
                 push_sample(&mut r.samples, field_value(p.fields, "tool"));
             }
-            "shape_drift" => r.shape_drift += 1,
-            _ => continue,
+            drift::DriftKind::ShapeDrift => r.shape_drift += 1,
         }
         if let Some(ts) = line.split_whitespace().next() {
             r.last_ts = Some(sanitize(ts));
@@ -134,20 +133,23 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     r
 }
 
-/// The label prefixes (e.g. `"cc"`) of the sources a decode-drift breadcrumb
-/// has named in this run, first seen first: the footer's nudge, kept as the
-/// events arrive, so a run reports only its own (WezTerm's ring log and
-/// Alacritty's message bar likewise show what their process logged).
-/// History stays with `doctor`, which reads the retained runs' logs.
+/// The sources a decode-drift breadcrumb has named in this run, first seen
+/// first: the footer's nudge, kept as the events arrive, so a run reports
+/// only its own (WezTerm's ring log and Alacritty's message bar likewise show
+/// what their process logged). History stays with `doctor`, which reads the
+/// retained runs' logs.
 #[derive(Debug, Clone, Default)]
-pub struct DriftSeen(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+pub struct DriftSeen(std::sync::Arc<std::sync::Mutex<Vec<&'static registry::SourceDescriptor>>>);
 
 impl DriftSeen {
-    pub(crate) fn prefixes(&self) -> Vec<String> {
+    /// The label prefixes (e.g. `"cc"`) of the sources seen.
+    pub(crate) fn prefixes(&self) -> Vec<&'static str> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .iter()
+            .map(|d| d.label_prefix)
+            .collect()
     }
 
     /// The layer that records into this, filtered to the breadcrumbs alone so
@@ -157,51 +159,43 @@ impl DriftSeen {
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
     {
         use tracing_subscriber::Layer;
-        self.clone().with_filter(
-            tracing_subscriber::filter::Targets::new()
-                .with_target(drift::TARGET, tracing::Level::WARN),
-        )
+        // Exactly the target: `Targets` would match it as a prefix too.
+        self.clone()
+            .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+                meta.target() == drift::TARGET && *meta.level() <= tracing::Level::WARN
+            }))
     }
 }
 
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for DriftSeen {
     fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
-        struct Source(Option<String>);
+        struct Source(Option<&'static registry::SourceDescriptor>);
         impl tracing::field::Visit for Source {
             // A breadcrumb records `source = %source`, whose Debug is its Display.
             fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-                if field.name() == "source" {
-                    self.0 = Some(format!("{value:?}"));
+                if field.name() == drift::SOURCE_FIELD {
+                    self.0 = registry::descriptor_for(&format!("{value:?}"));
                 }
             }
         }
-        // `Targets` matches by prefix; a breadcrumb's target is exact.
-        if event.metadata().target() != drift::TARGET {
-            return;
-        }
         let mut source = Source(None);
         event.record(&mut source);
-        let Some(prefix) = source
-            .0
-            .as_deref()
-            .and_then(registry::descriptor_for)
-            .map(|d| d.label_prefix)
-        else {
+        let Some(descriptor) = source.0 else {
             return;
         };
         let mut seen = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !seen.iter().any(|p| p == prefix) {
-            seen.push(prefix.to_string());
+        if !seen.iter().any(|d| std::ptr::eq(*d, descriptor)) {
+            seen.push(descriptor);
         }
     }
 }
 
 /// Merge the source-death footer warning (HIGHEST priority — the office is
 /// partially frozen) with a passive decode-drift nudge.
-pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<String> {
+pub fn footer_warning(source_death: Option<&str>, drifted: &[&str]) -> Option<String> {
     if let Some(d) = source_death {
         return Some(d.to_string());
     }
@@ -624,132 +618,6 @@ fn linux_activation_backend(
     }
 }
 
-/// Read the warn-floor log for a drift scan, separating "there is no log yet" from "the log
-/// could not be read" — the latter gets a warning line. A missing log is the ordinary
-/// no-TUI-run-yet state and genuinely means "no drift recorded"; every other error class
-/// leaves the counts UNKNOWN, and folding those into the same silent empty string made
-/// `doctor` positively assert `✓ no decode drift` off an input it never read.
-///
-/// The warning is `sanitize`d where it is MINTED, for the reason `crate::display_path`
-/// gives: the path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`.
-pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
-    read_log_tail(path, u64::MAX)
-}
-
-/// [`read_log`] of the last `max` bytes of `path`, from the first whole line
-/// in them.
-fn read_log_tail(path: &std::path::Path, max: u64) -> (String, Option<String>) {
-    let tail = || -> std::io::Result<String> {
-        use std::io::{Read, Seek, SeekFrom};
-        let mut file = std::fs::File::open(path)?;
-        // One byte before the cut, so a cut on a line start keeps that line.
-        let skip = file.metadata()?.len().saturating_sub(max).saturating_sub(1);
-        file.seek(SeekFrom::Start(skip))?;
-        let mut bytes = Vec::new();
-        file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
-        // Past `max`: the byte before the cut was read, so the run is cut.
-        if bytes.len() as u64 > max {
-            let line = bytes
-                .iter()
-                .position(|&b| b == b'\n')
-                .map_or(bytes.len(), |nl| nl + 1);
-            bytes.drain(..line);
-        }
-        String::from_utf8(bytes)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    };
-    match tail() {
-        Ok(s) => (s, None),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
-        Err(e) => (
-            String::new(),
-            Some(sanitize(&format!(
-                "log unreadable: {} ({e}) — the decode-drift counts are not meaningful",
-                path.display()
-            ))),
-        ),
-    }
-}
-
-/// Where the runtime log lives: the one file `$PIXTUOID_LOG` names, or a
-/// directory holding a file per run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LogLocation {
-    File(std::path::PathBuf),
-    Runs(std::path::PathBuf),
-}
-
-/// The extension of a run's file in a [`LogLocation::Runs`] directory.
-pub const RUN_LOG_EXT: &str = "log";
-
-/// The size past which the file `$PIXTUOID_LOG` names rotates at startup.
-pub const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
-
-/// The most one [`read_logs`] takes of the retained runs, newest first: what
-/// the single log held at most across its two generations, so a week of
-/// verbose runs costs a reader no more than it did.
-pub const LOG_READ_BYTES: u64 = 2 * LOG_ROTATE_BYTES;
-
-impl LogLocation {
-    pub fn path(&self) -> &std::path::Path {
-        match self {
-            Self::File(p) | Self::Runs(p) => p,
-        }
-    }
-}
-
-/// The log at `at`, read as [`read_log`] reads one; of a runs directory, the
-/// newest [`LOG_READ_BYTES`] across its runs, oldest run first.
-pub fn read_logs(at: &LogLocation) -> (String, Option<String>) {
-    match at {
-        LogLocation::File(path) => read_log(path),
-        LogLocation::Runs(dir) => read_runs(dir, LOG_READ_BYTES),
-    }
-}
-
-/// The newest `budget` bytes of the runs in `dir`, oldest run first: a run's
-/// file is named for its start, so name order is run order.
-fn read_runs(dir: &std::path::Path, budget: u64) -> (String, Option<String>) {
-    let mut runs: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == RUN_LOG_EXT))
-            .collect(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (String::new(), None),
-        Err(e) => {
-            return (
-                String::new(),
-                Some(sanitize(&format!(
-                    "log unreadable: {} ({e}) — the decode-drift counts are not meaningful",
-                    dir.display()
-                ))),
-            );
-        }
-    };
-    runs.sort();
-    let (mut read, mut warning, mut left) = (Vec::new(), None, budget);
-    for run in runs.iter().rev() {
-        if left == 0 {
-            break;
-        }
-        let len = std::fs::metadata(run).map_or(0, |m| m.len());
-        let (run_text, run_warning) = read_log_tail(run, left);
-        left = left.saturating_sub(len);
-        read.push(run_text);
-        warning = warning.or(run_warning);
-    }
-    let mut text = String::new();
-    for run_text in read.iter().rev() {
-        text.push_str(run_text);
-        // A run cut off mid-line must not join the next run's first line.
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
-    }
-    (text, warning)
-}
-
 mod shown {
     /// A path as the report prints it, [`display_path`](crate::display_path)ed
     /// when minted; the private field means no path field reaches a render
@@ -809,7 +677,7 @@ struct DoctorReport {
     log_path: ShownPath,
     config_path: ShownPath,
     config_warnings: Vec<String>,
-    /// Minted only by [`read_log`], which strips it; the render prints it as
+    /// Minted only by [`read_log`](crate::run_log::read_log), which strips it; the render prints it as
     /// is.
     log_warning: Option<String>,
     term_env: Option<String>,
@@ -963,14 +831,14 @@ fn probe_roots() -> ProbeRoots {
 
 /// All probing, no formatting. `log_at` is injected by `main`, which owns the
 /// log-location resolution; `graphics` is the `--graphics` flag.
-fn collect(log_at: &LogLocation, graphics: crate::GraphicsMode) -> DoctorReport {
+fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) -> DoctorReport {
     let mut config_warnings = Vec::new();
     let config_path = crate::config::config_path();
     let cfg = crate::config::load(&config_path, &mut config_warnings);
     // A separate PROCESS from the TUI, so the live `ConnectedSources` is
     // unreachable; persist-first makes the config a complete substitute.
     let connected = crate::config::resolve_connected(&cfg);
-    let (log, log_warning) = read_logs(log_at);
+    let (log, log_warning) = log_at.read();
 
     let term_env = pixtuoid_core::platform::text_env("TERM");
     let colorterm_env = pixtuoid_core::platform::text_env("COLORTERM");
@@ -1529,13 +1397,17 @@ fn render(r: &DoctorReport) -> String {
 /// # Errors
 ///
 /// Never: building the report is infallible, and the `Result` is the shape of the sibling subcommand handlers.
-pub fn run(log_at: &LogLocation, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
+pub fn run(
+    log_at: &crate::run_log::LogLocation,
+    graphics: crate::GraphicsMode,
+) -> anyhow::Result<String> {
     Ok(render(&collect(log_at, graphics)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run_log::read_log;
     use crate::test_capture::capture;
 
     /// The plain-text plumbing: `Ink { on: false }` must be a byte-for-byte
@@ -1729,7 +1601,7 @@ mod tests {
             ],
             || {
                 run(
-                    &LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
+                    &crate::run_log::LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
                     crate::GraphicsMode::Auto,
                 )
             },
@@ -1745,7 +1617,7 @@ mod tests {
         // captured stdout — pin the env so the plain-text asserts hold anywhere.
         let out = temp_env::with_vars_unset(["CLICOLOR_FORCE", "NO_COLOR"], || {
             run(
-                &LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
+                &crate::run_log::LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
                 crate::GraphicsMode::Auto,
             )
         });
@@ -2218,7 +2090,7 @@ mod tests {
 
         // The report must not assert clean drift off a log it never read.
         let out = run(
-            &LogLocation::File(dir.path().to_path_buf()),
+            &crate::run_log::LogLocation::File(dir.path().to_path_buf()),
             crate::GraphicsMode::Auto,
         )
         .unwrap();
@@ -2284,7 +2156,7 @@ mod tests {
             ],
             || {
                 run(
-                    &LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
+                    &crate::run_log::LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
                     crate::GraphicsMode::Auto,
                 )
             },
@@ -2725,31 +2597,6 @@ mod tests {
         let dw = footer_warning(Some(&death), &d).unwrap();
         assert!(!dw.contains('⚠'), "death msg must not embed ⚠: {dw}");
         assert_eq!(footer_warning(None, &[]), None);
-    }
-
-    /// A read takes the newest runs' bytes up to its budget, each cut run
-    /// from its first whole line, and lays them oldest run first.
-    #[test]
-    fn a_runs_read_takes_the_newest_bytes_within_its_budget() {
-        let dir = tempfile::tempdir().unwrap();
-        for (name, text) in [
-            ("1.log", "a1\na2\n"),
-            ("2.log", "b1\nb2\n"),
-            ("3.log", "c1\n"),
-        ] {
-            std::fs::write(dir.path().join(name), text).unwrap();
-        }
-        assert_eq!(read_runs(dir.path(), 7), ("b2\nc1\n".to_string(), None));
-        assert_eq!(
-            read_runs(dir.path(), 6),
-            ("b2\nc1\n".to_string(), None),
-            "a cut on a line start keeps that line"
-        );
-        assert_eq!(
-            read_runs(dir.path(), u64::MAX).0,
-            "a1\na2\nb1\nb2\nc1\n",
-            "every run under a budget that holds them"
-        );
     }
 
     #[test]
