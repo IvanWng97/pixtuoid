@@ -154,7 +154,7 @@ pub struct WindowGeometry {
 }
 
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
-/// `density`, [`office_scale`] fitted to it and never below it, so the window
+/// `density`, `office_scale` fitted to it and never below it, so the window
 /// never falls back to the classic. The ONE place this geometry lives, so the
 /// desk capacity derived from it can't drift from the office drawn.
 ///
