@@ -13,20 +13,36 @@ use crate::outside::WindowView;
 use crate::sky::{Element, Weather, WeatherMix, WeatherPolicy};
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
-/// Its policy, `weather` and `beat` are its whole key: two equal keys place
-/// equal marks.
+/// Its fields are its whole key: two equal keys place equal marks.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
     veil: Dithered<Option<(Rgb, f32)>>,
-    /// The weather at any instant.
-    policy: WeatherPolicy,
-    /// [`Sky::weather`](crate::sky::Sky::weather), held only at rest, the one
-    /// beat its marks read it on: a frame off rest paints the same whatever
-    /// this instant's mix.
-    weather: Option<WeatherMix>,
+    falling: Falling,
     /// The clock the marks move by.
     beat: Beat,
+}
+
+/// What decides which weather's marks fall.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Falling {
+    /// At rest, where loop time stands still: the sky's mix of this instant,
+    /// the one beat its marks read.
+    AtRest(WeatherMix),
+    /// Off rest: the weather at each mark's own loop time, so a frame paints
+    /// the same whatever this instant's mix.
+    Moving(WeatherPolicy),
+}
+
+impl Falling {
+    /// On `beat`, under `policy`, with `now` the mix of this instant.
+    fn on(beat: Beat, policy: WeatherPolicy, now: impl FnOnce() -> WeatherMix) -> Self {
+        if beat.is_rest() {
+            Self::AtRest(now())
+        } else {
+            Self::Moving(policy)
+        }
+    }
 }
 
 /// One weather's falling particles.
@@ -297,8 +313,9 @@ impl GlassWeather {
     pub(crate) fn of(moment: &Moment) -> Self {
         Self {
             veil: moment.look.glass_veil,
-            policy: moment.sky.policy(),
-            weather: moment.timing.beat.is_rest().then(|| moment.sky.weather()),
+            falling: Falling::on(moment.timing.beat, moment.sky.policy(), || {
+                moment.sky.weather()
+            }),
             beat: moment.timing.beat,
         }
     }
@@ -306,8 +323,10 @@ impl GlassWeather {
     /// The weather at loop time `loop_ms`; at rest, where loop time stands
     /// still, the sky's.
     fn weather_on_beat(&self, loop_ms: u64) -> WeatherMix {
-        self.weather
-            .unwrap_or_else(|| self.policy.weather_at_ms(self.beat.wall_ms(loop_ms)))
+        match self.falling {
+            Falling::AtRest(mix) => mix,
+            Falling::Moving(policy) => policy.weather_at_ms(self.beat.wall_ms(loop_ms)),
+        }
     }
 
     /// Whether the `i`th of `w`'s `count` shows for the whole of its fall
@@ -414,10 +433,9 @@ mod tests {
     fn clock_glass(beat: Beat, wall_ms: u64) -> GlassWeather {
         GlassWeather {
             veil: Dithered::solid(None),
-            policy: WeatherPolicy::Clock,
-            weather: beat
-                .is_rest()
-                .then(|| WeatherPolicy::Clock.weather_at_ms(wall_ms)),
+            falling: Falling::on(beat, WeatherPolicy::Clock, || {
+                WeatherPolicy::Clock.weather_at_ms(wall_ms)
+            }),
             beat,
         }
     }

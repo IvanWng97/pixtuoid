@@ -51,7 +51,30 @@ pub(crate) struct Moment {
     pub(crate) timing: crate::anim::Timing,
 }
 
+/// What the windows look out on of a [`Moment`]: all of it but the wall
+/// clock, which nothing outside reads, so an outside drawn from one is the
+/// same for any instant with the same sky, altitude and beat.
+#[derive(Clone, Copy)]
+pub(crate) struct Outlook<'a> {
+    pub(crate) sky: crate::sky::Sky,
+    /// Always `sky`'s, resolved against the frame's theme.
+    pub(crate) look: &'a SkyTones,
+    pub(crate) altitude: f32,
+    pub(crate) beat: crate::anim::Beat,
+}
+
 impl Moment {
+    /// What the windows look out on of this moment.
+    #[cfg(test)]
+    pub(crate) fn outlook(&self) -> Outlook<'_> {
+        Outlook {
+            sky: self.sky,
+            look: &self.look,
+            altitude: self.altitude,
+            beat: self.timing.beat,
+        }
+    }
+
     /// `sky`, looked at under `theme` from `altitude` on `timing`. The sky is
     /// given, not derived from `timing`, so a forced weather or flash carries.
     pub(crate) fn resolve(

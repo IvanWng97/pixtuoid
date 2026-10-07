@@ -15,7 +15,7 @@ use std::ops::RangeInclusive;
 use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material, Pack};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
-use crate::atmosphere::{Moment, SkyTones};
+use crate::atmosphere::SkyTones;
 use crate::layout::pct;
 use crate::outside::Cell;
 use crate::theme::Theme;
@@ -446,11 +446,11 @@ impl CityStrip {
     pub(crate) fn draw(
         pack: &Pack,
         (run_w, glass_h): (u16, u16),
-        moment: &Moment,
+        outlook: &crate::atmosphere::Outlook<'_>,
         theme: &Theme,
         density: Density,
     ) -> Self {
-        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.timing.beat);
+        let (look, altitude, beat) = (outlook.look, outlook.altitude, outlook.beat);
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),
@@ -601,6 +601,7 @@ fn hash(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atmosphere::Moment;
 
     use crate::anim::{Beat, Motion};
 
@@ -639,7 +640,7 @@ mod tests {
         };
         for d in [1, 4] {
             let density = Density::new(d).expect("nonzero");
-            let strip = CityStrip::draw(&pack(), (80, glass_h), &moment, theme, density);
+            let strip = CityStrip::draw(&pack(), (80, glass_h), &moment.outlook(), theme, density);
             let front = strip.front(run_x0, d);
             let view = crate::outside::WindowView::new(bay, rows.clone(), d, |cell| {
                 front(cell).unwrap_or(SKY)
@@ -802,7 +803,8 @@ mod tests {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH))
+                    .outlook(),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -876,7 +878,7 @@ mod tests {
                 let s = CityStrip::draw(
                     &pack,
                     (run_w, glass_h),
-                    &moment,
+                    &moment.outlook(),
                     theme,
                     Density::new(d).expect("nonzero"),
                 );

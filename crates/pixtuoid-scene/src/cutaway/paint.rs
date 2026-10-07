@@ -2323,7 +2323,7 @@ mod tests {
                 size: band,
                 bays: layout.window_bays().collect(),
             };
-            let outside = crate::outside::Outside::of(
+            let outside = crate::outside::Outside::at(
                 &moment,
                 &pack,
                 theme,
@@ -2332,7 +2332,7 @@ mod tests {
                 GlassWeather::of(&moment),
                 &mut crate::clouds::CloudCache::default(),
             );
-            let sky = crate::celestial::SkyView::of(&moment, band.0, band.1, theme);
+            let sky = crate::celestial::SkyView::of(&moment.outlook(), band.0, band.1, theme);
             let run = crate::layout::window_run(band.0);
             let city = crate::skyline::CityStrip::draw(
                 &pack,
@@ -2340,7 +2340,7 @@ mod tests {
                     run.end - run.start,
                     crate::layout::glass_rows(rows.end - rows.start),
                 ),
-                &moment,
+                &moment.outlook(),
                 theme,
                 density,
             );
