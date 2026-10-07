@@ -45,6 +45,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         config_path,
         audio,
         motion,
+        drift,
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
@@ -90,6 +91,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             connected,
             proxy,
             rt: rt.handle().clone(),
+            drift,
         },
         audio,
     );
@@ -122,6 +124,7 @@ pub(crate) struct PipelineBoot {
     /// (`PipelineBoot::spawn`): `run` holds no guard, and a `tokio::spawn`
     /// outside a runtime panics.
     rt: tokio::runtime::Handle,
+    drift: crate::doctor::DriftSeen,
 }
 
 /// The pipeline handles, available only once [`PipelineBoot::spawn`] has run.
@@ -129,9 +132,19 @@ pub(crate) struct LivePipeline {
     pub(crate) scene_rx: tokio::sync::watch::Receiver<std::sync::Arc<pixtuoid_core::SceneState>>,
     pub(crate) floor_caps:
         std::sync::Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
+    health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
+    drift: crate::doctor::DriftSeen,
     /// Inert anchor — the tasks are kept alive by the RUNTIME, not by these
     /// handles (dropping a tokio `JoinHandle` detaches). See `Pipeline`'s doc.
     _source_handles: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl LivePipeline {
+    /// The footer's warning now: [`crate::doctor::footer_warning`], as the
+    /// TUI's.
+    pub(crate) fn footer_warning(&self) -> Option<String> {
+        crate::doctor::footer_warning(&self.health_rx.borrow(), &self.drift.prefixes())
+    }
 }
 
 impl PipelineBoot {
@@ -170,7 +183,7 @@ impl PipelineBoot {
 
         {
             let mut scene_rx = scene_rx.clone();
-            let proxy = self.proxy;
+            let proxy = self.proxy.clone();
             self.rt.spawn(async move {
                 while scene_rx.changed().await.is_ok() {
                     if proxy.send_event(FloatingEvent::SceneChanged).is_err() {
@@ -182,7 +195,8 @@ impl PipelineBoot {
         // Deduped by count: the watch value is a grow-only Vec, so logging the whole
         // borrow on every change would re-warn all prior deaths.
         {
-            let mut health_rx = health_rx;
+            let mut health_rx = health_rx.clone();
+            let proxy = self.proxy.clone();
             self.rt.spawn(async move {
                 let mut deaths_seen = 0usize;
                 while health_rx.changed().await.is_ok() {
@@ -194,6 +208,10 @@ impl PipelineBoot {
                             "pixtuoid floating: source exited"
                         );
                     }
+                    // The footer names the death.
+                    if proxy.send_event(FloatingEvent::SceneChanged).is_err() {
+                        break;
+                    }
                 }
             });
         }
@@ -201,6 +219,8 @@ impl PipelineBoot {
         LivePipeline {
             scene_rx,
             floor_caps,
+            health_rx,
+            drift: self.drift,
             _source_handles,
         }
     }

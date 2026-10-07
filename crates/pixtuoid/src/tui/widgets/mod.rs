@@ -20,9 +20,6 @@ pub(super) use theme_picker::paint_theme_picker;
 pub(crate) use tooltip::{TooltipAt, paint_badges, paint_text_runs, paint_tooltip};
 pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(super) use welcome::paint_welcome;
-// `pub`: the snapshot example reuses the real formatter so its --source-warning
-// screenshots cannot drift from production.
-pub use footer::source_warning_message;
 // `pub`: the bin crate's crash reporter derives its issue-report URL from this one
 // authority.
 pub use version_popup::REPO_URL;

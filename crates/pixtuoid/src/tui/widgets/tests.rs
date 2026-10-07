@@ -407,21 +407,6 @@ fn footer_line(
 const QUIT_SUFFIX: &str = " [?]help [p]ause [t]heme [q]uit ";
 
 #[test]
-fn source_warning_message_formats_by_death_count() {
-    use pixtuoid_core::source::manager::SourceDeath;
-    let d = |s: &str| SourceDeath::new(s, "boom");
-    assert_eq!(super::source_warning_message(&[]), None);
-    assert_eq!(
-        super::source_warning_message(&[d("claude-code")]).unwrap(),
-        "claude-code source died — its agents are frozen; restart pixtuoid (see log)"
-    );
-    assert_eq!(
-        super::source_warning_message(&[d("claude-code"), d("codex")]).unwrap(),
-        "2 sources died — restart pixtuoid (see log)"
-    );
-}
-
-#[test]
 fn footer_source_warning_replaces_stats_and_keeps_quit() {
     let s = scene_of(vec![idle("myproject")]);
     let line = footer_line(

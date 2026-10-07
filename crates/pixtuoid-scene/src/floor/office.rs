@@ -1,0 +1,475 @@
+//! A painter's multi-floor office: every floor's view, the office-wide state
+//! they share, which floor shows, and the slide between two — the half of a
+//! floor switch no painter's own medium owns. [`FloorSession`] is its
+//! one-floor case.
+//!
+//! [`FloorSession`]: super::FloorSession
+
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+
+use super::{
+    AudioFrame, FloorInputs, FloorMeta, FloorTransition, PerFloor, PerOffice, waypoint_kind_of,
+};
+use crate::footer::FooterFloor;
+
+/// One floor of a painter's office: its raster and sim stores, and what its
+/// last frame laid out, occupied and flashed, so a painter reads the frame it
+/// just drew.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct FloorView {
+    pub(super) floor: PerFloor,
+    last_layout: Option<Arc<crate::layout::SceneLayout>>,
+    /// REPLACED each frame, never extended: the cue tracker fires on edges, so
+    /// an accumulating set would re-report stale waypoints forever.
+    pub(super) last_occupied: HashSet<usize>,
+    last_flash: crate::flash::FlashPhase,
+    /// Where the last frame may differ from the one before it.
+    last_dirty: crate::look::Dirty,
+}
+
+impl FloorView {
+    pub(super) fn new(pack: Arc<Pack>) -> Self {
+        Self {
+            floor: PerFloor::new(pack),
+            last_layout: None,
+            last_occupied: HashSet::new(),
+            last_flash: crate::flash::FlashPhase::default(),
+            last_dirty: crate::look::Dirty::All,
+        }
+    }
+
+    /// Draw `inputs` in `look` beside the office-wide `office`, eviction
+    /// aside; `None` when the size can't lay out.
+    pub(super) fn render(
+        &mut self,
+        office: &mut PerOffice,
+        look: crate::look::Look,
+        inputs: crate::look::RenderInputs<'_>,
+    ) -> Option<Arc<crate::layout::SceneLayout>> {
+        match crate::look::render(&mut self.floor, office.stores(), look, inputs) {
+            Some(frame) => {
+                self.last_layout = Some(Arc::clone(&frame.layout));
+                self.last_occupied = frame.occupied_waypoints;
+                self.last_flash = frame.flash;
+                self.last_dirty = frame.dirty;
+                Some(frame.layout)
+            }
+            None => {
+                self.last_layout = None;
+                self.last_occupied.clear();
+                self.last_flash = crate::flash::FlashPhase::default();
+                self.last_dirty = crate::look::Dirty::All;
+                None
+            }
+        }
+    }
+
+    /// What the last frame shows a pointer over `area`, in layout units.
+    pub(super) fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
+        crate::hit::scene_hit(
+            self.floor.raster.hovers()?,
+            self.floor.raster.star(),
+            self.last_layout.as_deref()?,
+            area,
+        )
+    }
+
+    /// One frame of audio intent from this floor's last frame, fed from its
+    /// OWN occupancy and layout so a painter can't hand a mismatched pair.
+    pub(super) fn audio_frame(
+        &self,
+        office: &mut PerOffice,
+        scene: &SceneState,
+        floor: FloorMeta,
+        now: SystemTime,
+    ) -> AudioFrame {
+        let layout = self.last_layout.as_deref();
+        office.audio.frame(
+            scene,
+            &self.last_occupied,
+            |idx| waypoint_kind_of(layout, idx),
+            floor,
+            now,
+        )
+    }
+
+    pub(super) fn flash(&self) -> crate::flash::FlashPhase {
+        self.last_flash
+    }
+
+    pub(super) fn buf(&self) -> Option<&RgbBuffer> {
+        self.floor.raster.pixels()
+    }
+
+    pub(super) fn moves_off_beat(&self) -> bool {
+        self.floor.ctx.moves_off_beat()
+    }
+}
+
+/// Which floor an office shows, and the slide to another: what every painter's
+/// floor keys and frame loop share. Navigation never starts a slide during
+/// one, and a slide lands on its destination however it ends.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct FloorNav {
+    current: usize,
+    transition: Option<FloorTransition>,
+}
+
+impl FloorNav {
+    /// The floor showing, or the one a slide leaves.
+    pub fn current(&self) -> usize {
+        self.current
+    }
+
+    /// The slide under way, if any.
+    pub fn transition(&self) -> Option<&FloorTransition> {
+        self.transition.as_ref()
+    }
+
+    /// Slide to `target`, unless it is the floor showing or a slide is under
+    /// way; whether a slide began.
+    pub fn navigate(&mut self, target: usize, now: SystemTime) -> bool {
+        if target == self.current || self.transition.is_some() {
+            return false;
+        }
+        self.transition = Some(FloorTransition::new(self.current, target, now));
+        true
+    }
+
+    /// Begin `transition` whatever it is, as no navigation could: a seam for
+    /// painters' tests of slides navigation refuses (a floor to itself).
+    #[doc(hidden)]
+    pub fn begin_unchecked(&mut self, transition: FloorTransition) {
+        self.transition = Some(transition);
+    }
+
+    /// The floor above, of `n_floors`, while no slide is under way.
+    pub fn up(&self, n_floors: usize) -> Option<usize> {
+        (self.transition.is_none() && self.current + 1 < n_floors).then_some(self.current + 1)
+    }
+
+    /// The floor below, while no slide is under way.
+    pub fn down(&self) -> Option<usize> {
+        (self.transition.is_none() && self.current > 0).then(|| self.current - 1)
+    }
+
+    /// End a slide at once on its destination, of `n_floors`: a cancel (a
+    /// resize) must not silently revert a navigation.
+    pub fn cancel(&mut self, n_floors: usize) {
+        if let Some(tr) = self.transition.take() {
+            self.current = tr.to_floor.min(n_floors.max(1) - 1);
+        }
+    }
+
+    /// The navigation over `n_floors` at `now`: a slide to or from a floor
+    /// gone is dropped, a finished one lands, and the floor showing stays in
+    /// the building. Whether a slide was dropped, which leaves what a painter
+    /// cached of it stale.
+    pub fn settle(&mut self, n_floors: usize, now: SystemTime) -> bool {
+        let dropped = self
+            .transition
+            .take_if(|tr| tr.from_floor >= n_floors || tr.to_floor >= n_floors)
+            .is_some();
+        if let Some(tr) = self.transition.take_if(|tr| tr.is_done(now)) {
+            self.current = tr.to_floor;
+        }
+        if self.current >= n_floors {
+            self.current = n_floors.saturating_sub(1);
+        }
+        dropped
+    }
+}
+
+/// Floor `floor` of `n_floors` under `office`'s weather and motion.
+fn office_floor(office: FloorMeta, floor: usize, n_floors: usize) -> FloorMeta {
+    FloorMeta::for_floor(floor, n_floors)
+        .with_weather(office.weather)
+        .with_motion(office.motion)
+}
+
+/// The pet of `pets` floor `floor` of `n_floors` draws: the one choice its
+/// frames and its tooltip both read.
+fn floor_pet(floor: usize, n_floors: usize, pets: &[crate::pet::Pet]) -> Option<&crate::pet::Pet> {
+    crate::pet::select_pet_for_floor(FloorMeta::for_floor(floor, n_floors).floor_seed, pets)
+}
+
+/// The footer's floor breadcrumb for floor `current` of `n_floors`, among
+/// `total_agents`; `None` in a one-floor office.
+#[doc(hidden)]
+pub fn footer_floor(current: usize, n_floors: usize, total_agents: usize) -> Option<FooterFloor> {
+    (n_floors > 1).then_some(FooterFloor {
+        current: current + 1,
+        total_floors: n_floors,
+        total_agents,
+    })
+}
+
+/// How far down the floor being left and the one arriving sit, `t` through a
+/// slide over a scene `h` units tall, a divider's gap between them.
+#[doc(hidden)]
+pub fn slide_offsets(t: f32, going_down: bool, h: f32) -> (i32, i32) {
+    // `t` applies to the total travel (screen height + divider gap) so the
+    // easing covers the full distance including the gap.
+    const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
+    let divider_h = h / FLOOR_SLIDE_DIVIDER_FRACTION;
+    let total = h + divider_h;
+    if going_down {
+        // Higher floor: current slides DOWN, new enters from TOP
+        let from_y = (t * total) as i32;
+        let to_y = -(total - t * total) as i32;
+        (from_y, to_y)
+    } else {
+        // Lower floor: current slides UP, new enters from BOTTOM
+        let from_y = -(t * total) as i32;
+        let to_y = (total - t * total) as i32;
+        (from_y, to_y)
+    }
+}
+
+/// `leaving` and `arriving` placed as [`slide_offsets`] places them, `t`
+/// through a slide, into `into` (resized to `leaving`'s size), `gap` where
+/// neither reaches.
+#[doc(hidden)]
+pub fn compose_slide(
+    into: &mut RgbBuffer,
+    (leaving, arriving): (&RgbBuffer, &RgbBuffer),
+    t: f32,
+    going_down: bool,
+    gap: Rgb,
+) {
+    let (w, h) = (leaving.width(), leaving.height());
+    let offsets = slide_offsets(t, going_down, f32::from(h));
+    into.resize_fill(w, h, gap);
+    for (buf, dy) in [(leaving, offsets.0), (arriving, offsets.1)] {
+        for y in 0..h {
+            let src = i32::from(y) - dy;
+            if let Ok(src) = u16::try_from(src)
+                && src < buf.height()
+            {
+                for x in 0..w.min(buf.width()) {
+                    into.put(x, y, buf.get(x, src));
+                }
+            }
+        }
+    }
+}
+
+/// A painter's office of up to [`MAX_FLOORS`](super::MAX_FLOORS) floors:
+/// each floor's [`FloorView`], the office-wide state they share (a cup of
+/// coffee survives a floor switch), the [`FloorNav`], and the slide's
+/// composed frame.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct OfficeSession {
+    pack: Arc<Pack>,
+    /// Each floor's view, kept past the last frame's floor count so a floor
+    /// that empties and fills again resumes its own.
+    views: Vec<FloorView>,
+    /// The floors the last frame's scene filled, at least one.
+    n_floors: usize,
+    office: PerOffice,
+    nav: FloorNav,
+    /// The last frame's slide, while one is under way.
+    slide: Option<RgbBuffer>,
+    /// The floor (or slide) the frame before showed, and whether the last
+    /// frame showed another: a floor's own dirt is against ITS last frame,
+    /// not the one on screen.
+    shown: Option<usize>,
+    shown_changed: bool,
+}
+
+impl OfficeSession {
+    /// An empty office drawing with `pack`.
+    pub fn new(pack: Arc<Pack>) -> Self {
+        Self {
+            views: vec![FloorView::new(Arc::clone(&pack))],
+            n_floors: 1,
+            pack,
+            office: PerOffice::default(),
+            nav: FloorNav::default(),
+            slide: None,
+            shown: None,
+            shown_changed: true,
+        }
+    }
+
+    /// Which floor shows, and the slide under way.
+    pub fn nav(&self) -> &FloorNav {
+        &self.nav
+    }
+
+    /// Slide to floor `target`: [`FloorNav::navigate`].
+    pub fn navigate(&mut self, target: usize, now: SystemTime) -> bool {
+        self.nav.navigate(target, now)
+    }
+
+    /// The floors the last frame's scene filled.
+    pub fn n_floors(&self) -> usize {
+        self.n_floors
+    }
+
+    /// The pet of `pets` the floor showing picks, as its frames draw it.
+    pub fn showing_pet<'p>(&self, pets: &'p [crate::pet::Pet]) -> Option<&'p crate::pet::Pet> {
+        floor_pet(self.nav.current(), self.n_floors, pets)
+    }
+
+    /// Render one frame of `inputs.world.scene` in `look`: the floor showing,
+    /// or both floors of a slide composed into one, `gap` between them.
+    /// `inputs.world.scene` is the FULL live scene: the office evicts against
+    /// it and projects each floor out of it. `inputs.world.floor` carries the
+    /// office's weather and motion, `inputs.place.gateway` its gateway; each
+    /// floor's index, altitude, breadcrumb and pet (of `pets`) are the
+    /// office's, and a petting plays only on its own floor. `None` when the
+    /// floor showing can't lay out, or during a slide, which has no one
+    /// layout.
+    pub fn render(
+        &mut self,
+        look: crate::look::Look,
+        inputs: crate::look::RenderInputs<'_>,
+        pets: &[crate::pet::Pet],
+        gap: Rgb,
+    ) -> Option<Arc<crate::layout::SceneLayout>> {
+        let scene = inputs.world.scene;
+        let now = inputs.world.now;
+        for view in &mut self.views {
+            view.floor.evict_missing(scene);
+        }
+        self.office.evict_missing(scene);
+        let n_floors = super::num_floors(scene).clamp(1, super::MAX_FLOORS);
+        self.n_floors = n_floors;
+        while self.views.len() < n_floors {
+            self.views.push(FloorView::new(Arc::clone(&self.pack)));
+        }
+        self.nav.settle(n_floors, now);
+        let total_agents = scene.agents.len();
+        let draw = |views: &mut Vec<FloorView>, office: &mut PerOffice, floor: usize| {
+            let floor_scene = super::project_floor_scene(scene, floor);
+            let meta = office_floor(inputs.world.floor, floor, n_floors);
+            let world = FloorInputs {
+                scene: &floor_scene,
+                floor: meta,
+                pets: super::PetInputs {
+                    pet: floor_pet(floor, n_floors, pets),
+                    petting: inputs
+                        .world
+                        .pets
+                        .petting
+                        .filter(|p| p.floor_idx == floor && p.is_active(now)),
+                },
+                ..inputs.world
+            };
+            views[floor].render(
+                office,
+                look,
+                crate::look::RenderInputs {
+                    world,
+                    place: crate::look::Place {
+                        floor: footer_floor(floor, n_floors, total_agents),
+                        ..inputs.place
+                    },
+                    ..inputs
+                },
+            )
+        };
+        let Some(tr) = self.nav.transition() else {
+            self.slide = None;
+            let current = self.nav.current();
+            self.shown_changed = self.shown.replace(current) != Some(current);
+            return draw(&mut self.views, &mut self.office, current);
+        };
+        self.shown = None;
+        let (from, to, t) = (tr.from_floor, tr.to_floor, tr.t(now));
+        draw(&mut self.views, &mut self.office, from);
+        draw(&mut self.views, &mut self.office, to);
+        let slide = self
+            .slide
+            .get_or_insert_with(|| RgbBuffer::filled(0, 0, gap));
+        if let (Some(leaving), Some(arriving)) = (self.views[from].buf(), self.views[to].buf()) {
+            compose_slide(slide, (leaving, arriving), t, to > from, gap);
+        }
+        None
+    }
+
+    /// The last frame's pixels: the slide's, or the floor showing's.
+    pub fn buf(&self) -> Option<&RgbBuffer> {
+        match &self.slide {
+            Some(slide) => Some(slide),
+            None => self.views.get(self.nav.current())?.buf(),
+        }
+    }
+
+    /// Where the last frame may differ from the one before it: a slide's
+    /// anywhere, as is a frame after one or after another floor's.
+    pub fn dirty(&self) -> &crate::look::Dirty {
+        const ALL: &crate::look::Dirty = &crate::look::Dirty::All;
+        match (&self.slide, self.views.get(self.nav.current())) {
+            (None, Some(view)) if !self.shown_changed => &view.last_dirty,
+            _ => ALL,
+        }
+    }
+
+    /// What of the last frame flashes: the floor showing's; nothing in a
+    /// slide.
+    pub fn flash(&self) -> crate::flash::FlashPhase {
+        match self.slide {
+            Some(_) => crate::flash::FlashPhase::default(),
+            None => self
+                .views
+                .get(self.nav.current())
+                .map(FloorView::flash)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// What the last frame shows a pointer over `area`, in layout units; none
+    /// in a slide, which shows no one floor's figures where they stand.
+    pub fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
+        self.slide
+            .is_none()
+            .then(|| self.views.get(self.nav.current()))
+            .flatten()?
+            .hit_at(area)
+    }
+
+    /// One frame of audio intent for the floor showing, in `scene` (the FULL
+    /// live scene) under `office_floor`'s weather and motion. Call it every
+    /// frame regardless of mute.
+    pub fn audio_frame(
+        &mut self,
+        scene: &SceneState,
+        office_floor: FloorMeta,
+        now: SystemTime,
+    ) -> AudioFrame {
+        // `nav` settles within `n_floors`, and a view is kept for each.
+        let current = self.nav.current().min(self.n_floors - 1);
+        let floor = self::office_floor(office_floor, current, self.n_floors);
+        self.views[current].audio_frame(&mut self.office, scene, floor, now)
+    }
+
+    /// The footer's floor breadcrumb, among `scene`'s agents.
+    pub fn footer_floor(&self, scene: &SceneState) -> Option<FooterFloor> {
+        footer_floor(self.nav.current(), self.n_floors, scene.agents.len())
+    }
+
+    /// The scene the footer counts and tallies: the floor showing's, as
+    /// [`FooterInputs::new`](crate::footer::FooterInputs::new) asks.
+    pub fn footer_scene(&self, scene: &SceneState) -> SceneState {
+        super::project_floor_scene(scene, self.nav.current())
+    }
+
+    /// Whether the floor showing's last frame changes between beats:
+    /// [`FloorSession::moves_off_beat`](super::FloorSession::moves_off_beat).
+    pub fn moves_off_beat(&self) -> bool {
+        self.views
+            .get(self.nav.current())
+            .is_some_and(FloorView::moves_off_beat)
+    }
+}

@@ -756,7 +756,11 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new(Arc::clone(&pack));
-    session.floor.ctx.walks.insert(gone, WalkState::default());
+    session
+        .floor_mut()
+        .ctx
+        .walks
+        .insert(gone, WalkState::default());
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
@@ -778,7 +782,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     );
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
-        !session.floor.ctx.walks.contains_key(&gone),
+        !session.floor().ctx.walks.contains_key(&gone),
         "render() evicts the floor half (walks) — the floating-leak class"
     );
     assert!(
@@ -801,7 +805,10 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         slot.last_event_at = now0;
     }
     let mut session = FloorSession::new(Arc::clone(&pack));
-    assert!(session.last_occupied.is_empty(), "empty before any render");
+    assert!(
+        session.view.last_occupied.is_empty(),
+        "empty before any render"
+    );
     // Requiring the FALL back to empty is the anti-stick tooth: an accumulating
     // `last_occupied` is monotone non-decreasing and can never produce it.
     let mut occupied_ever = false;
@@ -826,13 +833,13 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
                 },
             )
             .expect("160x96 lays out");
-        if session.last_occupied.is_empty() {
+        if session.view.last_occupied.is_empty() {
             if occupied_ever {
                 fell_back_empty = true;
                 break;
             }
         } else {
-            for &wp in &session.last_occupied {
+            for &wp in &session.view.last_occupied {
                 assert!(
                     wp < layout.waypoints.len(),
                     "occupied index {wp} must be a real waypoint"
@@ -867,7 +874,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     );
     assert!(none.is_none());
     assert!(
-        session.last_occupied.is_empty(),
+        session.view.last_occupied.is_empty(),
         "an unlayoutable render clears the stale occupancy"
     );
 }
@@ -898,11 +905,11 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         "the frame carries the agent's routed pose"
     );
     assert!(
-        session.floor.ctx.walks.contains_key(&id),
+        session.floor().ctx.walks.contains_key(&id),
         "the sim advanced: the entry leg was snapshotted into walks"
     );
     assert!(
-        session.floor.ctx.door_anim_max_ms > 0,
+        session.floor().ctx.door_anim_max_ms > 0,
         "the epilogue ran headlessly: the in-flight entry drives the door clamp"
     );
     assert!(session.buf().is_none(), "no pixel buffer was bought");
@@ -945,7 +952,7 @@ fn step_hands_back_the_layout_the_sim_stepped_on() {
         )
         .expect("a layoutable size steps");
     let memoized = session
-        .floor
+        .floor_mut()
         .ctx
         .frame_layout(size.w, size.h, meta.floor_seed)
         .expect("the memoized layout");
@@ -1874,4 +1881,137 @@ fn a_frame_is_a_function_of_its_instant_and_tier() {
         );
         assert!(a == b, "{motion:?}");
     }
+}
+
+/// A floor key slides one floor at a time and never during a slide; a slide
+/// lands on its destination when it finishes, is dropped when its floor goes,
+/// and a cancel lands it at once.
+#[test]
+fn floor_nav_slides_lands_and_clamps() {
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let done = t0 + Duration::from_secs(2);
+    let mut nav = FloorNav::default();
+    assert_eq!((nav.up(3), nav.down()), (Some(1), None));
+    assert!(nav.navigate(1, t0));
+    assert!(!nav.navigate(2, t0), "no slide begins during one");
+    assert_eq!((nav.up(3), nav.down()), (None, None));
+    assert!(!nav.settle(3, t0));
+    assert_eq!(nav.current(), 0, "a slide shows its floor until it lands");
+    assert!(!nav.settle(3, done));
+    assert_eq!((nav.current(), nav.transition().is_none()), (1, true));
+    assert!(nav.navigate(2, done));
+    assert!(nav.settle(2, done), "a slide to a floor gone is dropped");
+    assert_eq!(nav.current(), 1);
+    assert!(nav.navigate(0, done));
+    nav.cancel(3);
+    assert_eq!((nav.current(), nav.transition().is_none()), (0, true));
+    assert!(nav.navigate(2, done));
+    nav.cancel(3);
+    assert!(!nav.settle(1, done));
+    assert_eq!(nav.current(), 0, "the floor showing stays in the building");
+}
+
+/// An office shows the floor its navigation holds, of the floors its scene
+/// fills, with that floor's breadcrumb; a slide composes both floors, hits
+/// nothing, and lands on its destination.
+#[test]
+fn an_office_session_shows_each_floor_and_slides_between_them() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let scene = make_scene(3, 2);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    let render = |office: &mut OfficeSession, now| {
+        office.render(
+            crate::look::Look::Classic,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+            },
+            &[],
+            theme.surface.bg_fallback,
+        )
+    };
+    assert!(render(&mut office, t0).is_some(), "floor 1 lays out");
+    assert_eq!(office.n_floors(), 2);
+    let bread = |office: &OfficeSession| office.footer_floor(&scene).map(|f| f.current);
+    assert_eq!(bread(&office), Some(1));
+    let whole = crate::layout::Bounds {
+        x: 0,
+        y: 0,
+        width: 160,
+        height: 96,
+    };
+    assert!(office.navigate(1, t0));
+    let mid = t0 + Duration::from_millis(400);
+    assert!(
+        render(&mut office, mid).is_none(),
+        "a slide has no one layout"
+    );
+    assert!(office.buf().is_some(), "the slide is composed");
+    assert!(office.hit_at(whole).is_none(), "a slide hits nothing");
+    assert!(render(&mut office, t0 + Duration::from_secs(2)).is_some());
+    assert_eq!((office.nav().current(), bread(&office)), (1, Some(2)));
+    let pets: Vec<crate::pet::Pet> = (0..8)
+        .map(|i| crate::pet::Pet {
+            kind: crate::pet::PetKind::Cat,
+            name: format!("cat{i}"),
+        })
+        .collect();
+    assert_eq!(
+        office.showing_pet(&pets).map(|p| p.name.as_str()),
+        crate::pet::select_pet_for_floor(FloorMeta::for_floor(1, 2).floor_seed, &pets)
+            .map(|p| p.name.as_str()),
+        "the floor showing's pet"
+    );
+}
+
+/// An office whose upper floor empties shows one floor: the count, the
+/// breadcrumb and the way up all follow the live scene, not the views kept.
+#[test]
+fn an_office_session_follows_its_floors_down() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    let render = |office: &mut OfficeSession, scene: &SceneState| {
+        office.render(
+            crate::look::Look::Classic,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene,
+                    pack: &pack,
+                    now: t0,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+            },
+            &[],
+            theme.surface.bg_fallback,
+        )
+    };
+    let two = make_scene(3, 2);
+    render(&mut office, &two);
+    assert_eq!(office.n_floors(), 2);
+    let one = make_scene(2, 2);
+    render(&mut office, &one);
+    assert_eq!(office.n_floors(), 1);
+    assert!(
+        office.footer_floor(&one).is_none(),
+        "one floor has no breadcrumb"
+    );
+    assert_eq!(office.nav().up(office.n_floors()), None, "no floor above");
 }

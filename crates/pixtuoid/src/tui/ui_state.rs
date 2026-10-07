@@ -12,7 +12,7 @@ use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_scene::theme;
 
-use super::{ModalState, connection, dashboard, welcome, widgets};
+use super::{ModalState, connection, dashboard, welcome};
 use connection::{ConnectionFrame, ConnectionRow, ConnectionUi};
 use dashboard::{DashboardFrame, DashboardUi};
 use welcome::{OnboardingFrame, WelcomeUi};
@@ -60,8 +60,7 @@ pub(crate) struct UiState {
     help_open: bool,
     /// `[p]ause`: while paused, `now()` returns the frozen instant so every
     /// clock-driven animation (and the dashboard marquee) holds still.
-    paused: bool,
-    frozen_now: Option<SystemTime>,
+    pause: pixtuoid_scene::anim::PauseClock,
     /// `$PIXTUOID_FAKE_NOW`'s instant, Unix seconds, and when it was read:
     /// the clock `just pace-check` starts at a transition or at dusk, read
     /// nowhere else.
@@ -114,8 +113,7 @@ impl UiState {
             onboarding_closing_at: None,
             version_popup,
             help_open: false,
-            paused: false,
-            frozen_now: None,
+            pause: pixtuoid_scene::anim::PauseClock::default(),
             fake_now: fake_now(),
             theme_picker: None,
             saved_theme_idx,
@@ -148,20 +146,15 @@ impl UiState {
             .fake_now
             .and_then(|(read, at)| at.checked_add(read.elapsed()))
             .unwrap_or_else(SystemTime::now);
-        if self.paused {
-            *self.frozen_now.get_or_insert(wall)
-        } else {
-            self.frozen_now = None;
-            wall
-        }
+        self.pause.now(wall)
     }
 
     pub(crate) fn toggle_pause(&mut self) {
-        self.paused = !self.paused;
+        self.pause.toggle();
     }
 
     pub(crate) fn paused(&self) -> bool {
-        self.paused
+        self.pause.paused()
     }
 
     pub(crate) fn toggle_help(&mut self) {
@@ -345,10 +338,7 @@ impl UiState {
         scene: &SceneState,
         health: &[SourceDeath],
     ) -> RenderFrames {
-        let source_warning = crate::doctor::footer_warning(
-            widgets::source_warning_message(health).as_deref(),
-            &self.drift.prefixes(),
-        );
+        let source_warning = crate::doctor::footer_warning(health, &self.drift.prefixes());
 
         // Re-anchor the selection by AgentId — an agent may have exited.
         let dashboard_frame = if self.dashboard.open {
