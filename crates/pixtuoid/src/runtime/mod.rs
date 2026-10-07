@@ -47,7 +47,7 @@ pub struct RunConfig {
     pub connected: HashSet<String>,
     /// Where the warn-floor log lives, which the Sources panel reads for each
     /// source's drift history. `None` = no log.
-    pub log: Option<crate::doctor::LogLocation>,
+    pub log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
     pub drift: crate::doctor::DriftSeen,
     /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the

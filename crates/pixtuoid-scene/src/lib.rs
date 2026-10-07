@@ -44,6 +44,8 @@ pub(crate) mod clouds;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
+pub mod hit;
+#[doc(hidden)]
 pub use creatures::PET_LONGEST_REST_MS;
 #[doc(hidden)]
 pub mod cutaway;
@@ -87,6 +89,8 @@ pub mod tally;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+#[doc(hidden)]
+pub mod tooltip;
 pub mod walk;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
