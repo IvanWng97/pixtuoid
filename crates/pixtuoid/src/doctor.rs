@@ -1824,11 +1824,9 @@ mod tests {
         let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
         r.graphics_plan = Plan::Cutaway {
             fit: Fit::new(cell, area, density).expect("fits"),
-            protocol: ImageProtocol::Kitty,
+            route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
-            tmux: false,
             forced: false,
-            medium: crate::graphics::Medium::Direct,
         };
         assert_eq!(
             terminal_category(&r).details[0],

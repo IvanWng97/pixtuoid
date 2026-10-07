@@ -386,11 +386,9 @@ mod tests {
         assert_eq!(fit.scale().get(), 8);
         let cutaway = Plan::Cutaway {
             fit,
-            protocol: ImageProtocol::Kitty,
+            route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
-            tmux: false,
             forced: false,
-            medium: crate::graphics::Medium::Direct,
         };
         let seed = resolve_boot_caps(None, Some(cutaway), || term(cols, rows));
         let painted = fit.logical();
