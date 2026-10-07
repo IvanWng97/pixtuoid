@@ -4,7 +4,6 @@
 
 use pixtuoid_core::sprite::Rgb;
 
-use crate::atmosphere::Moment;
 use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
 use crate::layout::{WindowBay, glass_rows, window_run};
@@ -244,14 +243,19 @@ pub(crate) struct SkyView {
 }
 
 impl SkyView {
-    /// `moment`'s sky behind a wall band `top_wall_h` tall, in `theme`.
-    pub(crate) fn of(moment: &Moment, buf_w: u16, top_wall_h: u16, theme: &Theme) -> Self {
-        let look = &moment.look;
+    /// `outlook`'s sky behind a wall band `top_wall_h` tall, in `theme`.
+    pub(crate) fn of(
+        outlook: &crate::atmosphere::Outlook,
+        buf_w: u16,
+        top_wall_h: u16,
+        theme: &Theme,
+    ) -> Self {
+        let look = outlook.look();
         let sky: Bands = std::array::from_fn(|k| {
             look.glass_zenith
                 .mix(look.glass_horizon, k as f32 / (SKY_BANDS - 1) as f32)
         });
-        let disc = Disc::of(&moment.sky, buf_w, top_wall_h);
+        let disc = Disc::of(outlook.sky(), buf_w, top_wall_h);
         let core = match disc.map_or(BodyKind::Sun, |d| d.body) {
             BodyKind::Sun => theme.lighting.sun_core,
             BodyKind::Moon => theme.lighting.moon_core,
@@ -262,7 +266,7 @@ impl SkyView {
         Self {
             disc,
             stars: look.star_strength > 0.0,
-            beat: moment.timing.beat,
+            beat: outlook.beat(),
             sky,
             star: over(STAR_COLOR, look.star_strength * STAR_ALPHA_MAX),
             lit: over(core, vis),
@@ -365,6 +369,7 @@ impl PaneSky<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atmosphere::Moment;
 
     /// A star turns only on a Full beat, and the field's cycles span every
     /// beat count from the base to the base plus the span.
@@ -468,7 +473,7 @@ mod tests {
             0.0,
             crate::anim::Motion::Full.timing(now),
         );
-        SkyView::of(&moment, 160, 40, theme)
+        SkyView::of(&moment.outlook(theme), 160, 40, theme)
     }
 
     /// The window sky lights its stars on a clear night and none under
