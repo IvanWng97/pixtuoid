@@ -18,16 +18,27 @@ pub(crate) fn scene_hit<'a>(
     pixtuoid_scene::hit::scene_hit(hovers, star, layout, cell.bounds())
 }
 
-/// [`pixtuoid_scene::hit::coffee_at`] at the office pixels `cell` shows.
+/// What the bare office shows at `cell`, no figure or star over it: the
+/// probe the tests read the layout's fixtures through.
 #[cfg(test)]
-pub(crate) fn hit_test_coffee_machine(layout: &SceneLayout, cell: CellArea) -> bool {
-    pixtuoid_scene::hit::coffee_at(layout, cell.bounds())
+fn bare_hit(layout: &SceneLayout, cell: CellArea) -> Option<SceneHit<'static>> {
+    static NONE: std::sync::LazyLock<Hovers> = std::sync::LazyLock::new(Hovers::default);
+    pixtuoid_scene::hit::scene_hit(&NONE, None, layout, cell.bounds())
 }
 
-/// [`pixtuoid_scene::hit::fixture_label_at`] at the office pixels `cell` shows.
+/// Whether the bare office shows the coffee machine at `cell`.
+#[cfg(test)]
+pub(crate) fn hit_test_coffee_machine(layout: &SceneLayout, cell: CellArea) -> bool {
+    bare_hit(layout, cell) == Some(SceneHit::Coffee)
+}
+
+/// The fixture label the bare office shows at `cell`.
 #[cfg(test)]
 pub(crate) fn hit_test_furniture(layout: &SceneLayout, cell: CellArea) -> Option<&'static str> {
-    pixtuoid_scene::hit::fixture_label_at(layout, cell.bounds())
+    match bare_hit(layout, cell) {
+        Some(SceneHit::Furniture(label)) => Some(label),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

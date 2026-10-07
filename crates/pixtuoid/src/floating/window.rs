@@ -64,8 +64,9 @@ pub(crate) struct FloatingApp {
     shown: Option<super::offscreen::WindowGeometry>,
     /// Whether the pointer is over the window, where a hover shows its tooltip.
     cursor_in: bool,
-    /// What the pointer last hovered, so a move redraws only when it changes.
-    hovered: Option<String>,
+    /// Whether the pointer last hovered something, so a move off it redraws
+    /// once to drop its tooltip.
+    hovered: bool,
     /// The last petting, played while it lasts.
     petting: Option<pixtuoid_scene::pet::PetState>,
     /// Where a clicked agent's transcript roots are, for its focus jump:
@@ -116,7 +117,7 @@ impl FloatingApp {
             cursor: PhysicalPosition::new(0.0, 0.0),
             shown: None,
             cursor_in: false,
-            hovered: None,
+            hovered: false,
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
@@ -153,9 +154,9 @@ impl FloatingApp {
             .shown
             .filter(|_| self.cursor_in)
             .and_then(|at| self.renderer.hit_at((self.cursor.x, self.cursor.y), at))
-            .map(|hit| format!("{hit:?}"));
+            .is_some();
         // A shown tooltip follows the pointer, so it redraws on every move.
-        if hovered.is_some() || hovered != self.hovered {
+        if hovered || self.hovered {
             self.hovered = hovered;
             if let Some(window) = &self.window {
                 window.request_redraw();
@@ -163,26 +164,27 @@ impl FloatingApp {
         }
     }
 
-    /// A left press: resize from the corner, act on what the frame on screen
-    /// shows under the pointer as the TUI's click does, or drag the frameless
-    /// window. Errors are non-fatal — some platforms refuse a drag outside a
-    /// real press.
+    /// A left press: resize from the corner, carry out what the frame on
+    /// screen shows under the pointer as the TUI's click does, or drag the
+    /// frameless window. Errors are non-fatal — some platforms refuse a drag
+    /// outside a real press.
     fn press(&mut self) {
         use super::offscreen::Press;
-        use pixtuoid_scene::display::{HoverTarget, PetHover};
+        use pixtuoid_scene::hit::HitAction;
         let Some(window) = &self.window else {
             return;
         };
         let size = window.inner_size();
+        let now = SystemTime::now();
         let press = match self.shown {
             Some(at) => self.renderer.press_at(
                 (self.cursor.x, self.cursor.y),
                 (size.width, size.height),
                 at,
+                (self.petting.as_ref(), now),
             ),
             None => Press::Drag,
         };
-        let now = SystemTime::now();
         match press {
             Press::Resize => {
                 let _ = window.drag_resize_window(ResizeDirection::SouthEast);
@@ -190,32 +192,24 @@ impl FloatingApp {
             Press::Drag => {
                 let _ = window.drag_window();
             }
-            Press::Hit(hit) => {
-                if let Some(url) = hit.link() {
-                    let _ = open::that(url);
+            Press::Act(HitAction::Focus(id)) => {
+                let slot = self
+                    .live
+                    .as_ref()
+                    .and_then(|l| l.scene_rx.borrow().agents.get(&id).cloned());
+                if let Some(slot) = slot {
+                    crate::focus::focus_slot(&slot, &self.focus_roots);
                 }
-                match hit {
-                    pixtuoid_scene::hit::SceneHit::Figure(HoverTarget::Agent(id)) => {
-                        let slot = self
-                            .live
-                            .as_ref()
-                            .and_then(|l| l.scene_rx.borrow().agents.get(id).cloned());
-                        if let Some(slot) = slot {
-                            crate::focus::focus_slot(&slot, &self.focus_roots);
-                        }
-                    }
-                    pixtuoid_scene::hit::SceneHit::Figure(&HoverTarget::Pet(PetHover {
-                        kind,
-                        ..
-                    })) if self.petting.as_ref().is_none_or(|p| !p.is_active(now)) => {
-                        self.petting = Some(pixtuoid_scene::pet::PetState {
-                            petted_at: now,
-                            kind,
-                            floor_idx: 0,
-                        });
-                    }
-                    _ => {}
-                }
+            }
+            Press::Act(HitAction::Pet(kind)) => {
+                self.petting = Some(pixtuoid_scene::pet::PetState {
+                    petted_at: now,
+                    kind,
+                    floor_idx: 0,
+                });
+            }
+            Press::Act(HitAction::Open(url)) => {
+                let _ = open::that(url);
             }
         }
     }
