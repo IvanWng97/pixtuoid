@@ -153,6 +153,14 @@ impl FloatingApp {
         }
     }
 
+    /// Ask the window for a redraw, which the screen then tells from an expose.
+    fn request_redraw(&mut self) {
+        if let Some(window) = &self.window {
+            self.screen.asked();
+            window.request_redraw();
+        }
+    }
+
     /// Redraw when the pointer hovers something, or stops, so its tooltip
     /// follows within a move rather than at the next paint tick, which an
     /// idle office spaces a second apart.
@@ -165,9 +173,7 @@ impl FloatingApp {
         // A shown tooltip follows the pointer, so it redraws on every move.
         if hovered || self.hovered {
             self.hovered = hovered;
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+            self.request_redraw();
         }
     }
 
@@ -447,6 +453,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
         // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Real
         // translucency needs a native shim or a wgpu surface.
+        self.screen.asked();
         window.request_redraw();
         self.window = Some(window);
         self.context = Some(context);
@@ -455,11 +462,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: FloatingEvent) {
         match event {
-            FloatingEvent::SceneChanged => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-            }
+            FloatingEvent::SceneChanged => self.request_redraw(),
         }
     }
 
@@ -513,16 +516,13 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 } else {
                     return;
                 }
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+                self.request_redraw();
             }
-            WindowEvent::RedrawRequested => self.redraw(),
-            WindowEvent::Resized(_) => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+            WindowEvent::RedrawRequested => {
+                self.screen.redraw_arrived();
+                self.redraw();
             }
+            WindowEvent::Resized(_) => self.request_redraw(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = position;
                 self.cursor_in = true;
@@ -562,8 +562,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .clock
             .poll(Instant::now(), SystemTime::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        if paint && let Some(window) = &self.window {
-            window.request_redraw();
+        if paint {
+            self.request_redraw();
         }
     }
 }

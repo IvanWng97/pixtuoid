@@ -238,7 +238,10 @@ pub(crate) struct Overlays {
 /// of the frame on screen, known only while the screen holds the last frame
 /// rendered, which an office's dirt is measured against.
 #[derive(Debug, Default)]
-pub(crate) struct Screen(Option<Overlays>);
+pub(crate) struct Screen {
+    shown: Option<Overlays>,
+    asked: bool,
+}
 
 impl Screen {
     /// Whether a frame showing `next` over an office `dirty` against the last
@@ -250,18 +253,34 @@ impl Screen {
         next: &Overlays,
         dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
     ) -> bool {
-        *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged || self.0.as_ref() != Some(next)
+        *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged
+            || self.shown.as_ref() != Some(next)
+    }
+
+    /// The app asked the window for a redraw.
+    pub(crate) fn asked(&mut self) {
+        self.asked = true;
+    }
+
+    /// A redraw arrived. One the app didn't ask for is the platform's: winit
+    /// turns an X11 `Expose` into `RedrawRequested`
+    /// (`platform_impl/linux/x11/event_processor.rs`, v0.30.13), and an
+    /// uncovered window without a compositor holds nothing to skip against.
+    pub(crate) fn redraw_arrived(&mut self) {
+        if !std::mem::take(&mut self.asked) {
+            self.shown = None;
+        }
     }
 
     /// A frame was rendered that may not reach the screen — held back, or
     /// about to present: until one shows, the screen matches nothing rendered.
     pub(crate) fn stale(&mut self) {
-        self.0 = None;
+        self.shown = None;
     }
 
     /// A frame with `overlays` reached the screen.
     pub(crate) fn shown(&mut self, overlays: Overlays) {
-        self.0 = Some(overlays);
+        self.shown = Some(overlays);
     }
 }
 
@@ -1337,6 +1356,14 @@ mod tests {
             screen.needs(&shown, &Dirty::Unchanged),
             "after a held frame"
         );
+        // A redraw the app asked for keeps the screen; one it didn't (an
+        // expose) means the window lost what it showed.
+        screen.shown(shown.clone());
+        screen.asked();
+        screen.redraw_arrived();
+        assert!(!screen.needs(&shown, &Dirty::Unchanged), "an asked redraw");
+        screen.redraw_arrived();
+        assert!(screen.needs(&shown, &Dirty::Unchanged), "an expose");
     }
 
     #[test]
