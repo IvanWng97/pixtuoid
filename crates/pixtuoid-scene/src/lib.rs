@@ -89,6 +89,8 @@ pub mod tally;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+#[doc(hidden)]
+pub mod tooltip;
 pub mod walk;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.

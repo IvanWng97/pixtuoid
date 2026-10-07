@@ -93,14 +93,9 @@ fn state_vocab_is_total_and_distinct() {
     assert_eq!(letters.len(), 4, "each state has a distinct letter");
     assert_eq!(words.len(), 4, "each state has a distinct word");
     let t = &pixtuoid_scene::theme::NORMAL;
-    assert_eq!(
-        state_color(StateKind::Waiting, t),
-        to_color(t.ui.label_waiting)
-    );
-    assert_eq!(
-        state_color(StateKind::Exiting, t),
-        to_color(t.ui.label_exiting)
-    );
+    let tone = |k| pixtuoid_scene::tooltip::TipTone::Rung(k).rgb(t);
+    assert_eq!(tone(StateKind::Waiting), Some(t.ui.label_waiting));
+    assert_eq!(tone(StateKind::Exiting), Some(t.ui.label_exiting));
 }
 
 #[test]

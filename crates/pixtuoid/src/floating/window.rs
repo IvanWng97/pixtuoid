@@ -62,6 +62,10 @@ pub(crate) struct FloatingApp {
     cursor: PhysicalPosition<f64>,
     /// The geometry of the frame on screen, which a press maps back through.
     shown: Option<super::offscreen::WindowGeometry>,
+    /// Whether the pointer is over the window, where a hover shows its tooltip.
+    cursor_in: bool,
+    /// What the pointer last hovered, so a move redraws only when it changes.
+    hovered: Option<String>,
     /// The last petting, played while it lasts.
     petting: Option<pixtuoid_scene::pet::PetState>,
     /// Where a clicked agent's transcript roots are, for its focus jump:
@@ -111,6 +115,8 @@ impl FloatingApp {
             last_caps_size: None,
             cursor: PhysicalPosition::new(0.0, 0.0),
             shown: None,
+            cursor_in: false,
+            hovered: None,
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
@@ -136,6 +142,24 @@ impl FloatingApp {
             pos.map(|p| p.y),
         ) {
             tracing::warn!(error = %e, "pixtuoid floating: could not persist window geometry");
+        }
+    }
+
+    /// Redraw when the pointer hovers something, or stops, so its tooltip
+    /// follows within a move rather than at the next paint tick, which an
+    /// idle office spaces a second apart.
+    fn rehover(&mut self) {
+        let hovered = self
+            .shown
+            .filter(|_| self.cursor_in)
+            .and_then(|at| self.renderer.hit_at((self.cursor.x, self.cursor.y), at))
+            .map(|hit| format!("{hit:?}"));
+        // A shown tooltip follows the pointer, so it redraws on every move.
+        if hovered.is_some() || hovered != self.hovered {
+            self.hovered = hovered;
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
     }
 
@@ -229,19 +253,20 @@ impl FloatingApp {
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
+        let world = FloorInputs {
+            scene: &scene,
+            pack: &self.pack,
+            now,
+            floor: floor_meta,
+            pets: PetInputs {
+                pet: floor_pet,
+                petting: self.petting.as_ref(),
+            },
+        };
         let office = self.renderer.render_live(
             at,
             WindowFrame {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &self.pack,
-                    now,
-                    floor: floor_meta,
-                    pets: PetInputs {
-                        pet: floor_pet,
-                        petting: self.petting.as_ref(),
-                    },
-                },
+                world,
                 theme: self.theme,
                 place: Place {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
@@ -273,6 +298,15 @@ impl FloatingApp {
             .renderer
             .footer(&scene, budget, audio_audible, volume_flash);
         super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
+        let cursor = (self.cursor.x, self.cursor.y);
+        if let Some(tip) = self
+            .cursor_in
+            .then(|| self.renderer.hit_at(cursor, at))
+            .flatten()
+            .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
+        {
+            super::offscreen::paint_tooltip_into_surface(&mut surf, &tip, cursor, self.theme);
+        }
         window.pre_present_notify();
         if sb.present().is_ok() {
             self.renderer.presented();
@@ -407,7 +441,15 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                     window.request_redraw();
                 }
             }
-            WindowEvent::CursorMoved { position, .. } => self.cursor = position,
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = position;
+                self.cursor_in = true;
+                self.rehover();
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.cursor_in = false;
+                self.rehover();
+            }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
