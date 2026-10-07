@@ -413,84 +413,74 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
     cell.w.min(cell.h / 2)
 }
 
-/// The cutaway's geometry on one terminal: the office renders at the pack's
-/// densest art, and the image is that render upscaled a whole number of times —
-/// pixel-identical to a render at [`Fit::scale`] (pinned in `pixtuoid-scene` by
-/// `the_cutaway_paints_whole_art_pixels`).
+/// The cutaway's geometry on one terminal: [`PixelFit`] over the pixels of
+/// the cells the image covers.
 ///
-/// The densest art, not whichever density the cell lands nearest: the one
-/// render draws every piece at one density, and a scale only a coarser density
-/// divides would draw the densest art from coarser stand-ins.
+/// [`PixelFit`]: pixtuoid_scene::render_scale::PixelFit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Fit {
-    scale: RenderScale,
-    density: Density,
-    render: RenderScale,
-    logical: Size,
-}
+pub(crate) struct Fit(pixtuoid_scene::render_scale::PixelFit);
 
 impl Fit {
-    /// The terminal's half of [`RenderScale::fit`]: `cell`'s natural scale,
-    /// fitted to `max_density` (the pack's
+    /// `cell`'s natural scale fitted to `max_density` (the pack's
     /// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
     /// over an image `area` cells big. `None` when no multiple of it lies within
     /// the fit's bound, or the scale is 1.
     pub(crate) fn new(cell: CellSize, area: TermSize, max_density: Density) -> Option<Self> {
-        let fit = Self {
-            // Scale 1 IS the classic density: an encode per frame that draws
-            // the identical picture.
-            scale: RenderScale::fit(raw_scale_for_cell(cell), max_density)
-                .filter(|scale| scale.get() > 1)?,
-            density: max_density,
-            render: RenderScale::new(max_density.get())?,
-            logical: Size { w: 0, h: 0 },
-        };
-        Some(fit.over(cell, area))
+        pixtuoid_scene::render_scale::PixelFit::new(
+            raw_scale_for_cell(cell),
+            max_density,
+            image_px(cell, area),
+        )
+        // Scale 1 IS the classic density: an encode per frame that draws the
+        // identical picture.
+        .filter(|fit| fit.scale().get() > 1)
+        .map(Self)
     }
 
     /// This fit over an image `area` cells big: the scale stays, and the office
     /// takes the area's shape.
     pub(crate) fn over(self, cell: CellSize, area: TermSize) -> Self {
-        // The image anchors on cells, so its pixels are the cells', never a
-        // window size that counts the terminal's padding; past what a buffer
-        // can address, the office stops growing.
-        let px = |cells: u16, cell_px: u16| {
-            u16::try_from(u32::from(cells) * u32::from(cell_px)).unwrap_or(u16::MAX)
-        };
-        Self {
-            logical: Size {
-                w: self.scale.logical(px(area.width, cell.w)),
-                h: self.scale.logical(px(area.height, cell.h)),
-            },
-            ..self
-        }
+        Self(self.0.over(image_px(cell, area)))
     }
 
     /// Real pixels per logical office unit.
     pub(crate) fn scale(self) -> RenderScale {
-        self.scale
+        self.0.scale()
     }
 
     /// The density the office renders at before the upscale.
     pub(crate) fn density(self) -> Density {
-        self.density
+        self.0.density()
     }
 
     /// [`Fit::density`] as the scale the office renders at.
     #[cfg(feature = "graphics")]
     pub(crate) fn render_scale(self) -> RenderScale {
-        self.render
+        self.0.render_scale()
     }
 
     /// The whole factor the density render is upscaled by.
     pub(crate) fn upscale(self) -> u16 {
-        self.scale.get() / self.density.get()
+        self.0.upscale()
     }
 
     /// The office's extent in logical units: as many as the area's pixels hold
     /// on each axis, so the office takes the terminal's shape — no letterbox.
     pub(crate) fn logical(self) -> Size {
-        self.logical
+        self.0.logical()
+    }
+}
+
+/// The image's pixels over `area` cells: the cells', never a window size that
+/// counts the terminal's padding; past what a buffer can address, the office
+/// stops growing.
+fn image_px(cell: CellSize, area: TermSize) -> Size {
+    let px = |cells: u16, cell_px: u16| {
+        u16::try_from(u32::from(cells) * u32::from(cell_px)).unwrap_or(u16::MAX)
+    };
+    Size {
+        w: px(area.width, cell.w),
+        h: px(area.height, cell.h),
     }
 }
 

@@ -23,6 +23,9 @@ struct EnvHints {
     wezterm: bool,
     konsole: bool,
     iterm_session: bool,
+    /// `WARP_CLIENT_VERSION`, which Warp sets in every shell it starts
+    /// (warpdotdev/warp `crates/warp_terminal/src/local_tty/unix.rs`).
+    warp_client: bool,
 }
 
 impl EnvHints {
@@ -33,6 +36,7 @@ impl EnvHints {
             wezterm: env_set("WEZTERM_EXECUTABLE"),
             konsole: env_set("KONSOLE_VERSION"),
             iterm_session: env_set("ITERM_SESSION_ID"),
+            warp_client: env_set("WARP_CLIENT_VERSION"),
         }
     }
 
@@ -86,12 +90,16 @@ impl EnvHints {
 
     /// Warp, where no protocol the cutaway speaks animates, seen live in
     /// v0.2026.09.30: it answers kitty's query but has no Unicode placeholders,
-    /// draws no SIXEL, and never repaints an iTerm2 image it replaces.
+    /// draws no SIXEL, and never repaints an iTerm2 image it replaces. Inside
+    /// tmux, whose own `TERM_PROGRAM` hides Warp's, its client marker names
+    /// it.
     fn is_warp(&self) -> bool {
-        self.env
+        let named = self
+            .env
             .term_program
             .as_deref()
-            .is_some_and(|p| p.contains("WarpTerminal"))
+            .is_some_and(|p| p.contains("WarpTerminal"));
+        named || (self.env.tmux() && self.warp_client)
     }
 
     /// iTerm2 itself, not a terminal that speaks its images: its
@@ -485,6 +493,25 @@ mod tests {
         assert_eq!((d.protocol, d.cell, d.unanimated), (None, Some(cell), true));
         assert_eq!(warp.iterm2(), None);
         assert!(!hints("xterm-256color", "iTerm.app").is_warp());
+    }
+
+    /// Inside tmux Warp is named by its client marker, since tmux's own
+    /// `TERM_PROGRAM` hides Warp's; outside tmux the marker alone names
+    /// nothing: a terminal started from a Warp shell names itself.
+    #[test]
+    fn warp_inside_tmux_is_named_by_its_client_marker() {
+        let tmux = EnvHints {
+            warp_client: true,
+            ..client(hints("tmux-256color", "tmux"))
+        };
+        assert!(tmux.is_warp());
+        let d = detected(&[Response::Kitty], &tmux, Some(CellSize { w: 8, h: 18 }));
+        assert_eq!((d.protocol, d.unanimated), (None, true));
+        let started_from_warp = EnvHints {
+            warp_client: true,
+            ..hints("xterm-ghostty", "ghostty")
+        };
+        assert!(!started_from_warp.is_warp());
     }
 
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do

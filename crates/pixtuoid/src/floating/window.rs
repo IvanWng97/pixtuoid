@@ -1,9 +1,9 @@
 //! The `winit` + `softbuffer` window for `pixtuoid floating`.
 //!
 //! `FloatingApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
-//! always-on-top window + a `softbuffer` surface, renders the latest `watch`ed scene to a
-//! DOWNSCALED office buffer, then nearest-neighbor upscales it into the surface so the
-//! pixel-art office stays chunky/legible instead of 1:1-tiny.
+//! always-on-top window + a `softbuffer` surface, renders the latest `watch`ed scene's
+//! cutaway at the pack's densest art, then upscales it a whole number of times into the
+//! surface ([`super::offscreen::window_geometry`]).
 //!
 //! Platform glue — codecov-ignored; the testable seams are `floating::offscreen`
 //! (render), `floating::geometry` (the window/monitor rect math), and
@@ -23,11 +23,10 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
-use super::offscreen::OfficeRenderer;
+use super::offscreen::{OfficeRenderer, WindowFrame};
 use crate::config::{self, FloatingConfig};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
-use pixtuoid_scene::layout::Size;
-use pixtuoid_scene::look::{Place, RenderInputs};
+use pixtuoid_scene::look::Place;
 use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
@@ -48,7 +47,7 @@ pub(crate) struct FloatingApp {
     renderer: OfficeRenderer,
     audio_ctl: crate::audio::AudioController,
     /// The pipeline inputs, held until `resumed` can supply the REAL window size
-    /// (the `[floating]` config size is LOGICAL and would over-seed on HiDPI).
+    /// (the `[floating]` config size is LOGICAL and would mis-seed on HiDPI).
     /// `take`n exactly once; `None` afterwards.
     boot: Option<super::PipelineBoot>,
     /// The live pipeline — `None` until `resumed` boots it. `about_to_wait` DOES
@@ -153,15 +152,21 @@ impl FloatingApp {
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
-        let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
-        super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
+        let at = super::offscreen::window_geometry(size, self.pack.max_density_variant());
+        super::offscreen::sync_floor_caps(
+            &mut self.last_caps_size,
+            &floor_caps,
+            at.office.w,
+            at.office.h,
+        );
         let floor_meta = FloorMeta::ground().with_motion(self.motion);
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
         let office = self.renderer.render_live(
-            RenderInputs {
+            at,
+            WindowFrame {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &self.pack,
@@ -174,12 +179,10 @@ impl FloatingApp {
                     },
                 },
                 theme: self.theme,
-                size: Size { w: buf_w, h: buf_h },
                 place: Place {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
-                debug_walkable: false,
             },
             (win_w, win_h),
         );
@@ -192,24 +195,14 @@ impl FloatingApp {
         let Ok(mut sb) = surface.buffer_mut() else {
             return;
         };
-        let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
+        let (win_w, win_h) = (win_w as usize, win_h as usize);
         let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
             return; // nothing rendered, or held: the window keeps the last frame
         };
         let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
         };
-        surf.fill_upscaled(office, scale);
-        super::offscreen::paint_labels_into_surface(
-            &mut surf,
-            self.renderer.badges(),
-            scale as i32,
-        );
-        super::offscreen::paint_wall_board_into_surface(
-            &mut surf,
-            self.renderer.signs(),
-            scale as i32,
-        );
+        surf.fill_upscaled(office, usize::from(at.upscale));
         let budget = super::offscreen::footer_budget(win_w);
         let footer = self
             .renderer
@@ -237,19 +230,14 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if self.window.is_some() {
             return; // already created — a re-resume must not spawn a second window
         }
+        let min = super::offscreen::min_window(self.pack.max_density_variant());
         let mut attrs = Window::default_attributes()
             .with_title("pixtuoid")
             .with_decorations(false)
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_inner_size(LogicalSize::new(
-                f64::from(self.cfg.width),
-                f64::from(self.cfg.height),
-            ))
-            .with_min_inner_size(LogicalSize::new(
-                f64::from(config::FLOATING_MIN_W),
-                f64::from(config::FLOATING_MIN_H),
-            ));
+            .with_inner_size(LogicalSize::new(self.cfg.width, self.cfg.height))
+            .with_min_inner_size(min);
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
             && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
@@ -296,7 +284,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // Past the window/surface failure arms, so a failed boot binds no socket.
         // Pinned by `the_boot_seed_tracks_the_physical_window_not_the_logical_config`.
         if let Some(boot) = self.boot.take() {
-            self.live = Some(boot.spawn(window.inner_size()));
+            self.live = Some(boot.spawn(window.inner_size(), self.pack.max_density_variant()));
         }
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
         // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Real

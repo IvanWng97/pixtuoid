@@ -689,9 +689,10 @@ pub(crate) struct TuiSession {
     /// The Sources panel's mutation seam: a toggle calls `connected.set(src, on)`, which
     /// the reducer task's reconciler observes (gate + graceful evict).
     pub connected: crate::runtime::ConnectedSources,
-    /// The warn-floor log, throttle-scanned for decode-drift breadcrumbs to drive the
-    /// footer nudge. `None` = no surfacing.
-    pub log_path: Option<std::path::PathBuf>,
+    /// Where the warn-floor log lives, for the Sources panel's drift history.
+    pub log: Option<crate::doctor::LogLocation>,
+    /// The sources this run's decode drift has named, for the footer nudge.
+    pub drift: crate::doctor::DriftSeen,
     /// The persisted mute/volume, handed whole to `AudioController::new`.
     pub audio_cfg: crate::config::AudioConfig,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions root).
@@ -1126,7 +1127,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         mut source_health,
         socket_path,
         connected,
-        log_path,
+        log,
+        drift,
         focus_roots,
         first_run,
         audio_cfg,
@@ -1167,7 +1169,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     } else {
         resolve_version_popup(&config_path)
     };
-    let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
+    let mut ui =
+        ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log, drift);
     renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 
@@ -2424,6 +2427,7 @@ mod dispatch_tests {
             false,
             std::path::PathBuf::from("/tmp/sock"),
             None,
+            crate::doctor::DriftSeen::default(),
         );
         assert!(!ui.modal().connection_open, "panel starts closed");
 
@@ -2509,6 +2513,7 @@ mod apply_key_action_tests {
                     false,
                     tmp.path().join("sock"),
                     None,
+                    crate::doctor::DriftSeen::default(),
                 ),
                 renderer: TuiRenderer::new(
                     Terminal::new(TestBackend::new(80, 24)).expect("test backend"),

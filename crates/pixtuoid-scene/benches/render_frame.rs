@@ -46,16 +46,15 @@ use pixtuoid_scene::sky::{Weather, WeatherPolicy, hour_is_day};
 const BASE_EPOCH_SECS: u64 = 1_700_000_200;
 const SIM_WINDOW_FRAMES: u32 = 600;
 const FRAME_STEP_MS: u64 = 100;
-/// The DEFAULT floating window's office buffer (`pixtuoid`'s
-/// `FLOATING_DEFAULT_W/H`, which `office_scale` leaves at scale 1). NOT a
-/// ceiling: the TUI buffer is the terminal's own size and `office_scale`
-/// divides by HEIGHT only, so a wide window or wide terminal exceeds it.
-const FLOATING_DEFAULT: Size = Size { w: 360, h: 240 };
+/// A classic office buffer that seats [`OCCUPANCY`]'s biggest crowd (asserted
+/// below). NOT a ceiling: the TUI buffer is the terminal's own size, so a wide
+/// terminal exceeds it.
+const CLASSIC_WIDE: Size = Size { w: 360, h: 240 };
 /// The buffers a 192x80-cell terminal paints at 2x, 4x and 8x the half-block
 /// buffer's linear resolution, 8x being a full 8x16-pixel cell, after the
-/// default floating window they are measured against.
+/// classic office they are measured against.
 const RICH_SIZES: [Size; 4] = [
-    FLOATING_DEFAULT,
+    CLASSIC_WIDE,
     Size { w: 384, h: 320 },
     Size { w: 768, h: 640 },
     Size { w: 1536, h: 1280 },
@@ -196,30 +195,26 @@ fn render_frame(c: &mut Criterion) {
     let idle_crowd = office_scene(biggest, biggest, base, false);
     // Every crowd must seat, else the case measures a smaller office than its name claims.
     let seats = pixtuoid_scene::floor::floor_capacity(
-        FLOATING_DEFAULT.w,
-        FLOATING_DEFAULT.h,
+        CLASSIC_WIDE.w,
+        CLASSIC_WIDE.h,
         pixtuoid_scene::floor::floor_seed(0),
     );
     assert!(
         seats >= biggest,
-        "{FLOATING_DEFAULT:?} seats {seats} < {biggest}"
+        "{CLASSIC_WIDE:?} seats {seats} < {biggest}"
     );
 
     let mut cases: Vec<(String, &SceneState, Size)> = Vec::new();
     for (label, scene) in [("busy", &busy), ("idle", &idle)] {
-        for size in [Size { w: 192, h: 160 }, FLOATING_DEFAULT] {
+        for size in [Size { w: 192, h: 160 }, CLASSIC_WIDE] {
             cases.push((format!("{label}12_{}x{}", size.w, size.h), scene, size));
         }
     }
-    let Size { w, h } = FLOATING_DEFAULT;
+    let Size { w, h } = CLASSIC_WIDE;
     for (n, scene) in &crowds {
-        cases.push((format!("busy{n}_{w}x{h}"), scene, FLOATING_DEFAULT));
+        cases.push((format!("busy{n}_{w}x{h}"), scene, CLASSIC_WIDE));
     }
-    cases.push((
-        format!("idle{biggest}_{w}x{h}"),
-        &idle_crowd,
-        FLOATING_DEFAULT,
-    ));
+    cases.push((format!("idle{biggest}_{w}x{h}"), &idle_crowd, CLASSIC_WIDE));
 
     let mut group = c.benchmark_group("render_floor");
     for (name, scene, size) in cases {

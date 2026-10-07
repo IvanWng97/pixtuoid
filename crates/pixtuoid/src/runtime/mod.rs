@@ -45,9 +45,11 @@ pub struct RunConfig {
     /// The resolved set of CONNECTED source ids (registry names). A disconnected
     /// source's events are dropped + its sprites evicted.
     pub connected: HashSet<String>,
-    /// The warn-floor log path. `run_tui` throttle-scans it for decode-drift
-    /// breadcrumbs → the footer nudge. `None` in headless / when no log file.
-    pub log_path: Option<PathBuf>,
+    /// Where the warn-floor log lives, which the Sources panel reads for each
+    /// source's drift history. `None` = no log.
+    pub log: Option<crate::doctor::LogLocation>,
+    /// The sources this run's decode drift has named, for the footer nudge.
+    pub drift: crate::doctor::DriftSeen,
     /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the
     /// one-time onboarding "move-in" overlay. Ignored by headless + `floating`.
     pub first_run: bool,

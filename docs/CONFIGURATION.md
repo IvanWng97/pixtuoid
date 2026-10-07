@@ -40,7 +40,7 @@ kind = "dog"        # name omitted → "Office Dog"
 |-----|---------|
 | `last-seen-version` | Tracks the last version whose upgrade popup you've seen, so the popup only fires once per upgrade. Pixtuoid rewrites it when the popup fires, on first launch, or to repair an unparseable value — not on every launch. |
 | `[sources]` | Per-agent-CLI connection state (`source-id = true/false`), written when you connect/disconnect a source in the in-TUI **Sources panel** (`s`) or via the scriptable CLI (`pixtuoid connect`/`disconnect`/`sources set`/`setup --yes`). When a source has no entry it is simply not connected (since 0.12.0; on a first run — no `[sources]` yet — the onboarding wizard offers the detected CLIs to connect). A disconnected source's characters are hidden even if its hooks/transcripts are still present. |
-| `[floating]` | Geometry of the `pixtuoid floating` desktop window (`width`/`height`/`x`/`y`), rewritten when the window closes. Sizes below 240×160 clamp up on load; `x`/`y` are dropped when the OS can't report the position (the next launch is OS-placed). A user-set `opacity` is accepted (clamped 0.2–1.0) and preserved across the rewrite, but isn't applied yet. |
+| `[floating]` | Geometry of the `pixtuoid floating` desktop window (`width`/`height`/`x`/`y`), rewritten when the window closes. A size too small for the office to lay out opens at the smallest one that does; `x`/`y` are dropped when the OS can't report the position (the next launch is OS-placed). A user-set `opacity` is accepted (clamped 0.2–1.0) and preserved across the rewrite, but isn't applied yet. |
 | `[audio]` | Ambient office sound — **starts muted** (`muted = true` is the default; a terminal app never speaks uninvited). Press `m` — in the TUI or the floating window — to turn it on; the toggle persists here, so the office boots exactly as you left it, and the sound system only spins up on the first unmute (muted costs nothing). A ♩ in the TUI footer means you'd hear sound right now. `volume` (0.0–1.0, clamped, default 1.0) scales everything on a perceptual curve — low percents get genuinely quiet, and the whole bus sits under your real work audio by design; `+`/`-` nudge it live (±0.05, persisted, a `♩ N%` readout flashes in the footer — the floating window flashes the same readout in its bottom-right corner; `+` from muted also unmutes). Unmuted: a lofi office soundscape — after dark (the same sundown the office lights follow) or in rain it crossfades to a slower night take — mixed live from how busy **the floor you're viewing** is (a warm band layers up with active agents; typing density tracks them; other floors are silent until you ride to them), gentle rain when the office weather rains (weather is global — it's outside the windows), plus one-shots — a door chime on walk-ins and printer/vending moments. Every sound is synthesized at startup (no audio files). Prebuilt **Linux** binaries ship without audio (ALSA can't link into the static/cross builds); building from source on Linux needs `pkg-config` and the ALSA headers (`pkg-config`, `libasound2-dev`) for the default build, or `--no-default-features --features portable` for one without audio. |
 
 ## Themes
@@ -150,10 +150,10 @@ The TUI owns your terminal (alternate screen), so runtime diagnostics go to a
 
 | | |
 |-----|-----|
-| Default path | `~/.cache/pixtuoid/log` (or `$XDG_STATE_HOME/pixtuoid/log` if set to an absolute path) |
-| Custom path | set `$PIXTUOID_LOG=/path/to/file` |
+| Default path | `~/.cache/pixtuoid/logs/` (or `$XDG_STATE_HOME/pixtuoid/logs/` if set to an absolute path): one file per run, named for its start |
+| Custom path | set `$PIXTUOID_LOG=/path/to/file` to log every run to that one file |
 | Level | `warn` and above by default; `--log-level debug` or `trace` (or `$RUST_LOG`) raises it |
-| Rotation | one generation: past 5 MB the file rotates to `<name>.old` at startup |
+| Retention | a run's file is removed a week after its last write; a `$PIXTUOID_LOG` file instead rotates to `<name>.old` past 5 MB at startup |
 
 Warnings about a misconfigured `config.toml` (unknown theme, bad `[[pets]]`
 kind, malformed TOML) are also printed to stderr **before** the office takes

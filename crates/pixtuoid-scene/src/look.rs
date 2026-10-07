@@ -224,11 +224,6 @@ impl Raster {
             .map_or(&[], |classic| &classic.hits.badges)
     }
 
-    /// The signs the last classic frame set; none in another look.
-    pub(crate) fn classic_signs(&self) -> &[crate::display::TextRun] {
-        self.shown_classic().map_or(&[], |classic| &classic.signs)
-    }
-
     /// The classic, when it drew the last frame.
     fn shown_classic(&self) -> Option<&Classic> {
         self.classic
