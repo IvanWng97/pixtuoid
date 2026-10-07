@@ -231,6 +231,11 @@ enum Phase {
     Walking(Walk),
     /// Walking out, gone on arrival.
     Leaving(Walk),
+    /// Lifted by a pointer, at `at`: off the floor, so it neither rests nor
+    /// roams until set down.
+    Carried {
+        at: Point,
+    },
     Gone,
 }
 
@@ -339,15 +344,40 @@ impl CreatureWalk {
                 *walked_ms = 0;
             }
             Phase::Walking(w) | Phase::Leaving(w) => w.started_at += held,
-            Phase::Gone => {}
+            Phase::Carried { .. } | Phase::Gone => {}
         }
+        self.advanced_at = now;
+    }
+
+    /// Lifted, at `at`.
+    pub(crate) fn carry(&mut self, at: Point) {
+        if !self.leaving() {
+            self.phase = Phase::Carried { at };
+        }
+    }
+
+    /// Set down near `at`, from `now`: on the walkable floor its legs reach,
+    /// else at its latest draw, where a roam would have taken it; it rests
+    /// there, and roams on from it.
+    pub(crate) fn set_down(&mut self, at: Point, layout: &SceneLayout, now: SystemTime) {
+        if !matches!(self.phase, Phase::Carried { .. }) {
+            return;
+        }
+        let at = crate::pathfind::snap_point_to_walkable(&layout.walkable, at)
+            .filter(|&p| layout.reachable.reaches(p))
+            .unwrap_or_else(|| walkable_target(layout, self.seed, self.roams));
+        self.phase = Phase::Resting {
+            at,
+            since: now,
+            walked_ms: 0,
+        };
         self.advanced_at = now;
     }
 
     /// Where it is at `now`, without advancing it; `None` once gone.
     fn stance(&self, now: SystemTime) -> Option<Stance> {
         let walk = match &self.phase {
-            Phase::Resting { at, .. } => {
+            Phase::Resting { at, .. } | Phase::Carried { at } => {
                 return Some(Stance {
                     at: *at,
                     walking: None,
@@ -389,6 +419,8 @@ impl CreatureWalk {
             self.ground_size = size;
             self.phase = match self.phase {
                 Phase::Leaving(_) | Phase::Gone => Phase::Gone,
+                // the pointer still holds it
+                Phase::Carried { at } => Phase::Carried { at },
                 _ => Phase::Resting {
                     at: walkable_target(ground.layout, self.seed, self.roams),
                     since: now,

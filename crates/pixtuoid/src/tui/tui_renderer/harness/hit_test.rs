@@ -397,21 +397,43 @@ where
             .find(|p| r.scene_hit_at(p.x, p.y).is_some_and(|h| hits(&h)))
             .map(|p| (p.x, p.y))
     };
-    let click = |(column, row)| MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
+    let event = |kind, (column, row)| MouseEvent {
+        kind,
         column,
         row,
         modifiers: KeyModifiers::NONE,
     };
+    // A click is a press and its release; the release acts.
+    let click = |r: &mut TuiRenderer<B>,
+                 ui: &mut crate::tui::ui_state::UiState,
+                 at,
+                 focus: &mut dyn FnMut(&AgentSlot),
+                 now| {
+        crate::tui::handle_mouse_event(
+            event(MouseEventKind::Down(MouseButton::Left), at),
+            ui,
+            r,
+            &scene_rx,
+            |_| panic!("a press acts on nothing"),
+            now,
+        );
+        crate::tui::handle_mouse_event(
+            event(MouseEventKind::Up(MouseButton::Left), at),
+            ui,
+            r,
+            &scene_rx,
+            |slot| focus(slot),
+            now,
+        );
+    };
     let on_agent = cell(r, &|h| matches!(h, SceneHit::Figure(HoverTarget::Agent(_))))
         .expect("an agent's cell");
     let mut focused = None;
-    crate::tui::handle_mouse_event(
-        click(on_agent),
-        &mut ui,
+    click(
         r,
-        &scene_rx,
-        |slot| focused = Some(slot.agent_id),
+        &mut ui,
+        on_agent,
+        &mut |slot| focused = Some(slot.agent_id),
         now,
     );
     assert_eq!(focused, Some(id), "the click focuses the agent it hits");
@@ -422,12 +444,11 @@ where
         "premise: nobody petted it yet"
     );
     let mut pet = |r: &mut TuiRenderer<B>, at| {
-        crate::tui::handle_mouse_event(
-            click(on_pet),
-            &mut ui,
+        click(
             r,
-            &scene_rx,
-            |_| panic!("the pet is no agent"),
+            &mut ui,
+            on_pet,
+            &mut |_| panic!("the pet is no agent"),
             at,
         );
         r.active_pet_ref().map(|p| p.petted_at)
@@ -437,6 +458,42 @@ where
         pet(r, now + Duration::from_millis(1)),
         Some(now),
         "a second click while it purrs pets nothing new"
+    );
+    // A press on the agent that drags lifts it: the next frame draws it
+    // under the pointer, and a release clicks nothing but sets it down.
+    let scene = scene_rx.borrow().clone();
+    let away = (on_agent.0.saturating_sub(12), on_agent.1 + 4);
+    let send = |r: &mut TuiRenderer<B>, ui: &mut crate::tui::ui_state::UiState, kind, at| {
+        crate::tui::handle_mouse_event(
+            event(kind, at),
+            ui,
+            r,
+            &scene_rx,
+            |_| panic!("a drag focuses nothing"),
+            now,
+        );
+    };
+    send(
+        r,
+        &mut ui,
+        MouseEventKind::Down(MouseButton::Left),
+        on_agent,
+    );
+    send(r, &mut ui, MouseEventKind::Drag(MouseButton::Left), away);
+    r.render(&scene, pack(), now + Duration::from_millis(50))
+        .unwrap();
+    assert!(
+        matches!(r.scene_hit_at(away.0, away.1), Some(SceneHit::Figure(HoverTarget::Agent(hit))) if *hit == id),
+        "the lifted agent hangs under the pointer"
+    );
+    send(r, &mut ui, MouseEventKind::Up(MouseButton::Left), away);
+    for tenth in 1..=300 {
+        r.render(&scene, pack(), now + Duration::from_millis(100 * tenth))
+            .unwrap();
+    }
+    assert!(
+        matches!(r.scene_hit_at(on_agent.0, on_agent.1), Some(SceneHit::Figure(HoverTarget::Agent(hit))) if *hit == id),
+        "set down, it walked back to its desk"
     );
 }
 

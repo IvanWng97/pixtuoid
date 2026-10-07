@@ -162,7 +162,7 @@ pub(crate) fn character_top_left(
             // Via [`Seat::render_top_left`], the sprite blit's authority.
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_top_left(w)
         }
-        Pose::AimlessAt { dest } => waypoint_top_left(dest, w),
+        Pose::AimlessAt { dest: at } | Pose::Held { at } => waypoint_top_left(at, w),
         Pose::Walking {
             from, to, t_x1000, ..
         } => walking_top_left(crate::physics::walking_position(from, to, t_x1000), w),

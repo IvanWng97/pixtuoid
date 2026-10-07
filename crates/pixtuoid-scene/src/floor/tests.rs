@@ -2015,3 +2015,111 @@ fn an_office_session_follows_its_floors_down() {
     );
     assert_eq!(office.nav().up(office.n_floors()), None, "no floor above");
 }
+
+/// A lifted agent hangs where the pointer is, in front of the room; set
+/// down, it walks home from the floor near the drop and sits.
+#[test]
+fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
+    use crate::interact::{Figure, Gesture};
+    use crate::layout::Point;
+    use crate::pose::Pose;
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let scene = make_scene(1, 4);
+    let id = *scene.agents.keys().next().expect("one agent");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let size = Size { w: 160, h: 96 };
+    let step = |session: &mut FloorSession, now| {
+        session
+            .step(
+                FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                size,
+            )
+            .expect("lays out")
+    };
+    step(&mut session, t0);
+    let at = Point { x: 40, y: 70 };
+    session.floor_mut().grip(&Gesture::Lift {
+        figure: Figure::Agent(id),
+        at,
+    });
+    let held = step(&mut session, t0 + Duration::from_millis(100));
+    assert_eq!(held.frame.poses[&id], Some(Pose::Held { at }));
+    assert_eq!(
+        held.frame.characters.iter().map(|c| c.sort_row).max(),
+        Some(u16::MAX),
+        "drawn in front of the room"
+    );
+    let at = Point { x: 50, y: 72 };
+    session.floor_mut().grip(&Gesture::Carry(at));
+    session.floor_mut().grip(&Gesture::Drop(at));
+    let dropped = step(&mut session, t0 + Duration::from_millis(200));
+    let Some(Pose::Walking { from, .. }) = dropped.frame.poses[&id] else {
+        panic!("set down, it walks home: {:?}", dropped.frame.poses[&id]);
+    };
+    assert!(
+        from.x.abs_diff(at.x) <= 8 && from.y.abs_diff(at.y) <= 8,
+        "from the floor near the drop: {from:?}"
+    );
+    let sat = (1..300)
+        .map(|tenth| step(&mut session, t0 + Duration::from_millis(200 + 100 * tenth)))
+        .find_map(|s| s.frame.poses[&id].filter(|p| !matches!(p, Pose::Walking { .. })));
+    assert_eq!(sat, Some(Pose::SeatedIdle), "home, it sits");
+}
+
+/// A lifted pet hangs where the pointer is; set down, it rests on the floor
+/// there.
+#[test]
+fn a_lifted_pet_rests_where_it_is_set_down() {
+    use crate::interact::{Figure, Gesture};
+    use crate::layout::Point;
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let scene = make_scene(1, 4);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let cat = crate::pet::Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "Mochi".into(),
+    };
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let size = Size { w: 160, h: 96 };
+    let pet_at = |session: &mut FloorSession, now| {
+        let stepped = session
+            .step(
+                FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs {
+                        pet: Some(&cat),
+                        petting: None,
+                    },
+                },
+                size,
+            )
+            .expect("lays out");
+        stepped.frame.pet.expect("the cat is drawn").pos
+    };
+    let before = pet_at(&mut session, t0);
+    let at = Point { x: 60, y: 60 };
+    session.floor_mut().grip(&Gesture::Lift {
+        figure: Figure::Pet(crate::pet::PetKind::Cat),
+        at,
+    });
+    let held = pet_at(&mut session, t0 + Duration::from_millis(100));
+    assert_ne!(held, before, "it left where it was");
+    session.floor_mut().grip(&Gesture::Drop(at));
+    let set_down = pet_at(&mut session, t0 + Duration::from_millis(200));
+    let later = pet_at(&mut session, t0 + Duration::from_millis(1_200));
+    assert_eq!(set_down, later, "it rests where it was set down");
+    assert!(
+        set_down.x.abs_diff(held.x) <= 8 && set_down.y.abs_diff(held.y) <= 8,
+        "on the floor near the drop: {set_down:?} vs held {held:?}"
+    );
+}

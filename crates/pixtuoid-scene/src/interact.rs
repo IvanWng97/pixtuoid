@@ -1,0 +1,269 @@
+//! A pointer's gestures over the office, for every painter: a press on what
+//! the frame shows, then a click or a drag. A painter turns its own events
+//! into [`Pointer::down`] / [`Pointer::moved`] / [`Pointer::up`] in layout
+//! units and carries out the [`Gesture`]s; what a click does is
+//! [`SceneHit::action`]'s, and a drag lifts the figure under the press.
+
+use std::time::SystemTime;
+
+use pixtuoid_core::AgentId;
+use pixtuoid_core::source::daemon::DaemonInstanceKey;
+
+use crate::display::{HoverTarget, PetHover};
+use crate::hit::{HitAction, SceneHit};
+use crate::layout::Point;
+use crate::pet::{PetKind, PetState};
+
+/// How far a press moves, in layout units on either axis, before it lifts
+/// what it pressed rather than clicking it: past a hand's jitter on a
+/// trackpad, under a terminal cell's width.
+const LIFT_UNITS: u16 = 2;
+
+/// A figure a pointer can lift.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Figure {
+    Agent(AgentId),
+    Pet(PetKind),
+    Mascot(DaemonInstanceKey),
+}
+
+impl Figure {
+    /// The figure `target` shows.
+    pub fn of(target: &HoverTarget) -> Self {
+        match target {
+            HoverTarget::Agent(id) => Self::Agent(*id),
+            &HoverTarget::Pet(PetHover { kind, .. }) => Self::Pet(kind),
+            HoverTarget::Mascot(key) => Self::Mascot(key.clone()),
+        }
+    }
+}
+
+/// What a press landed on, which a painter acts on at once: a press on the
+/// bare office is the floating window's to drag the window by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pressed {
+    /// A figure, or a link: a click or a drag follows.
+    Something,
+    /// Nothing that answers a pointer.
+    Bare,
+}
+
+/// What a pointer's event amounts to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Gesture {
+    /// Released where it pressed: carry out the hit's action.
+    Click(HitAction),
+    /// Moved far enough on a figure to pick it up, the pointer at `at`.
+    Lift { figure: Figure, at: Point },
+    /// The lifted figure follows the pointer to `at`.
+    Carry(Point),
+    /// Released, carrying: set the figure down at `at`.
+    Drop(Point),
+}
+
+/// Which floor a gesture belongs to, for a painter of several: a lift to the
+/// floor showing, unless a slide shows none; its carry and drop to the floor
+/// it lifted on, whatever shows since.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GripFloor(Option<usize>);
+
+impl GripFloor {
+    /// The floor `gesture` goes to, with `showing` the floor on screen, or
+    /// `None` during a slide; `None` for a click, or with nothing lifted.
+    pub fn of(&mut self, gesture: &Gesture, showing: Option<usize>) -> Option<usize> {
+        match gesture {
+            Gesture::Lift { .. } => {
+                self.0 = showing;
+                self.0
+            }
+            Gesture::Carry(_) => self.0,
+            Gesture::Drop(_) => self.0.take(),
+            Gesture::Click(_) => None,
+        }
+    }
+}
+
+/// A figure a pointer holds on a floor, or has just set down, which the
+/// floor's next step carries out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Grip {
+    Held { figure: Figure, at: Point },
+    Dropped { figure: Figure, at: Point },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum State {
+    #[default]
+    Up,
+    Pressed {
+        at: Point,
+        figure: Option<Figure>,
+        action: Option<HitAction>,
+    },
+    /// Carrying a figure, last to `at`.
+    Carrying { at: Point },
+}
+
+/// One pointer's gesture in progress.
+#[derive(Debug, Clone, Default)]
+pub struct Pointer {
+    state: State,
+}
+
+impl Pointer {
+    /// A press at `at` on `hit`, with `petting` the last petting, at `now`.
+    pub fn down(
+        &mut self,
+        hit: Option<SceneHit<'_>>,
+        at: Point,
+        petting: Option<&PetState>,
+        now: SystemTime,
+    ) -> Pressed {
+        let figure = match hit {
+            Some(SceneHit::Figure(target)) => Some(Figure::of(target)),
+            _ => None,
+        };
+        let action = hit.and_then(|hit| hit.action(petting, now));
+        let pressed = if figure.is_some() || action.is_some() {
+            Pressed::Something
+        } else {
+            Pressed::Bare
+        };
+        self.state = match pressed {
+            Pressed::Something => State::Pressed { at, figure, action },
+            Pressed::Bare => State::Up,
+        };
+        pressed
+    }
+
+    /// The pointer moved to `at`.
+    pub fn moved(&mut self, at: Point) -> Option<Gesture> {
+        match &self.state {
+            State::Pressed {
+                at: from,
+                figure: Some(figure),
+                ..
+            } if from.x.abs_diff(at.x) >= LIFT_UNITS || from.y.abs_diff(at.y) >= LIFT_UNITS => {
+                let figure = figure.clone();
+                self.state = State::Carrying { at };
+                Some(Gesture::Lift { figure, at })
+            }
+            State::Carrying { .. } => {
+                self.state = State::Carrying { at };
+                Some(Gesture::Carry(at))
+            }
+            State::Up | State::Pressed { .. } => None,
+        }
+    }
+
+    /// The press released at `at`, or off the office: there a press clicks
+    /// nothing, and a figure carried lands where it was last carried.
+    pub fn up(&mut self, at: Option<Point>) -> Option<Gesture> {
+        match std::mem::take(&mut self.state) {
+            State::Pressed { action, .. } => action.filter(|_| at.is_some()).map(Gesture::Click),
+            State::Carrying { at: last } => Some(Gesture::Drop(at.unwrap_or(last))),
+            State::Up => None,
+        }
+    }
+
+    /// Whether a figure is lifted: its tooltip and the window's hover rest.
+    pub fn carrying(&self) -> bool {
+        matches!(self.state, State::Carrying { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pt(x: u16, y: u16) -> Point {
+        Point { x, y }
+    }
+
+    /// A press on an agent clicks where it releases, and lifts it once it
+    /// moves past the jitter: then it carries, and drops on release.
+    #[test]
+    fn a_press_on_a_figure_clicks_or_drags_it() {
+        let now = SystemTime::UNIX_EPOCH;
+        let id = AgentId::from_parts("claude-code", "s");
+        let agent = HoverTarget::Agent(id);
+        let mut p = Pointer::default();
+        assert_eq!(
+            p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now),
+            Pressed::Something
+        );
+        assert_eq!(p.moved(pt(11, 10)), None, "within the jitter");
+        assert_eq!(
+            p.up(Some(pt(11, 10))),
+            Some(Gesture::Click(HitAction::Focus(id)))
+        );
+
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        assert_eq!(
+            p.moved(pt(10, 10 + LIFT_UNITS)),
+            Some(Gesture::Lift {
+                figure: Figure::Agent(id),
+                at: pt(10, 10 + LIFT_UNITS)
+            })
+        );
+        assert!(p.carrying());
+        assert_eq!(p.moved(pt(30, 40)), Some(Gesture::Carry(pt(30, 40))));
+        assert_eq!(p.up(Some(pt(31, 41))), Some(Gesture::Drop(pt(31, 41))));
+        assert!(!p.carrying());
+        assert_eq!(p.up(Some(pt(31, 41))), None, "one release per press");
+    }
+
+    /// A link clicks but never lifts, and the bare office answers nothing:
+    /// it is the painter's to drag the window by.
+    #[test]
+    fn a_link_only_clicks_and_the_bare_office_is_the_painters() {
+        let now = SystemTime::UNIX_EPOCH;
+        let mut p = Pointer::default();
+        assert_eq!(
+            p.down(Some(SceneHit::Star), pt(5, 5), None, now),
+            Pressed::Something
+        );
+        assert_eq!(p.moved(pt(50, 50)), None, "a link does not lift");
+        assert_eq!(
+            p.up(Some(pt(50, 50))),
+            Some(Gesture::Click(HitAction::Open(crate::hit::REPO_URL)))
+        );
+        assert_eq!(
+            p.down(Some(SceneHit::Furniture("Desk")), pt(5, 5), None, now),
+            Pressed::Bare
+        );
+        assert_eq!(p.down(None, pt(5, 5), None, now), Pressed::Bare);
+        assert_eq!(p.moved(pt(50, 50)), None);
+        assert_eq!(p.up(Some(pt(50, 50))), None);
+    }
+
+    /// A pet mid-petting has no click, but still lifts.
+    #[test]
+    fn a_pet_mid_petting_still_lifts() {
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100);
+        let pet = HoverTarget::Pet(PetHover {
+            kind: PetKind::Cat,
+            centre: pt(0, 0),
+            anim: "cat_sit",
+        });
+        let playing = PetState {
+            petted_at: now,
+            kind: PetKind::Cat,
+            floor_idx: 0,
+        };
+        let mut p = Pointer::default();
+        assert_eq!(
+            p.down(Some(SceneHit::Figure(&pet)), pt(5, 5), Some(&playing), now),
+            Pressed::Something
+        );
+        assert_eq!(p.up(Some(pt(5, 5))), None, "no click while a petting plays");
+        p.down(Some(SceneHit::Figure(&pet)), pt(5, 5), Some(&playing), now);
+        assert!(matches!(
+            p.moved(pt(9, 5)),
+            Some(Gesture::Lift {
+                figure: Figure::Pet(PetKind::Cat),
+                ..
+            })
+        ));
+    }
+}

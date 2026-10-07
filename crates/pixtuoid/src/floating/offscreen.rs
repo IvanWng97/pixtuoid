@@ -12,6 +12,7 @@ use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
+use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, RenderInputs};
 use pixtuoid_scene::render_scale::PixelFit;
@@ -34,6 +35,8 @@ pub struct OfficeRenderer {
     session: OfficeSession,
     /// The configured pets: each floor shows the one its seed picks.
     pets: Vec<pixtuoid_scene::pet::Pet>,
+    /// The left button's gesture over the office.
+    pointer: Pointer,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
     /// The flash the window shows.
@@ -49,6 +52,7 @@ impl OfficeRenderer {
         Self {
             session: OfficeSession::new(pack),
             pets: Vec::new(),
+            pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             rendered: (FlashPhase::default(), (0, 0)),
@@ -152,13 +156,13 @@ impl OfficeRenderer {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
-    /// What a left press at `cursor` (physical px) in a `window`-sized window
-    /// drawn at `at` does at `now`, with `petting` the last one: resize from
-    /// the bottom-right corner, carry out what the last frame shows there
-    /// ([`SceneHit::action`](pixtuoid_scene::hit::SceneHit::action)), or else
-    /// drag the frameless window — from a fixture as from the bare floor.
+    /// A left press at `cursor` (physical px) in a `window`-sized window
+    /// drawn at `at`, at `now` with `petting` the last one: resize from the
+    /// bottom-right corner, else the pointer's — on what the last frame shows
+    /// there, a click or a drag follows ([`Pointer`]) — else, on the bare
+    /// office or a fixture, drag the frameless window.
     pub(crate) fn press_at(
-        &self,
+        &mut self,
         cursor: (f64, f64),
         window: (u32, u32),
         at: WindowGeometry,
@@ -170,9 +174,43 @@ impl OfficeRenderer {
         if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
             return Press::Resize;
         }
-        self.hit_at(cursor, at)
-            .and_then(|hit| hit.action(petting, now))
-            .map_or(Press::Drag, Press::Act)
+        let unit = unit_at(cursor, at);
+        let hit = self.session.hit_at(unit_bounds(unit));
+        match self.pointer.down(hit, unit, petting, now) {
+            Pressed::Something => Press::Pointer,
+            Pressed::Bare => Press::Drag,
+        }
+    }
+
+    /// The pointer moved to `cursor` over a frame drawn at `at`; whether a
+    /// figure it carries moved, which the window redraws.
+    pub(crate) fn pointer_moved(&mut self, cursor: (f64, f64), at: WindowGeometry) -> bool {
+        let gesture = self.pointer.moved(unit_at(cursor, at));
+        if let Some(gesture) = &gesture {
+            self.session.grip(gesture);
+        }
+        gesture.is_some()
+    }
+
+    /// The press released at `cursor` over a frame drawn at `at`: the click's
+    /// action, the window's to carry out; a figure carried is set down.
+    pub(crate) fn release(
+        &mut self,
+        cursor: (f64, f64),
+        at: WindowGeometry,
+    ) -> Option<pixtuoid_scene::hit::HitAction> {
+        match self.pointer.up(Some(unit_at(cursor, at)))? {
+            Gesture::Click(action) => Some(action),
+            gesture => {
+                self.session.grip(&gesture);
+                None
+            }
+        }
+    }
+
+    /// Whether the pointer carries a figure.
+    pub(crate) fn carrying(&self) -> bool {
+        self.pointer.carrying()
     }
 
     /// What the last frame, drawn at `at`, shows the pointer at `cursor`
@@ -182,15 +220,7 @@ impl OfficeRenderer {
         cursor: (f64, f64),
         at: WindowGeometry,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
-        let unit = |px: f64| {
-            (px.max(0.0) as u32 / u32::from(at.unit_px.max(1))).min(u32::from(u16::MAX)) as u16
-        };
-        self.session.hit_at(pixtuoid_scene::layout::Bounds {
-            x: unit(cursor.0),
-            y: unit(cursor.1),
-            width: 1,
-            height: 1,
-        })
+        self.session.hit_at(unit_bounds(unit_at(cursor, at)))
     }
 
     /// Where the last frame may differ from the one on screen before it.
@@ -269,8 +299,29 @@ impl Screen {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Press {
     Resize,
-    Act(pixtuoid_scene::hit::HitAction),
+    /// The pointer's: a click or a drag follows.
+    Pointer,
     Drag,
+}
+
+/// The layout unit a frame drawn at `at` shows at `cursor` (physical px).
+fn unit_at(cursor: (f64, f64), at: WindowGeometry) -> pixtuoid_scene::layout::Point {
+    let unit = |px: f64| {
+        (px.max(0.0) as u32 / u32::from(at.unit_px.max(1))).min(u32::from(u16::MAX)) as u16
+    };
+    pixtuoid_scene::layout::Point {
+        x: unit(cursor.0),
+        y: unit(cursor.1),
+    }
+}
+
+fn unit_bounds(unit: pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::Bounds {
+    pixtuoid_scene::layout::Bounds {
+        x: unit.x,
+        y: unit.y,
+        width: 1,
+        height: 1,
+    }
 }
 
 /// Window pixels from the bottom-right corner within which a press resizes.
@@ -1196,34 +1247,56 @@ mod tests {
             )
             .expect("a frame");
         let centre = |u: u16| f64::from(u) * f64::from(at.unit_px) + f64::from(at.unit_px) / 2.0;
-        let press =
-            |cursor| renderer.press_at(cursor, (window.width, window.height), at, (None, now));
-        let (mut hit_agent, mut dragged, mut fixture_drags) = (false, false, false);
+        let size = (window.width, window.height);
+        let (mut hit_agent, mut dragged, mut fixture_drags, mut on_agent) =
+            (false, false, false, None);
         for y in 0..at.office.h {
             for x in 0..at.office.w {
                 let cursor = (centre(x), centre(y));
-                match press(cursor) {
-                    Press::Act(HitAction::Focus(hit)) => {
-                        assert_eq!(hit, id, "a press hit another agent");
-                        hit_agent = true;
+                match renderer.press_at(cursor, size, at, (None, now)) {
+                    Press::Pointer => {
+                        if let Some(HitAction::Focus(hit)) = renderer.release(cursor, at) {
+                            assert_eq!(hit, id, "a click hit another agent");
+                            hit_agent = true;
+                            on_agent = Some(cursor);
+                        }
                     }
                     Press::Drag => dragged = true,
-                    Press::Act(_) | Press::Resize => {}
+                    Press::Resize => {}
                 }
                 if matches!(renderer.hit_at(cursor, at), Some(SceneHit::Furniture(_))) {
-                    assert_eq!(press(cursor), Press::Drag, "a fixture holds the window");
+                    assert_eq!(
+                        renderer.press_at(cursor, size, at, (None, now)),
+                        Press::Drag,
+                        "a fixture holds the window"
+                    );
                     fixture_drags = true;
                 }
             }
         }
-        assert!(hit_agent, "no press found the agent the frame drew");
+        assert!(hit_agent, "no click found the agent the frame drew");
         assert!(dragged, "no bare unit to drag the window by");
         assert!(fixture_drags, "the frame drew no labelled fixture");
         let corner = (
             f64::from(window.width) - 1.0,
             f64::from(window.height) - 1.0,
         );
-        assert_eq!(press(corner), Press::Resize);
+        assert_eq!(
+            renderer.press_at(corner, size, at, (None, now)),
+            Press::Resize
+        );
+        // A press on the agent that moves lifts it, carries it, and sets it
+        // down on release, which clicks nothing.
+        let on_agent = on_agent.expect("the agent's unit");
+        assert_eq!(
+            renderer.press_at(on_agent, size, at, (None, now)),
+            Press::Pointer
+        );
+        let away = (on_agent.0 + 10.0 * f64::from(at.unit_px), on_agent.1);
+        assert!(renderer.pointer_moved(away, at), "the move lifts it");
+        assert!(renderer.carrying());
+        assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");
+        assert!(!renderer.carrying());
     }
 
     /// A tooltip paints its box in the theme's tooltip background, inside the

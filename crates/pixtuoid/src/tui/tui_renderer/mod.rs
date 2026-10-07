@@ -65,6 +65,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     cached_layout: Option<Arc<SceneLayout>>,
     last_hovers: Hovers,
     last_star: Option<pixtuoid_scene::layout::Bounds>,
+    /// The left button's gesture over the office, and the floor it grips.
+    pointer: pixtuoid_scene::interact::Pointer,
+    gripped: pixtuoid_scene::interact::GripFloor,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
@@ -231,6 +234,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             cached_layout: None,
             last_hovers: Hovers::default(),
             last_star: None,
+            pointer: pixtuoid_scene::interact::Pointer::default(),
+            gripped: pixtuoid_scene::interact::GripFloor::default(),
             last_geometry: None,
             office: PerOffice::new(),
             debug_walkable: false,
@@ -478,7 +483,67 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_geometry?.area_at(col, row)
     }
 
+    /// A left press at cell `(col, row)` at `now`: on what the last frame
+    /// showed there, a click or a drag follows.
+    pub(crate) fn press(&mut self, col: u16, row: u16, now: std::time::SystemTime) {
+        let Some(cell) = self.scene_area_at(col, row) else {
+            return;
+        };
+        let hit = self.cached_layout.as_deref().and_then(|layout| {
+            crate::tui::hit_test::scene_hit(&self.last_hovers, self.last_star, layout, cell)
+        });
+        self.pointer.down(
+            hit,
+            centre(cell.bounds()),
+            self.chrome.active_pet.as_ref(),
+            now,
+        );
+    }
+
+    /// The pointer dragged to cell `(col, row)`: a figure lifted follows it.
+    pub(crate) fn drag(&mut self, col: u16, row: u16) {
+        let Some(cell) = self.scene_area_at(col, row) else {
+            return;
+        };
+        if let Some(gesture) = self.pointer.moved(centre(cell.bounds())) {
+            self.grip(&gesture);
+        }
+    }
+
+    /// The press released at cell `(col, row)`: the click's action, the
+    /// caller's to carry out; a figure carried is set down.
+    pub(crate) fn release(&mut self, col: u16, row: u16) -> Option<pixtuoid_scene::hit::HitAction> {
+        let at = self
+            .scene_area_at(col, row)
+            .map(|cell| centre(cell.bounds()));
+        match self.pointer.up(at)? {
+            pixtuoid_scene::interact::Gesture::Click(action) => Some(action),
+            gesture => {
+                self.grip(&gesture);
+                None
+            }
+        }
+    }
+
+    /// Where a tooltip follows the pointer: nowhere while it carries a
+    /// figure, which has none.
+    fn tooltip_pos(&self) -> Option<(u16, u16)> {
+        self.mouse_pos.filter(|_| !self.pointer.carrying())
+    }
+
+    fn grip(&mut self, gesture: &pixtuoid_scene::interact::Gesture) {
+        let showing = self.nav.transition().is_none().then(|| self.nav.current());
+        if let Some(floor) = self
+            .gripped
+            .of(gesture, showing)
+            .and_then(|f| self.floors.get_mut(f))
+        {
+            floor.grip(gesture);
+        }
+    }
+
     /// What cell `(col, row)` showed the pointer in the last frame drawn.
+    #[cfg(test)]
     pub(crate) fn scene_hit_at(
         &self,
         col: u16,
@@ -956,11 +1021,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .frame(scene, &floor_scene, pack, now, self.nav.current(), nf);
         let popup_scale = overlays.popup_scale;
+        let mouse_pos = self.tooltip_pos();
         let mut draw_ctx = DrawCtx {
             world,
             floor: &mut self.floors[self.nav.current()],
             office: self.office.stores(),
-            mouse_pos: self.mouse_pos,
+            mouse_pos,
             debug_walkable: self.debug_walkable,
             theme: self.chrome.theme,
             theme_picker: overlays.theme_picker,
@@ -1182,7 +1248,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let hovers = raster.hovers().cloned().unwrap_or_default();
         let star = raster.star();
         let geometry = fitted.geometry();
-        let mouse = self.mouse_pos.and_then(|(mx, my)| {
+        let mouse = self.tooltip_pos().and_then(|(mx, my)| {
             let hit = scene_hit(&hovers, star, &frame_layout, geometry.area_at(mx, my)?)?;
             Some((mx, my, hit))
         });
@@ -1237,3 +1303,11 @@ where
 
 #[cfg(test)]
 mod harness;
+
+/// The pixel a cell showing `bounds` points at: its middle.
+fn centre(bounds: pixtuoid_scene::layout::Bounds) -> pixtuoid_scene::layout::Point {
+    pixtuoid_scene::layout::Point {
+        x: bounds.x + bounds.width / 2,
+        y: bounds.y + bounds.height / 2,
+    }
+}

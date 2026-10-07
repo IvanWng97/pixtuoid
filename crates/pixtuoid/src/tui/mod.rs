@@ -960,15 +960,20 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         return;
     }
     match m.kind {
-        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+        MouseEventKind::Moved => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            renderer.set_mouse_pos(Some((m.column, m.row)));
+            renderer.drag(m.column, m.row);
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let action = renderer
-                .scene_hit_at(m.column, m.row)
-                .and_then(|hit| hit.action(renderer.active_pet_ref(), now));
-            match action {
+            renderer.press(m.column, m.row, now);
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            renderer.set_mouse_pos(Some((m.column, m.row)));
+            match renderer.release(m.column, m.row) {
                 Some(HitAction::Focus(id)) => {
                     let slot = scene_rx.borrow().agents.get(&id).cloned();
                     if let Some(slot) = slot {

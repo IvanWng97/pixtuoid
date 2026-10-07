@@ -137,6 +137,8 @@ pub struct FloorCtx {
     pub walks: HashMap<AgentId, WalkState>,
     /// The pet's and the gateway mascots' walks.
     pub(crate) creatures: HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
+    /// What a pointer holds on this floor, or just set down.
+    pub(crate) grip: Option<crate::interact::Grip>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -167,6 +169,7 @@ impl FloorCtx {
             neon: NeonState::new(),
             walks: HashMap::new(),
             creatures: HashMap::new(),
+            grip: None,
             door_anim_max_ms: 0,
             off_beat: false,
             layout_memo: None,
@@ -192,6 +195,7 @@ impl FloorCtx {
             neon: &mut self.neon,
             chitchat,
             creatures: &mut self.creatures,
+            grip: &mut self.grip,
         }
     }
 
@@ -381,6 +385,29 @@ pub struct PerFloor {
 }
 
 impl PerFloor {
+    /// Hand this floor a pointer's lift, carry or drop; its next step carries
+    /// it out. A click is the painter's ([`SceneHit::action`](crate::hit::SceneHit::action)).
+    #[doc(hidden)]
+    pub fn grip(&mut self, gesture: &crate::interact::Gesture) {
+        use crate::interact::{Gesture, Grip};
+        let grip = &mut self.ctx.grip;
+        *grip = match (gesture, grip.take()) {
+            (Gesture::Lift { figure, at }, _) => Some(Grip::Held {
+                figure: figure.clone(),
+                at: *at,
+            }),
+            (&Gesture::Carry(at), Some(Grip::Held { figure, .. })) => {
+                Some(Grip::Held { figure, at })
+            }
+            (&Gesture::Drop(at), Some(Grip::Held { figure, .. })) => {
+                Some(Grip::Dropped { figure, at })
+            }
+            (Gesture::Click(_), kept) => kept,
+            // nothing held to carry or drop: a lift on another floor, or none
+            (Gesture::Carry(_) | Gesture::Drop(_), _) => None,
+        };
+    }
+
     /// Fresh floor stores, drawn with `pack`.
     pub fn new(pack: Arc<Pack>) -> Self {
         Self {

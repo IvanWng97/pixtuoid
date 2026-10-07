@@ -284,6 +284,7 @@ pub struct OfficeSession {
     /// not the one on screen.
     shown: Option<usize>,
     shown_changed: bool,
+    gripped: crate::interact::GripFloor,
 }
 
 impl OfficeSession {
@@ -298,6 +299,7 @@ impl OfficeSession {
             slide: None,
             shown: None,
             shown_changed: true,
+            gripped: crate::interact::GripFloor::default(),
         }
     }
 
@@ -309,6 +311,17 @@ impl OfficeSession {
     /// Slide to floor `target`: [`FloorNav::navigate`].
     pub fn navigate(&mut self, target: usize, now: SystemTime) -> bool {
         self.nav.navigate(target, now)
+    }
+
+    /// Hand a pointer's lift to the floor showing, and its carry and drop to
+    /// the floor it lifted on, whatever shows since: [`PerFloor::grip`]. A
+    /// lift during a slide, which shows no one floor, lifts nothing.
+    pub fn grip(&mut self, gesture: &crate::interact::Gesture) {
+        let showing = self.nav.transition().is_none().then(|| self.nav.current());
+        let floor = self.gripped.of(gesture, showing);
+        if let Some(view) = floor.and_then(|f| self.views.get_mut(f)) {
+            view.floor.grip(gesture);
+        }
     }
 
     /// The floors the last frame's scene filled.
