@@ -32,8 +32,7 @@ use tokio::time::MissedTickBehavior;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use crate::tui::hit_test::SceneHit;
-use pixtuoid_scene::display::{HoverTarget, PetHover};
+use pixtuoid_scene::hit::HitAction;
 use pixtuoid_scene::{pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
@@ -690,7 +689,7 @@ pub(crate) struct TuiSession {
     /// the reducer task's reconciler observes (gate + graceful evict).
     pub connected: crate::runtime::ConnectedSources,
     /// Where the warn-floor log lives, for the Sources panel's drift history.
-    pub log: Option<crate::doctor::LogLocation>,
+    pub log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
     pub drift: crate::doctor::DriftSeen,
     /// The persisted mute/volume, handed whole to `AudioController::new`.
@@ -967,29 +966,27 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            match renderer.scene_hit_at(m.column, m.row) {
-                Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
+            let action = renderer
+                .scene_hit_at(m.column, m.row)
+                .and_then(|hit| hit.action(renderer.active_pet_ref(), now));
+            match action {
+                Some(HitAction::Focus(id)) => {
                     let slot = scene_rx.borrow().agents.get(&id).cloned();
                     if let Some(slot) = slot {
                         focus(&slot);
                     }
                 }
-                Some(SceneHit::Star) => {
-                    let _ = open::that(widgets::REPO_URL);
-                }
-                Some(SceneHit::Coffee) => {
-                    let _ = open::that("https://buymeacoffee.com/IvanWng97");
-                }
-                Some(SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, .. })))
-                    if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) =>
-                {
+                Some(HitAction::Pet(kind)) => {
                     renderer.set_active_pet(Some(renderer::PetState {
                         petted_at: now,
                         kind,
                         floor_idx: renderer.current_floor(),
                     }));
                 }
-                _ => {}
+                Some(HitAction::Open(url)) => {
+                    let _ = open::that(url);
+                }
+                None => {}
             }
         }
         _ => {}
@@ -1073,24 +1070,21 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
-            fit,
-            protocol,
-            cell,
-            tmux,
-            medium,
-            ..
+            fit, route, cell, ..
         } => {
             renderer.painted_by(jank::Painter {
-                look: protocol.name(),
+                look: route.protocol().name(),
                 scale: fit.scale().get(),
-                tmux,
+                tmux: route.tmux(),
                 terminal,
                 sync: out.synchronized(),
             });
-            renderer.set_cutaway(
-                cutaway::TileCutaway::new(fit, cell, protocol, tmux, Box::new(out.clone()))
-                    .through(medium),
-            );
+            renderer.set_cutaway(cutaway::TileCutaway::new(
+                fit,
+                cell,
+                route,
+                Box::new(out.clone()),
+            ));
         }
         _ => {
             renderer.painted_by(jank::Painter {

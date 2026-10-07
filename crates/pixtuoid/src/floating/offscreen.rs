@@ -114,6 +114,47 @@ impl OfficeRenderer {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
+    /// What a left press at `cursor` (physical px) in a `window`-sized window
+    /// drawn at `at` does at `now`, with `petting` the last one: resize from
+    /// the bottom-right corner, carry out what the last frame shows there
+    /// ([`SceneHit::action`](pixtuoid_scene::hit::SceneHit::action)), or else
+    /// drag the frameless window — from a fixture as from the bare floor.
+    pub(crate) fn press_at(
+        &self,
+        cursor: (f64, f64),
+        window: (u32, u32),
+        at: WindowGeometry,
+        (petting, now): (
+            Option<&pixtuoid_scene::pet::PetState>,
+            std::time::SystemTime,
+        ),
+    ) -> Press {
+        if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+            return Press::Resize;
+        }
+        self.hit_at(cursor, at)
+            .and_then(|hit| hit.action(petting, now))
+            .map_or(Press::Drag, Press::Act)
+    }
+
+    /// What the last frame, drawn at `at`, shows the pointer at `cursor`
+    /// (physical px).
+    pub fn hit_at(
+        &self,
+        cursor: (f64, f64),
+        at: WindowGeometry,
+    ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
+        let unit = |px: f64| {
+            (px.max(0.0) as u32 / u32::from(at.unit_px.max(1))).min(u32::from(u16::MAX)) as u16
+        };
+        self.session.hit_at(pixtuoid_scene::layout::Bounds {
+            x: unit(cursor.0),
+            y: unit(cursor.1),
+            width: 1,
+            height: 1,
+        })
+    }
+
     /// The status-footer model for the current scene — single-floor, so `floor = None`
     /// (no breadcrumb). `budget` is the caller's column budget ([`footer_budget`] at the
     /// live width). Source-death is deferred (`source_warning: None`) — floating doesn't
@@ -140,6 +181,17 @@ impl OfficeRenderer {
         build_footer(&inputs, budget)
     }
 }
+
+/// What a left press does: [`OfficeRenderer::press_at`]'s answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Press {
+    Resize,
+    Act(pixtuoid_scene::hit::HitAction),
+    Drag,
+}
+
+/// Window pixels from the bottom-right corner within which a press resizes.
+const RESIZE_CORNER_PX: f64 = 18.0;
 
 /// One floor's frame for the window: a [`RenderInputs`] whose office extent
 /// the window's [`WindowGeometry`] owns.
@@ -169,6 +221,8 @@ pub struct WindowGeometry {
     pub look: Look,
     pub office: Size,
     pub upscale: u16,
+    /// Window pixels per layout unit, which a pointer maps back through.
+    pub unit_px: u16,
 }
 
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
@@ -195,6 +249,7 @@ pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeome
         },
         office: fit.logical(),
         upscale: fit.upscale(),
+        unit_px: fit.scale().get(),
     }
 }
 
@@ -334,6 +389,19 @@ impl<'a> XrgbSurface<'a> {
         });
     }
 
+    /// Fill the `w`×`h` rect from `(x, y)` with `color`, clipped to the
+    /// surface.
+    fn fill(&mut self, (x, y): (i32, i32), (w, h): (i32, i32), color: u32) {
+        let (x0, y0) = (x.max(0), y.max(0));
+        let (x1, y1) = ((x + w).min(self.w as i32), (y + h).min(self.h as i32));
+        for py in y0..y1 {
+            let row = py as usize * self.w;
+            for px in x0..x1 {
+                self.px[row + px as usize] = color;
+            }
+        }
+    }
+
     /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
     fn draw_shadowed_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
         crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
@@ -342,6 +410,86 @@ impl<'a> XrgbSurface<'a> {
         crate::aa_text::draw_text_at(text, x, top_y, font_px, |gx, gy, cov| {
             self.blend(gx, gy, color, cov)
         });
+    }
+}
+
+/// Window pixels between a tooltip's box and its text.
+const TOOLTIP_PAD_PX: i32 = 6;
+/// Window pixels from the pointer to a tooltip's box.
+const TOOLTIP_GAP_PX: i32 = 14;
+
+/// Paint `tip` by the pointer at `cursor` (physical px) — the floating twin
+/// of the TUI's `paint_tooltip`, laying out the SAME shared model: an agent's
+/// card opens below the pointer and a label above it, each flipping when the
+/// window has no room, and each shifting left to stay inside it.
+pub fn paint_tooltip_into_surface(
+    sb: &mut XrgbSurface<'_>,
+    tip: &pixtuoid_scene::tooltip::Tooltip,
+    cursor: (f64, f64),
+    theme: &Theme,
+) {
+    use pixtuoid_scene::tooltip::{TipAnchor, TipRow, TipSpan};
+    let width = |spans: &[TipSpan]| -> i32 {
+        spans
+            .iter()
+            .map(|s| crate::aa_text::text_width(&s.text, FOOTER_FONT_PX))
+            .sum()
+    };
+    let gap = crate::aa_text::text_width("  ", FOOTER_FONT_PX);
+    let content_w = tip
+        .rows
+        .iter()
+        .map(|row| match row {
+            TipRow::Spans(spans) => width(spans),
+            TipRow::Heading { left, right } => {
+                width(left) + gap + crate::aa_text::text_width(&right.text, FOOTER_FONT_PX)
+            }
+            TipRow::Rule => 0,
+        })
+        .max()
+        .unwrap_or(0);
+    let line_h = crate::aa_text::line_height(FOOTER_FONT_PX);
+    let (box_w, box_h) = (
+        content_w + 2 * TOOLTIP_PAD_PX,
+        line_h * tip.rows.len() as i32 + 2 * TOOLTIP_PAD_PX,
+    );
+    let (cx, cy) = (cursor.0 as i32, cursor.1 as i32);
+    let (sw, sh) = (sb.w as i32, sb.h as i32);
+    let below = cy + TOOLTIP_GAP_PX;
+    let above = cy - TOOLTIP_GAP_PX - box_h;
+    let y = match tip.anchor {
+        TipAnchor::Below if below + box_h > sh => above,
+        TipAnchor::Below => below,
+        TipAnchor::Above if above < 0 => below,
+        TipAnchor::Above => above,
+    }
+    .clamp(0, (sh - box_h).max(0));
+    let x = (cx + TOOLTIP_GAP_PX).min(sw - box_w).max(0);
+    sb.fill((x, y), (box_w, box_h), pack_xrgb(theme.ui.tooltip_bg));
+    let ink = |s: &TipSpan| pack_xrgb(s.tone.rgb(theme).unwrap_or(theme.ui.tooltip_text));
+    let left = x + TOOLTIP_PAD_PX;
+    for (i, row) in tip.rows.iter().enumerate() {
+        let top = y + TOOLTIP_PAD_PX + line_h * i as i32;
+        let mut run = |spans: &[TipSpan], mut at: i32| {
+            for s in spans {
+                sb.draw_shadowed_text(&s.text, at, top, FOOTER_FONT_PX, ink(s));
+                at += crate::aa_text::text_width(&s.text, FOOTER_FONT_PX);
+            }
+        };
+        match row {
+            TipRow::Spans(spans) => run(spans, left),
+            TipRow::Heading { left: l, right } => {
+                run(l, left);
+                let right_x =
+                    left + content_w - crate::aa_text::text_width(&right.text, FOOTER_FONT_PX);
+                run(std::slice::from_ref(right), right_x);
+            }
+            TipRow::Rule => sb.fill(
+                (left, top + line_h / 2),
+                (content_w, 1),
+                pack_xrgb(theme.ui.tooltip_dim),
+            ),
+        }
     }
 }
 
@@ -388,11 +536,11 @@ mod tests {
         let density = density();
         WindowGeometry {
             look: Look::Cutaway {
-                scale: pixtuoid_scene::render_scale::RenderScale::new(density.get())
-                    .expect("nonzero"),
+                scale: pixtuoid_scene::render_scale::RenderScale::from(density),
             },
             office: size,
             upscale: 1,
+            unit_px: density.get(),
         }
     }
 
@@ -941,6 +1089,132 @@ mod tests {
             s.agents.insert(a.agent_id, a);
         }
         s
+    }
+
+    /// A press acts on what the frame on screen shows under it: an agent's
+    /// units hit that agent, a bare unit drags, and the bottom-right corner
+    /// resizes.
+    #[test]
+    fn a_press_hits_what_the_frame_shows_there() {
+        use pixtuoid_scene::hit::{HitAction, SceneHit};
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        let scene = scene_with(vec![agent], 16);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let window = PhysicalSize::new(960u32, 640u32);
+        let at = window_geometry(window, pack.max_density_variant());
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer
+            .render(
+                at,
+                WindowFrame {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    place: pixtuoid_scene::look::Place::default(),
+                },
+            )
+            .expect("a frame");
+        let centre = |u: u16| f64::from(u) * f64::from(at.unit_px) + f64::from(at.unit_px) / 2.0;
+        let press =
+            |cursor| renderer.press_at(cursor, (window.width, window.height), at, (None, now));
+        let (mut hit_agent, mut dragged, mut fixture_drags) = (false, false, false);
+        for y in 0..at.office.h {
+            for x in 0..at.office.w {
+                let cursor = (centre(x), centre(y));
+                match press(cursor) {
+                    Press::Act(HitAction::Focus(hit)) => {
+                        assert_eq!(hit, id, "a press hit another agent");
+                        hit_agent = true;
+                    }
+                    Press::Drag => dragged = true,
+                    Press::Act(_) | Press::Resize => {}
+                }
+                if matches!(renderer.hit_at(cursor, at), Some(SceneHit::Furniture(_))) {
+                    assert_eq!(press(cursor), Press::Drag, "a fixture holds the window");
+                    fixture_drags = true;
+                }
+            }
+        }
+        assert!(hit_agent, "no press found the agent the frame drew");
+        assert!(dragged, "no bare unit to drag the window by");
+        assert!(fixture_drags, "the frame drew no labelled fixture");
+        let corner = (
+            f64::from(window.width) - 1.0,
+            f64::from(window.height) - 1.0,
+        );
+        assert_eq!(press(corner), Press::Resize);
+    }
+
+    /// A tooltip paints its box in the theme's tooltip background, inside the
+    /// window wherever the pointer is: a label near the top flips below it,
+    /// and a card at the right edge shifts left.
+    #[test]
+    fn a_tooltip_stays_in_the_window_and_flips_off_the_edges() {
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let bg = pack_xrgb(theme.ui.tooltip_bg);
+        let (w, h) = (320usize, 200usize);
+        let painted = |tip: &pixtuoid_scene::tooltip::Tooltip, cursor: (f64, f64)| {
+            let mut px = vec![0u32; w * h];
+            let mut sb = XrgbSurface::new(&mut px, w, h).expect("sized");
+            paint_tooltip_into_surface(&mut sb, tip, cursor, theme);
+            let rows: Vec<usize> = (0..h)
+                .filter(|&y| px[y * w..(y + 1) * w].contains(&bg))
+                .collect();
+            let cols: Vec<usize> = (0..w)
+                .filter(|&x| (0..h).any(|y| px[y * w + x] == bg))
+                .collect();
+            (rows, cols)
+        };
+        let label = pixtuoid_scene::tooltip::coffee();
+        let (rows, _) = painted(&label, (100.0, 4.0));
+        assert!(!rows.is_empty(), "the label painted nothing");
+        assert!(
+            rows[0] > 4,
+            "a label at the top flips below the pointer: {rows:?}"
+        );
+        let (rows, _) = painted(&label, (100.0, 150.0));
+        assert!(
+            *rows.last().expect("painted") < 150,
+            "a label opens above the pointer"
+        );
+        let (_, cols) = painted(&label, (318.0, 100.0));
+        assert!(
+            *cols.last().expect("painted") < w,
+            "the label shifted inside the right edge"
+        );
+        assert!(
+            cols[0] < 318,
+            "the label shifted left of a right-edge pointer"
+        );
+        // An agent's card opens below the pointer, flips above at the bottom
+        // edge, and shifts left at the right one.
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        let scene = scene_with(vec![agent], 16);
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let card = pixtuoid_scene::tooltip::agent(&scene, id, now).expect("the agent's card");
+        let (rows, _) = painted(&card, (100.0, 20.0));
+        assert!(rows[0] > 20, "a card opens below the pointer: {rows:?}");
+        let (rows, _) = painted(&card, (100.0, 195.0));
+        assert!(
+            *rows.last().expect("painted") < 195 && rows[0] > 0,
+            "a card at the bottom flips above, inside the window: {rows:?}"
+        );
+        let (_, cols) = painted(&card, (318.0, 20.0));
+        assert!(
+            cols[0] < 318 && *cols.last().expect("painted") < w,
+            "a card at the right edge shifts left, inside the window"
+        );
     }
 
     #[test]

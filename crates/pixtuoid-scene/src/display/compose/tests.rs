@@ -63,7 +63,7 @@ fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
 #[cfg(feature = "cutaway-assets")]
 fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
     let pack = test_default_pack();
-    let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let scale = RenderScale::from(pack.max_density_variant());
     let desk = crate::layout::Point { x: 0, y: 20 };
     let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
     let desk_box = desk_span(&pack, art, desk, scale).expect("desk");
@@ -675,8 +675,7 @@ fn the_floor_indicator_stays_in_its_cell() {
     let densities = pack.density_variants();
     assert!(!densities.is_empty(), "the pack draws a density");
     for d in densities {
-        let pen = Pen::new(RenderScale::new(d.get()).expect("nonzero"), d.get())
-            .expect("d divides itself");
+        let pen = Pen::new(RenderScale::from(*d), d.get()).expect("d divides itself");
         for floor in [1, 12, 99] {
             let run = TextRun::indicator(door, floor, &crate::theme::NORMAL);
             let plate = run_rect(&run, pen);
@@ -771,7 +770,7 @@ fn the_board_writes_inside_the_signs_interior() {
         NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
     };
     let pack = test_default_pack();
-    let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let scale = RenderScale::from(pack.max_density_variant());
     let counts = crate::tally::StateCounts {
         waiting: 12,
         active: 34,
@@ -1215,7 +1214,7 @@ fn a_walker_just_south_of_a_desk_front_draws_over_it() {
 #[test]
 fn a_fixture_ties_a_figure_as_the_roster_says() {
     let pack = test_default_pack();
-    let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let scale = RenderScale::from(pack.max_density_variant());
     let mut over = std::collections::BTreeSet::new();
     for layout in many_layouts() {
         for fixture in layout.fixtures() {
@@ -1300,7 +1299,7 @@ fn a_wall_band_draws_over_a_figure_at_its_row() {
 #[test]
 fn the_lounge_couch_is_drawn_from_behind() {
     let pack = test_default_pack();
-    let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let scale = RenderScale::from(pack.max_density_variant());
     let layout = many_layouts()
         .find(|l| l.lounge.is_some())
         .expect("an office with a lounge");
@@ -1595,7 +1594,7 @@ fn ground_standing_wall_decor_sorts_with_the_ground() {
 fn every_desk_follows_the_one_arrangement() {
     use crate::layout::{Facing, Point};
     let pack = test_default_pack();
-    let dense = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let dense = RenderScale::from(pack.max_density_variant());
     let desk = Point { x: 40, y: 30 };
     for facing in [Facing::North, Facing::South] {
         let art = crate::pack::desk_sprite_name(facing);
@@ -1667,7 +1666,7 @@ fn the_cup_stands_on_the_sitters_side() {
     let pack = test_default_pack();
     for scale in [
         RenderScale::ONE,
-        RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+        RenderScale::from(pack.max_density_variant()),
     ] {
         for facing in [Facing::North, Facing::South] {
             let art = crate::pack::desk_sprite_name(facing);
@@ -1700,7 +1699,7 @@ fn the_cup_stands_on_the_sitters_side() {
 fn a_frames_bulbs_are_each_desk_arts_own() {
     use crate::layout::{Facing, Point};
     let pack = test_default_pack();
-    let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let scale = RenderScale::from(pack.max_density_variant());
     let desk = Point { x: 40, y: 30 };
     let arts = [Facing::South, Facing::North].map(crate::pack::desk_sprite_name);
     let fresh = arts.map(|art| DeskBulbCells::default().at(desk, art, &pack, scale));

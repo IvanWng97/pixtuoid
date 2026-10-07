@@ -1,6 +1,8 @@
 //! Where the office sits under the terminal's cells.
 
-use pixtuoid_scene::layout::{Bounds, Point};
+use pixtuoid_scene::layout::Bounds;
+#[cfg(test)]
+use pixtuoid_scene::layout::Point;
 use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::{Position, Rect};
 
@@ -98,6 +100,7 @@ impl CellArea {
 
     /// Whether this cell shows any pixel of the `w`×`h` box whose top-left is
     /// `tl`; an empty box shows nowhere.
+    #[cfg(test)]
     pub(crate) fn overlaps(self, tl: Point, w: u16, h: u16) -> bool {
         // u32: a box's exclusive end can lie one past `u16::MAX`.
         let (end_x, end_y) = (

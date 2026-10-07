@@ -6056,8 +6056,7 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 #[cfg(feature = "cutaway-assets")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
     let pack = crate::pack::test_default_pack();
-    let scale =
-        crate::render_scale::RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let scale = crate::render_scale::RenderScale::from(pack.max_density_variant());
     let mut cache = crate::frame_cache::FrameCache::new();
     let now = SystemTime::UNIX_EPOCH;
     let mut asymmetric = 0;
