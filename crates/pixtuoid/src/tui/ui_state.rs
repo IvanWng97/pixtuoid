@@ -17,69 +17,6 @@ use connection::{ConnectionFrame, ConnectionRow, ConnectionUi};
 use dashboard::{DashboardFrame, DashboardUi};
 use welcome::{OnboardingFrame, WelcomeUi};
 
-/// The throttled decode-drift re-scan that drives the footer nudge. The ONE
-/// deliberate exception to "no scan-the-history" — it derives a passive
-/// diagnostic nudge from the log artifact, NOT lifecycle state.
-///
-/// INCREMENTAL: log rotation is startup-only, so within a session the file is
-/// append-only and unbounded. Re-reading the WHOLE file every pass inline in the
-/// ~30fps loop would turn that growth into monotonically-worsening frame
-/// hitches, so the scan keeps a byte offset and reads ONLY the appended bytes.
-/// Drift breadcrumbs are monotone within a session, so prefixes accumulate.
-#[derive(Default)]
-struct DriftScan {
-    last_scan: Option<Instant>,
-    /// End of the last fully-scanned LINE — never mid-line: a read boundary can
-    /// split a breadcrumb, so a partial trailing line waits for the next pass.
-    offset: u64,
-    drifted: Vec<String>,
-}
-
-impl DriftScan {
-    fn rescan(&mut self, log_path: &Option<std::path::PathBuf>) {
-        let Some(lp) = log_path else { return };
-        const DRIFT_RESCAN_INTERVAL_SECS: u64 = 15;
-        let due = self
-            .last_scan
-            .is_none_or(|t| t.elapsed().as_secs() >= DRIFT_RESCAN_INTERVAL_SECS);
-        if due {
-            self.last_scan = Some(Instant::now());
-            self.scan_appended(lp);
-        }
-    }
-
-    /// One unthrottled incremental pass: from the stored offset to EOF, scanning
-    /// COMPLETE lines only. A file shrunk out from under us (external rotation)
-    /// rescans from the top.
-    fn scan_appended(&mut self, lp: &std::path::Path) {
-        use std::io::{Read, Seek, SeekFrom};
-        let Ok(mut f) = std::fs::File::open(lp) else {
-            return;
-        };
-        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-        if len < self.offset {
-            self.offset = 0;
-        }
-        if len == self.offset || f.seek(SeekFrom::Start(self.offset)).is_err() {
-            return;
-        }
-        let mut new = Vec::with_capacity(usize::try_from(len - self.offset).unwrap_or(0));
-        if f.take(len - self.offset).read_to_end(&mut new).is_err() {
-            return;
-        }
-        let Some(last_nl) = new.iter().rposition(|&b| b == b'\n') else {
-            return;
-        };
-        let text = String::from_utf8_lossy(&new[..=last_nl]);
-        self.offset += (last_nl + 1) as u64;
-        for p in crate::doctor::drifted_sources(&text) {
-            if !self.drifted.contains(&p) {
-                self.drifted.push(p);
-            }
-        }
-    }
-}
-
 /// One frame's renderer mirrors — bundling them keeps the compute (here) and
 /// the push (one call in the loop) from drifting apart per surface.
 pub(crate) struct RenderFrames {
@@ -135,10 +72,10 @@ pub(crate) struct UiState {
     pub(crate) saved_theme_idx: usize,
     pub(crate) dashboard: DashboardUi,
     pub(crate) connection: ConnectionUi,
-    drift_scan: DriftScan,
+    drift: crate::doctor::DriftSeen,
     socket_path: std::path::PathBuf,
-    /// The warn-floor log path the drift re-scan reads (`None` = no surfacing).
-    log_path: Option<std::path::PathBuf>,
+    /// Where the warn-floor log lives, for the Sources panel (`None` = no log).
+    log: Option<crate::doctor::LogLocation>,
 }
 
 /// `$PIXTUOID_FAKE_NOW`'s clock, said once at warn: a stray export would
@@ -163,7 +100,8 @@ impl UiState {
         onboarding_ui: WelcomeUi,
         version_popup: bool,
         socket_path: std::path::PathBuf,
-        log_path: Option<std::path::PathBuf>,
+        log: Option<crate::doctor::LogLocation>,
+        drift: crate::doctor::DriftSeen,
     ) -> Self {
         let onboarding_opened_at = (!onboarding_ui.is_empty()).then(Instant::now);
         let saved_theme_idx = theme::ALL_THEMES
@@ -183,9 +121,9 @@ impl UiState {
             saved_theme_idx,
             dashboard: DashboardUi::default(),
             connection: ConnectionUi::default(),
-            drift_scan: DriftScan::default(),
+            drift,
             socket_path,
-            log_path,
+            log,
         }
     }
 
@@ -407,12 +345,9 @@ impl UiState {
         scene: &SceneState,
         health: &[SourceDeath],
     ) -> RenderFrames {
-        // A counting tracing::Layer was rejected here: stateful blast radius on
-        // the single global file subscriber, for a hint this scan already covers.
-        self.drift_scan.rescan(&self.log_path);
         let source_warning = crate::doctor::footer_warning(
             widgets::source_warning_message(health).as_deref(),
-            &self.drift_scan.drifted,
+            &self.drift.prefixes(),
         );
 
         // Re-anchor the selection by AgentId — an agent may have exited.
@@ -495,11 +430,11 @@ impl UiState {
     }
 
     /// The Sources panel's cached rows carry a per-source HEALTH summary that
-    /// scans the warn-floor log, so read it fresh at each (infrequent) rebuild.
+    /// scans the retained logs, so read them fresh at each (infrequent) rebuild.
     pub(crate) fn read_conn_log(&self) -> String {
-        self.log_path
-            .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
+        self.log
+            .as_ref()
+            .map(|at| crate::doctor::read_logs(at).0)
             .unwrap_or_default()
     }
 }
@@ -516,6 +451,7 @@ mod tests {
             false,
             std::path::PathBuf::from("/tmp/sock"),
             None,
+            crate::doctor::DriftSeen::default(),
         )
     }
 
@@ -605,6 +541,7 @@ mod tests {
             false,
             std::path::PathBuf::from("/tmp/sock"),
             None,
+            crate::doctor::DriftSeen::default(),
         );
         assert!(ui.modal().onboarding_open, "a roster opens the overlay");
         ui.close_onboarding();
@@ -630,87 +567,5 @@ mod tests {
         assert_eq!(a, ui.now(), "paused: the same frozen instant");
         ui.toggle_pause();
         assert_ne!(a, ui.now(), "unpaused: live time again");
-    }
-
-    // A real tracing-fmt drift breadcrumb line — the shape doctor's scanner parses.
-    fn drift_line(source: &str, name: &str) -> String {
-        format!(
-            "2026-06-15T00:00:00Z  WARN pixtuoid::drift: source={source} kind=\"unknown_event\" name={name}\n"
-        )
-    }
-
-    #[test]
-    fn drift_scan_reads_incrementally_and_accumulates_prefixes() {
-        use std::io::Write;
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = dir.path().join("log");
-        std::fs::write(&log, drift_line("claude-code", "X")).unwrap();
-
-        let mut scan = DriftScan::default();
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted, vec!["cc".to_string()]);
-        let after_first = scan.offset;
-        assert_eq!(
-            after_first,
-            std::fs::metadata(&log).unwrap().len(),
-            "offset advances past the scanned lines"
-        );
-
-        let codex_line = drift_line("codex", "Y");
-        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
-        f.write_all(codex_line.as_bytes()).unwrap();
-        drop(f);
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted, vec!["cc".to_string(), "cx".to_string()]);
-        assert_eq!(
-            scan.offset,
-            after_first + codex_line.len() as u64,
-            "second pass consumed only the appended bytes"
-        );
-
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted.len(), 2);
-    }
-
-    #[test]
-    fn drift_scan_leaves_a_partial_trailing_line_for_the_next_pass() {
-        use std::io::Write;
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = dir.path().join("log");
-        let full = drift_line("claude-code", "X");
-        std::fs::write(&log, full.trim_end_matches('\n')).unwrap();
-
-        let mut scan = DriftScan::default();
-        scan.scan_appended(&log);
-        assert_eq!(scan.offset, 0, "a partial line is not consumed");
-        assert!(scan.drifted.is_empty(), "…nor scanned: {:?}", scan.drifted);
-
-        let mut f = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
-        f.write_all(b"\n").unwrap();
-        drop(f);
-        scan.scan_appended(&log);
-        assert_eq!(scan.drifted, vec!["cc".to_string()]);
-    }
-
-    #[test]
-    fn drift_scan_resets_on_external_truncation_and_tolerates_missing_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = dir.path().join("log");
-
-        let mut scan = DriftScan::default();
-        scan.scan_appended(&log);
-        assert_eq!(scan.offset, 0);
-
-        std::fs::write(&log, drift_line("claude-code", "X")).unwrap();
-        scan.scan_appended(&log);
-        assert!(scan.offset > 0);
-
-        std::fs::write(&log, drift_line("codex", "Y")).unwrap();
-        scan.scan_appended(&log);
-        assert!(
-            scan.drifted.contains(&"cx".to_string()),
-            "post-truncation content is scanned from offset 0: {:?}",
-            scan.drifted
-        );
     }
 }
