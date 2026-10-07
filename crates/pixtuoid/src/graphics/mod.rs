@@ -182,8 +182,8 @@ pub(crate) enum ClassicReason {
     /// Inside tmux with `allow-passthrough` off: no image, and no query for
     /// one, reaches the terminal (tmux(1), `allow-passthrough`).
     TmuxPassthroughOff,
-    /// The terminal speaks image protocols, but none the cutaway animates
-    /// with.
+    /// The terminal answers image protocols, but none the cutaway animates
+    /// with ([`Detected::unanimated`]).
     NoCutawayProtocol,
     /// The terminal has a protocol but reports no cell size, so there is no
     /// scale to fit.
@@ -339,6 +339,9 @@ pub(crate) struct Detected {
     /// Whether this process runs inside tmux — from the environment, not the
     /// terminal's answer.
     pub(crate) tmux: bool,
+    /// The terminal answers image protocols, but none the cutaway animates
+    /// with, so `protocol` is `None` unless `--graphics` forces one.
+    pub(crate) unanimated: bool,
 }
 
 /// The outcome of asking the terminal — [`resolve`]'s input.
@@ -368,13 +371,6 @@ pub(crate) enum Probe {
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     TmuxPassthroughOff,
-    /// A terminal that speaks no image protocol the cutaway animates with
-    /// (Warp), so nothing was asked.
-    #[cfg_attr(
-        all(not(all(feature = "graphics", unix)), not(test)),
-        expect(dead_code, reason = "only the Unix graphics probe returns it")
-    )]
-    NoCutawayProtocol,
     /// This build cannot ask ([`probe()`]).
     #[cfg_attr(
         all(feature = "graphics", unix, not(test)),
@@ -498,11 +494,14 @@ pub(crate) fn resolve(
         Probe::NotQueried => return classic(ClassicReason::NotQueried),
         Probe::NoAnswer => return classic(ClassicReason::NoAnswer),
         Probe::TmuxPassthroughOff => return classic(ClassicReason::TmuxPassthroughOff),
-        Probe::NoCutawayProtocol => return classic(ClassicReason::NoCutawayProtocol),
         Probe::Unsupported => return classic(ClassicReason::Unsupported),
     };
     let Some(protocol) = mode.forced().or(d.protocol) else {
-        return classic(ClassicReason::NoProtocol);
+        return classic(if d.unanimated {
+            ClassicReason::NoCutawayProtocol
+        } else {
+            ClassicReason::NoProtocol
+        });
     };
     let Some(cell) = d.cell else {
         return classic(ClassicReason::NoCellSize);
@@ -543,10 +542,9 @@ impl ClassicReason {
             Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
                  `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
-            Self::NoCutawayProtocol => {
-                "this terminal (Warp) speaks no image protocol the cutaway can animate with"
-                    .to_string()
-            }
+            Self::NoCutawayProtocol => "this terminal answers image protocols the cutaway \
+                 can't animate with here — `--graphics kitty|sixel|iterm2` forces one"
+                .to_string(),
             Self::NoCellSize => "terminal reports no cell size in pixels".to_string(),
             Self::TmuxNeedsKitty(p) => format!(
                 "inside tmux only kitty graphics survive a pane switch here, and this terminal \
@@ -833,6 +831,7 @@ mod tests {
             protocol,
             cell: Some(cell),
             tmux,
+            unanimated: false,
         })
     }
 
@@ -1188,6 +1187,7 @@ mod tests {
                     protocol: Some(ImageProtocol::Kitty),
                     cell: None,
                     tmux: false,
+                    unanimated: false,
                 }),
                 BASE_ONLY,
                 ClassicReason::NoCellSize,
@@ -1356,9 +1356,15 @@ mod tests {
             ),
             (
                 GraphicsMode::Auto,
-                Probe::NoCutawayProtocol,
+                Probe::Answered(Detected {
+                    protocol: None,
+                    cell: Some(CELL_8X16),
+                    tmux: false,
+                    unanimated: true,
+                }),
                 BUNDLED,
-                "this terminal (Warp) speaks no image protocol the cutaway can animate with",
+                "this terminal answers image protocols the cutaway can't animate with here — \
+                 `--graphics kitty|sixel|iterm2` forces one",
             ),
             (
                 GraphicsMode::Auto,
@@ -1366,6 +1372,7 @@ mod tests {
                     protocol: Some(ImageProtocol::Kitty),
                     cell: None,
                     tmux: false,
+                    unanimated: false,
                 }),
                 BUNDLED,
                 "terminal reports no cell size in pixels",
@@ -1417,6 +1424,29 @@ mod tests {
         }
         assert_eq!(seen.len(), 10, "every reason has a pinned row");
         assert_eq!(rows.len(), n, "no two reasons print the same row");
+    }
+
+    /// A terminal that answers no protocol the cutaway animates with falls
+    /// back on its own, but `--graphics` still forces one: it overrides
+    /// detection.
+    #[test]
+    fn a_forced_protocol_paints_where_none_animates() {
+        let probe = Probe::Answered(Detected {
+            protocol: None,
+            cell: Some(CELL_8X16),
+            tmux: false,
+            unanimated: true,
+        });
+        assert!(matches!(
+            resolve(GraphicsMode::Auto, probe, BUNDLED, AREA),
+            Plan::Classic {
+                reason: ClassicReason::NoCutawayProtocol
+            }
+        ));
+        assert!(matches!(
+            resolve(GraphicsMode::Kitty, probe, BUNDLED, AREA),
+            Plan::Cutaway { .. }
+        ));
     }
 
     /// A real Retina Ghostty reports a 17x41 cell: 17 is what the cell alone

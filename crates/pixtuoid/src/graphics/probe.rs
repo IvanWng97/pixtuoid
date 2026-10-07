@@ -128,10 +128,12 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
         Response::CellSize(Some((w, h))) => Some(CellSize { w: *w, h: *h }),
         _ => None,
     });
+    let unanimated = hints.is_warp();
     Detected {
-        protocol: queried.or_else(|| hints.iterm2()),
+        protocol: queried.or_else(|| hints.iterm2()).filter(|_| !unanimated),
         cell: answered_cell.or(window_cell),
         tmux: hints.env.tmux(),
+        unanimated,
     }
 }
 
@@ -183,9 +185,6 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::NotQueried;
     }
     let hints = EnvHints::read();
-    if hints.is_warp() {
-        return Probe::NoCutawayProtocol;
-    }
     if hints.our_tmux_pane() && tmux_passthrough() == Some(false) {
         return Probe::TmuxPassthroughOff;
     }
@@ -407,12 +406,15 @@ mod tests {
         );
     }
 
-    /// Warp is told by its own name, and is no longer guessed iTerm2: no
-    /// protocol it speaks animates.
+    /// Warp's kitty answer is taken as no protocol the cutaway animates with,
+    /// its cell kept for a `--graphics` that forces one; it is never guessed
+    /// iTerm2.
     #[test]
-    fn warp_is_named_and_never_guessed_iterm2() {
+    fn warp_answers_but_animates_no_protocol() {
         let warp = hints("xterm-256color", "WarpTerminal");
-        assert!(warp.is_warp());
+        let cell = CellSize { w: 8, h: 18 };
+        let d = detected(&[Response::Kitty], &warp, Some(cell));
+        assert_eq!((d.protocol, d.cell, d.unanimated), (None, Some(cell), true));
         assert_eq!(warp.iterm2(), None);
         assert!(!hints("xterm-256color", "iTerm.app").is_warp());
     }
@@ -444,6 +446,7 @@ mod tests {
                 protocol: Some(ImageProtocol::Iterm2),
                 cell: window,
                 tmux: false,
+                unanimated: false,
             })
         );
         assert_eq!(
