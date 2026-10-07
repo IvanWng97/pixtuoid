@@ -258,8 +258,9 @@ impl OfficeRenderer {
         volume_flash: Option<u8>,
         warning: Option<&str>,
     ) -> FooterModel {
+        let floor_scene = self.session.footer_scene(scene);
         let inputs = FooterInputs::new(
-            scene,
+            &floor_scene,
             FooterContext::new(
                 scene,
                 self.session.footer_floor(scene),
@@ -711,8 +712,7 @@ mod tests {
         let density = density();
         WindowGeometry {
             look: Look::Cutaway {
-                scale: pixtuoid_scene::render_scale::RenderScale::new(density.get())
-                    .expect("nonzero"),
+                scale: pixtuoid_scene::render_scale::RenderScale::from(density),
             },
             office: size,
             upscale: 1,
@@ -1004,6 +1004,19 @@ mod tests {
         // Never 0 — redraw divides by it.
         assert_eq!(office_scale(90), 1);
         assert_eq!(office_scale(0), 1);
+    }
+
+    /// A saved size below the pack's minimum opens, and is placed, at the
+    /// minimum: an office that seats every floor.
+    #[test]
+    fn a_saved_size_below_the_minimum_opens_where_every_floor_seats() {
+        let min = min_window(density());
+        let cfg: crate::config::AppConfig =
+            toml::from_str("[floating]\nwidth = 1\nheight = 1\n").expect("parses");
+        let f = crate::config::resolve_floating(&cfg).at_least(min.width, min.height);
+        assert_eq!((f.width, f.height), (min.width, min.height));
+        let caps = boot_capacities_for_window(PhysicalSize::new(f.width, f.height), density());
+        assert!(caps.iter().all(|&c| c > 0), "{caps:?}");
     }
 
     #[test]
@@ -1516,6 +1529,49 @@ mod tests {
         );
     }
 
+    /// The footer counts the floor showing, beside the breadcrumb's whole
+    /// office: one agent of four on the ground floor reads 1/4.
+    #[test]
+    fn the_footer_counts_the_floor_showing() {
+        let cap = 16;
+        let scene = scene_with(
+            vec![
+                active_on("/a/f0.jsonl", 0, 0),
+                active_on("/a/f1a.jsonl", 1, cap),
+                active_on("/a/f1b.jsonl", 1, cap + 1),
+                active_on("/a/f1c.jsonl", 1, cap + 2),
+            ],
+            cap,
+        );
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
+            },
+        );
+        let text: String = renderer
+            .footer(&scene, u16::MAX, false, None, None)
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(text.contains("1/4"), "{text:?}");
+    }
+
     #[test]
     fn floating_stems_count_only_the_rendered_floor() {
         let cap = 16;
@@ -1577,7 +1633,7 @@ mod tests {
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let slot = active_on("/p/a.jsonl", 0, 0);
         scene.agents.insert(slot.agent_id, slot);
-        let warning = crate::doctor::footer_warning(&[], &["cc".to_string()]);
+        let warning = crate::doctor::footer_warning(&[], &["cc"]);
         let budget = footer_budget(960);
         let calm = renderer.footer(&scene, budget, true, None, None).text();
         let warned = renderer

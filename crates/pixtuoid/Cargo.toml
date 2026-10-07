@@ -115,7 +115,7 @@ audio = ["dep:rodio"]
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash", "dep:itoa"]
+graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash", "dep:itoa", "dep:rustix"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
@@ -123,7 +123,7 @@ graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"
 libc = { workspace = true }
 # The kitty `t=s` objects (graphics/shm.rs), whose `shm_open` libc types
 # differently on each Unix.
-rustix = { workspace = true, features = ["shm", "mm"] }
+rustix = { workspace = true, features = ["shm", "mm"], optional = true }
 
 # Focus-jump activation (focus/macos.rs). Pinned to the SAME objc2 stack winit
 # already pulls so the bindings don't double-compile. This MUST track winit's

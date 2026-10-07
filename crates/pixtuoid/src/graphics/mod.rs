@@ -37,6 +37,10 @@ pub(crate) mod tiles;
 #[cfg(all(feature = "graphics", unix))]
 pub(crate) use probe::probe;
 
+/// [`ImageProtocol::image_budget`]'s for kitty: what Ghostty, re-scanning
+/// every placement per image, keeps up with at the paint rate.
+const KITTY_IMAGE_BUDGET: u32 = 400;
+
 /// A tile's extent in cells; [`ImageProtocol::tile`] is the authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TileShape {
@@ -59,14 +63,80 @@ pub(crate) struct TileShape {
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How a kitty image's pixels reach the terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Medium {
     /// In the escapes, compressed: any terminal, on any host.
-    #[default]
     Direct,
     /// Through a shared-memory object on this host (kitty's `t=s`), which the
-    /// terminal answered it reads ([`Plan::Cutaway`]).
+    /// terminal answered it reads.
+    #[cfg(unix)]
     SharedMemory,
+}
+
+/// How the cutaway's images reach the terminal: its protocol, through tmux's
+/// passthrough or not, and how kitty's pixels travel. Built only by
+/// [`Route::of`] or [`Route::direct`], so no route pairs shared memory with a
+/// protocol or tmux `may_share` refuses (Unix-only, so not linked).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Route {
+    protocol: ImageProtocol,
+    tmux: bool,
+    medium: Medium,
+}
+
+impl Route {
+    /// Whether a terminal answering `protocol`, through tmux or not, may read
+    /// shared memory at all: kitty's alone, and never through tmux, which may
+    /// later attach a client on another host ("Remote clients ... must send
+    /// the pixel data directly").
+    #[cfg(unix)]
+    pub(crate) fn may_share(protocol: Option<ImageProtocol>, tmux: bool) -> bool {
+        protocol == Some(ImageProtocol::Kitty) && !tmux
+    }
+
+    /// `protocol`, through tmux or not, its pixels through shared memory
+    /// where the terminal answered it reads ours (`shm`), forced or not.
+    pub(crate) fn of(
+        protocol: ImageProtocol,
+        tmux: bool,
+        #[cfg_attr(
+            not(unix),
+            expect(unused_variables, reason = "shared memory is Unix-only")
+        )]
+        shm: bool,
+    ) -> Self {
+        #[cfg(unix)]
+        if shm && Self::may_share(Some(protocol), tmux) {
+            return Self {
+                protocol,
+                tmux,
+                medium: Medium::SharedMemory,
+            };
+        }
+        Self::direct(protocol, tmux)
+    }
+
+    /// `protocol`, through tmux or not, its pixels in the escapes.
+    pub(crate) fn direct(protocol: ImageProtocol, tmux: bool) -> Self {
+        Self {
+            protocol,
+            tmux,
+            medium: Medium::Direct,
+        }
+    }
+
+    pub(crate) fn protocol(self) -> ImageProtocol {
+        self.protocol
+    }
+
+    /// Inside tmux: the encoder wraps each image in passthrough.
+    pub(crate) fn tmux(self) -> bool {
+        self.tmux
+    }
+
+    pub(crate) fn medium(self) -> Medium {
+        self.medium
+    }
 }
 
 /// A graphics protocol the terminal speaks and the cutaway can be handed over.
@@ -100,7 +170,23 @@ impl ImageProtocol {
         })
     }
 
-    /// The cells one re-sent piece of the image covers.
+    /// The most tiles, each its own image, one whole frame may hold, where the
+    /// terminal's cost grows with the images on screen; `None` where it
+    /// doesn't. Each image added scans those held — Ghostty's placements
+    /// (ghostty-org/ghostty `src/terminal/kitty/graphics_storage.zig`,
+    /// `addImage` → `removePlacementsByImageId`, `removeOrphans`), kitty's
+    /// images (kovidgoyal/kitty `kitty/graphics.c`, `handle_add_command` →
+    /// `remove_images`, `img_by_client_id`) — so a frame costs the tiles sent
+    /// times the tiles on screen.
+    pub(crate) fn image_budget(self) -> Option<u32> {
+        match self {
+            Self::Kitty => Some(KITTY_IMAGE_BUDGET),
+            Self::Sixel | Self::Iterm2 => None,
+        }
+    }
+
+    /// The cells one re-sent piece of the image covers, before an
+    /// [`image_budget`](Self::image_budget) coarsens it.
     pub(crate) fn tile(self) -> TileShape {
         match self {
             Self::Kitty => TileShape { cols: 4, rows: 2 },
@@ -195,8 +281,8 @@ pub(crate) enum ClassicReason {
     /// Inside tmux with `allow-passthrough` off: no image, and no query for
     /// one, reaches the terminal (tmux(1), `allow-passthrough`).
     TmuxPassthroughOff,
-    /// The terminal answers image protocols, but none the cutaway animates
-    /// with ([`Detected::unanimated`]).
+    /// The terminal has no image protocol the cutaway animates with
+    /// ([`Detected::unanimated`]).
     NoCutawayProtocol,
     /// The terminal has a protocol but reports no cell size, so there is no
     /// scale to fit.
@@ -231,15 +317,11 @@ pub(crate) enum Plan {
         /// Its geometry on this terminal.
         fit: Fit,
         /// How the image reaches the terminal.
-        protocol: ImageProtocol,
+        route: Route,
         /// The cell the scale was fitted to.
         cell: CellSize,
-        /// Inside tmux: the encoder wraps the image in passthrough.
-        tmux: bool,
         /// `--graphics` named the protocol, rather than the terminal.
         forced: bool,
-        /// How kitty's pixels reach the terminal.
-        medium: Medium,
     },
     /// The half-block office: one buffer pixel per half-block.
     Classic {
@@ -331,7 +413,10 @@ impl Plan {
         let heavy = matches!(
             self,
             Plan::Cutaway {
-                protocol: ImageProtocol::Sixel | ImageProtocol::Iterm2,
+                route: Route {
+                    protocol: ImageProtocol::Sixel | ImageProtocol::Iterm2,
+                    ..
+                },
                 ..
             }
         );
@@ -354,8 +439,8 @@ pub(crate) struct Detected {
     /// Whether this process runs inside tmux — from the environment, not the
     /// terminal's answer.
     pub(crate) tmux: bool,
-    /// The terminal answers image protocols, but none the cutaway animates
-    /// with, so `protocol` is `None` unless `--graphics` forces one.
+    /// The terminal has no image protocol the cutaway animates with, so
+    /// `protocol` is `None` unless `--graphics` forces one.
     pub(crate) unanimated: bool,
     /// Whether the terminal answered that it reads kitty images from this
     /// host's shared memory.
@@ -522,21 +607,11 @@ pub(crate) fn resolve(
     if d.tmux && protocol != ImageProtocol::Kitty {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
     }
-    // Shared memory only where the terminal said it reads ours, forced or
-    // not, and never through tmux, which may later attach a client on
-    // another host ("Remote clients ... must send the pixel data directly").
-    let medium = if protocol == ImageProtocol::Kitty && d.shm && !d.tmux {
-        Medium::SharedMemory
-    } else {
-        Medium::Direct
-    };
     Plan::Cutaway {
         fit,
-        protocol,
+        route: Route::of(protocol, d.tmux, d.shm),
         cell,
-        tmux: d.tmux,
         forced: mode.forced().is_some(),
-        medium,
     }
 }
 
@@ -559,8 +634,8 @@ impl ClassicReason {
             Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
                  `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
-            Self::NoCutawayProtocol => "this terminal answers image protocols the cutaway \
-                 can't animate with here — `--graphics kitty|sixel|iterm2` forces one"
+            Self::NoCutawayProtocol => "this terminal has no image protocol the cutaway \
+                 animates with — `--graphics kitty|sixel|iterm2` forces one"
                 .to_string(),
             Self::NoCellSize => "terminal reports no cell size in pixels".to_string(),
             Self::TmuxNeedsKitty(p) => format!(
@@ -655,13 +730,20 @@ impl Plan {
         match self {
             Plan::Cutaway {
                 fit,
-                protocol,
+                route:
+                    Route {
+                        protocol,
+                        tmux,
+                        medium,
+                    },
                 cell,
-                tmux,
                 forced,
-                medium,
             } => {
                 let shape = protocol.tile();
+                let budget = protocol
+                    .image_budget()
+                    .map(|b| format!(" (doubled until a frame is at most {b} tiles)"))
+                    .unwrap_or_default();
                 let cadence = match protocol.cadence().as_millis() {
                     0 => "every frame".to_string(),
                     ms => format!("at most every {ms} ms"),
@@ -684,7 +766,7 @@ impl Plan {
                 };
                 format!(
                     "graphics: {} ({}) on a {}x{} cell, {} — the cutaway at {}x \
-                     ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles \
+                     ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles{budget} \
                      {cadence}{how}",
                     protocol.name(),
                     if forced {
@@ -697,6 +779,7 @@ impl Plan {
                     match (tmux, medium) {
                         (true, _) => "through tmux passthrough",
                         (false, Medium::Direct) => "direct",
+                        #[cfg(unix)]
                         (false, Medium::SharedMemory) => "direct, pixels through shared memory",
                     },
                     fit.scale().get(),
@@ -1020,16 +1103,17 @@ mod tests {
             let got = plan(answered(Some(protocol), CELL_8X16, false), BUNDLED);
             let Plan::Cutaway {
                 fit,
-                protocol: p,
+                route,
                 cell,
-                tmux,
                 forced,
-                ..
             } = got
             else {
                 panic!("{protocol:?}: {got:?}");
             };
-            assert_eq!((p, cell, tmux, forced), (protocol, CELL_8X16, false, false));
+            assert_eq!(
+                (route, cell, forced),
+                (Route::direct(protocol, false), CELL_8X16, false)
+            );
             assert_eq!((fit.scale().get(), fit.upscale()), (8, 2));
         }
     }
@@ -1042,8 +1126,11 @@ mod tests {
         assert!(matches!(
             plan(ImageProtocol::Kitty),
             Plan::Cutaway {
-                protocol: ImageProtocol::Kitty,
-                tmux: true,
+                route: Route {
+                    protocol: ImageProtocol::Kitty,
+                    tmux: true,
+                    ..
+                },
                 ..
             }
         ));
@@ -1075,7 +1162,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { protocol, forced: true, .. } if protocol == want),
+                    matches!(got, Plan::Cutaway { route, forced: true, .. } if route.protocol == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -1256,7 +1343,7 @@ mod tests {
                 answered(Some(ImageProtocol::Kitty), cell(17, 41), true),
                 "graphics: kitty (the terminal's answer) on a 17x41 cell, through tmux \
                  passthrough — the cutaway at 16x (4x art upscaled 4x), a 127x99 office, sent \
-                 as 4x2-cell tiles every frame",
+                 as 4x2-cell tiles (doubled until a frame is at most 400 tiles) every frame",
             ),
             (
                 GraphicsMode::Auto,
@@ -1385,7 +1472,7 @@ mod tests {
                     shm: false,
                 }),
                 BUNDLED,
-                "this terminal answers image protocols the cutaway can't animate with here — \
+                "this terminal has no image protocol the cutaway animates with — \
                  `--graphics kitty|sixel|iterm2` forces one",
             ),
             (
@@ -1449,6 +1536,7 @@ mod tests {
         assert_eq!(rows.len(), n, "no two reasons print the same row");
     }
 
+    #[cfg(unix)]
     #[test]
     fn shared_memory_carries_kitty_where_the_terminal_reads_it() {
         let detected = |shm, tmux| {
@@ -1461,7 +1549,7 @@ mod tests {
             })
         };
         let medium = |mode, probe| match resolve(mode, probe, BUNDLED, AREA) {
-            Plan::Cutaway { medium, .. } => medium,
+            Plan::Cutaway { route, .. } => route.medium,
             plan => panic!("no cutaway: {plan:?}"),
         };
         for mode in [GraphicsMode::Auto, GraphicsMode::Kitty] {

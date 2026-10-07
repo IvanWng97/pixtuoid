@@ -187,7 +187,13 @@ fn armed(
     let out = crate::tui::FrameOut::new(wire.clone(), false);
     r.present_through(out.clone());
     r.set_cutaway(
-        TileCutaway::new(fit(cols, rows), CELL, protocol, false, Box::new(out)).arming(in_grid),
+        TileCutaway::new(
+            fit(cols, rows),
+            CELL,
+            crate::graphics::Route::direct(protocol, false),
+            Box::new(out),
+        )
+        .arming(in_grid),
     );
     (r, wire, in_grid)
 }
@@ -503,11 +509,9 @@ fn the_plans_cell_holds_until_the_windows_moves() {
     assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
     let plan = crate::graphics::Plan::Cutaway {
         fit: fit(cols, rows),
-        protocol: ImageProtocol::Sixel,
+        route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
         cell: CELL,
-        tmux: false,
         forced: false,
-        medium: crate::graphics::Medium::Direct,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -549,11 +553,9 @@ fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
     assert_eq!(wire.take(), "", "the plan's cell holds, nothing re-cut");
     let plan = crate::graphics::Plan::Cutaway {
         fit: fit(cols, rows),
-        protocol: ImageProtocol::Sixel,
+        route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
         cell: CELL,
-        tmux: false,
         forced: false,
-        medium: crate::graphics::Medium::Direct,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -1076,26 +1078,6 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
         ImageProtocol::Sixel,
         ImageProtocol::Iterm2,
     ] {
-        let shape = protocol.tile();
-        let across = u32::from(area.width.div_ceil(shape.cols));
-        let tiles: std::collections::BTreeSet<(u16, u16)> = area
-            .positions()
-            .filter(|p| neon_tube(p.x, 2 * p.y))
-            .map(|p| (p.x / shape.cols, p.y / shape.rows))
-            .collect();
-        let tube_sent = |wire: &str| match protocol {
-            ImageProtocol::Kitty => kitty_images(wire).iter().any(|&(id, _)| {
-                tiles.iter().any(|&(tx, ty)| {
-                    id == crate::graphics::kitty::process_base()
-                        + u32::from(ty) * across
-                        + u32::from(tx)
-                })
-            }),
-            ImageProtocol::Sixel | ImageProtocol::Iterm2 => tiles.iter().any(|&(tx, ty)| {
-                let at = (ty * shape.rows + 1, tx * shape.cols + 1);
-                wire.contains(&format!("\x1b[{};{}H{}", at.0, at.1, intro(protocol)))
-            }),
-        };
         for (frame, offset) in frame_grid(tick) {
             let (mut r, wire, screen) = on_screen(cols, rows, protocol);
             r.set_weather(stutter.weather);
@@ -1104,6 +1086,26 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
                 screen.at(at);
                 r.render(&scene, pack(), at).expect("render");
             }
+            let shape = r.cutaway.as_ref().expect("a cutaway").tile_shape();
+            let across = u32::from(area.width.div_ceil(shape.cols));
+            let tiles: std::collections::BTreeSet<(u16, u16)> = area
+                .positions()
+                .filter(|p| neon_tube(p.x, 2 * p.y))
+                .map(|p| (p.x / shape.cols, p.y / shape.rows))
+                .collect();
+            let tube_sent = |wire: &str| match protocol {
+                ImageProtocol::Kitty => kitty_images(wire).iter().any(|&(id, _)| {
+                    tiles.iter().any(|&(tx, ty)| {
+                        id == crate::graphics::kitty::process_base()
+                            + u32::from(ty) * across
+                            + u32::from(tx)
+                    })
+                }),
+                ImageProtocol::Sixel | ImageProtocol::Iterm2 => tiles.iter().any(|&(tx, ty)| {
+                    let at = (ty * shape.rows + 1, tx * shape.cols + 1);
+                    wire.contains(&format!("\x1b[{};{}H{}", at.0, at.1, intro(protocol)))
+                }),
+            };
             let now = stutter.start - lead(frame) + offset;
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
@@ -1169,7 +1171,7 @@ fn kitty_images(wire: &str) -> Vec<(u32, Vec<u8>)> {
 #[cfg(unix)]
 #[test]
 fn shared_memory_carries_the_tiles_the_escapes_would() {
-    let run = |medium| {
+    let run = |shm| {
         let (cols, rows) = (120, 40);
         let mut r = TuiRenderer::new(
             Terminal::new(Window::new(cols, rows)).expect("terminal"),
@@ -1180,22 +1182,18 @@ fn shared_memory_carries_the_tiles_the_escapes_would() {
         let wire = Wire::default();
         let out = crate::tui::FrameOut::new(wire.clone(), false);
         r.present_through(out.clone());
-        r.set_cutaway(
-            TileCutaway::new(
-                fit(cols, rows),
-                CELL,
-                ImageProtocol::Kitty,
-                false,
-                Box::new(out),
-            )
-            .through(medium),
-        );
+        r.set_cutaway(TileCutaway::new(
+            fit(cols, rows),
+            CELL,
+            crate::graphics::Route::of(ImageProtocol::Kitty, false, shm),
+            Box::new(out),
+        ));
         r.render(&office(), pack(), t0()).expect("render");
         kitty_images(&wire.take())
     };
-    let direct = run(crate::graphics::Medium::Direct);
+    let direct = run(false);
     assert!(!direct.is_empty(), "the first frame sends its tiles");
-    assert_eq!(run(crate::graphics::Medium::SharedMemory), direct);
+    assert_eq!(run(true), direct);
 }
 
 /// A floor switch slides the cutaway the way classic slides its half-blocks:
@@ -1207,8 +1205,10 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
     let scene = two_floor_scene();
     let mut now = t0();
     r.render(&scene, pack(), now).expect("render");
-    let across = 120u32.div_ceil(u32::from(ImageProtocol::Kitty.tile().cols));
-    let middle = crate::graphics::kitty::process_base() + across * 10 + across / 2;
+    let shape = r.cutaway.as_ref().expect("a cutaway").tile_shape();
+    let across = 120u32.div_ceil(u32::from(shape.cols));
+    let down = 40u32.div_ceil(u32::from(shape.rows));
+    let middle = crate::graphics::kitty::process_base() + across * (down / 2) + across / 2;
     let tile = |sent: &str| {
         kitty_images(sent)
             .into_iter()
@@ -1271,24 +1271,24 @@ fn a_cutaway_slide_runs_until_a_resize_lands_it() {
 /// which a board borrowed from the other floor would change.
 #[test]
 fn a_sliding_floor_keeps_its_own_wall_board() {
-    let tile = ImageProtocol::Kitty.tile();
-    let across = 120u32.div_ceil(u32::from(tile.cols));
     let base = crate::graphics::kitty::process_base();
     // The neon sign and the rows its board's three lines take, in cells.
     let (cols, rows) = (
         u32::from(pixtuoid_scene::layout::NEON_PANEL_W + 2),
         u32::from(pixtuoid_scene::layout::NEON_PANEL_INNER_Y / 2 + 3),
     );
-    let board: Vec<u32> = (0..rows.div_ceil(u32::from(tile.rows)))
-        .flat_map(|ty| {
-            (0..cols.div_ceil(u32::from(tile.cols))).map(move |tx| base + ty * across + tx)
-        })
-        .collect();
     let scene = two_floor_scene();
     for (from, to) in [(0, 1), (1, 0)] {
         let (mut r, wire) = kitty(120, 40);
         let mut now = t0();
         r.render(&scene, pack(), now).expect("render");
+        let tile = r.cutaway.as_ref().expect("a cutaway").tile_shape();
+        let across = 120u32.div_ceil(u32::from(tile.cols));
+        let board: Vec<u32> = (0..rows.div_ceil(u32::from(tile.rows)))
+            .flat_map(|ty| {
+                (0..cols.div_ceil(u32::from(tile.cols))).map(move |tx| base + ty * across + tx)
+            })
+            .collect();
         if from == 1 {
             r.navigate_floor(1, now);
             render_until_settled(&mut r, &scene, pack(), &mut now, 1);
@@ -1510,8 +1510,13 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
             pack_arc(),
         );
         r.set_cutaway(
-            TileCutaway::new(fit(120, 40), CELL, protocol, false, Box::new(wire.clone()))
-                .arming(Box::leak(Box::new(AtomicBool::new(false)))),
+            TileCutaway::new(
+                fit(120, 40),
+                CELL,
+                crate::graphics::Route::direct(protocol, false),
+                Box::new(wire.clone()),
+            )
+            .arming(Box::leak(Box::new(AtomicBool::new(false)))),
         );
         r.render(&office(), pack(), t0()).expect("render");
         let sent = wire.take();

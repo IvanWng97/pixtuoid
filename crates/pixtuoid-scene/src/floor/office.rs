@@ -476,6 +476,12 @@ impl OfficeSession {
         footer_floor(self.nav.current(), self.n_floors, scene.agents.len())
     }
 
+    /// The scene the footer counts and tallies: the floor showing's, as
+    /// [`FooterInputs::new`](crate::footer::FooterInputs::new) asks.
+    pub fn footer_scene(&self, scene: &SceneState) -> SceneState {
+        super::project_floor_scene(scene, self.nav.current())
+    }
+
     /// Whether the floor showing's last frame changes between beats:
     /// [`FloorSession::moves_off_beat`](super::FloorSession::moves_off_beat).
     pub fn moves_off_beat(&self) -> bool {

@@ -10,8 +10,6 @@ use std::path::Path;
 use anyhow::Result;
 use pixtuoid::{config, sources};
 
-use crate::logging::log_location;
-
 /// `pixtuoid setup [--yes]` — the headless onboarding twin. Without `--yes` it is
 /// a DRY RUN: writing to another tool's config is opt-in. Exits non-zero if any
 /// connect fails, so a `$?`-checking caller gets a real signal.
@@ -62,7 +60,7 @@ pub(crate) fn run_sources_list(json: bool) -> Result<()> {
     // An unreadable log leaves `health` under-reported, so say so instead of
     // returning a silent clean bill — via tracing, never stdout, because `--json`
     // stdout is the frozen Raycast array.
-    let (log, log_warning) = pixtuoid::doctor::read_logs(&log_location());
+    let (log, log_warning) = pixtuoid::run_log::LogLocation::from_env().read();
     if let Some(w) = log_warning {
         tracing::warn!("{w}");
     }

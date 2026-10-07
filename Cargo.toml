@@ -121,6 +121,9 @@ foldhash           = { version = "0.2", default-features = false }
 image              = { version = "0.25", default-features = false, features = ["png"] }
 libc               = "0.2"
 rustix             = "1"
+# Already in the tree through ratatui; `IntoStaticStr` + `EnumString` write and
+# read an enum's names from one declaration.
+strum              = { version = "0.28", default-features = false, features = ["derive"] }
 # 0.61 to match the major tokio already pulls (via mio) on Windows — a second
 # windows-sys major would double-compile the bindings.
 windows-sys        = "0.61"

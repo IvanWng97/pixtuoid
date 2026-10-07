@@ -108,26 +108,64 @@ pub fn render_cutaway(
 
 /// Paint `list` whole: its backdrop, then its pieces over it.
 pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
-    let pen = Pen::for_pack(list.scale(), list.pack());
     let key = BackdropKey {
-        backdrop: list.backdrop().clone(),
+        backdrop: list.backdrop(),
         carpet: list.carpet(),
         scale: list.scale(),
+        pen: Pen::for_pack(list.scale(), list.pack()),
     };
     cache.backdrop.stamp(
         key,
-        |k, layer| paint_backdrop(&k.backdrop, k.carpet, k.scale, pen, layer),
+        |k, layer| paint_backdrop(&k.backdrop, k.carpet, k.scale, k.pen, layer),
         buf,
     );
     paint_list(list, cache, buf);
 }
 
-/// All [`paint_backdrop`] reads, the pack aside: one cache draws one pack.
+/// All [`paint_backdrop`] reads. Held owning its backdrop, probed borrowing
+/// the list's.
 #[derive(Debug, PartialEq)]
-pub(crate) struct BackdropKey {
-    backdrop: Backdrop,
+pub(crate) struct BackdropKey<B = Backdrop> {
+    backdrop: B,
     carpet: Dithered<Carpet>,
     scale: RenderScale,
+    /// The pack's art grid at `scale`.
+    pen: Pen,
+}
+
+impl PartialEq<BackdropKey<&Backdrop>> for BackdropKey {
+    fn eq(&self, probe: &BackdropKey<&Backdrop>) -> bool {
+        // Destructured whole, so a field added to the key fails to compile
+        // here until it is compared.
+        let Self {
+            backdrop,
+            carpet,
+            scale,
+            pen,
+        } = self;
+        *backdrop == *probe.backdrop
+            && *carpet == probe.carpet
+            && *scale == probe.scale
+            && *pen == probe.pen
+    }
+}
+
+impl From<BackdropKey<&Backdrop>> for BackdropKey {
+    fn from(
+        BackdropKey {
+            backdrop,
+            carpet,
+            scale,
+            pen,
+        }: BackdropKey<&Backdrop>,
+    ) -> Self {
+        Self {
+            backdrop: backdrop.clone(),
+            carpet,
+            scale,
+            pen,
+        }
+    }
 }
 
 /// Everything under the list's pieces, none of which moves within a
@@ -1967,7 +2005,7 @@ mod tests {
     fn every_rug_lies_on_the_ground() {
         let pack = test_default_pack();
         let theme = &crate::theme::NORMAL;
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let f = &theme.furniture;
         let (mut trios, mut lounges) = (0, 0);
         for (w, h) in [(160, 96), (200, 120), (240, 144), (480, 270)] {
@@ -2160,7 +2198,7 @@ mod tests {
     fn a_shadow_falls_inside_its_pieces_reach() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let ground = pixtuoid_core::sprite::Rgb {
             r: 150,
             g: 110,
@@ -2227,7 +2265,7 @@ mod tests {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
         let d = pen.art(1).0;
         let office = Office {
@@ -2348,7 +2386,7 @@ mod tests {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
         let mut buf = RgbBuffer::filled(
             scale.to_buffer(layout.buf_w),
@@ -2463,6 +2501,80 @@ mod tests {
         assert!(
             (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
             "the dust {span:?} is off the foot {foot:?}"
+        );
+    }
+
+    /// A cache shared across frames paints each as a fresh cache would, each
+    /// step changing one of the backdrop's inputs — the layout's backdrop,
+    /// the weather's carpet, the scale: the key holds them all.
+    #[test]
+    fn a_shared_backdrop_cache_paints_every_frame_as_a_fresh_one() {
+        use crate::sky::{Sky, Weather};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let now = crate::localclock::at_hour(12);
+        let layouts = [0, 1]
+            .map(|seed| SceneLayout::compute_with_seed(160, 96, None, seed).expect("lays out"));
+        assert_ne!(
+            Backdrop::of(&layouts[0], theme),
+            Backdrop::of(&layouts[1], theme),
+            "the layouts' backdrops differ"
+        );
+        let mut shared = CutawayCache::default();
+        let mut fresh_frames = Vec::new();
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            for (seed, weather) in [
+                (0, Weather::Clear),
+                (1, Weather::Clear),
+                (1, Weather::Snow),
+                (0, Weather::Snow),
+            ] {
+                let layout = &layouts[seed];
+                let office = Office {
+                    layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = compose_at(
+                    &empty_frame(layout),
+                    office,
+                    &Moment::resolve(
+                        Sky::at_with(now, weather),
+                        theme,
+                        0.0,
+                        Motion::Full.timing(now),
+                    ),
+                    crate::floor::FloorMeta::ground(),
+                    quiet_board(),
+                    (
+                        &mut crate::display::compose::LightCache::default(),
+                        &mut crate::outside::OutsideCache::default(),
+                    ),
+                );
+                let blank = || {
+                    RgbBuffer::filled(
+                        scale.to_buffer(layout.buf_w),
+                        scale.to_buffer(layout.buf_h),
+                        theme.surface.bg_fallback,
+                    )
+                };
+                let (mut fresh, mut stamped) = (blank(), blank());
+                paint(&list, &mut CutawayCache::default(), &mut fresh);
+                paint(&list, &mut shared, &mut stamped);
+                assert!(
+                    fresh.as_slice() == stamped.as_slice(),
+                    "scale {s}, layout {seed}, {weather:?}"
+                );
+                fresh_frames.push(fresh);
+            }
+        }
+        assert!(
+            fresh_frames
+                .windows(2)
+                .all(|w| w[0].as_slice() != w[1].as_slice()),
+            "each step changes the frame"
         );
     }
 
@@ -2694,7 +2806,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -2767,7 +2879,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -2941,7 +3053,7 @@ mod tests {
     fn the_walls_contact_row_is_the_ground_a_shade_down() {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
         let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let blank = || {
@@ -2981,7 +3093,7 @@ mod tests {
     fn a_rug_is_mirrored_about_its_centre_column() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
         let rug = crate::layout::Bounds {
             x: 4,
@@ -3070,7 +3182,7 @@ mod tests {
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+            scale: RenderScale::from(pack.max_density_variant()),
         };
         let moving = |p: &Piece| {
             matches!(
@@ -3134,7 +3246,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = lively_office();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -3254,7 +3366,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = lively_office();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -3330,7 +3442,7 @@ mod tests {
     fn the_clocks_hands_stay_on_its_face() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let at = Point { x: 2, y: 2 };
         let dial = crate::pack::densest_frame(&pack, CLOCK_SPRITE, 0, scale).expect("the dial");
         let face = drawn_in(&dial, &[crate::pack::CLOCK_FACE_KEY]);
@@ -3395,7 +3507,7 @@ mod tests {
     fn the_cutaway_draws_every_fixture_the_roster_yields() {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
         let mut met = std::collections::BTreeSet::new();
         for layout in many_layouts() {
@@ -3452,7 +3564,7 @@ mod tests {
     #[test]
     fn the_cutaway_grounds_what_the_roster_says_stands() {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
                 let grounded = Covering::of(fixture.kind, &crate::theme::NORMAL).is_none()
@@ -4046,7 +4158,7 @@ mod tests {
             layout: &office.layout,
             pack: &pack,
             theme: &crate::theme::NORMAL,
-            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+            scale: RenderScale::from(pack.max_density_variant()),
         };
         let list = list_at(&office.frame, at, 12);
         let is_window = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
@@ -4304,7 +4416,7 @@ mod tests {
         let base = test_default_pack();
         for i in 0..1000 {
             let pack = &base;
-            let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+            let scale = RenderScale::from(pack.max_density_variant());
             let dense =
                 crate::pack::densest_frame(pack, "walking", 0, scale).expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
@@ -4865,7 +4977,7 @@ mod tests {
         use crate::effects::EffectKind as K;
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -4979,7 +5091,7 @@ mod tests {
     fn a_window_s_fingerprint_moves_with_the_moment_it_shows() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let mut painted = std::collections::HashMap::new();
         let glass = |now: std::time::SystemTime, painted: &mut _| {
             let list = compose_at(
@@ -5245,7 +5357,7 @@ mod tests {
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+            scale: RenderScale::from(pack.max_density_variant()),
         };
         let (mut lamps, mut glows) = (0, 0);
         for hour in [12, 18, 23] {
@@ -5278,7 +5390,7 @@ mod tests {
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+            scale: RenderScale::from(pack.max_density_variant()),
         };
         for neon in [
             crate::floor::NeonLevels::CALM,
@@ -5388,7 +5500,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5445,7 +5557,7 @@ mod tests {
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+            scale: RenderScale::from(pack.max_density_variant()),
         };
         let lists: Vec<Vec<(Span, u64, bool, bool)>> =
             [(&idle, 12), (&busy, 12), (&idle, 23), (&busy, 23)]
@@ -5839,7 +5951,7 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,
