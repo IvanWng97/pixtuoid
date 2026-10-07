@@ -121,6 +121,9 @@ graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+# The kitty `t=s` objects (graphics/shm.rs), whose `shm_open` libc types
+# differently on each Unix.
+rustix = { workspace = true, features = ["shm", "mm"] }
 
 # Focus-jump activation (focus/macos.rs). Pinned to the SAME objc2 stack winit
 # already pulls so the bindings don't double-compile. This MUST track winit's

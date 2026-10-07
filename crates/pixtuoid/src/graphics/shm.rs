@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -87,22 +87,13 @@ fn next_name() -> String {
 /// A new object holding `bytes`, and its name; held in the ledger until the
 /// terminal or [`READ_WITHIN`] unlinks it.
 pub(crate) fn publish(bytes: &[u8], now: Instant) -> io::Result<String> {
+    use rustix::shm::{Mode, OFlags};
     let name = next_name();
-    let cname = std::ffi::CString::new(name.clone()).map_err(io::Error::other)?;
-    // SAFETY: `cname` is a valid NUL-terminated name; the call creates a new
-    // object (O_EXCL) or fails.
-    let fd = unsafe {
-        libc::shm_open(
-            cname.as_ptr(),
-            libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
-            0o600 as libc::c_uint,
-        )
-    };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: `fd` was just opened above and nothing else owns it.
-    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let fd = rustix::shm::open(
+        name.as_str(),
+        OFlags::CREATE | OFlags::EXCL | OFlags::RDWR,
+        Mode::RUSR | Mode::WUSR,
+    )?;
     if let Err(e) = fill(&fd, bytes) {
         unlink(&name);
         return Err(e);
@@ -121,44 +112,34 @@ pub(crate) fn publish(bytes: &[u8], now: Instant) -> io::Result<String> {
 /// Size the object to `bytes` and copy them in. An object takes no
 /// `write(2)` on macOS, so through a mapping.
 fn fill(fd: &OwnedFd, bytes: &[u8]) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    let len = libc::off_t::try_from(bytes.len()).map_err(io::Error::other)?;
-    // SAFETY: `fd` is an open shm object this process created.
-    if unsafe { libc::ftruncate(fd.as_raw_fd(), len) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    use rustix::mm::{MapFlags, ProtFlags};
+    rustix::fs::ftruncate(fd, u64::try_from(bytes.len()).map_err(io::Error::other)?)?;
     if bytes.is_empty() {
         return Ok(());
     }
     // SAFETY: maps `bytes.len()` bytes of the object just sized to that length.
     let map = unsafe {
-        libc::mmap(
+        rustix::mm::mmap(
             std::ptr::null_mut(),
             bytes.len(),
-            libc::PROT_WRITE,
-            libc::MAP_SHARED,
-            fd.as_raw_fd(),
+            ProtFlags::WRITE,
+            MapFlags::SHARED,
+            fd,
             0,
         )
-    };
-    if map == libc::MAP_FAILED {
-        return Err(io::Error::last_os_error());
-    }
+    }?;
     // SAFETY: `map` is a fresh writable mapping of `bytes.len()` bytes that
     // cannot overlap `bytes`; it is unmapped once, here.
     unsafe {
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), map.cast::<u8>(), bytes.len());
-        libc::munmap(map, bytes.len());
+        let _ = rustix::mm::munmap(map, bytes.len());
     }
     Ok(())
 }
 
 /// Unlink `name`; one the terminal already unlinked is no error.
 fn unlink(name: &str) {
-    if let Ok(cname) = std::ffi::CString::new(name) {
-        // SAFETY: `cname` is a valid NUL-terminated name.
-        unsafe { libc::shm_unlink(cname.as_ptr()) };
-    }
+    let _ = rustix::shm::unlink(name);
 }
 
 /// Unlink every object this process still holds: at teardown, and in the
@@ -187,36 +168,33 @@ mod tests {
     /// The object's bytes as a reader on this host sees them, `None` once
     /// it is unlinked.
     pub(super) fn read(name: &str) -> Option<Vec<u8>> {
-        let cname = std::ffi::CString::new(name).ok()?;
-        // SAFETY: read-only open of a valid name.
-        let fd = unsafe { libc::shm_open(cname.as_ptr(), libc::O_RDONLY, 0) };
-        if fd < 0 {
-            return None;
-        }
-        // SAFETY: `fd` was just opened above.
-        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let fd = rustix::shm::open(
+            name,
+            rustix::shm::OFlags::RDONLY,
+            rustix::shm::Mode::empty(),
+        )
+        .ok()?;
         let file = std::fs::File::from(fd);
         let len = usize::try_from(file.metadata().ok()?.len()).ok()?;
         if len == 0 {
             return Some(Vec::new());
         }
-        use std::os::fd::AsRawFd;
         // SAFETY: maps the object's whole length read-only.
         let map = unsafe {
-            libc::mmap(
+            rustix::mm::mmap(
                 std::ptr::null_mut(),
                 len,
-                libc::PROT_READ,
-                libc::MAP_SHARED,
-                file.as_raw_fd(),
+                rustix::mm::ProtFlags::READ,
+                rustix::mm::MapFlags::SHARED,
+                &file,
                 0,
             )
-        };
-        assert_ne!(map, libc::MAP_FAILED);
+        }
+        .expect("mapped");
         // SAFETY: `map` holds `len` readable bytes until the unmap below.
         let out = unsafe { std::slice::from_raw_parts(map.cast::<u8>(), len) }.to_vec();
         // SAFETY: unmaps the mapping made above, once.
-        unsafe { libc::munmap(map, len) };
+        unsafe { rustix::mm::munmap(map, len) }.expect("unmapped");
         Some(out)
     }
 
