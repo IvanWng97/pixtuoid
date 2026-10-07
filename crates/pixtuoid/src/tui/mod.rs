@@ -688,7 +688,7 @@ pub(crate) struct TuiSession {
     /// the reducer task's reconciler observes (gate + graceful evict).
     pub connected: crate::runtime::ConnectedSources,
     /// Where the warn-floor log lives, for the Sources panel's drift history.
-    pub log: Option<crate::doctor::LogLocation>,
+    pub log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
     pub drift: crate::doctor::DriftSeen,
     /// The persisted mute/volume, handed whole to `AudioController::new`.

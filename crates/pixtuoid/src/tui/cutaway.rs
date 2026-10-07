@@ -495,6 +495,12 @@ impl TileCutaway {
         encode_cores(self.cores, self.audio)
     }
 
+    /// The tile the grid sends in now, its image budget applied.
+    #[cfg(test)]
+    pub(crate) fn tile_shape(&self) -> crate::graphics::TileShape {
+        self.tiles.shape()
+    }
+
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
     /// is drawn: kitty's placeholders, or for SIXEL and iTerm2 a
     /// [`SENTINEL`] ratatui's diff skips, so the flush never blanks the

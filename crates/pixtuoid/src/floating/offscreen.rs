@@ -1400,7 +1400,7 @@ mod tests {
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let slot = active_on("/p/a.jsonl", 0, 0);
         scene.agents.insert(slot.agent_id, slot);
-        let warning = crate::doctor::footer_warning(&[], &["cc".to_string()]);
+        let warning = crate::doctor::footer_warning(&[], &["cc"]);
         let budget = footer_budget(960);
         let calm = renderer.footer(&scene, budget, true, None, None).text();
         let warned = renderer
