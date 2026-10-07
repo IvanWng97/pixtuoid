@@ -36,6 +36,7 @@ pub mod audio;
 pub mod badge;
 #[doc(hidden)]
 pub mod burn;
+pub(crate) mod cached_layer;
 pub(crate) mod celestial;
 pub(crate) mod character;
 pub mod chitchat;
