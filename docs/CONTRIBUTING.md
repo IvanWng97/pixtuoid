@@ -332,9 +332,9 @@ before re-litigating.
   by two whole-PR reviews and is a FOLLOW-UP unless it blocks the merge. A
   blocking issue confirmed in a fold STOPS the loop: revert the fold and
   re-land smaller, or re-scope.
-- **A fold's fix** is a revert, a deletion, a comment- or doc-only change, or
-  a change shipping a test that fails without it; anything else reverts the
-  fold.
+- **A fold's behavior change** ships a test that fails without it; the rest
+  of a fold is a revert, a deletion, a refactor the existing tests cover, or
+  a comment or doc change.
 - **A fix round adds no new gate** — a wanted check is its own PR, asserting
   facts in its own layer (a Rust fact from Rust, never a Python regex over
   `.rs`).
