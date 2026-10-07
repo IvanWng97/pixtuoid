@@ -532,11 +532,10 @@ pub(crate) fn resolve(
     if d.tmux && protocol != ImageProtocol::Kitty {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
     }
-    // Shared memory only where the terminal said it reads ours, and never
-    // through tmux, which may later attach a client on another host
-    // ("Remote clients ... must send the pixel data directly").
-    let medium = if protocol == ImageProtocol::Kitty && d.shm && !d.tmux && mode.forced().is_none()
-    {
+    // Shared memory only where the terminal said it reads ours, forced or
+    // not, and never through tmux, which may later attach a client on
+    // another host ("Remote clients ... must send the pixel data directly").
+    let medium = if protocol == ImageProtocol::Kitty && d.shm && !d.tmux {
         Medium::SharedMemory
     } else {
         Medium::Direct
@@ -1466,6 +1465,40 @@ mod tests {
     /// A terminal that answers no protocol the cutaway animates with falls
     /// back on its own, but `--graphics` still forces one: it overrides
     /// detection.
+    #[test]
+    fn shared_memory_carries_kitty_where_the_terminal_reads_it() {
+        let detected = |shm, tmux| {
+            Probe::Answered(Detected {
+                protocol: Some(ImageProtocol::Kitty),
+                cell: Some(CELL_8X16),
+                tmux,
+                unanimated: false,
+                shm,
+            })
+        };
+        let medium = |mode, probe| match resolve(mode, probe, BUNDLED, AREA) {
+            Plan::Cutaway { medium, .. } => medium,
+            plan => panic!("no cutaway: {plan:?}"),
+        };
+        for mode in [GraphicsMode::Auto, GraphicsMode::Kitty] {
+            assert_eq!(
+                medium(mode, detected(true, false)),
+                Medium::SharedMemory,
+                "{mode:?}"
+            );
+            assert_eq!(
+                medium(mode, detected(false, false)),
+                Medium::Direct,
+                "{mode:?}"
+            );
+            assert_eq!(
+                medium(mode, detected(true, true)),
+                Medium::Direct,
+                "{mode:?} in tmux"
+            );
+        }
+    }
+
     #[test]
     fn a_forced_protocol_paints_where_none_animates() {
         let probe = Probe::Answered(Detected {
