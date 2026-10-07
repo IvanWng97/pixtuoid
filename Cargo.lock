@@ -2672,6 +2672,7 @@ dependencies = [
  "icy_sixel 0.7.0",
  "image",
  "insta",
+ "itoa",
  "libc",
  "miniz_oxide",
  "objc2-app-kit",

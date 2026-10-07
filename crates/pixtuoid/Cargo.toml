@@ -44,6 +44,9 @@ base64-simd        = { version = "0.8", optional = true }
 png                = { version = "0.18", optional = true }
 # SIXEL's per-tile palette map, hot in its encode.
 foldhash           = { workspace = true, optional = true }
+# SIXEL's numbers, written a run at a time without `core::fmt`'s machinery.
+# Already in the graph through ratatui-core's compact_str.
+itoa               = { version = "1", optional = true }
 miniz_oxide        = { version = "0.8", optional = true }
 # `event-stream`: the TUI loop awaits input beside its frame clock and signals.
 crossterm          = { workspace = true, features = ["event-stream"] }
@@ -112,7 +115,7 @@ audio = ["dep:rodio"]
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash"]
+graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash", "dep:itoa"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
