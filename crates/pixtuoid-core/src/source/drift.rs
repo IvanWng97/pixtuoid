@@ -39,7 +39,11 @@ pub const KIND_FIELD: &str = "kind";
 /// str::from` writes the name, `FromStr` reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr, strum::EnumString)]
 #[cfg_attr(test, derive(strum::VariantArray))]
-#[strum(serialize_all = "snake_case")]
+#[strum(
+    serialize_all = "snake_case",
+    parse_err_ty = UnknownDriftKind,
+    parse_err_fn = UnknownDriftKind::of
+)]
 pub enum DriftKind {
     /// [`unknown_event`]'s.
     UnknownEvent,
@@ -49,6 +53,18 @@ pub enum DriftKind {
     UnknownDispatch,
     /// [`shape_drift`]'s.
     ShapeDrift,
+}
+
+/// A [`KIND_FIELD`] naming no [`DriftKind`]: core's own, so strum's
+/// `ParseError` stays out of this crate's API.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no drift kind is named {0:?}")]
+pub struct UnknownDriftKind(pub String);
+
+impl UnknownDriftKind {
+    fn of(name: &str) -> Self {
+        Self(name.to_owned())
+    }
 }
 
 use crate::source::decoder::display_safe;
@@ -104,6 +120,10 @@ mod tests {
             );
             assert_eq!(<&str>::from(kind).parse(), Ok(kind));
         }
+        assert_eq!(
+            "nope".parse::<DriftKind>(),
+            Err(UnknownDriftKind("nope".to_owned()))
+        );
     }
 
     #[test]
