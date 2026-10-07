@@ -507,6 +507,7 @@ fn the_plans_cell_holds_until_the_windows_moves() {
         cell: CELL,
         tmux: false,
         forced: false,
+        medium: crate::graphics::Medium::Direct,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -552,6 +553,7 @@ fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
         cell: CELL,
         tmux: false,
         forced: false,
+        medium: crate::graphics::Medium::Direct,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -1120,30 +1122,79 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
 }
 
 /// Each kitty image the wire carried, in order: its id and its pixels,
-/// inflated.
+/// inflated, or read from shared memory as a terminal reads it (`t=s`, `S`).
 fn kitty_images(wire: &str) -> Vec<(u32, Vec<u8>)> {
     let mut images = Vec::new();
-    let mut open: Option<(u32, String)> = None;
+    let mut open: Option<(u32, Option<usize>, String)> = None;
     for escape in wire
         .split("\x1b\\")
         .filter_map(|e| e.split_once("\x1b_G").map(|(_, e)| e))
     {
         let (keys, payload) = escape.split_once(';').expect("a payload");
         if let Some(id) = keys.split(',').find_map(|k| k.strip_prefix("i=")) {
-            open = Some((id.parse().expect("an id"), String::new()));
+            let shared = keys
+                .contains("t=s")
+                .then(|| keys.split(',').find_map(|k| k.strip_prefix("S=")))
+                .flatten()
+                .map(|len| len.parse().expect("a length"));
+            open = Some((id.parse().expect("an id"), shared, String::new()));
         }
-        let (_, data) = open.as_mut().expect("an image under way");
+        let (_, _, data) = open.as_mut().expect("an image under way");
         data.push_str(payload);
         if keys.contains("m=0") {
-            let (id, data) = open.take().expect("an image under way");
-            let zlib = base64_simd::STANDARD
+            let (id, shared, data) = open.take().expect("an image under way");
+            let bytes = base64_simd::STANDARD
                 .decode_to_vec(data.as_bytes())
                 .expect("base64");
-            let rgb = miniz_oxide::inflate::decompress_to_vec_zlib(&zlib).expect("zlib");
+            let rgb = match shared {
+                #[cfg(unix)]
+                Some(len) => crate::graphics::shm::read_and_unlink(
+                    std::str::from_utf8(&bytes).expect("a name"),
+                    len,
+                )
+                .expect("the object holds the tile"),
+                #[cfg(not(unix))]
+                Some(_) => unreachable!("shared memory is Unix-only"),
+                None => miniz_oxide::inflate::decompress_to_vec_zlib(&bytes).expect("zlib"),
+            };
             images.push((id, rgb));
         }
     }
     images
+}
+
+/// Through shared memory the terminal receives every tile the escapes would
+/// carry, pixel for pixel: the medium changes how, never what.
+#[cfg(unix)]
+#[test]
+fn shared_memory_carries_the_tiles_the_escapes_would() {
+    let run = |medium| {
+        let (cols, rows) = (120, 40);
+        let mut r = TuiRenderer::new(
+            Terminal::new(Window::new(cols, rows)).expect("terminal"),
+            normal_theme(),
+            Vec::new(),
+            pack_arc(),
+        );
+        let wire = Wire::default();
+        let out = crate::tui::FrameOut::new(wire.clone(), false);
+        r.present_through(out.clone());
+        r.set_cutaway(
+            TileCutaway::new(
+                fit(cols, rows),
+                CELL,
+                ImageProtocol::Kitty,
+                false,
+                Box::new(out),
+            )
+            .through(medium),
+        );
+        r.render(&office(), pack(), t0()).expect("render");
+        kitty_images(&wire.take())
+    };
+    let direct = run(crate::graphics::Medium::Direct);
+    assert!(!direct.is_empty(), "the first frame sends its tiles");
+    assert_eq!(run(crate::graphics::Medium::SharedMemory), direct);
 }
 
 /// A floor switch slides the cutaway the way classic slides its half-blocks:
