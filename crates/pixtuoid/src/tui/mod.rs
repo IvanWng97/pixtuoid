@@ -599,7 +599,8 @@ pub(crate) fn setup_terminal(out: FrameOut, _armed: &QuitArms) -> Result<Term> {
 }
 
 /// THE terminal-mode unwind: the ONE definition of the order every exit path takes. `pub`
-/// for the panic hook in `crash.rs`, a module of the BIN crate.
+/// for the panic hook in `crash.rs`, a module of the BIN crate. It also unlinks every
+/// shared-memory object this process published.
 ///
 /// Every step runs even when an earlier one fails and the FIRST error is returned — a `?`
 /// after the escape write would skip `disable_raw` exactly when it is needed most. And
@@ -1451,6 +1452,15 @@ mod capacity_sweep_tests {
 mod teardown_tests {
     use super::unwind_after;
     use std::cell::Cell;
+
+    #[cfg(all(feature = "graphics", unix))]
+    #[test]
+    fn the_unwind_unlinks_every_shared_memory_object() {
+        use crate::graphics::shm;
+        let name = shm::publish(b"tile", std::time::Instant::now()).expect("published");
+        let _ = super::unwind_terminal_modes(&mut Vec::new(), || Ok(()));
+        assert_eq!(shm::read_and_unlink(&name, 4), None);
+    }
 
     struct FailingWriter;
     impl std::io::Write for FailingWriter {
