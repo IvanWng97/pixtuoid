@@ -1681,6 +1681,7 @@ impl Density {
     }
 
     /// The density as the non-zero factor it is.
+    #[doc(hidden)]
     pub const fn as_nonzero(self) -> NonZeroU16 {
         self.0
     }

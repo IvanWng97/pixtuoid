@@ -134,6 +134,7 @@ impl Default for RenderScale {
 /// The densest art, not whichever density the surface lands nearest: the one
 /// render draws every piece at one density, and a scale only a coarser density
 /// divides would draw the densest art from coarser stand-ins.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PixelFit {
     scale: RenderScale,
