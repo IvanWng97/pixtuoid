@@ -107,14 +107,21 @@ pub(crate) fn log_location() -> LogLocation {
         return LogLocation::File(p);
     }
     if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
-        return LogLocation::Runs(state.join("pixtuoid").join("logs"));
+        return runs_under(&state);
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return LogLocation::Runs(home.join(".cache").join("pixtuoid").join("logs"));
+        return runs_under(&home.join(".cache"));
     }
     // No home dir at all: the log must exist somewhere — it is the only runtime
     // diagnostics channel.
-    LogLocation::Runs(std::env::temp_dir().join("pixtuoid-logs"))
+    runs_under(&std::env::temp_dir())
+}
+
+/// The runs directory under `base`, inside pixtuoid's own directory on every
+/// arm, so the single log [`adopt_single_log`] moves in beside it is only ever
+/// pixtuoid's.
+fn runs_under(base: &Path) -> LogLocation {
+    LogLocation::Runs(base.join("pixtuoid").join("logs"))
 }
 
 /// How long a run's log outlives its last write before a later run removes
@@ -136,12 +143,35 @@ fn open_run_sink(
         }
         LogLocation::Runs(dir) => dir.join(run_file_name(now, std::process::id())),
     };
-    let sink = open_private_append(&path).map_err(|e| (path, e))?;
+    let opts = match at {
+        LogLocation::File(_) => OpenOptions::new(),
+        LogLocation::Runs(_) => live_run_options(),
+    };
+    let sink = open_private_append(&path, opts).map_err(|e| (path, e))?;
     if let LogLocation::Runs(dir) = at {
+        // Held for the run's life, it marks the file live to [`prune_runs`] on
+        // Unix, where removing an open file succeeds.
+        #[cfg(unix)]
+        let _ = sink.try_lock();
         adopt_single_log(dir);
         prune_runs(dir, now);
     }
     Ok(sink)
+}
+
+/// A run's sink, which a live run's [`prune_runs`] must not remove: std shares
+/// delete by default on Windows (`sys/fs/windows.rs` `share_mode`).
+fn live_run_options() -> OpenOptions {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+        let mut opts = OpenOptions::new();
+        opts.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+        opts
+    }
+    #[cfg(not(windows))]
+    OpenOptions::new()
 }
 
 /// A run's file: its start in UTC, then its pid, so runs started in one
@@ -170,9 +200,9 @@ fn adopt_single_log(dir: &Path) {
     }
 }
 
-/// Remove the runs in `dir` last written over [`RUN_LOG_RETAIN`] before `now`.
-/// A run still writing stays recent; one the OS won't remove (open on
-/// Windows) waits for a later run.
+/// Remove the runs in `dir` last written over [`RUN_LOG_RETAIN`] before `now`,
+/// except one whose run still holds it open: a run quiet for a week keeps
+/// logging to its file.
 fn prune_runs(dir: &Path, now: SystemTime) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -192,7 +222,15 @@ fn prune_runs(dir: &Path, now: SystemTime) {
                 now.duration_since(written)
                     .is_ok_and(|age| age > RUN_LOG_RETAIN)
             });
-        if stale {
+        // Windows refuses the remove itself.
+        #[cfg(unix)]
+        let live = || {
+            std::fs::File::open(&path)
+                .is_ok_and(|f| matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
+        };
+        #[cfg(not(unix))]
+        let live = || false;
+        if stale && !live() {
             let _ = std::fs::remove_file(&path);
         }
     }
@@ -211,8 +249,11 @@ fn prune_runs(dir: &Path, now: SystemTime) {
 /// [`pixtuoid::install::tighten_to_owner_only`] restates it on a sink an older
 /// version created 0644, which the create mode cannot bind to. An already-existing
 /// DIRECTORY keeps its mode: silently re-moding a user's `~/.cache` is not ours.
-pub(crate) fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
-    let f = create_owner_only_append(path)?;
+pub(crate) fn open_private_append(
+    path: &Path,
+    opts: OpenOptions,
+) -> std::io::Result<std::fs::File> {
+    let f = create_owner_only_append(path, opts)?;
     pixtuoid::install::tighten_to_owner_only(&f);
     Ok(f)
 }
@@ -220,7 +261,7 @@ pub(crate) fn open_private_append(path: &Path) -> std::io::Result<std::fs::File>
 /// The CREATE half of [`open_private_append`]. Deliberately does NOT fchmod — a
 /// test asserting the mode off THIS fn is asserting what the open established, not
 /// what a follow-up chmod repaired.
-fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
+fn create_owner_only_append(path: &Path, mut opts: OpenOptions) -> std::io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         #[cfg(unix)]
         {
@@ -233,7 +274,6 @@ fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
         #[cfg(not(unix))]
         std::fs::create_dir_all(parent)?;
     }
-    let mut opts = OpenOptions::new();
     opts.create(true).append(true);
     pixtuoid::install::owner_only_create(&mut opts);
     opts.open(path)
@@ -314,7 +354,7 @@ mod tests {
         // follow-up fchmod would repair a dropped create mode.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state").join("pixtuoid").join("log");
-        drop(create_owner_only_append(&path).expect("opens"));
+        drop(create_owner_only_append(&path, OpenOptions::new()).expect("opens"));
         assert_eq!(mode_of(&path), 0o600, "the sink must not inherit the umask");
         assert_eq!(
             mode_of(&dir.path().join("state").join("pixtuoid")),
@@ -334,7 +374,7 @@ mod tests {
         let path = dir.path().join("log");
         std::fs::write(&path, "old\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        drop(open_private_append(&path).expect("reopens"));
+        drop(open_private_append(&path, OpenOptions::new()).expect("reopens"));
         assert_eq!(mode_of(&path), 0o600, "a pre-existing sink is tightened");
     }
 
@@ -416,7 +456,8 @@ mod tests {
 
     /// A run opens a file of its own, owner-only, named so name order is start
     /// order; the old single log moves in beside it, and runs past
-    /// [`RUN_LOG_RETAIN`] go, the new one and a recent one staying.
+    /// [`RUN_LOG_RETAIN`] go, the new one, a recent one and a quiet live one
+    /// staying.
     #[test]
     fn a_run_logs_to_its_own_file_and_tidies_the_runs_before_it() {
         let root = tempfile::tempdir().unwrap();
@@ -439,6 +480,24 @@ mod tests {
             RUN_LOG_RETAIN / 2,
         );
         let foreign = aged("notes.txt", RUN_LOG_RETAIN * 2);
+        let quiet = aged(
+            &run_file_name(now - RUN_LOG_RETAIN * 3, 3),
+            RUN_LOG_RETAIN * 2,
+        );
+        // Its run, still open: the lock is the Unix mark, the share mode Windows'.
+        let quiet_run = {
+            let mut opts = OpenOptions::new();
+            opts.read(true);
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+                opts.share_mode(FILE_SHARE_READ);
+            }
+            opts.open(&quiet).unwrap()
+        };
+        #[cfg(unix)]
+        quiet_run.try_lock().unwrap();
         let single = dir.with_file_name("log");
         std::fs::write(&single, "the old single log\n").unwrap();
 
@@ -447,6 +506,8 @@ mod tests {
         let this_run = dir.join(run_file_name(now, std::process::id()));
         assert!(this_run.exists() && recent.exists() && foreign.exists());
         assert!(!stale.exists(), "a run past the retention goes");
+        assert!(quiet.exists(), "a quiet run still running keeps its file");
+        drop(quiet_run);
         assert!(!single.exists(), "the single log moves into the runs");
         #[cfg(unix)]
         assert_eq!(mode_of(&this_run), 0o600);
@@ -454,7 +515,11 @@ mod tests {
         let (text, warning) = pixtuoid::doctor::read_logs(&at);
         assert_eq!(warning, None);
         let order: Vec<&str> = text.lines().collect();
-        assert_eq!(order, ["x", "the old single log"], "runs read oldest first");
+        assert_eq!(
+            order,
+            ["x", "x", "the old single log"],
+            "runs read oldest first"
+        );
     }
 
     #[test]
