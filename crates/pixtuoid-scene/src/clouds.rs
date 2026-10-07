@@ -521,7 +521,7 @@ fn heaviness(weather: Weather) -> f32 {
 }
 
 /// How the sky body lights the clouds at one time of day.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Lighting {
     /// The light's lean on the glass, x east and y down.
     dir: (f32, f32),
@@ -712,7 +712,9 @@ struct Strike {
 /// One mass's bands on a grid `d` cells to the unit, in its own undrifted
 /// frame: what a frame translates by its drift and composites, and what the
 /// office's [`CloudCache`] keeps.
-#[derive(Debug, PartialEq)]
+// Eq: an `Arc` of an `Eq` type compares equal by pointer first, and the
+// cache hands one mass's raster out as one `Arc`.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct MassRaster {
     /// Its first column and row, in grid cells from the run's west end and
     /// the glass's top, undrifted.
@@ -864,6 +866,7 @@ impl CloudCache {
 }
 
 /// What the windows' clouds are this frame.
+#[derive(PartialEq)]
 pub(crate) struct Clouds {
     masses: Vec<Mass>,
     /// Each mass's bands, by index.
@@ -933,6 +936,12 @@ impl Clouds {
                 (w, t)
             })
             .collect();
+        let stepped = |w| {
+            dequantize(
+                quantize(weather.share(Element::Precipitation, w), SHARE_STEPS),
+                SHARE_STEPS,
+            )
+        };
         let clouds = Self {
             masses: Vec::new(),
             rasters: Vec::new(),
@@ -949,8 +958,8 @@ impl Clouds {
             heaviness: heavy,
             storm: dequantize(light.storm, LIGHT_STEPS),
             night,
-            rain: weather.share(Element::Precipitation, Weather::Rain)
-                + STORM_VIRGA * weather.share(Element::Precipitation, Weather::Storm),
+            // Each share in the deck's own steps, so its shafts step with its masses.
+            rain: stepped(Weather::Rain) + STORM_VIRGA * stepped(Weather::Storm),
             strike: None,
         };
         let mut planned = Vec::new();

@@ -432,6 +432,7 @@ impl PlaneColours {
 
 /// The city behind a window run, drawn onto an art grid of `density` art
 /// pixels to the logical unit, `None` where the sky shows.
+#[derive(PartialEq)]
 pub(crate) struct CityStrip {
     w: u16,
     h: u16,
