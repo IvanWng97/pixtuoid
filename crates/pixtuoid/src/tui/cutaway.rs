@@ -76,7 +76,7 @@ pub(crate) struct TileCutaway {
     /// The window's cell on the first frame that read one.
     first_window: Option<CellSize>,
     density: Density,
-    wire: crate::graphics::Wire,
+    route: crate::graphics::Route,
     /// [`kitty::process_base`].
     base: u32,
     /// `None` while classic paints.
@@ -136,7 +136,7 @@ impl std::fmt::Debug for TileCutaway {
         f.debug_struct("TileCutaway")
             .field("planned", &self.planned)
             .field("density", &self.density)
-            .field("wire", &self.wire)
+            .field("route", &self.route)
             .field("origin", &self.origin)
             .field("pending", &self.pending.as_ref().map(|p| p.tiles.len()))
             .field("landing", &self.landing.as_ref().map(|l| l.sent.len()))
@@ -153,15 +153,15 @@ enum Shown {
 
 impl TileCutaway {
     /// [`crate::graphics::Plan::Cutaway`]'s parts, transmitting into `out`.
-    pub(crate) fn new(fit: Fit, cell: CellSize, wire: crate::graphics::Wire, out: Sink) -> Self {
+    pub(crate) fn new(fit: Fit, cell: CellSize, route: crate::graphics::Route, out: Sink) -> Self {
         Self {
             planned: cell,
             first_window: None,
             density: fit.density(),
-            wire,
+            route,
             base: kitty::process_base(),
             fitted: None,
-            tiles: Tiles::new(wire.protocol, cell, fit),
+            tiles: Tiles::new(route.protocol(), cell, fit),
             image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
             image_behind: false,
             shown: None,
@@ -196,7 +196,7 @@ impl TileCutaway {
         };
         let fitted = Fitted { scene, cell, fit };
         if self.fitted != Some(fitted) {
-            self.tiles = Tiles::new(self.wire.protocol, cell, fit);
+            self.tiles = Tiles::new(self.route.protocol(), cell, fit);
         }
         self.fitted = Some(fitted);
         Some(fitted)
@@ -327,7 +327,7 @@ impl TileCutaway {
         let due = self.flash.changes(flashes)
             || self.sent_at.is_none_or(|at| {
                 now.duration_since(at)
-                    .map_or(true, |since| since >= self.wire.protocol.cadence())
+                    .map_or(true, |since| since >= self.route.protocol().cadence())
             });
         self.pending = Some(Pending {
             tiles: if due { changed } else { Vec::new() },
@@ -338,7 +338,7 @@ impl TileCutaway {
     /// Send kitty's tiles before ratatui's flush, so the placeholders it
     /// writes find their images there.
     pub(crate) fn before_flush(&mut self, now: SystemTime) {
-        if self.wire.protocol == ImageProtocol::Kitty {
+        if self.route.protocol() == ImageProtocol::Kitty {
             self.send(&[], now);
         }
     }
@@ -347,7 +347,7 @@ impl TileCutaway {
     /// flush: only then are the text cells they must avoid known. A covered
     /// tile is owed again, so it is re-sent once uncovered.
     pub(crate) fn after_flush(&mut self, covered: &[u32], now: SystemTime) {
-        if self.wire.protocol == ImageProtocol::Kitty {
+        if self.route.protocol() == ImageProtocol::Kitty {
             return;
         }
         for &index in covered {
@@ -376,14 +376,14 @@ impl TileCutaway {
             });
             return;
         }
-        match self.wire.protocol {
+        match self.route.protocol() {
             ImageProtocol::Kitty => {
                 if let Some(last) = send
                     .iter()
                     .filter_map(|c| kitty::image_id(self.base, c.tile))
                     .max()
                 {
-                    kitty::on_screen(self.wire.tmux, last);
+                    kitty::on_screen(self.route.tmux(), last);
                 }
             }
             ImageProtocol::Sixel | ImageProtocol::Iterm2 => {
@@ -442,7 +442,7 @@ impl TileCutaway {
         Encoder {
             tiles: &self.tiles,
             image: &self.image,
-            wire: self.wire,
+            route: self.route,
             base: self.base,
             origin: self.origin,
             threads: encode_cores(self.cores, self.audio),
@@ -495,7 +495,7 @@ impl TileCutaway {
     /// [`SENTINEL`] ratatui's diff skips, so the flush never blanks the
     /// pixels.
     pub(crate) fn place(&self, buf: &mut Buffer, scene: Rect) {
-        if self.wire.protocol == ImageProtocol::Kitty {
+        if self.route.protocol() == ImageProtocol::Kitty {
             let tiles = self
                 .tiles
                 .all()
@@ -521,7 +521,7 @@ impl TileCutaway {
     /// it hands back to ratatui's diff: the text, and the rest as
     /// half-blocks. Kitty's text needs no room made.
     pub(crate) fn cover(&self, buf: &mut Buffer, scene: Rect) -> Vec<u32> {
-        if self.wire.protocol == ImageProtocol::Kitty {
+        if self.route.protocol() == ImageProtocol::Kitty {
             return Vec::new();
         }
         let sentinel = sentinel();
@@ -593,7 +593,7 @@ fn threads_for(tiles: usize, cores: usize) -> usize {
 struct Encoder<'a> {
     tiles: &'a Tiles,
     image: &'a RgbBuffer,
-    wire: crate::graphics::Wire,
+    route: crate::graphics::Route,
     base: u32,
     origin: Position,
     threads: usize,
@@ -630,9 +630,9 @@ impl Encoder<'_> {
         let _encode = tracing::trace_span!("tile.encode").entered();
         let image =
             tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(self.image, c.tile));
-        match self.wire.protocol {
+        match self.route.protocol() {
             ImageProtocol::Kitty => kitty::image_id(self.base, c.tile)
-                .map(|id| kitty::transmit(id, &image, self.wire.tmux, self.wire.medium)),
+                .map(|id| kitty::transmit(id, &image, self.route.tmux(), self.route.medium())),
             ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
             ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
                 .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))

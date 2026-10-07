@@ -74,17 +74,17 @@ pub(crate) enum Medium {
 }
 
 /// How the cutaway's images reach the terminal: its protocol, through tmux's
-/// passthrough or not, and how kitty's pixels travel. [`resolve`] decides
-/// it once, and the encoder carries it whole.
+/// passthrough or not, and how kitty's pixels travel. Built only by
+/// [`Route::of`] or [`Route::direct`], so no route pairs shared memory with a
+/// protocol or tmux [`Route::may_share`] refuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Wire {
-    pub(crate) protocol: ImageProtocol,
-    /// Inside tmux: the encoder wraps each image in passthrough.
-    pub(crate) tmux: bool,
-    pub(crate) medium: Medium,
+pub(crate) struct Route {
+    protocol: ImageProtocol,
+    tmux: bool,
+    medium: Medium,
 }
 
-impl Wire {
+impl Route {
     /// Whether a terminal answering `protocol`, through tmux or not, may read
     /// shared memory at all: kitty's alone, and never through tmux, which may
     /// later attach a client on another host ("Remote clients ... must send
@@ -123,6 +123,19 @@ impl Wire {
             tmux,
             medium: Medium::Direct,
         }
+    }
+
+    pub(crate) fn protocol(self) -> ImageProtocol {
+        self.protocol
+    }
+
+    /// Inside tmux: the encoder wraps each image in passthrough.
+    pub(crate) fn tmux(self) -> bool {
+        self.tmux
+    }
+
+    pub(crate) fn medium(self) -> Medium {
+        self.medium
     }
 }
 
@@ -304,7 +317,7 @@ pub(crate) enum Plan {
         /// Its geometry on this terminal.
         fit: Fit,
         /// How the image reaches the terminal.
-        wire: Wire,
+        route: Route,
         /// The cell the scale was fitted to.
         cell: CellSize,
         /// `--graphics` named the protocol, rather than the terminal.
@@ -400,7 +413,7 @@ impl Plan {
         let heavy = matches!(
             self,
             Plan::Cutaway {
-                wire: Wire {
+                route: Route {
                     protocol: ImageProtocol::Sixel | ImageProtocol::Iterm2,
                     ..
                 },
@@ -596,7 +609,7 @@ pub(crate) fn resolve(
     }
     Plan::Cutaway {
         fit,
-        wire: Wire::of(protocol, d.tmux, d.shm),
+        route: Route::of(protocol, d.tmux, d.shm),
         cell,
         forced: mode.forced().is_some(),
     }
@@ -717,8 +730,8 @@ impl Plan {
         match self {
             Plan::Cutaway {
                 fit,
-                wire:
-                    Wire {
+                route:
+                    Route {
                         protocol,
                         tmux,
                         medium,
@@ -1090,7 +1103,7 @@ mod tests {
             let got = plan(answered(Some(protocol), CELL_8X16, false), BUNDLED);
             let Plan::Cutaway {
                 fit,
-                wire,
+                route,
                 cell,
                 forced,
             } = got
@@ -1098,8 +1111,8 @@ mod tests {
                 panic!("{protocol:?}: {got:?}");
             };
             assert_eq!(
-                (wire, cell, forced),
-                (Wire::direct(protocol, false), CELL_8X16, false)
+                (route, cell, forced),
+                (Route::direct(protocol, false), CELL_8X16, false)
             );
             assert_eq!((fit.scale().get(), fit.upscale()), (8, 2));
         }
@@ -1113,7 +1126,7 @@ mod tests {
         assert!(matches!(
             plan(ImageProtocol::Kitty),
             Plan::Cutaway {
-                wire: Wire {
+                route: Route {
                     protocol: ImageProtocol::Kitty,
                     tmux: true,
                     ..
@@ -1149,7 +1162,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { wire, forced: true, .. } if wire.protocol == want),
+                    matches!(got, Plan::Cutaway { route, forced: true, .. } if route.protocol == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -1536,7 +1549,7 @@ mod tests {
             })
         };
         let medium = |mode, probe| match resolve(mode, probe, BUNDLED, AREA) {
-            Plan::Cutaway { wire, .. } => wire.medium,
+            Plan::Cutaway { route, .. } => route.medium,
             plan => panic!("no cutaway: {plan:?}"),
         };
         for mode in [GraphicsMode::Auto, GraphicsMode::Kitty] {

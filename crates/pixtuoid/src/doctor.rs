@@ -1824,7 +1824,7 @@ mod tests {
         let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
         r.graphics_plan = Plan::Cutaway {
             fit: Fit::new(cell, area, density).expect("fits"),
-            wire: crate::graphics::Wire::direct(ImageProtocol::Kitty, false),
+            route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
             forced: false,
         };

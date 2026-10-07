@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(fit.scale().get(), 8);
         let cutaway = Plan::Cutaway {
             fit,
-            wire: crate::graphics::Wire::direct(ImageProtocol::Kitty, false),
+            route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
             forced: false,
         };

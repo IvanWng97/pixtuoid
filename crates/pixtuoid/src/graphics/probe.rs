@@ -211,7 +211,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
         Some(true) => {
             let mut d = detected(&responses, &hints, window_cell());
             // Never through tmux: see `resolve`.
-            d.shm = super::Wire::may_share(d.protocol, d.tmux) && reads_shared_memory();
+            d.shm = super::Route::may_share(d.protocol, d.tmux) && reads_shared_memory();
             Probe::Answered(d)
         }
     }

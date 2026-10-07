@@ -225,7 +225,7 @@ pub fn renderer(
         let mut cutaway = crate::tui::cutaway::TileCutaway::new(
             fit,
             cell,
-            crate::graphics::Wire::direct(image, false),
+            crate::graphics::Route::direct(image, false),
             Box::new(out.clone()),
         );
         // A live audio thread's spare core, which a renderer reads off its

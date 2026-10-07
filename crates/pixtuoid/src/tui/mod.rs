@@ -1070,19 +1070,19 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
-            fit, wire, cell, ..
+            fit, route, cell, ..
         } => {
             renderer.painted_by(jank::Painter {
-                look: wire.protocol.name(),
+                look: route.protocol().name(),
                 scale: fit.scale().get(),
-                tmux: wire.tmux,
+                tmux: route.tmux(),
                 terminal,
                 sync: out.synchronized(),
             });
             renderer.set_cutaway(cutaway::TileCutaway::new(
                 fit,
                 cell,
-                wire,
+                route,
                 Box::new(out.clone()),
             ));
         }
