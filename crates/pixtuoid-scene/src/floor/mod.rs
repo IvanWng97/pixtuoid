@@ -26,6 +26,10 @@ use crate::sim::{SimFrame, SimInputs, SimStores, sim_step};
 use crate::theme::Theme;
 use crate::walk::WalkState;
 
+mod office;
+#[doc(hidden)]
+pub use office::{FloorNav, FloorView, OfficeSession, compose_slide, footer_floor, slide_offsets};
+
 pub use pixtuoid_core::state::MAX_FLOORS;
 
 /// Derive a floor's layout seed from its index — the ONE definition every call
@@ -537,24 +541,17 @@ impl PerOffice {
     }
 }
 
-/// The OWNED single-floor painter session: one [`PerFloor`] + one
+/// The OWNED single-floor painter session: one [`FloorView`] + one
 /// [`PerOffice`] plus the dual `evict_missing` protocol behind one type, so a
 /// painter can't hand-roll (and silently skip) the eviction — a skipped
-/// eviction leaks per-agent state or teleports a recurring agent.
+/// eviction leaks per-agent state or teleports a recurring agent. An office
+/// of several floors is an [`OfficeSession`].
 #[derive(Debug)]
 pub struct FloorSession {
-    /// This session's single floor — its sim stores + raster.
-    pub floor: PerFloor,
+    /// This session's single floor — its sim stores + raster, and its last frame.
+    view: FloorView,
     /// The office-wide cross-frame state (coffee, chitchat, audio) shared across floors.
     pub office: PerOffice,
-    /// The layout the last `render` laid out, so a painter can't pass a layout
-    /// that disagrees with the sprite pass.
-    last_layout: Option<Arc<crate::layout::SceneLayout>>,
-    /// The occupancy the last `render` observed, so a painter reads the SAME
-    /// frame's occupancy it just painted.
-    last_occupied: std::collections::HashSet<usize>,
-    /// What of the last `render`'s frame flashes.
-    last_flash: crate::flash::FlashPhase,
 }
 
 impl FloorSession {
@@ -562,18 +559,26 @@ impl FloorSession {
     /// nothing laid out yet.
     pub fn new(pack: Arc<Pack>) -> Self {
         Self {
-            floor: PerFloor::new(pack),
+            view: FloorView::new(pack),
             office: PerOffice::default(),
-            last_layout: None,
-            last_occupied: std::collections::HashSet::new(),
-            last_flash: crate::flash::FlashPhase::default(),
         }
+    }
+
+    /// This session's floor: its sim stores + raster.
+    pub fn floor(&self) -> &PerFloor {
+        &self.view.floor
+    }
+
+    /// [`Self::floor`], to seed or inspect its stores.
+    #[cfg(test)]
+    pub(crate) fn floor_mut(&mut self) -> &mut PerFloor {
+        &mut self.view.floor
     }
 
     /// What of the last [`render`](Self::render)'s frame flashes; nothing
     /// before the first, or when it could not lay out.
     pub fn flash(&self) -> crate::flash::FlashPhase {
-        self.last_flash
+        self.view.flash()
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves of the
@@ -581,7 +586,7 @@ impl FloorSession {
     /// per-floor one holds no other floor's agents, so evicting against it
     /// would wipe their state.
     pub fn evict_missing(&mut self, scene: &SceneState) {
-        self.floor.evict_missing(scene);
+        self.view.floor.evict_missing(scene);
         self.office.evict_missing(scene);
     }
 
@@ -596,41 +601,21 @@ impl FloorSession {
         inputs: crate::look::RenderInputs<'_>,
     ) -> Option<Arc<crate::layout::SceneLayout>> {
         self.evict_missing(inputs.world.scene);
-        match crate::look::render(&mut self.floor, self.office.stores(), look, inputs) {
-            Some(frame) => {
-                self.last_layout = Some(Arc::clone(&frame.layout));
-                // REPLACE, never extend: the cue tracker fires on edges, so an
-                // accumulating set would re-report stale waypoints forever.
-                self.last_occupied = frame.occupied_waypoints;
-                self.last_flash = frame.flash;
-                Some(frame.layout)
-            }
-            None => {
-                self.last_layout = None;
-                self.last_occupied.clear();
-                self.last_flash = crate::flash::FlashPhase::default();
-                None
-            }
-        }
+        self.view.render(&mut self.office, look, inputs)
     }
 
     /// What the LAST rendered frame shows a pointer over `area`, in layout
     /// units: [`crate::hit::scene_hit`] on its hovers, star and layout.
     #[doc(hidden)]
     pub fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
-        crate::hit::scene_hit(
-            self.floor.raster.hovers()?,
-            self.floor.raster.star(),
-            self.last_layout.as_deref()?,
-            area,
-        )
+        self.view.hit_at(area)
     }
 
     /// The badges of the LAST frame the classic rendered, in paint order.
     /// Empty before the first `render`, and after a cutaway frame, whose image
     /// holds its text.
     pub fn badges(&self) -> &[crate::display::Badge] {
-        self.floor.raster.classic_badges()
+        self.view.floor.raster.classic_badges()
     }
 
     /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.
@@ -654,12 +639,12 @@ impl FloorSession {
     /// draws holds one frame per beat (`both_painters_paint_one_frame_per_beat`),
     /// so a painter may sleep to the next beat only while this is false.
     pub fn moves_off_beat(&self) -> bool {
-        self.floor.ctx.moves_off_beat()
+        self.view.floor.ctx.moves_off_beat()
     }
 
     /// The last frame's pixels, `None` before the first `render`.
     pub fn buf(&self) -> Option<&RgbBuffer> {
-        self.floor.raster.pixels()
+        self.view.buf()
     }
 
     /// One frame of audio intent for THIS session's last render, fed from the
@@ -672,25 +657,14 @@ impl FloorSession {
         floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
-        // Bind the two shared fields to LOCALS first so the closure captures the
-        // locals, not `self` — otherwise it collides with the `&mut
-        // self.office.audio` receiver.
-        let occupied = &self.last_occupied;
-        let layout = self.last_layout.as_deref();
-        self.office.audio.frame(
-            scene,
-            occupied,
-            |idx| waypoint_kind_of(layout, idx),
-            floor,
-            now,
-        )
+        self.view.audio_frame(&mut self.office, scene, floor, now)
     }
 
     /// Flush the per-floor recolored-sprite cache. Call after a theme change so
     /// cached AGENT sprites don't render with the old palette; the env base
     /// fill needs no flush, since `BaseFillCache` keys on the palette.
     pub fn reset_frame_cache(&mut self) {
-        self.floor.raster.reset_sprite_cache();
+        self.view.floor.raster.reset_sprite_cache();
     }
 
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
@@ -699,7 +673,7 @@ impl FloorSession {
     pub fn step(&mut self, world: FloorInputs<'_>, size: Size) -> Option<SteppedFloor> {
         self.evict_missing(world.scene);
         step_floor(
-            &mut self.floor.ctx,
+            &mut self.view.floor.ctx,
             &mut self.office.coffee,
             &mut self.office.chitchat,
             world,

@@ -1130,7 +1130,7 @@ mod tests {
             for into in (10..beat).step_by(10) {
                 let walks = office
                     .session
-                    .floor
+                    .floor()
                     .ctx
                     .creatures
                     .values()
@@ -1215,7 +1215,7 @@ mod tests {
         let elevator = mascot_elevator(
             &office
                 .session
-                .floor
+                .floor_mut()
                 .ctx
                 .frame_layout(192, 80, office.floor.floor_seed)
                 .expect("lays out"),
@@ -1266,7 +1266,7 @@ mod tests {
         }
         assert!(walking_out > 0, "it walks on after the roster drops it");
         assert!(
-            office.session.floor.ctx.creatures.is_empty(),
+            office.session.floor().ctx.creatures.is_empty(),
             "and its walk with it"
         );
         assert!(
@@ -1312,7 +1312,7 @@ mod tests {
         let elevator = mascot_elevator(
             &office
                 .session
-                .floor
+                .floor_mut()
                 .ctx
                 .frame_layout(192, 80, office.floor.floor_seed)
                 .expect("lays out"),
@@ -1327,7 +1327,7 @@ mod tests {
         assert!(
             office
                 .session
-                .floor
+                .floor()
                 .ctx
                 .creatures
                 .values()

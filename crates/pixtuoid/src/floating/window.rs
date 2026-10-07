@@ -40,8 +40,12 @@ pub(crate) struct FloatingApp {
     theme: &'static Theme,
     pack: std::sync::Arc<Pack>,
     config_path: PathBuf,
-    /// The configured office pets — one is selected per floor (v1 shows floor 0's).
-    pets: Vec<pixtuoid_scene::pet::Pet>,
+    /// The `[p]ause`, which holds the office's clock still.
+    pause: pixtuoid_scene::anim::PauseClock,
+    /// What the frame on screen shows beside the office.
+    screen: super::offscreen::Screen,
+    /// The frames' times and janks, reported as the TUI's are.
+    jank: crate::jank::Jank,
     /// How the office moves.
     motion: pixtuoid_scene::anim::Motion,
     renderer: OfficeRenderer,
@@ -101,13 +105,16 @@ impl FloatingApp {
         let pack = std::sync::Arc::new(pack);
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         renderer.set_audio(audio_ctl.handle().clone());
+        renderer.set_pets(pets);
         let focus_roots = boot.focus_roots();
         Self {
             cfg,
             theme,
             pack,
             config_path,
-            pets,
+            pause: pixtuoid_scene::anim::PauseClock::default(),
+            screen: super::offscreen::Screen::default(),
+            jank: crate::jank::Jank::new(Instant::now()),
             motion,
             renderer,
             audio_ctl,
@@ -175,7 +182,7 @@ impl FloatingApp {
             return;
         };
         let size = window.inner_size();
-        let now = SystemTime::now();
+        let now = self.pause.now(SystemTime::now());
         let press = match self.shown {
             Some(at) => self.renderer.press_at(
                 (self.cursor.x, self.cursor.y),
@@ -205,7 +212,7 @@ impl FloatingApp {
                 self.petting = Some(pixtuoid_scene::pet::PetState {
                     petted_at: now,
                     kind,
-                    floor_idx: 0,
+                    floor_idx: self.renderer.nav().current(),
                 });
             }
             Press::Act(HitAction::Open(url)) => {
@@ -215,6 +222,7 @@ impl FloatingApp {
     }
 
     fn redraw(&mut self) {
+        let started = Instant::now();
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -242,22 +250,21 @@ impl FloatingApp {
             at.office.w,
             at.office.h,
         );
+        // The office's weather and motion; the office picks each floor's own.
         let floor_meta = FloorMeta::ground().with_motion(self.motion);
-        let floor_pet =
-            pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
-        let now = SystemTime::now();
+        let now = self.pause.now(SystemTime::now());
         let world = FloorInputs {
             scene: &scene,
             pack: &self.pack,
             now,
             floor: floor_meta,
             pets: PetInputs {
-                pet: floor_pet,
+                pet: None,
                 petting: self.petting.as_ref(),
             },
         };
-        let office = self.renderer.render_live(
+        let live = self.renderer.render_live(
             at,
             WindowFrame {
                 world,
@@ -270,6 +277,57 @@ impl FloatingApp {
             (win_w, win_h),
         );
         self.shown = Some(at);
+        if !live
+            || self
+                .renderer
+                .buf()
+                .is_none_or(|o| o.width() == 0 || o.height() == 0)
+        {
+            // Nothing rendered, or held: the window keeps the last frame, which
+            // the next one's dirt is no longer measured against.
+            self.screen.stale();
+            return;
+        }
+        let cursor = (self.cursor.x, self.cursor.y);
+        let next = super::offscreen::Overlays {
+            window: (win_w, win_h),
+            footer: self.renderer.footer(
+                &scene,
+                super::offscreen::footer_budget(win_w as usize),
+                audio_audible,
+                volume_flash,
+                self.live
+                    .as_ref()
+                    .and_then(super::LivePipeline::footer_warning)
+                    .as_deref(),
+            ),
+            tooltip: self
+                .cursor_in
+                .then(|| self.renderer.hit_at(cursor, at))
+                .flatten()
+                .and_then(|hit| {
+                    // The office picks each floor's pet as it renders; the
+                    // tooltip names the one the floor showing drew.
+                    let shown = FloorInputs {
+                        pets: PetInputs {
+                            pet: self.renderer.showing_pet(),
+                            ..world.pets
+                        },
+                        ..world
+                    };
+                    pixtuoid_scene::tooltip::for_hit(hit, &shown)
+                })
+                .map(|tip| (tip, (cursor.0 as i32, cursor.1 as i32))),
+        };
+        let dirty = self.renderer.dirty();
+        let painted = crate::jank::Painted::from(dirty);
+        if !self.screen.needs(&next, dirty) {
+            // The frame on screen is this one: its flash phase shows.
+            self.renderer.presented();
+            return;
+        }
+        // Until this one presents, the screen matches no frame rendered.
+        self.screen.stale();
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -280,31 +338,38 @@ impl FloatingApp {
             return;
         };
         let (win_w, win_h) = (win_w as usize, win_h as usize);
-        let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
-            return; // nothing rendered, or held: the window keeps the last frame
-        };
         let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
         };
-        surf.fill_upscaled(office, usize::from(at.upscale));
-        let budget = super::offscreen::footer_budget(win_w);
-        let footer = self
-            .renderer
-            .footer(&scene, budget, audio_audible, volume_flash);
-        super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
-        let cursor = (self.cursor.x, self.cursor.y);
-        if let Some(tip) = self
-            .cursor_in
-            .then(|| self.renderer.hit_at(cursor, at))
-            .flatten()
-            .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
-        {
-            super::offscreen::paint_tooltip_into_surface(&mut surf, &tip, cursor, self.theme);
+        if let Some(office) = self.renderer.buf() {
+            surf.fill_upscaled(office, usize::from(at.upscale));
+        }
+        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme);
+        if let Some((tip, _)) = &next.tooltip {
+            super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, self.theme);
         }
         window.pre_present_notify();
+        let presenting = Instant::now();
         if sb.present().is_ok() {
             self.renderer.presented();
+            self.screen.shown(next);
         }
+        let now = Instant::now();
+        self.jank.painted_by(crate::jank::Painter {
+            look: "floating",
+            scale: at.unit_px,
+            ..crate::jank::Painter::default()
+        });
+        self.jank.record(
+            now - started,
+            now - presenting,
+            Some(crate::jank::FrameSend {
+                dirty: painted,
+                ..crate::jank::FrameSend::default()
+            }),
+            None,
+            now,
+        );
     }
 }
 
@@ -409,6 +474,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 // Geometry MUST persist HERE — the window is gone once `run_app`
                 // returns.
                 self.persist_geometry();
+                // A run shorter than a summary's window still reports its spread.
+                self.jank.finish();
                 event_loop.exit();
             }
             // `is_synthetic: false`: winit fabricates a Pressed for every key
@@ -420,13 +487,34 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
-                if let Some(action) = super::input::audio_action(&event.logical_key, event.repeat) {
-                    // floating has no [p]ause; effective mute == muted.
-                    self.audio_ctl
-                        .apply(action, false, Instant::now(), crate::audio::respawn);
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
+                let key = &event.logical_key;
+                if let Some(action) = super::input::audio_action(key, event.repeat) {
+                    self.audio_ctl.apply(
+                        action,
+                        self.pause.paused(),
+                        Instant::now(),
+                        crate::audio::respawn,
+                    );
+                } else if super::input::is_pause(key, event.repeat) {
+                    self.pause.toggle();
+                    // Unpause restores the user's own m-key state rather than clobbering it.
+                    self.audio_ctl.set_paused(self.pause.paused());
+                } else if let Some(step) = super::input::floor_step(key) {
+                    let nav = self.renderer.nav();
+                    let target = match step {
+                        super::input::FloorStep::Up => nav.up(self.renderer.n_floors()),
+                        super::input::FloorStep::Down => nav.down(),
+                    };
+                    let Some(target) = target else {
+                        return;
+                    };
+                    let now = self.pause.now(SystemTime::now());
+                    self.renderer.navigate(target, now);
+                } else {
+                    return;
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
                 }
             }
             WindowEvent::RedrawRequested => self.redraw(),
@@ -465,7 +553,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 && scene
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
-        }) && !self.renderer.moves_off_beat();
+        }) && !self.renderer.moves_off_beat()
+            && self.renderer.nav().transition().is_none();
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).

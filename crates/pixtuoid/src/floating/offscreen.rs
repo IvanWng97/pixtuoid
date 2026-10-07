@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
-use pixtuoid_scene::floor::{FloorInputs, FloorSession};
+use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, RenderInputs};
@@ -31,7 +31,9 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 /// alive across frames is what keeps walks/poses continuous (no walk-flash).
 #[derive(Debug)]
 pub struct OfficeRenderer {
-    session: FloorSession,
+    session: OfficeSession,
+    /// The configured pets: each floor shows the one its seed picks.
+    pets: Vec<pixtuoid_scene::pet::Pet>,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
     /// The flash the window shows.
@@ -45,14 +47,40 @@ impl OfficeRenderer {
     /// A renderer drawing with `pack`, which every frame's `world.pack` must be.
     pub fn new(pack: std::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self {
         Self {
-            session: FloorSession::new(pack),
+            session: OfficeSession::new(pack),
+            pets: Vec::new(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             rendered: (FlashPhase::default(), (0, 0)),
         }
     }
 
-    /// [`FloorSession::moves_off_beat`].
+    /// The pets each floor picks its own from.
+    pub(crate) fn set_pets(&mut self, pets: Vec<pixtuoid_scene::pet::Pet>) {
+        self.pets = pets;
+    }
+
+    /// [`OfficeSession::showing_pet`] of this window's pets.
+    pub(crate) fn showing_pet(&self) -> Option<&pixtuoid_scene::pet::Pet> {
+        self.session.showing_pet(&self.pets)
+    }
+
+    /// Which floor shows, and the slide under way.
+    pub(crate) fn nav(&self) -> &pixtuoid_scene::floor::FloorNav {
+        self.session.nav()
+    }
+
+    /// The floors the last frame's scene filled.
+    pub(crate) fn n_floors(&self) -> usize {
+        self.session.n_floors()
+    }
+
+    /// Slide to floor `target`.
+    pub(crate) fn navigate(&mut self, target: usize, now: std::time::SystemTime) {
+        self.session.navigate(target, now);
+    }
+
+    /// [`OfficeSession::moves_off_beat`].
     pub(crate) fn moves_off_beat(&self) -> bool {
         self.session.moves_off_beat()
     }
@@ -61,9 +89,11 @@ impl OfficeRenderer {
         self.audio = audio;
     }
 
-    /// Render the floor into the owned buffer in `at`'s look, the office
-    /// `at`'s logical extent, with no footer row subtracted. A too-small
-    /// layout leaves the buffer filled with the theme's `bg_fallback`.
+    /// Render the office's floor showing, or its slide to another, into the
+    /// owned buffer in `at`'s look, the office `at`'s logical extent, with no
+    /// footer row subtracted. `frame.world.scene` is the FULL scene, which the
+    /// office projects onto each floor. A too-small layout leaves the buffer
+    /// filled with the theme's `bg_fallback`.
     pub fn render(&mut self, at: WindowGeometry, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
         let WindowFrame {
             world,
@@ -73,6 +103,7 @@ impl OfficeRenderer {
         let FloorInputs {
             scene, floor, now, ..
         } = world;
+        let gap = theme.surface.bg_fallback;
         self.session.render(
             at.look,
             RenderInputs {
@@ -82,6 +113,8 @@ impl OfficeRenderer {
                 place,
                 debug_walkable: false,
             },
+            &self.pets,
+            gap,
         );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio
@@ -90,21 +123,26 @@ impl OfficeRenderer {
     }
 
     /// [`render`](Self::render) for the window on screen, `window` physical
-    /// pixels: `None` also when the flash hold keeps the frame back, so the
-    /// window keeps the last. A frame handed out is
-    /// [`presented`](Self::presented) once it shows.
+    /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
+    /// when the flash hold keeps it back, so the window keeps the last. A
+    /// frame shown is [`presented`](Self::presented) once it shows.
     pub fn render_live(
         &mut self,
         at: WindowGeometry,
         frame: WindowFrame<'_>,
         window: (u32, u32),
-    ) -> Option<&RgbBuffer> {
+    ) -> bool {
         self.render(at, frame);
         let flash = self.session.flash();
         if self.flash.holds(flash, window) {
-            return None;
+            return false;
         }
         self.rendered = (flash, window);
+        true
+    }
+
+    /// The last frame's pixels, `None` before the first.
+    pub fn buf(&self) -> Option<&RgbBuffer> {
         self.session.buf()
     }
 
@@ -155,30 +193,76 @@ impl OfficeRenderer {
         })
     }
 
-    /// The status-footer model for the current scene — single-floor, so `floor = None`
-    /// (no breadcrumb). `budget` is the caller's column budget ([`footer_budget`] at the
-    /// live width). Source-death is deferred (`source_warning: None`) — floating doesn't
-    /// thread the `SourceDeath` health channel yet.
+    /// Where the last frame may differ from the one on screen before it.
+    pub(crate) fn dirty(&self) -> &pixtuoid_scene::cutaway::canvas::Dirty {
+        self.session.dirty()
+    }
+
+    /// The status-footer model for the current scene, with the office's floor
+    /// breadcrumb. `budget` is the caller's column budget ([`footer_budget`] at
+    /// the live width).
     pub fn footer(
         &self,
         scene: &SceneState,
         budget: u16,
         audio_audible: bool,
         volume_flash: Option<u8>,
+        warning: Option<&str>,
     ) -> FooterModel {
+        let floor_scene = self.session.footer_scene(scene);
         let inputs = FooterInputs::new(
-            scene,
+            &floor_scene,
             FooterContext::new(
                 scene,
-                None,
+                self.session.footer_floor(scene),
                 audio_audible,
                 volume_flash,
-                None,
+                warning,
                 FOOTER_KEYS,
                 FOOTER_KEYS,
             ),
         );
         build_footer(&inputs, budget)
+    }
+}
+
+/// Everything a presented frame shows beside the office: the window's size,
+/// its footer, and the tooltip by the pointer.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Overlays {
+    pub(crate) window: (u32, u32),
+    pub(crate) footer: FooterModel,
+    pub(crate) tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
+}
+
+/// What the window shows, as far as a frame may skip presenting: the overlays
+/// of the frame on screen, known only while the screen holds the last frame
+/// rendered, which an office's dirt is measured against.
+#[derive(Debug, Default)]
+pub(crate) struct Screen(Option<Overlays>);
+
+impl Screen {
+    /// Whether a frame showing `next` over an office `dirty` against the last
+    /// rendered must be presented: an unchanged office under the same overlays
+    /// is the frame on screen, and presenting it again only spends the copy
+    /// and the present.
+    pub(crate) fn needs(
+        &self,
+        next: &Overlays,
+        dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
+    ) -> bool {
+        *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged || self.0.as_ref() != Some(next)
+    }
+
+    /// A frame was rendered that may not reach the screen — held back, or
+    /// about to present: until one shows, the screen matches nothing rendered.
+    pub(crate) fn stale(&mut self) {
+        self.0 = None;
+    }
+
+    /// A frame with `overlays` reached the screen.
+    pub(crate) fn shown(&mut self, overlays: Overlays) {
+        self.0 = Some(overlays);
     }
 }
 
@@ -330,7 +414,7 @@ const TEXT_SHADOW: u32 = 0x0000_0000;
 /// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
 /// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
 /// footer model; everything else is TUI-identical.
-const FOOTER_KEYS: &str = " [m]ute [+/-]vol ";
+const FOOTER_KEYS: &str = " [p]ause [m]ute [+/-]vol ";
 /// Breathing room from the window edges for the footer band — both the paint and the
 /// [`footer_budget`] column math read it, so they can't drift.
 const FOOTER_MARGIN_PX: i32 = 6;
@@ -675,7 +759,7 @@ mod tests {
         fn present(&mut self, now: SystemTime) -> RgbBuffer {
             let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
             self.screen.at(now);
-            let frame = self.renderer.render_live(
+            let live = self.renderer.render_live(
                 cutaway(Size { w: 160, h: 96 }),
                 WindowFrame {
                     world: FloorInputs {
@@ -690,7 +774,7 @@ mod tests {
                 },
                 self.px,
             );
-            if let Some(frame) = frame {
+            if let Some(frame) = self.renderer.buf().filter(|_| live) {
                 self.shown = frame.clone();
                 self.screen.advance(self.present_takes);
                 self.renderer.presented();
@@ -1217,6 +1301,87 @@ mod tests {
         );
     }
 
+    /// A frame presents when its office changed or anything over it did, an
+    /// unchanged office under the same overlays is the frame on screen, and a
+    /// frame rendered but not shown leaves nothing to skip against.
+    #[test]
+    fn only_a_changed_frame_presents() {
+        use pixtuoid_scene::cutaway::canvas::Dirty;
+        let overlays = |w: u32, text: &str| Overlays {
+            window: (w, 100),
+            footer: FooterModel {
+                segments: vec![pixtuoid_scene::footer::FooterSegment {
+                    text: text.into(),
+                    tone: pixtuoid_scene::footer::FooterTone::Neutral,
+                }],
+            },
+            tooltip: None,
+        };
+        let shown = overlays(200, "a");
+        let mut screen = Screen::default();
+        assert!(screen.needs(&shown, &Dirty::Unchanged), "the first frame");
+        screen.shown(shown.clone());
+        assert!(!screen.needs(&shown, &Dirty::Unchanged));
+        assert!(screen.needs(&shown, &Dirty::All));
+        assert!(screen.needs(&overlays(201, "a"), &Dirty::Unchanged));
+        assert!(screen.needs(&overlays(200, "b"), &Dirty::Unchanged));
+        let tipped = Overlays {
+            tooltip: Some((pixtuoid_scene::tooltip::coffee(), (3, 4))),
+            ..shown.clone()
+        };
+        assert!(screen.needs(&tipped, &Dirty::Unchanged));
+        // A held frame changed the office off screen: the next, unchanged
+        // against it, still presents.
+        screen.stale();
+        assert!(
+            screen.needs(&shown, &Dirty::Unchanged),
+            "after a held frame"
+        );
+    }
+
+    /// The footer counts the floor showing, beside the breadcrumb's whole
+    /// office: one agent of four on the ground floor reads 1/4.
+    #[test]
+    fn the_footer_counts_the_floor_showing() {
+        let cap = 16;
+        let scene = scene_with(
+            vec![
+                active_on("/a/f0.jsonl", 0, 0),
+                active_on("/a/f1a.jsonl", 1, cap),
+                active_on("/a/f1b.jsonl", 1, cap + 1),
+                active_on("/a/f1c.jsonl", 1, cap + 2),
+            ],
+            cap,
+        );
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
+            },
+        );
+        let text: String = renderer
+            .footer(&scene, u16::MAX, false, None, None)
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(text.contains("1/4"), "{text:?}");
+    }
+
     #[test]
     fn floating_stems_count_only_the_rendered_floor() {
         let cap = 16;
@@ -1268,6 +1433,24 @@ mod tests {
             stems.typing, moderate.typing,
             "typing level must reflect the RENDERED floor's 1 active, not all 4"
         );
+    }
+
+    /// The window's footer says what the TUI's does: a source's death or
+    /// this run's decode drift, from the one shared message.
+    #[test]
+    fn the_footer_shows_the_shared_warning_in_place_of_the_stats() {
+        let renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let slot = active_on("/p/a.jsonl", 0, 0);
+        scene.agents.insert(slot.agent_id, slot);
+        let warning = crate::doctor::footer_warning(&[], &["cc"]);
+        let budget = footer_budget(960);
+        let calm = renderer.footer(&scene, budget, true, None, None).text();
+        let warned = renderer
+            .footer(&scene, budget, true, None, warning.as_deref())
+            .text();
+        assert!(warned.contains("decode drift: cc·"), "{warned}");
+        assert!(!calm.contains("decode drift"), "{calm}");
     }
 
     #[test]
