@@ -42,14 +42,10 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     }
 }
 
-/// The base fill's complete input set. Every value the fill loops read is a
-/// named field here; a stale hit is invisible to every other gate, so this
-/// key IS the correctness boundary — a new input into the fill loops must
-/// join it.
+/// The base fill's complete input set: the [`CachedLayer`](crate::cached_layer::CachedLayer)
+/// key, and so its correctness boundary.
 #[derive(Debug, PartialEq)]
 struct BaseFillKey {
-    buf_w: u16,
-    buf_h: u16,
     band_h: u16,
     carpet: Dithered<[Rgb; 3]>,
     wall: Rgb,
@@ -59,44 +55,42 @@ struct BaseFillKey {
 /// the largest single cost of a frame (#900's profile) yet their inputs
 /// ([`BaseFillKey`]) change only on a resize, theme swap, or weather-tint
 /// change.
-#[derive(Debug)]
-pub(crate) struct BaseFillCache {
-    key: Option<BaseFillKey>,
-    filled: RgbBuffer,
-}
+#[derive(Debug, Default)]
+pub(crate) struct BaseFillCache(crate::cached_layer::CachedLayer<BaseFillKey>);
 
 impl BaseFillCache {
     /// Empty cache — no fill retained yet.
     pub(crate) fn new() -> Self {
-        Self {
-            key: None,
-            filled: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
-        }
+        Self::default()
     }
 
     /// Stamp the memoized fill over `buf`, refilling on any key change.
     fn blit_into(&mut self, buf: &mut RgbBuffer, key: BaseFillKey) {
-        if self.key.as_ref() != Some(&key) {
-            self.filled.resize_fill(key.buf_w, key.buf_h, key.wall);
-            for y in key.band_h..key.buf_h {
-                for x in 0..key.buf_w {
+        let fill = |key: &BaseFillKey, filled: &mut RgbBuffer| {
+            let BaseFillKey {
+                band_h,
+                carpet,
+                wall,
+            } = *key;
+            let (buf_w, buf_h) = (filled.width(), filled.height());
+            filled.resize_fill(buf_w, buf_h, wall);
+            for y in band_h..buf_h {
+                for x in 0..buf_w {
                     let hash = u32::from(x)
                         .wrapping_mul(73)
                         .wrapping_add(u32::from(y).wrapping_mul(151))
                         ^ (u32::from(x).wrapping_mul(11) ^ u32::from(y).wrapping_mul(37));
-                    let carpet = key.carpet.at(x, y);
+                    let carpet = carpet.at(x, y);
                     let color = match hash % 17 {
                         0 | 1 => carpet[0],
                         2 | 3 => carpet[1],
                         _ => carpet[2],
                     };
-                    self.filled.put(x, y, color);
+                    filled.put(x, y, color);
                 }
             }
-            self.key = Some(key);
-        }
-        debug_assert_eq!(buf.as_slice().len(), self.filled.as_slice().len());
-        buf.as_mut_slice().copy_from_slice(self.filled.as_slice());
+        };
+        self.0.stamp(key, fill, buf);
     }
 }
 
@@ -119,8 +113,6 @@ pub(super) fn paint_ground_and_walls(
     base_fill.blit_into(
         buf,
         BaseFillKey {
-            buf_w,
-            buf_h,
             band_h: top_wall_h.min(buf_h),
             carpet,
             wall,
