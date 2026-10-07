@@ -112,12 +112,17 @@ impl Rects {
 /// rects far apart paints most of the frame.
 const MAX_PASSES: usize = 8;
 
-/// `rects` merged into at most `max` boxes that cover them all, each merge
-/// the pair whose box adds the least area: Mozilla's
+/// `rects` merged into at most `max` disjoint boxes that cover them all, each
+/// merge the pair whose box adds the least area: Mozilla's
 /// `nsRegion::SimplifyOutward`, "at most aMaxRects by adding area to it ...
 /// a superset of the original region" (gecko-dev `gfx/src/nsRegion.h`).
+/// Overlapping boxes merge first whatever the cap, so no pixel is painted, or
+/// lit, twice. The pairs wait in a heap whose stale ones are skipped as they
+/// surface: O(n² log n) in the rects, not a scan of every pair a merge.
 fn passes(rects: &[Bounds], max: usize) -> Vec<Bounds> {
-    let area = |b: &Bounds| u64::from(b.width) * u64::from(b.height);
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let area = |b: &Bounds| i64::from(b.width) * i64::from(b.height);
     let union = |a: &Bounds, b: &Bounds| {
         let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
         let (x1, y1) = (
@@ -131,24 +136,41 @@ fn passes(rects: &[Bounds], max: usize) -> Vec<Bounds> {
             height: y1 - y0,
         }
     };
-    let mut boxes = rects.to_vec();
-    while boxes.len() > max.max(1) {
-        let mut best: Option<(i64, usize, usize)> = None;
-        for i in 0..boxes.len() {
-            for j in i + 1..boxes.len() {
-                let added = area(&union(&boxes[i], &boxes[j])) as i64
-                    - area(&boxes[i]) as i64
-                    - area(&boxes[j]) as i64;
-                if best.is_none_or(|(least, ..)| added < least) {
-                    best = Some((added, i, j));
-                }
+    let overlap = |a: &Bounds, b: &Bounds| {
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    };
+    // Overlapping pairs first, then by the area a merge adds.
+    let key = |a: &Bounds, b: &Bounds| (!overlap(a, b), area(&union(a, b)) - area(a) - area(b));
+    let mut boxes: Vec<Option<Bounds>> = rects.iter().copied().map(Some).collect();
+    let mut heap = BinaryHeap::new();
+    for i in 0..boxes.len() {
+        for j in i + 1..boxes.len() {
+            if let (Some(a), Some(b)) = (&boxes[i], &boxes[j]) {
+                heap.push(Reverse((key(a, b), i, j)));
             }
         }
-        let Some((_, i, j)) = best else { break };
-        let gone = boxes.swap_remove(j);
-        boxes[i] = union(&boxes[i], &gone);
     }
-    boxes
+    let mut alive = boxes.len();
+    while let Some(Reverse(((apart, _), i, j))) = heap.pop() {
+        let (Some(a), Some(b)) = (boxes[i], boxes[j]) else {
+            continue;
+        };
+        if apart && alive <= max.max(1) {
+            break;
+        }
+        let merged = union(&a, &b);
+        boxes[i] = None;
+        boxes[j] = None;
+        let k = boxes.len();
+        for (o, other) in boxes.iter().enumerate() {
+            if let Some(other) = other {
+                heap.push(Reverse((key(other, &merged), o, k)));
+            }
+        }
+        boxes.push(Some(merged));
+        alive -= 1;
+    }
+    boxes.into_iter().flatten().collect()
 }
 
 impl Dirty {
@@ -1192,6 +1214,24 @@ mod tests {
             8,
             "the overlapping pair is one box"
         );
+        // Boxes never overlap, whatever the cap: a scatter that merging
+        // forces into overlap, as many rects as a transition frame's.
+        let scatter: Vec<Bounds> = (0..96u16)
+            .map(|i| b((i * 37) % 600, (i * 53) % 400, 10 + i % 30, 8 + i % 20))
+            .collect();
+        for max in [1, 4, 8, 64, 200] {
+            let boxes = passes(&scatter, max);
+            assert!(scatter.iter().all(|r| covers(&boxes, r)), "{max}");
+            for (i, a) in boxes.iter().enumerate() {
+                for b in &boxes[i + 1..] {
+                    let meet = a.x < b.x + b.width
+                        && b.x < a.x + a.width
+                        && a.y < b.y + b.height
+                        && b.y < a.y + a.height;
+                    assert!(!meet, "{max}: {a:?} overlaps {b:?}");
+                }
+            }
+        }
     }
 
     #[test]
