@@ -306,7 +306,7 @@ fn a_frame_without_room_reports_no_transmits() {
     let (cols, rows) = too_small_terminal();
     r.terminal.backend_mut().resize(cols, rows);
     r.render(&office(), pack(), t0()).expect("render");
-    assert_ne!(cutaway(&r).dirty, crate::tui::jank::Painted::All);
+    assert_ne!(cutaway(&r).dirty, crate::jank::Painted::All);
     assert_eq!(cutaway(&r).sent, 0);
 }
 
@@ -355,7 +355,7 @@ fn a_held_frame_reports_no_transmits() {
         r.render(&scene, pack(), held).expect("render");
         assert_eq!(
             cutaway(&r),
-            crate::tui::jank::FrameSend::default(),
+            crate::jank::FrameSend::default(),
             "slide {slide}"
         );
         assert_eq!(r.transition().is_some(), slide);

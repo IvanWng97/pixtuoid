@@ -42,6 +42,10 @@ pub(crate) struct FloatingApp {
     config_path: PathBuf,
     /// The `[p]ause`, which holds the office's clock still.
     pause: pixtuoid_scene::anim::PauseClock,
+    /// What the frame on screen shows beside the office.
+    on_screen: Option<super::offscreen::Overlays>,
+    /// The frames' times and janks, reported as the TUI's are.
+    jank: crate::jank::Jank,
     /// How the office moves.
     motion: pixtuoid_scene::anim::Motion,
     renderer: OfficeRenderer,
@@ -108,6 +112,8 @@ impl FloatingApp {
             pack,
             config_path,
             pause: pixtuoid_scene::anim::PauseClock::default(),
+            on_screen: None,
+            jank: crate::jank::Jank::new(Instant::now()),
             motion,
             renderer,
             audio_ctl,
@@ -222,6 +228,7 @@ impl FloatingApp {
     }
 
     fn redraw(&mut self) {
+        let started = Instant::now();
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -263,7 +270,7 @@ impl FloatingApp {
                 petting: self.petting.as_ref(),
             },
         };
-        let office = self.renderer.render_live(
+        let live = self.renderer.render_live(
             at,
             WindowFrame {
                 world,
@@ -276,6 +283,37 @@ impl FloatingApp {
             (win_w, win_h),
         );
         self.shown = Some(at);
+        if !live
+            || self
+                .renderer
+                .buf()
+                .is_none_or(|o| o.width() == 0 || o.height() == 0)
+        {
+            return; // nothing rendered, or held: the window keeps the last frame
+        }
+        let cursor = (self.cursor.x, self.cursor.y);
+        let next = super::offscreen::Overlays {
+            window: (win_w, win_h),
+            footer: self.renderer.footer(
+                &scene,
+                super::offscreen::footer_budget(win_w as usize),
+                audio_audible,
+                volume_flash,
+            ),
+            tooltip: self
+                .cursor_in
+                .then(|| self.renderer.hit_at(cursor, at))
+                .flatten()
+                .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
+                .map(|tip| (tip, (cursor.0 as i32, cursor.1 as i32))),
+        };
+        let dirty = self.renderer.dirty();
+        let painted = crate::jank::Painted::from(dirty);
+        if !super::offscreen::needs_present(self.on_screen.as_ref(), &next, dirty) {
+            // The frame on screen is this one: its flash phase shows.
+            self.renderer.presented();
+            return;
+        }
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -286,31 +324,38 @@ impl FloatingApp {
             return;
         };
         let (win_w, win_h) = (win_w as usize, win_h as usize);
-        let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
-            return; // nothing rendered, or held: the window keeps the last frame
-        };
         let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
         };
-        surf.fill_upscaled(office, usize::from(at.upscale));
-        let budget = super::offscreen::footer_budget(win_w);
-        let footer = self
-            .renderer
-            .footer(&scene, budget, audio_audible, volume_flash);
-        super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
-        let cursor = (self.cursor.x, self.cursor.y);
-        if let Some(tip) = self
-            .cursor_in
-            .then(|| self.renderer.hit_at(cursor, at))
-            .flatten()
-            .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
-        {
-            super::offscreen::paint_tooltip_into_surface(&mut surf, &tip, cursor, self.theme);
+        if let Some(office) = self.renderer.buf() {
+            surf.fill_upscaled(office, usize::from(at.upscale));
+        }
+        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme);
+        if let Some((tip, _)) = &next.tooltip {
+            super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, self.theme);
         }
         window.pre_present_notify();
+        let presenting = Instant::now();
         if sb.present().is_ok() {
             self.renderer.presented();
+            self.on_screen = Some(next);
         }
+        let now = Instant::now();
+        self.jank.painted_by(crate::jank::Painter {
+            look: "floating",
+            scale: at.unit_px,
+            ..crate::jank::Painter::default()
+        });
+        self.jank.record(
+            now - started,
+            now - presenting,
+            Some(crate::jank::FrameSend {
+                dirty: painted,
+                ..crate::jank::FrameSend::default()
+            }),
+            None,
+            now,
+        );
     }
 }
 
@@ -415,6 +460,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 // Geometry MUST persist HERE — the window is gone once `run_app`
                 // returns.
                 self.persist_geometry();
+                // A run shorter than a summary's window still reports its spread.
+                self.jank.finish();
                 event_loop.exit();
             }
             // `is_synthetic: false`: winit fabricates a Pressed for every key

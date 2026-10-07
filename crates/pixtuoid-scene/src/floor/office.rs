@@ -30,6 +30,8 @@ pub struct FloorView {
     /// an accumulating set would re-report stale waypoints forever.
     pub(super) last_occupied: HashSet<usize>,
     last_flash: crate::flash::FlashPhase,
+    /// Where the last frame may differ from the one before it.
+    last_dirty: crate::look::Dirty,
 }
 
 impl FloorView {
@@ -39,6 +41,7 @@ impl FloorView {
             last_layout: None,
             last_occupied: HashSet::new(),
             last_flash: crate::flash::FlashPhase::default(),
+            last_dirty: crate::look::Dirty::All,
         }
     }
 
@@ -55,12 +58,14 @@ impl FloorView {
                 self.last_layout = Some(Arc::clone(&frame.layout));
                 self.last_occupied = frame.occupied_waypoints;
                 self.last_flash = frame.flash;
+                self.last_dirty = frame.dirty;
                 Some(frame.layout)
             }
             None => {
                 self.last_layout = None;
                 self.last_occupied.clear();
                 self.last_flash = crate::flash::FlashPhase::default();
+                self.last_dirty = crate::look::Dirty::All;
                 None
             }
         }
@@ -264,6 +269,11 @@ pub struct OfficeSession {
     nav: FloorNav,
     /// The last frame's slide, while one is under way.
     slide: Option<RgbBuffer>,
+    /// The floor (or slide) the frame before showed, and whether the last
+    /// frame showed another: a floor's own dirt is against ITS last frame,
+    /// not the one on screen.
+    shown: Option<usize>,
+    shown_changed: bool,
 }
 
 impl OfficeSession {
@@ -275,6 +285,8 @@ impl OfficeSession {
             office: PerOffice::default(),
             nav: FloorNav::default(),
             slide: None,
+            shown: None,
+            shown_changed: true,
         }
     }
 
@@ -352,8 +364,11 @@ impl OfficeSession {
         };
         let Some(tr) = self.nav.transition() else {
             self.slide = None;
-            return draw(&mut self.views, &mut self.office, self.nav.current());
+            let current = self.nav.current();
+            self.shown_changed = self.shown.replace(current) != Some(current);
+            return draw(&mut self.views, &mut self.office, current);
         };
+        self.shown = None;
         let (from, to, t) = (tr.from_floor, tr.to_floor, tr.t(now));
         draw(&mut self.views, &mut self.office, from);
         draw(&mut self.views, &mut self.office, to);
@@ -371,6 +386,16 @@ impl OfficeSession {
         match &self.slide {
             Some(slide) => Some(slide),
             None => self.views.get(self.nav.current())?.buf(),
+        }
+    }
+
+    /// Where the last frame may differ from the one before it: a slide's
+    /// anywhere, as is a frame after one or after another floor's.
+    pub fn dirty(&self) -> &crate::look::Dirty {
+        const ALL: &crate::look::Dirty = &crate::look::Dirty::All;
+        match (&self.slide, self.views.get(self.nav.current())) {
+            (None, Some(view)) if !self.shown_changed => &view.last_dirty,
+            _ => ALL,
         }
     }
 

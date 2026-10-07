@@ -23,6 +23,7 @@ pub(crate) mod graphics;
 pub use graphics::GraphicsMode;
 pub mod init_pack;
 pub mod install;
+pub(crate) mod jank;
 #[cfg(feature = "graphics")]
 #[doc(hidden)]
 pub mod pacing;

@@ -4,7 +4,6 @@ pub(crate) mod cutaway;
 pub mod dashboard;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
-pub(crate) mod jank;
 pub mod renderer;
 pub mod tui_renderer;
 mod ui_state;
@@ -1080,7 +1079,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             medium,
             ..
         } => {
-            renderer.painted_by(jank::Painter {
+            renderer.painted_by(crate::jank::Painter {
                 look: protocol.name(),
                 scale: fit.scale().get(),
                 tmux,
@@ -1093,7 +1092,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             );
         }
         _ => {
-            renderer.painted_by(jank::Painter {
+            renderer.painted_by(crate::jank::Painter {
                 look: "classic",
                 scale: 1,
                 tmux: tmux_env,
