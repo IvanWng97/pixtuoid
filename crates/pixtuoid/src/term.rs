@@ -15,7 +15,8 @@
 /// Default round-trip budget for the `DECRQSS` probe: long enough for a laggy SSH
 /// link to answer, short enough that a terminal which never answers only costs
 /// this once at startup.
-pub const TRUECOLOR_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+pub(crate) const TRUECOLOR_PROBE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(100);
 
 /// The synchronized-output probe's budget: [`TRUECOLOR_PROBE_TIMEOUT`]'s, for
 /// the same round trip. Its DA1 ends the wait as soon as the terminal answers.
@@ -45,7 +46,7 @@ fn truecolor_warn_suppressed(suppress_env: Option<&str>) -> bool {
 /// query is worth running: a TUI `run` (not headless), attached to a tty, where
 /// `$COLORTERM` didn't already declare truecolor and the escape hatch isn't set.
 /// The final decision is: warn unless the query returns `Some(true)`.
-pub fn warn_zone(
+pub(crate) fn warn_zone(
     cmd_is_run_tui: bool,
     is_tty: bool,
     colorterm: Option<&str>,
@@ -62,7 +63,7 @@ pub fn warn_zone(
 /// color end to end with no legible monochrome fallback, so when the environment
 /// disables color we refuse to launch the canvas and explain why.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColorPreflight {
+pub(crate) enum ColorPreflight {
     Proceed,
     /// The caller MUST `crossterm::style::force_color_output(true)`: crossterm
     /// strips color under `$NO_COLOR` and does NOT honor `$CLICOLOR_FORCE` itself,
@@ -81,7 +82,7 @@ pub enum ColorPreflight {
 /// `$CLICOLOR_FORCE=0` does NOT override. `$FORCE_COLOR` (npm) and `$CLICOLOR`
 /// are intentionally NOT read: crossterm keys only on `$NO_COLOR`, so they would
 /// have no effect on the render.
-pub fn color_preflight(
+pub(crate) fn color_preflight(
     no_color: Option<&str>,
     clicolor_force: Option<&str>,
     term: Option<&str>,
@@ -155,10 +156,18 @@ pub(crate) fn shown_env(v: Option<&str>) -> String {
 
 /// What asking the terminal whether it keeps 24-bit color learned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Truecolor {
+pub(crate) enum Truecolor {
     /// It answered: `true` when it echoed the 24-bit color back.
+    #[cfg_attr(
+        all(not(unix), not(test)),
+        expect(dead_code, reason = "only a Unix terminal is asked")
+    )]
     Answered(bool),
     /// It was asked, and no usable reply came.
+    #[cfg_attr(
+        all(not(unix), not(test)),
+        expect(dead_code, reason = "only a Unix terminal is asked")
+    )]
     NoAnswer,
     /// Nothing asked it: no terminal took the query, or this platform has none
     /// to send.
@@ -169,7 +178,7 @@ impl Truecolor {
     /// Whether the launcher's stderr warning and doctor's ⚠ row fire. Both read
     /// this, so they cannot disagree; `CantAsk` stays quiet because a platform
     /// with nothing to ask would nag on every launch.
-    pub fn warrants_warning(self) -> bool {
+    pub(crate) fn warrants_warning(self) -> bool {
         matches!(self, Self::NoAnswer | Self::Answered(false))
     }
 }
@@ -201,7 +210,7 @@ const DECRQSS_TRUECOLOR_PROBE: &[u8] = b"\x1b[48;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m";
 
 /// Ask the terminal whether it is truecolor by querying it directly.
 #[cfg(unix)]
-pub fn query_truecolor(timeout: std::time::Duration) -> Truecolor {
+pub(crate) fn query_truecolor(timeout: std::time::Duration) -> Truecolor {
     let mut reply = Vec::new();
     let asked = query_tty(
         DECRQSS_TRUECOLOR_PROBE,
@@ -441,7 +450,7 @@ fn response_terminated(buf: &[u8]) -> bool {
 /// Non-Unix stub: Windows hard-gates VT separately in `tui::mod`, so there is no
 /// preflight query there.
 #[cfg(not(unix))]
-pub fn query_truecolor(_timeout: std::time::Duration) -> Truecolor {
+pub(crate) fn query_truecolor(_timeout: std::time::Duration) -> Truecolor {
     Truecolor::CantAsk
 }
 

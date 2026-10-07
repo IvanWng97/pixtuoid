@@ -23,7 +23,7 @@ use crate::install::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum WireOutcome {
+pub(crate) enum WireOutcome {
     Connected,
     Disconnected,
     NoOp,
@@ -31,7 +31,7 @@ pub enum WireOutcome {
 }
 
 impl WireOutcome {
-    pub fn token(self) -> &'static str {
+    pub(crate) fn token(self) -> &'static str {
         match self {
             WireOutcome::Connected => "connected",
             WireOutcome::Disconnected => "disconnected",
@@ -48,7 +48,7 @@ impl std::fmt::Display for WireOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChangeOutcome {
+pub(crate) enum ChangeOutcome {
     Connected,
     Disconnected,
     NoOp,
@@ -58,7 +58,7 @@ pub enum ChangeOutcome {
 impl ChangeOutcome {
     /// Kept separate from the enum's `Debug` so the JSON contract can't drift
     /// if a variant is renamed.
-    pub fn wire_outcome(&self) -> WireOutcome {
+    pub(crate) fn wire_outcome(&self) -> WireOutcome {
         match self {
             ChangeOutcome::Connected => WireOutcome::Connected,
             ChangeOutcome::Disconnected => WireOutcome::Disconnected,
@@ -67,11 +67,7 @@ impl ChangeOutcome {
         }
     }
 
-    pub fn wire_token(&self) -> &'static str {
-        self.wire_outcome().token()
-    }
-
-    pub fn message(&self) -> Option<&str> {
+    pub(crate) fn message(&self) -> Option<&str> {
         match self {
             ChangeOutcome::Failed(msg) => Some(msg),
             _ => None,
@@ -81,7 +77,7 @@ impl ChangeOutcome {
 
 /// An attempted connect or disconnect — [`ChangeOutcome`] without its `NoOp`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AppliedChange {
+pub(crate) enum AppliedChange {
     Connected,
     Disconnected,
     Failed(String),
@@ -107,7 +103,7 @@ impl From<AppliedChange> for ChangeOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 // `deny_unknown_fields` ⇒ `additionalProperties: false` (rationale on `SourceStatus`).
 #[cfg_attr(test, derive(schemars::JsonSchema), schemars(deny_unknown_fields))]
-pub struct OutcomeRow {
+pub(crate) struct OutcomeRow {
     /// The registry source id the outcome applies to (e.g. `codex`).
     pub id: String,
     /// The bare machine token; human text rides in `message`.
@@ -123,7 +119,7 @@ impl OutcomeRow {
     /// enters the row: it folds another CLI's config content verbatim (a failed
     /// `connect codex` embeds the RAW offending source line) and
     /// `sources_cli::text_line` prints it to a real terminal (R0615-06).
-    pub fn new(id: String, outcome: &ChangeOutcome) -> Self {
+    pub(crate) fn new(id: String, outcome: &ChangeOutcome) -> Self {
         OutcomeRow {
             id,
             outcome: outcome.wire_outcome(),
@@ -139,7 +135,7 @@ impl OutcomeRow {
 // `deny_unknown_fields` ⇒ `additionalProperties: false`, so the generated TS type
 // has no index signature and a consumer typo is a `tsc` error.
 #[cfg_attr(test, derive(schemars::JsonSchema), schemars(deny_unknown_fields))]
-pub struct SourceStatus {
+pub(crate) struct SourceStatus {
     pub id: String,
     pub display_name: String,
     pub connected: bool,
@@ -158,7 +154,7 @@ pub struct SourceStatus {
 /// # Errors
 ///
 /// If `id` is not a registered source name.
-pub fn registered_id(id: &str) -> Result<&'static str> {
+pub(crate) fn registered_id(id: &str) -> Result<&'static str> {
     registry::registered_source_names()
         .find(|s| *s == id)
         .ok_or_else(|| {
@@ -173,7 +169,7 @@ pub fn registered_id(id: &str) -> Result<&'static str> {
 
 /// `FlagOnly` for a no-target (JSONL-only) source.
 #[derive(Debug)]
-pub enum ConnectOutcome {
+pub(crate) enum ConnectOutcome {
     FlagOnly,
     Installed(InstallReport),
 }
@@ -183,7 +179,7 @@ pub enum ConnectOutcome {
 /// folds in here so the gate still closes (connect rolls back, disconnect does not).
 /// Pinned by `map_disconnect_outcome_surfaces_a_folded_hook_removal_failure`.
 #[derive(Debug)]
-pub enum DisconnectOutcome {
+pub(crate) enum DisconnectOutcome {
     FlagOnly,
     Uninstalled(UninstallReport),
     HookRemovalFailed(String),
@@ -191,7 +187,7 @@ pub enum DisconnectOutcome {
 
 /// The step (if any) a user must still take after a successful `connect` —
 /// `None` for a target whose hooks take effect on the CLI's next run.
-pub fn post_install_hint(id: &str) -> Option<&'static str> {
+pub(crate) fn post_install_hint(id: &str) -> Option<&'static str> {
     crate::install::target::by_source(id).and_then(|t| t.post_install_hint)
 }
 
@@ -207,7 +203,7 @@ pub fn post_install_hint(id: &str) -> Option<&'static str> {
 /// # Errors
 ///
 /// If `id` is not a registered source, saving the `[sources]` flag fails, or the hook install fails (the flag is then rolled back).
-pub fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
+pub(crate) fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
     connect_target(cfg, sid, by_source(sid))
 }
@@ -256,7 +252,7 @@ fn connect_target(
 /// # Errors
 ///
 /// If `id` is not a registered source or persisting the cleared `[sources]` flag fails; a failed hook removal is reported in the outcome instead.
-pub fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
+pub(crate) fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
     let sid = registered_id(id)?;
     disconnect_target(cfg, sid, by_source(sid))
 }
@@ -279,7 +275,7 @@ fn disconnect_target(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
+pub(crate) enum Action {
     Connect,
     Disconnect,
     NoOp,
@@ -310,7 +306,7 @@ pub(crate) fn plan_reconcile(
 /// Declarative apply: make the connected set EXACTLY `desired`, reporting each
 /// source (a failed item doesn't abort the batch). CURRENT is resolved the same
 /// way the boot seed is — explicit `true` flags only.
-pub fn reconcile_to(cfg: &Path, desired: &HashSet<String>) -> Vec<(String, ChangeOutcome)> {
+pub(crate) fn reconcile_to(cfg: &Path, desired: &HashSet<String>) -> Vec<(String, ChangeOutcome)> {
     let app = config::load(cfg, &mut Vec::new());
     let current = config::resolve_connected(&app);
     plan_reconcile(&current, desired)
@@ -346,15 +342,14 @@ fn apply_want(cfg: &Path, sid: &'static str, want: bool) -> AppliedChange {
 /// the hook removal didn't) apart from a real failure.
 pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
 
-/// How BOTH presenters word that same fold for a human. `pub` (not `pub(crate)`)
-/// because `disconnect`'s CLI arm lives in `main.rs`, a separate crate the lib's
-/// `pub(crate)` can't reach. It is the PHRASE only — each surface adds its own
-/// framing, so neither can reword the fold alone.
-pub const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
+/// How BOTH presenters word that same fold for a human. It is the PHRASE only —
+/// each surface adds its own framing, so neither can reword the fold alone.
+pub(crate) const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
 
 /// How both presenters word a disconnect that couldn't reach `claude` to
 /// deregister the plugin, which keeps it registered with no hooks.
-pub const PLUGIN_LEFT_REGISTERED_PHRASE: &str = "plugin left registered (claude not on PATH)";
+pub(crate) const PLUGIN_LEFT_REGISTERED_PHRASE: &str =
+    "plugin left registered (claude not on PATH)";
 
 /// A folded hook-removal failure MUST surface as `Failed` (with the reason),
 /// NEVER a clean `Disconnected` — else a caller hides stale hooks behind it.
@@ -372,7 +367,10 @@ fn map_disconnect_outcome(o: DisconnectOutcome) -> AppliedChange {
 /// Apply an EXPLICIT per-source decision list (the first-run onboarding apply).
 /// Unlike the declarative `reconcile_to`, this touches ONLY the ids passed — a
 /// source absent from the list keeps its existing flag, never a surprise write.
-pub fn apply_choices(cfg: &Path, choices: &[(&'static str, bool)]) -> Vec<(String, AppliedChange)> {
+pub(crate) fn apply_choices(
+    cfg: &Path,
+    choices: &[(&'static str, bool)],
+) -> Vec<(String, AppliedChange)> {
     choices
         .iter()
         .map(|&(sid, want)| (sid.to_string(), apply_want(cfg, sid, want)))
@@ -547,7 +545,7 @@ fn status_from_row(r: &ConnectionRow) -> SourceStatus {
     }
 }
 
-pub fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
+pub(crate) fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
     let app = config::load(cfg, &mut Vec::new());
     let connected = config::resolve_connected(&app);
     build_rows(&connected, log)
@@ -558,7 +556,7 @@ pub fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
 
 /// Which agent CLIs are installed on this machine (target-bearing + probed
 /// present) — the "offer to connect these" set for first-run onboarding.
-pub fn detect() -> Vec<&'static str> {
+pub(crate) fn detect() -> Vec<&'static str> {
     registry::registered_source_names()
         .filter(|sid| by_source(sid).is_some_and(is_present))
         .collect()
@@ -829,10 +827,16 @@ mod tests {
 
     #[test]
     fn change_outcome_wire_tokens_are_stable() {
-        assert_eq!(ChangeOutcome::Connected.wire_token(), "connected");
-        assert_eq!(ChangeOutcome::Disconnected.wire_token(), "disconnected");
-        assert_eq!(ChangeOutcome::NoOp.wire_token(), "no_op");
-        assert_eq!(ChangeOutcome::Failed("boom".into()).wire_token(), "failed");
+        assert_eq!(ChangeOutcome::Connected.wire_outcome().token(), "connected");
+        assert_eq!(
+            ChangeOutcome::Disconnected.wire_outcome().token(),
+            "disconnected"
+        );
+        assert_eq!(ChangeOutcome::NoOp.wire_outcome().token(), "no_op");
+        assert_eq!(
+            ChangeOutcome::Failed("boom".into()).wire_outcome().token(),
+            "failed"
+        );
         assert_eq!(ChangeOutcome::Failed("boom".into()).message(), Some("boom"));
         assert_eq!(ChangeOutcome::Connected.message(), None);
     }

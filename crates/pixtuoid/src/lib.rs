@@ -1,13 +1,16 @@
-//! Public surface for the pixtuoid binary's internals — exposed because
-//! `main.rs`, the examples and the integration tests are separate crates.
+//! The pixtuoid program: `main.rs` only calls [`run`] and reports its error
+//! through [`fatal_error_text`]. What else is public is for the examples and
+//! the integration tests, which are separate crates.
 
 // A print macro panics when its reader leaves (`| head`): CLI and headless
 // output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod aa_text;
+mod app;
+pub use app::run;
 pub(crate) mod audio;
-pub mod cli;
+pub(crate) mod cli;
 pub mod config;
 pub mod doctor;
 
@@ -16,22 +19,18 @@ mod drift_surface;
 pub mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;
-/// The one graphics item that IS public API: `Cmd` and `RunConfig` carry it, and
-/// `main.rs` is a separate crate. Everything else in the module — the plan, the
-/// probe, the scale rule — is `pub(crate)`, because a `pub` item on a published
-/// crate is the one thing a follow-up cannot quietly undo.
-pub use graphics::GraphicsMode;
+pub(crate) use graphics::GraphicsMode;
 pub mod init_pack;
-pub mod install;
+pub(crate) mod install;
 pub(crate) mod jank;
 #[cfg(feature = "graphics")]
 #[doc(hidden)]
 pub mod pacing;
-pub mod run_log;
-pub mod runtime;
-pub mod setup;
-pub mod sources;
-pub mod term;
+pub(crate) mod run_log;
+pub(crate) mod runtime;
+pub(crate) mod setup;
+pub(crate) mod sources;
+pub(crate) mod term;
 pub mod tui;
 pub mod validate;
 pub(crate) mod version;
@@ -48,8 +47,7 @@ pub(crate) mod version;
 /// crate by `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of
 /// this predicate pinned to it by
 /// `the_bidi_table_matches_pixtuoid_cores_display_safe`.
-#[doc(hidden)]
-pub fn strip_control_chars(s: &str) -> String {
+pub(crate) fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
         .collect()
@@ -57,8 +55,7 @@ pub fn strip_control_chars(s: &str) -> String {
 
 /// `s` stripped line by line, the lines rejoined with `sep`, so a multi-line
 /// message keeps its shape.
-#[doc(hidden)]
-pub fn strip_lines(s: &str, sep: &str) -> String {
+pub(crate) fn strip_lines(s: &str, sep: &str) -> String {
     s.lines()
         .map(strip_control_chars)
         .collect::<Vec<_>>()
@@ -69,8 +66,7 @@ pub fn strip_lines(s: &str, sep: &str) -> String {
 /// hand-editable hook command is stripped where it enters the text that
 /// quotes it; per-output-site stripping already missed the `doctor` stdout
 /// path once.
-#[doc(hidden)]
-pub fn display_path(p: &std::path::Path) -> String {
+pub(crate) fn display_path(p: &std::path::Path) -> String {
     strip_control_chars(&p.display().to_string())
 }
 
@@ -79,9 +75,8 @@ pub fn display_path(p: &std::path::Path) -> String {
 /// [`closed`](Self::closed) and drops every later write, so the command still
 /// completes its side effects and exits with its own verdict, where `println!`
 /// would panic. Any other write error still fails.
-#[doc(hidden)]
 #[derive(Debug)]
-pub struct CliOut<W> {
+pub(crate) struct CliOut<W> {
     inner: W,
     closed: bool,
 }
@@ -134,8 +129,7 @@ impl<W: std::io::Write> std::io::Write for CliOut<W> {
 }
 
 /// Stdout for a CLI command's output; see [`CliOut`].
-#[doc(hidden)]
-pub fn cli_stdout() -> CliOut<std::io::Stdout> {
+pub(crate) fn cli_stdout() -> CliOut<std::io::Stdout> {
     CliOut::new(std::io::stdout())
 }
 

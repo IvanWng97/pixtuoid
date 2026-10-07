@@ -1,9 +1,6 @@
 //! First-run detection for the cinematic onboarding: ONE pure predicate, so the
 //! TUI's one-time "move-in" overlay and the headless `pixtuoid setup [--yes]`
 //! presenter agree on what "first run" means.
-//!
-//! `pub` (not `pub(crate)`) because the binary's `main.rs` is a separate crate
-//! from this lib and computes it in `build_run_config`.
 
 use std::path::Path;
 
@@ -23,7 +20,7 @@ use crate::config::AppConfig;
 /// bound a source is a user who has never been onboarded. Once any
 /// connect/disconnect persists a flag — even a *disconnected* `false` — the table
 /// is non-empty and onboarding never re-triggers.
-pub fn is_first_run(cfg: &AppConfig, path: &Path, load_degraded: bool) -> bool {
+pub(crate) fn is_first_run(cfg: &AppConfig, path: &Path, load_degraded: bool) -> bool {
     !load_degraded && (!path.exists() || cfg.sources.is_empty())
 }
 

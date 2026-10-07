@@ -6,7 +6,7 @@ use pixtuoid_scene::pack::PackSource;
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
-/// [`resolve_pets`] rather than failing the whole `toml::from_str` and tripping
+/// `resolve_pets` rather than failing the whole `toml::from_str` and tripping
 /// `load`'s all-or-nothing malformed arm, which would silently revert EVERY user
 /// setting to defaults.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -27,11 +27,11 @@ pub struct AppConfig {
     /// Supports `~` expansion.
     #[serde(rename = "pack-dir")]
     pub pack_dir: Option<String>,
-    /// A [`GraphicsMode`](crate::GraphicsMode) name, raw so a typo warns in
-    /// [`resolve_graphics`] instead of failing the whole load.
+    /// A `GraphicsMode` name, raw so a typo warns in `resolve_graphics` instead
+    /// of failing the whole load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graphics: Option<String>,
-    /// A [`MotionMode`] name, raw so a typo warns in [`resolve_motion`].
+    /// A [`MotionMode`] name, raw so a typo warns in `resolve_motion`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<String>,
     #[serde(
@@ -105,7 +105,7 @@ impl FloatingConfig {
     }
 }
 
-pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
+pub(crate) fn resolve_floating(config: &AppConfig) -> FloatingConfig {
     let raw = config.floating.clone().unwrap_or_default();
     FloatingConfig {
         width: raw.width.unwrap_or(FLOATING_DEFAULT_W),
@@ -131,7 +131,7 @@ pub struct AudioConfig {
     pub volume: f32,
 }
 
-pub fn resolve_audio(config: &AppConfig) -> AudioConfig {
+pub(crate) fn resolve_audio(config: &AppConfig) -> AudioConfig {
     let raw = config.audio.clone().unwrap_or_default();
     AudioConfig {
         muted: raw.muted.unwrap_or(true),
@@ -168,7 +168,7 @@ fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option
 /// The sprite pack `run` draws: `--pack-dir`, else config's `pack-dir` (both
 /// named by the user), else their own pack in `pixtuoid/sprites/` beside the
 /// config when it holds a `pack.toml`, else the bundled default.
-pub fn resolve_pack_source(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> PackSource {
+pub(crate) fn resolve_pack_source(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> PackSource {
     pack_source(config, cli_pack_dir, config_base())
 }
 
@@ -197,7 +197,7 @@ pub(crate) fn config_base() -> Option<PathBuf> {
         .or_else(|| pixtuoid_core::platform::user_home_opt().map(|h| h.join(".config")))
 }
 
-pub fn config_path() -> PathBuf {
+pub(crate) fn config_path() -> PathBuf {
     config_base().map_or_else(
         || PathBuf::from(".config/pixtuoid/config.toml"),
         |base| base.join("pixtuoid").join("config.toml"),
@@ -227,14 +227,14 @@ fn warn_user(warnings: &mut Vec<String>, line: String) {
 /// `load` — a temporal invariant nothing enforced, and reordering a resolver
 /// above it silently flipped a first run into "previously configured",
 /// suppressing onboarding forever (#836 review).
-pub fn load_with_status(path: &Path, warnings: &mut Vec<String>) -> (AppConfig, bool) {
+pub(crate) fn load_with_status(path: &Path, warnings: &mut Vec<String>) -> (AppConfig, bool) {
     let before = warnings.len();
     let cfg = load(path, warnings);
     let degraded = warnings.len() > before;
     (cfg, degraded)
 }
 
-pub fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
+pub(crate) fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AppConfig::default(),
@@ -387,7 +387,7 @@ pub(crate) fn save_floating(
 /// registered source is connected iff its `[sources]` flag is an explicit `true`.
 /// An absent flag is plainly DISCONNECTED, so a config predating `[sources]`
 /// reads as a first run and replays the onboarding wizard.
-pub fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String> {
+pub(crate) fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String> {
     pixtuoid_core::source::registry::registered_source_names()
         .filter(|src| config.sources.get(*src).copied().unwrap_or(false))
         .map(String::from)
@@ -419,7 +419,7 @@ pub(crate) fn resolve_max_desks(config: &AppConfig, warnings: &mut Vec<String>) 
 /// `max-desks = 0` warning still fires when the CLI flag wins (#836). Don't
 /// inline this back into `build_run_config`: that call site reads the real
 /// `config_path()`, so nothing there can assert the warning.
-pub fn resolve_desk_cap(
+pub(crate) fn resolve_desk_cap(
     config: &AppConfig,
     cli_max_desks: Option<usize>,
     warnings: &mut Vec<String>,
@@ -435,7 +435,7 @@ pub fn resolve_desk_cap(
 /// # Errors
 ///
 /// If `cli_theme` names no theme; the message lists the valid names.
-pub fn resolve_theme(
+pub(crate) fn resolve_theme(
     config: &AppConfig,
     cli_theme: Option<&str>,
     warnings: &mut Vec<String>,
@@ -467,7 +467,7 @@ pub fn resolve_theme(
 /// (CLI > config > default). The config value is checked even when the flag
 /// wins, as in [`resolve_theme`], and by clap's own parser, so the file and the
 /// flag accept the same names.
-pub fn resolve_graphics(
+pub(crate) fn resolve_graphics(
     config: &AppConfig,
     cli: Option<crate::GraphicsMode>,
     warnings: &mut Vec<String>,
@@ -516,7 +516,7 @@ impl MotionMode {
 
 /// Resolve config into the run's [`MotionMode`], warning on an unknown name
 /// as [`resolve_graphics`] does.
-pub fn resolve_motion(config: &AppConfig, warnings: &mut Vec<String>) -> MotionMode {
+pub(crate) fn resolve_motion(config: &AppConfig, warnings: &mut Vec<String>) -> MotionMode {
     let configured = config.motion.as_deref().and_then(|v| {
         let mode = <MotionMode as clap::ValueEnum>::from_str(v, false).ok();
         if mode.is_none() {
@@ -533,7 +533,7 @@ pub fn resolve_motion(config: &AppConfig, warnings: &mut Vec<String>) -> MotionM
 /// Resolve config into the office's `Pet`s. An unknown `kind` is warn-skipped —
 /// the remaining stanzas survive. Resolving HERE (once, at startup) means the
 /// render path reads `pet.name` directly, with no per-frame lookup.
-pub fn resolve_pets(
+pub(crate) fn resolve_pets(
     config: &AppConfig,
     warnings: &mut Vec<String>,
 ) -> Vec<pixtuoid_scene::pet::Pet> {

@@ -105,7 +105,10 @@ fn prune_runs(dir: &Path, now: SystemTime) {
 /// # Errors
 ///
 /// If the directory can't be created or the file can't be opened.
-pub fn open_private_append(path: &Path, opts: OpenOptions) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_private_append(
+    path: &Path,
+    opts: OpenOptions,
+) -> std::io::Result<std::fs::File> {
     let f = create_owner_only_append(path, opts)?;
     crate::install::tighten_to_owner_only(&f);
     Ok(f)
@@ -202,7 +205,7 @@ fn read_log_tail(path: &std::path::Path, max: u64) -> (String, Option<String>) {
 /// Where the runtime log lives: the one file `$PIXTUOID_LOG` names, or a
 /// directory holding a file per run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LogLocation {
+pub(crate) enum LogLocation {
     File(std::path::PathBuf),
     Runs(std::path::PathBuf),
 }
@@ -221,7 +224,7 @@ const LOG_READ_BYTES: u64 = 2 * LOG_ROTATE_BYTES;
 impl LogLocation {
     /// Where this process's log goes: `$PIXTUOID_LOG`'s file, else a runs
     /// directory in the state, cache or temp directory.
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         if let Some(p) = pixtuoid_core::platform::path_env("PIXTUOID_LOG") {
             return LogLocation::File(p);
         }
@@ -236,7 +239,7 @@ impl LogLocation {
         runs_under(&std::env::temp_dir())
     }
 
-    pub fn path(&self) -> &std::path::Path {
+    pub(crate) fn path(&self) -> &std::path::Path {
         match self {
             Self::File(p) | Self::Runs(p) => p,
         }
@@ -250,7 +253,10 @@ impl LogLocation {
     /// # Errors
     ///
     /// The sink's path and the error, if it can't be opened.
-    pub fn open_sink(&self, now: SystemTime) -> Result<std::fs::File, (PathBuf, std::io::Error)> {
+    pub(crate) fn open_sink(
+        &self,
+        now: SystemTime,
+    ) -> Result<std::fs::File, (PathBuf, std::io::Error)> {
         let (path, opts) = match self {
             LogLocation::File(path) => {
                 rotate_if_large(path);
@@ -275,7 +281,7 @@ impl LogLocation {
 
     /// The log here, its tail within the read budget; of a runs directory,
     /// the tail across its runs, oldest run first.
-    pub fn read(&self) -> (String, Option<String>) {
+    pub(crate) fn read(&self) -> (String, Option<String>) {
         match self {
             LogLocation::File(path) => read_log(path),
             LogLocation::Runs(dir) => read_runs(dir, LOG_READ_BYTES),

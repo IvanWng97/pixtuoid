@@ -8,7 +8,7 @@ pub(crate) fn install_crash_hook() {
     std::panic::set_hook(Box::new(|info| {
         // stdout is the stream `setup_terminal` ENTERED the alt screen on, so the
         // restore must go there — on stderr, `pixtuoid run 2>/dev/null` strands it.
-        let _ = pixtuoid::tui::unwind_terminal_modes(
+        let _ = crate::tui::unwind_terminal_modes(
             &mut std::io::stdout(),
             crossterm::terminal::disable_raw_mode,
         );
@@ -35,7 +35,7 @@ pub(crate) fn install_crash_hook() {
         // Owner-only: a backtrace carries the same project paths and agent ids
         // the runtime log does.
         if let Ok(mut f) =
-            pixtuoid::run_log::open_private_append(&crash_path, std::fs::OpenOptions::new())
+            crate::run_log::open_private_append(&crash_path, std::fs::OpenOptions::new())
         {
             use std::io::Write;
             let _ = f.write_all(report.as_bytes());
@@ -46,8 +46,8 @@ pub(crate) fn install_crash_hook() {
         // The payload and the path are text we don't control, so stripped
         // before they reach the terminal; the URL is percent-encoded already.
         let (msg, path) = (
-            pixtuoid::strip_lines(&panic_msg, "\n  "),
-            pixtuoid::display_path(&crash_path),
+            crate::strip_lines(&panic_msg, "\n  "),
+            crate::display_path(&crash_path),
         );
         let notice = format!(
             "\n\x1b[1;31mpixtuoid v{version} crashed — sorry about that.\x1b[0m\n\n\
@@ -119,7 +119,7 @@ fn build_issue_url(
 
     format!(
         "{}/issues/new?labels=crash-report&title={}&body={}",
-        pixtuoid::tui::widgets::REPO_URL,
+        crate::tui::widgets::REPO_URL,
         percent_encode(&title),
         percent_encode(&body),
     )
@@ -155,7 +155,7 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> usize {
 fn crash_log_path() -> PathBuf {
     // Empty or RELATIVE XDG_STATE_HOME = unset (XDG spec): an unfiltered "" yields
     // root `/pixtuoid/...`, a relative one lands CWD-relative.
-    if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
+    if let Some(state) = crate::install::nonempty_abs_env("XDG_STATE_HOME") {
         return state.join("pixtuoid").join("crash.log");
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
@@ -169,6 +169,16 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    /// `name`'s path as libtest's `--exact` reads it: the module path less the
+    /// crate, so a re-exec still finds the test after this module moves.
+    #[cfg(unix)]
+    fn this_test(name: &str) -> String {
+        let module = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, m)| m);
+        format!("{module}::{name}")
+    }
 
     /// Unix-only, and so is every test that reads it: crossterm dispatches on a
     /// PROCESS-GLOBAL ansi-support flag rather than on the writer, and under
@@ -194,7 +204,7 @@ mod tests {
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "crash::tests::the_hook_restores_on_stdout_and_keeps_the_report_on_stderr",
+                &this_test("the_hook_restores_on_stdout_and_keeps_the_report_on_stderr"),
                 "--nocapture",
             ])
             .env(CHILD, "1")
@@ -236,7 +246,7 @@ mod tests {
             let mut c = std::process::Command::new(std::env::current_exe().unwrap());
             c.args([
                 "--exact",
-                "crash::tests::the_hook_strips_the_payload_and_survives_a_broken_stderr",
+                &this_test("the_hook_strips_the_payload_and_survives_a_broken_stderr"),
                 "--nocapture",
             ])
             .env(CHILD, "1")

@@ -9,7 +9,7 @@ use anyhow::{Context, Result, anyhow};
 /// invalid and must be ignored (else config/log/pack land CWD-relative, silently
 /// bypassing `~/.config`). NOT for user-chosen paths like `PIXTUOID_LOG`, which
 /// may legitimately be relative.
-pub fn nonempty_abs_env(name: &str) -> Option<PathBuf> {
+pub(crate) fn nonempty_abs_env(name: &str) -> Option<PathBuf> {
     pixtuoid_core::platform::path_env(name).filter(|v| v.is_absolute())
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn home_relative_checked(rel: &str) -> Result<PathBuf> {
 /// Deliberately kept separately callable from [`tighten_to_owner_only`]: folded
 /// into one opener, reverting either half was invisible to every test, because
 /// the fchmod repaired what the create mode failed to set.
-pub fn owner_only_create(opts: &mut OpenOptions) -> &mut OpenOptions {
+pub(crate) fn owner_only_create(opts: &mut OpenOptions) -> &mut OpenOptions {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -78,7 +78,7 @@ pub fn owner_only_create(opts: &mut OpenOptions) -> &mut OpenOptions {
 /// files are deliberately never unlinked, so without this the hole would never
 /// close for an upgrader. Through the fd (fchmod), never the path: a path chmod
 /// would re-race whatever `O_NOFOLLOW` guarantee the open established.
-pub fn tighten_to_owner_only(f: &File) {
+pub(crate) fn tighten_to_owner_only(f: &File) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
