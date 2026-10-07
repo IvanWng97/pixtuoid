@@ -633,7 +633,30 @@ fn linux_activation_backend(
 /// The warning is `sanitize`d where it is MINTED, for the reason `crate::display_path`
 /// gives: the path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`.
 pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
-    match std::fs::read_to_string(path) {
+    read_log_tail(path, u64::MAX)
+}
+
+/// [`read_log`] of the last `max` bytes of `path`, from the first whole line
+/// in them.
+fn read_log_tail(path: &std::path::Path, max: u64) -> (String, Option<String>) {
+    let tail = || -> std::io::Result<String> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(path)?;
+        let skip = file.metadata()?.len().saturating_sub(max);
+        file.seek(SeekFrom::Start(skip))?;
+        let mut bytes = Vec::new();
+        file.take(max).read_to_end(&mut bytes)?;
+        if skip > 0 {
+            let line = bytes
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(bytes.len(), |nl| nl + 1);
+            bytes.drain(..line);
+        }
+        String::from_utf8(bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    };
+    match tail() {
         Ok(s) => (s, None),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
         Err(e) => (
@@ -657,6 +680,14 @@ pub enum LogLocation {
 /// The extension of a run's file in a [`LogLocation::Runs`] directory.
 pub const RUN_LOG_EXT: &str = "log";
 
+/// The size past which the file `$PIXTUOID_LOG` names rotates at startup.
+pub const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// The most one [`read_logs`] takes of the retained runs, newest first: what
+/// the single log held at most across its two generations, so a week of
+/// verbose runs costs a reader no more than it did.
+pub const LOG_READ_BYTES: u64 = 2 * LOG_ROTATE_BYTES;
+
 impl LogLocation {
     pub fn path(&self) -> &std::path::Path {
         match self {
@@ -665,13 +696,18 @@ impl LogLocation {
     }
 }
 
-/// Every retained log at `at`, oldest run first, read as [`read_log`] reads
-/// one: a run's file is named for its start, so name order is run order.
+/// The log at `at`, read as [`read_log`] reads one; of a runs directory, the
+/// newest [`LOG_READ_BYTES`] across its runs, oldest run first.
 pub fn read_logs(at: &LogLocation) -> (String, Option<String>) {
-    let dir = match at {
-        LogLocation::File(path) => return read_log(path),
-        LogLocation::Runs(dir) => dir,
-    };
+    match at {
+        LogLocation::File(path) => read_log(path),
+        LogLocation::Runs(dir) => read_runs(dir, LOG_READ_BYTES),
+    }
+}
+
+/// The newest `budget` bytes of the runs in `dir`, oldest run first: a run's
+/// file is named for its start, so name order is run order.
+fn read_runs(dir: &std::path::Path, budget: u64) -> (String, Option<String>) {
     let mut runs: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
         Ok(entries) => entries
             .flatten()
@@ -690,15 +726,24 @@ pub fn read_logs(at: &LogLocation) -> (String, Option<String>) {
         }
     };
     runs.sort();
-    let (mut text, mut warning) = (String::new(), None);
-    for run in runs {
-        let (run_text, run_warning) = read_log(&run);
-        text.push_str(&run_text);
+    let (mut read, mut warning, mut left) = (Vec::new(), None, budget);
+    for run in runs.iter().rev() {
+        if left == 0 {
+            break;
+        }
+        let len = std::fs::metadata(run).map_or(0, |m| m.len());
+        let (run_text, run_warning) = read_log_tail(run, left);
+        left = left.saturating_sub(len);
+        read.push(run_text);
+        warning = warning.or(run_warning);
+    }
+    let mut text = String::new();
+    for run_text in read.iter().rev() {
+        text.push_str(run_text);
         // A run cut off mid-line must not join the next run's first line.
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
-        warning = warning.or(run_warning);
     }
     (text, warning)
 }
@@ -2638,7 +2683,8 @@ mod tests {
     }
 
     /// The footer's drift is this run's breadcrumbs alone, each source once,
-    /// first seen first: no other event, nor a target the breadcrumbs' prefixes.
+    /// first seen first: no other event, nor a target that merely has the
+    /// breadcrumbs' target as a prefix.
     #[test]
     fn drift_seen_and_footer_warning() {
         use tracing_subscriber::layer::SubscriberExt;
@@ -2676,6 +2722,26 @@ mod tests {
         let dw = footer_warning(Some(&death), &d).unwrap();
         assert!(!dw.contains('⚠'), "death msg must not embed ⚠: {dw}");
         assert_eq!(footer_warning(None, &[]), None);
+    }
+
+    /// A read takes the newest runs' bytes up to its budget, each cut run
+    /// from its first whole line, and lays them oldest run first.
+    #[test]
+    fn a_runs_read_takes_the_newest_bytes_within_its_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, text) in [
+            ("1.log", "a1\na2\n"),
+            ("2.log", "b1\nb2\n"),
+            ("3.log", "c1\n"),
+        ] {
+            std::fs::write(dir.path().join(name), text).unwrap();
+        }
+        assert_eq!(read_runs(dir.path(), 7), ("b2\nc1\n".to_string(), None));
+        assert_eq!(
+            read_runs(dir.path(), u64::MAX).0,
+            "a1\na2\nb1\nb2\nc1\n",
+            "every run under a budget that holds them"
+        );
     }
 
     #[test]

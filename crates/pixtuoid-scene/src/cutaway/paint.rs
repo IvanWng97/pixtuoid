@@ -110,7 +110,7 @@ pub fn render_cutaway(
 pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let pen = Pen::for_pack(list.scale(), list.pack());
     let key = BackdropKey {
-        backdrop: list.backdrop().clone(),
+        backdrop: list.backdrop(),
         carpet: list.carpet(),
         scale: list.scale(),
     };
@@ -123,11 +123,41 @@ pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut 
 }
 
 /// All [`paint_backdrop`] reads, the pack aside: one cache draws one pack.
+/// Held owning its backdrop, probed borrowing the list's.
 #[derive(Debug, PartialEq)]
-pub(crate) struct BackdropKey {
-    backdrop: Backdrop,
+pub(crate) struct BackdropKey<B = Backdrop> {
+    backdrop: B,
     carpet: Dithered<Carpet>,
     scale: RenderScale,
+}
+
+impl PartialEq<BackdropKey<&Backdrop>> for BackdropKey {
+    fn eq(&self, probe: &BackdropKey<&Backdrop>) -> bool {
+        // Destructured whole, so a field added to the key fails to compile
+        // here until it is compared.
+        let Self {
+            backdrop,
+            carpet,
+            scale,
+        } = self;
+        *backdrop == *probe.backdrop && *carpet == probe.carpet && *scale == probe.scale
+    }
+}
+
+impl From<BackdropKey<&Backdrop>> for BackdropKey {
+    fn from(
+        BackdropKey {
+            backdrop,
+            carpet,
+            scale,
+        }: BackdropKey<&Backdrop>,
+    ) -> Self {
+        Self {
+            backdrop: backdrop.clone(),
+            carpet,
+            scale,
+        }
+    }
 }
 
 /// Everything under the list's pieces, none of which moves within a
@@ -2469,6 +2499,80 @@ mod tests {
     /// A storm's strike lifts the whole frame by whole ramp steps, what glows
     /// of its own too, and its window glass further, the bolt's. That only a
     /// storm strikes is the model's: `a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash`.
+    /// A cache shared across frames paints each as a fresh cache would, each
+    /// step changing one of the backdrop's inputs — the layout's backdrop,
+    /// the weather's carpet, the scale: the key holds them all.
+    #[test]
+    fn a_shared_backdrop_cache_paints_every_frame_as_a_fresh_one() {
+        use crate::sky::{Sky, Weather};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let now = crate::localclock::at_hour(12);
+        let layouts = [0, 1]
+            .map(|seed| SceneLayout::compute_with_seed(160, 96, None, seed).expect("lays out"));
+        assert_ne!(
+            Backdrop::of(&layouts[0], theme),
+            Backdrop::of(&layouts[1], theme),
+            "the layouts' backdrops differ"
+        );
+        let mut shared = CutawayCache::default();
+        let mut fresh_frames = Vec::new();
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            for (seed, weather) in [
+                (0, Weather::Clear),
+                (1, Weather::Clear),
+                (1, Weather::Snow),
+                (0, Weather::Snow),
+            ] {
+                let layout = &layouts[seed];
+                let office = Office {
+                    layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = compose_at(
+                    &empty_frame(layout),
+                    office,
+                    &Moment::resolve(
+                        Sky::at_with(now, weather),
+                        theme,
+                        0.0,
+                        Motion::Full.timing(now),
+                    ),
+                    crate::floor::FloorMeta::ground(),
+                    quiet_board(),
+                    (
+                        &mut crate::display::compose::LightCache::default(),
+                        &mut crate::outside::OutsideCache::default(),
+                    ),
+                );
+                let blank = || {
+                    RgbBuffer::filled(
+                        scale.to_buffer(layout.buf_w),
+                        scale.to_buffer(layout.buf_h),
+                        theme.surface.bg_fallback,
+                    )
+                };
+                let (mut fresh, mut stamped) = (blank(), blank());
+                paint(&list, &mut CutawayCache::default(), &mut fresh);
+                paint(&list, &mut shared, &mut stamped);
+                assert!(
+                    fresh.as_slice() == stamped.as_slice(),
+                    "scale {s}, layout {seed}, {weather:?}"
+                );
+                fresh_frames.push(fresh);
+            }
+        }
+        assert!(
+            fresh_frames
+                .windows(2)
+                .all(|w| w[0].as_slice() != w[1].as_slice()),
+            "each step changes the frame"
+        );
+    }
+
     #[test]
     fn a_strike_lifts_the_room_and_its_glass_most() {
         use crate::sky::{Sky, Weather};

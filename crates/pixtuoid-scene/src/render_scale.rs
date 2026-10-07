@@ -56,24 +56,32 @@ impl RenderScale {
     /// A density of 1 — a pack with no variants — makes every scale a
     /// multiple, so this is exactly [`RenderScale::new`] there.
     pub fn fit(natural: u16, density: Density) -> Option<Self> {
+        let nearest = Self::nearest_multiple(natural, density);
         // u64: a square of a u16-range value times the bound overflows u32.
-        let d = u64::from(density.get());
-        let n = u64::from(natural);
-        let below = n / d * d;
+        let (n, m) = (u64::from(natural), u64::from(nearest.get()));
+        let (lo, hi) = (m.min(n), m.max(n));
+        (hi * hi <= FIT_MAX_RATIO_SQUARED * lo * lo).then_some(Self(nearest))
+    }
+
+    /// The multiple of `density` nearest `natural` by ratio, the density
+    /// itself at the least: below it, the next multiple up is `0`'s only rival
+    /// and always the nearer.
+    fn nearest_multiple(natural: u16, density: Density) -> NonZeroU16 {
+        let d = density.as_nonzero();
+        let below = natural / d;
         // A multiple past `u16::MAX` is no scale at all, so it is no candidate.
-        let above = Some(below + d).filter(|&a| u16::try_from(a).is_ok());
-        let nearest = match above {
+        let above = below
+            .checked_add(1)
+            .filter(|k| k.checked_mul(d.get()).is_some());
+        let (n, step) = (u64::from(natural), u64::from(d.get()));
+        let k = match above {
             // `n/below < above/n` ⇔ `n² < below·above`, compared exactly in
             // integers; adjacent multiples `kd` and `(k+1)d` never tie, since
             // that needs `k(k+1)` to be a square.
-            Some(a) if n * n >= below * a => a,
+            Some(a) if n * n >= u64::from(below) * step * u64::from(a) * step => a,
             _ => below,
         };
-        let (lo, hi) = (nearest.min(n), nearest.max(n));
-        if hi * hi > FIT_MAX_RATIO_SQUARED * lo * lo {
-            return None;
-        }
-        u16::try_from(nearest).ok().and_then(Self::new)
+        d.saturating_mul(NonZeroU16::MIN.saturating_add(k.saturating_sub(1)))
     }
 
     /// Buffer pixels per layout unit.
@@ -155,8 +163,8 @@ impl PixelFit {
     /// `natural` below `density` takes the density itself, so the office
     /// shrinks rather than its art coarsening.
     pub fn at_least_density(natural: u16, density: Density, px: crate::layout::Size) -> Self {
-        Self::new(natural.max(density.get()), density, px)
-            .unwrap_or_else(|| Self::at(RenderScale(density.as_nonzero()), density, px))
+        let scale = RenderScale::nearest_multiple(natural.max(density.get()), density);
+        Self::at(RenderScale(scale), density, px)
     }
 
     fn at(scale: RenderScale, density: Density, px: crate::layout::Size) -> Self {
@@ -213,6 +221,27 @@ mod tests {
 
     fn fit(natural: u16, density: u16) -> Option<u16> {
         RenderScale::fit(natural, Density::new(density).expect("nonzero")).map(RenderScale::get)
+    }
+
+    /// A surface with no other look renders at the nearest multiple of the
+    /// density to its natural, the density at the least, for every natural:
+    /// [`RenderScale::fit`] of a natural at least the density never refuses.
+    #[test]
+    fn a_fit_at_least_the_density_always_lands() {
+        let px = crate::layout::Size { w: 640, h: 480 };
+        for d in 1..=8 {
+            let density = Density::new(d).expect("nonzero");
+            for natural in (0..=u16::MAX).step_by(7).chain([u16::MAX]) {
+                let got = PixelFit::at_least_density(natural, density, px)
+                    .scale()
+                    .get();
+                assert_eq!(
+                    Some(got),
+                    fit(natural.max(d), d),
+                    "natural {natural}, density {d}"
+                );
+            }
+        }
     }
 
     /// At a density of 8, natural scale by natural scale: every pick is a
