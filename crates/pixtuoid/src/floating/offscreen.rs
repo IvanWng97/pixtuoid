@@ -271,6 +271,17 @@ impl Screen {
         }
     }
 
+    /// The screen of the window whose handle is `raw`: X11's (Xlib or XCB)
+    /// keeps no pixels, and a window that names no handle is taken as one
+    /// that might not.
+    pub(crate) fn of_window(raw: Option<winit::raw_window_handle::RawWindowHandle>) -> Self {
+        use winit::raw_window_handle::RawWindowHandle;
+        Self::new(!matches!(
+            raw,
+            None | Some(RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_))
+        ))
+    }
+
     /// A frame was rendered that may not reach the screen — held back, or
     /// about to present: until one shows, the screen matches nothing rendered.
     pub(crate) fn stale(&mut self) {
@@ -1354,7 +1365,22 @@ mod tests {
             screen.needs(&shown, &Dirty::Unchanged),
             "after a held frame"
         );
-        // Where the platform keeps no pixels, every frame presents.
+        // Where the platform keeps no pixels, every frame presents: X11's
+        // windows, and one that names no handle.
+        use winit::raw_window_handle::{
+            RawWindowHandle, Win32WindowHandle, XcbWindowHandle, XlibWindowHandle,
+        };
+        let x11 = [
+            RawWindowHandle::Xlib(XlibWindowHandle::new(1)),
+            RawWindowHandle::Xcb(XcbWindowHandle::new(std::num::NonZeroU32::MIN)),
+        ];
+        assert!(
+            x11.into_iter()
+                .all(|raw| !Screen::of_window(Some(raw)).retains)
+        );
+        assert!(!Screen::of_window(None).retains);
+        let win32 = Win32WindowHandle::new(std::num::NonZeroIsize::MIN);
+        assert!(Screen::of_window(Some(RawWindowHandle::Win32(win32))).retains);
         let mut forgetful = Screen::new(false);
         forgetful.shown(shown.clone());
         assert!(
