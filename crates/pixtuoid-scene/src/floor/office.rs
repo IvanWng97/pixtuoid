@@ -195,6 +195,12 @@ fn office_floor(office: FloorMeta, floor: usize, n_floors: usize) -> FloorMeta {
         .with_motion(office.motion)
 }
 
+/// The pet of `pets` floor `floor` of `n_floors` draws: the one choice its
+/// frames and its tooltip both read.
+fn floor_pet(floor: usize, n_floors: usize, pets: &[crate::pet::Pet]) -> Option<&crate::pet::Pet> {
+    crate::pet::select_pet_for_floor(FloorMeta::for_floor(floor, n_floors).floor_seed, pets)
+}
+
 /// The footer's floor breadcrumb for floor `current` of `n_floors`, among
 /// `total_agents`; `None` in a one-floor office.
 #[doc(hidden)]
@@ -264,7 +270,11 @@ pub fn compose_slide(
 #[derive(Debug)]
 pub struct OfficeSession {
     pack: Arc<Pack>,
+    /// Each floor's view, kept past the last frame's floor count so a floor
+    /// that empties and fills again resumes its own.
     views: Vec<FloorView>,
+    /// The floors the last frame's scene filled, at least one.
+    n_floors: usize,
     office: PerOffice,
     nav: FloorNav,
     /// The last frame's slide, while one is under way.
@@ -281,6 +291,7 @@ impl OfficeSession {
     pub fn new(pack: Arc<Pack>) -> Self {
         Self {
             views: vec![FloorView::new(Arc::clone(&pack))],
+            n_floors: 1,
             pack,
             office: PerOffice::default(),
             nav: FloorNav::default(),
@@ -302,7 +313,12 @@ impl OfficeSession {
 
     /// The floors the last frame's scene filled.
     pub fn n_floors(&self) -> usize {
-        self.views.len()
+        self.n_floors
+    }
+
+    /// The pet of `pets` the floor showing picks, as its frames draw it.
+    pub fn showing_pet<'p>(&self, pets: &'p [crate::pet::Pet]) -> Option<&'p crate::pet::Pet> {
+        floor_pet(self.nav.current(), self.n_floors, pets)
     }
 
     /// Render one frame of `inputs.world.scene` in `look`: the floor showing,
@@ -327,7 +343,8 @@ impl OfficeSession {
             view.floor.evict_missing(scene);
         }
         self.office.evict_missing(scene);
-        let n_floors = super::num_floors(scene).min(super::MAX_FLOORS);
+        let n_floors = super::num_floors(scene).clamp(1, super::MAX_FLOORS);
+        self.n_floors = n_floors;
         while self.views.len() < n_floors {
             self.views.push(FloorView::new(Arc::clone(&self.pack)));
         }
@@ -340,7 +357,7 @@ impl OfficeSession {
                 scene: &floor_scene,
                 floor: meta,
                 pets: super::PetInputs {
-                    pet: crate::pet::select_pet_for_floor(meta.floor_seed, pets),
+                    pet: floor_pet(floor, n_floors, pets),
                     petting: inputs
                         .world
                         .pets
@@ -431,15 +448,15 @@ impl OfficeSession {
         office_floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
-        // `new` seeds a floor and `render` never shrinks them, so one is there.
-        let current = self.nav.current().min(self.views.len() - 1);
-        let floor = self::office_floor(office_floor, current, self.views.len());
+        // `nav` settles within `n_floors`, and a view is kept for each.
+        let current = self.nav.current().min(self.n_floors - 1);
+        let floor = self::office_floor(office_floor, current, self.n_floors);
         self.views[current].audio_frame(&mut self.office, scene, floor, now)
     }
 
     /// The footer's floor breadcrumb, among `scene`'s agents.
     pub fn footer_floor(&self, scene: &SceneState) -> Option<FooterFloor> {
-        footer_floor(self.nav.current(), self.views.len(), scene.agents.len())
+        footer_floor(self.nav.current(), self.n_floors, scene.agents.len())
     }
 
     /// Whether the floor showing's last frame changes between beats:

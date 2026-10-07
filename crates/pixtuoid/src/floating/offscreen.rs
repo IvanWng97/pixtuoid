@@ -60,6 +60,11 @@ impl OfficeRenderer {
         self.pets = pets;
     }
 
+    /// [`OfficeSession::showing_pet`] of this window's pets.
+    pub(crate) fn showing_pet(&self) -> Option<&pixtuoid_scene::pet::Pet> {
+        self.session.showing_pet(&self.pets)
+    }
+
     /// Which floor shows, and the slide under way.
     pub(crate) fn nav(&self) -> &pixtuoid_scene::floor::FloorNav {
         self.session.nav()
@@ -229,16 +234,35 @@ pub(crate) struct Overlays {
     pub(crate) tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
 }
 
-/// Whether a frame showing `next` over an office `dirty` against the last must
-/// be presented, after one that showed `shown`: an unchanged office under the
-/// same overlays is the frame on screen, and presenting it again only spends
-/// the copy and the present.
-pub(crate) fn needs_present(
-    shown: Option<&Overlays>,
-    next: &Overlays,
-    dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
-) -> bool {
-    *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged || shown != Some(next)
+/// What the window shows, as far as a frame may skip presenting: the overlays
+/// of the frame on screen, known only while the screen holds the last frame
+/// rendered, which an office's dirt is measured against.
+#[derive(Debug, Default)]
+pub(crate) struct Screen(Option<Overlays>);
+
+impl Screen {
+    /// Whether a frame showing `next` over an office `dirty` against the last
+    /// rendered must be presented: an unchanged office under the same overlays
+    /// is the frame on screen, and presenting it again only spends the copy
+    /// and the present.
+    pub(crate) fn needs(
+        &self,
+        next: &Overlays,
+        dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
+    ) -> bool {
+        *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged || self.0.as_ref() != Some(next)
+    }
+
+    /// A frame was rendered that may not reach the screen — held back, or
+    /// about to present: until one shows, the screen matches nothing rendered.
+    pub(crate) fn stale(&mut self) {
+        self.0 = None;
+    }
+
+    /// A frame with `overlays` reached the screen.
+    pub(crate) fn shown(&mut self, overlays: Overlays) {
+        self.0 = Some(overlays);
+    }
 }
 
 /// What a left press does: [`OfficeRenderer::press_at`]'s answer.
@@ -1264,8 +1288,9 @@ mod tests {
         );
     }
 
-    /// A frame presents when its office changed or anything over it did, and
-    /// an unchanged office under the same overlays is the frame on screen.
+    /// A frame presents when its office changed or anything over it did, an
+    /// unchanged office under the same overlays is the frame on screen, and a
+    /// frame rendered but not shown leaves nothing to skip against.
     #[test]
     fn only_a_changed_frame_presents() {
         use pixtuoid_scene::cutaway::canvas::Dirty;
@@ -1280,27 +1305,25 @@ mod tests {
             tooltip: None,
         };
         let shown = overlays(200, "a");
-        assert!(
-            needs_present(None, &shown, &Dirty::Unchanged),
-            "the first frame"
-        );
-        assert!(!needs_present(Some(&shown), &shown, &Dirty::Unchanged));
-        assert!(needs_present(Some(&shown), &shown, &Dirty::All));
-        assert!(needs_present(
-            Some(&shown),
-            &overlays(201, "a"),
-            &Dirty::Unchanged
-        ));
-        assert!(needs_present(
-            Some(&shown),
-            &overlays(200, "b"),
-            &Dirty::Unchanged
-        ));
+        let mut screen = Screen::default();
+        assert!(screen.needs(&shown, &Dirty::Unchanged), "the first frame");
+        screen.shown(shown.clone());
+        assert!(!screen.needs(&shown, &Dirty::Unchanged));
+        assert!(screen.needs(&shown, &Dirty::All));
+        assert!(screen.needs(&overlays(201, "a"), &Dirty::Unchanged));
+        assert!(screen.needs(&overlays(200, "b"), &Dirty::Unchanged));
         let tipped = Overlays {
             tooltip: Some((pixtuoid_scene::tooltip::coffee(), (3, 4))),
             ..shown.clone()
         };
-        assert!(needs_present(Some(&shown), &tipped, &Dirty::Unchanged));
+        assert!(screen.needs(&tipped, &Dirty::Unchanged));
+        // A held frame changed the office off screen: the next, unchanged
+        // against it, still presents.
+        screen.stale();
+        assert!(
+            screen.needs(&shown, &Dirty::Unchanged),
+            "after a held frame"
+        );
     }
 
     #[test]

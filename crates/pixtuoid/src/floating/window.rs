@@ -43,7 +43,7 @@ pub(crate) struct FloatingApp {
     /// The `[p]ause`, which holds the office's clock still.
     pause: pixtuoid_scene::anim::PauseClock,
     /// What the frame on screen shows beside the office.
-    on_screen: Option<super::offscreen::Overlays>,
+    screen: super::offscreen::Screen,
     /// The frames' times and janks, reported as the TUI's are.
     jank: crate::jank::Jank,
     /// How the office moves.
@@ -113,7 +113,7 @@ impl FloatingApp {
             pack,
             config_path,
             pause: pixtuoid_scene::anim::PauseClock::default(),
-            on_screen: None,
+            screen: super::offscreen::Screen::default(),
             jank: crate::jank::Jank::new(Instant::now()),
             motion,
             renderer,
@@ -283,7 +283,10 @@ impl FloatingApp {
                 .buf()
                 .is_none_or(|o| o.width() == 0 || o.height() == 0)
         {
-            return; // nothing rendered, or held: the window keeps the last frame
+            // Nothing rendered, or held: the window keeps the last frame, which
+            // the next one's dirt is no longer measured against.
+            self.screen.stale();
+            return;
         }
         let cursor = (self.cursor.x, self.cursor.y);
         let next = super::offscreen::Overlays {
@@ -302,16 +305,29 @@ impl FloatingApp {
                 .cursor_in
                 .then(|| self.renderer.hit_at(cursor, at))
                 .flatten()
-                .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
+                .and_then(|hit| {
+                    // The office picks each floor's pet as it renders; the
+                    // tooltip names the one the floor showing drew.
+                    let shown = FloorInputs {
+                        pets: PetInputs {
+                            pet: self.renderer.showing_pet(),
+                            ..world.pets
+                        },
+                        ..world
+                    };
+                    pixtuoid_scene::tooltip::for_hit(hit, &shown)
+                })
                 .map(|tip| (tip, (cursor.0 as i32, cursor.1 as i32))),
         };
         let dirty = self.renderer.dirty();
         let painted = crate::jank::Painted::from(dirty);
-        if !super::offscreen::needs_present(self.on_screen.as_ref(), &next, dirty) {
+        if !self.screen.needs(&next, dirty) {
             // The frame on screen is this one: its flash phase shows.
             self.renderer.presented();
             return;
         }
+        // Until this one presents, the screen matches no frame rendered.
+        self.screen.stale();
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -336,7 +352,7 @@ impl FloatingApp {
         let presenting = Instant::now();
         if sb.present().is_ok() {
             self.renderer.presented();
-            self.on_screen = Some(next);
+            self.screen.shown(next);
         }
         let now = Instant::now();
         self.jank.painted_by(crate::jank::Painter {

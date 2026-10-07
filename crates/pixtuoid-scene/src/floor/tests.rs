@@ -1961,4 +1961,57 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
     assert!(office.hit_at(whole).is_none(), "a slide hits nothing");
     assert!(render(&mut office, t0 + Duration::from_secs(2)).is_some());
     assert_eq!((office.nav().current(), bread(&office)), (1, Some(2)));
+    let pets: Vec<crate::pet::Pet> = (0..8)
+        .map(|i| crate::pet::Pet {
+            kind: crate::pet::PetKind::Cat,
+            name: format!("cat{i}"),
+        })
+        .collect();
+    assert_eq!(
+        office.showing_pet(&pets).map(|p| p.name.as_str()),
+        crate::pet::select_pet_for_floor(FloorMeta::for_floor(1, 2).floor_seed, &pets)
+            .map(|p| p.name.as_str()),
+        "the floor showing's pet"
+    );
+}
+
+/// An office whose upper floor empties shows one floor: the count, the
+/// breadcrumb and the way up all follow the live scene, not the views kept.
+#[test]
+fn an_office_session_follows_its_floors_down() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    let render = |office: &mut OfficeSession, scene: &SceneState| {
+        office.render(
+            crate::look::Look::Classic,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene,
+                    pack: &pack,
+                    now: t0,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+            },
+            &[],
+            theme.surface.bg_fallback,
+        )
+    };
+    let two = make_scene(3, 2);
+    render(&mut office, &two);
+    assert_eq!(office.n_floors(), 2);
+    let one = make_scene(2, 2);
+    render(&mut office, &one);
+    assert_eq!(office.n_floors(), 1);
+    assert!(
+        office.footer_floor(&one).is_none(),
+        "one floor has no breadcrumb"
+    );
+    assert_eq!(office.nav().up(office.n_floors()), None, "no floor above");
 }
