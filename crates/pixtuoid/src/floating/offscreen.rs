@@ -683,14 +683,14 @@ mod tests {
     }
 
     /// A saved size below the pack's minimum opens, and is placed, at the
-    /// minimum on the short axis: an office that seats every floor.
+    /// minimum: an office that seats every floor.
     #[test]
     fn a_saved_size_below_the_minimum_opens_where_every_floor_seats() {
         let min = min_window(density());
         let cfg: crate::config::AppConfig =
-            toml::from_str("[floating]\nwidth = 240\nheight = 900\n").expect("parses");
+            toml::from_str("[floating]\nwidth = 1\nheight = 1\n").expect("parses");
         let f = crate::config::resolve_floating(&cfg).at_least(min.width, min.height);
-        assert_eq!((f.width, f.height), (min.width.max(240), 900));
+        assert_eq!((f.width, f.height), (min.width, min.height));
         let caps = boot_capacities_for_window(PhysicalSize::new(f.width, f.height), density());
         assert!(caps.iter().all(|&c| c > 0), "{caps:?}");
     }

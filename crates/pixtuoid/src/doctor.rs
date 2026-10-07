@@ -642,11 +642,13 @@ fn read_log_tail(path: &std::path::Path, max: u64) -> (String, Option<String>) {
     let tail = || -> std::io::Result<String> {
         use std::io::{Read, Seek, SeekFrom};
         let mut file = std::fs::File::open(path)?;
-        let skip = file.metadata()?.len().saturating_sub(max);
+        // One byte before the cut, so a cut on a line start keeps that line.
+        let skip = file.metadata()?.len().saturating_sub(max).saturating_sub(1);
         file.seek(SeekFrom::Start(skip))?;
         let mut bytes = Vec::new();
-        file.take(max).read_to_end(&mut bytes)?;
-        if skip > 0 {
+        file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+        // Past `max`: the byte before the cut was read, so the run is cut.
+        if bytes.len() as u64 > max {
             let line = bytes
                 .iter()
                 .position(|&b| b == b'\n')
@@ -2738,6 +2740,11 @@ mod tests {
             std::fs::write(dir.path().join(name), text).unwrap();
         }
         assert_eq!(read_runs(dir.path(), 7), ("b2\nc1\n".to_string(), None));
+        assert_eq!(
+            read_runs(dir.path(), 6),
+            ("b2\nc1\n".to_string(), None),
+            "a cut on a line start keeps that line"
+        );
         assert_eq!(
             read_runs(dir.path(), u64::MAX).0,
             "a1\na2\nb1\nb2\nc1\n",

@@ -64,8 +64,9 @@ impl RenderScale {
     }
 
     /// The multiple of `density` nearest `natural` by ratio, the density
-    /// itself at the least: below it, the next multiple up is `0`'s only rival
-    /// and always the nearer.
+    /// itself at the least: the multiplier `k` is 0 only for a `natural` under
+    /// the density, where the multiple above, the density, is the nearer, so
+    /// the last line is `k.max(1)` as a `NonZeroU16`.
     fn nearest_multiple(natural: u16, density: Density) -> NonZeroU16 {
         let d = density.as_nonzero();
         let below = natural / d;
@@ -240,6 +241,11 @@ mod tests {
                     fit(natural.max(d), d),
                     "natural {natural}, density {d}"
                 );
+            }
+            // The nearest multiple by ratio: at 4, 9 → 8 (9/8 < 12/9) and 10 → 12.
+            if d == 4 {
+                let at = |n| PixelFit::at_least_density(n, density, px).scale().get();
+                assert_eq!([at(5), at(6), at(9), at(10)], [4, 8, 8, 12]);
             }
             // Below the density the office shrinks; the art keeps its density.
             let below = PixelFit::at_least_density(d - 1, density, px);

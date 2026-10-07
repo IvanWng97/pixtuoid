@@ -2496,9 +2496,6 @@ mod tests {
         );
     }
 
-    /// A storm's strike lifts the whole frame by whole ramp steps, what glows
-    /// of its own too, and its window glass further, the bolt's. That only a
-    /// storm strikes is the model's: `a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash`.
     /// A cache shared across frames paints each as a fresh cache would, each
     /// step changing one of the backdrop's inputs — the layout's backdrop,
     /// the weather's carpet, the scale: the key holds them all.
@@ -2573,6 +2570,9 @@ mod tests {
         );
     }
 
+    /// A storm's strike lifts the whole frame by whole ramp steps, what glows
+    /// of its own too, and its window glass further, the bolt's. That only a
+    /// storm strikes is the model's: `a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash`.
     #[test]
     fn a_strike_lifts_the_room_and_its_glass_most() {
         use crate::sky::{Sky, Weather};
