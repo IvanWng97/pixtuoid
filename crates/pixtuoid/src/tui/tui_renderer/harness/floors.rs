@@ -111,7 +111,8 @@ fn an_unborrowable_slide_cancels() {
     let mut r = build(100, 40, vec![]);
     let now = t0();
     r.render(&scene, p, now).unwrap();
-    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, now));
+    r.nav
+        .begin_unchecked(pixtuoid_scene::floor::FloorTransition::new(0, 0, now));
     let logged = crate::test_capture::capture(|| {
         r.render(&scene, p, now).unwrap();
     });

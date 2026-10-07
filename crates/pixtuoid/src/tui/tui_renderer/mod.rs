@@ -28,18 +28,6 @@ use pixtuoid_scene::look::Rendered;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pathfind::Router;
 
-fn floor_info_for(
-    current_idx: usize,
-    nf: usize,
-    total_agents: usize,
-) -> Option<pixtuoid_scene::footer::FooterFloor> {
-    (nf > 1).then(|| pixtuoid_scene::footer::FooterFloor {
-        current: current_idx + 1,
-        total_floors: nf,
-        total_agents,
-    })
-}
-
 #[derive(Debug, Default)]
 struct PopupState {
     open: bool,
@@ -70,8 +58,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// The terminal refused the last frame: a run of refusals warns once.
     refusing: bool,
     floors: Vec<PerFloor>,
-    current_floor: usize,
-    transition: Option<FloorTransition>,
+    nav: pixtuoid_scene::floor::FloorNav,
     /// [`Self::office_extent`] after the last frame.
     last_extent: Option<(u16, u16)>,
     mouse_pos: Option<(u16, u16)>,
@@ -176,7 +163,7 @@ impl Chrome {
             },
             footer: crate::tui::widgets::footer_context(
                 scene,
-                floor_info_for(floor, nf, scene.agents.len()),
+                pixtuoid_scene::floor::footer_floor(floor, nf, scene.agents.len()),
                 self.audio.is_audible(),
                 self.volume_flash,
                 self.source_warning.as_deref(),
@@ -238,8 +225,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             frame_out: None,
             redraw_owed: false,
             refusing: false,
-            current_floor: 0,
-            transition: None,
+            nav: pixtuoid_scene::floor::FloorNav::default(),
             last_extent: None,
             mouse_pos: None,
             cached_layout: None,
@@ -295,14 +281,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         #[cfg(not(feature = "graphics"))]
         let look = classic;
         let nf = self.grow_floors(scene);
-        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let floor_scene = project_floor_scene(scene, self.nav.current());
         let Frame { world, footer, .. } =
             self.chrome
-                .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+                .frame(scene, &floor_scene, pack, now, self.nav.current(), nf);
         let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
         self.office.raster.warm();
         let _ = pixtuoid_scene::look::render(
-            &mut self.floors[self.current_floor],
+            &mut self.floors[self.nav.current()],
             self.office.stores(),
             look.0,
             RenderInputs {
@@ -450,7 +436,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn current_floor(&self) -> usize {
-        self.current_floor
+        self.nav.current()
     }
 
     #[cfg(test)]
@@ -520,27 +506,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     pub fn current_floor_seed(&self) -> u64 {
         let nf = self.floors.len();
-        FloorMeta::for_floor(self.current_floor, nf).floor_seed
+        FloorMeta::for_floor(self.nav.current(), nf).floor_seed
     }
 
     pub fn transition(&self) -> Option<&FloorTransition> {
-        self.transition.as_ref()
+        self.nav.transition()
     }
 
     pub fn navigate_floor(&mut self, target: usize, now: SystemTime) {
-        if target == self.current_floor || self.transition.is_some() {
-            return;
-        }
-        self.transition = Some(FloorTransition::new(self.current_floor, target, now));
+        self.nav.navigate(target, now);
     }
 
     pub fn cancel_transition(&mut self) {
-        if let Some(tr) = self.transition.take() {
-            // Land on the destination floor: a resize-induced cancel must not
-            // silently revert a user-initiated navigation.
-            let nf = self.floors.len().max(1);
-            self.current_floor = tr.to_floor.min(nf - 1);
-        }
+        self.nav.cancel(self.floors.len());
     }
 
     pub fn set_mouse_pos(&mut self, pos: Option<(u16, u16)>) {
@@ -549,7 +527,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// The current floor's last frame, `None` before its first.
     pub fn buf(&self) -> Option<&RgbBuffer> {
-        self.floors[self.current_floor].raster.pixels()
+        self.floors[self.nav.current()].raster.pixels()
     }
 
     pub fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
@@ -661,7 +639,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         now: SystemTime,
         nf: usize,
     ) -> Result<()> {
-        let Some((from_floor, to_floor, t, going_down)) = self.transition.as_ref().map(|tr| {
+        let Some((from_floor, to_floor, t, going_down)) = self.nav.transition().map(|tr| {
             (
                 tr.from_floor,
                 tr.to_floor,
@@ -680,7 +658,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &to_scene,
             crate::tui::widgets::footer_context(
                 scene,
-                floor_info_for(to_floor, nf, scene.agents.len()),
+                pixtuoid_scene::floor::footer_floor(to_floor, nf, scene.agents.len()),
                 self.chrome.audio.is_audible(),
                 self.chrome.volume_flash,
                 self.chrome.source_warning.as_deref(),
@@ -781,7 +759,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
 
         let (from_offset, to_offset) =
-            crate::tui::geometry::slide_offsets(t, going_down, f32::from(scene_rect.height));
+            pixtuoid_scene::floor::slide_offsets(t, going_down, f32::from(scene_rect.height));
 
         let overlays = self.chrome.overlays(popup_scale);
         let theme = self.chrome.theme;
@@ -811,7 +789,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// A refused frame steps nothing, but the door's clamp still keeps time, as
     /// [`step_floor`](pixtuoid_scene::floor::step_floor) keeps it for a stepped one.
     fn rest_floor(&mut self, now: SystemTime) {
-        self.floors[self.current_floor]
+        self.floors[self.nav.current()]
             .ctx
             .recompute_door_anim_max_ms(now);
     }
@@ -837,7 +815,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &out.occupied_waypoints,
             |idx| pixtuoid_scene::floor::waypoint_kind_of(out.layout.as_deref(), idx),
             self.chrome.floor_meta(
-                self.current_floor,
+                self.nav.current(),
                 num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS),
             ),
             now,
@@ -911,7 +889,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let send = None;
         let note = self
             .floors
-            .get(self.current_floor)
+            .get(self.nav.current())
             .and_then(|f| f.raster.note());
         self.jank.record(
             begun.elapsed(),
@@ -935,22 +913,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         let nf = self.grow_floors(scene);
 
-        if let Some(ref tr) = self.transition
-            && (tr.from_floor >= nf || tr.to_floor >= nf)
-        {
-            self.transition = None;
+        if self.nav.settle(nf, now) {
             self.cached_layout = None;
-        }
-
-        if let Some(ref tr) = self.transition
-            && tr.is_done(now)
-        {
-            self.current_floor = tr.to_floor;
-            self.transition = None;
-        }
-
-        if self.current_floor >= nf {
-            self.current_floor = nf.saturating_sub(1);
         }
 
         #[cfg(feature = "graphics")]
@@ -967,7 +931,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 .ok()
                 .and_then(crate::graphics::CellSize::of_window);
             let drawn = cutaway.fit_to(scene_area, window).map(|fitted| {
-                if self.transition.is_some() {
+                if self.nav.transition().is_some() {
                     self.render_cutaway_slide(&mut cutaway, fitted, scene, pack, now, nf)
                 } else {
                     self.render_cutaway(&mut cutaway, fitted, scene, pack, now, nf)
@@ -979,22 +943,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             }
         }
 
-        if self.transition.is_some() {
+        if self.nav.transition().is_some() {
             return self.render_transition(scene, pack, now, nf);
         }
 
-        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let floor_scene = project_floor_scene(scene, self.nav.current());
         let Frame {
             world,
             footer,
             overlays,
         } = self
             .chrome
-            .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+            .frame(scene, &floor_scene, pack, now, self.nav.current(), nf);
         let popup_scale = overlays.popup_scale;
         let mut draw_ctx = DrawCtx {
             world,
-            floor: &mut self.floors[self.current_floor],
+            floor: &mut self.floors[self.nav.current()],
             office: self.office.stores(),
             mouse_pos: self.mouse_pos,
             debug_walkable: self.debug_walkable,
@@ -1036,7 +1000,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         use crate::tui::renderer::{
             draw_footer_only_frame, paint_footer, paint_overlays, scene_rect,
         };
-        let Some((from_floor, to_floor, t, going_down)) = self.transition.as_ref().map(|tr| {
+        let Some((from_floor, to_floor, t, going_down)) = self.nav.transition().map(|tr| {
             (
                 tr.from_floor,
                 tr.to_floor,
@@ -1167,14 +1131,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             paint_scene_tooltip, scene_hit, scene_rect,
         };
         let scene_area = fitted.scene;
-        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let floor_scene = project_floor_scene(scene, self.nav.current());
         let Frame {
             world,
             footer,
             overlays,
         } = self
             .chrome
-            .frame(scene, &floor_scene, pack, now, self.current_floor, nf);
+            .frame(scene, &floor_scene, pack, now, self.nav.current(), nf);
         let popup_scale = overlays.popup_scale;
         let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
         let theme = self.chrome.theme;
@@ -1182,7 +1146,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let rendered = (!too_small)
             .then(|| {
                 pixtuoid_scene::look::render(
-                    &mut self.floors[self.current_floor],
+                    &mut self.floors[self.nav.current()],
                     self.office.stores(),
                     Look::Cutaway {
                         scale: fitted.fit.render_scale(),
@@ -1213,8 +1177,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.rest_floor(now);
             return drawn;
         };
-        cutaway.paint(fitted, self.current_floor, pixels, dirty, flash, now);
-        let raster = &self.floors[self.current_floor].raster;
+        cutaway.paint(fitted, self.nav.current(), pixels, dirty, flash, now);
+        let raster = &self.floors[self.nav.current()].raster;
         let hovers = raster.hovers().cloned().unwrap_or_default();
         let star = raster.star();
         let geometry = fitted.geometry();

@@ -27,7 +27,6 @@ use ratatui::layout::{Position, Rect};
 use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::tui::geometry::SceneGeometry;
-use crate::tui::geometry::slide_offsets;
 use crate::tui::jank::FrameSend;
 use crate::tui::renderer::set_half_block;
 
@@ -279,22 +278,14 @@ impl TileCutaway {
             self.pending = None;
             return;
         }
-        let (w, h) = (slide.leaving.width(), slide.leaving.height());
-        let offsets = slide_offsets(slide.t, slide.going_down, f32::from(h));
-        self.image = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
+        pixtuoid_scene::floor::compose_slide(
+            &mut self.image,
+            (slide.leaving, slide.arriving),
+            slide.t,
+            slide.going_down,
+            theme.surface.bg_fallback,
+        );
         self.shown = Some(Shown::Slide);
-        for (buf, dy) in [(slide.leaving, offsets.0), (slide.arriving, offsets.1)] {
-            for y in 0..h {
-                let src = i32::from(y) - dy;
-                if let Ok(src) = u16::try_from(src)
-                    && src < buf.height()
-                {
-                    for x in 0..w.min(buf.width()) {
-                        self.image.put(x, y, buf.get(x, src));
-                    }
-                }
-            }
-        }
         self.stage(&Dirty::All, true, flashes, now, fitted.scene.as_position());
     }
 
