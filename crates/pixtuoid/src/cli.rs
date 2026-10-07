@@ -12,9 +12,9 @@ pub struct Cli {
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
 
-    /// Log verbosity. The TUI always logs warn+ to a file
-    /// (~/.cache/pixtuoid/log, or $PIXTUOID_LOG /
-    /// $XDG_STATE_HOME/pixtuoid/log); debug/trace raise the file's
+    /// Log verbosity. The TUI always logs warn+ to a file per run
+    /// (in ~/.cache/pixtuoid/logs/ or $XDG_STATE_HOME/pixtuoid/logs/, or
+    /// the one file $PIXTUOID_LOG names); debug/trace raise the file's
     /// verbosity. Non-TUI commands log to stderr at this level.
     /// ($RUST_LOG remains the escape hatch for full directive syntax.)
     #[arg(long, global = true, value_enum, default_value = "info")]
