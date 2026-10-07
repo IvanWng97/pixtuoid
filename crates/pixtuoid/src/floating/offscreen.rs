@@ -16,7 +16,7 @@ use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, RenderInputs};
 use pixtuoid_scene::render_scale::PixelFit;
 use pixtuoid_scene::theme::Theme;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 
 /// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
 /// definition of the floating surface pixel format; the office blit (`window.rs`)
@@ -62,18 +62,27 @@ impl OfficeRenderer {
     }
 
     /// Render the floor into the owned buffer in `at`'s look, the office
-    /// `at`'s logical extent (whatever `inputs.size` says), with no footer row
-    /// subtracted. A too-small layout leaves the buffer filled with the theme's
-    /// `bg_fallback`.
-    pub fn render(&mut self, at: WindowGeometry, inputs: RenderInputs<'_>) -> Option<&RgbBuffer> {
+    /// `at`'s logical extent, with no footer row subtracted. A too-small
+    /// layout leaves the buffer filled with the theme's `bg_fallback`.
+    pub fn render(&mut self, at: WindowGeometry, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
+        let WindowFrame {
+            world,
+            theme,
+            place,
+        } = frame;
         let FloorInputs {
             scene, floor, now, ..
-        } = inputs.world;
-        let inputs = RenderInputs {
-            size: at.office,
-            ..inputs
-        };
-        self.session.render(at.look, inputs);
+        } = world;
+        self.session.render(
+            at.look,
+            RenderInputs {
+                world,
+                theme,
+                size: at.office,
+                place,
+                debug_walkable: false,
+            },
+        );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio
             .frame(self.session.audio_frame(scene, floor, now));
@@ -87,10 +96,10 @@ impl OfficeRenderer {
     pub fn render_live(
         &mut self,
         at: WindowGeometry,
-        inputs: RenderInputs<'_>,
+        frame: WindowFrame<'_>,
         window: (u32, u32),
     ) -> Option<&RgbBuffer> {
-        self.render(at, inputs);
+        self.render(at, frame);
         let flash = self.session.flash();
         if self.flash.holds(flash, window) {
             return None;
@@ -132,6 +141,15 @@ impl OfficeRenderer {
     }
 }
 
+/// One floor's frame for the window: a [`RenderInputs`] whose office extent
+/// the window's [`WindowGeometry`] owns.
+#[derive(Debug, Clone, Copy)]
+pub struct WindowFrame<'a> {
+    pub world: FloorInputs<'a>,
+    pub theme: &'static pixtuoid_scene::theme::Theme,
+    pub place: pixtuoid_scene::look::Place,
+}
+
 /// The window's natural real pixels per logical unit: what keeps the office
 /// near `OFFICE_TARGET_H` units tall, so its art stays chunky and legible.
 /// Min 1.
@@ -160,7 +178,7 @@ pub struct WindowGeometry {
 ///
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
-/// error instead of a silent HiDPI over-seed (#803).
+/// error instead of a silent HiDPI mis-seed (#803).
 pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeometry {
     let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
     let fit = PixelFit::at_least_density(
@@ -178,6 +196,16 @@ pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeome
         office: fit.logical(),
         upscale: fit.upscale(),
     }
+}
+
+/// The smallest window, in logical px, whose office lays out:
+/// [`min_layout_size`](pixtuoid_scene::layout::min_layout_size) at the pack's
+/// `density`, which [`window_geometry`] never draws below, on a display that
+/// gives a logical px one physical px.
+pub(crate) fn min_window(density: Density) -> LogicalSize<u32> {
+    let min = pixtuoid_scene::layout::min_layout_size();
+    let px = |units: u16| u32::from(units) * u32::from(density.get());
+    LogicalSize::new(px(min.w), px(min.h))
 }
 
 /// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h`. THE one
@@ -347,8 +375,6 @@ mod tests {
     use super::*;
     use pixtuoid_scene::floor::{FloorMeta, PetInputs};
 
-    /// The window's geometry for an office `size` units big, at the test
-    /// pack's densest art and no upscale.
     /// The bundled pack's densest art, which the window draws at.
     fn density() -> Density {
         pixtuoid_scene::pack::load_bundled_pack()
@@ -356,6 +382,8 @@ mod tests {
             .max_density_variant()
     }
 
+    /// The window's geometry for an office `size` units big, at the test
+    /// pack's densest art and no upscale.
     fn cutaway(size: Size) -> WindowGeometry {
         let density = density();
         WindowGeometry {
@@ -370,7 +398,6 @@ mod tests {
 
     use pixtuoid_scene::layout::Size;
     use std::time::Duration;
-    use winit::dpi::LogicalSize;
 
     #[test]
     fn fill_upscaled_repeats_the_last_office_pixel_into_the_remainder_edge() {
@@ -432,7 +459,7 @@ mod tests {
         let buf = renderer
             .render(
                 cutaway(Size { w: 160, h: 96 }),
-                RenderInputs {
+                WindowFrame {
                     world: FloorInputs {
                         scene: &scene,
                         pack: &pack,
@@ -441,9 +468,7 @@ mod tests {
                         pets: PetInputs::default(),
                     },
                     theme,
-                    size: Size { w: 160, h: 96 },
                     place: pixtuoid_scene::look::Place::default(),
-                    debug_walkable: false,
                 },
             )
             .expect("a frame");
@@ -504,7 +529,7 @@ mod tests {
             self.screen.at(now);
             let frame = self.renderer.render_live(
                 cutaway(Size { w: 160, h: 96 }),
-                RenderInputs {
+                WindowFrame {
                     world: FloorInputs {
                         scene: &self.scene,
                         pack: crate::test_flash::pack(),
@@ -513,9 +538,7 @@ mod tests {
                         pets: PetInputs::default(),
                     },
                     theme,
-                    size: Size { w: 160, h: 96 },
                     place: pixtuoid_scene::look::Place::default(),
-                    debug_walkable: false,
                 },
                 self.px,
             );
@@ -657,6 +680,16 @@ mod tests {
         // Never 0 — redraw divides by it.
         assert_eq!(office_scale(90), 1);
         assert_eq!(office_scale(0), 1);
+    }
+
+    #[test]
+    fn the_smallest_window_seats_every_floor_at_any_scale_factor() {
+        let min = min_window(density());
+        for factor in 1..=3 {
+            let size = PhysicalSize::new(min.width * factor, min.height * factor);
+            let caps = boot_capacities_for_window(size, density());
+            assert!(caps.iter().all(|&c| c > 0), "{factor}x: {caps:?}");
+        }
     }
 
     #[test]
@@ -919,7 +952,7 @@ mod tests {
         renderer.set_audio(handle);
         renderer.render(
             cutaway(Size { w: 160, h: 96 }),
-            RenderInputs {
+            WindowFrame {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -928,9 +961,7 @@ mod tests {
                     pets: PetInputs::default(),
                 },
                 theme,
-                size: Size { w: 160, h: 96 },
                 place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
             },
         );
         let frames = crate::audio::drain_frames(&rx);
@@ -1012,7 +1043,7 @@ mod tests {
             // (the vending/printer height gates in layout::compute).
             renderer.render(
                 cutaway(Size { w: 192, h: 160 }),
-                RenderInputs {
+                WindowFrame {
                     world: FloorInputs {
                         scene: &scene,
                         pack: &pack,
@@ -1021,9 +1052,7 @@ mod tests {
                         pets: PetInputs::default(),
                     },
                     theme,
-                    size: Size { w: 192, h: 160 },
                     place: pixtuoid_scene::look::Place::default(),
-                    debug_walkable: false,
                 },
             );
             heard.extend(
@@ -1062,7 +1091,7 @@ mod tests {
         let scene = scene_with(agents.clone(), cap);
         renderer.render(
             cutaway(Size { w: 160, h: 96 }),
-            RenderInputs {
+            WindowFrame {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -1071,9 +1100,7 @@ mod tests {
                     pets: PetInputs::default(),
                 },
                 theme,
-                size: Size { w: 160, h: 96 },
                 place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
             },
         );
         crate::audio::drain_frames(&rx); // discard the priming frames
@@ -1083,7 +1110,7 @@ mod tests {
         now += std::time::Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
         renderer.render(
             cutaway(Size { w: 160, h: 96 }),
-            RenderInputs {
+            WindowFrame {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -1092,9 +1119,7 @@ mod tests {
                     pets: PetInputs::default(),
                 },
                 theme,
-                size: Size { w: 160, h: 96 },
                 place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
             },
         );
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1111,7 +1136,7 @@ mod tests {
         now += std::time::Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
         renderer.render(
             cutaway(Size { w: 160, h: 96 }),
-            RenderInputs {
+            WindowFrame {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -1120,9 +1145,7 @@ mod tests {
                     pets: PetInputs::default(),
                 },
                 theme,
-                size: Size { w: 160, h: 96 },
                 place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
             },
         );
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)

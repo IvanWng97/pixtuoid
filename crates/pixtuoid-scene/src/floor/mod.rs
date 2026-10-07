@@ -612,12 +612,6 @@ impl FloorSession {
         self.floor.raster.classic_badges()
     }
 
-    /// The board's lines and the floor indicator of the LAST frame the classic
-    /// rendered. Empty before the first `render`, and after a cutaway frame.
-    pub fn signs(&self) -> &[crate::display::TextRun] {
-        self.floor.raster.classic_signs()
-    }
-
     /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.
     pub fn board(
         &self,

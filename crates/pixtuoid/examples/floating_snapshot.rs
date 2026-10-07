@@ -14,11 +14,10 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{OfficeRenderer, XrgbSurface, window_geometry};
+use pixtuoid::floating::offscreen::{OfficeRenderer, WindowFrame, XrgbSurface, window_geometry};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
-use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::theme::theme_by_name;
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
@@ -157,7 +156,7 @@ fn main() -> Result<()> {
     let buf = renderer
         .render(
             at,
-            RenderInputs {
+            WindowFrame {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -166,12 +165,10 @@ fn main() -> Result<()> {
                     pets: PetInputs::default(),
                 },
                 theme,
-                size: at.office,
                 place: pixtuoid_scene::look::Place {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
-                debug_walkable: false,
             },
         )
         .expect("a frame");
