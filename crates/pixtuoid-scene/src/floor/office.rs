@@ -144,13 +144,6 @@ impl FloorNav {
         true
     }
 
-    /// Begin `transition` whatever it is, as no navigation could: a seam for
-    /// painters' tests of slides navigation refuses (a floor to itself).
-    #[doc(hidden)]
-    pub fn begin_unchecked(&mut self, transition: FloorTransition) {
-        self.transition = Some(transition);
-    }
-
     /// The floor above, of `n_floors`, while no slide is under way.
     pub fn up(&self, n_floors: usize) -> Option<usize> {
         (self.transition.is_none() && self.current + 1 < n_floors).then_some(self.current + 1)
