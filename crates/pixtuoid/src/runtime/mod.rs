@@ -47,7 +47,7 @@ pub struct RunConfig {
     pub connected: HashSet<String>,
     /// Where the warn-floor log lives, which the Sources panel reads for each
     /// source's drift history. `None` = no log.
-    pub log: Option<crate::doctor::LogLocation>,
+    pub log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
     pub drift: crate::doctor::DriftSeen,
     /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the
@@ -386,11 +386,9 @@ mod tests {
         assert_eq!(fit.scale().get(), 8);
         let cutaway = Plan::Cutaway {
             fit,
-            protocol: ImageProtocol::Kitty,
+            route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
-            tmux: false,
             forced: false,
-            medium: crate::graphics::Medium::Direct,
         };
         let seed = resolve_boot_caps(None, Some(cutaway), || term(cols, rows));
         let painted = fit.logical();

@@ -132,7 +132,7 @@ fn run() -> Result<()> {
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor { graphics } => {
-            let report = doctor::run(&logging::log_location(), graphics)?;
+            let report = doctor::run(&pixtuoid::run_log::LogLocation::from_env(), graphics)?;
             write!(pixtuoid::cli_stdout(), "{report}")?;
             Ok(())
         }
@@ -235,7 +235,7 @@ fn build_run_config(
         theme,
         pets,
         connected,
-        log: Some(logging::log_location()),
+        log: Some(pixtuoid::run_log::LogLocation::from_env()),
         drift,
         first_run,
         audio: config::resolve_audio(&cfg),

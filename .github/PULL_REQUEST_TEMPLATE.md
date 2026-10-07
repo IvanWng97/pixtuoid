@@ -26,8 +26,7 @@ Delete sections that don't apply. Keep it short — the diff speaks for itself.
 ## How I tested it
 
 <!--
-- just test
-- just preflight full (lint → clippy → hack → test)
+- CI's light tier (runs on push); the local-review rows that apply
 - Live: ./target/release/pixtuoid run --headless --projects-root ~/.claude/projects
 -->
 

@@ -35,7 +35,7 @@ pub(crate) fn install_crash_hook() {
         // Owner-only: a backtrace carries the same project paths and agent ids
         // the runtime log does.
         if let Ok(mut f) =
-            crate::logging::open_private_append(&crash_path, std::fs::OpenOptions::new())
+            pixtuoid::run_log::open_private_append(&crash_path, std::fs::OpenOptions::new())
         {
             use std::io::Write;
             let _ = f.write_all(report.as_bytes());

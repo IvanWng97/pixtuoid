@@ -688,7 +688,7 @@ pub(crate) struct TuiSession {
     /// the reducer task's reconciler observes (gate + graceful evict).
     pub connected: crate::runtime::ConnectedSources,
     /// Where the warn-floor log lives, for the Sources panel's drift history.
-    pub log: Option<crate::doctor::LogLocation>,
+    pub log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
     pub drift: crate::doctor::DriftSeen,
     /// The persisted mute/volume, handed whole to `AudioController::new`.
@@ -1069,24 +1069,21 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
-            fit,
-            protocol,
-            cell,
-            tmux,
-            medium,
-            ..
+            fit, route, cell, ..
         } => {
             renderer.painted_by(crate::jank::Painter {
-                look: protocol.name(),
+                look: route.protocol().name(),
                 scale: fit.scale().get(),
-                tmux,
+                tmux: route.tmux(),
                 terminal,
                 sync: out.synchronized(),
             });
-            renderer.set_cutaway(
-                cutaway::TileCutaway::new(fit, cell, protocol, tmux, Box::new(out.clone()))
-                    .through(medium),
-            );
+            renderer.set_cutaway(cutaway::TileCutaway::new(
+                fit,
+                cell,
+                route,
+                Box::new(out.clone()),
+            ));
         }
         _ => {
             renderer.painted_by(crate::jank::Painter {

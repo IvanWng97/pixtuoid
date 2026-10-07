@@ -27,6 +27,7 @@ pub(crate) mod jank;
 #[cfg(feature = "graphics")]
 #[doc(hidden)]
 pub mod pacing;
+pub mod run_log;
 pub mod runtime;
 pub mod setup;
 pub mod sources;
