@@ -5,11 +5,8 @@ pub(crate) mod cursor;
 pub(crate) mod grok;
 pub(crate) mod hermes;
 mod hook_cmd;
-pub(crate) mod kimi;
-// `io` holds the config-write authority (invariant #4), which must never be
-// cross-crate reachable — only its env filters and owner-only file-mode
-// helpers (below) are re-exported.
 pub(crate) mod io;
+pub(crate) mod kimi;
 pub(crate) use io::{nonempty_abs_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod dsh;
 pub(crate) mod merge;
