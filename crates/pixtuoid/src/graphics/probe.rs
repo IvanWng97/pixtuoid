@@ -13,7 +13,9 @@ use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv, env_set, env_text
 /// What the environment says about the terminal beyond [`TermEnv`], read once
 /// per probe.
 ///
-/// Its protocol rules mirror ratatui-image 11.1.0's picker, cited per rule.
+/// Its protocol rules mirror ratatui-image 11.1.0's picker, cited per rule,
+/// except where iTerm2 is told apart from what merely speaks its images
+/// ([`EnvHints::is_iterm2`]).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct EnvHints {
     env: TermEnv,
@@ -66,11 +68,11 @@ impl EnvHints {
 
     /// iTerm2 inline images, which upstream's query does not ask about
     /// (`cap_parser.rs:132-133`), guessed from the terminal the environment
-    /// names: inside tmux, the outer terminal's markers (`picker.rs:357-368`);
-    /// anywhere, `TERM_PROGRAM`/`LC_TERMINAL` (`picker.rs:372-390`).
+    /// names: iTerm2 itself ([`Self::is_iterm2`]), WezTerm's markers inside
+    /// tmux (`picker.rs:357-368`), and the other terminals that speak them
+    /// (`picker.rs:372-390`).
     fn iterm2(&self) -> Option<ImageProtocol> {
-        const ITERM2_TERM_PROGRAMS: [&str; 9] = [
-            "iTerm",
+        const OTHER_TERM_PROGRAMS: [&str; 8] = [
             "WezTerm",
             "mintty",
             "vscode",
@@ -80,26 +82,39 @@ impl EnvHints {
             "Bobcat",
             "WarpTerminal",
         ];
-        let outer = self.env.tmux() && (self.iterm_session || self.wezterm);
+        let outer = self.env.tmux() && self.wezterm;
         let named = self
             .env
             .term_program
             .as_deref()
-            .is_some_and(|p| ITERM2_TERM_PROGRAMS.iter().any(|t| p.contains(t)))
-            || self
-                .lc_terminal
-                .as_deref()
-                .is_some_and(|t| t.contains("iTerm"));
-        (outer || named).then_some(ImageProtocol::Iterm2)
+            .is_some_and(|p| OTHER_TERM_PROGRAMS.iter().any(|t| p.contains(t)));
+        (self.is_iterm2() || outer || named).then_some(ImageProtocol::Iterm2)
+    }
+
+    /// iTerm2 itself, not a terminal that speaks its images: its
+    /// `TERM_PROGRAM`, its session inside tmux, or its `LC_TERMINAL` where
+    /// `TERM_PROGRAM` is absent (ssh) or tmux's own. A terminal started from
+    /// iTerm2's shell names itself and inherits that `LC_TERMINAL`.
+    fn is_iterm2(&self) -> bool {
+        let named = |v: &Option<String>| v.as_deref().is_some_and(|v| v.contains("iTerm"));
+        named(&self.env.term_program)
+            || ((self.env.term_program.is_none() || self.env.tmux()) && named(&self.lc_terminal))
+            || (self.env.tmux() && self.iterm_session)
     }
 }
 
-/// What the terminal's answer and the environment together say: kitty over
-/// SIXEL when it answers both (ratatui-image 11.1.0 `picker.rs:544-554`), then
-/// the iTerm2 guess (`picker.rs:136-140`); the cell from its answer, else from
-/// the kernel's window size.
+/// What the terminal's answer and the environment together say: SIXEL for
+/// iTerm2 when it lists it, else kitty over SIXEL when it answers both
+/// (ratatui-image 11.1.0 `picker.rs:544-554`), then the iTerm2 guess
+/// (`picker.rs:136-140`); the cell from its answer, else from the kernel's
+/// window size.
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
-    let queried = if responses.contains(&Response::Kitty) {
+    // iTerm2 answers kitty's query, but its kitty, "except animation"
+    // (iterm2.com/downloads.html changelog), is far too slow for 16x frames,
+    // and its inline images nearly so; its SIXEL keeps up.
+    let queried = if hints.is_iterm2() && responses.contains(&Response::Sixel) {
+        Some(ImageProtocol::Sixel)
+    } else if responses.contains(&Response::Kitty) {
         Some(ImageProtocol::Kitty)
     } else if responses.contains(&Response::Sixel) {
         Some(ImageProtocol::Sixel)
@@ -300,6 +315,90 @@ mod tests {
         };
         assert_eq!(lc.iterm2(), Some(ImageProtocol::Iterm2));
         assert_eq!(hints("xterm-ghostty", "ghostty").iterm2(), None);
+        let leaked = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-256color", "Apple_Terminal")
+        };
+        assert_eq!(leaked.iterm2(), None, "started from iTerm2's shell");
+    }
+
+    /// iTerm2 answers kitty's query and lists SIXEL in its DA1 (3.7.3, live:
+    /// `ESC [ ? 64;1;2;4;6;17;18;21;22;52 c` and `ESC _ G i=31;OK`), and only
+    /// its SIXEL keeps up with a 16x frame: it takes SIXEL. A terminal that
+    /// lists no SIXEL keeps its kitty, whatever the environment names.
+    #[test]
+    fn iterm2_takes_its_sixel_over_its_kitty() {
+        let both = [Response::Kitty, Response::Sixel];
+        let iterm2 = hints("xterm-256color", "iTerm.app");
+        assert_eq!(
+            detected(&both, &iterm2, None).protocol,
+            Some(ImageProtocol::Sixel)
+        );
+        let in_tmux = client(EnvHints {
+            iterm_session: true,
+            ..hints("tmux-256color", "tmux")
+        });
+        assert_eq!(
+            detected(&both, &in_tmux, None).protocol,
+            Some(ImageProtocol::Sixel)
+        );
+        assert_eq!(
+            detected(&[Response::Kitty], &iterm2, None).protocol,
+            Some(ImageProtocol::Kitty),
+            "no SIXEL listed"
+        );
+        let leaked = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-ghostty", "ghostty")
+        };
+        assert_eq!(
+            detected(&[Response::Kitty], &leaked, None).protocol,
+            Some(ImageProtocol::Kitty),
+            "a terminal started from iTerm2's shell"
+        );
+        let leaked_both = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-256color", "WezTerm")
+        };
+        assert_eq!(
+            detected(&both, &leaked_both, None).protocol,
+            Some(ImageProtocol::Kitty),
+            "a terminal started from iTerm2's shell that lists SIXEL too"
+        );
+        let over_ssh = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-256color", "")
+        };
+        assert_eq!(
+            detected(&both, &over_ssh, None).protocol,
+            Some(ImageProtocol::Sixel),
+            "over ssh only LC_TERMINAL arrives"
+        );
+        let tmux_over_ssh = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..client(hints("tmux-256color", "tmux"))
+        };
+        assert_eq!(
+            detected(&both, &tmux_over_ssh, None).protocol,
+            Some(ImageProtocol::Sixel),
+            "tmux names itself, not the terminal"
+        );
+        // A pane's environment is the tmux server's: a server iTerm2 started
+        // still reads as iTerm2 when another terminal attaches, which then
+        // paints SIXEL if it lists it. Slower there, never frozen.
+        let started_in_iterm2 = EnvHints {
+            iterm_session: true,
+            ..tmux_over_ssh.clone()
+        };
+        assert_eq!(
+            detected(&both, &started_in_iterm2, None).protocol,
+            Some(ImageProtocol::Sixel),
+            "attached from another terminal: the server's iTerm2 environment"
+        );
+        assert_eq!(
+            detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
+            Some(ImageProtocol::Kitty)
+        );
     }
 
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do
