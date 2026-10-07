@@ -76,9 +76,9 @@ A pack can also redraw an animation on a denser grid, registered as
 `<name>@<N>x` (`desk@4x` is `desk` drawn on a 4x grid). Each frame is exactly
 `N` times the size of the matching base frame, and the frame counts match;
 `validate-pack` reports a variant that breaks either rule, and it is never
-drawn. The classic renderers — the half-block terminal office, the
-`floating` window and the site's live office — draw the base art. Variants
-are for the pixel-graphics cutaway, which `run --graphics` paints over kitty's
+drawn. The classic renderers — the half-block terminal office and the site's
+live office — draw the base art. Variants are for the pixel-graphics cutaway,
+which the `floating` window paints, and `run --graphics` over kitty's
 graphics protocol, SIXEL or iTerm2's inline images: it takes the
 densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
@@ -153,7 +153,7 @@ The TUI owns your terminal (alternate screen), so runtime diagnostics go to a
 | Default path | `~/.cache/pixtuoid/logs/` (or `$XDG_STATE_HOME/pixtuoid/logs/` if set to an absolute path): one file per run, named for its start |
 | Custom path | set `$PIXTUOID_LOG=/path/to/file` to log every run to that one file |
 | Level | `warn` and above by default; `--log-level debug` or `trace` (or `$RUST_LOG`) raises it |
-| Retention | a run's file is removed a week after its last write; a `$PIXTUOID_LOG` file instead rotates to `<name>.old` past 5 MB at startup |
+| Retention | a run's file is removed a week after its last write, unless its run is still open; the single `log`/`log.old` an older pixtuoid kept moves in and ages out the same way; `doctor` and the Sources panel read the newest 10 MB across runs; a `$PIXTUOID_LOG` file instead rotates to `<name>.old` past 5 MB at startup |
 
 Warnings about a misconfigured `config.toml` (unknown theme, bad `[[pets]]`
 kind, malformed TOML) are also printed to stderr **before** the office takes

@@ -22,23 +22,28 @@ impl<K> Default for CachedLayer<K> {
     }
 }
 
-impl<K: PartialEq> CachedLayer<K> {
+impl<K> CachedLayer<K> {
     /// Stamp the layer for `key` into `buf` wherever `buf`'s clip lets a write
     /// through, drawing it first with `draw` over a buffer `buf`'s size on any
     /// change of key or size. `draw` is handed the key, so what it reads
-    /// beside the key is a capture the caller names.
-    pub(crate) fn stamp(
+    /// beside the key is a capture the caller names. `key` may borrow what
+    /// `K` owns: it becomes a `K` only on a miss, so a hit allocates nothing.
+    pub(crate) fn stamp<Q>(
         &mut self,
-        key: K,
+        key: Q,
         draw: impl FnOnce(&K, &mut RgbBuffer),
         buf: &mut RgbBuffer,
-    ) {
+    ) where
+        K: PartialEq<Q>,
+        Q: Into<K>,
+    {
         let size = (buf.width(), buf.height());
-        if self.key.as_ref() != Some(&key) || (self.layer.width(), self.layer.height()) != size {
+        let hit = self.key.as_ref().is_some_and(|held| *held == key);
+        if !hit || (self.layer.width(), self.layer.height()) != size {
             self.layer
                 .resize_fill(size.0, size.1, Rgb { r: 0, g: 0, b: 0 });
-            draw(&key, &mut self.layer);
-            self.key = Some(key);
+            let key = self.key.insert(key.into());
+            draw(key, &mut self.layer);
         }
         let width = usize::from(size.0);
         let layer = self.layer.as_slice();
