@@ -363,6 +363,32 @@ pub type pixtuoid_core::source::decoder::IdDeriver = fn(&std::path::Path) -> all
 pub type pixtuoid_core::source::decoder::LineDecoder = fn(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub type pixtuoid_core::source::decoder::PathFilter = fn(&std::path::Path) -> bool
 pub mod pixtuoid_core::source::drift
+pub enum pixtuoid_core::source::drift::DriftKind
+pub pixtuoid_core::source::drift::DriftKind::MissingField
+pub pixtuoid_core::source::drift::DriftKind::ShapeDrift
+pub pixtuoid_core::source::drift::DriftKind::UnknownDispatch
+pub pixtuoid_core::source::drift::DriftKind::UnknownEvent
+impl pixtuoid_core::source::drift::DriftKind
+pub const fn pixtuoid_core::source::drift::DriftKind::name(self) -> &'static str
+pub fn pixtuoid_core::source::drift::DriftKind::of(&str) -> core::option::Option<Self>
+impl core::clone::Clone for pixtuoid_core::source::drift::DriftKind
+pub fn pixtuoid_core::source::drift::DriftKind::clone(&self) -> pixtuoid_core::source::drift::DriftKind
+impl core::cmp::Eq for pixtuoid_core::source::drift::DriftKind
+impl core::cmp::PartialEq for pixtuoid_core::source::drift::DriftKind
+pub fn pixtuoid_core::source::drift::DriftKind::eq(&self, &pixtuoid_core::source::drift::DriftKind) -> bool
+impl core::fmt::Debug for pixtuoid_core::source::drift::DriftKind
+pub fn pixtuoid_core::source::drift::DriftKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::source::drift::DriftKind
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::drift::DriftKind
+impl core::marker::Freeze for pixtuoid_core::source::drift::DriftKind
+impl core::marker::Send for pixtuoid_core::source::drift::DriftKind
+impl core::marker::Sync for pixtuoid_core::source::drift::DriftKind
+impl core::marker::Unpin for pixtuoid_core::source::drift::DriftKind
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::drift::DriftKind
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::drift::DriftKind
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::drift::DriftKind
+pub const pixtuoid_core::source::drift::KIND_FIELD: &str
+pub const pixtuoid_core::source::drift::SOURCE_FIELD: &str
 pub const pixtuoid_core::source::drift::TARGET: &str
 pub fn pixtuoid_core::source::drift::missing_field(&str, &str, &str)
 pub fn pixtuoid_core::source::drift::shape_drift(&str, &str)

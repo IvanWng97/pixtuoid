@@ -28,12 +28,56 @@
 /// The `tracing` target every drift breadcrumb shares; consumers key on it.
 pub const TARGET: &str = "pixtuoid::drift";
 
+/// The field a breadcrumb names its source in: a `tracing` field name is an
+/// identifier, so the emitters spell it, and this is what readers match
+/// (`breadcrumbs_name_their_source_and_kind_in_the_named_fields`).
+pub const SOURCE_FIELD: &str = "source";
+/// The field a breadcrumb names its [`DriftKind`] in.
+pub const KIND_FIELD: &str = "kind";
+
+/// What a breadcrumb reports, as its [`KIND_FIELD`] names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftKind {
+    /// [`unknown_event`]'s.
+    UnknownEvent,
+    /// [`missing_field`]'s.
+    MissingField,
+    /// [`unknown_dispatch`]'s.
+    UnknownDispatch,
+    /// [`shape_drift`]'s.
+    ShapeDrift,
+}
+
+impl DriftKind {
+    const ALL: [Self; 4] = [
+        Self::UnknownEvent,
+        Self::MissingField,
+        Self::UnknownDispatch,
+        Self::ShapeDrift,
+    ];
+
+    /// Its name in the log.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::UnknownEvent => "unknown_event",
+            Self::MissingField => "missing_field",
+            Self::UnknownDispatch => "unknown_dispatch",
+            Self::ShapeDrift => "shape_drift",
+        }
+    }
+
+    /// The kind a log names `name`.
+    pub fn of(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
 use crate::source::decoder::display_safe;
 
 /// A hook/transcript event we don't handle and that isn't a registered custom
 /// event — for a renamed event WE depend on, this is the signal.
 pub fn unknown_event(source: &str, name: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "unknown_event", name = %display_safe(name));
+    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::UnknownEvent.name(), name = %display_safe(name));
 }
 
 /// A REQUIRED field of an event we DO handle is absent — the decode degrades to
@@ -41,25 +85,47 @@ pub fn unknown_event(source: &str, name: &str) {
 /// committed to decoding: on a type-discriminator read a missing value just
 /// means "a line we ignore", and breadcrumbing those would flood.
 pub fn missing_field(source: &str, event: &str, field: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "missing_field", event = %display_safe(event), field = %display_safe(field));
+    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::MissingField.name(), event = %display_safe(event), field = %display_safe(field));
 }
 
 /// The subagent-dispatch tool ran under a name we don't recognise — semantic
 /// `subagent_type` detection still handled it, but upstream renamed the tool.
 pub fn unknown_dispatch(source: &str, tool: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "unknown_dispatch", tool = %display_safe(tool));
+    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::UnknownDispatch.name(), tool = %display_safe(tool));
 }
 
 /// A consumed upstream data SHAPE drifted — a registry/transcript field that
 /// still parses but lost a key we read. `detail` carries the specifics.
 pub fn shape_drift(source: &str, detail: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = "shape_drift", detail = %display_safe(detail));
+    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::ShapeDrift.name(), detail = %display_safe(detail));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_capture::capture_logs as capture;
+
+    /// Every emitter names its source and kind in the fields readers match,
+    /// and every kind reads back as itself.
+    #[test]
+    fn breadcrumbs_name_their_source_and_kind_in_the_named_fields() {
+        let out = capture(|| {
+            unknown_event("codex", "e");
+            missing_field("codex", "e", "f");
+            unknown_dispatch("codex", "t");
+            shape_drift("codex", "d");
+        });
+        for kind in DriftKind::ALL {
+            assert!(
+                out.contains(&format!(
+                    "{SOURCE_FIELD}=codex {KIND_FIELD}=\"{}\"",
+                    kind.name()
+                )),
+                "{kind:?}:\n{out}"
+            );
+            assert_eq!(DriftKind::of(kind.name()), Some(kind));
+        }
+    }
 
     #[test]
     fn breadcrumb_values_are_display_safe_and_capped() {
