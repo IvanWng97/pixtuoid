@@ -302,12 +302,11 @@ sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
-or introduced but non-blocking, no bigger than the PR, and found past round 2
-outside the last fold per the [convergence contract](#convergence-contract),
-and not FIXED in place — in
-place fits a small defect inside code this change already touches, adding
-no local row — so it is fixed in #N; a defect in another session's tree cites
-that session's PR). A
+or introduced, non-blocking, no bigger than the PR and found after round 2
+per the [convergence contract](#convergence-contract), and not FIXED in place
+— in place fits a small defect inside code this change already touches,
+adding no local row — so it is fixed in #N; a defect in another session's
+tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
 `FOLLOW-UP → #N: …`, where #N is a PR other than this one: open, merged, or
@@ -324,20 +323,19 @@ before re-litigating.
   change that both adds and deletes at scale is two PRs.
 - **Deletion census** — before deleting N members of a class, the full list
   and its criterion land in the first commit or the PR body (#943).
-- **Rounds narrow; fixes are never put off.** Rounds 1 and 2 each fold every
-  accepted finding, whatever code it names, into ONE commit: a defect this
-  change introduced is FIXED in it, since a clean-up left for later rarely
-  lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
-  From round 3 a fold takes only findings on the lines the previous fold
-  changed, plus one [the merge gate](#the-merge-gate) confirms blocks the
-  merge; a non-blocking one elsewhere was missed by two whole-PR reviews and
-  is a FOLLOW-UP. The first round with nothing to fold ends the loop. A
-  finding on lines two folds already changed, or a blocking issue confirmed
-  in a fold, STOPS it: revert the fold and re-land smaller, or re-scope.
+- **Fixes are never put off; severity ends the loop.** Rounds 1 and 2 each
+  fold every accepted finding, whatever code it names, into ONE commit: a
+  defect this change introduced is FIXED in it, since a clean-up left for
+  later rarely lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
+  After round 2 a fold takes only what [the merge gate](#the-merge-gate)
+  confirms blocks the merge, and a non-blocking finding is a FOLLOW-UP: a
+  review moves on once only non-blocking suggestions remain
+  ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
+  issue confirmed in a fold STOPS the loop: revert the fold and re-land
+  smaller, or re-scope.
 - **A fold's behavior change** ships a test that fails without it; the rest
   of a fold is a revert, a deletion, a comment or doc change, or a refactor
-  whose commit names the existing tests that run every line it touches.
-  Anything else reverts the fold.
+  the existing tests cover. Anything else reverts the fold.
 - **A fix round adds no new gate** — a wanted check is its own PR, asserting
   facts in its own layer (a Rust fact from Rust, never a Python regex over
   `.rs`).
