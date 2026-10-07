@@ -1911,6 +1911,40 @@ fn floor_nav_slides_lands_and_clamps() {
     assert_eq!(nav.current(), 0, "the floor showing stays in the building");
 }
 
+/// A lift goes to the floor showing and nothing during a slide; its carry and
+/// drop go to the floor it lifted on, whatever shows since, and nothing after.
+#[test]
+fn a_grip_stays_on_the_floor_it_lifted_on() {
+    use crate::interact::{Figure, Gesture, GripFloor};
+    use crate::layout::Point;
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let at = Point { x: 4, y: 4 };
+    let lift = Gesture::Lift {
+        figure: Figure::Pet(crate::pet::PetKind::Cat),
+        at,
+    };
+    let mut nav = FloorNav::default();
+    let mut gripped = GripFloor::default();
+    assert_eq!(gripped.of(&lift, &nav), Some(0));
+    assert!(nav.navigate(1, t0));
+    assert_eq!(gripped.of(&Gesture::Carry(at), &nav), Some(0));
+    assert!(!nav.settle(2, t0 + Duration::from_secs(2)));
+    assert_eq!(nav.current(), 1);
+    assert_eq!(gripped.of(&Gesture::Drop(at), &nav), Some(0));
+    assert_eq!(
+        gripped.of(&Gesture::Carry(at), &nav),
+        None,
+        "a drop ends the grip"
+    );
+    assert!(nav.navigate(0, t0));
+    assert_eq!(
+        gripped.of(&lift, &nav),
+        None,
+        "a slide shows no floor to lift on"
+    );
+    assert_eq!(gripped.of(&Gesture::Drop(at), &nav), None);
+}
+
 /// An office shows the floor its navigation holds, of the floors its scene
 /// fills, with that floor's breadcrumb; a slide composes both floors, hits
 /// nothing, and lands on its destination.

@@ -28,7 +28,8 @@ use crate::walk::WalkState;
 
 mod office;
 #[doc(hidden)]
-pub use office::{FloorNav, FloorView, OfficeSession, compose_slide, footer_floor, slide_offsets};
+use office::FloorView;
+pub use office::{FloorNav, OfficeSession, compose_slide, footer_floor, slide_offsets};
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 

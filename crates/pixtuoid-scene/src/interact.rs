@@ -86,12 +86,12 @@ pub enum Gesture {
 pub struct GripFloor(Option<usize>);
 
 impl GripFloor {
-    /// The floor `gesture` goes to, with `showing` the floor on screen, or
-    /// `None` during a slide; `None` for a click, or with nothing lifted.
-    pub fn of(&mut self, gesture: &Gesture, showing: Option<usize>) -> Option<usize> {
+    /// The floor `gesture` goes to as `nav` shows them; `None` for a click,
+    /// or with nothing lifted.
+    pub fn of(&mut self, gesture: &Gesture, nav: &crate::floor::FloorNav) -> Option<usize> {
         match gesture {
             Gesture::Lift { .. } => {
-                self.0 = showing;
+                self.0 = nav.showing();
                 self.0
             }
             Gesture::Carry(_) => self.0,

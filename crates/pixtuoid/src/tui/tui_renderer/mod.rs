@@ -542,10 +542,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     fn grip(&mut self, gesture: &pixtuoid_scene::interact::Gesture) {
-        let showing = self.nav.transition().is_none().then(|| self.nav.current());
         if let Some(floor) = self
             .gripped
-            .of(gesture, showing)
+            .of(gesture, &self.nav)
             .and_then(|f| self.floors.get_mut(f))
         {
             floor.grip(gesture);
