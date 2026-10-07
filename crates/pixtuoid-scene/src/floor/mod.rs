@@ -569,7 +569,7 @@ impl PerOffice {
     }
 }
 
-/// The OWNED single-floor painter session: one [`FloorView`] + one
+/// The OWNED single-floor painter session: one floor's view + one
 /// [`PerOffice`] plus the dual `evict_missing` protocol behind one type, so a
 /// painter can't hand-roll (and silently skip) the eviction — a skipped
 /// eviction leaks per-agent state or teleports a recurring agent. An office
