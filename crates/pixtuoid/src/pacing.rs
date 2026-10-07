@@ -222,8 +222,12 @@ pub fn renderer(
         let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
         let fit = Fit::new(cell, area, pack.max_density_variant())
             .context("the cell is too small for the cutaway")?;
-        let mut cutaway =
-            crate::tui::cutaway::TileCutaway::new(fit, cell, image, false, Box::new(out.clone()));
+        let mut cutaway = crate::tui::cutaway::TileCutaway::new(
+            fit,
+            cell,
+            crate::graphics::Route::direct(image, false),
+            Box::new(out.clone()),
+        );
         // A live audio thread's spare core, which a renderer reads off its
         // audio handle: the bench synthesizes with no device to open one.
         if audio {

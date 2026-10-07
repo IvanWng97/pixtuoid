@@ -371,28 +371,20 @@ fn base_for(seed: u64) -> u32 {
 /// can't be had falls back to the escapes.
 ///
 /// `q=2` on every chunk: a reply would arrive as input mid-frame.
-pub(crate) fn transmit(
-    id: u32,
-    image: &TileImage,
-    tmux: bool,
-    #[cfg_attr(
-        not(unix),
-        expect(unused_variables, reason = "shared memory is Unix-only")
-    )]
-    medium: Medium,
-) -> Vec<u8> {
-    #[cfg(unix)]
-    if medium == Medium::SharedMemory {
-        match tracing::trace_span!("tile.shm")
+pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool, medium: Medium) -> Vec<u8> {
+    match medium {
+        #[cfg(unix)]
+        Medium::SharedMemory => match tracing::trace_span!("tile.shm")
             .in_scope(|| super::shm::publish(&image.rgb, std::time::Instant::now()))
         {
-            Ok(name) => return shared(id, image, &name, tmux),
+            Ok(name) => shared(id, image, &name, tmux),
             Err(e) => {
-                tracing::debug!(error = %e, "kitty shared memory failed, tile sent in the escapes")
+                tracing::debug!(error = %e, "kitty shared memory failed, tile sent in the escapes");
+                direct(id, image, tmux)
             }
-        }
+        },
+        Medium::Direct => direct(id, image, tmux),
     }
-    direct(id, image, tmux)
 }
 
 /// `image` zlib-compressed ("Compression") in the escapes.
