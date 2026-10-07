@@ -300,8 +300,10 @@ REFUTED (cite the mechanism, per AGENTS.md; add one where none exists. Before
 adding code for a finding, establish its case is reachable: when a test or
 sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
-change, and bigger than the PR: split it off into #N; a redesign that brings
-the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
+change, and bigger than the PR, or found in round 2 outside round 1's fold,
+which the [convergence contract](#convergence-contract) bars folding: split
+it off into #N; a redesign that brings the finding into scope ends FIXED) ·
+FOLLOW-UP → #N (real and PRE-EXISTING,
 and not FIXED in place — in place fits a small defect inside code this change
 already touches, adding no local row — so it is fixed in #N; a defect in
 another session's tree cites that session's PR). A
