@@ -13,7 +13,9 @@ use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv, env_set, env_text
 /// What the environment says about the terminal beyond [`TermEnv`], read once
 /// per probe.
 ///
-/// Its protocol rules mirror ratatui-image 11.1.0's picker, cited per rule.
+/// Its protocol rules mirror ratatui-image 11.1.0's picker, cited per rule,
+/// except where iTerm2 is told apart from what merely speaks its images
+/// ([`EnvHints::is_iterm2`]).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct EnvHints {
     env: TermEnv,
@@ -89,10 +91,9 @@ impl EnvHints {
         (self.is_iterm2() || outer || named).then_some(ImageProtocol::Iterm2)
     }
 
-    /// iTerm2 itself, not one of the terminals that speak its images: its
-    /// `TERM_PROGRAM`, inside tmux its session, or its `LC_TERMINAL` where no
-    /// other terminal names itself: over ssh, where no `TERM_PROGRAM`
-    /// arrives, or inside tmux, whose own it is. A terminal started from
+    /// iTerm2 itself, not a terminal that speaks its images: its
+    /// `TERM_PROGRAM`, its session inside tmux, or its `LC_TERMINAL` where
+    /// `TERM_PROGRAM` is absent (ssh) or tmux's own. A terminal started from
     /// iTerm2's shell names itself and inherits that `LC_TERMINAL`.
     fn is_iterm2(&self) -> bool {
         let named = |v: &Option<String>| v.as_deref().is_some_and(|v| v.contains("iTerm"));
@@ -109,8 +110,8 @@ impl EnvHints {
 /// window size.
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     // iTerm2 answers kitty's query, but its kitty, "except animation"
-    // (iterm2.com/downloads.html changelog), takes seconds a 16x frame, and its
-    // inline images most of one; its SIXEL keeps up.
+    // (iterm2.com/downloads.html changelog), is far too slow for 16x frames,
+    // and its inline images nearly so; its SIXEL keeps up.
     let queried = if hints.is_iterm2() && responses.contains(&Response::Sixel) {
         Some(ImageProtocol::Sixel)
     } else if responses.contains(&Response::Kitty) {
@@ -381,6 +382,18 @@ mod tests {
             detected(&both, &tmux_over_ssh, None).protocol,
             Some(ImageProtocol::Sixel),
             "tmux names itself, not the terminal"
+        );
+        // A pane's environment is the tmux server's: a server iTerm2 started
+        // still reads as iTerm2 when another terminal attaches, which then
+        // paints SIXEL if it lists it. Slower there, never frozen.
+        let started_in_iterm2 = EnvHints {
+            iterm_session: true,
+            ..tmux_over_ssh.clone()
+        };
+        assert_eq!(
+            detected(&both, &started_in_iterm2, None).protocol,
+            Some(ImageProtocol::Sixel),
+            "attached from another terminal: the server's iTerm2 environment"
         );
         assert_eq!(
             detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
