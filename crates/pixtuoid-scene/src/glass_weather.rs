@@ -21,8 +21,10 @@ pub(crate) struct GlassWeather {
     veil: Dithered<Option<(Rgb, f32)>>,
     /// The weather at any instant.
     policy: WeatherPolicy,
-    /// [`Sky::weather`](crate::sky::Sky::weather).
-    weather: WeatherMix,
+    /// [`Sky::weather`](crate::sky::Sky::weather), held only at rest, the one
+    /// beat its marks read it on: a frame off rest paints the same whatever
+    /// this instant's mix.
+    weather: Option<WeatherMix>,
     /// The clock the marks move by.
     beat: Beat,
 }
@@ -296,7 +298,7 @@ impl GlassWeather {
         Self {
             veil: moment.look.glass_veil,
             policy: moment.sky.policy(),
-            weather: moment.sky.weather(),
+            weather: moment.timing.beat.is_rest().then(|| moment.sky.weather()),
             beat: moment.timing.beat,
         }
     }
@@ -304,11 +306,8 @@ impl GlassWeather {
     /// The weather at loop time `loop_ms`; at rest, where loop time stands
     /// still, the sky's.
     fn weather_on_beat(&self, loop_ms: u64) -> WeatherMix {
-        if self.beat.is_rest() {
-            self.weather
-        } else {
-            self.policy.weather_at_ms(self.beat.wall_ms(loop_ms))
-        }
+        self.weather
+            .unwrap_or_else(|| self.policy.weather_at_ms(self.beat.wall_ms(loop_ms)))
     }
 
     /// Whether the `i`th of `w`'s `count` shows for the whole of its fall
@@ -416,7 +415,9 @@ mod tests {
         GlassWeather {
             veil: Dithered::solid(None),
             policy: WeatherPolicy::Clock,
-            weather: WeatherPolicy::Clock.weather_at_ms(wall_ms),
+            weather: beat
+                .is_rest()
+                .then(|| WeatherPolicy::Clock.weather_at_ms(wall_ms)),
             beat,
         }
     }
