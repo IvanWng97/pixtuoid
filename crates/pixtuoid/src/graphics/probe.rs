@@ -26,6 +26,7 @@ enum Terminal {
     /// A terminal that speaks iTerm2's images and isn't iTerm2
     /// (`picker.rs:372-390`).
     SpeaksIterm2,
+    /// Any other, kitty, Ghostty and Alacritty among them.
     Other,
 }
 
@@ -107,12 +108,24 @@ impl EnvHints {
         )
     }
 
-    /// The terminal its `TERM_PROGRAM` names, else, where that is absent
-    /// (ssh) or tmux's own, the one its markers name. A terminal started
-    /// from another's shell names itself and inherits those markers, so they
-    /// count only there.
+    /// The terminal its own `TERM` names, else its `TERM_PROGRAM`, else,
+    /// where that is absent (ssh) or tmux's own, its markers. A terminal
+    /// started from another's shell inherits the rest, and those that set
+    /// no `TERM_PROGRAM` inherit that too.
     fn terminal(&self) -> Terminal {
+        // Their defaults: kovidgoyal/kitty `kitty/options/definition.py:3322`,
+        // ghostty-org/ghostty `src/config/Config.zig:3928`,
+        // alacritty/alacritty `alacritty_terminal/src/tty/mod.rs:104`.
+        const OWN_TERMS: [&str; 3] = ["xterm-kitty", "xterm-ghostty", "alacritty"];
         const SPEAKS_ITERM2: [&str; 6] = ["mintty", "vscode", "Tabby", "Hyper", "rio", "Bobcat"];
+        if self
+            .env
+            .term
+            .as_deref()
+            .is_some_and(|t| OWN_TERMS.contains(&t))
+        {
+            return Terminal::Other;
+        }
         let program = self.env.term_program.as_deref().unwrap_or_default();
         let named = |names: &[&str]| names.iter().any(|n| program.contains(n));
         if named(&["iTerm"]) {
@@ -648,5 +661,30 @@ mod tests {
             ..hints("xterm-ghostty", "ghostty")
         };
         assert_eq!(started_from_wezterm.terminal(), Terminal::Other);
+    }
+
+    /// kitty and Alacritty set `TERM` but no `TERM_PROGRAM`: started from
+    /// another terminal's shell, their own `TERM` names them over what they
+    /// inherited.
+    #[test]
+    fn a_terminals_own_term_names_it_over_what_it_inherited() {
+        let kitty_from_wezterm = EnvHints {
+            wezterm: true,
+            ..hints("xterm-kitty", "WezTerm")
+        };
+        assert_eq!(
+            detected(&[Response::Kitty], &kitty_from_wezterm, None).protocol,
+            Some(ImageProtocol::Kitty)
+        );
+        let kitty_from_konsole = EnvHints {
+            konsole: true,
+            ..hints("xterm-kitty", "")
+        };
+        assert_eq!(
+            detected(&[Response::Kitty], &kitty_from_konsole, None).protocol,
+            Some(ImageProtocol::Kitty)
+        );
+        let alacritty_from_vscode = hints("alacritty", "vscode");
+        assert_eq!(detected(&[], &alacritty_from_vscode, None).protocol, None);
     }
 }
