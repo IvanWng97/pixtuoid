@@ -61,12 +61,10 @@ pub struct AppConfig {
     pub pets: Option<Vec<PetEntry>>,
 }
 
-/// Default `pixtuoid floating` window size (logical px) + the minimum below which
-/// the half-block office art is unreadable.
-pub const FLOATING_DEFAULT_W: u32 = 360;
-pub const FLOATING_DEFAULT_H: u32 = 240;
-pub const FLOATING_MIN_W: u32 = 240;
-pub const FLOATING_MIN_H: u32 = 160;
+/// Default `pixtuoid floating` window size (logical px); the window's own
+/// minimum is the pack's (`floating::offscreen::min_window`).
+pub const FLOATING_DEFAULT_W: u32 = 480;
+pub const FLOATING_DEFAULT_H: u32 = 320;
 /// Below this the window is too transparent to read.
 pub const FLOATING_MIN_OPACITY: f32 = 0.2;
 
@@ -94,11 +92,24 @@ pub struct FloatingConfig {
     pub opacity: f32,
 }
 
+impl FloatingConfig {
+    /// This geometry with its size raised to at least `min_w`×`min_h`, the
+    /// one size the window opens at and is placed by.
+    #[must_use]
+    pub fn at_least(self, min_w: u32, min_h: u32) -> Self {
+        Self {
+            width: self.width.max(min_w),
+            height: self.height.max(min_h),
+            ..self
+        }
+    }
+}
+
 pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
     let raw = config.floating.clone().unwrap_or_default();
     FloatingConfig {
-        width: raw.width.unwrap_or(FLOATING_DEFAULT_W).max(FLOATING_MIN_W),
-        height: raw.height.unwrap_or(FLOATING_DEFAULT_H).max(FLOATING_MIN_H),
+        width: raw.width.unwrap_or(FLOATING_DEFAULT_W),
+        height: raw.height.unwrap_or(FLOATING_DEFAULT_H),
         x: raw.x,
         y: raw.y,
         opacity: raw.opacity.unwrap_or(1.0).clamp(FLOATING_MIN_OPACITY, 1.0),

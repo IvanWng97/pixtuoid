@@ -1679,6 +1679,12 @@ impl Density {
     pub const fn get(self) -> u16 {
         self.0.get()
     }
+
+    /// The density as the non-zero factor it is.
+    #[doc(hidden)]
+    pub const fn as_nonzero(self) -> NonZeroU16 {
+        self.0
+    }
 }
 
 impl std::fmt::Display for Density {

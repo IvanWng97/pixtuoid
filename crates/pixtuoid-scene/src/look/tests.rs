@@ -207,7 +207,12 @@ fn a_refused_classic_frame_names_no_one() {
     )
     .expect("lays out");
     assert!(
-        !floor.raster.classic_signs().is_empty(),
+        !floor
+            .raster
+            .classic_drawn()
+            .expect("shown")
+            .signs
+            .is_empty(),
         "the office is drawn"
     );
     let refused = RenderInputs {
