@@ -1172,9 +1172,6 @@ mod tests {
         assert_eq!(dirty, Dirty::within(want));
     }
 
-    /// No list of rects is empty: "nowhere" is only ever
-    /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
-    /// unchanged frame.
     /// A frame's rects merge into at most the cap's boxes that cover every
     /// one of them, the nearest merging first: rects far apart stay apart,
     /// and overlapping ones become one.
@@ -1234,6 +1231,9 @@ mod tests {
         }
     }
 
+    /// No list of rects is empty: "nowhere" is only ever
+    /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
+    /// unchanged frame.
     #[test]
     fn an_empty_list_of_rects_is_unchanged() {
         let b = Bounds {
