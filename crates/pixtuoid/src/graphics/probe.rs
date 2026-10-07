@@ -66,11 +66,11 @@ impl EnvHints {
 
     /// iTerm2 inline images, which upstream's query does not ask about
     /// (`cap_parser.rs:132-133`), guessed from the terminal the environment
-    /// names: inside tmux, the outer terminal's markers (`picker.rs:357-368`);
-    /// anywhere, `TERM_PROGRAM`/`LC_TERMINAL` (`picker.rs:372-390`).
+    /// names: iTerm2 itself ([`Self::is_iterm2`]), WezTerm's markers inside
+    /// tmux (`picker.rs:357-368`), and the other terminals that speak them
+    /// (`picker.rs:372-390`).
     fn iterm2(&self) -> Option<ImageProtocol> {
-        const ITERM2_TERM_PROGRAMS: [&str; 9] = [
-            "iTerm",
+        const OTHER_TERM_PROGRAMS: [&str; 8] = [
             "WezTerm",
             "mintty",
             "vscode",
@@ -80,33 +80,32 @@ impl EnvHints {
             "Bobcat",
             "WarpTerminal",
         ];
-        let outer = self.env.tmux() && (self.iterm_session || self.wezterm);
+        let outer = self.env.tmux() && self.wezterm;
         let named = self
             .env
             .term_program
             .as_deref()
-            .is_some_and(|p| ITERM2_TERM_PROGRAMS.iter().any(|t| p.contains(t)))
-            || self
-                .lc_terminal
-                .as_deref()
-                .is_some_and(|t| t.contains("iTerm"));
-        (outer || named).then_some(ImageProtocol::Iterm2)
+            .is_some_and(|p| OTHER_TERM_PROGRAMS.iter().any(|t| p.contains(t)));
+        (self.is_iterm2() || outer || named).then_some(ImageProtocol::Iterm2)
     }
 
     /// iTerm2 itself, not one of the terminals that speak its images: its
-    /// `TERM_PROGRAM` or `LC_TERMINAL`, or inside tmux its session.
+    /// `TERM_PROGRAM`, inside tmux its session, or over ssh, where no
+    /// `TERM_PROGRAM` arrives, its `LC_TERMINAL`. A terminal started from
+    /// iTerm2's shell names itself and inherits that `LC_TERMINAL`.
     fn is_iterm2(&self) -> bool {
         let named = |v: &Option<String>| v.as_deref().is_some_and(|v| v.contains("iTerm"));
         named(&self.env.term_program)
-            || named(&self.lc_terminal)
+            || (self.env.term_program.is_none() && named(&self.lc_terminal))
             || (self.env.tmux() && self.iterm_session)
     }
 }
 
-/// What the terminal's answer and the environment together say: kitty over
-/// SIXEL when it answers both (ratatui-image 11.1.0 `picker.rs:544-554`), but
-/// for iTerm2, then the iTerm2 guess (`picker.rs:136-140`); the cell from its
-/// answer, else from the kernel's window size.
+/// What the terminal's answer and the environment together say: SIXEL for
+/// iTerm2 when it lists it, else kitty over SIXEL when it answers both
+/// (ratatui-image 11.1.0 `picker.rs:544-554`), then the iTerm2 guess
+/// (`picker.rs:136-140`); the cell from its answer, else from the kernel's
+/// window size.
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     // iTerm2 answers kitty's query, but its kitty, "except animation"
     // (iterm2.com/downloads.html changelog), takes seconds a 16x frame, and its
@@ -314,6 +313,11 @@ mod tests {
         };
         assert_eq!(lc.iterm2(), Some(ImageProtocol::Iterm2));
         assert_eq!(hints("xterm-ghostty", "ghostty").iterm2(), None);
+        let leaked = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-256color", "Apple_Terminal")
+        };
+        assert_eq!(leaked.iterm2(), None, "started from iTerm2's shell");
     }
 
     /// iTerm2 answers kitty's query and lists SIXEL in its DA1 (3.7.3, live:
@@ -349,6 +353,24 @@ mod tests {
             detected(&[Response::Kitty], &leaked, None).protocol,
             Some(ImageProtocol::Kitty),
             "a terminal started from iTerm2's shell"
+        );
+        let leaked_both = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-256color", "WezTerm")
+        };
+        assert_eq!(
+            detected(&both, &leaked_both, None).protocol,
+            Some(ImageProtocol::Kitty),
+            "a terminal started from iTerm2's shell that lists SIXEL too"
+        );
+        let over_ssh = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-256color", "")
+        };
+        assert_eq!(
+            detected(&both, &over_ssh, None).protocol,
+            Some(ImageProtocol::Sixel),
+            "over ssh only LC_TERMINAL arrives"
         );
         assert_eq!(
             detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
