@@ -105,7 +105,7 @@ fn run() -> Result<()> {
     let log_level: &'static str = log_level.as_str();
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
         || matches!(&cmd, Cmd::Floating { .. });
-    logging::init(tui_active, log_level);
+    let drift = logging::init(tui_active, log_level);
 
     match cmd {
         Cmd::Run {
@@ -120,18 +120,19 @@ fn run() -> Result<()> {
                 cli_max_desks,
                 headless,
                 graphics,
+                drift,
             )?;
             runtime::run(rc)
         }
         Cmd::Floating { source } => {
             // No desk cap: floating seeds its capacity from the window.
-            let rc = build_run_config(cli_theme.as_deref(), source, None, false, None)?;
+            let rc = build_run_config(cli_theme.as_deref(), source, None, false, None, drift)?;
             floating::run(rc)
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor { graphics } => {
-            let report = doctor::run(&logging::log_file_path(), graphics)?;
+            let report = doctor::run(&logging::log_location(), graphics)?;
             write!(pixtuoid::cli_stdout(), "{report}")?;
             Ok(())
         }
@@ -191,6 +192,7 @@ fn build_run_config(
     cli_max_desks: Option<usize>,
     headless: bool,
     cli_graphics: Option<pixtuoid::GraphicsMode>,
+    drift: pixtuoid::doctor::DriftSeen,
 ) -> Result<runtime::RunConfig> {
     let SourceArgs {
         socket,
@@ -233,7 +235,8 @@ fn build_run_config(
         theme,
         pets,
         connected,
-        log_path: Some(logging::log_file_path()),
+        log: Some(logging::log_location()),
+        drift,
         first_run,
         audio: config::resolve_audio(&cfg),
         graphics,

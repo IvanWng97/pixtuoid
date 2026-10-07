@@ -6,14 +6,20 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use pixtuoid::doctor::{DriftSeen, LogLocation};
+use std::time::{Duration, SystemTime};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
 
-/// Install the global tracing subscriber. TUI mode (and `floating`, a long-running
-/// GUI whose launching terminal would just collect noise) ALWAYS logs to the file —
-/// the alternate screen owns the terminal, so the log file is the only place a
-/// runtime error can surface — at a `warn` floor unless $RUST_LOG, $PIXTUOID_LOG or
-/// --log-level raises it. Every other mode goes to stderr.
-pub(crate) fn init(tui_active: bool, log_level: &'static str) {
+/// Install the global tracing subscriber, and return what its drift layer
+/// sees. TUI mode (and `floating`, a long-running GUI whose launching terminal
+/// would just collect noise) ALWAYS logs to a file — the alternate screen owns
+/// the terminal, so the log file is the only place a runtime error can surface
+/// — at a `warn` floor unless $RUST_LOG, $PIXTUOID_LOG or --log-level raises
+/// it. Every other mode goes to stderr.
+pub(crate) fn init(tui_active: bool, log_level: &'static str) -> DriftSeen {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
     let rust_log = pixtuoid_core::platform::text_env("RUST_LOG");
     let make_filter = || {
         EnvFilter::try_new(filter_directives(rust_log.as_deref(), log_level))
@@ -24,6 +30,8 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
     // The env var's VALUE is the log file path, so an empty one would "enable" file
     // mode with an unopenable path — `path_env` treats it as unset.
     let explicit_log_file = pixtuoid_core::platform::path_env("PIXTUOID_LOG").is_some();
+    let drift = DriftSeen::default();
+    let registry = tracing_subscriber::registry().with(drift.layer());
 
     if tui_active {
         let rust_log_set = rust_log.as_deref().is_some_and(|v| !v.is_empty());
@@ -40,38 +48,45 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
                 _ => "warn",
             })
         };
-        let path = log_file_path();
-        // Rotation before the open: it no-ops when the file (and so its dir) is
-        // absent, which `open_private_append` then creates.
-        rotate_if_large(&path);
-        match open_private_append(&path) {
+        match open_run_sink(&log_location(), SystemTime::now()) {
             Ok(f) => {
                 let writer = Arc::new(Mutex::new(f));
-                fmt_builder()
-                    .with_env_filter(filter)
-                    .with_ansi(false)
-                    .with_writer(move || MutexFileWriter(writer.clone()))
+                registry
+                    .with(
+                        fmt_layer()
+                            .with_ansi(false)
+                            .with_writer(move || MutexFileWriter(writer.clone()))
+                            .with_filter(filter),
+                    )
                     .init();
             }
-            Err(e) => {
+            Err((path, e)) => {
                 // The footer's "see log" advice would point at nothing — say so on
                 // the pre-altscreen stderr channel rather than degrading silently.
                 let _ = writeln!(std::io::stderr(), "{}", log_open_failure(&path, &e));
+                registry.init();
             }
         }
     } else {
-        fmt_builder()
-            .with_env_filter(make_filter())
-            .with_writer(std::io::stderr)
+        registry
+            .with(
+                fmt_layer()
+                    .with_writer(std::io::stderr)
+                    .with_filter(make_filter()),
+            )
             .init();
     }
+    drift
 }
 
-/// `tracing_subscriber::fmt()` with its internal-error report off: on a failed
+/// The formatting layer with its internal-error report off: on a failed
 /// write that report is an `eprintln!`, which panics when stderr is the pipe
 /// that failed, and lands on the TUI's alternate screen when the log file is.
-fn fmt_builder() -> tracing_subscriber::fmt::SubscriberBuilder {
-    tracing_subscriber::fmt().log_internal_errors(false)
+fn fmt_layer<S>() -> tracing_subscriber::fmt::Layer<S>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    tracing_subscriber::fmt::layer().log_internal_errors(false)
 }
 
 /// The tracing directive string to build the `EnvFilter` from: a NON-EMPTY
@@ -85,21 +100,102 @@ fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a s
     }
 }
 
-pub(crate) fn log_file_path() -> PathBuf {
+pub(crate) fn log_location() -> LogLocation {
     // Kept in lockstep with init()'s `explicit_log_file` read, so "file mode
     // enabled" and "which file" cannot disagree on a whitespace value.
     if let Some(p) = pixtuoid_core::platform::path_env("PIXTUOID_LOG") {
-        return p;
+        return LogLocation::File(p);
     }
     if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
-        return state.join("pixtuoid").join("log");
+        return LogLocation::Runs(state.join("pixtuoid").join("logs"));
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return home.join(".cache").join("pixtuoid").join("log");
+        return LogLocation::Runs(home.join(".cache").join("pixtuoid").join("logs"));
     }
     // No home dir at all: the log must exist somewhere — it is the only runtime
     // diagnostics channel.
-    std::env::temp_dir().join("pixtuoid.log")
+    LogLocation::Runs(std::env::temp_dir().join("pixtuoid-logs"))
+}
+
+/// How long a run's log outlives its last write before a later run removes
+/// it: WezTerm's week (`env-bootstrap/src/ringlog.rs` `prune_old_logs`), so
+/// what `doctor` reports is recent.
+const RUN_LOG_RETAIN: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Open this run's sink at `at`, or the path that failed and why: the named
+/// file after its size rotation, or a fresh file of its own in the runs
+/// directory, which is first tidied.
+fn open_run_sink(
+    at: &LogLocation,
+    now: SystemTime,
+) -> Result<std::fs::File, (PathBuf, std::io::Error)> {
+    let path = match at {
+        LogLocation::File(path) => {
+            rotate_if_large(path);
+            path.clone()
+        }
+        LogLocation::Runs(dir) => dir.join(run_file_name(now, std::process::id())),
+    };
+    let sink = open_private_append(&path).map_err(|e| (path, e))?;
+    if let LogLocation::Runs(dir) = at {
+        adopt_single_log(dir);
+        prune_runs(dir, now);
+    }
+    Ok(sink)
+}
+
+/// A run's file: its start in UTC, then its pid, so runs started in one
+/// second never share one and name order is start order.
+fn run_file_name(start: SystemTime, tag: impl std::fmt::Display) -> String {
+    let start: chrono::DateTime<chrono::Utc> = start.into();
+    format!(
+        "{}-{tag}.{}",
+        start.format("%Y%m%dT%H%M%SZ"),
+        pixtuoid::doctor::RUN_LOG_EXT
+    )
+}
+
+/// Move the single log an older pixtuoid kept beside `dir` (`log`, rotated to
+/// `log.old`) into it as runs named for their last write, so it ages out like
+/// any run instead of staying behind.
+fn adopt_single_log(dir: &Path) {
+    for (name, tag) in [("log.old", "single-old"), ("log", "single")] {
+        let old = dir.with_file_name(name);
+        let Ok(meta) = std::fs::metadata(&old) else {
+            continue;
+        };
+        if let (true, Ok(written)) = (meta.is_file(), meta.modified()) {
+            let _ = std::fs::rename(&old, dir.join(run_file_name(written, tag)));
+        }
+    }
+}
+
+/// Remove the runs in `dir` last written over [`RUN_LOG_RETAIN`] before `now`.
+/// A run still writing stays recent; one the OS won't remove (open on
+/// Windows) waits for a later run.
+fn prune_runs(dir: &Path, now: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_none_or(|e| e != pixtuoid::doctor::RUN_LOG_EXT)
+        {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|written| {
+                now.duration_since(written)
+                    .is_ok_and(|age| age > RUN_LOG_RETAIN)
+            });
+        if stale {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// Open a diagnostic sink for append, creating it — and any directory it needs —
@@ -146,11 +242,11 @@ fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
 /// The size past which [`rotate_if_large`] rotates the log.
 const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
-/// One-deep rotation at startup (log → log.old) keeps the last two generations
-/// without a rotation dependency. Accepted edge: with several instances sharing
-/// the default path, one instance's startup rotation renames the file out from
-/// under a running sibling (its fd follows; a later rotation strands it on an
-/// unlinked inode).
+/// One-deep rotation at startup of the file `$PIXTUOID_LOG` names (log →
+/// log.old) keeps the last two generations. Accepted edge: with several
+/// instances sharing that file, one instance's startup rotation renames it out
+/// from under a running sibling (its fd follows; a later rotation strands it on
+/// an unlinked inode).
 fn rotate_if_large(path: &Path) {
     let too_large = std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES);
     if too_large {
@@ -182,7 +278,7 @@ impl std::io::Write for MutexFileWriter {
     }
 }
 
-/// The path is [`log_file_path`]'s, which env decides, so it is stripped
+/// The path is [`log_location`]'s, which env decides, so it is stripped
 /// before it reaches the terminal.
 fn log_open_failure(path: &Path, e: &std::io::Error) -> String {
     format!(
@@ -254,17 +350,17 @@ mod tests {
     }
 
     #[test]
-    fn log_file_path_rejects_a_relative_xdg_state_home() {
+    fn log_location_rejects_a_relative_xdg_state_home() {
         // Pins the CALL SITE, not just the primitive: a revert to plain
         // `path_env` here would leak a relative log path.
         temp_env::with_var_unset("PIXTUOID_LOG", || {
             let home =
                 pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-            let cache = home.join(".cache").join("pixtuoid").join("log");
+            let cache = LogLocation::Runs(home.join(".cache").join("pixtuoid").join("logs"));
             for rel in ["", "   ", "rel/state", "~/state"] {
                 temp_env::with_var("XDG_STATE_HOME", Some(rel), || {
                     assert_eq!(
-                        log_file_path(),
+                        log_location(),
                         cache,
                         "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
                     );
@@ -275,8 +371,8 @@ mod tests {
             let abs = if cfg!(windows) { "C:/state" } else { "/state" };
             temp_env::with_var("XDG_STATE_HOME", Some(abs), || {
                 assert_eq!(
-                    log_file_path(),
-                    PathBuf::from(format!("{abs}/pixtuoid/log"))
+                    log_location(),
+                    LogLocation::Runs(PathBuf::from(format!("{abs}/pixtuoid/logs")))
                 );
             });
         });
@@ -316,5 +412,55 @@ mod tests {
             dir.path().join("app.log.old").exists(),
             ".old is appended, not substituted"
         );
+    }
+
+    /// A run opens a file of its own, owner-only, named so name order is start
+    /// order; the old single log moves in beside it, and runs past
+    /// [`RUN_LOG_RETAIN`] go, the new one and a recent one staying.
+    #[test]
+    fn a_run_logs_to_its_own_file_and_tidies_the_runs_before_it() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("pixtuoid").join("logs");
+        let now = SystemTime::now();
+        std::fs::create_dir_all(&dir).unwrap();
+        let aged = |name: &str, age: Duration| {
+            let path = dir.join(name);
+            std::fs::write(&path, "x\n").unwrap();
+            let f = std::fs::File::options().write(true).open(&path).unwrap();
+            f.set_modified(now - age).unwrap();
+            path
+        };
+        let stale = aged(
+            &run_file_name(now - RUN_LOG_RETAIN * 2, 1),
+            RUN_LOG_RETAIN * 2,
+        );
+        let recent = aged(
+            &run_file_name(now - RUN_LOG_RETAIN / 2, 2),
+            RUN_LOG_RETAIN / 2,
+        );
+        let foreign = aged("notes.txt", RUN_LOG_RETAIN * 2);
+        let single = dir.with_file_name("log");
+        std::fs::write(&single, "the old single log\n").unwrap();
+
+        let at = LogLocation::Runs(dir.clone());
+        drop(open_run_sink(&at, now).expect("opens"));
+        let this_run = dir.join(run_file_name(now, std::process::id()));
+        assert!(this_run.exists() && recent.exists() && foreign.exists());
+        assert!(!stale.exists(), "a run past the retention goes");
+        assert!(!single.exists(), "the single log moves into the runs");
+        #[cfg(unix)]
+        assert_eq!(mode_of(&this_run), 0o600);
+
+        let (text, warning) = pixtuoid::doctor::read_logs(&at);
+        assert_eq!(warning, None);
+        let order: Vec<&str> = text.lines().collect();
+        assert_eq!(order, ["x", "the old single log"], "runs read oldest first");
+    }
+
+    #[test]
+    fn run_file_names_sort_by_start() {
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_000_000);
+        assert_eq!(run_file_name(t, 42), "20261003T040000Z-42.log");
+        assert!(run_file_name(t, 99) < run_file_name(t + Duration::from_secs(1), 1));
     }
 }
