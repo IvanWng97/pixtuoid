@@ -10,12 +10,52 @@ use ratatui_image::picker::cap_parser::{Parser, Response};
 
 use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv, env_set, env_text};
 
+/// The terminal the environment names, as far as the cutaway's protocols go.
+///
+/// Its rows mirror ratatui-image 11.1.0's picker, cited per row, except
+/// where iTerm2 is told apart from what merely speaks its images, and Warp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Terminal {
+    Iterm2,
+    /// Seen live in v0.2026.09.30: it answers kitty's query but has no
+    /// Unicode placeholders, draws no SIXEL, and never repaints an iTerm2
+    /// image it replaces.
+    Warp,
+    WezTerm,
+    Konsole,
+    /// A terminal that speaks iTerm2's images and isn't iTerm2
+    /// (`picker.rs:372-390`).
+    SpeaksIterm2,
+    Other,
+}
+
+impl Terminal {
+    /// The protocols the cutaway animates with in it, best first. iTerm2's
+    /// images count as answered, since the query never asks about them
+    /// (`cap_parser.rs:132-133`).
+    fn animates(self) -> &'static [ImageProtocol] {
+        use ImageProtocol::{Iterm2, Kitty, Sixel};
+        match self {
+            // Its kitty, "except animation" (iterm2.com/downloads.html
+            // changelog), is far too slow for 16x frames, and its inline
+            // images nearly so; its SIXEL keeps up.
+            Self::Iterm2 => &[Sixel, Kitty, Iterm2],
+            Self::Warp => &[],
+            // Neither implements kitty's placeholders, Konsole's SIXEL is
+            // buggy, and WezTerm draws better through iTerm2
+            // (`picker.rs:119-128`).
+            Self::WezTerm => &[Iterm2],
+            Self::Konsole => &[],
+            // Kitty over SIXEL where both answer (`picker.rs:544-554`), then
+            // the iTerm2 guess (`picker.rs:136-140`).
+            Self::SpeaksIterm2 => &[Kitty, Sixel, Iterm2],
+            Self::Other => &[Kitty, Sixel],
+        }
+    }
+}
+
 /// What the environment says about the terminal beyond [`TermEnv`], read once
 /// per probe.
-///
-/// Its protocol rules mirror ratatui-image 11.1.0's picker, cited per rule,
-/// except where iTerm2 is told apart from what merely speaks its images
-/// ([`EnvHints::is_iterm2`]).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct EnvHints {
     env: TermEnv,
@@ -48,100 +88,87 @@ impl EnvHints {
     }
 
     /// The capability query, wrapped for tmux whenever this process is inside
-    /// it.
+    /// it, asking only for what the terminal animates.
     fn query(&self) -> String {
+        let animates = self.terminal().animates();
         Parser::query(
             self.env.tmux(),
             QueryStdioOptions {
-                blacklist_protocols: self.blacklist(),
+                blacklist_protocols: [
+                    (ImageProtocol::Kitty, ProtocolType::Kitty),
+                    (ImageProtocol::Sixel, ProtocolType::Sixel),
+                ]
+                .into_iter()
+                .filter(|(p, _)| !animates.contains(p))
+                .map(|(_, t)| t)
+                .collect(),
                 ..QueryStdioOptions::default()
             },
         )
     }
 
-    /// Protocols never asked for under WezTerm or Konsole: neither implements
-    /// kitty's placeholders, Konsole's SIXEL is buggy, and WezTerm draws better
-    /// through iTerm2 (`picker.rs:119-128`).
-    fn blacklist(&self) -> Vec<ProtocolType> {
-        if self.wezterm || self.konsole {
-            vec![ProtocolType::Kitty, ProtocolType::Sixel]
-        } else {
-            Vec::new()
+    /// The terminal its `TERM_PROGRAM` names, else, where that is absent
+    /// (ssh) or tmux's own, the one its markers name. A terminal started
+    /// from another's shell names itself and inherits those markers, so they
+    /// count only there.
+    fn terminal(&self) -> Terminal {
+        const SPEAKS_ITERM2: [&str; 6] = ["mintty", "vscode", "Tabby", "Hyper", "rio", "Bobcat"];
+        let program = self.env.term_program.as_deref().unwrap_or_default();
+        let named = |names: &[&str]| names.iter().any(|n| program.contains(n));
+        if named(&["iTerm"]) {
+            return Terminal::Iterm2;
         }
-    }
-
-    /// iTerm2 inline images, which upstream's query does not ask about
-    /// (`cap_parser.rs:132-133`), guessed from the terminal the environment
-    /// names: iTerm2 itself ([`Self::is_iterm2`]), WezTerm's markers inside
-    /// tmux (`picker.rs:357-368`), and the other terminals that speak them
-    /// (`picker.rs:372-390`).
-    fn iterm2(&self) -> Option<ImageProtocol> {
-        const OTHER_TERM_PROGRAMS: [&str; 7] = [
-            "WezTerm", "mintty", "vscode", "Tabby", "Hyper", "rio", "Bobcat",
-        ];
-        let outer = self.env.tmux() && self.wezterm;
-        let named = self
-            .env
-            .term_program
+        if named(&["WarpTerminal"]) {
+            return Terminal::Warp;
+        }
+        if named(&["WezTerm"]) {
+            return Terminal::WezTerm;
+        }
+        if named(&SPEAKS_ITERM2) {
+            return Terminal::SpeaksIterm2;
+        }
+        if !(self.env.term_program.is_none() || self.env.tmux()) {
+            return Terminal::Other;
+        }
+        let tmux = self.env.tmux();
+        if tmux && self.warp_client {
+            Terminal::Warp
+        } else if self
+            .lc_terminal
             .as_deref()
-            .is_some_and(|p| OTHER_TERM_PROGRAMS.iter().any(|t| p.contains(t)));
-        (self.is_iterm2() || outer || named).then_some(ImageProtocol::Iterm2)
-    }
-
-    /// Warp, where no protocol the cutaway speaks animates, seen live in
-    /// v0.2026.09.30: it answers kitty's query but has no Unicode placeholders,
-    /// draws no SIXEL, and never repaints an iTerm2 image it replaces. Inside
-    /// tmux, whose own `TERM_PROGRAM` hides Warp's, its client marker names
-    /// it.
-    fn is_warp(&self) -> bool {
-        let named = self
-            .env
-            .term_program
-            .as_deref()
-            .is_some_and(|p| p.contains("WarpTerminal"));
-        named || (self.env.tmux() && self.warp_client)
-    }
-
-    /// iTerm2 itself, not a terminal that speaks its images: its
-    /// `TERM_PROGRAM`, its session inside tmux, or its `LC_TERMINAL` where
-    /// `TERM_PROGRAM` is absent (ssh) or tmux's own. A terminal started from
-    /// iTerm2's shell names itself and inherits that `LC_TERMINAL`.
-    fn is_iterm2(&self) -> bool {
-        let named = |v: &Option<String>| v.as_deref().is_some_and(|v| v.contains("iTerm"));
-        named(&self.env.term_program)
-            || ((self.env.term_program.is_none() || self.env.tmux()) && named(&self.lc_terminal))
-            || (self.env.tmux() && self.iterm_session)
+            .is_some_and(|v| v.contains("iTerm"))
+            || (tmux && self.iterm_session)
+        {
+            Terminal::Iterm2
+        } else if self.wezterm {
+            Terminal::WezTerm
+        } else if self.konsole {
+            Terminal::Konsole
+        } else {
+            Terminal::Other
+        }
     }
 }
 
-/// What the terminal's answer and the environment together say: SIXEL for
-/// iTerm2 when it lists it, else kitty over SIXEL when it answers both
-/// (ratatui-image 11.1.0 `picker.rs:544-554`), then the iTerm2 guess
-/// (`picker.rs:136-140`); the cell from its answer, else from the kernel's
-/// window size.
+/// What the terminal's answer and the environment together say: the first
+/// protocol the terminal [animates](Terminal::animates) with that it
+/// answered; the cell from its answer, else from the kernel's window size.
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
-    // iTerm2 answers kitty's query, but its kitty, "except animation"
-    // (iterm2.com/downloads.html changelog), is far too slow for 16x frames,
-    // and its inline images nearly so; its SIXEL keeps up.
-    let queried = if hints.is_iterm2() && responses.contains(&Response::Sixel) {
-        Some(ImageProtocol::Sixel)
-    } else if responses.contains(&Response::Kitty) {
-        Some(ImageProtocol::Kitty)
-    } else if responses.contains(&Response::Sixel) {
-        Some(ImageProtocol::Sixel)
-    } else {
-        None
-    };
+    let animates = hints.terminal().animates();
+    let protocol = animates.iter().copied().find(|p| match p {
+        ImageProtocol::Kitty => responses.contains(&Response::Kitty),
+        ImageProtocol::Sixel => responses.contains(&Response::Sixel),
+        ImageProtocol::Iterm2 => true,
+    });
     let answered_cell = responses.iter().find_map(|r| match r {
         Response::CellSize(Some((w, h))) => Some(CellSize { w: *w, h: *h }),
         _ => None,
     });
-    let unanimated = hints.is_warp();
     Detected {
-        protocol: queried.or_else(|| hints.iterm2()).filter(|_| !unanimated),
+        protocol,
         cell: answered_cell.or(window_cell),
         tmux: hints.env.tmux(),
-        unanimated,
+        unanimated: animates.is_empty(),
         shm: false,
     }
 }
@@ -382,25 +409,31 @@ mod tests {
             Some(ImageProtocol::Iterm2)
         );
         assert_eq!(
-            detected(
-                &[Response::Kitty],
-                &hints("xterm-256color", "WezTerm"),
-                None
-            )
-            .protocol,
+            detected(&[Response::Kitty], &hints("xterm-256color", "vscode"), None).protocol,
             Some(ImageProtocol::Kitty)
+        );
+        assert_eq!(
+            detected(&[], &hints("xterm-256color", "vscode"), None).protocol,
+            Some(ImageProtocol::Iterm2)
         );
         let lc = EnvHints {
             lc_terminal: Some("iTerm2".into()),
             ..EnvHints::default()
         };
-        assert_eq!(lc.iterm2(), Some(ImageProtocol::Iterm2));
-        assert_eq!(hints("xterm-ghostty", "ghostty").iterm2(), None);
+        assert_eq!(lc.terminal(), Terminal::Iterm2);
+        assert_eq!(
+            hints("xterm-ghostty", "ghostty").terminal(),
+            Terminal::Other
+        );
         let leaked = EnvHints {
             lc_terminal: Some("iTerm2".into()),
             ..hints("xterm-256color", "Apple_Terminal")
         };
-        assert_eq!(leaked.iterm2(), None, "started from iTerm2's shell");
+        assert_eq!(
+            leaked.terminal(),
+            Terminal::Other,
+            "started from iTerm2's shell"
+        );
     }
 
     /// iTerm2 answers kitty's query and lists SIXEL in its DA1 (3.7.3, live:
@@ -439,7 +472,7 @@ mod tests {
         );
         let leaked_both = EnvHints {
             lc_terminal: Some("iTerm2".into()),
-            ..hints("xterm-256color", "WezTerm")
+            ..hints("xterm-ghostty", "ghostty")
         };
         assert_eq!(
             detected(&both, &leaked_both, None).protocol,
@@ -491,8 +524,8 @@ mod tests {
         let cell = CellSize { w: 8, h: 18 };
         let d = detected(&[Response::Kitty], &warp, Some(cell));
         assert_eq!((d.protocol, d.cell, d.unanimated), (None, Some(cell), true));
-        assert_eq!(warp.iterm2(), None);
-        assert!(!hints("xterm-256color", "iTerm.app").is_warp());
+        assert_eq!(warp.terminal(), Terminal::Warp);
+        assert!(!warp.query().contains("\x1b_G"), "kitty is never asked");
     }
 
     /// Inside tmux Warp is named by its client marker, since tmux's own
@@ -504,14 +537,14 @@ mod tests {
             warp_client: true,
             ..client(hints("tmux-256color", "tmux"))
         };
-        assert!(tmux.is_warp());
+        assert_eq!(tmux.terminal(), Terminal::Warp);
         let d = detected(&[Response::Kitty], &tmux, Some(CellSize { w: 8, h: 18 }));
         assert_eq!((d.protocol, d.unanimated), (None, true));
         let started_from_warp = EnvHints {
             warp_client: true,
             ..hints("xterm-ghostty", "ghostty")
         };
-        assert!(!started_from_warp.is_warp());
+        assert_eq!(started_from_warp.terminal(), Terminal::Other);
     }
 
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do
@@ -522,12 +555,12 @@ mod tests {
             iterm_session: true,
             ..hints("tmux-256color", "tmux")
         };
-        assert_eq!(outer.iterm2(), Some(ImageProtocol::Iterm2));
+        assert_eq!(outer.terminal(), Terminal::Iterm2);
         let not_tmux = EnvHints {
             iterm_session: true,
             ..hints("xterm-ghostty", "ghostty")
         };
-        assert_eq!(not_tmux.iterm2(), None);
+        assert_eq!(not_tmux.terminal(), Terminal::Other);
     }
 
     /// A silent terminal is still the protocol the environment names; with
@@ -575,7 +608,7 @@ mod tests {
             iterm_session: true,
             ..pane
         };
-        assert_eq!(outer.iterm2(), Some(ImageProtocol::Iterm2));
+        assert_eq!(outer.terminal(), Terminal::Iterm2);
     }
 
     /// The same `TERM`/`TERM_PROGRAM` test ratatui-image applies.
@@ -587,23 +620,33 @@ mod tests {
         assert!(!EnvHints::default().env.tmux());
     }
 
+    /// WezTerm and Konsole are never asked for kitty or SIXEL: WezTerm draws
+    /// through iTerm2's images, Konsole with none. Their markers name them
+    /// only where `TERM_PROGRAM` doesn't name another terminal.
     #[test]
     fn wezterm_and_konsole_are_never_asked_for_kitty_or_sixel() {
-        for hints in [
-            EnvHints {
-                wezterm: true,
-                ..EnvHints::default()
-            },
-            EnvHints {
-                konsole: true,
-                ..EnvHints::default()
-            },
-        ] {
-            assert_eq!(
-                hints.blacklist(),
-                vec![ProtocolType::Kitty, ProtocolType::Sixel]
+        let wezterm = EnvHints {
+            wezterm: true,
+            ..hints("xterm-256color", "WezTerm")
+        };
+        let konsole = EnvHints {
+            konsole: true,
+            ..hints("xterm-256color", "")
+        };
+        for (hints, want) in [(&wezterm, Some(ImageProtocol::Iterm2)), (&konsole, None)] {
+            let query = hints.query();
+            assert!(
+                !query.contains("\x1b_G") && !query.contains("\x1b[c"),
+                "{query:?}"
             );
+            let d = detected(&[Response::Kitty, Response::Sixel], hints, None);
+            assert_eq!(d.protocol, want);
         }
-        assert!(EnvHints::default().blacklist().is_empty());
+        assert!(EnvHints::default().query().contains("\x1b_G"));
+        let started_from_wezterm = EnvHints {
+            wezterm: true,
+            ..hints("xterm-ghostty", "ghostty")
+        };
+        assert_eq!(started_from_wezterm.terminal(), Terminal::Other);
     }
 }
