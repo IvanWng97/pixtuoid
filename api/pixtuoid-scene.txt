@@ -186,7 +186,6 @@ pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::flash(&self) -> crate::flash::FlashPhase
 pub fn pixtuoid_scene::floor::FloorSession::floor(&self) -> &pixtuoid_scene::floor::PerFloor
-pub fn pixtuoid_scene::floor::FloorSession::floor_mut(&mut self) -> &mut pixtuoid_scene::floor::PerFloor
 pub fn pixtuoid_scene::floor::FloorSession::moves_off_beat(&self) -> bool
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
