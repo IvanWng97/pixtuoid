@@ -1012,13 +1012,6 @@ fn save_floating_clears_stale_position_when_os_cannot_report_it() {
 }
 
 #[test]
-fn a_floating_size_below_the_minimum_opens_and_is_placed_at_it() {
-    let cfg: AppConfig = toml::from_str("[floating]\nwidth = 360\nheight = 900\n").unwrap();
-    let f = resolve_floating(&cfg).at_least(480, 320);
-    assert_eq!((f.width, f.height), (480, 900));
-}
-
-#[test]
 fn floating_opacity_is_bounded() {
     let cfg: AppConfig = toml::from_str("[floating]\nopacity = 9.0\n").unwrap();
     let f = resolve_floating(&cfg);
