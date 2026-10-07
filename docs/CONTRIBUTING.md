@@ -302,8 +302,9 @@ sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
-or found past round 2 outside the last fold per the
-[convergence contract](#convergence-contract), and not FIXED in place — in
+or introduced but non-blocking, no bigger than the PR, and found past round 2
+outside the last fold per the [convergence contract](#convergence-contract),
+and not FIXED in place — in
 place fits a small defect inside code this change already touches, adding
 no local row — so it is fixed in #N; a defect in another session's tree cites
 that session's PR). A
@@ -328,13 +329,15 @@ before re-litigating.
   change introduced is FIXED in it, since a clean-up left for later rarely
   lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
   From round 3 a fold takes only findings on the lines the previous fold
-  changed, so each round reads less than the last; one elsewhere was missed
-  by two whole-PR reviews and is a FOLLOW-UP unless it blocks the merge. A
-  blocking issue confirmed in a fold STOPS the loop: revert the fold and
-  re-land smaller, or re-scope.
+  changed, plus one [the merge gate](#the-merge-gate) confirms blocks the
+  merge; a non-blocking one elsewhere was missed by two whole-PR reviews and
+  is a FOLLOW-UP. The first round with nothing to fold ends the loop. A
+  finding on lines two folds already changed, or a blocking issue confirmed
+  in a fold, STOPS it: revert the fold and re-land smaller, or re-scope.
 - **A fold's behavior change** ships a test that fails without it; the rest
-  of a fold is a revert, a deletion, a refactor the existing tests cover, or
-  a comment or doc change.
+  of a fold is a revert, a deletion, a comment or doc change, or a refactor
+  whose commit names the existing tests that run every line it touches.
+  Anything else reverts the fold.
 - **A fix round adds no new gate** — a wanted check is its own PR, asserting
   facts in its own layer (a Rust fact from Rust, never a Python regex over
   `.rs`).
