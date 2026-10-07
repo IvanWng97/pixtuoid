@@ -187,7 +187,11 @@ impl FloatingApp {
                 (self.cursor.x, self.cursor.y),
                 (size.width, size.height),
                 at,
-                (self.petting.as_ref(), now),
+                super::offscreen::Pressing {
+                    scale_factor: window.scale_factor(),
+                    petting: self.petting.as_ref(),
+                    now,
+                },
             ),
             None => Press::Drag,
         };

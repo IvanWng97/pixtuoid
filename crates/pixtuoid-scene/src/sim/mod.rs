@@ -452,9 +452,6 @@ pub(crate) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
 /// The bundled lobster's size, for a pack that lacks the mascot's anim.
 const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 
-/// The floor's pet this tick, walking the people's walker: a pet being
-/// petted holds still where it stands, and a resting one naps beside an idle
-/// desk.
 /// Carry out the floor's grip before anything steps: a creature held follows
 /// the pointer and one set down lands, an agent set down starts home; a hold
 /// stays for the next step, a drop is spent. The agent held, if one is.
@@ -493,6 +490,9 @@ fn take_grip(
     None
 }
 
+/// The floor's pet this tick, walking the people's walker: a pet being
+/// petted holds still where it stands, and a resting one naps beside an idle
+/// desk.
 fn pet_placement(
     agents: &[AgentSlot],
     pack: &Pack,

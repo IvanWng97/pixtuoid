@@ -492,9 +492,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let hit = self.cached_layout.as_deref().and_then(|layout| {
             crate::tui::hit_test::scene_hit(&self.last_hovers, self.last_star, layout, cell)
         });
+        let bounds = cell.bounds();
+        // A cell is the terminal's one step: any move to another lifts.
+        let slop = pixtuoid_scene::interact::Slop {
+            x: bounds.width,
+            y: bounds.height,
+        };
         let down = self.pointer.down(
             hit,
-            centre(cell.bounds()),
+            centre(bounds),
+            slop,
             self.chrome.active_pet.as_ref(),
             now,
         );

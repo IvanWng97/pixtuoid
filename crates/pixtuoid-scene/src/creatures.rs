@@ -594,6 +594,25 @@ mod tests {
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
 
     use super::*;
+
+    /// One set down where no leg reaches rests at its latest draw, on the
+    /// floor it roams, not off it.
+    #[test]
+    fn a_creature_set_down_out_of_reach_rests_where_it_can_roam() {
+        let layout = SceneLayout::compute(160, 96, None).expect("layout fits");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut walk = CreatureWalk::at_home(&layout, 7, now);
+        let off = Point {
+            x: u16::MAX,
+            y: u16::MAX,
+        };
+        walk.carry(off);
+        assert_eq!(walk.stance(now).map(|s| s.at), Some(off), "carried");
+        walk.set_down(off, &layout, now);
+        let at = walk.stance(now).expect("rests").at;
+        assert!(layout.reachable.reaches(at), "{at:?}");
+        assert_eq!(at, walkable_target(&layout, 7, 0));
+    }
     use crate::anim::{Motion, PAINT_FPS};
     use crate::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
     use crate::layout::Size;

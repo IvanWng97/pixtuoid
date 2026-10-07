@@ -2067,6 +2067,28 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
         from.x.abs_diff(at.x) <= 8 && from.y.abs_diff(at.y) <= 8,
         "from the floor near the drop: {from:?}"
     );
+    // Set down where no leg reaches, it lands home rather than off the floor.
+    let lift_again = Gesture::Lift {
+        figure: Figure::Agent(id),
+        at,
+    };
+    let far = Point {
+        x: u16::MAX,
+        y: u16::MAX,
+    };
+    session.floor_mut().grip(&lift_again);
+    session.floor_mut().grip(&Gesture::Drop(far));
+    let landed = step(&mut session, t0 + Duration::from_millis(300));
+    let desk = landed
+        .layout
+        .home_desk(scene.agents[&id].desk_index.single_floor_local())
+        .expect("a desk");
+    let home = crate::pose::desk_leg_endpoint(desk, &landed.layout).0;
+    match landed.frame.poses[&id] {
+        Some(Pose::Walking { from, .. }) => assert_eq!(from, home, "it walks from home"),
+        Some(Pose::Held { .. }) | None => panic!("not landed: {:?}", landed.frame.poses[&id]),
+        Some(_) => {}
+    }
     let sat = (1..300)
         .map(|tenth| step(&mut session, t0 + Duration::from_millis(200 + 100 * tenth)))
         .find_map(|s| s.frame.poses[&id].filter(|p| !matches!(p, Pose::Walking { .. })));

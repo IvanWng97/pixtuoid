@@ -166,10 +166,7 @@ impl OfficeRenderer {
         cursor: (f64, f64),
         window: (u32, u32),
         at: WindowGeometry,
-        (petting, now): (
-            Option<&pixtuoid_scene::pet::PetState>,
-            std::time::SystemTime,
-        ),
+        pressing: Pressing<'_>,
     ) -> Press {
         if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
             // As any press does: a carry whose release never came ends here.
@@ -178,7 +175,13 @@ impl OfficeRenderer {
         }
         let unit = unit_at(cursor, at);
         let hit = self.session.hit_at(unit_bounds(unit));
-        let down = self.pointer.down(hit, unit, petting, now);
+        // The slop in this window's units, at least one.
+        let slop_px = DRAG_SLOP_DIP * pressing.scale_factor;
+        let units = (slop_px / f64::from(at.unit_px.max(1))).ceil().max(1.0) as u16;
+        let slop = pixtuoid_scene::interact::Slop { x: units, y: units };
+        let down = self
+            .pointer
+            .down(hit, unit, slop, pressing.petting, pressing.now);
         if let Some(ended) = &down.ended {
             self.session.grip(ended);
         }
@@ -215,7 +218,7 @@ impl OfficeRenderer {
         cursor: (f64, f64),
         at: WindowGeometry,
     ) -> Option<pixtuoid_scene::hit::HitAction> {
-        match self.pointer.up(Some(unit_at(cursor, at)))? {
+        match self.pointer.up(unit_in(cursor, at))? {
             Gesture::Click(action) => Some(action),
             gesture => {
                 self.session.grip(&gesture);
@@ -318,6 +321,28 @@ pub enum Press {
     /// The pointer's: a click or a drag follows.
     Pointer,
     Drag,
+}
+
+/// How far, in logical px, a press may wander and still click: Android's
+/// touch slop, "distance a touch can wander before we think the user is
+/// scrolling" (`ViewConfiguration.TOUCH_SLOP`, 8 dips).
+const DRAG_SLOP_DIP: f64 = 8.0;
+
+/// What a press is made under, beside where: the display's scale factor,
+/// the last petting, and the time.
+#[derive(Debug, Clone, Copy)]
+pub struct Pressing<'a> {
+    pub scale_factor: f64,
+    pub petting: Option<&'a pixtuoid_scene::pet::PetState>,
+    pub now: std::time::SystemTime,
+}
+
+/// The layout unit a frame drawn at `at` shows at `cursor`, or `None` off
+/// the office.
+fn unit_in(cursor: (f64, f64), at: WindowGeometry) -> Option<pixtuoid_scene::layout::Point> {
+    let unit = unit_at(cursor, at);
+    (cursor.0 >= 0.0 && cursor.1 >= 0.0 && unit.x < at.office.w && unit.y < at.office.h)
+        .then_some(unit)
 }
 
 /// The layout unit a frame drawn at `at` shows at `cursor` (physical px).
@@ -1269,7 +1294,16 @@ mod tests {
         for y in 0..at.office.h {
             for x in 0..at.office.w {
                 let cursor = (centre(x), centre(y));
-                match renderer.press_at(cursor, size, at, (None, now)) {
+                match renderer.press_at(
+                    cursor,
+                    size,
+                    at,
+                    Pressing {
+                        scale_factor: 1.0,
+                        petting: None,
+                        now,
+                    },
+                ) {
                     Press::Pointer => {
                         if let Some(HitAction::Focus(hit)) = renderer.release(cursor, at) {
                             assert_eq!(hit, id, "a click hit another agent");
@@ -1282,7 +1316,16 @@ mod tests {
                 }
                 if matches!(renderer.hit_at(cursor, at), Some(SceneHit::Furniture(_))) {
                     assert_eq!(
-                        renderer.press_at(cursor, size, at, (None, now)),
+                        renderer.press_at(
+                            cursor,
+                            size,
+                            at,
+                            Pressing {
+                                scale_factor: 1.0,
+                                petting: None,
+                                now
+                            }
+                        ),
                         Press::Drag,
                         "a fixture holds the window"
                     );
@@ -1298,14 +1341,32 @@ mod tests {
             f64::from(window.height) - 1.0,
         );
         assert_eq!(
-            renderer.press_at(corner, size, at, (None, now)),
+            renderer.press_at(
+                corner,
+                size,
+                at,
+                Pressing {
+                    scale_factor: 1.0,
+                    petting: None,
+                    now
+                }
+            ),
             Press::Resize
         );
         // A press on the agent that moves lifts it, carries it, and sets it
         // down on release, which clicks nothing.
         let on_agent = on_agent.expect("the agent's unit");
         assert_eq!(
-            renderer.press_at(on_agent, size, at, (None, now)),
+            renderer.press_at(
+                on_agent,
+                size,
+                at,
+                Pressing {
+                    scale_factor: 1.0,
+                    petting: None,
+                    now
+                }
+            ),
             Press::Pointer
         );
         let away = (on_agent.0 + 10.0 * f64::from(at.unit_px), on_agent.1);
@@ -1315,16 +1376,43 @@ mod tests {
         assert!(!renderer.carrying());
         // A carry whose release goes elsewhere is set down when the window
         // loses focus, or at the next press.
-        renderer.press_at(on_agent, size, at, (None, now));
+        renderer.press_at(
+            on_agent,
+            size,
+            at,
+            Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
         assert!(renderer.pointer_moved(away, at));
         assert!(
             renderer.cancel_pointer(),
             "focus lost mid-carry sets it down"
         );
         assert!(!renderer.carrying() && !renderer.cancel_pointer());
-        renderer.press_at(on_agent, size, at, (None, now));
+        renderer.press_at(
+            on_agent,
+            size,
+            at,
+            Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
         assert!(renderer.pointer_moved(away, at));
-        renderer.press_at(corner, size, at, (None, now));
+        renderer.press_at(
+            corner,
+            size,
+            at,
+            Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
         assert!(!renderer.carrying(), "the next press sets it down");
     }
 

@@ -14,10 +14,20 @@ use crate::hit::{HitAction, SceneHit};
 use crate::layout::Point;
 use crate::pet::{PetKind, PetState};
 
-/// How far a press moves, in layout units on either axis, before it lifts
-/// what it pressed rather than clicking it: past a hand's jitter on a
-/// trackpad, under a terminal cell's width.
-const LIFT_UNITS: u16 = 2;
+/// How far a press may wander, in layout units on each axis, and still be a
+/// click: past it, it lifts what it pressed, and a release there clicks
+/// nothing. The painter's, whose pointer moves in its own steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slop {
+    pub x: u16,
+    pub y: u16,
+}
+
+impl Slop {
+    fn exceeded(self, from: Point, to: Point) -> bool {
+        from.x.abs_diff(to.x) >= self.x || from.y.abs_diff(to.y) >= self.y
+    }
+}
 
 /// A figure a pointer can lift.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -105,6 +115,7 @@ enum State {
     Up,
     Pressed {
         at: Point,
+        slop: Slop,
         figure: Option<Figure>,
         action: Option<HitAction>,
     },
@@ -124,6 +135,7 @@ impl Pointer {
         &mut self,
         hit: Option<SceneHit<'_>>,
         at: Point,
+        slop: Slop,
         petting: Option<&PetState>,
         now: SystemTime,
     ) -> Down {
@@ -141,7 +153,12 @@ impl Pointer {
             Pressed::Bare
         };
         self.state = match pressed {
-            Pressed::Something => State::Pressed { at, figure, action },
+            Pressed::Something => State::Pressed {
+                at,
+                slop,
+                figure,
+                action,
+            },
             Pressed::Bare => State::Up,
         };
         Down { pressed, ended }
@@ -162,9 +179,10 @@ impl Pointer {
         match &self.state {
             State::Pressed {
                 at: from,
+                slop,
                 figure: Some(figure),
                 ..
-            } if from.x.abs_diff(at.x) >= LIFT_UNITS || from.y.abs_diff(at.y) >= LIFT_UNITS => {
+            } if slop.exceeded(*from, at) => {
                 let figure = figure.clone();
                 self.state = State::Carrying { at };
                 Some(Gesture::Lift { figure, at })
@@ -181,7 +199,15 @@ impl Pointer {
     /// nothing, and a figure carried lands where it was last carried.
     pub fn up(&mut self, at: Option<Point>) -> Option<Gesture> {
         match std::mem::take(&mut self.state) {
-            State::Pressed { action, .. } => action.filter(|_| at.is_some()).map(Gesture::Click),
+            // Released where it pressed, give or take the slop.
+            State::Pressed {
+                at: from,
+                slop,
+                action,
+                ..
+            } => action
+                .filter(|_| at.is_some_and(|at| !slop.exceeded(from, at)))
+                .map(Gesture::Click),
             State::Carrying { at: last } => Some(Gesture::Drop(at.unwrap_or(last))),
             State::Up => None,
         }
@@ -201,6 +227,8 @@ mod tests {
         Point { x, y }
     }
 
+    const SLOP: Slop = Slop { x: 2, y: 2 };
+
     /// A press on an agent clicks where it releases, and lifts it once it
     /// moves past the jitter: then it carries, and drops on release.
     #[test]
@@ -210,7 +238,7 @@ mod tests {
         let agent = HoverTarget::Agent(id);
         let mut p = Pointer::default();
         assert_eq!(
-            p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now)
+            p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), SLOP, None, now)
                 .pressed,
             Pressed::Something
         );
@@ -220,12 +248,12 @@ mod tests {
             Some(Gesture::Click(HitAction::Focus(id)))
         );
 
-        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), SLOP, None, now);
         assert_eq!(
-            p.moved(pt(10, 10 + LIFT_UNITS)),
+            p.moved(pt(10, 10 + SLOP.y)),
             Some(Gesture::Lift {
                 figure: Figure::Agent(id),
-                at: pt(10, 10 + LIFT_UNITS)
+                at: pt(10, 10 + SLOP.y)
             })
         );
         assert!(p.carrying());
@@ -233,7 +261,7 @@ mod tests {
         assert_eq!(p.up(Some(pt(31, 41))), Some(Gesture::Drop(pt(31, 41))));
         assert!(!p.carrying());
         assert_eq!(p.up(Some(pt(31, 41))), None, "one release per press");
-        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), SLOP, None, now);
         p.moved(pt(10, 20));
         p.moved(pt(12, 24));
         assert_eq!(
@@ -241,7 +269,7 @@ mod tests {
             Some(Gesture::Drop(pt(12, 24))),
             "released off the office, it lands where it was last carried"
         );
-        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), SLOP, None, now);
         assert_eq!(
             p.up(None),
             None,
@@ -256,16 +284,16 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH;
         let agent = HoverTarget::Agent(AgentId::from_parts("claude-code", "s"));
         let mut p = Pointer::default();
-        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), SLOP, None, now);
         p.moved(pt(20, 20));
-        let down = p.down(None, pt(50, 50), None, now);
+        let down = p.down(None, pt(50, 50), SLOP, None, now);
         assert_eq!(
             down.ended,
             Some(Gesture::Drop(pt(20, 20))),
             "the next press sets it down"
         );
         assert!(!p.carrying());
-        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), SLOP, None, now);
         p.moved(pt(30, 30));
         assert_eq!(
             p.cancel(),
@@ -280,27 +308,38 @@ mod tests {
         );
     }
 
-    /// A link clicks but never lifts, and the bare office answers nothing:
-    /// it is the painter's to drag the window by.
+    /// A link clicks where it is released in place, but never lifts, and the
+    /// bare office answers nothing: it is the painter's to drag the window by.
     #[test]
     fn a_link_only_clicks_and_the_bare_office_is_the_painters() {
         let now = SystemTime::UNIX_EPOCH;
         let mut p = Pointer::default();
         assert_eq!(
-            p.down(Some(SceneHit::Star), pt(5, 5), None, now).pressed,
+            p.down(Some(SceneHit::Star), pt(5, 5), SLOP, None, now)
+                .pressed,
             Pressed::Something
         );
         assert_eq!(p.moved(pt(50, 50)), None, "a link does not lift");
         assert_eq!(
             p.up(Some(pt(50, 50))),
-            Some(Gesture::Click(HitAction::Open(crate::hit::REPO_URL)))
+            None,
+            "released away, it clicks nothing"
+        );
+        p.down(Some(SceneHit::Star), pt(5, 5), SLOP, None, now);
+        assert_eq!(
+            p.up(Some(pt(6, 5))),
+            Some(Gesture::Click(HitAction::Open(crate::hit::REPO_URL))),
+            "released in place, within the slop"
         );
         assert_eq!(
-            p.down(Some(SceneHit::Furniture("Desk")), pt(5, 5), None, now)
+            p.down(Some(SceneHit::Furniture("Desk")), pt(5, 5), SLOP, None, now)
                 .pressed,
             Pressed::Bare
         );
-        assert_eq!(p.down(None, pt(5, 5), None, now).pressed, Pressed::Bare);
+        assert_eq!(
+            p.down(None, pt(5, 5), SLOP, None, now).pressed,
+            Pressed::Bare
+        );
         assert_eq!(p.moved(pt(50, 50)), None);
         assert_eq!(p.up(Some(pt(50, 50))), None);
     }
@@ -321,12 +360,24 @@ mod tests {
         };
         let mut p = Pointer::default();
         assert_eq!(
-            p.down(Some(SceneHit::Figure(&pet)), pt(5, 5), Some(&playing), now)
-                .pressed,
+            p.down(
+                Some(SceneHit::Figure(&pet)),
+                pt(5, 5),
+                SLOP,
+                Some(&playing),
+                now
+            )
+            .pressed,
             Pressed::Something
         );
         assert_eq!(p.up(Some(pt(5, 5))), None, "no click while a petting plays");
-        p.down(Some(SceneHit::Figure(&pet)), pt(5, 5), Some(&playing), now);
+        p.down(
+            Some(SceneHit::Figure(&pet)),
+            pt(5, 5),
+            SLOP,
+            Some(&playing),
+            now,
+        );
         assert!(matches!(
             p.moved(pt(9, 5)),
             Some(Gesture::Lift {

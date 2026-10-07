@@ -232,7 +232,16 @@ fn main() -> Result<()> {
     let mut now = now;
     if let Some((from, to)) = drag {
         let window = (win_w, win_h);
-        renderer.press_at(from, window, at, (None, now));
+        renderer.press_at(
+            from,
+            window,
+            at,
+            pixtuoid::floating::offscreen::Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
         if !renderer.pointer_moved(to, at) {
             return Err(anyhow!("--drag lifted nothing at {from:?}"));
         }
