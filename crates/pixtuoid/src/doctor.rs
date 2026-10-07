@@ -51,7 +51,7 @@ fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
     let fields = &line[at + marker.len()..];
     Some(DriftLine {
         source: field_value(fields, drift::SOURCE_FIELD)?,
-        kind: drift::DriftKind::of(field_value(fields, drift::KIND_FIELD)?)?,
+        kind: field_value(fields, drift::KIND_FIELD)?.parse().ok()?,
         fields,
     })
 }

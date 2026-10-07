@@ -35,8 +35,11 @@ pub const SOURCE_FIELD: &str = "source";
 /// The field a breadcrumb names its [`DriftKind`] in.
 pub const KIND_FIELD: &str = "kind";
 
-/// What a breadcrumb reports, as its [`KIND_FIELD`] names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
+/// What a breadcrumb reports, as its [`KIND_FIELD`] names it: `&'static
+/// str::from` writes the name, `FromStr` reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr, strum::EnumString)]
+#[cfg_attr(test, derive(strum::VariantArray))]
+#[strum(serialize_all = "snake_case")]
 pub enum DriftKind {
     /// [`unknown_event`]'s.
     UnknownEvent,
@@ -48,33 +51,12 @@ pub enum DriftKind {
     ShapeDrift,
 }
 
-impl DriftKind {
-    /// Its name in the log.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::UnknownEvent => "unknown_event",
-            Self::MissingField => "missing_field",
-            Self::UnknownDispatch => "unknown_dispatch",
-            Self::ShapeDrift => "shape_drift",
-        }
-    }
-
-    /// The kind a log names `name`.
-    pub fn of(name: &str) -> Option<Self> {
-        Self::VARIANTS
-            .iter()
-            .copied()
-            .find(|kind| kind.name() == name)
-    }
-}
-
 use crate::source::decoder::display_safe;
-use strum::VariantArray as _;
 
 /// A hook/transcript event we don't handle and that isn't a registered custom
 /// event — for a renamed event WE depend on, this is the signal.
 pub fn unknown_event(source: &str, name: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::UnknownEvent.name(), name = %display_safe(name));
+    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::UnknownEvent), name = %display_safe(name));
 }
 
 /// A REQUIRED field of an event we DO handle is absent — the decode degrades to
@@ -82,19 +64,19 @@ pub fn unknown_event(source: &str, name: &str) {
 /// committed to decoding: on a type-discriminator read a missing value just
 /// means "a line we ignore", and breadcrumbing those would flood.
 pub fn missing_field(source: &str, event: &str, field: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::MissingField.name(), event = %display_safe(event), field = %display_safe(field));
+    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::MissingField), event = %display_safe(event), field = %display_safe(field));
 }
 
 /// The subagent-dispatch tool ran under a name we don't recognise — semantic
 /// `subagent_type` detection still handled it, but upstream renamed the tool.
 pub fn unknown_dispatch(source: &str, tool: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::UnknownDispatch.name(), tool = %display_safe(tool));
+    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::UnknownDispatch), tool = %display_safe(tool));
 }
 
 /// A consumed upstream data SHAPE drifted — a registry/transcript field that
 /// still parses but lost a key we read. `detail` carries the specifics.
 pub fn shape_drift(source: &str, detail: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = DriftKind::ShapeDrift.name(), detail = %display_safe(detail));
+    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::ShapeDrift), detail = %display_safe(detail));
 }
 
 #[cfg(test)]
@@ -112,15 +94,15 @@ mod tests {
             unknown_dispatch("codex", "t");
             shape_drift("codex", "d");
         });
-        for &kind in DriftKind::VARIANTS {
+        for &kind in <DriftKind as strum::VariantArray>::VARIANTS {
             assert!(
                 out.contains(&format!(
                     "{SOURCE_FIELD}=codex {KIND_FIELD}=\"{}\"",
-                    kind.name()
+                    <&str>::from(kind)
                 )),
                 "{kind:?}:\n{out}"
             );
-            assert_eq!(DriftKind::of(kind.name()), Some(kind));
+            assert_eq!(<&str>::from(kind).parse(), Ok(kind));
         }
     }
 
