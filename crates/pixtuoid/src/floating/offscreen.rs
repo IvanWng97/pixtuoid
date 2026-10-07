@@ -5,16 +5,18 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
-use pixtuoid_scene::display::{Badge, TextRun};
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, FloorSession};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, RenderInputs};
+use pixtuoid_scene::render_scale::PixelFit;
 use pixtuoid_scene::theme::Theme;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 
 /// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
 /// definition of the floating surface pixel format; the office blit (`window.rs`)
@@ -59,15 +61,28 @@ impl OfficeRenderer {
         self.audio = audio;
     }
 
-    /// Render the floor into the owned buffer at `inputs.size` office-buffer pixels —
-    /// the window downscaled by `window_buffer_geometry`, with no footer row
-    /// subtracted. A too-small layout leaves the buffer filled with the theme's
-    /// `bg_fallback`.
-    pub fn render(&mut self, inputs: RenderInputs<'_>) -> Option<&RgbBuffer> {
+    /// Render the floor into the owned buffer in `at`'s look, the office
+    /// `at`'s logical extent, with no footer row subtracted. A too-small
+    /// layout leaves the buffer filled with the theme's `bg_fallback`.
+    pub fn render(&mut self, at: WindowGeometry, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
+        let WindowFrame {
+            world,
+            theme,
+            place,
+        } = frame;
         let FloorInputs {
             scene, floor, now, ..
-        } = inputs.world;
-        self.session.render(Look::Classic, inputs);
+        } = world;
+        self.session.render(
+            at.look,
+            RenderInputs {
+                world,
+                theme,
+                size: at.office,
+                place,
+                debug_walkable: false,
+            },
+        );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio
             .frame(self.session.audio_frame(scene, floor, now));
@@ -80,10 +95,11 @@ impl OfficeRenderer {
     /// [`presented`](Self::presented) once it shows.
     pub fn render_live(
         &mut self,
-        inputs: RenderInputs<'_>,
+        at: WindowGeometry,
+        frame: WindowFrame<'_>,
         window: (u32, u32),
     ) -> Option<&RgbBuffer> {
-        self.render(inputs);
+        self.render(at, frame);
         let flash = self.session.flash();
         if self.flash.holds(flash, window) {
             return None;
@@ -96,17 +112,6 @@ impl OfficeRenderer {
     /// presenting just now.
     pub fn presented(&mut self) {
         self.flash.shown(self.rendered.0, self.rendered.1);
-    }
-
-    /// The badges of the LAST rendered frame (call right after `render`).
-    pub fn badges(&self) -> &[Badge] {
-        self.session.badges()
-    }
-
-    /// The board's lines and the floor indicator of the LAST rendered frame
-    /// (call right after `render`).
-    pub fn signs(&self) -> &[TextRun] {
-        self.session.signs()
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -136,8 +141,18 @@ impl OfficeRenderer {
     }
 }
 
-/// Integer upscale factor keeping the office buffer near `OFFICE_TARGET_H` px tall, so
-/// pixel-art sprites stay chunky and legible. Min 1: never downscale-and-blur.
+/// One floor's frame for the window: a [`RenderInputs`] whose office extent
+/// the window's [`WindowGeometry`] owns.
+#[derive(Debug, Clone, Copy)]
+pub struct WindowFrame<'a> {
+    pub world: FloorInputs<'a>,
+    pub theme: &'static pixtuoid_scene::theme::Theme,
+    pub place: pixtuoid_scene::look::Place,
+}
+
+/// The window's natural real pixels per logical unit: what keeps the office
+/// near `OFFICE_TARGET_H` units tall, so its art stays chunky and legible.
+/// Min 1.
 pub(crate) fn office_scale(win_h: u32) -> u32 {
     const OFFICE_TARGET_H: u32 = 180;
     (f64::from(win_h) / f64::from(OFFICE_TARGET_H))
@@ -145,19 +160,52 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
         .max(1.0) as u32
 }
 
-/// The window→office-buffer projection for a PHYSICAL-px window: the integer
-/// `office_scale` plus the downscaled buffer dims (`window / scale`, clamped
-/// non-zero, NO footer row). The ONE place this geometry lives, so the desk capacity
-/// derived from it can't drift on an `office_scale`/clamp change.
+/// What a window draws its office as: the look, the office's logical extent
+/// (which the desk capacity is derived from), and the whole factor the
+/// rendered buffer is upscaled by to the window. Everything the window paints
+/// reads it, so another look is another [`window_geometry`] arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowGeometry {
+    pub look: Look,
+    pub office: Size,
+    pub upscale: u16,
+}
+
+/// How a PHYSICAL-px window draws its office: the cutaway at the pack's
+/// `density`, `office_scale` fitted to it and never below it, so the window
+/// never falls back to the classic. The ONE place this geometry lives, so the
+/// desk capacity derived from it can't drift from the office drawn.
 ///
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
-/// error instead of a silent HiDPI over-seed (#803).
-pub fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
-    let scale = office_scale(size.height);
-    let buf_w = (size.width / scale).clamp(1, u32::from(u16::MAX)) as u16;
-    let buf_h = (size.height / scale).clamp(1, u32::from(u16::MAX)) as u16;
-    (scale, buf_w, buf_h)
+/// error instead of a silent HiDPI mis-seed (#803).
+pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeometry {
+    let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
+    let fit = PixelFit::at_least_density(
+        px(office_scale(size.height)),
+        density,
+        Size {
+            w: px(size.width),
+            h: px(size.height),
+        },
+    );
+    WindowGeometry {
+        look: Look::Cutaway {
+            scale: fit.render_scale(),
+        },
+        office: fit.logical(),
+        upscale: fit.upscale(),
+    }
+}
+
+/// The smallest window, in logical px, whose office lays out:
+/// [`min_layout_size`](pixtuoid_scene::layout::min_layout_size) at the pack's
+/// `density`, which [`window_geometry`] never draws below, on a display that
+/// gives a logical px one physical px.
+pub(crate) fn min_window(density: Density) -> LogicalSize<u32> {
+    let min = pixtuoid_scene::layout::min_layout_size();
+    let px = |units: u16| u32::from(units) * u32::from(density.get());
+    LogicalSize::new(px(min.w), px(min.h))
 }
 
 /// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h`. THE one
@@ -178,9 +226,12 @@ pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOOR
 /// There is deliberately NO `cap == 0 → FALLBACK_DESKS` clause: `sync_floor_caps`
 /// `store`s the honest 0 for a window too small to lay out, and a fallback points the
 /// WRONG way, admitting `FALLBACK_DESKS` agents onto desks that do not exist.
-pub(crate) fn boot_capacities_for_window(size: PhysicalSize<u32>) -> [usize; MAX_FLOORS] {
-    let (_scale, buf_w, buf_h) = window_buffer_geometry(size);
-    floor_caps_for_buffer(buf_w, buf_h)
+pub(crate) fn boot_capacities_for_window(
+    size: PhysicalSize<u32>,
+    density: Density,
+) -> [usize; MAX_FLOORS] {
+    let office = window_geometry(size, density).office;
+    floor_caps_for_buffer(office.w, office.h)
 }
 
 /// Publish [`floor_caps_for_buffer`]'s answer into the reducer's per-floor capacity
@@ -214,17 +265,12 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
-/// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
-/// by eye against `examples/floating_snapshot`.
-const LABEL_FONT_PX: f32 = 12.0;
-/// Window pixels a badge's plate reaches past its text on every side.
-const BADGE_PLATE_PAD_PX: i32 = 2;
-/// Window pixels a badge's text top sits above its anchor.
-const BADGE_LIFT_PX: i32 = 12;
-/// Badge drop-shadow — the AA text draws straight over the office (no TUI
-/// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
-const BADGE_SHADOW: u32 = 0x0000_0000;
+/// The footer's AA font size (px), drawn at NATIVE surface res so it stays a
+/// crisp fixed-height caption whatever the office's scale.
+const FOOTER_FONT_PX: f32 = 12.0;
+/// The footer text's drop shadow: it draws straight over the office, so a 1px
+/// offset shadow keeps it legible over bright windows and plants.
+const TEXT_SHADOW: u32 = 0x0000_0000;
 
 /// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
 /// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
@@ -271,7 +317,7 @@ impl<'a> XrgbSurface<'a> {
     }
 
     /// Alpha-composite `color` over the pixel at `(x, y)` by `coverage` — a straight
-    /// linear blend in `0x00RRGGBB` space; the badge/board sit on opaque office
+    /// linear blend in `0x00RRGGBB` space; the footer sits on opaque office
     /// pixels, so there is no alpha channel to keep. Off-surface is a no-op.
     fn blend(&mut self, x: i32, y: i32, color: u32, coverage: f32) {
         if x < 0 || y < 0 || (x as usize) >= self.w || (y as usize) >= self.h {
@@ -288,23 +334,10 @@ impl<'a> XrgbSurface<'a> {
         });
     }
 
-    /// Fill the `w`×`h` rect from `(x, y)` with `color`, clipped to the
-    /// surface.
-    fn fill(&mut self, (x, y): (i32, i32), (w, h): (i32, i32), color: u32) {
-        let (x0, y0) = (x.max(0), y.max(0));
-        let (x1, y1) = ((x + w).min(self.w as i32), (y + h).min(self.h as i32));
-        for py in y0..y1 {
-            let row = py as usize * self.w;
-            for px in x0..x1 {
-                self.px[row + px as usize] = color;
-            }
-        }
-    }
-
     /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
     fn draw_shadowed_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
         crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
-            self.blend(gx, gy, BADGE_SHADOW, cov)
+            self.blend(gx, gy, TEXT_SHADOW, cov)
         });
         crate::aa_text::draw_text_at(text, x, top_y, font_px, |gx, gy, cov| {
             self.blend(gx, gy, color, cov)
@@ -312,97 +345,26 @@ impl<'a> XrgbSurface<'a> {
     }
 }
 
-/// Paint `badges` into the upscaled [`XrgbSurface`]. Each badge's `at` is
-/// office-buffer space → multiply by `scale` for screen space; the badge is
-/// centered horizontally over it and sits just above the head.
-pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[Badge], scale: i32) {
-    let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
-    let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
-    for Badge {
-        at,
-        marker: ink,
-        name,
-        plate,
-        ..
-    } in badges
-    {
-        let tw = mw + crate::aa_text::text_width(&name.text, LABEL_FONT_PX);
-        let cx = i32::from(at.x) * scale - tw / 2;
-        let cy = i32::from(at.y) * scale - BADGE_LIFT_PX;
-        let pad = BADGE_PLATE_PAD_PX;
-        let h = LABEL_FONT_PX.ceil() as i32;
-        sb.fill(
-            (cx - pad, cy - pad),
-            (tw + 2 * pad, h + 2 * pad),
-            pack_xrgb(*plate),
-        );
-        sb.draw_shadowed_text(&marker, cx, cy, LABEL_FONT_PX, pack_xrgb(*ink));
-        sb.draw_shadowed_text(&name.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(name.ink));
-    }
-}
-
-/// Paint the neon wall-board text over the already-painted panel, into the upscaled
-/// surface. The panel interior is `NEON_PANEL_INNER_*` in office-buffer px, so the board
-/// text ANCHORS to it and SCALES with the office `scale` (unlike the fixed-height name
-/// badges) — the three rows always fit inside the glowing frame. At a very small office
-/// scale the rows would be sub-legible; there we leave the panel empty rather than mush.
-pub fn paint_wall_board_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], scale: i32) {
-    use pixtuoid_scene::display::{Align, TextRole};
-    use pixtuoid_scene::layout::NEON_PANEL_INNER_H;
-    if scale <= 0 {
-        return;
-    }
-    let row_h = i32::from(NEON_PANEL_INNER_H) * scale / 3;
-    // Below this a row can't hold a legible glyph — leave the empty glowing panel.
-    const MIN_ROW_PX: i32 = 4;
-    if row_h < MIN_ROW_PX {
-        return;
-    }
-    // Fill ~85% of the row so descenders don't collide with the next row.
-    let font_px = row_h as f32 * 0.85;
-    let board = runs
-        .iter()
-        .filter(|run| matches!(run.role, TextRole::Brand | TextRole::Star | TextRole::Board));
-    for run in board {
-        let width: i32 = run
-            .spans
-            .iter()
-            .map(|s| crate::aa_text::text_width(&s.text, font_px))
-            .sum();
-        let at = i32::from(run.at.x) * scale;
-        let mut x = match run.align {
-            Align::Right => (at - width).max(0),
-            Align::Over | Align::Centre => at - width / 2,
-            Align::Left => at,
-        };
-        let y = i32::from(run.at.y) * scale;
-        for span in &run.spans {
-            sb.draw_shadowed_text(&span.text, x, y, font_px, pack_xrgb(span.ink));
-            x += crate::aa_text::text_width(&span.text, font_px);
-        }
-    }
-}
-
 /// Column budget for the floating footer at `win_w` px — how many monospace Monaspace
 /// advances fit between the margins. Monaspace is fixed-advance, so a column budget maps
 /// cleanly to pixels.
 pub fn footer_budget(win_w: usize) -> u16 {
-    let advance = crate::aa_text::text_width("M", LABEL_FONT_PX).max(1);
+    let advance = crate::aa_text::text_width("M", FOOTER_FONT_PX).max(1);
     (((win_w as i32 - 2 * FOOTER_MARGIN_PX).max(0)) / advance) as u16
 }
 
 /// Paint the shared status footer as a bottom-overlay band — the floating twin of the
 /// TUI's status row, rendering the SAME [`build_footer`] model so the two can't drift.
 /// An OVERLAY over the office's bottom rows: it never insets the buffer (that would
-/// shift the desk-capacity lockstep). Fixed caption height like the name badges, so it
-/// stays crisp at any office scale.
+/// shift the desk-capacity lockstep). Fixed caption height, so it stays crisp at any
+/// office scale.
 pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, theme: &Theme) {
-    let y = (sb.h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FOOTER_MARGIN_PX).max(0);
+    let y = (sb.h as i32 - crate::aa_text::line_height(FOOTER_FONT_PX) - FOOTER_MARGIN_PX).max(0);
     let mut x = FOOTER_MARGIN_PX;
     for seg in &model.segments {
         let color = pack_xrgb(seg.tone.rgb(theme));
-        sb.draw_shadowed_text(&seg.text, x, y, LABEL_FONT_PX, color);
-        x += crate::aa_text::text_width(&seg.text, LABEL_FONT_PX);
+        sb.draw_shadowed_text(&seg.text, x, y, FOOTER_FONT_PX, color);
+        x += crate::aa_text::text_width(&seg.text, FOOTER_FONT_PX);
     }
 }
 
@@ -413,28 +375,29 @@ mod tests {
     use super::*;
     use pixtuoid_scene::floor::{FloorMeta, PetInputs};
 
-    /// A badge reading `name` in `tone` under `theme`, hung from `at`.
-    fn badge(
-        at: pixtuoid_scene::layout::Point,
-        name: &str,
-        tone: pixtuoid_scene::badge::BadgeTone,
-        theme: &Theme,
-    ) -> Badge {
-        let ink = pixtuoid_scene::badge::badge_ink(name, tone, theme);
-        Badge {
-            agent: pixtuoid_core::AgentId::from_transcript_path("/badge/0.jsonl"),
-            at,
-            marker: ink.marker,
-            name: pixtuoid_scene::display::TextSpan {
-                text: name.into(),
-                ink: ink.name,
+    /// The bundled pack's densest art, which the window draws at.
+    fn density() -> Density {
+        pixtuoid_scene::pack::load_bundled_pack()
+            .expect("bundled pack loads")
+            .max_density_variant()
+    }
+
+    /// The window's geometry for an office `size` units big, at the test
+    /// pack's densest art and no upscale.
+    fn cutaway(size: Size) -> WindowGeometry {
+        let density = density();
+        WindowGeometry {
+            look: Look::Cutaway {
+                scale: pixtuoid_scene::render_scale::RenderScale::new(density.get())
+                    .expect("nonzero"),
             },
-            plate: theme.ui.tooltip_bg,
+            office: size,
+            upscale: 1,
         }
     }
+
     use pixtuoid_scene::layout::Size;
     use std::time::Duration;
-    use winit::dpi::LogicalSize;
 
     #[test]
     fn fill_upscaled_repeats_the_last_office_pixel_into_the_remainder_edge() {
@@ -494,21 +457,27 @@ mod tests {
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         let buf = renderer
-            .render(RenderInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: FloorMeta::ground(),
-                    pets: PetInputs::default(),
+            .render(
+                cutaway(Size { w: 160, h: 96 }),
+                WindowFrame {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    place: pixtuoid_scene::look::Place::default(),
                 },
-                theme,
-                size: Size { w: 160, h: 96 },
-                place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
-            })
+            )
             .expect("a frame");
-        assert_eq!((buf.width(), buf.height()), (160, 96));
+        let d = density().get();
+        assert_eq!(
+            (buf.width(), buf.height()),
+            (160 * d, 96 * d),
+            "the office at its densest art"
+        );
         // `ensure_size` pre-fills with `bg_fallback` (non-black) BEFORE the painter runs,
         // so "any non-black pixel" would pass even if the painter no-op'd.
         let bg = theme.surface.bg_fallback;
@@ -559,7 +528,8 @@ mod tests {
             let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
             self.screen.at(now);
             let frame = self.renderer.render_live(
-                RenderInputs {
+                cutaway(Size { w: 160, h: 96 }),
+                WindowFrame {
                     world: FloorInputs {
                         scene: &self.scene,
                         pack: crate::test_flash::pack(),
@@ -568,9 +538,7 @@ mod tests {
                         pets: PetInputs::default(),
                     },
                     theme,
-                    size: Size { w: 160, h: 96 },
                     place: pixtuoid_scene::look::Place::default(),
-                    debug_walkable: false,
                 },
                 self.px,
             );
@@ -715,16 +683,24 @@ mod tests {
     }
 
     #[test]
+    fn the_smallest_window_seats_every_floor_at_any_scale_factor() {
+        let min = min_window(density());
+        for factor in 1..=3 {
+            let size = PhysicalSize::new(min.width * factor, min.height * factor);
+            let caps = boot_capacities_for_window(size, density());
+            assert!(caps.iter().all(|&c| c > 0), "{factor}x: {caps:?}");
+        }
+    }
+
+    #[test]
     fn boot_capacities_for_window_match_the_first_redraw_geometry_not_the_tui_overseed() {
         let (w, h) = (1280u32, 720u32);
-        let scale = office_scale(h);
-        let buf_w = (w / scale) as u16;
-        let buf_h = (h / scale) as u16;
-        let boot = boot_capacities_for_window(PhysicalSize::new(w, h));
+        let office = window_geometry(PhysicalSize::new(w, h), density()).office;
+        let boot = boot_capacities_for_window(PhysicalSize::new(w, h), density());
         for (i, &got) in boot.iter().enumerate() {
             let want = pixtuoid_scene::floor::floor_capacity(
-                buf_w,
-                buf_h,
+                office.w,
+                office.h,
                 pixtuoid_scene::floor::floor_seed(i),
             );
             assert_eq!(
@@ -756,41 +732,40 @@ mod tests {
             f64::from(crate::config::FLOATING_DEFAULT_H),
         );
         // The logical size read as physical — the defect.
-        let as_if_physical = boot_capacities_for_window(PhysicalSize::new(
-            logical.width as u32,
-            logical.height as u32,
-        ));
+        let as_if_physical = boot_capacities_for_window(
+            PhysicalSize::new(logical.width as u32, logical.height as u32),
+            density(),
+        );
 
-        // MEASURED buffers for the default 360×240 logical window. `office_scale`
-        // ROUNDS, so this is NOT monotone in sf — no logical-side seed is sound.
-        // The sf-1.0 row is also what pins `render_frame.rs`'s `FLOATING_DEFAULT`
-        // copy of these constants: a change to either reds this row first.
+        // MEASURED offices for the default 480×320 logical window. `office_scale`
+        // ROUNDS before the density fit, so the office is NOT monotone in sf (at
+        // 4× it shrinks to 240×160) — no logical-side seed is sound.
         let measured = [
-            (1.00_f64, (360u32, 240u32), 80usize),
-            (1.25, (225, 150), 30),
-            (1.50, (270, 180), 42),
-            (1.75, (315, 210), 56),
+            (1.00_f64, (120u32, 80u32), 6usize),
+            (1.25, (150, 100), 12),
+            (1.50, (180, 120), 20),
+            (1.75, (210, 140), 24),
             (2.00, (240, 160), 30),
-            (3.00, (270, 180), 42),
+            (3.00, (360, 240), 80),
         ];
         for (sf, want_buf, want_floor0) in measured {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
-            let (_scale, buf_w, buf_h) = window_buffer_geometry(physical);
+            let office = window_geometry(physical, density()).office;
             assert_eq!(
-                (u32::from(buf_w), u32::from(buf_h)),
+                (u32::from(office.w), u32::from(office.h)),
                 want_buf,
-                "office buffer at {sf}× of {logical:?}"
+                "office at {sf}× of {logical:?}"
             );
             assert_eq!(
-                boot_capacities_for_window(physical)[0],
+                boot_capacities_for_window(physical, density())[0],
                 want_floor0,
                 "floor-0 seed at {sf}×"
             );
         }
-        let at_2x = boot_capacities_for_window(logical.to_physical(2.0));
+        let at_2x = boot_capacities_for_window(logical.to_physical(2.0), density());
         assert!(
-            at_2x[0] < as_if_physical[0],
-            "logical-as-physical over-seeds at 2×: {} vs the real {}",
+            at_2x[0] > as_if_physical[0],
+            "logical-as-physical under-seeds at 2×: {} vs the real {}",
             as_if_physical[0],
             at_2x[0],
         );
@@ -802,18 +777,18 @@ mod tests {
         // assert below went red. Derive so the next move can't reach it.
         let min = pixtuoid_scene::layout::min_layout_size();
         let tiny = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
-        let (_scale, buf_w, buf_h) = window_buffer_geometry(tiny);
+        let office = window_geometry(tiny, density()).office;
         assert_eq!(
             pixtuoid_scene::floor::floor_capacity(
-                buf_w,
-                buf_h,
+                office.w,
+                office.h,
                 pixtuoid_scene::floor::floor_seed(0)
             ),
             0,
             "fixture must actually be unlayoutable, else this asserts nothing"
         );
         assert_eq!(
-            boot_capacities_for_window(tiny)[0],
+            boot_capacities_for_window(tiny, density())[0],
             0,
             "the seed must agree with what the redraw stores, not invent desks"
         );
@@ -868,10 +843,10 @@ mod tests {
             PhysicalSize::new(853, 480),
             unlayoutable,
         ] {
-            let seed = boot_capacities_for_window(window);
+            let seed = boot_capacities_for_window(window, density());
             let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
-            let (_scale, buf_w, buf_h) = window_buffer_geometry(window);
-            sync_floor_caps(&mut None, &caps, buf_w, buf_h);
+            let office = window_geometry(window, density()).office;
+            sync_floor_caps(&mut None, &caps, office.w, office.h);
             let published: [usize; MAX_FLOORS] =
                 std::array::from_fn(|i| caps[i].load(Ordering::Relaxed));
             assert_eq!(
@@ -908,244 +883,6 @@ mod tests {
             caps[0].load(Ordering::Relaxed),
             999,
             "a skipped publish must not touch the atomics"
-        );
-    }
-
-    /// A badge sits on its plate in the window too: the plate reaches
-    /// [`BADGE_PLATE_PAD_PX`] past its text on every side and no further, and
-    /// the text draws over it.
-    #[test]
-    fn a_badge_sits_on_its_plate_in_the_window() {
-        use pixtuoid_scene::badge::BadgeTone;
-        use pixtuoid_scene::layout::Point;
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let plate = Rgb { r: 1, g: 2, b: 3 };
-        let badge = Badge {
-            plate,
-            ..badge(
-                Point { x: 40, y: 30 },
-                "cc\u{b7}api",
-                BadgeTone::Idle,
-                theme,
-            )
-        };
-        let (w, h, scale) = (240usize, 120usize, 2);
-        let mut sb = vec![0x00FF_FFFFu32; w * h];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            std::slice::from_ref(&badge),
-            scale,
-        );
-        // The text's box, as `paint_labels_into_surface` lays it.
-        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
-        let tw = crate::aa_text::text_width(&marker, LABEL_FONT_PX)
-            + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);
-        let (cx, cy) = (
-            i32::from(badge.at.x) * scale - tw / 2,
-            i32::from(badge.at.y) * scale - BADGE_LIFT_PX,
-        );
-        let (th, pad) = (LABEL_FONT_PX.ceil() as i32, BADGE_PLATE_PAD_PX);
-        let at = |x: i32, y: i32| sb[y as usize * w + x as usize];
-        let (left, top) = (cx - pad, cy - pad);
-        let (right, bottom) = (cx + tw + pad - 1, cy + th + pad - 1);
-        let plated = pack_xrgb(plate);
-        assert_eq!(at(left, top), plated, "the top-left corner");
-        assert_eq!(at(right, bottom), plated, "the bottom-right corner");
-        assert_ne!(at(left - 1, top), plated, "left of the plate");
-        assert_ne!(at(left, top - 1), plated, "above the plate");
-        assert_ne!(at(right + 1, bottom), plated, "right of the plate");
-        assert_ne!(at(right, bottom + 1), plated, "below the plate");
-        let inside: Vec<u32> = (top..=bottom)
-            .flat_map(|y| (left..=right).map(move |x| (x, y)))
-            .map(|(x, y)| at(x, y))
-            .collect();
-        for ink in [badge.marker, badge.name.ink] {
-            assert!(
-                inside.contains(&pack_xrgb(ink)),
-                "the text draws {ink:?} over the plate"
-            );
-        }
-    }
-
-    #[test]
-    fn paint_labels_uses_the_right_color_per_tone() {
-        use pixtuoid_scene::badge::BadgeTone;
-        use pixtuoid_scene::layout::Point;
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let as_u32 = |c: Rgb| u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b);
-        let badge_dot = |tone| {
-            // A leading ● guarantees a solid full-coverage glyph.
-            vec![badge(Point { x: 20, y: 20 }, "\u{25cf}cc", tone, theme)]
-        };
-        for (tone, expected) in [
-            (BadgeTone::Active, theme.ui.label_active),
-            (BadgeTone::Waiting, theme.ui.label_waiting),
-            (BadgeTone::Idle, theme.ui.label_idle),
-            (BadgeTone::Exiting, theme.ui.label_exiting),
-        ] {
-            let mut sb = vec![0u32; 100 * 100];
-            paint_labels_into_surface(
-                &mut XrgbSurface::new(&mut sb, 100, 100).expect("sized"),
-                &badge_dot(tone),
-                2,
-            );
-            assert!(
-                sb.contains(&as_u32(expected)),
-                "tone {tone:?} must paint its theme color {expected:?}"
-            );
-        }
-    }
-
-    /// The badge's ink centres on the anchor scaled to the surface: the run's `at`
-    /// is already the sprite's top-centre, so any extra offset walks it off the sprite.
-    #[test]
-    fn a_badge_centres_its_ink_on_the_scaled_anchor() {
-        use pixtuoid_scene::badge::BadgeTone;
-        use pixtuoid_scene::layout::Point;
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let (w, h, scale) = (240usize, 60usize, 3i32);
-        let ground = 0x0080_8080u32;
-        let mut sb = vec![ground; w * h];
-        let anchor = Point { x: 40, y: 15 };
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge(anchor, "idle-x", BadgeTone::Idle, theme)],
-            scale,
-        );
-        let cols: Vec<i32> = (0..w)
-            .filter(|&x| (0..h).any(|y| sb[y * w + x] != ground))
-            .map(|x| x as i32)
-            .collect();
-        let (Some(&left), Some(&right)) = (cols.first(), cols.last()) else {
-            panic!("the badge painted nothing");
-        };
-        let centre = i32::from(anchor.x) * scale;
-        // Glyph side bearings and the 1-px drop shadow, not an offset.
-        const ROUNDING_PX: i32 = 2;
-        assert!(
-            (i32::midpoint(left, right) - centre).abs() <= ROUNDING_PX,
-            "ink spans {left}..={right}, centred off the anchor's {centre}"
-        );
-    }
-
-    #[test]
-    fn paint_labels_ink_the_marker_and_the_name_as_the_model_says() {
-        // A registered prefix (`cc·`), so the marker's ink differs from the name's.
-        use pixtuoid_scene::badge::{BADGE_MARKER, BadgeTone, badge_ink};
-        use pixtuoid_scene::layout::Point;
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let text = "cc\u{b7}api";
-        let ink = badge_ink(text, BadgeTone::Idle, theme);
-        assert_ne!(ink.marker, ink.name, "premise: the two parts differ");
-        let (w, h, scale, anchor) = (120usize, 120usize, 2, Point { x: 20, y: 20 });
-        let mut sb = vec![0u32; w * h];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &[badge(anchor, text, BadgeTone::Idle, theme)],
-            scale,
-        );
-        // The marker's columns, then the name's, as `paint_labels_into_surface`
-        // lays them.
-        let marker = BADGE_MARKER.to_string();
-        let tw = crate::aa_text::text_width(&format!("{marker}{text}"), LABEL_FONT_PX);
-        let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
-        let left = i32::from(anchor.x) * scale - tw / 2;
-        let colours = |cols: std::ops::Range<i32>| -> std::collections::HashSet<u32> {
-            sb.iter()
-                .enumerate()
-                .filter(|(i, _)| cols.contains(&((i % w) as i32)))
-                .map(|(_, &p)| p)
-                .collect()
-        };
-        let (dot, name) = (colours(left..left + mw), colours(left + mw..left + tw));
-        let (m, n) = (pack_xrgb(ink.marker), pack_xrgb(ink.name));
-        assert!(
-            dot.contains(&m) && !dot.contains(&n),
-            "the ● takes the marker ink"
-        );
-        assert!(
-            name.contains(&n) && !name.contains(&m),
-            "the name takes the name ink"
-        );
-    }
-
-    #[test]
-    fn paint_labels_render_antialiased_partial_coverage_not_binary_pixels() {
-        use pixtuoid_scene::badge::BadgeTone;
-        use pixtuoid_scene::layout::Point;
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        // A WHITE ground: AA edges land STRICTLY between the ground and any fully-lit ink.
-        let white = 0x00FF_FFFFu32;
-        let mut sb = vec![white; 200 * 60];
-        let active = vec![badge(
-            Point { x: 20, y: 20 },
-            "active",
-            BadgeTone::Active,
-            theme,
-        )];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, 200, 60).expect("sized"),
-            &active,
-            2,
-        );
-        let ink = pack_xrgb(theme.ui.label_active);
-        let shadow = 0x0000_0000u32;
-        let intermediate = sb.iter().any(|&p| p != white && p != ink && p != shadow);
-        assert!(
-            intermediate,
-            "AA text must blend edge pixels between the ground and the ink"
-        );
-        assert!(
-            sb.contains(&ink),
-            "glyph interior reaches full-coverage tone color"
-        );
-    }
-
-    #[test]
-    fn wall_board_paints_brand_and_mood_tones_into_the_panel() {
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        // A generous scale, so full-coverage stroke interiors reach the exact tone colors.
-        let counts = pixtuoid_scene::tally::StateCounts {
-            active: 2,
-            waiting: 1,
-            idle: 1,
-            exiting: 0,
-            total: 4,
-        };
-        let board = pixtuoid_scene::neon_sign::build_board(
-            counts,
-            90,
-            None,
-            None,
-            pixtuoid_scene::anim::Motion::Full,
-            std::time::SystemTime::UNIX_EPOCH,
-        );
-        let runs = board.runs(theme);
-        let scale = 8i32;
-        let (w, h) = (320usize, 96usize);
-        let mut sb = vec![0u32; w * h];
-        paint_wall_board_into_surface(
-            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &runs,
-            scale,
-        );
-        assert!(
-            sb.contains(&pack_xrgb(theme.ui.neon_brand)),
-            "L1 brand paints the neon-brand hue"
-        );
-        assert!(
-            sb.contains(&pack_xrgb(theme.ui.label_active)),
-            "the ● work mood segment paints the active hue"
-        );
-        let mut tiny = vec![0u32; w * h];
-        paint_wall_board_into_surface(
-            &mut XrgbSurface::new(&mut tiny, w, h).expect("sized"),
-            &runs,
-            1,
-        );
-        assert!(
-            tiny.iter().all(|&p| p == 0),
-            "a scale-1 office suppresses the sub-legible board"
         );
     }
 
@@ -1213,19 +950,20 @@ mod tests {
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
-        renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
             },
-            theme,
-            size: Size { w: 160, h: 96 },
-            place: pixtuoid_scene::look::Place::default(),
-            debug_walkable: false,
-        });
+        );
         let frames = crate::audio::drain_frames(&rx);
         assert!(!frames.is_empty(), "an enabled handle receives frames");
         let stems = frames.last().unwrap().stems;
@@ -1303,19 +1041,20 @@ mod tests {
             let now = now0 + std::time::Duration::from_secs(2 * step);
             // 192x160: tall enough that the corridor hosts BOTH appliances
             // (the vending/printer height gates in layout::compute).
-            renderer.render(RenderInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: FloorMeta::ground(),
-                    pets: PetInputs::default(),
+            renderer.render(
+                cutaway(Size { w: 192, h: 160 }),
+                WindowFrame {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    place: pixtuoid_scene::look::Place::default(),
                 },
-                theme,
-                size: Size { w: 192, h: 160 },
-                place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
-            });
+            );
             heard.extend(
                 crate::audio::drain_frames(&rx)
                     .into_iter()
@@ -1350,37 +1089,39 @@ mod tests {
 
         let mut agents = vec![active_on("/d/f0.jsonl", 0, 0)];
         let scene = scene_with(agents.clone(), cap);
-        renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
             },
-            theme,
-            size: Size { w: 160, h: 96 },
-            place: pixtuoid_scene::look::Place::default(),
-            debug_walkable: false,
-        });
+        );
         crate::audio::drain_frames(&rx); // discard the priming frames
 
         agents.push(active_on("/d/f1-new.jsonl", 1, cap));
         let scene = scene_with(agents.clone(), cap);
         now += std::time::Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
-        renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
             },
-            theme,
-            size: Size { w: 160, h: 96 },
-            place: pixtuoid_scene::look::Place::default(),
-            debug_walkable: false,
-        });
+        );
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
             .into_iter()
             .flat_map(|f| f.events)
@@ -1393,19 +1134,20 @@ mod tests {
         agents.push(active_on("/d/f0-new.jsonl", 0, 1));
         let scene = scene_with(agents, cap);
         now += std::time::Duration::from_millis(pixtuoid_scene::anim::PAINT_FRAME_MS);
-        renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
             },
-            theme,
-            size: Size { w: 160, h: 96 },
-            place: pixtuoid_scene::look::Place::default(),
-            debug_walkable: false,
-        });
+        );
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
             .into_iter()
             .flat_map(|f| f.events)
@@ -1414,91 +1156,5 @@ mod tests {
             on_floor.contains(&pixtuoid_scene::audio::OneShot::DoorChime),
             "a ground-floor walk-in must chime the floating window: {on_floor:?}"
         );
-    }
-
-    /// Every badge the frame drew paints into the surface: its marker and its
-    /// name, each in its own ink, inside the box it is centred in.
-    #[test]
-    fn every_badge_the_frame_drew_paints_into_the_surface() {
-        use pixtuoid_core::source::AgentEvent;
-        use pixtuoid_core::{AgentId, Reducer, Transport};
-        let pack = std::sync::Arc::new(
-            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
-        );
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
-
-        // Seeded the production way: a SessionStart through the reducer assigns the desk.
-        let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
-        let mut reducer = Reducer::new();
-        for (session, cwd) in [
-            ("offscreen-a", "/home/user/demo"),
-            ("offscreen-b", "/srv/api"),
-        ] {
-            reducer.apply(
-                &mut scene,
-                AgentEvent::SessionStart {
-                    agent_id: AgentId::from_parts("claude-code", session),
-                    source: "claude-code".to_string(),
-                    session_id: session.to_string(),
-                    cwd: std::path::PathBuf::from(cwd),
-                    parent_id: None,
-                },
-                now,
-                Transport::Jsonl,
-            );
-        }
-
-        // No frame rendered yet → no drawn sprites → no badges.
-        assert!(renderer.badges().is_empty());
-        let (w, h, scale) = (160u16, 96u16, 3i32);
-        renderer.render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
-            },
-            theme,
-            size: Size { w, h },
-            place: pixtuoid_scene::look::Place::default(),
-            debug_walkable: false,
-        });
-        let badges = renderer.badges();
-        assert_eq!(badges.len(), 2, "two seeded agents → two name badges");
-        let (sw, sh) = (usize::from(w) * 3, usize::from(h) * 3);
-        let ground = 0x0080_8080u32;
-        let mut sb = vec![ground; sw * sh];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, sw, sh).expect("sized"),
-            badges,
-            scale,
-        );
-        let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
-        for badge in badges {
-            let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
-            let tw = mw + crate::aa_text::text_width(&badge.name.text, LABEL_FONT_PX);
-            let left = i32::from(badge.at.x) * scale - tw / 2;
-            let top = i32::from(badge.at.y) * scale - crate::aa_text::line_height(LABEL_FONT_PX);
-            let inks: std::collections::HashSet<u32> = sb
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| {
-                    let (x, y) = ((i % sw) as i32, (i / sw) as i32);
-                    (left..left + tw).contains(&x)
-                        && (top..i32::from(badge.at.y) * scale).contains(&y)
-                })
-                .map(|(_, &p)| p)
-                .collect();
-            for ink in [badge.marker, badge.name.ink] {
-                assert!(
-                    inks.contains(&pack_xrgb(ink)),
-                    "{:?}'s badge lacks {ink:?}",
-                    badge.name.text
-                );
-            }
-        }
     }
 }
