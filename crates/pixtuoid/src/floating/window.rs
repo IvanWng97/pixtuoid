@@ -113,7 +113,9 @@ impl FloatingApp {
             pack,
             config_path,
             pause: pixtuoid_scene::anim::PauseClock::default(),
-            screen: super::offscreen::Screen::new(true),
+            // Until `resumed` names the platform: presenting every frame is
+            // safe on any.
+            screen: super::offscreen::Screen::new(false),
             jank: crate::jank::Jank::new(Instant::now()),
             motion,
             renderer,
@@ -543,9 +545,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 }
                 self.request_redraw();
             }
-            WindowEvent::RedrawRequested => {
-                self.redraw();
-            }
+            WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::Resized(_) => self.request_redraw(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = position;
