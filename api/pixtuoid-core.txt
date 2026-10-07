@@ -380,6 +380,8 @@ impl core::fmt::Debug for pixtuoid_core::source::drift::DriftKind
 pub fn pixtuoid_core::source::drift::DriftKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for pixtuoid_core::source::drift::DriftKind
 impl core::marker::StructuralPartialEq for pixtuoid_core::source::drift::DriftKind
+impl strum::VariantArray for pixtuoid_core::source::drift::DriftKind
+pub const pixtuoid_core::source::drift::DriftKind::VARIANTS: &'static [Self]
 impl core::marker::Freeze for pixtuoid_core::source::drift::DriftKind
 impl core::marker::Send for pixtuoid_core::source::drift::DriftKind
 impl core::marker::Sync for pixtuoid_core::source::drift::DriftKind

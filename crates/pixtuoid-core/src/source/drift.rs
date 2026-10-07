@@ -36,7 +36,7 @@ pub const SOURCE_FIELD: &str = "source";
 pub const KIND_FIELD: &str = "kind";
 
 /// What a breadcrumb reports, as its [`KIND_FIELD`] names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
 pub enum DriftKind {
     /// [`unknown_event`]'s.
     UnknownEvent,
@@ -49,13 +49,6 @@ pub enum DriftKind {
 }
 
 impl DriftKind {
-    const ALL: [Self; 4] = [
-        Self::UnknownEvent,
-        Self::MissingField,
-        Self::UnknownDispatch,
-        Self::ShapeDrift,
-    ];
-
     /// Its name in the log.
     pub const fn name(self) -> &'static str {
         match self {
@@ -68,11 +61,15 @@ impl DriftKind {
 
     /// The kind a log names `name`.
     pub fn of(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.name() == name)
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|kind| kind.name() == name)
     }
 }
 
 use crate::source::decoder::display_safe;
+use strum::VariantArray as _;
 
 /// A hook/transcript event we don't handle and that isn't a registered custom
 /// event — for a renamed event WE depend on, this is the signal.
@@ -115,7 +112,7 @@ mod tests {
             unknown_dispatch("codex", "t");
             shape_drift("codex", "d");
         });
-        for kind in DriftKind::ALL {
+        for &kind in DriftKind::VARIANTS {
             assert!(
                 out.contains(&format!(
                     "{SOURCE_FIELD}=codex {KIND_FIELD}=\"{}\"",

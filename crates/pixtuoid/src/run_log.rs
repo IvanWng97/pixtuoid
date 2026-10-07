@@ -159,7 +159,7 @@ fn rotate_if_large(path: &Path) {
 ///
 /// The warning is `sanitize`d where it is MINTED, for the reason `crate::display_path`
 /// gives: the path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`.
-pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
+pub(crate) fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     read_log_tail(path, u64::MAX)
 }
 
@@ -207,15 +207,15 @@ pub enum LogLocation {
 }
 
 /// The extension of a run's file in a [`LogLocation::Runs`] directory.
-pub const RUN_LOG_EXT: &str = "log";
+const RUN_LOG_EXT: &str = "log";
 
 /// The size past which the file `$PIXTUOID_LOG` names rotates at startup.
-pub const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
 /// The most one [`LogLocation::read`] takes of the retained runs, newest first: what
 /// the single log held at most across its two generations, so a week of
 /// verbose runs costs a reader no more than it did.
-pub const LOG_READ_BYTES: u64 = 2 * LOG_ROTATE_BYTES;
+const LOG_READ_BYTES: u64 = 2 * LOG_ROTATE_BYTES;
 
 impl LogLocation {
     /// Where this process's log goes: `$PIXTUOID_LOG`'s file, else a runs

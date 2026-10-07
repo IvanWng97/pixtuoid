@@ -1,5 +1,5 @@
-//! Logging bootstrap: the tracing-subscriber install + the log-file path
-//! resolution/rotation.
+//! Logging bootstrap: installs the tracing subscriber over the sink
+//! [`pixtuoid::run_log`] opens.
 
 use std::io::Write;
 use std::path::Path;
