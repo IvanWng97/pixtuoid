@@ -27,6 +27,8 @@ pub(crate) mod iterm2;
 pub(crate) mod kitty;
 #[cfg(all(feature = "graphics", unix))]
 mod probe;
+#[cfg(all(feature = "graphics", unix))]
+pub(crate) mod shm;
 #[cfg(feature = "graphics")]
 pub(crate) mod sixel;
 #[cfg(feature = "graphics")]
@@ -55,6 +57,17 @@ pub(crate) struct TileShape {
 /// terminator.
 #[cfg(all(feature = "graphics", unix))]
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How a kitty image's pixels reach the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Medium {
+    /// In the escapes, compressed: any terminal, on any host.
+    #[default]
+    Direct,
+    /// Through a shared-memory object on this host (kitty's `t=s`), which the
+    /// terminal answered it reads ([`Plan::Cutaway`]).
+    SharedMemory,
+}
 
 /// A graphics protocol the terminal speaks and the cutaway can be handed over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +238,8 @@ pub(crate) enum Plan {
         tmux: bool,
         /// `--graphics` named the protocol, rather than the terminal.
         forced: bool,
+        /// How kitty's pixels reach the terminal.
+        medium: Medium,
     },
     /// The half-block office: one buffer pixel per half-block.
     Classic {
@@ -342,6 +357,9 @@ pub(crate) struct Detected {
     /// The terminal answers image protocols, but none the cutaway animates
     /// with, so `protocol` is `None` unless `--graphics` forces one.
     pub(crate) unanimated: bool,
+    /// Whether the terminal answered that it reads kitty images from this
+    /// host's shared memory.
+    pub(crate) shm: bool,
 }
 
 /// The outcome of asking the terminal — [`resolve`]'s input.
@@ -504,12 +522,21 @@ pub(crate) fn resolve(
     if d.tmux && protocol != ImageProtocol::Kitty {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
     }
+    // Shared memory only where the terminal said it reads ours, forced or
+    // not, and never through tmux, which may later attach a client on
+    // another host ("Remote clients ... must send the pixel data directly").
+    let medium = if protocol == ImageProtocol::Kitty && d.shm && !d.tmux {
+        Medium::SharedMemory
+    } else {
+        Medium::Direct
+    };
     Plan::Cutaway {
         fit,
         protocol,
         cell,
         tmux: d.tmux,
         forced: mode.forced().is_some(),
+        medium,
     }
 }
 
@@ -632,6 +659,7 @@ impl Plan {
                 cell,
                 tmux,
                 forced,
+                medium,
             } => {
                 let shape = protocol.tile();
                 let cadence = match protocol.cadence().as_millis() {
@@ -666,10 +694,10 @@ impl Plan {
                     },
                     cell.w,
                     cell.h,
-                    if tmux {
-                        "through tmux passthrough"
-                    } else {
-                        "direct"
+                    match (tmux, medium) {
+                        (true, _) => "through tmux passthrough",
+                        (false, Medium::Direct) => "direct",
+                        (false, Medium::SharedMemory) => "direct, pixels through shared memory",
                     },
                     fit.scale().get(),
                     fit.density(),
@@ -822,6 +850,7 @@ mod tests {
             cell: Some(cell),
             tmux,
             unanimated: false,
+            shm: false,
         })
     }
 
@@ -995,6 +1024,7 @@ mod tests {
                 cell,
                 tmux,
                 forced,
+                ..
             } = got
             else {
                 panic!("{protocol:?}: {got:?}");
@@ -1178,6 +1208,7 @@ mod tests {
                     cell: None,
                     tmux: false,
                     unanimated: false,
+                    shm: false,
                 }),
                 BASE_ONLY,
                 ClassicReason::NoCellSize,
@@ -1351,6 +1382,7 @@ mod tests {
                     cell: Some(CELL_8X16),
                     tmux: false,
                     unanimated: true,
+                    shm: false,
                 }),
                 BUNDLED,
                 "this terminal answers image protocols the cutaway can't animate with here — \
@@ -1363,6 +1395,7 @@ mod tests {
                     cell: None,
                     tmux: false,
                     unanimated: false,
+                    shm: false,
                 }),
                 BUNDLED,
                 "terminal reports no cell size in pixels",
@@ -1416,6 +1449,40 @@ mod tests {
         assert_eq!(rows.len(), n, "no two reasons print the same row");
     }
 
+    #[test]
+    fn shared_memory_carries_kitty_where_the_terminal_reads_it() {
+        let detected = |shm, tmux| {
+            Probe::Answered(Detected {
+                protocol: Some(ImageProtocol::Kitty),
+                cell: Some(CELL_8X16),
+                tmux,
+                unanimated: false,
+                shm,
+            })
+        };
+        let medium = |mode, probe| match resolve(mode, probe, BUNDLED, AREA) {
+            Plan::Cutaway { medium, .. } => medium,
+            plan => panic!("no cutaway: {plan:?}"),
+        };
+        for mode in [GraphicsMode::Auto, GraphicsMode::Kitty] {
+            assert_eq!(
+                medium(mode, detected(true, false)),
+                Medium::SharedMemory,
+                "{mode:?}"
+            );
+            assert_eq!(
+                medium(mode, detected(false, false)),
+                Medium::Direct,
+                "{mode:?}"
+            );
+            assert_eq!(
+                medium(mode, detected(true, true)),
+                Medium::Direct,
+                "{mode:?} in tmux"
+            );
+        }
+    }
+
     /// A terminal that answers no protocol the cutaway animates with falls
     /// back on its own, but `--graphics` still forces one: it overrides
     /// detection.
@@ -1426,6 +1493,7 @@ mod tests {
             cell: Some(CELL_8X16),
             tmux: false,
             unanimated: true,
+            shm: false,
         });
         assert!(matches!(
             resolve(GraphicsMode::Auto, probe, BUNDLED, AREA),

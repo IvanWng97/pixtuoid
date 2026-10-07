@@ -2683,6 +2683,7 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "rodio",
+ "rustix 1.1.5",
  "saphyr",
  "schemars",
  "semver",

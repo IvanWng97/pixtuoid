@@ -78,6 +78,8 @@ pub(crate) struct TileCutaway {
     density: Density,
     protocol: ImageProtocol,
     tmux: bool,
+    /// How kitty's pixels reach the terminal.
+    medium: crate::graphics::Medium,
     /// [`kitty::process_base`].
     base: u32,
     /// `None` while classic paints.
@@ -168,6 +170,7 @@ impl TileCutaway {
             density: fit.density(),
             protocol,
             tmux,
+            medium: crate::graphics::Medium::Direct,
             base: kitty::process_base(),
             fitted: None,
             tiles: Tiles::new(protocol, cell, fit),
@@ -454,6 +457,7 @@ impl TileCutaway {
             protocol: self.protocol,
             base: self.base,
             tmux: self.tmux,
+            medium: self.medium,
             origin: self.origin,
             threads: encode_cores(self.cores, self.audio),
         }
@@ -468,6 +472,12 @@ impl TileCutaway {
     /// A new frame, which has transmitted nothing until it paints.
     pub(crate) fn begin_frame(&mut self) {
         self.last = FrameSend::default();
+    }
+
+    /// Send kitty's pixels through `medium`.
+    pub(crate) fn through(mut self, medium: crate::graphics::Medium) -> Self {
+        self.medium = medium;
+        self
     }
 
     /// Set `in_grid` where the unwind would read the process's own.
@@ -600,6 +610,7 @@ struct Encoder<'a> {
     protocol: ImageProtocol,
     base: u32,
     tmux: bool,
+    medium: crate::graphics::Medium,
     origin: Position,
     threads: usize,
 }
@@ -636,9 +647,8 @@ impl Encoder<'_> {
         let image =
             tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(self.image, c.tile));
         match self.protocol {
-            ImageProtocol::Kitty => {
-                kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
-            }
+            ImageProtocol::Kitty => kitty::image_id(self.base, c.tile)
+                .map(|id| kitty::transmit(id, &image, self.tmux, self.medium)),
             ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
             ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
                 .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
