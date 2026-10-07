@@ -60,6 +60,13 @@ pub(crate) struct FloatingApp {
     last_caps_size: Option<(u16, u16)>,
     /// Latest cursor position (physical px) — for the corner resize hit-test on click.
     cursor: PhysicalPosition<f64>,
+    /// The geometry of the frame on screen, which a press maps back through.
+    shown: Option<super::offscreen::WindowGeometry>,
+    /// The last petting, played while it lasts.
+    petting: Option<pixtuoid_scene::pet::PetState>,
+    /// Where a clicked agent's transcript roots are, for its focus jump:
+    /// (CC projects root, Codex sessions root).
+    focus_roots: (Option<PathBuf>, Option<PathBuf>),
     /// The animation-tick deadline — see [`super::cadence`] for why the redraw
     /// REQUEST (not just the wait) has to be gated on it.
     clock: super::cadence::FrameClock,
@@ -75,9 +82,6 @@ pub(crate) struct Appearance {
     pub(crate) motion: pixtuoid_scene::anim::Motion,
 }
 
-/// Click within this many physical px of the bottom-right corner = resize, else move.
-const RESIZE_CORNER_PX: f64 = 18.0;
-
 impl FloatingApp {
     pub(crate) fn new(
         cfg: FloatingConfig,
@@ -92,6 +96,7 @@ impl FloatingApp {
         let pack = std::sync::Arc::new(pack);
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         renderer.set_audio(audio_ctl.handle().clone());
+        let focus_roots = boot.focus_roots();
         Self {
             cfg,
             theme,
@@ -105,6 +110,9 @@ impl FloatingApp {
             live: None,
             last_caps_size: None,
             cursor: PhysicalPosition::new(0.0, 0.0),
+            shown: None,
+            petting: None,
+            focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now()),
             window: None,
             context: None,
@@ -128,6 +136,63 @@ impl FloatingApp {
             pos.map(|p| p.y),
         ) {
             tracing::warn!(error = %e, "pixtuoid floating: could not persist window geometry");
+        }
+    }
+
+    /// A left press: resize from the corner, act on what the frame on screen
+    /// shows under the pointer as the TUI's click does, or drag the frameless
+    /// window. Errors are non-fatal — some platforms refuse a drag outside a
+    /// real press.
+    fn press(&mut self) {
+        use super::offscreen::Press;
+        use pixtuoid_scene::display::{HoverTarget, PetHover};
+        let Some(window) = &self.window else {
+            return;
+        };
+        let size = window.inner_size();
+        let press = match self.shown {
+            Some(at) => self.renderer.press_at(
+                (self.cursor.x, self.cursor.y),
+                (size.width, size.height),
+                at,
+            ),
+            None => Press::Drag,
+        };
+        let now = SystemTime::now();
+        match press {
+            Press::Resize => {
+                let _ = window.drag_resize_window(ResizeDirection::SouthEast);
+            }
+            Press::Drag => {
+                let _ = window.drag_window();
+            }
+            Press::Hit(hit) => {
+                if let Some(url) = hit.link() {
+                    let _ = open::that(url);
+                }
+                match hit {
+                    pixtuoid_scene::hit::SceneHit::Figure(HoverTarget::Agent(id)) => {
+                        let slot = self
+                            .live
+                            .as_ref()
+                            .and_then(|l| l.scene_rx.borrow().agents.get(id).cloned());
+                        if let Some(slot) = slot {
+                            crate::focus::focus_slot(&slot, &self.focus_roots);
+                        }
+                    }
+                    pixtuoid_scene::hit::SceneHit::Figure(&HoverTarget::Pet(PetHover {
+                        kind,
+                        ..
+                    })) if self.petting.as_ref().is_none_or(|p| !p.is_active(now)) => {
+                        self.petting = Some(pixtuoid_scene::pet::PetState {
+                            petted_at: now,
+                            kind,
+                            floor_idx: 0,
+                        });
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -174,8 +239,7 @@ impl FloatingApp {
                     floor: floor_meta,
                     pets: PetInputs {
                         pet: floor_pet,
-                        // Click-to-pet needs window pointer hit-testing (deferred).
-                        petting: None,
+                        petting: self.petting.as_ref(),
                     },
                 },
                 theme: self.theme,
@@ -188,6 +252,7 @@ impl FloatingApp {
             },
             (win_w, win_h),
         );
+        self.shown = Some(at);
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -354,24 +419,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
-            } => {
-                // Frameless: a left-press drags the window, EXCEPT near the bottom-right
-                // corner, which resizes. Errors are non-fatal — some platforms refuse
-                // outside a real press.
-                if let Some(window) = &self.window {
-                    let size = window.inner_size();
-                    let near_corner = super::geometry::near_resize_corner(
-                        (self.cursor.x, self.cursor.y),
-                        (size.width, size.height),
-                        RESIZE_CORNER_PX,
-                    );
-                    let _ = if near_corner {
-                        window.drag_resize_window(ResizeDirection::SouthEast)
-                    } else {
-                        window.drag_window()
-                    };
-                }
-            }
+            } => self.press(),
             _ => {}
         }
     }
