@@ -148,18 +148,26 @@ impl OfficeRenderer {
     }
 
     /// What a left press at `cursor` (physical px) in a `window`-sized window
-    /// drawn at `at` does: resize from the bottom-right corner, act on what
-    /// the last frame shows there, or else drag the frameless window.
+    /// drawn at `at` does at `now`, with `petting` the last one: resize from
+    /// the bottom-right corner, carry out what the last frame shows there
+    /// ([`SceneHit::action`](pixtuoid_scene::hit::SceneHit::action)), or else
+    /// drag the frameless window — from a fixture as from the bare floor.
     pub(crate) fn press_at(
         &self,
         cursor: (f64, f64),
         window: (u32, u32),
         at: WindowGeometry,
-    ) -> Press<'_> {
+        (petting, now): (
+            Option<&pixtuoid_scene::pet::PetState>,
+            std::time::SystemTime,
+        ),
+    ) -> Press {
         if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
             return Press::Resize;
         }
-        self.hit_at(cursor, at).map_or(Press::Drag, Press::Hit)
+        self.hit_at(cursor, at)
+            .and_then(|hit| hit.action(petting, now))
+            .map_or(Press::Drag, Press::Act)
     }
 
     /// What the last frame, drawn at `at`, shows the pointer at `cursor`
@@ -235,9 +243,9 @@ pub(crate) fn needs_present(
 
 /// What a left press does: [`OfficeRenderer::press_at`]'s answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Press<'a> {
+pub(crate) enum Press {
     Resize,
-    Hit(pixtuoid_scene::hit::SceneHit<'a>),
+    Act(pixtuoid_scene::hit::HitAction),
     Drag,
 }
 
@@ -1135,8 +1143,7 @@ mod tests {
     /// resizes.
     #[test]
     fn a_press_hits_what_the_frame_shows_there() {
-        use pixtuoid_scene::display::HoverTarget;
-        use pixtuoid_scene::hit::SceneHit;
+        use pixtuoid_scene::hit::{HitAction, SceneHit};
         let pack = std::sync::Arc::new(
             pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
         );
@@ -1165,29 +1172,34 @@ mod tests {
             )
             .expect("a frame");
         let centre = |u: u16| f64::from(u) * f64::from(at.unit_px) + f64::from(at.unit_px) / 2.0;
-        let (mut hit_agent, mut dragged) = (false, false);
+        let press =
+            |cursor| renderer.press_at(cursor, (window.width, window.height), at, (None, now));
+        let (mut hit_agent, mut dragged, mut fixture_drags) = (false, false, false);
         for y in 0..at.office.h {
             for x in 0..at.office.w {
-                match renderer.press_at((centre(x), centre(y)), (window.width, window.height), at) {
-                    Press::Hit(SceneHit::Figure(HoverTarget::Agent(hit))) => {
-                        assert_eq!(*hit, id, "a press hit another agent");
+                let cursor = (centre(x), centre(y));
+                match press(cursor) {
+                    Press::Act(HitAction::Focus(hit)) => {
+                        assert_eq!(hit, id, "a press hit another agent");
                         hit_agent = true;
                     }
                     Press::Drag => dragged = true,
-                    Press::Hit(_) | Press::Resize => {}
+                    Press::Act(_) | Press::Resize => {}
+                }
+                if matches!(renderer.hit_at(cursor, at), Some(SceneHit::Furniture(_))) {
+                    assert_eq!(press(cursor), Press::Drag, "a fixture holds the window");
+                    fixture_drags = true;
                 }
             }
         }
         assert!(hit_agent, "no press found the agent the frame drew");
         assert!(dragged, "no bare unit to drag the window by");
+        assert!(fixture_drags, "the frame drew no labelled fixture");
         let corner = (
             f64::from(window.width) - 1.0,
             f64::from(window.height) - 1.0,
         );
-        assert_eq!(
-            renderer.press_at(corner, (window.width, window.height), at),
-            Press::Resize
-        );
+        assert_eq!(press(corner), Press::Resize);
     }
 
     /// A tooltip paints its box in the theme's tooltip background, inside the
@@ -1230,6 +1242,25 @@ mod tests {
         assert!(
             cols[0] < 318,
             "the label shifted left of a right-edge pointer"
+        );
+        // An agent's card opens below the pointer, flips above at the bottom
+        // edge, and shifts left at the right one.
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        let scene = scene_with(vec![agent], 16);
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let card = pixtuoid_scene::tooltip::agent(&scene, id, now).expect("the agent's card");
+        let (rows, _) = painted(&card, (100.0, 20.0));
+        assert!(rows[0] > 20, "a card opens below the pointer: {rows:?}");
+        let (rows, _) = painted(&card, (100.0, 195.0));
+        assert!(
+            *rows.last().expect("painted") < 195 && rows[0] > 0,
+            "a card at the bottom flips above, inside the window: {rows:?}"
+        );
+        let (_, cols) = painted(&card, (318.0, 20.0));
+        assert!(
+            cols[0] < 318 && *cols.last().expect("painted") < w,
+            "a card at the right edge shifts left, inside the window"
         );
     }
 
