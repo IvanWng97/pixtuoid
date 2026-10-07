@@ -1827,12 +1827,12 @@ mod tests {
         );
     }
 
-    /// Frame by frame at the paint rate through the office's
+    /// At the paint rate through the office's
     /// [`OutsideCache`](crate::outside::OutsideCache), on Full and Calm,
-    /// through a weather transition and across dusk, every frame but the
-    /// first finds its every mass already drawn, and draws at most
-    /// [`DRAWS_AHEAD`] ahead: a frame that reuses the last one's views draws
-    /// ahead all the same.
+    /// through a weather transition and across dusk, every frame within
+    /// [`AHEAD`] of a step, past the first `lead` frames of warm-up, finds its
+    /// every mass already drawn and draws at most [`DRAWS_AHEAD`] ahead: a
+    /// frame that reuses the last one's views draws ahead all the same.
     #[test]
     fn every_step_is_drawn_ahead_of_it() {
         use crate::sky::WeatherPolicy;
