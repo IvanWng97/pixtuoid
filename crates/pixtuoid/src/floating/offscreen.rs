@@ -105,6 +105,30 @@ impl OfficeRenderer {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
+    /// What a left press at `cursor` (physical px) in a `window`-sized window
+    /// drawn at `at` does: resize from the bottom-right corner, act on what
+    /// the last frame shows there, or else drag the frameless window.
+    pub(crate) fn press_at(
+        &self,
+        cursor: (f64, f64),
+        window: (u32, u32),
+        at: WindowGeometry,
+    ) -> Press<'_> {
+        if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+            return Press::Resize;
+        }
+        let unit = |px: f64| {
+            (px.max(0.0) as u32 / u32::from(at.unit_px.max(1))).min(u32::from(u16::MAX)) as u16
+        };
+        let area = pixtuoid_scene::layout::Bounds {
+            x: unit(cursor.0),
+            y: unit(cursor.1),
+            width: 1,
+            height: 1,
+        };
+        self.session.hit_at(area).map_or(Press::Drag, Press::Hit)
+    }
+
     /// The status-footer model for the current scene — single-floor, so `floor = None`
     /// (no breadcrumb). `budget` is the caller's column budget ([`footer_budget`] at the
     /// live width). Source-death is deferred (`source_warning: None`) — floating doesn't
@@ -132,6 +156,17 @@ impl OfficeRenderer {
     }
 }
 
+/// What a left press does: [`OfficeRenderer::press_at`]'s answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Press<'a> {
+    Resize,
+    Hit(pixtuoid_scene::hit::SceneHit<'a>),
+    Drag,
+}
+
+/// Window pixels from the bottom-right corner within which a press resizes.
+const RESIZE_CORNER_PX: f64 = 18.0;
+
 /// The window's natural real pixels per logical unit: what keeps the office
 /// near `OFFICE_TARGET_H` units tall, so its art stays chunky and legible.
 /// Min 1.
@@ -151,6 +186,8 @@ pub struct WindowGeometry {
     pub look: Look,
     pub office: Size,
     pub upscale: u16,
+    /// Window pixels per layout unit, which a pointer maps back through.
+    pub unit_px: u16,
 }
 
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
@@ -177,6 +214,7 @@ pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeome
         },
         office: fit.logical(),
         upscale: fit.upscale(),
+        unit_px: fit.scale().get(),
     }
 }
 
@@ -365,6 +403,7 @@ mod tests {
             },
             office: size,
             upscale: 1,
+            unit_px: density.get(),
         }
     }
 
@@ -895,6 +934,68 @@ mod tests {
             s.agents.insert(a.agent_id, a);
         }
         s
+    }
+
+    /// A press acts on what the frame on screen shows under it: an agent's
+    /// units hit that agent, a bare unit drags, and the bottom-right corner
+    /// resizes.
+    #[test]
+    fn a_press_hits_what_the_frame_shows_there() {
+        use pixtuoid_scene::display::HoverTarget;
+        use pixtuoid_scene::hit::SceneHit;
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        let scene = scene_with(vec![agent], 16);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let window = PhysicalSize::new(960u32, 640u32);
+        let at = window_geometry(window, pack.max_density_variant());
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer
+            .render(
+                at,
+                RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: at.office,
+                    place: pixtuoid_scene::look::Place::default(),
+                    debug_walkable: false,
+                },
+            )
+            .expect("a frame");
+        let centre = |u: u16| f64::from(u) * f64::from(at.unit_px) + f64::from(at.unit_px) / 2.0;
+        let (mut hit_agent, mut dragged) = (false, false);
+        for y in 0..at.office.h {
+            for x in 0..at.office.w {
+                match renderer.press_at((centre(x), centre(y)), (window.width, window.height), at) {
+                    Press::Hit(SceneHit::Figure(HoverTarget::Agent(hit))) => {
+                        assert_eq!(*hit, id, "a press hit another agent");
+                        hit_agent = true;
+                    }
+                    Press::Drag => dragged = true,
+                    Press::Hit(_) | Press::Resize => {}
+                }
+            }
+        }
+        assert!(hit_agent, "no press found the agent the frame drew");
+        assert!(dragged, "no bare unit to drag the window by");
+        let corner = (
+            f64::from(window.width) - 1.0,
+            f64::from(window.height) - 1.0,
+        );
+        assert_eq!(
+            renderer.press_at(corner, (window.width, window.height), at),
+            Press::Resize
+        );
     }
 
     #[test]

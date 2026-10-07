@@ -134,6 +134,12 @@ pub(crate) struct LivePipeline {
 }
 
 impl PipelineBoot {
+    /// The transcript roots a clicked agent's focus jump reads: (CC projects
+    /// root, Codex sessions root).
+    pub(crate) fn focus_roots(&self) -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
+        (self.projects_root.clone(), self.codex_sessions_root.clone())
+    }
+
     /// Boot the source pipeline seeded from the REAL window size, and wire the
     /// two background consumers that need the event-loop proxy.
     pub(crate) fn spawn(
