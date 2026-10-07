@@ -68,6 +68,10 @@ pub(crate) struct Changed {
 /// The tile grid over one image and the hash each tile was last sent with.
 #[derive(Debug)]
 pub(crate) struct Tiles {
+    /// [`ImageProtocol::tile`], before the budget coarsens it.
+    base: TileShape,
+    /// [`ImageProtocol::image_budget`].
+    budget: Option<u32>,
     shape: TileShape,
     cell: CellSize,
     upscale: u32,
@@ -84,6 +88,8 @@ impl Tiles {
     /// The grid `protocol` re-sends in, over an image `fit` lays on `cell`.
     pub(crate) fn new(protocol: ImageProtocol, cell: CellSize, fit: Fit) -> Self {
         Self {
+            base: protocol.tile(),
+            budget: protocol.image_budget(),
             shape: protocol.tile(),
             cell,
             upscale: u32::from(fit.upscale()),
@@ -99,6 +105,8 @@ impl Tiles {
         let size = (buf.width(), buf.height());
         if size != self.size {
             self.size = size;
+            self.shape = self.base;
+            self.fit_budget();
             let (across, down) = self.across_down();
             self.sent = vec![None; (across * down) as usize];
             self.owed = (0..self.sent.len() as u32).collect();
@@ -219,6 +227,31 @@ impl Tiles {
             u32::from(self.size.0) * self.upscale,
             u32::from(self.size.1) * self.upscale,
         )
+    }
+
+    /// Double the tile a side until a whole frame's tiles fit the budget, or
+    /// one tile is the whole image: the finest diff the terminal keeps up
+    /// with.
+    fn fit_budget(&mut self) {
+        let Some(budget) = self.budget else {
+            return;
+        };
+        loop {
+            let (across, down) = self.across_down();
+            if across * down <= budget || (across == 1 && down == 1) {
+                return;
+            }
+            self.shape = TileShape {
+                cols: self.shape.cols.saturating_mul(2),
+                rows: self.shape.rows.saturating_mul(2),
+            };
+        }
+    }
+
+    /// The tile it sends in now.
+    #[cfg(test)]
+    pub(crate) fn shape(&self) -> TileShape {
+        self.shape
     }
 
     fn across_down(&self) -> (u32, u32) {
@@ -405,6 +438,65 @@ mod tests {
             (2, 8, 0, 1, 2),
             "42 image px is 9 cells: a third, one-cell column"
         );
+    }
+
+    /// The owner's 17x41 cell over 4x art, upscaled 4x, as a 16x office.
+    fn owner_kitty(protocol: ImageProtocol) -> Tiles {
+        let cell = CellSize { w: 17, h: 41 };
+        let fit = Fit::new(cell, AREA, Density::new(4).expect("nonzero")).expect("fits");
+        Tiles::new(protocol, cell, fit)
+    }
+
+    /// A whole frame never holds more tiles than kitty's image budget, at
+    /// any office size, while a small one keeps the protocol's own tile: the
+    /// finest diff that fits.
+    #[test]
+    fn kittys_tiles_coarsen_only_past_its_image_budget() {
+        let budget = ImageProtocol::Kitty.image_budget().expect("kitty has one") as usize;
+        for (w, h) in [
+            (40, 20),
+            (200, 100),
+            (400, 200),
+            (700, 350),
+            (1000, 500),
+            (1500, 800),
+        ] {
+            let mut t = owner_kitty(ImageProtocol::Kitty);
+            let sent = t.changed(&buffer(w, h), &Dirty::All).len();
+            assert!(sent <= budget, "{w}x{h}: {sent} tiles");
+            if t.shape != ImageProtocol::Kitty.tile() {
+                let finer = TileShape {
+                    cols: t.shape.cols / 2,
+                    rows: t.shape.rows / 2,
+                };
+                let mut f = owner_kitty(ImageProtocol::Kitty);
+                f.base = finer;
+                f.budget = None;
+                let over = f.changed(&buffer(w, h), &Dirty::All).len();
+                assert!(
+                    over > budget,
+                    "{w}x{h}: {finer:?} gave {over}, within budget"
+                );
+            }
+        }
+        let mut small = owner_kitty(ImageProtocol::Kitty);
+        small.changed(&buffer(40, 20), &Dirty::All);
+        assert_eq!(small.shape, ImageProtocol::Kitty.tile());
+        let mut big = owner_kitty(ImageProtocol::Kitty);
+        big.changed(&buffer(1000, 500), &Dirty::All);
+        assert_ne!(big.shape, ImageProtocol::Kitty.tile());
+    }
+
+    /// SIXEL and iTerm2 have no image budget: their tile is the protocol's at
+    /// any size.
+    #[test]
+    fn sixel_and_iterm2_keep_their_tile_at_any_size() {
+        for p in [ImageProtocol::Sixel, ImageProtocol::Iterm2] {
+            assert_eq!(p.image_budget(), None);
+            let mut t = owner_kitty(p);
+            t.changed(&buffer(1000, 500), &Dirty::All);
+            assert_eq!(t.shape, p.tile());
+        }
     }
 
     #[test]

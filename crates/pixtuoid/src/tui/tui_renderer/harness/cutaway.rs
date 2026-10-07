@@ -1206,8 +1206,10 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
     let scene = two_floor_scene();
     let mut now = t0();
     r.render(&scene, pack(), now).expect("render");
-    let across = 120u32.div_ceil(u32::from(ImageProtocol::Kitty.tile().cols));
-    let middle = crate::graphics::kitty::process_base() + across * 10 + across / 2;
+    let shape = r.cutaway.as_ref().expect("a cutaway").tile_shape();
+    let across = 120u32.div_ceil(u32::from(shape.cols));
+    let down = 40u32.div_ceil(u32::from(shape.rows));
+    let middle = crate::graphics::kitty::process_base() + across * (down / 2) + across / 2;
     let tile = |sent: &str| {
         kitty_images(sent)
             .into_iter()
