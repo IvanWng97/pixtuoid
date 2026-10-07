@@ -2722,6 +2722,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snapbox",
+ "strum",
  "temp-env",
  "tempfile",
  "thiserror 2.0.21",
