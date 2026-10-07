@@ -248,7 +248,7 @@ fn render_floor_scaling(c: &mut Criterion) {
 fn render_cutaway_frame(c: &mut Criterion) {
     let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
-    let scale = RenderScale::new(pack.max_density_variant().get()).expect("a nonzero density");
+    let scale = RenderScale::from(pack.max_density_variant());
     // The case names are claims about the sky model; hold it to them.
     assert!(
         hour_is_day(NOON as f32) && !hour_is_day(NIGHT as f32),
