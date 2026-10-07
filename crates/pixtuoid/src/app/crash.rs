@@ -170,6 +170,16 @@ mod tests {
 
     use super::*;
 
+    /// `name`'s path as libtest's `--exact` reads it: the module path less the
+    /// crate, so a re-exec still finds the test after this module moves.
+    #[cfg(unix)]
+    fn this_test(name: &str) -> String {
+        let module = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, m)| m);
+        format!("{module}::{name}")
+    }
+
     /// Unix-only, and so is every test that reads it: crossterm dispatches on a
     /// PROCESS-GLOBAL ansi-support flag rather than on the writer, and under
     /// `windows-test` that flag is false — the sequences go to the real console,
@@ -194,7 +204,7 @@ mod tests {
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "crash::tests::the_hook_restores_on_stdout_and_keeps_the_report_on_stderr",
+                &this_test("the_hook_restores_on_stdout_and_keeps_the_report_on_stderr"),
                 "--nocapture",
             ])
             .env(CHILD, "1")
@@ -236,7 +246,7 @@ mod tests {
             let mut c = std::process::Command::new(std::env::current_exe().unwrap());
             c.args([
                 "--exact",
-                "crash::tests::the_hook_strips_the_payload_and_survives_a_broken_stderr",
+                &this_test("the_hook_strips_the_payload_and_survives_a_broken_stderr"),
                 "--nocapture",
             ])
             .env(CHILD, "1")
