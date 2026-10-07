@@ -75,7 +75,7 @@ pub(crate) struct UiState {
     drift: crate::doctor::DriftSeen,
     socket_path: std::path::PathBuf,
     /// Where the warn-floor log lives, for the Sources panel (`None` = no log).
-    log: Option<crate::doctor::LogLocation>,
+    log: Option<crate::run_log::LogLocation>,
 }
 
 /// `$PIXTUOID_FAKE_NOW`'s clock, said once at warn: a stray export would
@@ -100,7 +100,7 @@ impl UiState {
         onboarding_ui: WelcomeUi,
         version_popup: bool,
         socket_path: std::path::PathBuf,
-        log: Option<crate::doctor::LogLocation>,
+        log: Option<crate::run_log::LogLocation>,
         drift: crate::doctor::DriftSeen,
     ) -> Self {
         let onboarding_opened_at = (!onboarding_ui.is_empty()).then(Instant::now);
@@ -432,10 +432,7 @@ impl UiState {
     /// The Sources panel's cached rows carry a per-source HEALTH summary that
     /// scans the retained logs, so read them fresh at each (infrequent) rebuild.
     pub(crate) fn read_conn_log(&self) -> String {
-        self.log
-            .as_ref()
-            .map(|at| crate::doctor::read_logs(at).0)
-            .unwrap_or_default()
+        self.log.as_ref().map(|at| at.read().0).unwrap_or_default()
     }
 }
 
