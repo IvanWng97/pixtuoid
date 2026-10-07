@@ -92,6 +92,19 @@ pub struct FloatingConfig {
     pub opacity: f32,
 }
 
+impl FloatingConfig {
+    /// This geometry with its size raised to at least `min_w`×`min_h`, the
+    /// one size the window opens at and is placed by.
+    #[must_use]
+    pub fn at_least(self, min_w: u32, min_h: u32) -> Self {
+        Self {
+            width: self.width.max(min_w),
+            height: self.height.max(min_h),
+            ..self
+        }
+    }
+}
+
 pub fn resolve_floating(config: &AppConfig) -> FloatingConfig {
     let raw = config.floating.clone().unwrap_or_default();
     FloatingConfig {

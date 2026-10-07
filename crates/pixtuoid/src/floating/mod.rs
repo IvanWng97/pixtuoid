@@ -48,9 +48,10 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
-    let floating_cfg = config::resolve_floating(&app_config);
     let pack = pixtuoid_scene::pack::load_sprite_pack(pack)
         .context("loading the sprite pack for the floating window")?;
+    let min = offscreen::min_window(pack.max_density_variant());
+    let floating_cfg = config::resolve_floating(&app_config).at_least(min.width, min.height);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
