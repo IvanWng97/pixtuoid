@@ -26,8 +26,8 @@ use ratatui::layout::{Position, Rect};
 
 use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
+use crate::jank::FrameSend;
 use crate::tui::geometry::SceneGeometry;
-use crate::tui::jank::FrameSend;
 use crate::tui::renderer::set_half_block;
 
 /// A floor slide's two floors' frames at progress `t` of a
@@ -197,7 +197,7 @@ impl TileCutaway {
             self.fitted = None;
             // The classic paints this frame: it transmits nothing.
             self.last = FrameSend {
-                dirty: crate::tui::jank::Painted::Classic,
+                dirty: crate::jank::Painted::Classic,
                 ..FrameSend::default()
             };
             return None;

@@ -48,7 +48,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// The pack every floor's raster draws with, which each frame's must be.
     pack: Arc<Pack>,
     /// The frames' times and janks.
-    jank: crate::tui::jank::Jank,
+    jank: crate::jank::Jank,
     /// What holds each frame's output and presents it whole; `None` writes
     /// straight to the backend.
     frame_out: Option<crate::tui::FrameOut>,
@@ -221,7 +221,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             terminal,
             floors: vec![PerFloor::new(Arc::clone(&pack))],
             pack,
-            jank: crate::tui::jank::Jank::new(std::time::Instant::now()),
+            jank: crate::jank::Jank::new(std::time::Instant::now()),
             frame_out: None,
             redraw_owed: false,
             refusing: false,
@@ -350,7 +350,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// Name what draws the frames, for their pacing summaries.
-    pub(crate) fn painted_by(&mut self, painter: crate::tui::jank::Painter) {
+    pub(crate) fn painted_by(&mut self, painter: crate::jank::Painter) {
         self.jank.painted_by(painter);
     }
 

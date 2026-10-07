@@ -9,7 +9,11 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::DaemonState;
 
-use crate::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
+/// Where a [`Rendered`] frame may differ from the last: the frame entry's
+/// word for it, which the model reads without naming a rasterizer.
+#[doc(hidden)]
+pub use crate::cutaway::canvas::Dirty;
+use crate::cutaway::canvas::{CanvasFrame, CutawayCanvas};
 use crate::display::Hovers;
 use crate::floor::{FloorInputs, OfficeStores, PerFloor, step_floor};
 use crate::footer::FooterFloor;

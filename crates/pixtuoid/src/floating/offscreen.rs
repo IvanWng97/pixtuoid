@@ -106,21 +106,26 @@ impl OfficeRenderer {
     }
 
     /// [`render`](Self::render) for the window on screen, `window` physical
-    /// pixels: `None` also when the flash hold keeps the frame back, so the
-    /// window keeps the last. A frame handed out is
-    /// [`presented`](Self::presented) once it shows.
+    /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
+    /// when the flash hold keeps it back, so the window keeps the last. A
+    /// frame shown is [`presented`](Self::presented) once it shows.
     pub fn render_live(
         &mut self,
         at: WindowGeometry,
         inputs: RenderInputs<'_>,
         window: (u32, u32),
-    ) -> Option<&RgbBuffer> {
+    ) -> bool {
         self.render(at, inputs);
         let flash = self.session.flash();
         if self.flash.holds(flash, window) {
-            return None;
+            return false;
         }
         self.rendered = (flash, window);
+        true
+    }
+
+    /// The last frame's pixels, `None` before the first.
+    pub fn buf(&self) -> Option<&RgbBuffer> {
         self.session.buf()
     }
 
@@ -163,6 +168,11 @@ impl OfficeRenderer {
         })
     }
 
+    /// Where the last frame may differ from the one on screen before it.
+    pub(crate) fn dirty(&self) -> &pixtuoid_scene::cutaway::canvas::Dirty {
+        self.session.dirty()
+    }
+
     /// The status-footer model for the current scene, with the office's floor
     /// breadcrumb. `budget` is the caller's column budget ([`footer_budget`] at
     /// the live width). Source-death is deferred (`source_warning: None`) —
@@ -188,6 +198,27 @@ impl OfficeRenderer {
         );
         build_footer(&inputs, budget)
     }
+}
+
+/// Everything a presented frame shows beside the office: the window's size,
+/// its footer, and the tooltip by the pointer.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Overlays {
+    pub(crate) window: (u32, u32),
+    pub(crate) footer: FooterModel,
+    pub(crate) tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
+}
+
+/// Whether a frame showing `next` over an office `dirty` against the last must
+/// be presented, after one that showed `shown`: an unchanged office under the
+/// same overlays is the frame on screen, and presenting it again only spends
+/// the copy and the present.
+pub(crate) fn needs_present(
+    shown: Option<&Overlays>,
+    next: &Overlays,
+    dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
+) -> bool {
+    *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged || shown != Some(next)
 }
 
 /// What a left press does: [`OfficeRenderer::press_at`]'s answer.
@@ -668,7 +699,7 @@ mod tests {
         fn present(&mut self, now: SystemTime) -> RgbBuffer {
             let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
             self.screen.at(now);
-            let frame = self.renderer.render_live(
+            let live = self.renderer.render_live(
                 cutaway(Size { w: 160, h: 96 }),
                 RenderInputs {
                     world: FloorInputs {
@@ -685,7 +716,7 @@ mod tests {
                 },
                 self.px,
             );
-            if let Some(frame) = frame {
+            if let Some(frame) = self.renderer.buf().filter(|_| live) {
                 self.shown = frame.clone();
                 self.screen.advance(self.present_takes);
                 self.renderer.presented();
@@ -1166,6 +1197,45 @@ mod tests {
             cols[0] < 318,
             "the label shifted left of a right-edge pointer"
         );
+    }
+
+    /// A frame presents when its office changed or anything over it did, and
+    /// an unchanged office under the same overlays is the frame on screen.
+    #[test]
+    fn only_a_changed_frame_presents() {
+        use pixtuoid_scene::cutaway::canvas::Dirty;
+        let overlays = |w: u32, text: &str| Overlays {
+            window: (w, 100),
+            footer: FooterModel {
+                segments: vec![pixtuoid_scene::footer::FooterSegment {
+                    text: text.into(),
+                    tone: pixtuoid_scene::footer::FooterTone::Neutral,
+                }],
+            },
+            tooltip: None,
+        };
+        let shown = overlays(200, "a");
+        assert!(
+            needs_present(None, &shown, &Dirty::Unchanged),
+            "the first frame"
+        );
+        assert!(!needs_present(Some(&shown), &shown, &Dirty::Unchanged));
+        assert!(needs_present(Some(&shown), &shown, &Dirty::All));
+        assert!(needs_present(
+            Some(&shown),
+            &overlays(201, "a"),
+            &Dirty::Unchanged
+        ));
+        assert!(needs_present(
+            Some(&shown),
+            &overlays(200, "b"),
+            &Dirty::Unchanged
+        ));
+        let tipped = Overlays {
+            tooltip: Some((pixtuoid_scene::tooltip::coffee(), (3, 4))),
+            ..shown.clone()
+        };
+        assert!(needs_present(Some(&shown), &tipped, &Dirty::Unchanged));
     }
 
     #[test]
