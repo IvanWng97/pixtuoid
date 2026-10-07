@@ -76,7 +76,7 @@ pub(crate) enum Medium {
 /// How the cutaway's images reach the terminal: its protocol, through tmux's
 /// passthrough or not, and how kitty's pixels travel. Built only by
 /// [`Route::of`] or [`Route::direct`], so no route pairs shared memory with a
-/// protocol or tmux [`Route::may_share`] refuses.
+/// protocol or tmux `may_share` refuses (Unix-only, so not linked).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Route {
     protocol: ImageProtocol,
