@@ -495,6 +495,22 @@ where
         matches!(r.scene_hit_at(on_agent.0, on_agent.1), Some(SceneHit::Figure(HoverTarget::Agent(hit))) if *hit == id),
         "set down, it walked back to its desk"
     );
+    // A carry whose release never came (the button let go outside the
+    // terminal) ends at the next press, even one where no office is drawn.
+    send(
+        r,
+        &mut ui,
+        MouseEventKind::Down(MouseButton::Left),
+        on_agent,
+    );
+    send(r, &mut ui, MouseEventKind::Drag(MouseButton::Left), away);
+    assert!(r.pointer.carrying(), "premise: the agent is lifted");
+    r.forget_drawn();
+    send(r, &mut ui, MouseEventKind::Down(MouseButton::Left), away);
+    assert!(
+        !r.pointer.carrying(),
+        "a press over no drawn office still sets the lost carry down"
+    );
 }
 
 /// The click handler acts on `scene_hit_at`, so wherever it names a figure or

@@ -487,6 +487,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// showed there, a click or a drag follows.
     pub(crate) fn press(&mut self, col: u16, row: u16, now: std::time::SystemTime) {
         let Some(cell) = self.scene_area_at(col, row) else {
+            // As any press does: a carry whose release never came ends here.
+            if let Some(ended) = self.pointer.cancel() {
+                self.grip(&ended);
+            }
             return;
         };
         let hit = self.cached_layout.as_deref().and_then(|layout| {
