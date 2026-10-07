@@ -1073,24 +1073,21 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     match plan {
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
-            fit,
-            protocol,
-            cell,
-            tmux,
-            medium,
-            ..
+            fit, wire, cell, ..
         } => {
             renderer.painted_by(jank::Painter {
-                look: protocol.name(),
+                look: wire.protocol.name(),
                 scale: fit.scale().get(),
-                tmux,
+                tmux: wire.tmux,
                 terminal,
                 sync: out.synchronized(),
             });
-            renderer.set_cutaway(
-                cutaway::TileCutaway::new(fit, cell, protocol, tmux, Box::new(out.clone()))
-                    .through(medium),
-            );
+            renderer.set_cutaway(cutaway::TileCutaway::new(
+                fit,
+                cell,
+                wire,
+                Box::new(out.clone()),
+            ));
         }
         _ => {
             renderer.painted_by(jank::Painter {
