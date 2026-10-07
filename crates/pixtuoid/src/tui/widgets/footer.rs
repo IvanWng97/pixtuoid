@@ -29,23 +29,6 @@ pub fn footer_context<'a>(
     )
 }
 
-/// One-line footer warning for dead sources; `None` while healthy.
-pub fn source_warning_message(
-    deaths: &[pixtuoid_core::source::manager::SourceDeath],
-) -> Option<String> {
-    match deaths {
-        [] => None,
-        [d] => Some(format!(
-            "{} source died — its agents are frozen; restart pixtuoid (see log)",
-            d.source
-        )),
-        many => Some(format!(
-            "{} sources died — restart pixtuoid (see log)",
-            many.len()
-        )),
-    }
-}
-
 pub(crate) fn paint_footer(
     f: &mut ratatui::Frame<'_>,
     inputs: &FooterInputs<'_>,

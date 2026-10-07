@@ -160,8 +160,9 @@ fn rotate_if_large(path: &Path) {
 /// leaves the counts UNKNOWN, and folding those into the same silent empty string made
 /// `doctor` positively assert `✓ no decode drift` off an input it never read.
 ///
-/// The warning is `sanitize`d where it is MINTED, for the reason `crate::display_path`
-/// gives: the path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`.
+/// The warning is [`crate::strip_control_chars`]-ed where it is MINTED, for the
+/// reason `crate::display_path` gives: the path comes from
+/// `PIXTUOID_LOG`/`XDG_STATE_HOME`.
 pub(crate) fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     read_log_tail(path, u64::MAX)
 }
@@ -224,8 +225,6 @@ impl LogLocation {
     /// Where this process's log goes: `$PIXTUOID_LOG`'s file, else a runs
     /// directory in the state, cache or temp directory.
     pub(crate) fn from_env() -> Self {
-        // Kept in lockstep with init()'s `explicit_log_file` read, so "file mode
-        // enabled" and "which file" cannot disagree on a whitespace value.
         if let Some(p) = pixtuoid_core::platform::path_env("PIXTUOID_LOG") {
             return LogLocation::File(p);
         }
@@ -258,20 +257,18 @@ impl LogLocation {
         &self,
         now: SystemTime,
     ) -> Result<std::fs::File, (PathBuf, std::io::Error)> {
-        let at = self;
-        let path = match at {
+        let (path, opts) = match self {
             LogLocation::File(path) => {
                 rotate_if_large(path);
-                path.clone()
+                (path.clone(), OpenOptions::new())
             }
-            LogLocation::Runs(dir) => dir.join(run_file_name(now, std::process::id())),
-        };
-        let opts = match at {
-            LogLocation::File(_) => OpenOptions::new(),
-            LogLocation::Runs(_) => live_run_options(),
+            LogLocation::Runs(dir) => (
+                dir.join(run_file_name(now, std::process::id())),
+                live_run_options(),
+            ),
         };
         let sink = open_private_append(&path, opts).map_err(|e| (path, e))?;
-        if let LogLocation::Runs(dir) = at {
+        if let LogLocation::Runs(dir) = self {
             // Held for the run's life, it marks the file live to [`prune_runs`] on
             // Unix, where removing an open file succeeds.
             #[cfg(unix)]

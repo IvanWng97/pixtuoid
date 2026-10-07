@@ -312,7 +312,7 @@ fn a_frame_without_room_reports_no_transmits() {
     let (cols, rows) = too_small_terminal();
     r.terminal.backend_mut().resize(cols, rows);
     r.render(&office(), pack(), t0()).expect("render");
-    assert_ne!(cutaway(&r).dirty, crate::tui::jank::Painted::All);
+    assert_ne!(cutaway(&r).dirty, crate::jank::Painted::All);
     assert_eq!(cutaway(&r).sent, 0);
 }
 
@@ -361,7 +361,7 @@ fn a_held_frame_reports_no_transmits() {
         r.render(&scene, pack(), held).expect("render");
         assert_eq!(
             cutaway(&r),
-            crate::tui::jank::FrameSend::default(),
+            crate::jank::FrameSend::default(),
             "slide {slide}"
         );
         assert_eq!(r.transition().is_some(), slide);
@@ -675,7 +675,8 @@ fn an_unborrowable_cutaway_slide_cancels() {
     let (mut r, _wire) = painter(cols, rows, ImageProtocol::Kitty);
     let scene = two_floor_scene();
     r.render(&scene, pack(), t0()).expect("render");
-    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
+    r.nav
+        .begin_unchecked(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
     let logged = crate::test_capture::capture(|| {
         r.render(&scene, pack(), t0()).expect("render");
     });

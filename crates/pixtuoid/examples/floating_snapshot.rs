@@ -191,7 +191,7 @@ fn main() -> Result<()> {
     let (bw, bh) = (buf.width(), buf.height());
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
-    let footer = renderer.footer(&scene, budget, true, None);
+    let footer = renderer.footer(&scene, budget, true, None, None);
     pixtuoid::floating::offscreen::paint_footer_into_surface(&mut surf, &footer, theme);
     if let Some(cursor) = hover {
         let world = FloorInputs {

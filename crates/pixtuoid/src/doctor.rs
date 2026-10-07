@@ -193,11 +193,27 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for DriftSeen {
     }
 }
 
-/// Merge the source-death footer warning (HIGHEST priority — the office is
-/// partially frozen) with a passive decode-drift nudge.
-pub fn footer_warning(source_death: Option<&str>, drifted: &[&str]) -> Option<String> {
-    if let Some(d) = source_death {
-        return Some(d.to_string());
+/// The one footer warning every painter shows: a source's death (HIGHEST
+/// priority — the office is partially frozen), else a passive decode-drift
+/// nudge naming each `drifted` source prefix.
+pub fn footer_warning(
+    deaths: &[pixtuoid_core::source::manager::SourceDeath],
+    drifted: &[&str],
+) -> Option<String> {
+    match deaths {
+        [] => {}
+        [d] => {
+            return Some(format!(
+                "{} source died — its agents are frozen; restart pixtuoid (see log)",
+                d.source
+            ));
+        }
+        many => {
+            return Some(format!(
+                "{} sources died — restart pixtuoid (see log)",
+                many.len()
+            ));
+        }
     }
     if drifted.is_empty() {
         return None;
@@ -829,8 +845,9 @@ fn probe_roots() -> ProbeRoots {
     }
 }
 
-/// All probing, no formatting. `log_at` is injected by `main`, which owns the
-/// log-location resolution; `graphics` is the `--graphics` flag.
+/// All probing, no formatting. `log_at` is injected by `main` (resolved by
+/// [`LogLocation::from_env`](crate::run_log::LogLocation::from_env));
+/// `graphics` is the `--graphics` flag.
 fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) -> DoctorReport {
     let mut config_warnings = Vec::new();
     let config_path = crate::config::config_path();
@@ -2574,11 +2591,16 @@ mod tests {
         );
         let d = seen.prefixes();
         assert_eq!(d, vec!["cc".to_string(), "cx".to_string()]);
+        let died = |s: &str| pixtuoid_core::source::manager::SourceDeath::new(s, "boom");
         assert_eq!(
-            footer_warning(Some("source 'x' died"), &d).as_deref(),
-            Some("source 'x' died")
+            footer_warning(&[died("claude-code")], &d).as_deref(),
+            Some("claude-code source died — its agents are frozen; restart pixtuoid (see log)")
         );
-        let w = footer_warning(None, &d).unwrap();
+        assert_eq!(
+            footer_warning(&[died("claude-code"), died("codex")], &d).as_deref(),
+            Some("2 sources died — restart pixtuoid (see log)")
+        );
+        let w = footer_warning(&[], &d).unwrap();
         assert!(
             w.contains("cc·") && w.contains("cx·") && w.contains("doctor"),
             "{w}"
@@ -2586,15 +2608,9 @@ mod tests {
         // The footer painter (`footer.rs` `" ⚠ {warn} "`) owns the warning glyph;
         // an embedded one double-prints (`⚠ ⚠ …`).
         assert!(!w.contains('⚠'), "drift msg must not embed ⚠: {w}");
-        // The REAL `source_warning_message` output, not a literal, so the death
-        // tier is checked against its actual producer.
-        let death = crate::tui::widgets::source_warning_message(&[
-            pixtuoid_core::source::manager::SourceDeath::new("claude-code", "x"),
-        ])
-        .unwrap();
-        let dw = footer_warning(Some(&death), &d).unwrap();
+        let dw = footer_warning(&[died("claude-code")], &d).unwrap();
         assert!(!dw.contains('⚠'), "death msg must not embed ⚠: {dw}");
-        assert_eq!(footer_warning(None, &[]), None);
+        assert_eq!(footer_warning(&[], &[]), None);
     }
 
     #[test]

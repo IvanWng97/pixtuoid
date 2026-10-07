@@ -278,8 +278,8 @@ pub(crate) enum ClassicReason {
     /// Inside tmux with `allow-passthrough` off: no image, and no query for
     /// one, reaches the terminal (tmux(1), `allow-passthrough`).
     TmuxPassthroughOff,
-    /// The terminal answers image protocols, but none the cutaway animates
-    /// with ([`Detected::unanimated`]).
+    /// The terminal has no image protocol the cutaway animates with
+    /// ([`Detected::unanimated`]).
     NoCutawayProtocol,
     /// The terminal has a protocol but reports no cell size, so there is no
     /// scale to fit.
@@ -436,8 +436,8 @@ pub(crate) struct Detected {
     /// Whether this process runs inside tmux — from the environment, not the
     /// terminal's answer.
     pub(crate) tmux: bool,
-    /// The terminal answers image protocols, but none the cutaway animates
-    /// with, so `protocol` is `None` unless `--graphics` forces one.
+    /// The terminal has no image protocol the cutaway animates with, so
+    /// `protocol` is `None` unless `--graphics` forces one.
     pub(crate) unanimated: bool,
     /// Whether the terminal answered that it reads kitty images from this
     /// host's shared memory.
@@ -631,8 +631,8 @@ impl ClassicReason {
             Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
                  `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
-            Self::NoCutawayProtocol => "this terminal answers image protocols the cutaway \
-                 can't animate with here — `--graphics kitty|sixel|iterm2` forces one"
+            Self::NoCutawayProtocol => "this terminal has no image protocol the cutaway \
+                 animates with — `--graphics kitty|sixel|iterm2` forces one"
                 .to_string(),
             Self::NoCellSize => "terminal reports no cell size in pixels".to_string(),
             Self::TmuxNeedsKitty(p) => format!(
@@ -1469,7 +1469,7 @@ mod tests {
                     shm: false,
                 }),
                 BUNDLED,
-                "this terminal answers image protocols the cutaway can't animate with here — \
+                "this terminal has no image protocol the cutaway animates with — \
                  `--graphics kitty|sixel|iterm2` forces one",
             ),
             (

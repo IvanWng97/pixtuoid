@@ -540,11 +540,12 @@ fn main() -> Result<()> {
 
     // Reuse the REAL formatters so the screenshot wording can't drift from
     // production.
-    let death_text = args.source_warning.as_deref().and_then(|src| {
-        pixtuoid::tui::widgets::source_warning_message(&[
-            pixtuoid_core::source::manager::SourceDeath::new(src, "forced for screenshot"),
-        ])
-    });
+    let deaths: Vec<_> = args
+        .source_warning
+        .as_deref()
+        .map(|src| pixtuoid_core::source::manager::SourceDeath::new(src, "forced for screenshot"))
+        .into_iter()
+        .collect();
     let drifted: Vec<&str> = args
         .drift_warning
         .as_deref()
@@ -555,7 +556,7 @@ fn main() -> Result<()> {
                 .collect()
         })
         .unwrap_or_default();
-    let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
+    let warning_text = pixtuoid::doctor::footer_warning(&deaths, &drifted);
     let mut office = pixtuoid_scene::floor::PerOffice::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.

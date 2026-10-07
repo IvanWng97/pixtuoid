@@ -27,9 +27,8 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) -> DriftSeen {
     };
 
     let wants_verbose = matches!(log_level, "debug" | "trace");
-    // The env var's VALUE is the log file path, so an empty one would "enable" file
-    // mode with an unopenable path — `path_env` treats it as unset.
-    let explicit_log_file = pixtuoid_core::platform::path_env("PIXTUOID_LOG").is_some();
+    let log_at = LogLocation::from_env();
+    let explicit_log_file = matches!(log_at, LogLocation::File(_));
     let drift = DriftSeen::default();
     let registry = tracing_subscriber::registry().with(drift.layer());
 
@@ -48,7 +47,7 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) -> DriftSeen {
                 _ => "warn",
             })
         };
-        match LogLocation::from_env().open_sink(SystemTime::now()) {
+        match log_at.open_sink(SystemTime::now()) {
             Ok(f) => {
                 let writer = Arc::new(Mutex::new(f));
                 registry
