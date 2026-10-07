@@ -17,10 +17,7 @@ pub(super) use footer::paint_footer;
 pub(super) use help::paint_help_overlay;
 pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(super) use theme_picker::paint_theme_picker;
-pub(crate) use tooltip::{TooltipAt, paint_badges, paint_hover_tooltip, paint_text_runs};
-pub(super) use tooltip::{
-    paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
-};
+pub(crate) use tooltip::{TooltipAt, paint_badges, paint_text_runs, paint_tooltip};
 pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(super) use welcome::paint_welcome;
 // `pub`: the snapshot example reuses the real formatter so its --source-warning
@@ -49,17 +46,8 @@ pub(crate) fn display_width(s: &str) -> usize {
     usize::from(pixtuoid_scene::display::text::cells(s))
 }
 
-pub(crate) use pixtuoid_scene::neon_sign::compact_hms;
-
+#[cfg(test)]
 pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
-
-/// A [`StateKind`]'s themed ratatui hue — the binary shim over the shared
-/// [`FooterTone::rgb`](pixtuoid_scene::footer::FooterTone::rgb) authority, so the
-/// footer/tooltip/dashboard state colours can't drift from the footer model's. It can't
-/// be an inherent method: it returns a ratatui `Color` on the foreign `RungKind`.
-pub(crate) fn state_color(kind: StateKind, theme: &Theme) -> Color {
-    to_color(pixtuoid_scene::footer::FooterTone::Rung(kind).rgb(theme))
-}
 
 /// The drop shadow's single uniform darkening factor (0 = black, 1 = unchanged).
 /// Uniform is an OWNER PREFERENCE, not an unfinished gradient. Pinned by
