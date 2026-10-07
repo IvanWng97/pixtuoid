@@ -1423,21 +1423,21 @@ impl Clouds {
         if self.rain <= 0.0 {
             return c;
         }
+        let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
+        // sparse, slanted streaks, half their cells; tested before the mass
+        // search, which scans every lobe
+        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d)) == 0;
+        if !(streak && gx % 2 == gy % 2) {
+            return c;
+        }
         let Some(m) = self.virga_mass(x, y) else {
             return c;
         };
-        let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
         let fade = 1.0 - (y - m.base) / VIRGA_DEPTH;
-        // sparse, slanted streaks, half their cells
-        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d)) == 0;
-        if streak && gx % 2 == gy % 2 {
-            c.mix(
-                self.tone(m.weather, Band::Shade),
-                VIRGA_STRENGTH * self.rain.min(1.0) * fade,
-            )
-        } else {
-            c
-        }
+        c.mix(
+            self.tone(m.weather, Band::Shade),
+            VIRGA_STRENGTH * self.rain.min(1.0) * fade,
+        )
     }
 
     /// The mid or near mass whose virga falls at `(x, y)` units: under its
