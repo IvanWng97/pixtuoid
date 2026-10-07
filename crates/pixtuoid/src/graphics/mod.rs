@@ -106,10 +106,12 @@ impl ImageProtocol {
 
     /// The most tiles, each its own image, one whole frame may hold, where the
     /// terminal's cost grows with the images on screen; `None` where it
-    /// doesn't. Ghostty re-scans every placement for each image re-sent under
-    /// its id (ghostty-org/ghostty `src/terminal/kitty/graphics_storage.zig`,
-    /// `addImage` → `removePlacementsByImageId`, `removeOrphans`), so a frame's
-    /// cost grows with the tiles sent times the tiles on screen.
+    /// doesn't. Each image added scans those held — Ghostty's placements
+    /// (ghostty-org/ghostty `src/terminal/kitty/graphics_storage.zig`,
+    /// `addImage` → `removePlacementsByImageId`, `removeOrphans`), kitty's
+    /// images (kovidgoyal/kitty `kitty/graphics.c`, `handle_add_command` →
+    /// `remove_images`, `img_by_client_id`) — so a frame costs the tiles sent
+    /// times the tiles on screen.
     pub(crate) fn image_budget(self) -> Option<u32> {
         match self {
             Self::Kitty => Some(KITTY_IMAGE_BUDGET),
@@ -682,7 +684,7 @@ impl Plan {
                 let shape = protocol.tile();
                 let budget = protocol
                     .image_budget()
-                    .map(|b| format!(" (coarser past {b} to a frame)"))
+                    .map(|b| format!(" (doubled until a frame is at most {b} tiles)"))
                     .unwrap_or_default();
                 let cadence = match protocol.cadence().as_millis() {
                     0 => "every frame".to_string(),
@@ -1278,7 +1280,7 @@ mod tests {
                 answered(Some(ImageProtocol::Kitty), cell(17, 41), true),
                 "graphics: kitty (the terminal's answer) on a 17x41 cell, through tmux \
                  passthrough — the cutaway at 16x (4x art upscaled 4x), a 127x99 office, sent \
-                 as 4x2-cell tiles (coarser past 400 to a frame) every frame",
+                 as 4x2-cell tiles (doubled until a frame is at most 400 tiles) every frame",
             ),
             (
                 GraphicsMode::Auto,

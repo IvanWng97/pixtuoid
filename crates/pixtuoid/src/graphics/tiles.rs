@@ -68,10 +68,8 @@ pub(crate) struct Changed {
 /// The tile grid over one image and the hash each tile was last sent with.
 #[derive(Debug)]
 pub(crate) struct Tiles {
-    /// [`ImageProtocol::tile`], before the budget coarsens it.
-    base: TileShape,
-    /// [`ImageProtocol::image_budget`].
-    budget: Option<u32>,
+    protocol: ImageProtocol,
+    /// The tile it sends in at `size`: [`Self::fitted`].
     shape: TileShape,
     cell: CellSize,
     upscale: u32,
@@ -88,8 +86,7 @@ impl Tiles {
     /// The grid `protocol` re-sends in, over an image `fit` lays on `cell`.
     pub(crate) fn new(protocol: ImageProtocol, cell: CellSize, fit: Fit) -> Self {
         Self {
-            base: protocol.tile(),
-            budget: protocol.image_budget(),
+            protocol,
             shape: protocol.tile(),
             cell,
             upscale: u32::from(fit.upscale()),
@@ -105,8 +102,7 @@ impl Tiles {
         let size = (buf.width(), buf.height());
         if size != self.size {
             self.size = size;
-            self.shape = self.base;
-            self.fit_budget();
+            self.shape = self.fitted();
             let (across, down) = self.across_down();
             self.sent = vec![None; (across * down) as usize];
             self.owed = (0..self.sent.len() as u32).collect();
@@ -215,10 +211,10 @@ impl Tiles {
     }
 
     /// One tile's extent in image pixels on each axis.
-    fn tile_px(&self) -> (u32, u32) {
+    fn tile_px(&self, shape: TileShape) -> (u32, u32) {
         (
-            u32::from(self.shape.cols) * u32::from(self.cell.w),
-            u32::from(self.shape.rows) * u32::from(self.cell.h),
+            u32::from(shape.cols) * u32::from(self.cell.w),
+            u32::from(shape.rows) * u32::from(self.cell.h),
         )
     }
 
@@ -229,21 +225,22 @@ impl Tiles {
         )
     }
 
-    /// Double the tile a side until a whole frame's tiles fit the budget, or
-    /// one tile is the whole image: the finest diff the terminal keeps up
-    /// with.
-    fn fit_budget(&mut self) {
-        let Some(budget) = self.budget else {
-            return;
+    /// The protocol's tile, doubled a side until a whole frame's tiles fit
+    /// its [image budget](ImageProtocol::image_budget) or one tile is the
+    /// whole image: the finest diff the terminal keeps up with.
+    fn fitted(&self) -> TileShape {
+        let mut shape = self.protocol.tile();
+        let Some(budget) = self.protocol.image_budget() else {
+            return shape;
         };
         loop {
-            let (across, down) = self.across_down();
+            let (across, down) = self.grid(shape);
             if across * down <= budget || (across == 1 && down == 1) {
-                return;
+                return shape;
             }
-            self.shape = TileShape {
-                cols: self.shape.cols.saturating_mul(2),
-                rows: self.shape.rows.saturating_mul(2),
+            shape = TileShape {
+                cols: shape.cols.saturating_mul(2),
+                rows: shape.rows.saturating_mul(2),
             };
         }
     }
@@ -255,7 +252,12 @@ impl Tiles {
     }
 
     fn across_down(&self) -> (u32, u32) {
-        let ((w, h), (tw, th)) = (self.image_px(), self.tile_px());
+        self.grid(self.shape)
+    }
+
+    /// The tiles across and down the image at `size` in `shape`.
+    fn grid(&self, shape: TileShape) -> (u32, u32) {
+        let ((w, h), (tw, th)) = (self.image_px(), self.tile_px(shape));
         (w.div_ceil(tw), h.div_ceil(th))
     }
 
@@ -285,7 +287,7 @@ impl Tiles {
     /// The tiles a buffer-pixel rect overlaps.
     fn reached(&self, r: Bounds) -> impl Iterator<Item = u32> + use<> {
         let (across, down) = self.across_down();
-        let (tw, th) = self.tile_px();
+        let (tw, th) = self.tile_px(self.shape);
         let k = self.upscale;
         let span = |start: u16, len: u16, tile: u32, limit: u32| {
             let (a, b) = (u32::from(start), u32::from(start) + u32::from(len));
@@ -469,10 +471,8 @@ mod tests {
                     cols: t.shape.cols / 2,
                     rows: t.shape.rows / 2,
                 };
-                let mut f = owner_kitty(ImageProtocol::Kitty);
-                f.base = finer;
-                f.budget = None;
-                let over = f.changed(&buffer(w, h), &Dirty::All).len();
+                let (across, down) = t.grid(finer);
+                let over = (across * down) as usize;
                 assert!(
                     over > budget,
                     "{w}x{h}: {finer:?} gave {over}, within budget"
