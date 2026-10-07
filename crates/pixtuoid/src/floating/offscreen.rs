@@ -187,14 +187,14 @@ impl OfficeRenderer {
 
     /// The status-footer model for the current scene, with the office's floor
     /// breadcrumb. `budget` is the caller's column budget ([`footer_budget`] at
-    /// the live width). Source-death is deferred (`source_warning: None`) —
-    /// floating doesn't thread the `SourceDeath` health channel yet.
+    /// the live width).
     pub fn footer(
         &self,
         scene: &SceneState,
         budget: u16,
         audio_audible: bool,
         volume_flash: Option<u8>,
+        warning: Option<&str>,
     ) -> FooterModel {
         let inputs = FooterInputs::new(
             scene,
@@ -203,7 +203,7 @@ impl OfficeRenderer {
                 self.session.footer_floor(scene),
                 audio_audible,
                 volume_flash,
-                None,
+                warning,
                 FOOTER_KEYS,
                 FOOTER_KEYS,
             ),
@@ -1323,6 +1323,24 @@ mod tests {
             stems.typing, moderate.typing,
             "typing level must reflect the RENDERED floor's 1 active, not all 4"
         );
+    }
+
+    /// The window's footer says what the TUI's does: a source's death or
+    /// this run's decode drift, from the one shared message.
+    #[test]
+    fn the_footer_shows_the_shared_warning_in_place_of_the_stats() {
+        let renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let slot = active_on("/p/a.jsonl", 0, 0);
+        scene.agents.insert(slot.agent_id, slot);
+        let warning = crate::doctor::footer_warning(&[], &["cc".to_string()]);
+        let budget = footer_budget(960);
+        let calm = renderer.footer(&scene, budget, true, None, None).text();
+        let warned = renderer
+            .footer(&scene, budget, true, None, warning.as_deref())
+            .text();
+        assert!(warned.contains("decode drift: cc·"), "{warned}");
+        assert!(!calm.contains("decode drift"), "{calm}");
     }
 
     #[test]

@@ -12,7 +12,7 @@ use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_scene::theme;
 
-use super::{ModalState, connection, dashboard, welcome, widgets};
+use super::{ModalState, connection, dashboard, welcome};
 use connection::{ConnectionFrame, ConnectionRow, ConnectionUi};
 use dashboard::{DashboardFrame, DashboardUi};
 use welcome::{OnboardingFrame, WelcomeUi};
@@ -338,10 +338,7 @@ impl UiState {
         scene: &SceneState,
         health: &[SourceDeath],
     ) -> RenderFrames {
-        let source_warning = crate::doctor::footer_warning(
-            widgets::source_warning_message(health).as_deref(),
-            &self.drift.prefixes(),
-        );
+        let source_warning = crate::doctor::footer_warning(health, &self.drift.prefixes());
 
         // Re-anchor the selection by AgentId — an agent may have exited.
         let dashboard_frame = if self.dashboard.open {

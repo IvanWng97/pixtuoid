@@ -299,6 +299,10 @@ impl FloatingApp {
                 super::offscreen::footer_budget(win_w as usize),
                 audio_audible,
                 volume_flash,
+                self.live
+                    .as_ref()
+                    .and_then(super::LivePipeline::footer_warning)
+                    .as_deref(),
             ),
             tooltip: self
                 .cursor_in
