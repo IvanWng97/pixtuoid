@@ -13,7 +13,7 @@ use ratatui::style::Color;
 
 use std::sync::Arc;
 
-use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
+use pixtuoid_scene::display::{HoverTarget, Hovers};
 use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
@@ -22,10 +22,9 @@ use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
 
 use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
-pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
+pub(crate) use crate::tui::widgets::{TooltipAt, paint_tooltip};
 pub(super) use crate::tui::widgets::{
-    paint_badges, paint_coffee_tooltip, paint_connection_panel, paint_dashboard, paint_footer,
-    paint_furniture_tooltip, paint_help_overlay, paint_mascot_tooltip, paint_pet_tooltip,
+    paint_badges, paint_connection_panel, paint_dashboard, paint_footer, paint_help_overlay,
     paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
 };
 
@@ -312,29 +311,8 @@ pub(crate) fn paint_scene_tooltip(
     at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    match *hit {
-        SceneHit::Figure(HoverTarget::Agent(id)) => {
-            paint_hover_tooltip(f, world.scene, *id, at, world.now, theme);
-        }
-        SceneHit::Figure(&HoverTarget::Pet(PetHover { kind, anim, .. })) => {
-            let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(world.now));
-            // The hover was drawn from `pets.pet`, so the kinds agree and the
-            // `default_name` arm is not a live path.
-            let display_name = world
-                .pets
-                .pet
-                .map(|p| p.name.as_str())
-                .unwrap_or_else(|| kind.default_name());
-            paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
-        }
-        SceneHit::Figure(HoverTarget::Mascot(key)) => {
-            if let Some(card) = GatewayCard::of(world.scene, key) {
-                paint_mascot_tooltip(f, &card, at, theme);
-            }
-        }
-        SceneHit::Coffee => paint_coffee_tooltip(f, at, theme),
-        SceneHit::Furniture(label) => paint_furniture_tooltip(f, label, at, theme),
-        SceneHit::Star => {}
+    if let Some(tip) = pixtuoid_scene::tooltip::for_hit(*hit, world) {
+        paint_tooltip(f, &tip, at, theme);
     }
 }
 
