@@ -72,15 +72,8 @@ impl EnvHints {
     /// tmux (`picker.rs:357-368`), and the other terminals that speak them
     /// (`picker.rs:372-390`).
     fn iterm2(&self) -> Option<ImageProtocol> {
-        const OTHER_TERM_PROGRAMS: [&str; 8] = [
-            "WezTerm",
-            "mintty",
-            "vscode",
-            "Tabby",
-            "Hyper",
-            "rio",
-            "Bobcat",
-            "WarpTerminal",
+        const OTHER_TERM_PROGRAMS: [&str; 7] = [
+            "WezTerm", "mintty", "vscode", "Tabby", "Hyper", "rio", "Bobcat",
         ];
         let outer = self.env.tmux() && self.wezterm;
         let named = self
@@ -89,6 +82,16 @@ impl EnvHints {
             .as_deref()
             .is_some_and(|p| OTHER_TERM_PROGRAMS.iter().any(|t| p.contains(t)));
         (self.is_iterm2() || outer || named).then_some(ImageProtocol::Iterm2)
+    }
+
+    /// Warp, where no protocol the cutaway speaks animates, seen live in
+    /// v0.2026.09.30: it answers kitty's query but has no Unicode placeholders,
+    /// draws no SIXEL, and never repaints an iTerm2 image it replaces.
+    fn is_warp(&self) -> bool {
+        self.env
+            .term_program
+            .as_deref()
+            .is_some_and(|p| p.contains("WarpTerminal"))
     }
 
     /// iTerm2 itself, not a terminal that speaks its images: its
@@ -180,6 +183,9 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::NotQueried;
     }
     let hints = EnvHints::read();
+    if hints.is_warp() {
+        return Probe::NoCutawayProtocol;
+    }
     if hints.our_tmux_pane() && tmux_passthrough() == Some(false) {
         return Probe::TmuxPassthroughOff;
     }
@@ -399,6 +405,16 @@ mod tests {
             detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
             Some(ImageProtocol::Kitty)
         );
+    }
+
+    /// Warp is told by its own name, and is no longer guessed iTerm2: no
+    /// protocol it speaks animates.
+    #[test]
+    fn warp_is_named_and_never_guessed_iterm2() {
+        let warp = hints("xterm-256color", "WarpTerminal");
+        assert!(warp.is_warp());
+        assert_eq!(warp.iterm2(), None);
+        assert!(!hints("xterm-256color", "iTerm.app").is_warp());
     }
 
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do

@@ -182,6 +182,9 @@ pub(crate) enum ClassicReason {
     /// Inside tmux with `allow-passthrough` off: no image, and no query for
     /// one, reaches the terminal (tmux(1), `allow-passthrough`).
     TmuxPassthroughOff,
+    /// The terminal speaks image protocols, but none the cutaway animates
+    /// with.
+    NoCutawayProtocol,
     /// The terminal has a protocol but reports no cell size, so there is no
     /// scale to fit.
     NoCellSize,
@@ -365,6 +368,13 @@ pub(crate) enum Probe {
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     TmuxPassthroughOff,
+    /// A terminal that speaks no image protocol the cutaway animates with
+    /// (Warp), so nothing was asked.
+    #[cfg_attr(
+        all(not(all(feature = "graphics", unix)), not(test)),
+        expect(dead_code, reason = "only the Unix graphics probe returns it")
+    )]
+    NoCutawayProtocol,
     /// This build cannot ask ([`probe()`]).
     #[cfg_attr(
         all(feature = "graphics", unix, not(test)),
@@ -488,6 +498,7 @@ pub(crate) fn resolve(
         Probe::NotQueried => return classic(ClassicReason::NotQueried),
         Probe::NoAnswer => return classic(ClassicReason::NoAnswer),
         Probe::TmuxPassthroughOff => return classic(ClassicReason::TmuxPassthroughOff),
+        Probe::NoCutawayProtocol => return classic(ClassicReason::NoCutawayProtocol),
         Probe::Unsupported => return classic(ClassicReason::Unsupported),
     };
     let Some(protocol) = mode.forced().or(d.protocol) else {
@@ -532,6 +543,10 @@ impl ClassicReason {
             Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
                  `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
+            Self::NoCutawayProtocol => {
+                "this terminal (Warp) speaks no image protocol the cutaway can animate with"
+                    .to_string()
+            }
             Self::NoCellSize => "terminal reports no cell size in pixels".to_string(),
             Self::TmuxNeedsKitty(p) => format!(
                 "inside tmux only kitty graphics survive a pane switch here, and this terminal \
@@ -1341,6 +1356,12 @@ mod tests {
             ),
             (
                 GraphicsMode::Auto,
+                Probe::NoCutawayProtocol,
+                BUNDLED,
+                "this terminal (Warp) speaks no image protocol the cutaway can animate with",
+            ),
+            (
+                GraphicsMode::Auto,
                 Probe::Answered(Detected {
                     protocol: Some(ImageProtocol::Kitty),
                     cell: None,
@@ -1388,12 +1409,13 @@ mod tests {
                 ClassicReason::NoCellSize => 6,
                 ClassicReason::TmuxNeedsKitty(_) => 7,
                 ClassicReason::CellTooSmall { .. } => 8,
+                ClassicReason::NoCutawayProtocol => 9,
             });
             let row = row(mode, probe, max_density);
             assert_eq!(row, format!("graphics: classic half-blocks — {want}"));
             rows.insert(row);
         }
-        assert_eq!(seen.len(), 9, "every reason has a pinned row");
+        assert_eq!(seen.len(), 10, "every reason has a pinned row");
         assert_eq!(rows.len(), n, "no two reasons print the same row");
     }
 
