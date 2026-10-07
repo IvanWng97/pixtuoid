@@ -4,7 +4,7 @@
 //! byte-faithful to what it blits.
 //!
 //! Usage:
-//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y]`
 //! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
 //! `... -- /tmp/f.png 960x640`.
 
@@ -110,6 +110,7 @@ fn main() -> Result<()> {
     );
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
+    let mut hover: Option<(f64, f64)> = None;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
     while i < rest.len() {
@@ -119,6 +120,17 @@ fn main() -> Result<()> {
                     .get(i + 1)
                     .cloned()
                     .ok_or_else(|| anyhow!("--theme needs a value"))?;
+                i += 2;
+            }
+            "--hover" => {
+                let (x, y) = rest
+                    .get(i + 1)
+                    .and_then(|v| v.split_once(','))
+                    .ok_or_else(|| anyhow!("--hover needs X,Y window px"))?;
+                hover = Some((
+                    x.parse().context("bad --hover x")?,
+                    y.parse().context("bad --hover y")?,
+                ));
                 i += 2;
             }
             "--agents" => {
@@ -184,6 +196,23 @@ fn main() -> Result<()> {
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);
     pixtuoid::floating::offscreen::paint_footer_into_surface(&mut surf, &footer, theme);
+    if let Some(cursor) = hover {
+        let world = FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now,
+            floor: FloorMeta::ground(),
+            pets: PetInputs::default(),
+        };
+        if let Some(tip) = renderer
+            .hit_at(cursor, at)
+            .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
+        {
+            pixtuoid::floating::offscreen::paint_tooltip_into_surface(
+                &mut surf, &tip, cursor, theme,
+            );
+        }
+    }
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {
