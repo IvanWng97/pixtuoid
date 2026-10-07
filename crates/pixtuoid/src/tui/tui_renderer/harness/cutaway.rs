@@ -187,7 +187,13 @@ fn armed(
     let out = crate::tui::FrameOut::new(wire.clone(), false);
     r.present_through(out.clone());
     r.set_cutaway(
-        TileCutaway::new(fit(cols, rows), CELL, protocol, false, Box::new(out)).arming(in_grid),
+        TileCutaway::new(
+            fit(cols, rows),
+            CELL,
+            crate::graphics::Route::direct(protocol, false),
+            Box::new(out),
+        )
+        .arming(in_grid),
     );
     (r, wire, in_grid)
 }
@@ -503,11 +509,9 @@ fn the_plans_cell_holds_until_the_windows_moves() {
     assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
     let plan = crate::graphics::Plan::Cutaway {
         fit: fit(cols, rows),
-        protocol: ImageProtocol::Sixel,
+        route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
         cell: CELL,
-        tmux: false,
         forced: false,
-        medium: crate::graphics::Medium::Direct,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -549,11 +553,9 @@ fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
     assert_eq!(wire.take(), "", "the plan's cell holds, nothing re-cut");
     let plan = crate::graphics::Plan::Cutaway {
         fit: fit(cols, rows),
-        protocol: ImageProtocol::Sixel,
+        route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
         cell: CELL,
-        tmux: false,
         forced: false,
-        medium: crate::graphics::Medium::Direct,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -1169,7 +1171,7 @@ fn kitty_images(wire: &str) -> Vec<(u32, Vec<u8>)> {
 #[cfg(unix)]
 #[test]
 fn shared_memory_carries_the_tiles_the_escapes_would() {
-    let run = |medium| {
+    let run = |shm| {
         let (cols, rows) = (120, 40);
         let mut r = TuiRenderer::new(
             Terminal::new(Window::new(cols, rows)).expect("terminal"),
@@ -1180,22 +1182,18 @@ fn shared_memory_carries_the_tiles_the_escapes_would() {
         let wire = Wire::default();
         let out = crate::tui::FrameOut::new(wire.clone(), false);
         r.present_through(out.clone());
-        r.set_cutaway(
-            TileCutaway::new(
-                fit(cols, rows),
-                CELL,
-                ImageProtocol::Kitty,
-                false,
-                Box::new(out),
-            )
-            .through(medium),
-        );
+        r.set_cutaway(TileCutaway::new(
+            fit(cols, rows),
+            CELL,
+            crate::graphics::Route::of(ImageProtocol::Kitty, false, shm),
+            Box::new(out),
+        ));
         r.render(&office(), pack(), t0()).expect("render");
         kitty_images(&wire.take())
     };
-    let direct = run(crate::graphics::Medium::Direct);
+    let direct = run(false);
     assert!(!direct.is_empty(), "the first frame sends its tiles");
-    assert_eq!(run(crate::graphics::Medium::SharedMemory), direct);
+    assert_eq!(run(true), direct);
 }
 
 /// A floor switch slides the cutaway the way classic slides its half-blocks:
@@ -1512,8 +1510,13 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
             pack_arc(),
         );
         r.set_cutaway(
-            TileCutaway::new(fit(120, 40), CELL, protocol, false, Box::new(wire.clone()))
-                .arming(Box::leak(Box::new(AtomicBool::new(false)))),
+            TileCutaway::new(
+                fit(120, 40),
+                CELL,
+                crate::graphics::Route::direct(protocol, false),
+                Box::new(wire.clone()),
+            )
+            .arming(Box::leak(Box::new(AtomicBool::new(false)))),
         );
         r.render(&office(), pack(), t0()).expect("render");
         let sent = wire.take();

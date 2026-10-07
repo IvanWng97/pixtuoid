@@ -619,8 +619,7 @@ mod tests {
         let density = density();
         WindowGeometry {
             look: Look::Cutaway {
-                scale: pixtuoid_scene::render_scale::RenderScale::new(density.get())
-                    .expect("nonzero"),
+                scale: pixtuoid_scene::render_scale::RenderScale::from(density),
             },
             office: size,
             upscale: 1,

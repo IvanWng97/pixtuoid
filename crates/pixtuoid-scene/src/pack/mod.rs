@@ -636,7 +636,7 @@ mod tests {
         let front = desk_front(&pack, lookup::DESK_SPRITE).expect("the bundled desk has a front");
         for scale in [
             RenderScale::ONE,
-            RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+            RenderScale::from(pack.max_density_variant()),
         ] {
             let desk = densest_frame(&pack, lookup::DESK_SPRITE, 0, scale).expect("the desk");
             let over = densest_frame(&pack, front, 0, scale).expect("the front");
