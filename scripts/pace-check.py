@@ -3,7 +3,7 @@
 a storm, or across dusk, and fail on a frame past the paint interval or a
 window whose p99 passes P99_MS.
 
-The binary measures itself: its `frame pacing` summaries (`tui/jank.rs`), a
+The binary measures itself: its `frame pacing` summaries (`jank.rs`), a
 minute each and one at exit, are what this reads, from the log it writes.
 `--live` runs it in this terminal, as a user would, which is the only run
 whose writes meet a real terminal's parser; without it, a pseudo-terminal
@@ -134,7 +134,7 @@ def main():
         PIXTUOID_FAKE_NOW=str(start_at(args.run)),
         PIXTUOID_LOG=str(log),
         # `frame slow` is debug: every frame past its interval, with its state.
-        RUST_LOG="info,pixtuoid::tui::jank=debug",
+        RUST_LOG="info,pixtuoid::jank=debug",
     )
     graphics = "off" if args.scale == "classic" else args.graphics
     argv = [str(BIN), "--log-level", "info", "run", "--graphics", graphics]
