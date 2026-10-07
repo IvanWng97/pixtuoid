@@ -241,6 +241,20 @@ mod tests {
                     "natural {natural}, density {d}"
                 );
             }
+            // Below the density the office shrinks; the art keeps its density.
+            let below = PixelFit::at_least_density(d - 1, density, px);
+            assert_eq!(
+                (below.scale().get(), below.upscale(), below.logical()),
+                (
+                    d,
+                    1,
+                    crate::layout::Size {
+                        w: px.w / d,
+                        h: px.h / d
+                    }
+                ),
+                "density {d}"
+            );
         }
     }
 
