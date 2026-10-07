@@ -464,6 +464,8 @@ struct HitchRun {
     /// Synthesize lofi track beds on a thread throughout, as a track swap
     /// does: the audio's heaviest load.
     lofi: bool,
+    /// The ambient tier: the plan puts SIXEL and iTerm2 on Calm.
+    motion: Motion,
 }
 
 /// A terminal the hitch runs draw on.
@@ -508,6 +510,7 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(60),
             whole: false,
             lofi: false,
+            motion: Motion::Full,
         },
         HitchRun {
             name: "noon overcast",
@@ -517,6 +520,7 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(60),
             whole: false,
             lofi: false,
+            motion: Motion::Full,
         },
         HitchRun {
             name: "noon storm",
@@ -526,6 +530,19 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(120),
             whole: false,
             lofi: false,
+            motion: Motion::Full,
+        },
+        // Every beat at night changes the windows' sky and a light far apart:
+        // the repaint that spans them is the SIXEL and iTerm2 rows' cost.
+        HitchRun {
+            name: "night on Calm, 33 ms",
+            weather: WeatherPolicy::Forced(Weather::Clear),
+            start: Some(pixtuoid_scene::localclock::at_hour_min(21, 30)),
+            step: tick,
+            length: Duration::from_secs(60),
+            whole: false,
+            lofi: false,
+            motion: Motion::Calm,
         },
         HitchRun {
             name: "dusk ff 1s/frame",
@@ -535,6 +552,7 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(3600),
             whole: false,
             lofi: false,
+            motion: Motion::Full,
         },
         HitchRun {
             name: "a weather transition, 33 ms",
@@ -547,6 +565,7 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(120),
             whole: false,
             lofi: false,
+            motion: Motion::Full,
         },
         HitchRun {
             name: "stress: storm, every frame whole",
@@ -556,6 +575,7 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(30),
             whole: true,
             lofi: false,
+            motion: Motion::Full,
         },
         HitchRun {
             name: "stress: storm, every frame whole, lofi building",
@@ -565,6 +585,7 @@ fn hitch(path: &Path) -> Result<()> {
             length: Duration::from_secs(30),
             whole: true,
             lofi: true,
+            motion: Motion::Full,
         },
     ];
     let real = HitchRun {
@@ -575,6 +596,7 @@ fn hitch(path: &Path) -> Result<()> {
         length: Duration::from_secs(real_secs),
         whole: false,
         lofi: false,
+        motion: Motion::Full,
     };
     let owner = |protocol, name| Term {
         name,
@@ -633,7 +655,7 @@ fn hitch(path: &Path) -> Result<()> {
             run.lofi,
         )?;
         r.set_weather(run.weather);
-        r.set_motion(Motion::Full);
+        r.set_motion(run.motion);
         let lofi_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let lofi = run.lofi.then(|| {
             let stop = Arc::clone(&lofi_stop);

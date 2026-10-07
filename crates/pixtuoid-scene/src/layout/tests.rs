@@ -32,6 +32,25 @@ fn a_box_on_the_far_edge_overlaps_by_its_pixels() {
     assert!(!edge.overlaps(b(0, 0, 4, 4)));
 }
 
+/// The union holds both boxes, overlapping or apart, and a box on the far
+/// edge neither overflows it nor wraps it.
+#[test]
+fn a_union_holds_both_boxes_to_the_far_edge() {
+    let b = |x, y, width, height| Bounds {
+        x,
+        y,
+        width,
+        height,
+    };
+    assert_eq!(b(10, 10, 4, 4).union(b(13, 2, 4, 4)), b(10, 2, 7, 12));
+    assert_eq!(b(0, 0, 1, 1).union(b(5, 5, 1, 1)), b(0, 0, 6, 6));
+    let edge = b(u16::MAX, u16::MAX, 1, 1);
+    assert_eq!(
+        edge.union(b(u16::MAX - 3, u16::MAX - 3, 2, 2)),
+        b(u16::MAX - 3, u16::MAX - 3, 4, 4)
+    );
+}
+
 #[test]
 fn widening_against_column_0_keeps_the_east_edge() {
     let b = |x, width| Bounds {
