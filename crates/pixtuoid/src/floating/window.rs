@@ -555,6 +555,14 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.cursor_in = false;
                 self.rehover();
             }
+            // Its release goes elsewhere now: a figure in hand is set down.
+            WindowEvent::Focused(false) => {
+                if self.renderer.cancel_pointer()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,

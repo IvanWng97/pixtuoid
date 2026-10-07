@@ -48,6 +48,14 @@ pub enum Pressed {
     Bare,
 }
 
+/// A press: what it landed on, and the carry it ended, set down where it was
+/// last carried, which the painter hands its floor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Down {
+    pub pressed: Pressed,
+    pub ended: Option<Gesture>,
+}
+
 /// What a pointer's event amounts to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gesture {
@@ -118,7 +126,10 @@ impl Pointer {
         at: Point,
         petting: Option<&PetState>,
         now: SystemTime,
-    ) -> Pressed {
+    ) -> Down {
+        // A carry whose release never came — the window lost focus, the
+        // terminal dropped the mouse-up — sets its figure down first.
+        let ended = self.cancel();
         let figure = match hit {
             Some(SceneHit::Figure(target)) => Some(Figure::of(target)),
             _ => None,
@@ -133,7 +144,17 @@ impl Pointer {
             Pressed::Something => State::Pressed { at, figure, action },
             Pressed::Bare => State::Up,
         };
-        pressed
+        Down { pressed, ended }
+    }
+
+    /// End the gesture without a release, as when the window loses focus: a
+    /// figure carried lands where it was last carried, and a press clicks
+    /// nothing.
+    pub fn cancel(&mut self) -> Option<Gesture> {
+        match std::mem::take(&mut self.state) {
+            State::Carrying { at } => Some(Gesture::Drop(at)),
+            State::Up | State::Pressed { .. } => None,
+        }
     }
 
     /// The pointer moved to `at`.
@@ -189,7 +210,8 @@ mod tests {
         let agent = HoverTarget::Agent(id);
         let mut p = Pointer::default();
         assert_eq!(
-            p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now),
+            p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now)
+                .pressed,
             Pressed::Something
         );
         assert_eq!(p.moved(pt(11, 10)), None, "within the jitter");
@@ -211,6 +233,51 @@ mod tests {
         assert_eq!(p.up(Some(pt(31, 41))), Some(Gesture::Drop(pt(31, 41))));
         assert!(!p.carrying());
         assert_eq!(p.up(Some(pt(31, 41))), None, "one release per press");
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.moved(pt(10, 20));
+        p.moved(pt(12, 24));
+        assert_eq!(
+            p.up(None),
+            Some(Gesture::Drop(pt(12, 24))),
+            "released off the office, it lands where it was last carried"
+        );
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        assert_eq!(
+            p.up(None),
+            None,
+            "a press released off the office clicks nothing"
+        );
+    }
+
+    /// A carry whose release never came ends at the next press, or when the
+    /// painter cancels it, setting its figure down where it was last carried.
+    #[test]
+    fn a_carry_without_its_release_still_sets_the_figure_down() {
+        let now = SystemTime::UNIX_EPOCH;
+        let agent = HoverTarget::Agent(AgentId::from_parts("claude-code", "s"));
+        let mut p = Pointer::default();
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.moved(pt(20, 20));
+        let down = p.down(None, pt(50, 50), None, now);
+        assert_eq!(
+            down.ended,
+            Some(Gesture::Drop(pt(20, 20))),
+            "the next press sets it down"
+        );
+        assert!(!p.carrying());
+        p.down(Some(SceneHit::Figure(&agent)), pt(10, 10), None, now);
+        p.moved(pt(30, 30));
+        assert_eq!(
+            p.cancel(),
+            Some(Gesture::Drop(pt(30, 30))),
+            "a cancel sets it down"
+        );
+        assert_eq!(p.cancel(), None, "once");
+        assert_eq!(
+            p.up(Some(pt(30, 30))),
+            None,
+            "and its release, late, does nothing"
+        );
     }
 
     /// A link clicks but never lifts, and the bare office answers nothing:
@@ -220,7 +287,7 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH;
         let mut p = Pointer::default();
         assert_eq!(
-            p.down(Some(SceneHit::Star), pt(5, 5), None, now),
+            p.down(Some(SceneHit::Star), pt(5, 5), None, now).pressed,
             Pressed::Something
         );
         assert_eq!(p.moved(pt(50, 50)), None, "a link does not lift");
@@ -229,10 +296,11 @@ mod tests {
             Some(Gesture::Click(HitAction::Open(crate::hit::REPO_URL)))
         );
         assert_eq!(
-            p.down(Some(SceneHit::Furniture("Desk")), pt(5, 5), None, now),
+            p.down(Some(SceneHit::Furniture("Desk")), pt(5, 5), None, now)
+                .pressed,
             Pressed::Bare
         );
-        assert_eq!(p.down(None, pt(5, 5), None, now), Pressed::Bare);
+        assert_eq!(p.down(None, pt(5, 5), None, now).pressed, Pressed::Bare);
         assert_eq!(p.moved(pt(50, 50)), None);
         assert_eq!(p.up(Some(pt(50, 50))), None);
     }
@@ -253,7 +321,8 @@ mod tests {
         };
         let mut p = Pointer::default();
         assert_eq!(
-            p.down(Some(SceneHit::Figure(&pet)), pt(5, 5), Some(&playing), now),
+            p.down(Some(SceneHit::Figure(&pet)), pt(5, 5), Some(&playing), now)
+                .pressed,
             Pressed::Something
         );
         assert_eq!(p.up(Some(pt(5, 5))), None, "no click while a petting plays");

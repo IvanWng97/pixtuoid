@@ -474,7 +474,10 @@ fn take_grip(
     let creature = match figure {
         Figure::Agent(id) if held => return Some((id, at)),
         Figure::Agent(id) => {
-            stores.walks.entry(id).or_default().dropped = Some(crate::walk::Dropped::At(at));
+            // One gone mid-carry has nothing to walk home.
+            if let Some(walk) = stores.walks.get_mut(&id) {
+                walk.dropped = Some(crate::walk::Dropped::At(at));
+            }
             return None;
         }
         Figure::Pet(kind) => CreatureKey::Pet(kind),

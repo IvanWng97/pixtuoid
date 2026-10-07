@@ -492,12 +492,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let hit = self.cached_layout.as_deref().and_then(|layout| {
             crate::tui::hit_test::scene_hit(&self.last_hovers, self.last_star, layout, cell)
         });
-        self.pointer.down(
+        let down = self.pointer.down(
             hit,
             centre(cell.bounds()),
             self.chrome.active_pet.as_ref(),
             now,
         );
+        if let Some(ended) = &down.ended {
+            self.grip(ended);
+        }
     }
 
     /// The pointer dragged to cell `(col, row)`: a figure lifted follows it.

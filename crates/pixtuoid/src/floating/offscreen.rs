@@ -60,7 +60,7 @@ impl OfficeRenderer {
     }
 
     /// The pets each floor picks its own from.
-    pub(crate) fn set_pets(&mut self, pets: Vec<pixtuoid_scene::pet::Pet>) {
+    pub fn set_pets(&mut self, pets: Vec<pixtuoid_scene::pet::Pet>) {
         self.pets = pets;
     }
 
@@ -161,7 +161,7 @@ impl OfficeRenderer {
     /// bottom-right corner, else the pointer's — on what the last frame shows
     /// there, a click or a drag follows ([`Pointer`]) — else, on the bare
     /// office or a fixture, drag the frameless window.
-    pub(crate) fn press_at(
+    pub fn press_at(
         &mut self,
         cursor: (f64, f64),
         window: (u32, u32),
@@ -172,19 +172,35 @@ impl OfficeRenderer {
         ),
     ) -> Press {
         if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+            // As any press does: a carry whose release never came ends here.
+            self.cancel_pointer();
             return Press::Resize;
         }
         let unit = unit_at(cursor, at);
         let hit = self.session.hit_at(unit_bounds(unit));
-        match self.pointer.down(hit, unit, petting, now) {
+        let down = self.pointer.down(hit, unit, petting, now);
+        if let Some(ended) = &down.ended {
+            self.session.grip(ended);
+        }
+        match down.pressed {
             Pressed::Something => Press::Pointer,
             Pressed::Bare => Press::Drag,
         }
     }
 
+    /// End the pointer's gesture without a release, as when the window loses
+    /// focus mid-drag; whether it set a figure down, which the window redraws.
+    pub(crate) fn cancel_pointer(&mut self) -> bool {
+        let ended = self.pointer.cancel();
+        if let Some(gesture) = &ended {
+            self.session.grip(gesture);
+        }
+        ended.is_some()
+    }
+
     /// The pointer moved to `cursor` over a frame drawn at `at`; whether a
     /// figure it carries moved, which the window redraws.
-    pub(crate) fn pointer_moved(&mut self, cursor: (f64, f64), at: WindowGeometry) -> bool {
+    pub fn pointer_moved(&mut self, cursor: (f64, f64), at: WindowGeometry) -> bool {
         let gesture = self.pointer.moved(unit_at(cursor, at));
         if let Some(gesture) = &gesture {
             self.session.grip(gesture);
@@ -194,7 +210,7 @@ impl OfficeRenderer {
 
     /// The press released at `cursor` over a frame drawn at `at`: the click's
     /// action, the window's to carry out; a figure carried is set down.
-    pub(crate) fn release(
+    pub fn release(
         &mut self,
         cursor: (f64, f64),
         at: WindowGeometry,
@@ -297,7 +313,7 @@ impl Screen {
 
 /// What a left press does: [`OfficeRenderer::press_at`]'s answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Press {
+pub enum Press {
     Resize,
     /// The pointer's: a click or a drag follows.
     Pointer,
@@ -1297,6 +1313,19 @@ mod tests {
         assert!(renderer.carrying());
         assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");
         assert!(!renderer.carrying());
+        // A carry whose release goes elsewhere is set down when the window
+        // loses focus, or at the next press.
+        renderer.press_at(on_agent, size, at, (None, now));
+        assert!(renderer.pointer_moved(away, at));
+        assert!(
+            renderer.cancel_pointer(),
+            "focus lost mid-carry sets it down"
+        );
+        assert!(!renderer.carrying() && !renderer.cancel_pointer());
+        renderer.press_at(on_agent, size, at, (None, now));
+        assert!(renderer.pointer_moved(away, at));
+        renderer.press_at(corner, size, at, (None, now));
+        assert!(!renderer.carrying(), "the next press sets it down");
     }
 
     /// A tooltip paints its box in the theme's tooltip background, inside the
