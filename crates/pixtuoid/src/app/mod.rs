@@ -77,7 +77,6 @@ pub fn run() -> Result<()> {
     // $PIXTUOID_NO_TRUECOLOR_WARN is the escape hatch for a terminal we can't
     // auto-detect. The query runs only inside `warn_zone`, so a healthy truecolor
     // session pays nothing.
-    #[cfg(not(windows))]
     if crate::term::warn_zone(
         is_run_tui,
         std::io::IsTerminal::is_terminal(&std::io::stderr()),

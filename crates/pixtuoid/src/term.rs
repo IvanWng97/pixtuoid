@@ -158,8 +158,10 @@ pub(crate) fn shown_env(v: Option<&str>) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Truecolor {
     /// It answered: `true` when it echoed the 24-bit color back.
+    #[cfg_attr(not(unix), expect(dead_code, reason = "only a Unix terminal is asked"))]
     Answered(bool),
     /// It was asked, and no usable reply came.
+    #[cfg_attr(not(unix), expect(dead_code, reason = "only a Unix terminal is asked"))]
     NoAnswer,
     /// Nothing asked it: no terminal took the query, or this platform has none
     /// to send.
@@ -442,7 +444,7 @@ fn response_terminated(buf: &[u8]) -> bool {
 /// Non-Unix stub: Windows hard-gates VT separately in `tui::mod`, so there is no
 /// preflight query there.
 #[cfg(not(unix))]
-pub fn query_truecolor(_timeout: std::time::Duration) -> Truecolor {
+pub(crate) fn query_truecolor(_timeout: std::time::Duration) -> Truecolor {
     Truecolor::CantAsk
 }
 
