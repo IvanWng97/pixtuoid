@@ -92,14 +92,28 @@ impl EnvHints {
                 .is_some_and(|t| t.contains("iTerm"));
         (outer || named).then_some(ImageProtocol::Iterm2)
     }
+
+    /// iTerm2 itself, not one of the terminals that speak its images: its
+    /// `TERM_PROGRAM` or `LC_TERMINAL`, or inside tmux its session.
+    fn is_iterm2(&self) -> bool {
+        let named = |v: &Option<String>| v.as_deref().is_some_and(|v| v.contains("iTerm"));
+        named(&self.env.term_program)
+            || named(&self.lc_terminal)
+            || (self.env.tmux() && self.iterm_session)
+    }
 }
 
 /// What the terminal's answer and the environment together say: kitty over
-/// SIXEL when it answers both (ratatui-image 11.1.0 `picker.rs:544-554`), then
-/// the iTerm2 guess (`picker.rs:136-140`); the cell from its answer, else from
-/// the kernel's window size.
+/// SIXEL when it answers both (ratatui-image 11.1.0 `picker.rs:544-554`), but
+/// for iTerm2, then the iTerm2 guess (`picker.rs:136-140`); the cell from its
+/// answer, else from the kernel's window size.
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
-    let queried = if responses.contains(&Response::Kitty) {
+    // iTerm2 answers kitty's query, but its kitty, "except animation"
+    // (iterm2.com/downloads.html changelog), takes seconds a 16x frame, and its
+    // inline images most of one; its SIXEL keeps up.
+    let queried = if hints.is_iterm2() && responses.contains(&Response::Sixel) {
+        Some(ImageProtocol::Sixel)
+    } else if responses.contains(&Response::Kitty) {
         Some(ImageProtocol::Kitty)
     } else if responses.contains(&Response::Sixel) {
         Some(ImageProtocol::Sixel)
@@ -300,6 +314,46 @@ mod tests {
         };
         assert_eq!(lc.iterm2(), Some(ImageProtocol::Iterm2));
         assert_eq!(hints("xterm-ghostty", "ghostty").iterm2(), None);
+    }
+
+    /// iTerm2 answers kitty's query and lists SIXEL in its DA1 (3.7.3, live:
+    /// `ESC [ ? 64;1;2;4;6;17;18;21;22;52 c` and `ESC _ G i=31;OK`), and only
+    /// its SIXEL keeps up with a 16x frame: it takes SIXEL. A terminal that
+    /// lists no SIXEL keeps its kitty, whatever the environment names.
+    #[test]
+    fn iterm2_takes_its_sixel_over_its_kitty() {
+        let both = [Response::Kitty, Response::Sixel];
+        let iterm2 = hints("xterm-256color", "iTerm.app");
+        assert_eq!(
+            detected(&both, &iterm2, None).protocol,
+            Some(ImageProtocol::Sixel)
+        );
+        let in_tmux = client(EnvHints {
+            iterm_session: true,
+            ..hints("tmux-256color", "tmux")
+        });
+        assert_eq!(
+            detected(&both, &in_tmux, None).protocol,
+            Some(ImageProtocol::Sixel)
+        );
+        assert_eq!(
+            detected(&[Response::Kitty], &iterm2, None).protocol,
+            Some(ImageProtocol::Kitty),
+            "no SIXEL listed"
+        );
+        let leaked = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..hints("xterm-ghostty", "ghostty")
+        };
+        assert_eq!(
+            detected(&[Response::Kitty], &leaked, None).protocol,
+            Some(ImageProtocol::Kitty),
+            "a terminal started from iTerm2's shell"
+        );
+        assert_eq!(
+            detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
+            Some(ImageProtocol::Kitty)
+        );
     }
 
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do
