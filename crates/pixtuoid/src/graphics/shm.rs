@@ -18,9 +18,11 @@ use std::time::{Duration, Instant};
 /// unread this late was dropped, and unlinking it costs at most a stale tile.
 const READ_WITHIN: Duration = Duration::from_secs(2);
 
-/// The most bytes unread objects hold at once, oldest unlinked first: a
-/// terminal that never reads (a dropped passthrough) must not pile up
-/// [`READ_WITHIN`] of whole frames.
+/// The most bytes the ledger holds at once, oldest unlinked first: a terminal
+/// that never reads (a dropped passthrough) must not pile up [`READ_WITHIN`]
+/// of whole frames. The terminal's own unlink goes unseen, so the ledger
+/// counts read objects too, and publishing more than this within
+/// [`READ_WITHIN`] unlinks before it.
 const MAX_UNREAD_BYTES: usize = 256 << 20;
 
 /// The names this process has published and not yet unlinked itself, oldest
