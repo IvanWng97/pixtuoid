@@ -271,16 +271,31 @@ struct Last {
 /// Each of a wall's bays, and what its glass shows.
 pub(crate) type Views = Vec<(WindowBay, Arc<WindowView>)>;
 
-/// All [`Outside::of`] reads of its arguments but the pack and the theme,
-/// which are the cache's own, and the moment's `now`, which it never reads.
+/// All [`Outside::of`] reads but the pack and the theme, which are the
+/// cache's own: it takes this and nothing else, so nothing it reads can
+/// miss the key.
 #[derive(Debug, PartialEq)]
-struct OutsideKey {
+pub(crate) struct OutsideKey {
     sky: crate::sky::Sky,
     altitude: f32,
     beat: crate::anim::Beat,
     wall: Wall,
     density: Density,
     weather: GlassWeather,
+}
+
+impl OutsideKey {
+    /// The outside `wall` shows at `moment` under `weather`, at `density`.
+    pub(crate) fn of(moment: &Moment, wall: Wall, density: Density, weather: GlassWeather) -> Self {
+        Self {
+            sky: moment.sky,
+            altitude: moment.altitude,
+            beat: moment.timing.beat,
+            wall,
+            density,
+            weather,
+        }
+    }
 }
 
 impl OutsideCache {
@@ -295,14 +310,7 @@ impl OutsideCache {
         density: Density,
         weather: GlassWeather,
     ) -> Views {
-        let drawn = OutsideKey {
-            sky: moment.sky,
-            altitude: moment.altitude,
-            beat: moment.timing.beat,
-            wall,
-            density,
-            weather,
-        };
+        let drawn = OutsideKey::of(moment, wall, density, weather);
         let (run, glass_h) = drawn.wall.glass();
         let glass = (run.end - run.start, glass_h);
         if let Some(last) = &self.last
@@ -311,18 +319,7 @@ impl OutsideCache {
             crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
             return last.views.clone();
         }
-        let outside = Outside::of(
-            moment,
-            pack,
-            theme,
-            Wall {
-                size: drawn.wall.size,
-                bays: drawn.wall.bays.clone(),
-            },
-            density,
-            weather,
-            &mut self.clouds,
-        );
+        let outside = Outside::of(&drawn, pack, theme, &mut self.clouds);
         crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
         if let Some(last) = &mut self.last
             && last.painted == outside
@@ -365,23 +362,27 @@ impl std::fmt::Debug for Outside {
 }
 
 impl Outside {
-    /// The outside at `moment` of `wall` under `weather`, at `density`, a
-    /// strike landing only on the glass of its bays; `clouds` keeps
-    /// the clouds' masses across frames, and an empty one draws them afresh.
+    /// The outside `key` names, its sky in `theme`, a strike landing only on
+    /// the glass of its bays; `clouds` keeps the clouds' masses across
+    /// frames, and an empty one draws them afresh.
     pub(crate) fn of(
-        moment: &Moment,
+        key: &OutsideKey,
         pack: &Pack,
         theme: &Theme,
-        wall: Wall,
-        density: Density,
-        weather: GlassWeather,
         clouds: &mut crate::clouds::CloudCache,
     ) -> Self {
+        let &OutsideKey {
+            sky,
+            altitude,
+            beat,
+            ref wall,
+            density,
+            weather,
+        } = key;
+        let outlook = crate::atmosphere::Outlook::resolve(sky, theme, altitude, beat);
         let (run, glass_h) = wall.glass();
-        let Wall {
-            size: (buf_w, band_h),
-            bays,
-        } = wall;
+        let (buf_w, band_h) = wall.size;
+        let bays = wall.bays.clone();
         let rows = window_rows(band_h);
         let panes: Vec<Range<u16>> = bays
             .iter()
@@ -390,15 +391,21 @@ impl Outside {
             .map(|p| p.start - run.start..p.end - run.start)
             .collect();
         Self {
-            sky: SkyView::of(moment, buf_w, band_h, theme),
+            sky: SkyView::of(&outlook, buf_w, band_h, theme),
             clouds: crate::clouds::Clouds::of(
-                moment,
+                &outlook,
                 (run.end - run.start, glass_h),
                 density.get(),
                 &panes,
                 clouds,
             ),
-            city: CityStrip::draw(pack, (run.end - run.start, glass_h), moment, theme, density),
+            city: CityStrip::draw(
+                pack,
+                (run.end - run.start, glass_h),
+                &outlook,
+                theme,
+                density,
+            ),
             run_x0: run.start,
             weather,
             rows,
@@ -640,15 +647,17 @@ pub(crate) mod tests {
                 Moment::resolve(s.sky, theme, 0.0, crate::anim::Motion::Full.timing(s.now));
             for d in [Density::ONE, pack.max_density_variant()] {
                 let outside = Outside::of(
-                    &moment,
+                    &OutsideKey::of(
+                        &moment,
+                        Wall {
+                            size: wall,
+                            bays: slots(wall.0),
+                        },
+                        d,
+                        GlassWeather::of(&moment),
+                    ),
                     &pack,
                     theme,
-                    Wall {
-                        size: wall,
-                        bays: slots(wall.0),
-                    },
-                    d,
-                    GlassWeather::of(&moment),
                     &mut crate::clouds::CloudCache::default(),
                 );
                 let rows = window_rows(wall.1);
@@ -902,15 +911,17 @@ pub(crate) mod tests {
         let dx = 7;
         let far = (crate::layout::WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
         let mut outside = Outside::of(
-            &moment,
+            &OutsideKey::of(
+                &moment,
+                Wall {
+                    size: (crate::layout::WINDOW_W * 3, 32),
+                    bays: slots(crate::layout::WINDOW_W * 3),
+                },
+                Density::ONE,
+                GlassWeather::of(&moment),
+            ),
             &crate::pack::test_default_pack(),
             theme,
-            Wall {
-                size: (crate::layout::WINDOW_W * 3, 32),
-                bays: slots(crate::layout::WINDOW_W * 3),
-            },
-            Density::ONE,
-            GlassWeather::of(&moment),
             &mut crate::clouds::CloudCache::default(),
         );
         let mut pane = |x: u16, run_x0: u16| {
@@ -956,16 +967,17 @@ pub(crate) mod tests {
                     Moment::resolve(sky, theme, 0.0, crate::anim::Motion::Full.timing(now))
                 };
                 let mut outside = Outside::of(
-                    &at(Weather::Storm),
+                    &OutsideKey::of(
+                        &at(Weather::Storm),
+                        Wall {
+                            size: wall,
+                            bays: bays.clone(),
+                        },
+                        d, // a clear pane's glass: no veil or rain over the bolt
+                        GlassWeather::of(&at(Weather::Clear)),
+                    ),
                     &pack,
                     theme,
-                    Wall {
-                        size: wall,
-                        bays: bays.clone(),
-                    },
-                    d,
-                    // a clear pane's glass: no veil or rain over the bolt
-                    GlassWeather::of(&at(Weather::Clear)),
                     &mut crate::clouds::CloudCache::default(),
                 );
                 assert!(outside.run_x0 > 0, "a run off the wall's west edge");

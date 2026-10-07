@@ -981,11 +981,11 @@ impl Clouds {
         (clouds, planned)
     }
 
-    /// The clouds of `moment` over a window run `span` units wide and glass
+    /// The clouds of `outlook` over a window run `span` units wide and glass
     /// `glass_h` tall, drawn on a grid `d` to the unit; `cache` keeps the
     /// masses' bands across frames, and an empty one draws them afresh.
     pub(crate) fn of(
-        moment: &Moment,
+        outlook: &crate::atmosphere::Outlook,
         (span, glass_h): (u16, u16),
         d: u16,
         panes: &[Range<u16>],
@@ -993,8 +993,8 @@ impl Clouds {
     ) -> Self {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
         // f64: an epoch-scale beat in f32 steps in minutes, freezing then jumping the deck
-        let secs = moment.timing.beat.ms() as f64 / 1000.0;
-        let (mut clouds, planned) = Self::plan(&moment.sky, secs, (span, glass_h), d);
+        let secs = outlook.beat().ms() as f64 / 1000.0;
+        let (mut clouds, planned) = Self::plan(outlook.sky(), secs, (span, glass_h), d);
         let mut drawn: Vec<_> = planned
             .into_iter()
             .map(|(mass, key)| {
@@ -1005,8 +1005,8 @@ impl Clouds {
         // far to near, each mass beside its own bands: the nearest wins
         drawn.sort_by_key(|(m, _)| m.layer);
         (clouds.masses, clouds.rasters) = drawn.into_iter().unzip();
-        if let Some(phase) = moment.sky.strike() {
-            let beat = moment.timing.beat;
+        if let Some(phase) = outlook.sky().strike() {
+            let beat = outlook.beat();
             clouds.strike = clouds.strike_at(
                 crate::sky::strike_bucket(beat),
                 phase,
@@ -1737,7 +1737,13 @@ mod tests {
     ) -> Clouds {
         let sky = Sky::at_with(now, weather).with_strike(strike);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-        Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default())
+        Clouds::of(
+            &moment.outlook(&crate::theme::NORMAL),
+            (SPAN, GLASS_H),
+            1,
+            RUN,
+            &mut CloudCache::default(),
+        )
     }
 
     /// The mass rasters `f` draws: the `clouds.draw` spans it opens.
@@ -1787,7 +1793,13 @@ mod tests {
         assert!(steps > 0, "a step lands within the first second");
         let mut cache = CloudCache::default();
         cache.warm();
-        Clouds::of(&moment_at(0), (SPAN, GLASS_H), 4, RUN, &mut cache);
+        Clouds::of(
+            &moment_at(0).outlook(theme),
+            (SPAN, GLASS_H),
+            4,
+            RUN,
+            &mut cache,
+        );
         Clouds::draw_ahead(&moment_at(0), (SPAN, GLASS_H), 4, &mut cache);
         for n in 1..(AHEAD.as_millis() / frame.as_millis()) as u32 {
             let moment = moment_at(n);
@@ -1796,7 +1808,7 @@ mod tests {
                 planned.iter().all(|&(_, key)| cache.holds(key)),
                 "frame {n} drew on demand"
             );
-            Clouds::of(&moment, (SPAN, GLASS_H), 4, RUN, &mut cache);
+            Clouds::of(&moment.outlook(theme), (SPAN, GLASS_H), 4, RUN, &mut cache);
             Clouds::draw_ahead(&moment, (SPAN, GLASS_H), 4, &mut cache);
         }
     }
@@ -1939,7 +1951,13 @@ mod tests {
                 let sky = Sky::at_with(now, weather);
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-                let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, &mut CloudCache::default());
+                let c = Clouds::of(
+                    &moment.outlook(&crate::theme::NORMAL),
+                    (SPAN, GLASS_H),
+                    d,
+                    RUN,
+                    &mut CloudCache::default(),
+                );
                 let drift = c.cell_drifts();
                 let (cols, rows) = (usize::from(SPAN * d) / 2, usize::from(GLASS_H * d));
                 for west in [-3, 0, i32::from(SPAN * d) / 3, i32::from(SPAN * d) - 2] {
@@ -1965,7 +1983,14 @@ mod tests {
             let now = crate::localclock::at_hour(12) + Duration::from_millis(ms);
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).masses
+            Clouds::of(
+                &moment.outlook(&crate::theme::NORMAL),
+                (SPAN, GLASS_H),
+                1,
+                RUN,
+                &mut CloudCache::default(),
+            )
+            .masses
         };
         let beat = crate::anim::FULL_TICK_MS;
         let first = at(0);
@@ -2072,7 +2097,13 @@ mod tests {
                     .with_strike(Some(crate::sky::StrikePhase::Primary));
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-                let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, &mut CloudCache::default());
+                let c = Clouds::of(
+                    &moment.outlook(&crate::theme::NORMAL),
+                    (SPAN, GLASS_H),
+                    d,
+                    RUN,
+                    &mut CloudCache::default(),
+                );
                 let Some(&(x, y)) = c
                     .strike
                     .as_ref()
@@ -2115,7 +2146,14 @@ mod tests {
                     .with_strike(Some(crate::sky::StrikePhase::Primary));
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-                Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).strike
+                Clouds::of(
+                    &moment.outlook(&crate::theme::NORMAL),
+                    (SPAN, GLASS_H),
+                    1,
+                    RUN,
+                    &mut CloudCache::default(),
+                )
+                .strike
             };
             let first = at(0);
             strikes += usize::from(first.is_some());
@@ -2333,7 +2371,13 @@ mod tests {
                 let sky = Sky::at_with(now, Weather::Storm);
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-                let c = Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default());
+                let c = Clouds::of(
+                    &moment.outlook(&crate::theme::NORMAL),
+                    (SPAN, GLASS_H),
+                    1,
+                    RUN,
+                    &mut CloudCache::default(),
+                );
                 let lifts: Vec<Option<u32>> = (0..SPAN * 4)
                     .flat_map(|x| (0..GLASS_H * 4).map(move |y| (x, y)))
                     .flat_map(|(x, y)| {
@@ -2386,7 +2430,14 @@ mod tests {
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment =
                 Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Still.timing(now));
-            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, &mut CloudCache::default()).masses
+            Clouds::of(
+                &moment.outlook(&crate::theme::NORMAL),
+                (SPAN, GLASS_H),
+                1,
+                RUN,
+                &mut CloudCache::default(),
+            )
+            .masses
         };
         assert_eq!(at(0), at(600_000));
     }
