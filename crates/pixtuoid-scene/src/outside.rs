@@ -276,12 +276,12 @@ pub(crate) type Views = Vec<(WindowBay, Arc<WindowView>)>;
 /// miss the key.
 #[derive(Debug, PartialEq)]
 pub(crate) struct OutsideKey {
-    pub(crate) sky: crate::sky::Sky,
-    pub(crate) altitude: f32,
-    pub(crate) beat: crate::anim::Beat,
-    pub(crate) wall: Wall,
-    pub(crate) density: Density,
-    pub(crate) weather: GlassWeather,
+    sky: crate::sky::Sky,
+    altitude: f32,
+    beat: crate::anim::Beat,
+    wall: Wall,
+    density: Density,
+    weather: GlassWeather,
 }
 
 impl OutsideKey {
@@ -379,13 +379,7 @@ impl Outside {
             density,
             weather,
         } = key;
-        let look = crate::atmosphere::SkyTones::resolve(&sky, theme);
-        let outlook = crate::atmosphere::Outlook {
-            sky,
-            look: &look,
-            altitude,
-            beat,
-        };
+        let outlook = crate::atmosphere::Outlook::resolve(sky, theme, altitude, beat);
         let (run, glass_h) = wall.glass();
         let (buf_w, band_h) = wall.size;
         let bays = wall.bays.clone();
@@ -418,25 +412,6 @@ impl Outside {
             d: density.get(),
             bays,
         }
-    }
-
-    /// [`Self::of`] the key [`OutsideKey::of`] makes of these.
-    #[cfg(test)]
-    pub(crate) fn at(
-        moment: &Moment,
-        pack: &Pack,
-        theme: &Theme,
-        wall: Wall,
-        density: Density,
-        weather: GlassWeather,
-        clouds: &mut crate::clouds::CloudCache,
-    ) -> Self {
-        Self::of(
-            &OutsideKey::of(moment, wall, density, weather),
-            pack,
-            theme,
-            clouds,
-        )
     }
 
     /// Each of the wall's bays, and what its glass shows.
@@ -671,16 +646,18 @@ pub(crate) mod tests {
             let moment =
                 Moment::resolve(s.sky, theme, 0.0, crate::anim::Motion::Full.timing(s.now));
             for d in [Density::ONE, pack.max_density_variant()] {
-                let outside = Outside::at(
-                    &moment,
+                let outside = Outside::of(
+                    &OutsideKey::of(
+                        &moment,
+                        Wall {
+                            size: wall,
+                            bays: slots(wall.0),
+                        },
+                        d,
+                        GlassWeather::of(&moment),
+                    ),
                     &pack,
                     theme,
-                    Wall {
-                        size: wall,
-                        bays: slots(wall.0),
-                    },
-                    d,
-                    GlassWeather::of(&moment),
                     &mut crate::clouds::CloudCache::default(),
                 );
                 let rows = window_rows(wall.1);
@@ -933,16 +910,18 @@ pub(crate) mod tests {
         );
         let dx = 7;
         let far = (crate::layout::WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
-        let mut outside = Outside::at(
-            &moment,
+        let mut outside = Outside::of(
+            &OutsideKey::of(
+                &moment,
+                Wall {
+                    size: (crate::layout::WINDOW_W * 3, 32),
+                    bays: slots(crate::layout::WINDOW_W * 3),
+                },
+                Density::ONE,
+                GlassWeather::of(&moment),
+            ),
             &crate::pack::test_default_pack(),
             theme,
-            Wall {
-                size: (crate::layout::WINDOW_W * 3, 32),
-                bays: slots(crate::layout::WINDOW_W * 3),
-            },
-            Density::ONE,
-            GlassWeather::of(&moment),
             &mut crate::clouds::CloudCache::default(),
         );
         let mut pane = |x: u16, run_x0: u16| {
@@ -987,17 +966,18 @@ pub(crate) mod tests {
                         .with_strike(Some(crate::sky::StrikePhase::Primary));
                     Moment::resolve(sky, theme, 0.0, crate::anim::Motion::Full.timing(now))
                 };
-                let mut outside = Outside::at(
-                    &at(Weather::Storm),
+                let mut outside = Outside::of(
+                    &OutsideKey::of(
+                        &at(Weather::Storm),
+                        Wall {
+                            size: wall,
+                            bays: bays.clone(),
+                        },
+                        d, // a clear pane's glass: no veil or rain over the bolt
+                        GlassWeather::of(&at(Weather::Clear)),
+                    ),
                     &pack,
                     theme,
-                    Wall {
-                        size: wall,
-                        bays: bays.clone(),
-                    },
-                    d,
-                    // a clear pane's glass: no veil or rain over the bolt
-                    GlassWeather::of(&at(Weather::Clear)),
                     &mut crate::clouds::CloudCache::default(),
                 );
                 assert!(outside.run_x0 > 0, "a run off the wall's west edge");

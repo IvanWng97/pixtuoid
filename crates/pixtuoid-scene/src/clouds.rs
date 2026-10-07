@@ -985,7 +985,7 @@ impl Clouds {
     /// `glass_h` tall, drawn on a grid `d` to the unit; `cache` keeps the
     /// masses' bands across frames, and an empty one draws them afresh.
     pub(crate) fn of(
-        outlook: &crate::atmosphere::Outlook<'_>,
+        outlook: &crate::atmosphere::Outlook,
         (span, glass_h): (u16, u16),
         d: u16,
         panes: &[Range<u16>],
@@ -993,8 +993,8 @@ impl Clouds {
     ) -> Self {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
         // f64: an epoch-scale beat in f32 steps in minutes, freezing then jumping the deck
-        let secs = outlook.beat.ms() as f64 / 1000.0;
-        let (mut clouds, planned) = Self::plan(&outlook.sky, secs, (span, glass_h), d);
+        let secs = outlook.beat().ms() as f64 / 1000.0;
+        let (mut clouds, planned) = Self::plan(outlook.sky(), secs, (span, glass_h), d);
         let mut drawn: Vec<_> = planned
             .into_iter()
             .map(|(mass, key)| {
@@ -1005,8 +1005,8 @@ impl Clouds {
         // far to near, each mass beside its own bands: the nearest wins
         drawn.sort_by_key(|(m, _)| m.layer);
         (clouds.masses, clouds.rasters) = drawn.into_iter().unzip();
-        if let Some(phase) = outlook.sky.strike() {
-            let beat = outlook.beat;
+        if let Some(phase) = outlook.sky().strike() {
+            let beat = outlook.beat();
             clouds.strike = clouds.strike_at(
                 crate::sky::strike_bucket(beat),
                 phase,
@@ -1738,7 +1738,7 @@ mod tests {
         let sky = Sky::at_with(now, weather).with_strike(strike);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
         Clouds::of(
-            &moment.outlook(),
+            &moment.outlook(&crate::theme::NORMAL),
             (SPAN, GLASS_H),
             1,
             RUN,
@@ -1793,7 +1793,13 @@ mod tests {
         assert!(steps > 0, "a step lands within the first second");
         let mut cache = CloudCache::default();
         cache.warm();
-        Clouds::of(&moment_at(0).outlook(), (SPAN, GLASS_H), 4, RUN, &mut cache);
+        Clouds::of(
+            &moment_at(0).outlook(theme),
+            (SPAN, GLASS_H),
+            4,
+            RUN,
+            &mut cache,
+        );
         Clouds::draw_ahead(&moment_at(0), (SPAN, GLASS_H), 4, &mut cache);
         for n in 1..(AHEAD.as_millis() / frame.as_millis()) as u32 {
             let moment = moment_at(n);
@@ -1802,7 +1808,7 @@ mod tests {
                 planned.iter().all(|&(_, key)| cache.holds(key)),
                 "frame {n} drew on demand"
             );
-            Clouds::of(&moment.outlook(), (SPAN, GLASS_H), 4, RUN, &mut cache);
+            Clouds::of(&moment.outlook(theme), (SPAN, GLASS_H), 4, RUN, &mut cache);
             Clouds::draw_ahead(&moment, (SPAN, GLASS_H), 4, &mut cache);
         }
     }
@@ -1946,7 +1952,7 @@ mod tests {
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
                 let c = Clouds::of(
-                    &moment.outlook(),
+                    &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
                     d,
                     RUN,
@@ -1978,7 +1984,7 @@ mod tests {
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
             Clouds::of(
-                &moment.outlook(),
+                &moment.outlook(&crate::theme::NORMAL),
                 (SPAN, GLASS_H),
                 1,
                 RUN,
@@ -2092,7 +2098,7 @@ mod tests {
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
                 let c = Clouds::of(
-                    &moment.outlook(),
+                    &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
                     d,
                     RUN,
@@ -2141,7 +2147,7 @@ mod tests {
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
                 Clouds::of(
-                    &moment.outlook(),
+                    &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
                     1,
                     RUN,
@@ -2366,7 +2372,7 @@ mod tests {
                 let moment =
                     Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
                 let c = Clouds::of(
-                    &moment.outlook(),
+                    &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
                     1,
                     RUN,
@@ -2425,7 +2431,7 @@ mod tests {
             let moment =
                 Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Still.timing(now));
             Clouds::of(
-                &moment.outlook(),
+                &moment.outlook(&crate::theme::NORMAL),
                 (SPAN, GLASS_H),
                 1,
                 RUN,

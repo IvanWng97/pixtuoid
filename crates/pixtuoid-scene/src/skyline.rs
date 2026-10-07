@@ -446,11 +446,11 @@ impl CityStrip {
     pub(crate) fn draw(
         pack: &Pack,
         (run_w, glass_h): (u16, u16),
-        outlook: &crate::atmosphere::Outlook<'_>,
+        outlook: &crate::atmosphere::Outlook,
         theme: &Theme,
         density: Density,
     ) -> Self {
-        let (look, altitude, beat) = (outlook.look, outlook.altitude, outlook.beat);
+        let (look, altitude, beat) = (outlook.look(), outlook.altitude(), outlook.beat());
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),
@@ -640,7 +640,13 @@ mod tests {
         };
         for d in [1, 4] {
             let density = Density::new(d).expect("nonzero");
-            let strip = CityStrip::draw(&pack(), (80, glass_h), &moment.outlook(), theme, density);
+            let strip = CityStrip::draw(
+                &pack(),
+                (80, glass_h),
+                &moment.outlook(theme),
+                theme,
+                density,
+            );
             let front = strip.front(run_x0, d);
             let view = crate::outside::WindowView::new(bay, rows.clone(), d, |cell| {
                 front(cell).unwrap_or(SKY)
@@ -804,7 +810,7 @@ mod tests {
                 &pack,
                 (60, 20),
                 &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH))
-                    .outlook(),
+                    .outlook(theme),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -878,7 +884,7 @@ mod tests {
                 let s = CityStrip::draw(
                     &pack,
                     (run_w, glass_h),
-                    &moment.outlook(),
+                    &moment.outlook(theme),
                     theme,
                     Density::new(d).expect("nonzero"),
                 );
