@@ -15,7 +15,7 @@ use crate::theme::Theme;
 /// One frame's disc (sun by day, moon by night), arcing across the window
 /// wall. `cx` is an ABSOLUTE buffer x, not a per-window offset: one disc across
 /// the whole wall, shown by the one pane it stands over ([`Disc::hosted_by`]).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) struct Disc {
     pub(crate) cx: f32,
     pub(crate) cy: f32,
@@ -209,7 +209,7 @@ const BLAZE: Rgb = Rgb {
 const BLAZE_LEAN: [f32; 3] = [0.4, 0.25, 0.1];
 
 /// The golden hour's warm cast over open sky, at one strength a frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct Blaze(f32);
 
 impl Blaze {
@@ -230,6 +230,7 @@ impl Blaze {
 
 /// The window sky one frame shows: its disc and stars, and every tone they
 /// paint in, resolved once so a pixel only picks among them.
+#[derive(PartialEq)]
 pub(crate) struct SkyView {
     disc: Option<Disc>,
     stars: bool,

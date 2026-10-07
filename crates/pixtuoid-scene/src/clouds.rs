@@ -521,7 +521,7 @@ fn heaviness(weather: Weather) -> f32 {
 }
 
 /// How the sky body lights the clouds at one time of day.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Lighting {
     /// The light's lean on the glass, x east and y down.
     dir: (f32, f32),
@@ -712,7 +712,9 @@ struct Strike {
 /// One mass's bands on a grid `d` cells to the unit, in its own undrifted
 /// frame: what a frame translates by its drift and composites, and what the
 /// office's [`CloudCache`] keeps.
-#[derive(Debug, PartialEq)]
+// Eq: an `Arc` of an `Eq` type compares equal by pointer first, and the
+// cache hands one mass's raster out as one `Arc`.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct MassRaster {
     /// Its first column and row, in grid cells from the run's west end and
     /// the glass's top, undrifted.
@@ -864,6 +866,7 @@ impl CloudCache {
 }
 
 /// What the windows' clouds are this frame.
+#[derive(PartialEq)]
 pub(crate) struct Clouds {
     masses: Vec<Mass>,
     /// Each mass's bands, by index.
@@ -933,6 +936,12 @@ impl Clouds {
                 (w, t)
             })
             .collect();
+        let stepped = |w| {
+            dequantize(
+                quantize(weather.share(Element::Precipitation, w), SHARE_STEPS),
+                SHARE_STEPS,
+            )
+        };
         let clouds = Self {
             masses: Vec::new(),
             rasters: Vec::new(),
@@ -949,8 +958,8 @@ impl Clouds {
             heaviness: heavy,
             storm: dequantize(light.storm, LIGHT_STEPS),
             night,
-            rain: weather.share(Element::Precipitation, Weather::Rain)
-                + STORM_VIRGA * weather.share(Element::Precipitation, Weather::Storm),
+            // Each share in the deck's own steps, so its shafts step with its masses.
+            rain: stepped(Weather::Rain) + STORM_VIRGA * stepped(Weather::Storm),
             strike: None,
         };
         let mut planned = Vec::new();
@@ -1423,21 +1432,21 @@ impl Clouds {
         if self.rain <= 0.0 {
             return c;
         }
+        let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
+        // sparse, slanted streaks, half their cells; tested before the mass
+        // search, which scans every lobe
+        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d)) == 0;
+        if !(streak && gx % 2 == gy % 2) {
+            return c;
+        }
         let Some(m) = self.virga_mass(x, y) else {
             return c;
         };
-        let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
         let fade = 1.0 - (y - m.base) / VIRGA_DEPTH;
-        // sparse, slanted streaks, half their cells
-        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d)) == 0;
-        if streak && gx % 2 == gy % 2 {
-            c.mix(
-                self.tone(m.weather, Band::Shade),
-                VIRGA_STRENGTH * self.rain.min(1.0) * fade,
-            )
-        } else {
-            c
-        }
+        c.mix(
+            self.tone(m.weather, Band::Shade),
+            VIRGA_STRENGTH * self.rain.min(1.0) * fade,
+        )
     }
 
     /// The mid or near mass whose virga falls at `(x, y)` units: under its

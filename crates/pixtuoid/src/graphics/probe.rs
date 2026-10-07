@@ -72,15 +72,8 @@ impl EnvHints {
     /// tmux (`picker.rs:357-368`), and the other terminals that speak them
     /// (`picker.rs:372-390`).
     fn iterm2(&self) -> Option<ImageProtocol> {
-        const OTHER_TERM_PROGRAMS: [&str; 8] = [
-            "WezTerm",
-            "mintty",
-            "vscode",
-            "Tabby",
-            "Hyper",
-            "rio",
-            "Bobcat",
-            "WarpTerminal",
+        const OTHER_TERM_PROGRAMS: [&str; 7] = [
+            "WezTerm", "mintty", "vscode", "Tabby", "Hyper", "rio", "Bobcat",
         ];
         let outer = self.env.tmux() && self.wezterm;
         let named = self
@@ -89,6 +82,16 @@ impl EnvHints {
             .as_deref()
             .is_some_and(|p| OTHER_TERM_PROGRAMS.iter().any(|t| p.contains(t)));
         (self.is_iterm2() || outer || named).then_some(ImageProtocol::Iterm2)
+    }
+
+    /// Warp, where no protocol the cutaway speaks animates, seen live in
+    /// v0.2026.09.30: it answers kitty's query but has no Unicode placeholders,
+    /// draws no SIXEL, and never repaints an iTerm2 image it replaces.
+    fn is_warp(&self) -> bool {
+        self.env
+            .term_program
+            .as_deref()
+            .is_some_and(|p| p.contains("WarpTerminal"))
     }
 
     /// iTerm2 itself, not a terminal that speaks its images: its
@@ -125,10 +128,12 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
         Response::CellSize(Some((w, h))) => Some(CellSize { w: *w, h: *h }),
         _ => None,
     });
+    let unanimated = hints.is_warp();
     Detected {
-        protocol: queried.or_else(|| hints.iterm2()),
+        protocol: queried.or_else(|| hints.iterm2()).filter(|_| !unanimated),
         cell: answered_cell.or(window_cell),
         tmux: hints.env.tmux(),
+        unanimated,
     }
 }
 
@@ -401,6 +406,19 @@ mod tests {
         );
     }
 
+    /// Warp's kitty answer is taken as no protocol the cutaway animates with,
+    /// its cell kept for a `--graphics` that forces one; it is never guessed
+    /// iTerm2.
+    #[test]
+    fn warp_answers_but_animates_no_protocol() {
+        let warp = hints("xterm-256color", "WarpTerminal");
+        let cell = CellSize { w: 8, h: 18 };
+        let d = detected(&[Response::Kitty], &warp, Some(cell));
+        assert_eq!((d.protocol, d.cell, d.unanimated), (None, Some(cell), true));
+        assert_eq!(warp.iterm2(), None);
+        assert!(!hints("xterm-256color", "iTerm.app").is_warp());
+    }
+
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do
     /// not count.
     #[test]
@@ -428,6 +446,7 @@ mod tests {
                 protocol: Some(ImageProtocol::Iterm2),
                 cell: window,
                 tmux: false,
+                unanimated: false,
             })
         );
         assert_eq!(

@@ -250,12 +250,22 @@ impl Wall {
 /// The outside's state across frames, for one pack in one theme (the
 /// [`OfficeRaster`](crate::look::OfficeRaster) that holds it empties it for
 /// another): the clouds' masses, and the last frame's views beside what
-/// `Outside::of` drew them from, which a frame given the same reuses
+/// `Outside::of` drew them from and what that resolved to, which a frame
+/// given the same, or resolving to the same, reuses
 /// ([Blink's display-item cache](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/core/paint/README.md#display-item-caching)).
 #[derive(Debug, Default)]
 pub struct OutsideCache {
     pub(crate) clouds: crate::clouds::CloudCache,
-    last: Option<(OutsideKey, Views)>,
+    last: Option<Last>,
+}
+
+#[derive(Debug)]
+struct Last {
+    key: OutsideKey,
+    /// All the views' painting reads: a sky whose key moves below every step
+    /// the outside is drawn in resolves to an equal one.
+    painted: Outside,
+    views: Views,
 }
 
 /// Each of a wall's bays, and what its glass shows.
@@ -295,13 +305,13 @@ impl OutsideCache {
         };
         let (run, glass_h) = drawn.wall.glass();
         let glass = (run.end - run.start, glass_h);
-        if let Some((last, views)) = &self.last
-            && *last == drawn
+        if let Some(last) = &self.last
+            && last.key == drawn
         {
             crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
-            return views.clone();
+            return last.views.clone();
         }
-        let views: Vec<_> = Outside::of(
+        let outside = Outside::of(
             moment,
             pack,
             theme,
@@ -312,18 +322,30 @@ impl OutsideCache {
             density,
             weather,
             &mut self.clouds,
-        )
-        .views()
-        .map(|(bay, view)| (bay, Arc::new(view)))
-        .collect();
+        );
         crate::clouds::Clouds::draw_ahead(moment, glass, density.get(), &mut self.clouds);
-        self.last = Some((drawn, views.clone()));
+        if let Some(last) = &mut self.last
+            && last.painted == outside
+        {
+            last.key = drawn;
+            return last.views.clone();
+        }
+        let views: Views = outside
+            .views()
+            .map(|(bay, view)| (bay, Arc::new(view)))
+            .collect();
+        self.last = Some(Last {
+            key: drawn,
+            painted: outside,
+            views: views.clone(),
+        });
         views
     }
 }
 
 /// Everything one frame's windows look out on, the same through every one,
 /// on one painter's grid.
+#[derive(PartialEq)]
 pub(crate) struct Outside {
     sky: SkyView,
     clouds: crate::clouds::Clouds,
@@ -334,6 +356,12 @@ pub(crate) struct Outside {
     rows: Range<u16>,
     d: u16,
     bays: Vec<WindowBay>,
+}
+
+impl std::fmt::Debug for Outside {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Outside").finish_non_exhaustive()
+    }
 }
 
 impl Outside {
@@ -806,6 +834,37 @@ pub(crate) mod tests {
                 "a frame apart in its {input} drew the other's outside"
             );
         }
+
+        // A sky apart below every step the outside is drawn in: the key
+        // differs, the outside resolves alike, and its views are reused.
+        let views = |f: &Frame, cache: &mut OutsideCache| {
+            cache.views(
+                &f.moment,
+                &pack,
+                &crate::theme::NORMAL,
+                Wall {
+                    size: f.wall,
+                    bays: slots(f.wall.0),
+                },
+                f.d,
+                f.weather,
+            )
+        };
+        let (near, nearer) = (
+            frame(at(fogging(0.4), 0), wall, one),
+            frame(at(fogging(0.4001), 0), wall, one),
+        );
+        let mut cache = OutsideCache::default();
+        let first = views(&near, &mut cache);
+        let second = views(&nearer, &mut cache);
+        assert!(
+            Arc::ptr_eq(&first[0].1, &second[0].1),
+            "a sky resolving alike painted afresh"
+        );
+        assert_eq!(
+            pixels(&nearer, &mut cache),
+            pixels(&nearer, &mut OutsideCache::default())
+        );
 
         // the policy's own overcast: the frames ahead see what this one does
         let forced = |now| {

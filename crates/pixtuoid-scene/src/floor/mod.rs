@@ -140,6 +140,9 @@ pub struct FloorCtx {
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
+    /// Whether the last stepped frame changes between beats: see
+    /// [`FloorSession::moves_off_beat`].
+    off_beat: bool,
     /// Memo of the last per-frame layout, keyed by the ONLY inputs
     /// `SceneLayout::compute_with_seed` reads on the frame path. Rebuilding it every
     /// frame re-allocs + re-stamps the walkable mask and re-runs the coarse BFS
@@ -165,8 +168,14 @@ impl FloorCtx {
             walks: HashMap::new(),
             creatures: HashMap::new(),
             door_anim_max_ms: 0,
+            off_beat: false,
             layout_memo: None,
         }
+    }
+
+    /// [`FloorSession::moves_off_beat`] for this floor.
+    pub(crate) fn moves_off_beat(&self) -> bool {
+        self.off_beat
     }
 
     /// This floor's stores for one `sim_step`, beside the office's `chitchat`.
@@ -630,11 +639,12 @@ impl FloorSession {
         )
     }
 
-    /// Whether a creature on this floor is mid-walk at `now`: a painter that
-    /// slows while the office is idle keeps its pace while one walks, or its
-    /// legs freeze as it glides.
-    pub fn a_creature_walks(&self, now: SystemTime) -> bool {
-        self.view.a_creature_walks(now)
+    /// Whether the last stepped frame changes between beats: someone walks, or
+    /// the sign's or the room's light is mid-fade. Everything else a painter
+    /// draws holds one frame per beat (`both_painters_paint_one_frame_per_beat`),
+    /// so a painter may sleep to the next beat only while this is false.
+    pub fn moves_off_beat(&self) -> bool {
+        self.view.floor.ctx.moves_off_beat()
     }
 
     /// The last frame's pixels, `None` before the first `render`.
@@ -702,6 +712,14 @@ pub fn step_floor(
         frame.new_coffee_carriers.iter().copied(),
         world.now,
     );
+    fctx.off_beat = frame
+        .poses
+        .values()
+        .flatten()
+        .any(|pose| matches!(pose, crate::pose::Pose::Walking { .. }))
+        || fctx.creatures.values().any(|w| w.walks_at(world.now))
+        || fctx.neon.fading(world.now)
+        || fctx.vacancy_dim.easing();
     Some(SteppedFloor { layout, frame })
 }
 
@@ -730,6 +748,8 @@ impl VacancyDim {
     pub const EMPTY_DEBOUNCE_MS: u64 = 5_000;
     /// Time constant of the exponential lit-level ease (ms).
     pub const FADE_TAU_MS: u64 = 800;
+    /// How near its target the ease lands on it: under one 8-bit channel step.
+    const SETTLED: f32 = 1.0 / u8::MAX as f32;
     /// A fully-lit floor (level 1.0), no fade in progress.
     pub fn new() -> Self {
         Self {
@@ -741,8 +761,8 @@ impl VacancyDim {
     }
 
     /// Whether the empty-debounce has run out — the floor's VERDICT that it is
-    /// really empty. Read this, never `level() < 1.0`: an f32 ease that once left
-    /// 1.0 stalls a few ulps short of it forever.
+    /// really empty. Read this, never `level() < 1.0`: the level trails the
+    /// verdict by the length of its ease.
     pub(crate) fn dimmed(&self) -> bool {
         self.dimmed
     }
@@ -750,6 +770,12 @@ impl VacancyDim {
     /// Current smoothed lit level in `[MIN_LEVEL, 1.0]`.
     pub fn level(&self) -> f32 {
         self.level
+    }
+
+    /// Whether the level has yet to land on its target.
+    pub(crate) fn easing(&self) -> bool {
+        let target = if self.dimmed { Self::MIN_LEVEL } else { 1.0 };
+        self.level != target
     }
 
     /// Force the steady-state empty look, bypassing the debounce + ease — static
@@ -787,6 +813,10 @@ impl VacancyDim {
 
         let alpha = 1.0 - (-(dt_ms as f32) / Self::FADE_TAU_MS as f32).exp();
         self.level += (target - self.level) * alpha.clamp(0.0, 1.0);
+        // The ease ends rather than stepping a stray channel forever.
+        if (target - self.level).abs() < Self::SETTLED {
+            self.level = target;
+        }
         self.level
     }
 }
@@ -941,6 +971,13 @@ impl NeonState {
         Self::default()
     }
 
+    /// Whether a mood change is still crossing over at `now`.
+    pub(crate) fn fading(&self, now: SystemTime) -> bool {
+        self.fade
+            .as_ref()
+            .is_some_and(|f| crate::anim::elapsed_ms(now, f.started_at) < u64::from(Self::FADE_MS))
+    }
+
     fn stutter_flash(beat: crate::anim::Beat) -> bool {
         if beat.is_rest() {
             return false;
@@ -952,9 +989,9 @@ impl NeonState {
     }
 
     /// The longest loop-time step a flash can still be drawn across: the
-    /// shortest flash. A painter stepping further — a still, the floating
-    /// window's ambient cadence — would skip some flashes and hold others, so
-    /// it gets the steady starved tube instead.
+    /// shortest flash. A painter stepping further, such as a still, would skip
+    /// some flashes and hold others, so it gets the steady starved tube
+    /// instead.
     fn shortest_flash_ms() -> u64 {
         Self::STUTTER_FLASHES_MS
             .iter()

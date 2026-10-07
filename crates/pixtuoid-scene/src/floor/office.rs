@@ -103,8 +103,8 @@ impl FloorView {
         self.floor.raster.pixels()
     }
 
-    pub(super) fn a_creature_walks(&self, now: SystemTime) -> bool {
-        self.floor.ctx.creatures.values().any(|w| w.walks_at(now))
+    pub(super) fn moves_off_beat(&self) -> bool {
+        self.floor.ctx.moves_off_beat()
     }
 }
 
@@ -417,10 +417,11 @@ impl OfficeSession {
         footer_floor(self.nav.current(), self.views.len(), scene.agents.len())
     }
 
-    /// Whether a creature on the floor showing walks at `now`.
-    pub fn a_creature_walks(&self, now: SystemTime) -> bool {
+    /// Whether the floor showing's last frame changes between beats:
+    /// [`FloorSession::moves_off_beat`](super::FloorSession::moves_off_beat).
+    pub fn moves_off_beat(&self) -> bool {
         self.views
             .get(self.nav.current())
-            .is_some_and(|v| v.a_creature_walks(now))
+            .is_some_and(FloorView::moves_off_beat)
     }
 }

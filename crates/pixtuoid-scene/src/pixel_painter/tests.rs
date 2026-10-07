@@ -2865,9 +2865,9 @@ fn sim_rig() -> (
     (scene, layout, id, now0, pack)
 }
 
-/// `sim_step` must hand the sign the room's VERDICT, not its smoothed level: once
-/// a floor has dimmed and been repopulated the level never reads a bit-exact 1.0
-/// again, so a level-based join starves the sign the moment the tally goes empty.
+/// `sim_step` must hand the sign the room's VERDICT, not its smoothed level: the
+/// level trails the verdict by the length of its ease, so a level-based join
+/// starves the sign in the gap after a populated room's last agent walks out.
 #[test]
 fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
     use std::time::Duration;
