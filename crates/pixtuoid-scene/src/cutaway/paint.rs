@@ -109,8 +109,25 @@ pub fn render_cutaway(
 /// Paint `list` whole: its backdrop, then its pieces over it.
 pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let pen = Pen::for_pack(list.scale(), list.pack());
-    paint_backdrop(list.backdrop(), list.carpet(), list.scale(), pen, buf);
+    let key = BackdropKey {
+        backdrop: list.backdrop().clone(),
+        carpet: list.carpet(),
+        scale: list.scale(),
+    };
+    cache.backdrop.stamp(
+        key,
+        |k, layer| paint_backdrop(&k.backdrop, k.carpet, k.scale, pen, layer),
+        buf,
+    );
     paint_list(list, cache, buf);
+}
+
+/// All [`paint_backdrop`] reads, the pack aside: one cache draws one pack.
+#[derive(Debug, PartialEq)]
+pub(crate) struct BackdropKey {
+    backdrop: Backdrop,
+    carpet: Dithered<Carpet>,
+    scale: RenderScale,
 }
 
 /// Everything under the list's pieces, none of which moves within a
@@ -411,6 +428,8 @@ impl Placed {
 /// What the cutaway keeps across frames, for one pack.
 #[derive(Debug, Default)]
 pub struct CutawayCache {
+    /// Under every piece: drawn once a backdrop, carpet and scale.
+    backdrop: crate::cached_layer::CachedLayer<BackdropKey>,
     figures: crate::frame_cache::FrameCache,
     art: ArtCache,
     net_colours: crate::cutaway::light::NetMemo,

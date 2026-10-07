@@ -36,12 +36,14 @@ pub mod audio;
 pub mod badge;
 #[doc(hidden)]
 pub mod burn;
+pub(crate) mod cached_layer;
 pub(crate) mod celestial;
 pub(crate) mod character;
 pub mod chitchat;
 pub(crate) mod clouds;
 pub(crate) mod composite;
 pub(crate) mod creatures;
+pub(crate) mod damage;
 #[doc(hidden)]
 pub use creatures::PET_LONGEST_REST_MS;
 #[doc(hidden)]
