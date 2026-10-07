@@ -829,8 +829,9 @@ fn probe_roots() -> ProbeRoots {
     }
 }
 
-/// All probing, no formatting. `log_at` is injected by `main`, which owns the
-/// log-location resolution; `graphics` is the `--graphics` flag.
+/// All probing, no formatting. `log_at` is injected by `main` (resolved by
+/// [`LogLocation::from_env`](crate::run_log::LogLocation::from_env));
+/// `graphics` is the `--graphics` flag.
 fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) -> DoctorReport {
     let mut config_warnings = Vec::new();
     let config_path = crate::config::config_path();

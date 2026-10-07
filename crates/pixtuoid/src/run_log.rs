@@ -252,20 +252,18 @@ impl LogLocation {
     ///
     /// The sink's path and the error, if it can't be opened.
     pub fn open_sink(&self, now: SystemTime) -> Result<std::fs::File, (PathBuf, std::io::Error)> {
-        let at = self;
-        let path = match at {
+        let (path, opts) = match self {
             LogLocation::File(path) => {
                 rotate_if_large(path);
-                path.clone()
+                (path.clone(), OpenOptions::new())
             }
-            LogLocation::Runs(dir) => dir.join(run_file_name(now, std::process::id())),
-        };
-        let opts = match at {
-            LogLocation::File(_) => OpenOptions::new(),
-            LogLocation::Runs(_) => live_run_options(),
+            LogLocation::Runs(dir) => (
+                dir.join(run_file_name(now, std::process::id())),
+                live_run_options(),
+            ),
         };
         let sink = open_private_append(&path, opts).map_err(|e| (path, e))?;
-        if let LogLocation::Runs(dir) = at {
+        if let LogLocation::Runs(dir) = self {
             // Held for the run's life, it marks the file live to [`prune_runs`] on
             // Unix, where removing an open file succeeds.
             #[cfg(unix)]
