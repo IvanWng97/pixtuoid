@@ -10,6 +10,7 @@ use miniz_oxide::deflate::{CompressionLevel, compress_to_vec_zlib};
 use ratatui::style::Color;
 use ratatui_image::picker::cap_parser::Parser;
 
+use super::Medium;
 use super::tiles::{Tile, TileImage};
 
 const PLACEHOLDER: char = '\u{10EEEE}';
@@ -65,27 +66,68 @@ fn base_for(seed: u64) -> u32 {
     (1 + (seed % blocks) as u32) * SPAN
 }
 
-/// The escapes that (re)transmit `image`, zlib-compressed ("Compression"), as
-/// image `id` and make its virtual placement over the tile's cells, each
-/// wrapped for tmux's passthrough (tmux(1), `allow-passthrough`) when `tmux`.
+/// The escapes that (re)transmit `image` as image `id` through `medium` and
+/// make its virtual placement over the tile's cells, each wrapped for tmux's
+/// passthrough (tmux(1), `allow-passthrough`) when `tmux`. Shared memory that
+/// can't be had falls back to the escapes.
 ///
 /// `q=2` on every chunk: a reply would arrive as input mid-frame.
-pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
+pub(crate) fn transmit(
+    id: u32,
+    image: &TileImage,
+    tmux: bool,
+    #[cfg_attr(
+        not(unix),
+        expect(unused_variables, reason = "shared memory is Unix-only")
+    )]
+    medium: Medium,
+) -> Vec<u8> {
+    #[cfg(unix)]
+    if medium == Medium::SharedMemory {
+        match tracing::trace_span!("tile.shm")
+            .in_scope(|| super::shm::publish(&image.rgb, std::time::Instant::now()))
+        {
+            Ok(name) => return shared(id, image, &name, tmux),
+            Err(e) => {
+                tracing::debug!(error = %e, "kitty shared memory failed, tile sent in the escapes")
+            }
+        }
+    }
+    direct(id, image, tmux)
+}
+
+/// `image` zlib-compressed ("Compression") in the escapes.
+fn direct(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
     let zlib = tracing::trace_span!("tile.zlib")
         .in_scope(|| compress_to_vec_zlib(&image.rgb, CompressionLevel::BestSpeed as u8));
+    let keys = placement_keys(id, image, "o=z,");
+    let b64 = tracing::trace_span!("tile.base64")
+        .in_scope(|| base64_simd::STANDARD.encode_to_string(zlib));
+    chunked(&keys, b64.as_bytes(), tmux)
+}
+
+/// `image` read from the shared-memory object `name` holding exactly its
+/// bytes (`S`: a mapping's size is a whole number of pages).
+#[cfg(unix)]
+fn shared(id: u32, image: &TileImage, name: &str, tmux: bool) -> Vec<u8> {
+    let keys = placement_keys(id, image, &format!("t=s,S={},", image.rgb.len()));
+    let b64 = base64_simd::STANDARD.encode_to_string(name);
+    chunked(&keys, b64.as_bytes(), tmux)
+}
+
+/// Transmit-and-place `image` as `id`, raw RGB carried as `medium` says, over
+/// the tile's cells.
+fn placement_keys(id: u32, image: &TileImage, medium: &str) -> String {
     let TileImage {
         tile,
         width,
         height,
         ..
     } = image;
-    let keys = format!(
-        "a=T,U=1,i={id},f=24,o=z,s={width},v={height},c={},r={},",
+    format!(
+        "a=T,U=1,i={id},f=24,{medium}s={width},v={height},c={},r={},",
         tile.cols, tile.rows
-    );
-    let b64 = tracing::trace_span!("tile.base64")
-        .in_scope(|| base64_simd::STANDARD.encode_to_string(zlib));
-    chunked(&keys, b64.as_bytes(), tmux)
+    )
 }
 
 fn chunked(keys: &str, payload: &[u8], tmux: bool) -> Vec<u8> {
@@ -232,7 +274,7 @@ mod tests {
     #[test]
     fn a_tile_is_one_quiet_compressed_rgb_transmit_with_a_virtual_placement() {
         let rgb = vec![1, 2, 3, 4, 5, 6];
-        let out = transmit(1, &image(rgb.clone()), false);
+        let out = transmit(1, &image(rgb.clone()), false, Medium::Direct);
         let [escape] = escapes(&out).try_into().expect("one escape");
         assert!(
             escape.starts_with("\x1b_Ga=T,U=1,i=1,f=24,o=z,s=2,v=1,c=1,r=1,q=2,m=0;"),
@@ -242,12 +284,35 @@ mod tests {
         assert_eq!(payloads(&out).1, rgb);
     }
 
+    /// Through shared memory a tile is one escape naming an object that holds
+    /// exactly its raw RGB, uncompressed, with the same placement.
+    #[cfg(unix)]
+    #[test]
+    fn a_shared_memory_tile_names_an_object_holding_its_rgb() {
+        let rgb = incompressible(CHUNK * 3);
+        let out = transmit(1, &image(rgb.clone()), false, Medium::SharedMemory);
+        let [escape] = escapes(&out).try_into().expect("one escape");
+        let keys = format!(
+            "\x1b_Ga=T,U=1,i=1,f=24,t=s,S={},s=2,v=1,c=1,r=1,q=2,m=0;",
+            rgb.len()
+        );
+        assert!(escape.starts_with(&keys), "{escape:?}");
+        let name = base64_simd::STANDARD
+            .decode_to_vec(&escape[keys.len()..escape.len() - 2])
+            .expect("base64");
+        let name = String::from_utf8(name).expect("a name");
+        assert_eq!(
+            super::super::shm::read_and_unlink(&name, rgb.len()),
+            Some(rgb)
+        );
+    }
+
     /// Every escape but the last carries a whole chunk and says more follow;
     /// the rest name nothing but `m` and `q`.
     #[test]
     fn the_payload_splits_at_the_chunk_size() {
         let rgb = incompressible(CHUNK * 2);
-        let out = transmit(1, &image(rgb.clone()), false);
+        let out = transmit(1, &image(rgb.clone()), false, Medium::Direct);
         let all = escapes(&out);
         let (chunks, decoded) = payloads(&out);
         assert_eq!(decoded, rgb);
@@ -297,7 +362,7 @@ mod tests {
             height: h,
             rgb,
         };
-        let sent = transmit(1, &tile, false);
+        let sent = transmit(1, &tile, false, Medium::Direct);
         assert!(sent.len() < raw / 4, "{} of {raw}", sent.len());
         assert_eq!(payloads(&sent).1, tile.rgb);
     }
@@ -306,12 +371,12 @@ mod tests {
     #[test]
     fn inside_tmux_each_escape_is_wrapped() {
         let tile = image(incompressible(CHUNK * 2));
-        let plain = escapes(&transmit(1, &tile, false));
+        let plain = escapes(&transmit(1, &tile, false, Medium::Direct));
         let wrapped: Vec<u8> = plain
             .iter()
             .flat_map(|e| format!("\x1bPtmux;{}\x1b\\", e.replace('\x1b', "\x1b\x1b")).into_bytes())
             .collect();
-        assert_eq!(transmit(1, &tile, true), wrapped);
+        assert_eq!(transmit(1, &tile, true, Medium::Direct), wrapped);
     }
 
     /// The spec's own 2x2 example, for image 42.
@@ -406,7 +471,7 @@ mod tests {
                 .iter()
                 .map(|c| {
                     let id = image_id(SPAN, c.tile).expect("id");
-                    transmit(id, &tiles.image(&buf, c.tile), false).len()
+                    transmit(id, &tiles.image(&buf, c.tile), false, Medium::Direct).len()
                 })
                 .sum();
             tiles.sent(&changed);

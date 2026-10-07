@@ -1909,6 +1909,7 @@ mod tests {
             cell,
             tmux: false,
             forced: false,
+            medium: crate::graphics::Medium::Direct,
         };
         assert_eq!(
             terminal_category(&r).details[0],
