@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::geometry::CellArea;
-use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::layout::{Point, Size};
 
 #[test]
 fn coffee_machine_hit_test_returns_false_for_origin() {
@@ -25,29 +25,6 @@ fn coffee_machine_hit_test_returns_true_for_machine_area() {
         hit_test_coffee_machine(&layout, CellArea::half_block(mid_x, mid_cell_y)),
         "expected hit at coffee machine area ({mid_x}, {mid_cell_y})"
     );
-}
-
-#[test]
-fn a_figure_over_the_coffee_machine_is_the_hit() {
-    let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
-    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
-    let cell = crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y);
-    let cat = HoverTarget::Pet(pixtuoid_scene::display::PetHover {
-        kind: pixtuoid_scene::pet::PetKind::Cat,
-        centre: pixtuoid_scene::layout::Point {
-            x: mid_x,
-            y: mid_cell_y * 2,
-        },
-        anim: "cat_walk",
-    });
-    assert!(matches!(
-        figure_or_fixture(Some(&cat), None, &layout, cell),
-        Some(SceneHit::Figure(t)) if *t == cat
-    ));
-    assert!(matches!(
-        figure_or_fixture(None, None, &layout, cell),
-        Some(SceneHit::Coffee)
-    ));
 }
 
 #[test]

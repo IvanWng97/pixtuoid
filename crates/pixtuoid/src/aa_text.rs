@@ -1,5 +1,5 @@
 //! Shared anti-aliased text rasterizer (Monaspace Neon) for the binary's pixel
-//! surfaces — the floating window's name badges + wall board, and the examples'
+//! surfaces — the floating window's footer and tooltips, and the examples'
 //! cell text and `--proof` panel. The cutaway paints its own pixel font
 //! (`pixtuoid_scene`'s `cutaway::text`).
 //!

@@ -1,18 +1,13 @@
-use std::time::SystemTime;
-
-use pixtuoid_core::source::registry::descriptor_for;
-use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, SceneState};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
-use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
+use super::{display_width, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::badge::disambig_suffix;
-use pixtuoid_scene::display::{Badge, GatewayCard, TextRole, TextRun};
-use pixtuoid_scene::pet::PetKind;
+use pixtuoid_core::AgentId;
+use pixtuoid_scene::display::{Badge, TextRole, TextRun};
+use pixtuoid_scene::tooltip::{TipAnchor, TipRow, TipSpan, TipTone, Tooltip};
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -135,187 +130,86 @@ fn put_line(
     }
 }
 
-/// The dossier's detail-column budget — the ONE quantity BOTH detail sources are
-/// clipped to (Active's tool args and Waiting's reason feed the same `detail_line`
-/// slot), so widening the card can't leave one row ragged against the other.
-const DETAIL_CHARS: usize = 34;
-
-/// A short form of a cwd path: the TAIL (most informative — project dir) with a
-/// leading `…`. Char-sliced, never a byte slice, so a multibyte path can't panic.
-fn short_cwd(cwd: &std::path::Path) -> String {
-    const MAX: usize = 30;
-    let s = cwd.to_string_lossy();
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= MAX {
-        s.into_owned()
-    } else {
-        format!(
-            "\u{2026}{}",
-            chars[chars.len() - (MAX - 1)..].iter().collect::<String>()
-        )
-    }
-}
-
-/// Floating "dossier" panel painted near the cursor when an agent is hovered or
-/// pinned. Uses the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`)
-/// so it can't drift from the footer/board/dashboard; dim rows use `tooltip_dim`,
-/// NOT the live `label_exiting`.
-pub(crate) fn paint_hover_tooltip(
+/// Paint `tip` by the pointer at `at`, in the shared card backing and frame.
+/// An agent's card opens below the pointer, flipping above when there is no
+/// room, at least 20 columns wide; a one-line label opens above it, flipping
+/// below.
+pub(crate) fn paint_tooltip(
     f: &mut ratatui::Frame<'_>,
-    scene: &SceneState,
-    agent_id: AgentId,
+    tip: &Tooltip,
     at: TooltipAt,
-    now: SystemTime,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     let TooltipAt { mx, my, scene_rect } = at;
-    let Some(agent) = scene.agents.get(&agent_id) else {
-        return;
-    };
-
-    let kind = if agent.exiting_at.is_some() {
-        StateKind::Exiting
-    } else {
-        match agent.state {
-            ActivityState::Active { .. } => StateKind::Active,
-            ActivityState::Waiting { .. } => StateKind::Waiting,
-            ActivityState::Idle => StateKind::Idle,
+    let span = |s: &TipSpan| {
+        let mut style = Style::default();
+        if let Some(c) = s.tone.rgb(theme) {
+            style = style.fg(to_color(c));
         }
+        if s.tone == TipTone::Title {
+            style = style.add_modifier(ratatui::style::Modifier::BOLD);
+        }
+        Span::styled(s.text.clone(), style)
     };
-
-    let dim = Style::default().fg(to_color(theme.ui.tooltip_dim));
-    let text_style = Style::default().fg(to_color(theme.ui.tooltip_text));
-
-    // The tool's glow hue comes from the TYPED kind, never a re-parse of the
-    // displayed name.
-    let mut state_spans = vec![Span::styled(
-        format!("{} {}", kind.glyph(), kind.word()),
-        Style::default().fg(state_color(kind, theme)),
-    )];
-    // An EXITING agent must show none of the live tool/reason affordances — the
-    // walking-out slot retains its Active/Waiting payload (`mark_exiting` doesn't
-    // reset `state`), so gate on the exiting-first `kind`, not the raw `agent.state`.
-    let mut detail_line: Option<String> = None;
-    if !matches!(kind, StateKind::Exiting) {
-        if let ActivityState::Active {
-            detail, kind: tk, ..
-        } = &agent.state
-        {
-            if let Some(d) = detail.as_deref().filter(|d| !d.is_empty()) {
-                let (tool, rest) = d
-                    .split_once(char::is_whitespace)
-                    .map(|(t, r)| (t.trim_end_matches(':'), r.trim()))
-                    .unwrap_or((d.trim_end_matches(':'), ""));
-                if !tool.is_empty() {
-                    state_spans.push(Span::raw(" \u{b7} "));
-                    state_spans.push(Span::styled(
-                        tool.to_string(),
-                        Style::default().fg(to_color(theme.tool_glow.for_kind(*tk))),
-                    ));
-                }
-                if !rest.is_empty() {
-                    detail_line = Some(rest.chars().take(DETAIL_CHARS).collect());
-                }
+    let width = |spans: &[TipSpan]| spans.iter().map(|s| display_width(&s.text)).sum::<usize>();
+    // The heading's right run flushes to the widest body row.
+    let body_w = tip
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            TipRow::Spans(spans) => Some(width(spans)),
+            TipRow::Heading { .. } | TipRow::Rule => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let content_w = tip.rows.iter().fold(body_w, |w, row| match row {
+        TipRow::Heading { left, right } => w.max(width(left) + 2 + display_width(&right.text)),
+        TipRow::Spans(_) | TipRow::Rule => w,
+    });
+    let lines: Vec<Line> = tip
+        .rows
+        .iter()
+        .map(|row| match row {
+            TipRow::Spans(spans) => Line::from(spans.iter().map(span).collect::<Vec<_>>()),
+            TipRow::Heading { left, right } => {
+                let pad = content_w.saturating_sub(width(left) + display_width(&right.text));
+                let mut spans: Vec<Span> = left.iter().map(span).collect();
+                spans.push(Span::raw(" ".repeat(pad)));
+                spans.push(span(right));
+                Line::from(spans)
             }
-        } else if let ActivityState::Waiting { reason } = &agent.state {
-            let r: String = reason.chars().take(DETAIL_CHARS).collect();
-            detail_line = Some(format!("?{r}"));
-        }
-    }
-
-    // Built before L1 so the `·id4` right-flush + the separator can size to the
-    // widest body line.
-    let mut body: Vec<Line> = Vec::new();
-    body.push(Line::from(state_spans));
-    if let Some(d) = detail_line {
-        body.push(Line::from(Span::styled(format!("  {d}"), text_style)));
-    }
-    if let Some(parent) = agent.parent_id.and_then(|p| scene.agents.get(&p)) {
-        body.push(Line::from(Span::styled(
-            format!("\u{21b3} under {}", parent.label),
-            dim,
-        )));
-    }
-    body.push(Line::from(Span::styled(
-        format!("\u{25a4} {}", short_cwd(&agent.cwd)),
-        dim,
-    )));
-    // The effort is suffixed only while FRESH — the same burn-TTL the flame reads,
-    // so the text can't outlive the fire.
-    if let Some(model) = agent.model.as_deref() {
-        let mut row = format!("\u{2605} {model}");
-        if let Some(effort) = pixtuoid_scene::burn::fresh_effort(agent, now) {
-            row.push_str(&format!(" \u{b7} {effort}"));
-        }
-        body.push(Line::from(Span::styled(row, dim)));
-    }
-
-    let session_secs = now
-        .duration_since(agent.created_at)
-        .unwrap_or_default()
-        .as_secs();
-    let mut stats = format!(
-        "\u{25f7} {} \u{b7} {} calls",
-        compact_hms(session_secs),
-        agent.tool_call_count
-    );
-    // Skipped at zero so sources with no usage wire keep their dossier unchanged.
-    if agent.tokens_used > 0 {
-        stats.push_str(&format!(
-            " \u{b7} \u{3a3} {} tok",
-            pixtuoid_scene::token_meter::compact_tokens(agent.tokens_used)
-        ));
-    }
-    // Fresh agents show no active-% meter — the % is noise before ~5s of accounting.
-    if matches!(kind, StateKind::Active) && session_secs >= 5 {
-        let pct = (agent.active_ms / 1000)
-            .checked_mul(100)
-            .and_then(|n| n.checked_div(session_secs))
-            .map(|p| p.min(100))
-            .unwrap_or(0);
-        let filled = (pct as usize * 5).div_ceil(100).min(5);
-        let meter: String = "\u{25ae}".repeat(filled) + &"\u{25af}".repeat(5 - filled);
-        stats.push_str(&format!(" \u{b7} {meter} {pct}%"));
-    }
-    body.push(Line::from(Span::styled(stats, dim)));
-
-    let badge_tag = descriptor_for(agent.source.as_ref()).map_or("??", |d| d.label_prefix);
-    let l1_head_w = 4 + 1 + display_width(&agent.label); // "[xx]" + space + label
-    let id4 = format!("\u{b7}{}", disambig_suffix(&agent.session_id));
-    let body_w = body.iter().map(|l| l.width()).max().unwrap_or(0);
-    let content_w = body_w.max(l1_head_w + 2 + display_width(&id4));
-    let pad = content_w.saturating_sub(l1_head_w + display_width(&id4));
-    let l1 = Line::from(vec![
-        source_badge_span(badge_tag, theme),
-        Span::styled(
-            format!(" {}", agent.label),
-            Style::default()
-                .fg(to_color(theme.ui.tooltip_title))
-                .add_modifier(ratatui::style::Modifier::BOLD),
-        ),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(id4, dim),
-    ]);
-    let separator = Line::from(Span::styled("\u{2500}".repeat(content_w), dim));
-
-    let mut lines: Vec<Line> = Vec::with_capacity(body.len() + 2);
-    lines.push(l1);
-    lines.push(separator);
-    lines.extend(body);
-
-    let content_h = lines.len() as u16;
+            TipRow::Rule => Line::from(Span::styled(
+                "\u{2500}".repeat(content_w),
+                Style::default().fg(to_color(theme.ui.tooltip_dim)),
+            )),
+        })
+        .collect();
     let content_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(20);
     // +2 cols / +2 rows for the frame's 1-cell padding on all sides.
-    let tip_w = (content_w + 2).min(scene_rect.width).max(20);
-    let tip_h = (content_h + 2).min(scene_rect.height);
-
-    let tx = flip_x_anchor(mx, tip_w, scene_rect);
-    let mut ty = my.saturating_add(1);
-    if ty.saturating_add(tip_h) > scene_rect.y + scene_rect.height {
-        ty = my.saturating_sub(tip_h).max(scene_rect.y);
-    }
+    let tip_h = (lines.len() as u16 + 2).min(scene_rect.height);
+    let (tip_w, ty) = match tip.anchor {
+        TipAnchor::Below => {
+            let tip_w = (content_w + 2).min(scene_rect.width).max(20);
+            let mut ty = my.saturating_add(1);
+            if ty.saturating_add(tip_h) > scene_rect.y + scene_rect.height {
+                ty = my.saturating_sub(tip_h).max(scene_rect.y);
+            }
+            (tip_w, ty)
+        }
+        TipAnchor::Above => {
+            // Guard on geometry (cursor within tip_h of the top) rather than
+            // the post-saturation `ty`, which can't detect overflow when
+            // scene_rect.y == 0 (saturating_sub floors at 0, never < 0).
+            let ty = if my < scene_rect.y + tip_h {
+                my.saturating_add(1)
+            } else {
+                my.saturating_sub(tip_h)
+            };
+            ((content_w + 2).min(scene_rect.width), ty)
+        }
+    };
     let rect = Rect {
-        x: tx,
+        x: flip_x_anchor(mx, tip_w, scene_rect),
         y: ty,
         width: tip_w,
         height: tip_h,
@@ -323,138 +217,69 @@ pub(crate) fn paint_hover_tooltip(
     let Some(clipped) = clip_widget_rect(rect, scene_rect) else {
         return;
     };
-
     super::paint_card_backing(f, clipped, theme);
     f.render_widget(framed_tooltip(lines), clipped);
 }
 
-fn paint_simple_tooltip(
-    f: &mut ratatui::Frame<'_>,
-    text: &str,
-    at: TooltipAt,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    let TooltipAt { mx, my, scene_rect } = at;
-    let line = Line::from(Span::styled(
-        text,
-        Style::default()
-            .fg(to_color(theme.ui.tooltip_title))
-            .add_modifier(ratatui::style::Modifier::BOLD),
-    ));
-    // Size by DISPLAY width, not char count: wide glyphs (e.g. the coffee ☕, 2
-    // cells) would otherwise undersize the box by a column and clip the content.
-    let tip_w = (line.width() as u16 + 2).min(scene_rect.width);
-    let tip_h = 3u16.min(scene_rect.height);
-    let tx = flip_x_anchor(mx, tip_w, scene_rect);
-    // Float above the cursor, flipping below when there is no room. Guard on
-    // geometry (cursor within tip_h of the top) rather than the post-saturation
-    // `ty`, which can't detect overflow when scene_rect.y == 0 (saturating_sub
-    // floors at 0, never < 0).
-    let mut ty = my.saturating_sub(tip_h);
-    if my < scene_rect.y + tip_h {
-        ty = my.saturating_add(1);
-    }
-    if let Some(r) = clip_widget_rect(
-        Rect {
-            x: tx,
-            y: ty,
-            width: tip_w,
-            height: tip_h,
-        },
-        scene_rect,
-    ) {
-        super::paint_card_backing(f, r, theme);
-        f.render_widget(framed_tooltip(vec![line]), r);
-    }
-}
-
-pub(crate) fn paint_coffee_tooltip(
-    f: &mut ratatui::Frame<'_>,
-    at: TooltipAt,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    paint_simple_tooltip(f, " \u{2615} Buy Ivan a coffee ", at, theme);
-}
-
-pub(crate) fn paint_furniture_tooltip(
-    f: &mut ratatui::Frame<'_>,
-    label: &str,
-    at: TooltipAt,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    let text = format!(" {} ", label);
-    paint_simple_tooltip(f, &text, at, theme);
-}
-
-pub(crate) fn paint_pet_tooltip(
-    f: &mut ratatui::Frame<'_>,
-    kind: PetKind,
-    anim_name: &str,
-    is_on_cooldown: bool,
-    display_name: &str,
-    at: TooltipAt,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    let idle = format!(" {display_name} ");
-    let text: &str = if is_on_cooldown {
-        match kind {
-            PetKind::Cat => " purr... ",
-            PetKind::Dog => " woof! ",
-        }
-    } else if anim_name == kind.sleep_anim() {
-        " Shhh... sleeping "
-    } else if anim_name == kind.sit_anim() {
-        " Pet me! "
-    } else {
-        &idle
-    };
-    paint_simple_tooltip(f, text, at, theme);
-}
-
-pub(crate) fn paint_mascot_tooltip(
-    f: &mut ratatui::Frame<'_>,
-    card: &GatewayCard,
-    at: TooltipAt,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    let text = mascot_tooltip_text(card);
-    paint_simple_tooltip(f, &text, at, theme);
-}
-
-/// The mascot tooltip's text. The verb keys on `busy` — see
-/// [`GatewayCard::busy`] for why the run state, not the session count — and
-/// `degraded` outranks busy/idle.
-fn mascot_tooltip_text(card: &GatewayCard) -> String {
-    let &GatewayCard {
-        name,
-        ref instance,
-        busy,
-        degraded,
-        active_sessions,
-    } = card;
-    // `OpenClaw:19789` — `instance` is set only when there IS a sibling to tell
-    // apart, so the single-gateway tooltip stays byte-unchanged.
-    let name = match instance {
-        Some(i) => format!("{name}:{i}"),
-        None => name.to_string(),
-    };
-    let verb = if degraded {
-        "model error"
-    } else if busy {
-        "working"
-    } else {
-        "idle"
-    };
-    if active_sessions > 1 {
-        format!(" {name} gateway · {verb} · {active_sessions} sessions ")
-    } else {
-        format!(" {name} gateway · {verb} ")
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{GatewayCard, TooltipAt, mascot_tooltip_text};
+    use super::{TooltipAt, paint_tooltip};
+    use pixtuoid_scene::display::GatewayCard;
+    use pixtuoid_scene::tooltip::{DETAIL_CHARS, Tooltip, mascot_text as mascot_tooltip_text};
+
+    /// Each tooltip the TUI shows, built by the shared model and painted by
+    /// [`paint_tooltip`], as `renderer::paint_scene_tooltip` does.
+    fn paint_hover_tooltip(
+        f: &mut ratatui::Frame<'_>,
+        scene: &pixtuoid_core::SceneState,
+        id: pixtuoid_core::AgentId,
+        at: TooltipAt,
+        now: std::time::SystemTime,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) {
+        if let Some(tip) = pixtuoid_scene::tooltip::agent(scene, id, now) {
+            paint_tooltip(f, &tip, at, theme);
+        }
+    }
+
+    fn paint_simple_tooltip(
+        f: &mut ratatui::Frame<'_>,
+        text: &str,
+        at: TooltipAt,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) {
+        paint_tooltip(f, &Tooltip::label(text), at, theme);
+    }
+
+    fn paint_coffee_tooltip(
+        f: &mut ratatui::Frame<'_>,
+        at: TooltipAt,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) {
+        paint_tooltip(f, &pixtuoid_scene::tooltip::coffee(), at, theme);
+    }
+
+    fn paint_pet_tooltip(
+        f: &mut ratatui::Frame<'_>,
+        kind: pixtuoid_scene::pet::PetKind,
+        anim: &str,
+        on_cooldown: bool,
+        name: &str,
+        at: TooltipAt,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) {
+        let tip = pixtuoid_scene::tooltip::pet(kind, anim, on_cooldown, name);
+        paint_tooltip(f, &tip, at, theme);
+    }
+
+    fn paint_mascot_tooltip(
+        f: &mut ratatui::Frame<'_>,
+        card: &GatewayCard,
+        at: TooltipAt,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) {
+        paint_tooltip(f, &Tooltip::label(&mascot_tooltip_text(card)), at, theme);
+    }
     use pixtuoid_scene::theme;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -873,7 +698,7 @@ mod tests {
     fn mascot_tooltip_paints_gateway_verb_into_buffer() {
         let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
         term.draw(|f| {
-            super::paint_mascot_tooltip(
+            paint_mascot_tooltip(
                 f,
                 &mascot(None, true, false, 1),
                 TooltipAt {
@@ -898,7 +723,7 @@ mod tests {
         let mut term2 = Terminal::new(TestBackend::new(60, 8)).unwrap();
         term2
             .draw(|f| {
-                super::paint_mascot_tooltip(
+                paint_mascot_tooltip(
                     f,
                     &mascot(None, true, true, 1),
                     TooltipAt {
@@ -928,7 +753,7 @@ mod tests {
         let sit = kind.sit_anim();
         let mut term = Terminal::new(TestBackend::new(40, 8)).unwrap();
         term.draw(|f| {
-            super::paint_pet_tooltip(
+            paint_pet_tooltip(
                 f,
                 kind,
                 sit,
@@ -1011,7 +836,7 @@ mod tests {
                     cell.bg = bright;
                 }
             }
-            super::paint_hover_tooltip(
+            paint_hover_tooltip(
                 f,
                 &scene,
                 id,
@@ -1088,7 +913,7 @@ mod tests {
             scene.agents.insert(id, slot);
             let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
             term.draw(|f| {
-                super::paint_hover_tooltip(
+                paint_hover_tooltip(
                     f,
                     &scene,
                     id,
@@ -1105,7 +930,7 @@ mod tests {
             buffer_text(&term)
         };
 
-        let budget = super::DETAIL_CHARS;
+        let budget = DETAIL_CHARS;
         let fits: String = payload.chars().take(budget).collect();
         let overruns: String = payload.chars().take(budget + 1).collect();
 
@@ -1141,7 +966,7 @@ mod tests {
         // content row = box-top + 1.
         let mut top = Terminal::new(TestBackend::new(40, 24)).unwrap();
         top.draw(|f| {
-            super::paint_simple_tooltip(
+            paint_simple_tooltip(
                 f,
                 " PROBE ",
                 TooltipAt {
@@ -1161,7 +986,7 @@ mod tests {
 
         let mut low = Terminal::new(TestBackend::new(40, 24)).unwrap();
         low.draw(|f| {
-            super::paint_simple_tooltip(
+            paint_simple_tooltip(
                 f,
                 " PROBE ",
                 TooltipAt {
@@ -1252,7 +1077,7 @@ mod tests {
                     cell.bg = bright;
                 }
             }
-            super::paint_coffee_tooltip(
+            paint_coffee_tooltip(
                 f,
                 TooltipAt {
                     mx: 20,
