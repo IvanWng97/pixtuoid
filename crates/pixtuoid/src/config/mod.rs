@@ -6,7 +6,7 @@ use pixtuoid_scene::pack::PackSource;
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
-/// [`resolve_pets`] rather than failing the whole `toml::from_str` and tripping
+/// `resolve_pets` rather than failing the whole `toml::from_str` and tripping
 /// `load`'s all-or-nothing malformed arm, which would silently revert EVERY user
 /// setting to defaults.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -31,7 +31,7 @@ pub struct AppConfig {
     /// of failing the whole load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graphics: Option<String>,
-    /// A [`MotionMode`] name, raw so a typo warns in [`resolve_motion`].
+    /// A [`MotionMode`] name, raw so a typo warns in `resolve_motion`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<String>,
     #[serde(
