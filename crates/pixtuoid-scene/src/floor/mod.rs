@@ -610,6 +610,18 @@ impl FloorSession {
         self.view.hit_at(area)
     }
 
+    /// What the LAST rendered frame shows a pointer over `area`, in layout
+    /// units: [`crate::hit::scene_hit`] on its hovers, star and layout.
+    #[doc(hidden)]
+    pub fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
+        crate::hit::scene_hit(
+            self.floor.raster.hovers()?,
+            self.floor.raster.star(),
+            self.last_layout.as_deref()?,
+            area,
+        )
+    }
+
     /// The badges of the LAST frame the classic rendered, in paint order.
     /// Empty before the first `render`, and after a cutaway frame, whose image
     /// holds its text.
