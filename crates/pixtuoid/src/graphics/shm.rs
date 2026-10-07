@@ -59,6 +59,12 @@ impl Ledger {
             unlink(&held.name);
         }
     }
+
+    fn drain(&mut self) {
+        while !self.held.is_empty() {
+            self.drop_oldest();
+        }
+    }
 }
 
 static LEDGER: Mutex<Ledger> = Mutex::new(Ledger {
@@ -72,14 +78,15 @@ fn ledger() -> std::sync::MutexGuard<'static, Ledger> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// This process's names: `/pxt`, its kitty id block (random per process, so
-/// a dead process's leftovers never collide) and a sequence number, within
-/// macOS's 31-byte limit on a name (`PSHMNAMLEN`).
+/// This process's names: `/pxt`, its pid (no live process shares it) and a
+/// sequence number, within macOS's 31-byte limit on a name (`PSHMNAMLEN`).
+/// A dead process's unread leftover under a reused pid fails the `O_EXCL`
+/// open, and that tile takes the escapes.
 fn next_name() -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     format!(
         "/pxt{:x}-{:x}",
-        super::kitty::process_base(),
+        std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     )
 }
@@ -87,6 +94,20 @@ fn next_name() -> String {
 /// A new object holding `bytes`, and its name; held in the ledger until the
 /// terminal or [`READ_WITHIN`] unlinks it.
 pub(crate) fn publish(bytes: &[u8], now: Instant) -> io::Result<String> {
+    let name = create(bytes)?;
+    ledger().hold(
+        Held {
+            name: name.clone(),
+            at: now,
+            len: bytes.len(),
+        },
+        now,
+    );
+    Ok(name)
+}
+
+/// A new object holding `bytes`, held by no ledger.
+fn create(bytes: &[u8]) -> io::Result<String> {
     use rustix::shm::{Mode, OFlags};
     let name = next_name();
     let fd = rustix::shm::open(
@@ -98,14 +119,6 @@ pub(crate) fn publish(bytes: &[u8], now: Instant) -> io::Result<String> {
         unlink(&name);
         return Err(e);
     }
-    ledger().hold(
-        Held {
-            name: name.clone(),
-            at: now,
-            len: bytes.len(),
-        },
-        now,
-    );
     Ok(name)
 }
 
@@ -145,10 +158,7 @@ fn unlink(name: &str) {
 /// Unlink every object this process still holds: at teardown, and in the
 /// unwind, so none outlives the process.
 pub(crate) fn unlink_all() {
-    let mut ledger = ledger();
-    while !ledger.held.is_empty() {
-        ledger.drop_oldest();
-    }
+    ledger().drain();
 }
 
 /// What a terminal does with `name`: its first `len` bytes, then the object
@@ -222,10 +232,9 @@ mod tests {
     fn the_ledger_unlinks_what_is_left_unread() {
         let mut ledger = Ledger::default();
         let t0 = Instant::now();
-        let first = publish(b"a", t0).expect("published");
-        let second = publish(b"b", t0).expect("published");
+        let first = create(b"a").expect("created");
+        let second = create(b"b").expect("created");
         unlink(&second);
-        // Held by a ledger of the test's own, so the global one stays clean.
         for name in [&first, &second] {
             ledger.hold(
                 Held {
@@ -258,9 +267,19 @@ mod tests {
     }
 
     #[test]
-    fn unlink_all_leaves_nothing_behind() {
-        let name = publish(b"left", Instant::now()).expect("published");
-        unlink_all();
+    fn a_drained_ledger_leaves_nothing_behind() {
+        let mut ledger = Ledger::default();
+        let now = Instant::now();
+        let name = create(b"left").expect("created");
+        ledger.hold(
+            Held {
+                name: name.clone(),
+                at: now,
+                len: 4,
+            },
+            now,
+        );
+        ledger.drain();
         assert_eq!(read(&name), None);
     }
 }

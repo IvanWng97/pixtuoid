@@ -614,6 +614,9 @@ pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
+    // No shared-memory object outlives the process, whatever the terminal read.
+    #[cfg(all(feature = "graphics", unix))]
+    crate::graphics::shm::unlink_all();
     unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
 }
 

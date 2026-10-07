@@ -728,9 +728,6 @@ impl Plan {
 /// What the terminal unwind writes before it leaves the alt screen: our
 /// images' delete, once any reached the terminal.
 pub(crate) fn unwind_prelude() -> Vec<u8> {
-    // No shared-memory object outlives the process, whatever the terminal read.
-    #[cfg(all(feature = "graphics", unix))]
-    shm::unlink_all();
     #[cfg(feature = "graphics")]
     return [
         kitty::unwind(),
@@ -1462,9 +1459,6 @@ mod tests {
         assert_eq!(rows.len(), n, "no two reasons print the same row");
     }
 
-    /// A terminal that answers no protocol the cutaway animates with falls
-    /// back on its own, but `--graphics` still forces one: it overrides
-    /// detection.
     #[test]
     fn shared_memory_carries_kitty_where_the_terminal_reads_it() {
         let detected = |shm, tmux| {
@@ -1499,6 +1493,9 @@ mod tests {
         }
     }
 
+    /// A terminal that answers no protocol the cutaway animates with falls
+    /// back on its own, but `--graphics` still forces one: it overrides
+    /// detection.
     #[test]
     fn a_forced_protocol_paints_where_none_animates() {
         let probe = Probe::Answered(Detected {
