@@ -107,6 +107,50 @@ impl Rects {
     }
 }
 
+/// The most passes one frame's rects are painted in: a pass has a fixed cost,
+/// so many small ones outrun the whole repaint, and one bounding box over
+/// rects far apart paints most of the frame.
+const MAX_PASSES: usize = 8;
+
+/// `rects` merged into at most `max` boxes that cover them all, each merge
+/// the pair whose box adds the least area: Mozilla's
+/// `nsRegion::SimplifyOutward`, "at most aMaxRects by adding area to it ...
+/// a superset of the original region" (gecko-dev `gfx/src/nsRegion.h`).
+fn passes(rects: &[Bounds], max: usize) -> Vec<Bounds> {
+    let area = |b: &Bounds| u64::from(b.width) * u64::from(b.height);
+    let union = |a: &Bounds, b: &Bounds| {
+        let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+        let (x1, y1) = (
+            (a.x + a.width).max(b.x + b.width),
+            (a.y + a.height).max(b.y + b.height),
+        );
+        Bounds {
+            x: x0,
+            y: y0,
+            width: x1 - x0,
+            height: y1 - y0,
+        }
+    };
+    let mut boxes = rects.to_vec();
+    while boxes.len() > max.max(1) {
+        let mut best: Option<(i64, usize, usize)> = None;
+        for i in 0..boxes.len() {
+            for j in i + 1..boxes.len() {
+                let added = area(&union(&boxes[i], &boxes[j])) as i64
+                    - area(&boxes[i]) as i64
+                    - area(&boxes[j]) as i64;
+                if best.is_none_or(|(least, ..)| added < least) {
+                    best = Some((added, i, j));
+                }
+            }
+        }
+        let Some((_, i, j)) = best else { break };
+        let gone = boxes.swap_remove(j);
+        boxes[i] = union(&boxes[i], &gone);
+    }
+    boxes
+}
+
 impl Dirty {
     /// Only inside `rects`: [`Self::Unchanged`] when there are none.
     pub fn within(rects: Vec<Bounds>) -> Self {
@@ -219,22 +263,13 @@ impl CutawayCanvas {
                 }
                 paint(&list, cache, &mut self.buf);
             }
-            // The same paint once, kept to the rects' bounding box: outside it
-            // the frame is the last one, so nothing there is painted, or lit,
-            // twice. One pass, not one a rect: a pass's fixed cost times a
-            // frame of many small rects outran the whole repaint.
             Dirty::Rects(rects) => {
                 // a new size changes the epoch's backdrop, so it paints whole
                 debug_assert_eq!((self.buf.width(), self.buf.height()), size);
-                let r = rects.as_slice();
-                let span = |start: fn(&Bounds) -> u16, end: fn(&Bounds) -> u16| {
-                    r.iter().map(start).min().unwrap_or(0)..r.iter().map(end).max().unwrap_or(0)
-                };
-                let clip = (
-                    span(|b| b.x, |b| b.x + b.width),
-                    span(|b| b.y, |b| b.y + b.height),
-                );
-                self.buf.with_clip(clip, |buf| paint(&list, cache, buf));
+                for pass in passes(rects.as_slice(), MAX_PASSES) {
+                    let clip = (pass.x..pass.x + pass.width, pass.y..pass.y + pass.height);
+                    self.buf.with_clip(clip, |buf| paint(&list, cache, buf));
+                }
             }
             Dirty::Unchanged => {}
         });
@@ -1118,6 +1153,47 @@ mod tests {
     /// No list of rects is empty: "nowhere" is only ever
     /// [`Dirty::Unchanged`], so a consumer that skips on it skips every
     /// unchanged frame.
+    /// A frame's rects merge into at most the cap's boxes that cover every
+    /// one of them, the nearest merging first: rects far apart stay apart,
+    /// and overlapping ones become one.
+    #[test]
+    fn rects_merge_into_few_boxes_that_cover_them_all() {
+        let b = |x, y, width, height| Bounds {
+            x,
+            y,
+            width,
+            height,
+        };
+        let covers = |boxes: &[Bounds], r: &Bounds| {
+            boxes.iter().any(|o| {
+                o.x <= r.x
+                    && o.y <= r.y
+                    && r.x + r.width <= o.x + o.width
+                    && r.y + r.height <= o.y + o.height
+            })
+        };
+        // a row of windows across the top, a light far below, an overlap
+        let rects: Vec<Bounds> = (0..7)
+            .map(|i| b(i * 40, 0, 20, 10))
+            .chain([b(150, 200, 30, 30), b(160, 210, 30, 30)])
+            .collect();
+        for max in [1, 2, 3, 8, 64] {
+            let boxes = passes(&rects, max);
+            assert!(boxes.len() <= max.max(1), "{max}: {boxes:?}");
+            assert!(rects.iter().all(|r| covers(&boxes, r)), "{max}: {boxes:?}");
+        }
+        let two = passes(&rects, 2);
+        assert!(
+            two.iter().all(|o| o.y >= 200 || o.y + o.height <= 10),
+            "the windows' row and the light stay apart: {two:?}"
+        );
+        assert_eq!(
+            passes(&rects, 8).len(),
+            8,
+            "the overlapping pair is one box"
+        );
+    }
+
     #[test]
     fn an_empty_list_of_rects_is_unchanged() {
         let b = Bounds {
