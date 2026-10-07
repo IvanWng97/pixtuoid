@@ -123,24 +123,8 @@ fn passes(rects: &[Bounds], max: usize) -> Vec<Bounds> {
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
     let area = |b: &Bounds| i64::from(b.width) * i64::from(b.height);
-    let union = |a: &Bounds, b: &Bounds| {
-        let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
-        let (x1, y1) = (
-            (a.x + a.width).max(b.x + b.width),
-            (a.y + a.height).max(b.y + b.height),
-        );
-        Bounds {
-            x: x0,
-            y: y0,
-            width: x1 - x0,
-            height: y1 - y0,
-        }
-    };
-    let overlap = |a: &Bounds, b: &Bounds| {
-        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
-    };
     // Overlapping pairs first, then by the area a merge adds.
-    let key = |a: &Bounds, b: &Bounds| (!overlap(a, b), area(&union(a, b)) - area(a) - area(b));
+    let key = |a: &Bounds, b: &Bounds| (!a.overlaps(*b), area(&a.union(*b)) - area(a) - area(b));
     let mut boxes: Vec<Option<Bounds>> = rects.iter().copied().map(Some).collect();
     let mut heap = BinaryHeap::new();
     for i in 0..boxes.len() {
@@ -158,7 +142,7 @@ fn passes(rects: &[Bounds], max: usize) -> Vec<Bounds> {
         if apart && alive <= max.max(1) {
             break;
         }
-        let merged = union(&a, &b);
+        let merged = a.union(b);
         boxes[i] = None;
         boxes[j] = None;
         let k = boxes.len();

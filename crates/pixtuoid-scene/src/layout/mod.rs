@@ -90,6 +90,21 @@ impl Bounds {
             && u32::from(other.y) < end(self.y, self.height)
     }
 
+    /// The least box holding both, its ends taken in u32 as [`Self::overlaps`]
+    /// takes them, and its size clamped to `u16` (two boxes on one buffer
+    /// never need more).
+    pub(crate) fn union(self, other: Bounds) -> Bounds {
+        let end = |at: u16, len: u16| u32::from(at) + u32::from(len);
+        let (x, y) = (self.x.min(other.x), self.y.min(other.y));
+        let span = |from: u16, to: u32| u16::try_from(to - u32::from(from)).unwrap_or(u16::MAX);
+        Bounds {
+            x,
+            y,
+            width: span(x, end(self.x, self.width).max(end(other.x, other.width))),
+            height: span(y, end(self.y, self.height).max(end(other.y, other.height))),
+        }
+    }
+
     /// Whether the two half-open boxes share a column, whatever their rows.
     pub(crate) fn shares_columns(self, other: Bounds) -> bool {
         Bounds {
