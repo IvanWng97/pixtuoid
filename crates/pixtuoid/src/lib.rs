@@ -1,6 +1,6 @@
-//! The pixtuoid program: `main.rs` only calls [`run`] and reports its error.
-//! What else is public is for the examples and the integration tests, which
-//! are separate crates.
+//! The pixtuoid program: `main.rs` only calls [`run`] and reports its error
+//! through [`fatal_error_text`]. What else is public is for the examples and
+//! the integration tests, which are separate crates.
 
 // A print macro panics when its reader leaves (`| head`): CLI and headless
 // output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
@@ -46,8 +46,7 @@ pub(crate) mod version;
 /// crate by `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of
 /// this predicate pinned to it by
 /// `the_bidi_table_matches_pixtuoid_cores_display_safe`.
-#[doc(hidden)]
-pub fn strip_control_chars(s: &str) -> String {
+pub(crate) fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
         .collect()
@@ -55,8 +54,7 @@ pub fn strip_control_chars(s: &str) -> String {
 
 /// `s` stripped line by line, the lines rejoined with `sep`, so a multi-line
 /// message keeps its shape.
-#[doc(hidden)]
-pub fn strip_lines(s: &str, sep: &str) -> String {
+pub(crate) fn strip_lines(s: &str, sep: &str) -> String {
     s.lines()
         .map(strip_control_chars)
         .collect::<Vec<_>>()
@@ -67,8 +65,7 @@ pub fn strip_lines(s: &str, sep: &str) -> String {
 /// hand-editable hook command is stripped where it enters the text that
 /// quotes it; per-output-site stripping already missed the `doctor` stdout
 /// path once.
-#[doc(hidden)]
-pub fn display_path(p: &std::path::Path) -> String {
+pub(crate) fn display_path(p: &std::path::Path) -> String {
     strip_control_chars(&p.display().to_string())
 }
 
@@ -77,9 +74,8 @@ pub fn display_path(p: &std::path::Path) -> String {
 /// [`closed`](Self::closed) and drops every later write, so the command still
 /// completes its side effects and exits with its own verdict, where `println!`
 /// would panic. Any other write error still fails.
-#[doc(hidden)]
 #[derive(Debug)]
-pub struct CliOut<W> {
+pub(crate) struct CliOut<W> {
     inner: W,
     closed: bool,
 }
@@ -132,8 +128,7 @@ impl<W: std::io::Write> std::io::Write for CliOut<W> {
 }
 
 /// Stdout for a CLI command's output; see [`CliOut`].
-#[doc(hidden)]
-pub fn cli_stdout() -> CliOut<std::io::Stdout> {
+pub(crate) fn cli_stdout() -> CliOut<std::io::Stdout> {
     CliOut::new(std::io::stdout())
 }
 

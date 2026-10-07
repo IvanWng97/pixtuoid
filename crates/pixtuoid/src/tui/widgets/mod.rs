@@ -23,9 +23,7 @@ pub(super) use welcome::paint_welcome;
 // `pub`: the snapshot example reuses the real formatter so its --source-warning
 // screenshots cannot drift from production.
 pub use footer::source_warning_message;
-// `pub`: the bin crate's crash reporter derives its issue-report URL from this one
-// authority.
-pub use version_popup::REPO_URL;
+pub(crate) use version_popup::REPO_URL;
 
 use std::time::SystemTime;
 
