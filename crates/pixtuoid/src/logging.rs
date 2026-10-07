@@ -131,7 +131,8 @@ const RUN_LOG_RETAIN: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Open this run's sink at `at`, or the path that failed and why: the named
 /// file after its size rotation, or a fresh file of its own in the runs
-/// directory, which is first tidied.
+/// directory, which, once held, the single log is adopted into and old runs
+/// are pruned from.
 fn open_run_sink(
     at: &LogLocation,
     now: SystemTime,
@@ -279,8 +280,7 @@ fn create_owner_only_append(path: &Path, mut opts: OpenOptions) -> std::io::Resu
     opts.open(path)
 }
 
-/// The size past which [`rotate_if_large`] rotates the log.
-const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+use pixtuoid::doctor::LOG_ROTATE_BYTES;
 
 /// One-deep rotation at startup of the file `$PIXTUOID_LOG` names (log →
 /// log.old) keeps the last two generations. Accepted edge: with several
