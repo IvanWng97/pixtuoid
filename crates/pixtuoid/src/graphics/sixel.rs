@@ -39,22 +39,33 @@ const MIN_REPEAT: usize = 4;
 /// whose height is not a multiple of [`BAND`] has unset rows at the foot of
 /// its last band, over the next tile's top.
 pub(crate) fn transmit(image: &TileImage, origin: Position) -> Vec<u8> {
-    let percent: Vec<[u8; 3]> = image
-        .rgb
-        .as_chunks()
-        .0
-        .iter()
-        .map(|p| p.map(to_percent))
-        .collect();
-    let (palette, indices) = match indexed(&percent) {
+    // Indexed by the tile's own colours, then each colour, not each pixel,
+    // taken to percent and merged: the same palette, in the same first-seen
+    // order, as indexing every pixel's percent.
+    let (raw, raw_indices) = indexed(image.rgb.as_chunks().0);
+    let merged = |to: fn([u8; 3]) -> [u8; 3]| {
+        let (palette, remap) = indexed(&raw.iter().map(|&c| to(c)).collect::<Vec<_>>());
+        (
+            palette,
+            raw_indices.iter().map(|&i| remap[i]).collect::<Vec<_>>(),
+        )
+    };
+    let (palette, indices) = match merged(|c| c.map(to_percent)) {
         exact if exact.0.len() <= REGISTERS => exact,
-        _ => indexed(&percent.iter().map(|c| c.map(to_cube)).collect::<Vec<_>>()),
+        _ => merged(|c| c.map(to_percent).map(to_cube)),
     };
     let width = image.width as usize;
     let mut out = image.tile.cursor_to(origin);
     let _ = write!(out, "\x1bP9;1q\"1;1;{};{}", image.width, image.height);
     for (i, [r, g, b]) in palette.iter().enumerate() {
-        let _ = write!(out, "#{i};2;{r};{g};{b}");
+        out.push('#');
+        push_number(&mut out, i);
+        out.push_str(";2;");
+        push_number(&mut out, usize::from(*r));
+        out.push(';');
+        push_number(&mut out, usize::from(*g));
+        out.push(';');
+        push_number(&mut out, usize::from(*b));
     }
     let rows: Vec<&[usize]> = indices.chunks(width.max(1)).collect();
     // One pass a band sets every colour's sixels, as libsixel's encoder does
@@ -92,14 +103,23 @@ pub(crate) fn transmit(image: &TileImage, origin: Position) -> Vec<u8> {
             if m > 0 {
                 out.push('$');
             }
-            let _ = write!(out, "#{colour}");
+            out.push('#');
+            push_number(&mut out, colour);
             let mut x = 0;
             while x < width {
                 let bits = line[x];
                 let run = line[x..].iter().take_while(|&&b| b == bits).count();
+                // A colour's line ends at its last pixel, as libsixel's nodes
+                // do (`sixel_encode_body`'s `sx..mx`): the empty sixels after
+                // it set nothing, and `$` or `-` follows either way.
+                if bits == 0 && x + run == width {
+                    break;
+                }
                 let ch = char::from(SIXEL_BIAS + bits);
                 if run >= MIN_REPEAT {
-                    let _ = write!(out, "!{run}{ch}");
+                    out.push('!');
+                    push_number(&mut out, run);
+                    out.push(ch);
                 } else {
                     out.extend(std::iter::repeat_n(ch, run));
                 }
@@ -109,6 +129,11 @@ pub(crate) fn transmit(image: &TileImage, origin: Position) -> Vec<u8> {
     }
     out.push_str("\x1b\\");
     out.into_bytes()
+}
+
+/// `n` in decimal, onto `out`.
+fn push_number(out: &mut String, n: usize) {
+    out.push_str(itoa::Buffer::new().format(n));
 }
 
 /// An 8-bit channel as the nearest whole percent.
@@ -132,13 +157,20 @@ fn to_cube(v: u8) -> u8 {
 fn indexed(pixels: &[[u8; 3]]) -> (Vec<[u8; 3]>, Vec<usize>) {
     let mut palette = Vec::new();
     let mut seen = HashMap::with_hasher(foldhash::fast::FixedState::default());
+    // Pixel art runs: a pixel the colour of the last one skips the map.
+    let mut last: Option<([u8; 3], usize)> = None;
     let indices = pixels
         .iter()
-        .map(|&c| {
-            *seen.entry(c).or_insert_with(|| {
-                palette.push(c);
-                palette.len() - 1
-            })
+        .map(|&c| match last {
+            Some((l, i)) if l == c => i,
+            _ => {
+                let i = *seen.entry(c).or_insert_with(|| {
+                    palette.push(c);
+                    palette.len() - 1
+                });
+                last = Some((c, i));
+                i
+            }
         })
         .collect();
     (palette, indices)
@@ -201,7 +233,7 @@ mod tests {
                 &image(2, 1, vec![255, 0, 0, 0, 0, 255]),
                 Position::new(10, 5)
             ),
-            b"\x1b[7;13H\x1bP9;1q\"1;1;2;1#0;2;100;0;0#1;2;0;0;100#0@?$#1?@\x1b\\"
+            b"\x1b[7;13H\x1bP9;1q\"1;1;2;1#0;2;100;0;0#1;2;0;0;100#0@$#1?@\x1b\\"
         );
     }
 
@@ -307,8 +339,8 @@ mod tests {
         );
     }
 
-    /// The encoder as it was before its one-pass bands, kept as the reference
-    /// the new one must match byte for byte.
+    /// The encoder as it was before #1400's one-pass bands, kept as the
+    /// reference whose pixels the new one must show.
     fn before_one_pass(image: &TileImage, origin: Position) -> Vec<u8> {
         let percent: Vec<[u8; 3]> = image
             .rgb
@@ -371,12 +403,12 @@ mod tests {
         *seed
     }
 
-    /// The one-pass bands write exactly what the encoder wrote before them,
-    /// over tiles of every band remainder (the owner's 41 px cell gives
-    /// 164 px tiles, two short of a band), a few colours and past
-    /// [`REGISTERS`].
+    /// The terminal shows exactly the pixels the encoder showed before it
+    /// went faster, in no more bytes, over tiles of every band remainder (the
+    /// owner's 41 px cell gives 164 px tiles, two short of a band), a few
+    /// colours and past [`REGISTERS`].
     #[test]
-    fn one_pass_bands_write_what_the_encoder_wrote_before() {
+    fn the_terminal_shows_what_the_encoder_showed_before() {
         let mut seed = 0x9E37_79B9_7F4A_7C15;
         for height in (1..=13).chain([41, 82, 164, 166]) {
             for width in [1, 4, 17, 136] {
@@ -391,11 +423,13 @@ mod tests {
                         .flat_map(|_| palette[noise(&mut seed) as usize % colours])
                         .collect();
                     let tile = image(width as u32, height as u32, rgb);
-                    assert_eq!(
+                    let (now, before) = (
                         transmit(&tile, Position::new(3, 2)),
                         before_one_pass(&tile, Position::new(3, 2)),
-                        "{width}x{height}, {colours} colours"
                     );
+                    let at = format!("{width}x{height}, {colours} colours");
+                    assert_eq!(decode(&now), decode(&before), "{at}");
+                    assert!(now.len() <= before.len(), "{at}");
                 }
             }
         }
