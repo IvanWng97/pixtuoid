@@ -1,64 +1,33 @@
-//! Mouse hit-testing: which agent, pet, mascot or piece of furniture is painted
-//! under a terminal cell.
+//! Mouse hit-testing at a terminal cell: the engine's [`pixtuoid_scene::hit`]
+//! over the office pixels the cell shows.
 
-use pixtuoid_scene::display::{HoverTarget, Hovers};
-use pixtuoid_scene::layout::{Bounds, Point, SceneLayout};
+use pixtuoid_scene::display::Hovers;
+use pixtuoid_scene::layout::{Bounds, SceneLayout};
 
 use crate::tui::geometry::CellArea;
 
-/// What a cell shows the pointer. A tooltip and a click both resolve a cell
-/// through [`scene_hit`], so a click acts on exactly what the tooltip names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SceneHit<'a> {
-    Figure(&'a HoverTarget),
-    /// The wall board's star, a link to the repo.
-    Star,
-    Coffee,
-    Furniture(&'static str),
-}
+pub(crate) use pixtuoid_scene::hit::SceneHit;
 
-/// The topmost of `hovers` at `cell`, else the board's `star`, else the
-/// coffee machine, else a labelled fixture of `layout`.
+/// [`pixtuoid_scene::hit::scene_hit`] at the office pixels `cell` shows.
 pub(crate) fn scene_hit<'a>(
     hovers: &'a Hovers,
     star: Option<Bounds>,
     layout: &SceneLayout,
     cell: CellArea,
 ) -> Option<SceneHit<'a>> {
-    figure_or_fixture(hovers.at(cell.bounds()), star, layout, cell)
+    pixtuoid_scene::hit::scene_hit(hovers, star, layout, cell.bounds())
 }
 
-/// `figure`, the topmost hover at `cell`, else the board's `star`, else the
-/// coffee machine, else a labelled fixture of `layout`.
-fn figure_or_fixture<'a>(
-    figure: Option<&'a HoverTarget>,
-    star: Option<Bounds>,
-    layout: &SceneLayout,
-    cell: CellArea,
-) -> Option<SceneHit<'a>> {
-    if let Some(target) = figure {
-        Some(SceneHit::Figure(target))
-    } else if star.is_some_and(|b| cell.overlaps(Point { x: b.x, y: b.y }, b.width, b.height)) {
-        Some(SceneHit::Star)
-    } else if hit_test_coffee_machine(layout, cell) {
-        Some(SceneHit::Coffee)
-    } else {
-        hit_test_furniture(layout, cell).map(SceneHit::Furniture)
-    }
-}
-
-/// Whether `cell` shows the coffee-machine section of the pantry counter
-/// sprite.
+/// [`pixtuoid_scene::hit::coffee_at`] at the office pixels `cell` shows.
+#[cfg(test)]
 pub(crate) fn hit_test_coffee_machine(layout: &SceneLayout, cell: CellArea) -> bool {
-    layout
-        .coffee_machine()
-        .is_some_and(|b| cell.overlaps(Point { x: b.x, y: b.y }, b.width, b.height))
+    pixtuoid_scene::hit::coffee_at(layout, cell.bounds())
 }
 
-/// The label of the fixture hovering `cell` points at, if it carries one. The
-/// coffee machine is handled separately for its click-to-open behavior.
+/// [`pixtuoid_scene::hit::fixture_label_at`] at the office pixels `cell` shows.
+#[cfg(test)]
 pub(crate) fn hit_test_furniture(layout: &SceneLayout, cell: CellArea) -> Option<&'static str> {
-    layout.fixture_at(cell.bounds())?.hover_label()
+    pixtuoid_scene::hit::fixture_label_at(layout, cell.bounds())
 }
 
 #[cfg(test)]
