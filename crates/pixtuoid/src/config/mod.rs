@@ -63,8 +63,8 @@ pub struct AppConfig {
 
 /// Default `pixtuoid floating` window size (logical px) + the minimum below which
 /// the half-block office art is unreadable.
-pub const FLOATING_DEFAULT_W: u32 = 360;
-pub const FLOATING_DEFAULT_H: u32 = 240;
+pub const FLOATING_DEFAULT_W: u32 = 480;
+pub const FLOATING_DEFAULT_H: u32 = 320;
 pub const FLOATING_MIN_W: u32 = 240;
 pub const FLOATING_MIN_H: u32 = 160;
 /// Below this the window is too transparent to read.

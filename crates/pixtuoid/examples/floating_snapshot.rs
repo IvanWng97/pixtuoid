@@ -1,11 +1,12 @@
 //! Render ONE frame of the `pixtuoid floating` office to a PNG — visual verification for
-//! the floating window. It drives the SAME `OfficeRenderer`, `XrgbSurface` upscale and
-//! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
+//! the floating window. It drives the SAME `window_geometry`, `OfficeRenderer`,
+//! `XrgbSurface` upscale and footer painter the live window uses, so the PNG is
+//! byte-faithful to what it blits.
 //!
 //! Usage:
 //!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
 //! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
-//! `... -- /tmp/f.png 360x240`.
+//! `... -- /tmp/f.png 960x640`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,13 +14,10 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{
-    OfficeRenderer, XrgbSurface, paint_labels_into_surface, window_buffer_geometry,
-};
+use pixtuoid::floating::offscreen::{OfficeRenderer, XrgbSurface, window_geometry};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
-use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -152,36 +150,36 @@ fn main() -> Result<()> {
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
     let (win_w, win_h) = (u32::from(size.0), u32::from(size.1));
-    let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
+    let at = window_geometry(
+        winit::dpi::PhysicalSize::new(win_w, win_h),
+        pack.max_density_variant(),
+    );
     let buf = renderer
-        .render(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
+        .render(
+            at,
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: at.office,
+                place: pixtuoid_scene::look::Place {
+                    gateway: pixtuoid_scene::tally::office_gateway(&scene),
+                    floor: None,
+                },
+                debug_walkable: false,
             },
-            theme,
-            size: Size { w: ow, h: oh },
-            place: pixtuoid_scene::look::Place {
-                gateway: pixtuoid_scene::tally::office_gateway(&scene),
-                floor: None,
-            },
-            debug_walkable: false,
-        })
+        )
         .expect("a frame");
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
-    surf.fill_upscaled(buf, scale as usize);
+    surf.fill_upscaled(buf, usize::from(at.upscale));
     let (bw, bh) = (buf.width(), buf.height());
-    paint_labels_into_surface(&mut surf, renderer.badges(), scale as i32);
-    pixtuoid::floating::offscreen::paint_wall_board_into_surface(
-        &mut surf,
-        renderer.signs(),
-        scale as i32,
-    );
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);
@@ -200,7 +198,8 @@ fn main() -> Result<()> {
     }
     img.save(&out).with_context(|| format!("writing {out}"))?;
     eprintln!(
-        "wrote {out} ({win_w}x{win_h}, office buffer {bw}x{bh} @{scale}x, {n_agents} agents)"
+        "wrote {out} ({win_w}x{win_h}, office buffer {bw}x{bh} upscaled {}x, {n_agents} agents)",
+        at.upscale
     );
     Ok(())
 }

@@ -136,9 +136,13 @@ pub(crate) struct LivePipeline {
 impl PipelineBoot {
     /// Boot the source pipeline seeded from the REAL window size, and wire the
     /// two background consumers that need the event-loop proxy.
-    pub(crate) fn spawn(self, window_size: winit::dpi::PhysicalSize<u32>) -> LivePipeline {
+    pub(crate) fn spawn(
+        self,
+        window_size: winit::dpi::PhysicalSize<u32>,
+        density: pixtuoid_core::sprite::format::Density,
+    ) -> LivePipeline {
         let _guard = self.rt.enter(); // spawn_pipeline's internal spawns need it
-        let boot_caps = offscreen::boot_capacities_for_window(window_size);
+        let boot_caps = offscreen::boot_capacities_for_window(window_size, density);
         tracing::debug!(
             ?window_size,
             floor0_desks = boot_caps[0],

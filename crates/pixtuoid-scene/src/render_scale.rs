@@ -122,6 +122,89 @@ impl Default for RenderScale {
     }
 }
 
+/// A cutaway on a surface of real pixels, whatever the painter: the office
+/// renders at the pack's densest art and the image is that render upscaled a
+/// whole number of times to [`Self::scale`], so every art pixel lands as an
+/// equal square (integer scaling, as pixel-art engines draw:
+/// <https://docs.godotengine.org/en/stable/tutorials/rendering/multiple_resolutions.html>),
+/// pixel-identical to a render at the scale itself (pinned by
+/// `the_cutaway_paints_whole_art_pixels`). The office takes the surface's
+/// shape; the sub-unit remainder is the painter's margin.
+///
+/// The densest art, not whichever density the surface lands nearest: the one
+/// render draws every piece at one density, and a scale only a coarser density
+/// divides would draw the densest art from coarser stand-ins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PixelFit {
+    scale: RenderScale,
+    density: Density,
+    logical: crate::layout::Size,
+}
+
+impl PixelFit {
+    /// The surface's `natural` real pixels per unit fitted to `density` (the
+    /// pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant))
+    /// over a surface `px` big; `None` when [`RenderScale::fit`] finds no
+    /// scale.
+    pub fn new(natural: u16, density: Density, px: crate::layout::Size) -> Option<Self> {
+        RenderScale::fit(natural, density).map(|scale| Self::at(scale, density, px))
+    }
+
+    /// [`Self::new`] for a surface that has no other look to fall back to: a
+    /// `natural` below `density` takes the density itself, so the office
+    /// shrinks rather than its art coarsening.
+    pub fn at_least_density(natural: u16, density: Density, px: crate::layout::Size) -> Self {
+        Self::new(natural.max(density.get()), density, px)
+            .unwrap_or_else(|| Self::at(RenderScale(density.as_nonzero()), density, px))
+    }
+
+    fn at(scale: RenderScale, density: Density, px: crate::layout::Size) -> Self {
+        Self {
+            scale,
+            density,
+            logical: crate::layout::Size { w: 0, h: 0 },
+        }
+        .over(px)
+    }
+
+    /// This fit over a surface `px` big: the scale stays, and the office takes
+    /// as many units as the surface holds on each axis.
+    pub fn over(self, px: crate::layout::Size) -> Self {
+        Self {
+            logical: crate::layout::Size {
+                w: self.scale.logical(px.w),
+                h: self.scale.logical(px.h),
+            },
+            ..self
+        }
+    }
+
+    /// Real pixels per logical unit.
+    pub fn scale(self) -> RenderScale {
+        self.scale
+    }
+
+    /// The density the office renders at before the upscale.
+    pub fn density(self) -> Density {
+        self.density
+    }
+
+    /// [`Self::density`] as the scale the office renders at.
+    pub fn render_scale(self) -> RenderScale {
+        RenderScale(self.density.as_nonzero())
+    }
+
+    /// The whole factor the density render is upscaled by.
+    pub fn upscale(self) -> u16 {
+        self.scale.get() / self.density.get()
+    }
+
+    /// The office's extent in logical units.
+    pub fn logical(self) -> crate::layout::Size {
+        self.logical
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
