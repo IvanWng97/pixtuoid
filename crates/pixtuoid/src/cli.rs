@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
     version,
     about = "Terminal pixel-art office for AI coding agents"
 )]
-pub struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
 
@@ -41,7 +41,7 @@ fn theme_help() -> String {
 /// commands that wire sources → reducer → renderer). Flattened in via
 /// `#[command(flatten)]` so the four flags can't drift between the two commands.
 #[derive(Debug, clap::Args)]
-pub struct SourceArgs {
+pub(crate) struct SourceArgs {
     /// Empty/whitespace is rejected: an explicit override deserves a loud
     /// answer, and bind("") would strand a relative `.lock` in the CWD.
     #[arg(long, value_parser = parse_nonempty_path, value_hint = clap::ValueHint::FilePath)]
@@ -57,7 +57,7 @@ pub struct SourceArgs {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Cmd {
+pub(crate) enum Cmd {
     /// Run the TUI (default if no subcommand given).
     Run {
         #[command(flatten)]
@@ -174,7 +174,7 @@ pub enum Cmd {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum SourcesAction {
+pub(crate) enum SourcesAction {
     /// Make the connected set EXACTLY these ids (declarative — everything else
     /// disconnects). Backs the Raycast multi-select checkbox-form. `--json` is
     /// the global flag on `sources` (works before or after `set`).
@@ -188,7 +188,7 @@ pub enum SourcesAction {
 /// `dbug` is a hard clap parse error instead of silently parsing as an
 /// `EnvFilter` TARGET directive (`dbug=trace`) that filters everything off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum LogLevel {
+pub(crate) enum LogLevel {
     Error,
     Warn,
     Info,
@@ -198,7 +198,7 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// The tracing level token every `EnvFilter` is built from.
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             LogLevel::Error => "error",
             LogLevel::Warn => "warn",
@@ -210,7 +210,7 @@ impl LogLevel {
 }
 
 impl Cli {
-    pub fn cmd_or_default(self) -> (LogLevel, Option<String>, Cmd) {
+    pub(crate) fn cmd_or_default(self) -> (LogLevel, Option<String>, Cmd) {
         let level = self.log_level;
         let theme = self.theme;
         let cmd = self.cmd.unwrap_or(Cmd::Run {

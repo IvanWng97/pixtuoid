@@ -220,11 +220,8 @@ impl CellSize {
 }
 
 /// What the user asked for: `--graphics`, else the `graphics` config key.
-///
-/// The one `pub` item here, re-exported from the crate root: it is a field of
-/// the `pub` [`crate::cli::Cmd`] and `main.rs` is a separate crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
-pub enum GraphicsMode {
+pub(crate) enum GraphicsMode {
     /// Use terminal graphics when the terminal supports them.
     Auto,
     /// Never use terminal graphics, however capable the terminal is.

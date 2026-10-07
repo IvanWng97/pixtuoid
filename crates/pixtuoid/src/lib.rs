@@ -1,13 +1,16 @@
-//! Public surface for the pixtuoid binary's internals — exposed because
-//! `main.rs`, the examples and the integration tests are separate crates.
+//! The pixtuoid program: `main.rs` only calls [`run`] and reports its error.
+//! What else is public is for the examples and the integration tests, which
+//! are separate crates.
 
 // A print macro panics when its reader leaves (`| head`): CLI and headless
 // output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod aa_text;
+mod app;
+pub use app::run;
 pub(crate) mod audio;
-pub mod cli;
+pub(crate) mod cli;
 pub mod config;
 pub mod doctor;
 
@@ -16,21 +19,17 @@ mod drift_surface;
 pub mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;
-/// The one graphics item that IS public API: `Cmd` and `RunConfig` carry it, and
-/// `main.rs` is a separate crate. Everything else in the module — the plan, the
-/// probe, the scale rule — is `pub(crate)`, because a `pub` item on a published
-/// crate is the one thing a follow-up cannot quietly undo.
-pub use graphics::GraphicsMode;
+pub(crate) use graphics::GraphicsMode;
 pub mod init_pack;
-pub mod install;
+pub(crate) mod install;
 #[cfg(feature = "graphics")]
 #[doc(hidden)]
 pub mod pacing;
-pub mod run_log;
-pub mod runtime;
-pub mod setup;
-pub mod sources;
-pub mod term;
+pub(crate) mod run_log;
+pub(crate) mod runtime;
+pub(crate) mod setup;
+pub(crate) mod sources;
+pub(crate) mod term;
 pub mod tui;
 pub mod validate;
 pub(crate) mod version;

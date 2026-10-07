@@ -10,7 +10,7 @@ pub(crate) mod kimi;
 // cross-crate reachable — only its env filters and owner-only file-mode
 // helpers (below) are re-exported.
 pub(crate) mod io;
-pub use io::{nonempty_abs_env, owner_only_create, tighten_to_owner_only};
+pub(crate) use io::{nonempty_abs_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod dsh;
 pub(crate) mod merge;
 pub(crate) mod omp;
@@ -18,7 +18,7 @@ pub(crate) mod openclaw;
 pub(crate) mod opencode;
 pub(crate) mod reasonix;
 pub(crate) mod target;
-pub use target::TARGETS;
+pub(crate) use target::TARGETS;
 pub(crate) mod verify;
 
 use std::path::PathBuf;

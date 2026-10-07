@@ -467,7 +467,7 @@ pub fn resolve_theme(
 /// (CLI > config > default). The config value is checked even when the flag
 /// wins, as in [`resolve_theme`], and by clap's own parser, so the file and the
 /// flag accept the same names.
-pub fn resolve_graphics(
+pub(crate) fn resolve_graphics(
     config: &AppConfig,
     cli: Option<crate::GraphicsMode>,
     warnings: &mut Vec<String>,
