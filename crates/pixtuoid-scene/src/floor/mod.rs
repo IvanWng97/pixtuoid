@@ -27,8 +27,8 @@ use crate::theme::Theme;
 use crate::walk::WalkState;
 
 mod office;
-#[doc(hidden)]
 use office::FloorView;
+#[doc(hidden)]
 pub use office::{FloorNav, OfficeSession, compose_slide, footer_floor, slide_offsets};
 
 pub use pixtuoid_core::state::MAX_FLOORS;
