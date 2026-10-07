@@ -209,8 +209,9 @@ impl OfficeRenderer {
         volume_flash: Option<u8>,
         warning: Option<&str>,
     ) -> FooterModel {
+        let floor_scene = self.session.footer_scene(scene);
         let inputs = FooterInputs::new(
-            scene,
+            &floor_scene,
             FooterContext::new(
                 scene,
                 self.session.footer_floor(scene),
@@ -1336,6 +1337,49 @@ mod tests {
             screen.needs(&shown, &Dirty::Unchanged),
             "after a held frame"
         );
+    }
+
+    /// The footer counts the floor showing, beside the breadcrumb's whole
+    /// office: one agent of four on the ground floor reads 1/4.
+    #[test]
+    fn the_footer_counts_the_floor_showing() {
+        let cap = 16;
+        let scene = scene_with(
+            vec![
+                active_on("/a/f0.jsonl", 0, 0),
+                active_on("/a/f1a.jsonl", 1, cap),
+                active_on("/a/f1b.jsonl", 1, cap + 1),
+                active_on("/a/f1c.jsonl", 1, cap + 2),
+            ],
+            cap,
+        );
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer.render(
+            cutaway(Size { w: 160, h: 96 }),
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
+            },
+        );
+        let text: String = renderer
+            .footer(&scene, u16::MAX, false, None, None)
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(text.contains("1/4"), "{text:?}");
     }
 
     #[test]
