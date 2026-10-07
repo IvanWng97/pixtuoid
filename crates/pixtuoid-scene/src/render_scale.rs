@@ -25,6 +25,13 @@ use pixtuoid_core::sprite::format::Density;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RenderScale(NonZeroU16);
 
+impl From<Density> for RenderScale {
+    /// The scale art drawn at `density` lands at as it is.
+    fn from(density: Density) -> Self {
+        Self(density.as_nonzero())
+    }
+}
+
 impl RenderScale {
     /// The classic path — one layout unit per buffer pixel.
     pub const ONE: Self = Self(NonZeroU16::MIN);
@@ -201,7 +208,7 @@ impl PixelFit {
 
     /// [`Self::density`] as the scale the office renders at.
     pub fn render_scale(self) -> RenderScale {
-        RenderScale(self.density.as_nonzero())
+        RenderScale::from(self.density)
     }
 
     /// The whole factor the density render is upscaled by.
