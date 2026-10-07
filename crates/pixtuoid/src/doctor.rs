@@ -134,13 +134,69 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
     r
 }
 
-/// Source label-prefixes (e.g. `"cc"`) that have ANY decode-drift breadcrumb in
-/// the log — for the live footer nudge.
-pub(crate) fn drifted_sources(log: &str) -> Vec<String> {
-    registry::registered_source_names()
-        .filter(|s| scan_log_for_source(log, s).total() > 0)
-        .filter_map(|s| registry::descriptor_for(s).map(|d| d.label_prefix.to_string()))
-        .collect()
+/// The label prefixes (e.g. `"cc"`) of the sources a decode-drift breadcrumb
+/// has named in this run, first seen first: the footer's nudge, kept as the
+/// events arrive, so a run reports only its own (WezTerm's ring log and
+/// Alacritty's message bar likewise show what their process logged).
+/// History stays with `doctor`, which reads the retained runs' logs.
+#[derive(Debug, Clone, Default)]
+pub struct DriftSeen(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl DriftSeen {
+    pub(crate) fn prefixes(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The layer that records into this, filtered to the breadcrumbs alone so
+    /// it never sees, or slows, any other event.
+    pub fn layer<S>(&self) -> impl tracing_subscriber::Layer<S>
+    where
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    {
+        use tracing_subscriber::Layer;
+        self.clone().with_filter(
+            tracing_subscriber::filter::Targets::new()
+                .with_target(drift::TARGET, tracing::Level::WARN),
+        )
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for DriftSeen {
+    fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
+        struct Source(Option<String>);
+        impl tracing::field::Visit for Source {
+            // A breadcrumb records `source = %source`, whose Debug is its Display.
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "source" {
+                    self.0 = Some(format!("{value:?}"));
+                }
+            }
+        }
+        // `Targets` matches by prefix; a breadcrumb's target is exact.
+        if event.metadata().target() != drift::TARGET {
+            return;
+        }
+        let mut source = Source(None);
+        event.record(&mut source);
+        let Some(prefix) = source
+            .0
+            .as_deref()
+            .and_then(registry::descriptor_for)
+            .map(|d| d.label_prefix)
+        else {
+            return;
+        };
+        let mut seen = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !seen.iter().any(|p| p == prefix) {
+            seen.push(prefix.to_string());
+        }
+    }
 }
 
 /// Merge the source-death footer warning (HIGHEST priority — the office is
@@ -590,6 +646,63 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     }
 }
 
+/// Where the runtime log lives: the one file `$PIXTUOID_LOG` names, or a
+/// directory holding a file per run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogLocation {
+    File(std::path::PathBuf),
+    Runs(std::path::PathBuf),
+}
+
+/// The extension of a run's file in a [`LogLocation::Runs`] directory.
+pub const RUN_LOG_EXT: &str = "log";
+
+impl LogLocation {
+    pub fn path(&self) -> &std::path::Path {
+        match self {
+            Self::File(p) | Self::Runs(p) => p,
+        }
+    }
+}
+
+/// Every retained log at `at`, oldest run first, read as [`read_log`] reads
+/// one: a run's file is named for its start, so name order is run order.
+pub fn read_logs(at: &LogLocation) -> (String, Option<String>) {
+    let dir = match at {
+        LogLocation::File(path) => return read_log(path),
+        LogLocation::Runs(dir) => dir,
+    };
+    let mut runs: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == RUN_LOG_EXT))
+            .collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (String::new(), None),
+        Err(e) => {
+            return (
+                String::new(),
+                Some(sanitize(&format!(
+                    "log unreadable: {} ({e}) — the decode-drift counts are not meaningful",
+                    dir.display()
+                ))),
+            );
+        }
+    };
+    runs.sort();
+    let (mut text, mut warning) = (String::new(), None);
+    for run in runs {
+        let (run_text, run_warning) = read_log(&run);
+        text.push_str(&run_text);
+        // A run cut off mid-line must not join the next run's first line.
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        warning = warning.or(run_warning);
+    }
+    (text, warning)
+}
+
 mod shown {
     /// A path as the report prints it, [`display_path`](crate::display_path)ed
     /// when minted; the private field means no path field reaches a render
@@ -801,16 +914,16 @@ fn probe_roots() -> ProbeRoots {
     }
 }
 
-/// All probing, no formatting. `log_path` is injected by `main`, which owns the
-/// log-path resolution; `graphics` is the `--graphics` flag.
-fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorReport {
+/// All probing, no formatting. `log_at` is injected by `main`, which owns the
+/// log-location resolution; `graphics` is the `--graphics` flag.
+fn collect(log_at: &LogLocation, graphics: crate::GraphicsMode) -> DoctorReport {
     let mut config_warnings = Vec::new();
     let config_path = crate::config::config_path();
     let cfg = crate::config::load(&config_path, &mut config_warnings);
     // A separate PROCESS from the TUI, so the live `ConnectedSources` is
     // unreachable; persist-first makes the config a complete substitute.
     let connected = crate::config::resolve_connected(&cfg);
-    let (log, log_warning) = read_log(log_path);
+    let (log, log_warning) = read_logs(log_at);
 
     let term_env = pixtuoid_core::platform::text_env("TERM");
     let colorterm_env = pixtuoid_core::platform::text_env("COLORTERM");
@@ -887,7 +1000,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
 
     let (backend, backend_healthy) = activation_backend();
     DoctorReport {
-        log_path: ShownPath::new(log_path),
+        log_path: ShownPath::new(log_at.path()),
         config_path: ShownPath::new(config_path),
         config_warnings,
         log_warning,
@@ -1369,8 +1482,8 @@ fn render(r: &DoctorReport) -> String {
 /// # Errors
 ///
 /// Never: building the report is infallible, and the `Result` is the shape of the sibling subcommand handlers.
-pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
-    Ok(render(&collect(log_path, graphics)))
+pub fn run(log_at: &LogLocation, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
+    Ok(render(&collect(log_at, graphics)))
 }
 
 #[cfg(test)]
@@ -1569,7 +1682,7 @@ mod tests {
             ],
             || {
                 run(
-                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    &LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
                     crate::GraphicsMode::Auto,
                 )
             },
@@ -1585,7 +1698,7 @@ mod tests {
         // captured stdout — pin the env so the plain-text asserts hold anywhere.
         let out = temp_env::with_vars_unset(["CLICOLOR_FORCE", "NO_COLOR"], || {
             run(
-                std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                &LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
                 crate::GraphicsMode::Auto,
             )
         });
@@ -2056,7 +2169,11 @@ mod tests {
         );
 
         // The report must not assert clean drift off a log it never read.
-        let out = run(dir.path(), crate::GraphicsMode::Auto).unwrap();
+        let out = run(
+            &LogLocation::File(dir.path().to_path_buf()),
+            crate::GraphicsMode::Auto,
+        )
+        .unwrap();
         assert!(out.contains("[!] decode drift — log unreadable"), "{out}");
     }
 
@@ -2119,7 +2236,7 @@ mod tests {
             ],
             || {
                 run(
-                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    &LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
                     crate::GraphicsMode::Auto,
                 )
             },
@@ -2520,14 +2637,23 @@ mod tests {
         assert_eq!(version_cmp(Some("garbage"), "1.0.62"), None);
     }
 
+    /// The footer's drift is this run's breadcrumbs alone, each source once,
+    /// first seen first: no other event, nor a target the breadcrumbs' prefixes.
     #[test]
-    fn drifted_sources_and_footer_warning() {
-        let log = capture(|| {
-            drift::unknown_event("claude-code", "NewHook");
-            drift::missing_field("codex", "function_call", "name");
-        });
-        let mut d = drifted_sources(&log);
-        d.sort();
+    fn drift_seen_and_footer_warning() {
+        use tracing_subscriber::layer::SubscriberExt;
+        let seen = DriftSeen::default();
+        tracing::subscriber::with_default(
+            tracing_subscriber::registry().with(seen.layer()),
+            || {
+                drift::unknown_event("claude-code", "NewHook");
+                tracing::warn!(source = "copilot", "an ordinary warning naming a source");
+                tracing::warn!(target: "pixtuoid::drift_surface", source = %"copilot", "a prefixed target");
+                drift::missing_field("codex", "function_call", "name");
+                drift::unknown_event("claude-code", "Again");
+            },
+        );
+        let d = seen.prefixes();
         assert_eq!(d, vec!["cc".to_string(), "cx".to_string()]);
         assert_eq!(
             footer_warning(Some("source 'x' died"), &d).as_deref(),

@@ -388,6 +388,7 @@ where
         false,
         std::path::PathBuf::from("/tmp/sock"),
         None,
+        crate::doctor::DriftSeen::default(),
     );
     let cell = |r: &TuiRenderer<B>, hits: &dyn Fn(&SceneHit<'_>) -> bool| {
         r.frame_buffer()

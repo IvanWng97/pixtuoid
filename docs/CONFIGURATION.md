@@ -150,10 +150,10 @@ The TUI owns your terminal (alternate screen), so runtime diagnostics go to a
 
 | | |
 |-----|-----|
-| Default path | `~/.cache/pixtuoid/log` (or `$XDG_STATE_HOME/pixtuoid/log` if set to an absolute path) |
-| Custom path | set `$PIXTUOID_LOG=/path/to/file` |
+| Default path | `~/.cache/pixtuoid/logs/` (or `$XDG_STATE_HOME/pixtuoid/logs/` if set to an absolute path): one file per run, named for its start |
+| Custom path | set `$PIXTUOID_LOG=/path/to/file` to log every run to that one file |
 | Level | `warn` and above by default; `--log-level debug` or `trace` (or `$RUST_LOG`) raises it |
-| Rotation | one generation: past 5 MB the file rotates to `<name>.old` at startup |
+| Retention | a run's file is removed a week after its last write; a `$PIXTUOID_LOG` file instead rotates to `<name>.old` past 5 MB at startup |
 
 Warnings about a misconfigured `config.toml` (unknown theme, bad `[[pets]]`
 kind, malformed TOML) are also printed to stderr **before** the office takes
