@@ -238,10 +238,14 @@ pub(crate) struct Overlays {
 /// What the window shows, as far as a frame may skip presenting: the overlays
 /// of the frame on screen, known only while the screen holds the last frame
 /// rendered, which an office's dirt is measured against.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Screen {
     shown: Option<Overlays>,
-    asked: bool,
+    /// Whether the platform keeps the window's pixels between presents. X11
+    /// does not ("X does not guarantee to preserve the contents of windows",
+    /// Xlib's overview), and winit hands its `Expose` over as the same
+    /// `RedrawRequested` a paint tick asks for, so no frame may skip there.
+    retains: bool,
 }
 
 impl Screen {
@@ -254,22 +258,16 @@ impl Screen {
         next: &Overlays,
         dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
     ) -> bool {
-        *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged
+        !self.retains
+            || *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged
             || self.shown.as_ref() != Some(next)
     }
 
-    /// The app asked the window for a redraw.
-    pub(crate) fn asked(&mut self) {
-        self.asked = true;
-    }
-
-    /// A redraw arrived. One the app didn't ask for is the platform's: winit
-    /// turns an X11 `Expose` into `RedrawRequested`
-    /// (`platform_impl/linux/x11/event_processor.rs`, v0.30.13), and an
-    /// uncovered window without a compositor holds nothing to skip against.
-    pub(crate) fn redraw_arrived(&mut self) {
-        if !std::mem::take(&mut self.asked) {
-            self.shown = None;
+    /// A window on a platform that keeps its pixels (`retains`) or not.
+    pub(crate) fn new(retains: bool) -> Self {
+        Self {
+            shown: None,
+            retains,
         }
     }
 
@@ -1337,7 +1335,7 @@ mod tests {
             tooltip: None,
         };
         let shown = overlays(200, "a");
-        let mut screen = Screen::default();
+        let mut screen = Screen::new(true);
         assert!(screen.needs(&shown, &Dirty::Unchanged), "the first frame");
         screen.shown(shown.clone());
         assert!(!screen.needs(&shown, &Dirty::Unchanged));
@@ -1356,14 +1354,13 @@ mod tests {
             screen.needs(&shown, &Dirty::Unchanged),
             "after a held frame"
         );
-        // A redraw the app asked for keeps the screen; one it didn't (an
-        // expose) means the window lost what it showed.
-        screen.shown(shown.clone());
-        screen.asked();
-        screen.redraw_arrived();
-        assert!(!screen.needs(&shown, &Dirty::Unchanged), "an asked redraw");
-        screen.redraw_arrived();
-        assert!(screen.needs(&shown, &Dirty::Unchanged), "an expose");
+        // Where the platform keeps no pixels, every frame presents.
+        let mut forgetful = Screen::new(false);
+        forgetful.shown(shown.clone());
+        assert!(
+            forgetful.needs(&shown, &Dirty::Unchanged),
+            "X11 retains nothing"
+        );
     }
 
     /// The footer counts the floor showing, beside the breadcrumb's whole

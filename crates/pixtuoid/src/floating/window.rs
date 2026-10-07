@@ -113,7 +113,7 @@ impl FloatingApp {
             pack,
             config_path,
             pause: pixtuoid_scene::anim::PauseClock::default(),
-            screen: super::offscreen::Screen::default(),
+            screen: super::offscreen::Screen::new(true),
             jank: crate::jank::Jank::new(Instant::now()),
             motion,
             renderer,
@@ -153,10 +153,8 @@ impl FloatingApp {
         }
     }
 
-    /// Ask the window for a redraw, which the screen then tells from an expose.
-    fn request_redraw(&mut self) {
+    fn request_redraw(&self) {
         if let Some(window) = &self.window {
-            self.screen.asked();
             window.request_redraw();
         }
     }
@@ -389,6 +387,33 @@ fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h
     )
 }
 
+/// Whether the window system keeps a window's pixels between presents: X11
+/// alone does not.
+fn retains_pixels(event_loop: &ActiveEventLoop) -> bool {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        use winit::platform::x11::ActiveEventLoopExtX11;
+        !event_loop.is_x11()
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )))]
+    {
+        let _ = event_loop;
+        true
+    }
+}
+
 impl ApplicationHandler<FloatingEvent> for FloatingApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -453,7 +478,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
         // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Real
         // translucency needs a native shim or a wgpu surface.
-        self.screen.asked();
+        self.screen = super::offscreen::Screen::new(retains_pixels(event_loop));
         window.request_redraw();
         self.window = Some(window);
         self.context = Some(context);
@@ -519,7 +544,6 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                self.screen.redraw_arrived();
                 self.redraw();
             }
             WindowEvent::Resized(_) => self.request_redraw(),
