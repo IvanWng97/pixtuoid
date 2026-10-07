@@ -52,6 +52,14 @@ pub struct Theme {
     pub source: SourceColors,
 }
 
+impl Theme {
+    /// A source's hue by its 2-char label prefix, the idle label's for an
+    /// unknown one: what every badge of it is coloured.
+    pub fn source_hue(&self, prefix: &str) -> Rgb {
+        self.source.by_prefix(prefix).unwrap_or(self.ui.label_idle)
+    }
+}
+
 /// The room shell: perimeter walls, carpet, and window frame.
 #[derive(Debug, Clone)]
 pub struct SurfaceColors {
@@ -386,6 +394,14 @@ pub fn theme_by_name(name: &str) -> Option<&'static Theme> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every badge of a source takes its hue, and one of an unknown source
+    /// the idle label's.
+    #[test]
+    fn a_source_hue_falls_back_to_the_idle_label() {
+        assert_eq!(NORMAL.source_hue("cc"), NORMAL.source.claude_code);
+        assert_eq!(NORMAL.source_hue("zz"), NORMAL.ui.label_idle);
+    }
 
     #[test]
     fn all_themes_resolve_by_name() {

@@ -20,9 +20,6 @@ pub(super) use theme_picker::paint_theme_picker;
 pub(crate) use tooltip::{TooltipAt, paint_badges, paint_text_runs, paint_tooltip};
 pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(super) use welcome::paint_welcome;
-// `pub`: the bin crate's crash reporter derives its issue-report URL from this one
-// authority.
-pub use version_popup::REPO_URL;
 
 use std::time::SystemTime;
 
@@ -117,10 +114,9 @@ fn paint_card_backing(f: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
     );
 }
 
-/// The badge color for a source's 2-char label prefix, falling back to `label_idle` for
-/// an unknown prefix.
+/// [`Theme::source_hue`] as a cell colour.
 fn badge_color_for(tag: &str, theme: &pixtuoid_scene::theme::Theme) -> Color {
-    to_color(theme.source.by_prefix(tag).unwrap_or(theme.ui.label_idle))
+    to_color(theme.source_hue(tag))
 }
 
 /// The `[xx]` two-letter source badge span, coloured by the source's theme hue. Never

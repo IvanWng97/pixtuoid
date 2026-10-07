@@ -10,6 +10,11 @@ use std::time::{Duration, Instant};
 use pixtuoid_scene::anim::PAINT_FRAME_MS;
 use pixtuoid_scene::look::FrameNote;
 
+/// The target every report logs under, whatever module this is:
+/// `scripts/pace-check.py` filters its debug frames by it
+/// (`pace_check_filters_the_reports_target`).
+const TARGET: &str = "pixtuoid::jank";
+
 /// How often the spread is reported.
 const WINDOW: Duration = Duration::from_secs(60);
 /// A window's frames twice over, room for a loop that runs hot: past it the
@@ -80,6 +85,7 @@ macro_rules! report {
             (Some(n.weather.0), Some(n.weather.1), n.weather.2)
         });
         tracing::$level!(
+            target: TARGET,
             total = ms(total),
             produce = ms(total.saturating_sub(send.encode + present)),
             encode = ms(send.encode),
@@ -220,15 +226,27 @@ impl Jank {
             sync,
         } = &self.painter;
         if janks > 0 {
-            tracing::warn!(look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::warn!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
         } else {
-            tracing::info!(look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::info!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    /// The fluency gate reads the debug frames through its `RUST_LOG`, which
+    /// must name the target they log under.
+    #[test]
+    fn pace_check_filters_the_reports_target() {
+        let script = include_str!("../../../scripts/pace-check.py");
+        assert!(
+            script.contains(&format!("{}=debug", super::TARGET)),
+            "scripts/pace-check.py's RUST_LOG must enable {}=debug",
+            super::TARGET
+        );
+    }
+
     use super::*;
 
     fn slow() -> Duration {
