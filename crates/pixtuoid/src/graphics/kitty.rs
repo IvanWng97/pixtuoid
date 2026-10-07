@@ -107,9 +107,9 @@ fn shared(id: u32, image: &TileImage, name: &str, tmux: bool) -> Vec<u8> {
     chunked(&keys, b64.as_bytes(), tmux)
 }
 
-/// Transmit-and-place `image` as `id`, raw RGB carried as `medium` says, over
-/// the tile's cells.
-fn placement_keys(id: u32, image: &TileImage, medium: &str) -> String {
+/// Transmit-and-place `image` as `id`, raw RGB carried as `transport_keys`
+/// say, over the tile's cells.
+fn placement_keys(id: u32, image: &TileImage, transport_keys: &str) -> String {
     let TileImage {
         tile,
         width,
@@ -117,7 +117,7 @@ fn placement_keys(id: u32, image: &TileImage, medium: &str) -> String {
         ..
     } = image;
     format!(
-        "a=T,U=1,i={id},f=24,{medium}s={width},v={height},c={},r={},",
+        "a=T,U=1,i={id},f=24,{transport_keys}s={width},v={height},c={},r={},",
         tile.cols, tile.rows
     )
 }

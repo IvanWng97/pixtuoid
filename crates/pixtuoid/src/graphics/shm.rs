@@ -18,10 +18,12 @@ use std::time::{Duration, Instant};
 /// unread this late was dropped, and unlinking it costs at most a stale tile.
 const READ_WITHIN: Duration = Duration::from_secs(2);
 
-/// The most bytes unread objects hold at once, oldest unlinked first: a
-/// terminal that never reads (a dropped passthrough) must not pile up
-/// [`READ_WITHIN`] of whole frames.
-const MAX_UNREAD_BYTES: usize = 256 << 20;
+/// The most bytes the ledger holds at once, oldest unlinked first: a terminal
+/// that never reads (a dropped passthrough) must not pile up [`READ_WITHIN`]
+/// of whole frames. The terminal's own unlink goes unseen, so the ledger
+/// counts read objects too: publishing more than this within [`READ_WITHIN`]
+/// unlinks objects before the terminal has had that long to read them.
+const MAX_LEDGER_BYTES: usize = 256 << 20;
 
 /// The names this process has published and not yet unlinked itself, oldest
 /// first.
@@ -40,13 +42,13 @@ struct Held {
 
 impl Ledger {
     /// Record `name`, then unlink what is past [`READ_WITHIN`] at `now` or
-    /// over [`MAX_UNREAD_BYTES`].
+    /// over [`MAX_LEDGER_BYTES`].
     fn hold(&mut self, held: Held, now: Instant) {
         self.bytes += held.len;
         self.held.push_back(held);
         while let Some(oldest) = self.held.front() {
             let late = now.saturating_duration_since(oldest.at) > READ_WITHIN;
-            if !late && self.bytes <= MAX_UNREAD_BYTES {
+            if !late && self.bytes <= MAX_LEDGER_BYTES {
                 break;
             }
             self.drop_oldest();
@@ -260,7 +262,7 @@ mod tests {
         let huge = Held {
             name: next_name(),
             at: t0 + READ_WITHIN * 2,
-            len: MAX_UNREAD_BYTES + 1,
+            len: MAX_LEDGER_BYTES + 1,
         };
         ledger.hold(huge, t0 + READ_WITHIN * 2);
         assert!(ledger.held.is_empty() && ledger.bytes == 0, "over the cap");
