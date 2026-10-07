@@ -106,7 +106,7 @@ impl FloatingApp {
             live: None,
             last_caps_size: None,
             cursor: PhysicalPosition::new(0.0, 0.0),
-            clock: super::cadence::FrameClock::new(Instant::now()),
+            clock: super::cadence::FrameClock::new(Instant::now(), motion),
             window: None,
             context: None,
             surface: None,
@@ -382,23 +382,24 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // An EMPTY office must NOT go fully idle: the time-driven ambient layer
-        // (clock hands, weather, lightning, day/night, the wandering pet) still
-        // advances, and a 0fps idle would freeze it into a dead-looking window.
-        // A LIVE gateway daemon lives in `daemons`, not `agents`, and is a
-        // time-driven WANDERING mascot, so it too holds the fast cadence, as
-        // does a walking pet, whose legs step by the ground it covers.
+        // An EMPTY office still steps on its beat (clock hands, weather,
+        // lightning, day/night), so it paints each beat, never 0fps. A LIVE
+        // gateway daemon lives in `daemons`, not `agents`, and is a WANDERING
+        // mascot, so it holds the fast cadence, as does whatever the floor
+        // reports moving between beats: a walk, or a light mid-fade.
         let office_idle = self.live.as_ref().is_none_or(|live| {
             let scene = live.scene_rx.borrow();
             scene.agents.is_empty()
                 && scene
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
-        }) && !self.renderer.a_creature_walks(SystemTime::now());
+        }) && !self.renderer.moves_off_beat();
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).
-        let (paint, deadline) = self.clock.poll(Instant::now(), office_idle);
+        let (paint, deadline) = self
+            .clock
+            .poll(Instant::now(), SystemTime::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         if paint && let Some(window) = &self.window {
             window.request_redraw();

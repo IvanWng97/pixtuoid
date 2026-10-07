@@ -1091,22 +1091,57 @@ mod tests {
         let mut office = Office::new(192, 80);
         let scene = SceneState::default();
         let cat = Pet::defaulted(PetKind::Cat);
-        let resting = office
-            .frame(&scene, Some(&cat), None, 0)
-            .pet
-            .expect("drawn");
-        assert_ne!(resting.anim_name, PetKind::Cat.walk_anim());
-        assert!(!office.session.a_creature_walks(at(0)));
-        let walking_at = (0..120_000)
-            .step_by(PAINT_MS as usize)
-            .find(|&ms| {
-                office
-                    .frame(&scene, Some(&cat), None, ms)
-                    .pet
-                    .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim())
-            })
-            .expect("the cat sets off");
-        assert!(office.session.a_creature_walks(at(walking_at)));
+        let (mut rested, mut walked) = (false, false);
+        for ms in (0..120_000).step_by(PAINT_MS as usize) {
+            let walking = office
+                .frame(&scene, Some(&cat), None, ms)
+                .pet
+                .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim());
+            let told = office.session.moves_off_beat();
+            assert!(!walking || told, "the cat walks unseen at {ms} ms");
+            rested |= !walking && !told;
+            walked |= walking;
+        }
+        assert!(
+            rested && walked,
+            "the cat rests ({rested}) and sets off ({walked})"
+        );
+    }
+
+    /// Stepped only as each beat turns, as a painter of an idle office steps
+    /// it, a creature that rests at a step walks at no instant before the
+    /// next: a roam sets off in a step, never between two, so a painter that
+    /// sleeps to the beat while nothing moves off it shows every leg from its
+    /// first step.
+    #[test]
+    fn a_resting_creature_sets_off_only_in_a_step() {
+        let mut office = Office::new(192, 80);
+        let scene = SceneState::default();
+        let cat = Pet::defaulted(PetKind::Cat);
+        let beat = crate::anim::FULL_TICK_MS;
+        let mut set_off = 0;
+        for turn in 0..120_000 / beat {
+            let ms = turn * beat + 1;
+            office.frame(&scene, Some(&cat), None, ms);
+            if office.session.moves_off_beat() {
+                set_off += 1;
+                continue;
+            }
+            for into in (10..beat).step_by(10) {
+                let walks = office
+                    .session
+                    .floor
+                    .ctx
+                    .creatures
+                    .values()
+                    .any(|w| w.walks_at(at(ms + into)));
+                assert!(
+                    !walks,
+                    "the cat set off {into} ms after the step at {ms} ms"
+                );
+            }
+        }
+        assert!(set_off > 0, "the cat never set off");
     }
 
     /// A walking pet turns to where its leg heads, both ways; a resting one
