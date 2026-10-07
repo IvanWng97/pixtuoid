@@ -78,9 +78,12 @@ spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
 skill runs its local rows. Merging is `@mergifyio queue`; a release PR merges
 by hand.
 
-**At most 4 open PRs across the sessions** (bots' and outside contributors'
-aside): the runners take [20 jobs at once](https://docs.github.com/en/actions/reference/limits)
-and one light-tier push needs more, so a fifth open PR only queues. A PR
+**At most 6 open PRs across the sessions** (bots' and outside contributors'
+aside), a stack's layers each holding one: the runners take
+[20 jobs at once](https://docs.github.com/en/actions/reference/limits) and one
+light-tier push needs more, so every open PR's push waits behind the others'.
+A PR built on another's branch stacks on it
+([`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate)). A PR
 opens, never as a draft, once preflight is green and its local rows are run;
 the bots review it from there. Until a slot frees, the branch stays pushed
 with no PR. A PR

@@ -30,8 +30,11 @@ queue_rules:
     # The PR itself: branch protection's required checks (here the light-tier
     # ci-gate) and conversation resolution, restated since nothing is injected.
     queue_conditions:
-      # A stacked PR waits until its base lands and GitHub retargets it.
-      - base = main
+      # A stack layer (docs/CONTRIBUTING.md#the-merge-gate) queues against main
+      # through its `Depends-On`; any other PR targets main.
+      - or:
+          - base = main
+          - "#depends-on > 0"
       - -draft
       # A queue update would merge main into it, which release-plz.yml's
       # release-merge refuses after the merge (docs/CONTRIBUTING.md#cutting-the-release).

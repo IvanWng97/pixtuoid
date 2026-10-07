@@ -280,7 +280,13 @@ local row. The queue tests up to `batch_size` PRs together on a draft PR
 themselves; it never updates a PR's own branch
 ([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
 are the ones merged"), so the bots' statuses on the PR's head are the ones its
-`queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
+`queue_conditions` read. A PR built on another's branch is a
+[stack](https://docs.mergify.com/merge-queue/stacks) layer: its base is that
+branch and its body carries `Depends-On: #N`, so its diff is its own change,
+and a `queue` on the top layer queues every layer below, landing them in
+order. A stack that lands only in part leaves its next layer carrying the
+landed one's pre-squash commits; that layer merges `main` in, never
+`stack sync`, which rebases and force-pushes. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
 bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
 generated-art record: it renders main's merged code, which each look PR's lens
 already read as evidence.
