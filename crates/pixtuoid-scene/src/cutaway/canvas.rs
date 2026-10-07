@@ -447,7 +447,7 @@ mod tests {
     ) -> Run {
         let (layout, pack) = (Arc::new(layout), Arc::new(pack));
         let theme = normal();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::from(pack.max_density_variant());
         let office = Office {
             layout: &layout,
             pack: &pack,

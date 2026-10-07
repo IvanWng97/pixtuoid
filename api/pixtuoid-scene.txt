@@ -1520,6 +1520,8 @@ pub fn pixtuoid_scene::render_scale::RenderScale::clone(&self) -> pixtuoid_scene
 impl core::cmp::Eq for pixtuoid_scene::render_scale::RenderScale
 impl core::cmp::PartialEq for pixtuoid_scene::render_scale::RenderScale
 pub fn pixtuoid_scene::render_scale::RenderScale::eq(&self, &pixtuoid_scene::render_scale::RenderScale) -> bool
+impl core::convert::From<pixtuoid_core::sprite::format::Density> for pixtuoid_scene::render_scale::RenderScale
+pub fn pixtuoid_scene::render_scale::RenderScale::from(pixtuoid_core::sprite::format::Density) -> Self
 impl core::default::Default for pixtuoid_scene::render_scale::RenderScale
 pub fn pixtuoid_scene::render_scale::RenderScale::default() -> Self
 impl core::fmt::Debug for pixtuoid_scene::render_scale::RenderScale
