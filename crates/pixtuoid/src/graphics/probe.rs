@@ -90,13 +90,14 @@ impl EnvHints {
     }
 
     /// iTerm2 itself, not one of the terminals that speak its images: its
-    /// `TERM_PROGRAM`, inside tmux its session, or over ssh, where no
-    /// `TERM_PROGRAM` arrives, its `LC_TERMINAL`. A terminal started from
+    /// `TERM_PROGRAM`, inside tmux its session, or its `LC_TERMINAL` where no
+    /// other terminal names itself: over ssh, where no `TERM_PROGRAM`
+    /// arrives, or inside tmux, whose own it is. A terminal started from
     /// iTerm2's shell names itself and inherits that `LC_TERMINAL`.
     fn is_iterm2(&self) -> bool {
         let named = |v: &Option<String>| v.as_deref().is_some_and(|v| v.contains("iTerm"));
         named(&self.env.term_program)
-            || (self.env.term_program.is_none() && named(&self.lc_terminal))
+            || ((self.env.term_program.is_none() || self.env.tmux()) && named(&self.lc_terminal))
             || (self.env.tmux() && self.iterm_session)
     }
 }
@@ -371,6 +372,15 @@ mod tests {
             detected(&both, &over_ssh, None).protocol,
             Some(ImageProtocol::Sixel),
             "over ssh only LC_TERMINAL arrives"
+        );
+        let tmux_over_ssh = EnvHints {
+            lc_terminal: Some("iTerm2".into()),
+            ..client(hints("tmux-256color", "tmux"))
+        };
+        assert_eq!(
+            detected(&both, &tmux_over_ssh, None).protocol,
+            Some(ImageProtocol::Sixel),
+            "tmux names itself, not the terminal"
         );
         assert_eq!(
             detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
