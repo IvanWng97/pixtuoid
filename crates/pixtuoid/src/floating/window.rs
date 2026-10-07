@@ -23,10 +23,10 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
-use super::offscreen::OfficeRenderer;
+use super::offscreen::{OfficeRenderer, WindowFrame};
 use crate::config::{self, FloatingConfig};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
-use pixtuoid_scene::look::{Place, RenderInputs};
+use pixtuoid_scene::look::Place;
 use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
@@ -51,7 +51,7 @@ pub(crate) struct FloatingApp {
     renderer: OfficeRenderer,
     audio_ctl: crate::audio::AudioController,
     /// The pipeline inputs, held until `resumed` can supply the REAL window size
-    /// (the `[floating]` config size is LOGICAL and would over-seed on HiDPI).
+    /// (the `[floating]` config size is LOGICAL and would mis-seed on HiDPI).
     /// `take`n exactly once; `None` afterwards.
     boot: Option<super::PipelineBoot>,
     /// The live pipeline — `None` until `resumed` boots it. `about_to_wait` DOES
@@ -272,15 +272,13 @@ impl FloatingApp {
         };
         let live = self.renderer.render_live(
             at,
-            RenderInputs {
+            WindowFrame {
                 world,
                 theme: self.theme,
-                size: at.office,
                 place: Place {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
-                debug_walkable: false,
             },
             (win_w, win_h),
         );
@@ -376,19 +374,17 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if self.window.is_some() {
             return; // already created — a re-resume must not spawn a second window
         }
+        let min = super::offscreen::min_window(self.pack.max_density_variant());
         let mut attrs = Window::default_attributes()
             .with_title("pixtuoid")
             .with_decorations(false)
             .with_resizable(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_inner_size(LogicalSize::new(
-                f64::from(self.cfg.width),
-                f64::from(self.cfg.height),
+                self.cfg.width.max(min.width),
+                self.cfg.height.max(min.height),
             ))
-            .with_min_inner_size(LogicalSize::new(
-                f64::from(config::FLOATING_MIN_W),
-                f64::from(config::FLOATING_MIN_H),
-            ));
+            .with_min_inner_size(min);
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
             && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
