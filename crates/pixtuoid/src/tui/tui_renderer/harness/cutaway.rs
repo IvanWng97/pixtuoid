@@ -671,7 +671,8 @@ fn an_unborrowable_cutaway_slide_cancels() {
     let (mut r, _wire) = painter(cols, rows, ImageProtocol::Kitty);
     let scene = two_floor_scene();
     r.render(&scene, pack(), t0()).expect("render");
-    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
+    r.nav
+        .begin_unchecked(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
     let logged = crate::test_capture::capture(|| {
         r.render(&scene, pack(), t0()).expect("render");
     });

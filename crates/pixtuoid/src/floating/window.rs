@@ -40,8 +40,8 @@ pub(crate) struct FloatingApp {
     theme: &'static Theme,
     pack: std::sync::Arc<Pack>,
     config_path: PathBuf,
-    /// The configured office pets — one is selected per floor (v1 shows floor 0's).
-    pets: Vec<pixtuoid_scene::pet::Pet>,
+    /// The `[p]ause`, which holds the office's clock still.
+    pause: pixtuoid_scene::anim::PauseClock,
     /// How the office moves.
     motion: pixtuoid_scene::anim::Motion,
     renderer: OfficeRenderer,
@@ -100,13 +100,14 @@ impl FloatingApp {
         let pack = std::sync::Arc::new(pack);
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         renderer.set_audio(audio_ctl.handle().clone());
+        renderer.set_pets(pets);
         let focus_roots = boot.focus_roots();
         Self {
             cfg,
             theme,
             pack,
             config_path,
-            pets,
+            pause: pixtuoid_scene::anim::PauseClock::default(),
             motion,
             renderer,
             audio_ctl,
@@ -182,7 +183,7 @@ impl FloatingApp {
             ),
             None => Press::Drag,
         };
-        let now = SystemTime::now();
+        let now = self.pause.now(SystemTime::now());
         match press {
             Press::Resize => {
                 let _ = window.drag_resize_window(ResizeDirection::SouthEast);
@@ -211,7 +212,7 @@ impl FloatingApp {
                         self.petting = Some(pixtuoid_scene::pet::PetState {
                             petted_at: now,
                             kind,
-                            floor_idx: 0,
+                            floor_idx: self.renderer.nav().current(),
                         });
                     }
                     _ => {}
@@ -248,18 +249,17 @@ impl FloatingApp {
             at.office.w,
             at.office.h,
         );
+        // The office's weather and motion; the office picks each floor's own.
         let floor_meta = FloorMeta::ground().with_motion(self.motion);
-        let floor_pet =
-            pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
-        let now = SystemTime::now();
+        let now = self.pause.now(SystemTime::now());
         let world = FloorInputs {
             scene: &scene,
             pack: &self.pack,
             now,
             floor: floor_meta,
             pets: PetInputs {
-                pet: floor_pet,
+                pet: None,
                 petting: self.petting.as_ref(),
             },
         };
@@ -433,13 +433,34 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
-                if let Some(action) = super::input::audio_action(&event.logical_key, event.repeat) {
-                    // floating has no [p]ause; effective mute == muted.
-                    self.audio_ctl
-                        .apply(action, false, Instant::now(), crate::audio::respawn);
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
+                let key = &event.logical_key;
+                if let Some(action) = super::input::audio_action(key, event.repeat) {
+                    self.audio_ctl.apply(
+                        action,
+                        self.pause.paused(),
+                        Instant::now(),
+                        crate::audio::respawn,
+                    );
+                } else if super::input::is_pause(key, event.repeat) {
+                    self.pause.toggle();
+                    // Unpause restores the user's own m-key state rather than clobbering it.
+                    self.audio_ctl.set_paused(self.pause.paused());
+                } else if let Some(step) = super::input::floor_step(key) {
+                    let nav = self.renderer.nav();
+                    let target = match step {
+                        super::input::FloorStep::Up => nav.up(self.renderer.n_floors()),
+                        super::input::FloorStep::Down => nav.down(),
+                    };
+                    let Some(target) = target else {
+                        return;
+                    };
+                    let now = self.pause.now(SystemTime::now());
+                    self.renderer.navigate(target, now);
+                } else {
+                    return;
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
                 }
             }
             WindowEvent::RedrawRequested => self.redraw(),
@@ -479,7 +500,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 && scene
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
-        }) && !self.renderer.a_creature_walks(SystemTime::now());
+        }) && !self.renderer.a_creature_walks(SystemTime::now())
+            && self.renderer.nav().transition().is_none();
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).

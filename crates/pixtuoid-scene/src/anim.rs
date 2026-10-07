@@ -179,6 +179,39 @@ fn loop_time(wall: SystemTime, pace: u64) -> u64 {
     epoch_ms(wall) / (FULL_TICK_MS * pace) * FULL_TICK_MS
 }
 
+/// A painter's `[p]ause`: while paused, every read of the clock gives the
+/// instant the pause began, so the whole office holds still and resumes from
+/// where it stood.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PauseClock {
+    paused: bool,
+    frozen: Option<SystemTime>,
+}
+
+impl PauseClock {
+    /// Pause, or resume.
+    pub fn toggle(&mut self) {
+        self.paused = !self.paused;
+    }
+
+    /// Whether the clock is paused.
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    /// The frame's time at `wall`: `wall` itself, or the instant the pause
+    /// began.
+    pub fn now(&mut self, wall: SystemTime) -> SystemTime {
+        if self.paused {
+            *self.frozen.get_or_insert(wall)
+        } else {
+            self.frozen = None;
+            wall
+        }
+    }
+}
+
 /// An instant, and the [`Beat`] its ambient loops read at it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Timing {
