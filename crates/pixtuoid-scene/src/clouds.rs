@@ -1863,14 +1863,33 @@ mod tests {
         let (run, glass_h) = wall.glass();
         for motion in [Motion::Full, Motion::Calm] {
             for (start, policy, length) in windows {
+                let timing = |n: u32| motion.timing(start - AHEAD + frame * n);
+                let planned =
+                    |sky: &Sky| Clouds::plan(sky, 0.0, (run.end - run.start, glass_h), d.get()).1;
+                // Only a frame within `AHEAD` of a step, where the plan
+                // changes, can draw ahead or on demand, so the rest are
+                // found by the plan alone, which paints nothing, and skipped.
+                let frames = lead + (length.as_millis() / frame.as_millis()) as u32;
+                let mut near = vec![false; frames as usize];
+                let mut last_plan = planned(&Sky::at(timing(0), policy));
+                for n in 1..frames {
+                    let plan = planned(&Sky::at(timing(n), policy));
+                    if plan != last_plan {
+                        // `lead` frames to warm the cache, then `AHEAD`.
+                        near[n.saturating_sub(2 * lead) as usize..=n as usize].fill(true);
+                    }
+                    last_plan = plan;
+                }
+                let from = near
+                    .iter()
+                    .position(|&b| b)
+                    .expect("the window crosses a step") as u32;
                 let mut cache = crate::outside::OutsideCache::default();
                 let mut ahead_drawn = 0;
-                for n in 0..lead + (length.as_millis() / frame.as_millis()) as u32 {
-                    let timing = motion.timing(start - AHEAD + frame * n);
+                for n in (from..frames).filter(|&n| near[n as usize]) {
+                    let timing = timing(n);
                     let moment = Moment::resolve(Sky::at(timing, policy), theme, 0.0, timing);
-                    let (_, planned) =
-                        Clouds::plan(&moment.sky, 0.0, (run.end - run.start, glass_h), d.get());
-                    let missing = planned
+                    let missing = planned(&moment.sky)
                         .iter()
                         .filter(|&&(_, key)| !cache.clouds.holds(key))
                         .count();
@@ -1887,7 +1906,7 @@ mod tests {
                             crate::glass_weather::GlassWeather::of(&moment),
                         );
                     });
-                    if n > lead {
+                    if n > from + lead {
                         assert_eq!(missing, 0, "{motion:?} {policy:?} frame {n} drew on demand");
                         assert!(
                             drawn <= DRAWS_AHEAD,
