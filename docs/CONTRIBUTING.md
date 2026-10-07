@@ -306,7 +306,8 @@ split it off into #N; a round-1 redesign that brings the finding into scope
 ends FIXED) ·
 FOLLOW-UP → #N (real and PRE-EXISTING,
 and not FIXED in place — in place fits a small defect inside code this change
-already touches, adding no local row — so it is fixed in #N; a defect in
+already touches, adding no local row, found by round 1 or inside its fold —
+so it is fixed in #N; a defect in
 another session's tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
