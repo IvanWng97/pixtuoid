@@ -300,9 +300,10 @@ REFUTED (cite the mechanism, per AGENTS.md; add one where none exists. Before
 adding code for a finding, establish its case is reachable: when a test or
 sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
-change, and bigger than the PR, or found in round 2 outside round 1's fold,
-which the [convergence contract](#convergence-contract) bars folding: split
-it off into #N; a redesign that brings the finding into scope ends FIXED) ·
+change, and either bigger than the PR or found after round 1 outside its
+fold, which the [convergence contract](#convergence-contract) bars folding:
+split it off into #N; a round-1 redesign that brings the finding into scope
+ends FIXED) ·
 FOLLOW-UP → #N (real and PRE-EXISTING,
 and not FIXED in place — in place fits a small defect inside code this change
 already touches, adding no local row — so it is fixed in #N; a defect in
@@ -325,8 +326,9 @@ before re-litigating.
   and its criterion land in the first commit or the PR body (#943).
 - **Two fix rounds, hard cap.** Round 1 folds every accepted finding into ONE
   commit. Round 2 verifies the dispositions; a round-2 finding outside round
-  1's fold is dispositioned, never folded. A blocking issue confirmed in round
-  1's fixes STOPS the loop: revert the fold and re-land smaller, or re-scope.
+  1's fold is dispositioned (REFUTED, RE-SCOPED or FOLLOW-UP), never folded.
+  A blocking issue confirmed in round 1's fixes STOPS the loop: revert the
+  fold and re-land smaller, or re-scope.
   No round 3.
 - **Round 2's fold** is the last behavior change and is verified, not
   re-reviewed: each fix is a revert, a deletion, or a change shipping a test
