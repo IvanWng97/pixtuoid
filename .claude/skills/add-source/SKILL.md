@@ -35,4 +35,4 @@ while these two were red, caught only by the full suite. Run
 
 - `just gen-contract` only if you touched the `--json`/`SourceStatus`/`OutcomeRow`
   SHAPE (adding a row doesn't).
-- `just preflight full` before the PR, then run the **local-review** skill.
+- Run the **local-review** skill before the PR; CI runs the tests.
