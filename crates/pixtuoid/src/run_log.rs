@@ -276,8 +276,8 @@ impl LogLocation {
         Ok(sink)
     }
 
-    /// The log here, read as [`read_log`] reads one; of a runs directory, the
-    /// newest [`LOG_READ_BYTES`] across its runs, oldest run first.
+    /// The log here, its tail within the read budget; of a runs directory,
+    /// the tail across its runs, oldest run first.
     pub fn read(&self) -> (String, Option<String>) {
         match self {
             LogLocation::File(path) => read_log(path),
