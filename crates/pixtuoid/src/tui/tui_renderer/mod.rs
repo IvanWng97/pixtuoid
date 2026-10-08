@@ -46,6 +46,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pack: Arc<Pack>,
     /// The frames' times and janks.
     jank: crate::jank::Jank,
+    /// When the loop's clock scheduled the frame being drawn ([`Self::due_at`]).
+    due: Option<std::time::Instant>,
     /// What holds each frame's output and presents it whole; `None` writes
     /// straight to the backend.
     frame_out: Option<crate::tui::FrameOut>,
@@ -205,6 +207,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             session: OfficeSession::new(Arc::clone(&pack)),
             pack,
             jank: crate::jank::Jank::new(std::time::Instant::now()),
+            due: None,
             frame_out: None,
             redraw_owed: false,
             refusing: false,
@@ -318,6 +321,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// is judged against.
     pub(crate) fn scheduled_every(&mut self, interval: std::time::Duration) {
         self.jank.scheduled_every(interval);
+    }
+
+    /// The next frame is the one the loop's clock scheduled for `at`: its
+    /// showing counts toward the hitch time ([`crate::jank::Jank::shown`]).
+    pub(crate) fn due_at(&mut self, at: std::time::Instant) {
+        self.due = Some(at);
     }
 
     /// Hold each frame's output in `out` and present it whole.
@@ -840,13 +849,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .session
             .floor(self.session.nav().current())
             .and_then(|f| f.raster.note());
-        self.jank.record(
-            begun.elapsed(),
-            present,
-            send,
-            note,
-            std::time::Instant::now(),
-        );
+        let shown = std::time::Instant::now();
+        self.jank
+            .record(begun.elapsed(), present, send, note, shown);
+        if let Some(due) = self.due.take() {
+            self.jank.shown(due, shown);
+        }
         Ok(())
     }
 

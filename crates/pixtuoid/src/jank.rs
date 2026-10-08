@@ -114,11 +114,11 @@ pub(crate) struct Jank {
     janks: u32,
     /// Frames past their interval.
     over: u32,
-    /// How long the screen held a frame past its interval: a frame that
-    /// overruns skips each tick it missed (`MissedTickBehavior::Skip`), so
-    /// the last frame stays a whole interval longer for each. Apple's hitch
-    /// duration (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
+    /// How long frames stayed on screen past their schedule this window
+    /// ([`Self::shown`]).
     hitch: Duration,
+    /// The last scheduled frame shown: when it was due, and when it showed.
+    last_shown: Option<(Instant, Instant)>,
     since: Instant,
     painter: Painter,
     /// The interval the loop schedules frames at.
@@ -149,6 +149,7 @@ impl Jank {
             janks: 0,
             over: 0,
             hitch: Duration::ZERO,
+            last_shown: None,
             since: now,
             painter: Painter::default(),
             interval: Duration::from_millis(PAINT_FRAME_MS),
@@ -159,6 +160,21 @@ impl Jank {
     /// slow past and janks at twice.
     pub(crate) fn scheduled_every(&mut self, interval: Duration) {
         self.interval = interval;
+    }
+
+    /// Count the frame due at `due` and shown at `at` toward the hitch time:
+    /// the frame before it stayed on screen from its showing until `at`, past
+    /// the spacing their two dues ask for by the hitch duration, "the
+    /// difference between the actual frame lifetime and the expected frame
+    /// lifetime" (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
+    /// A redraw no schedule asked for never comes here, so it can't count.
+    pub(crate) fn shown(&mut self, due: Instant, at: Instant) {
+        if let Some((was_due, was_shown)) = self.last_shown {
+            let held = at.saturating_duration_since(was_shown);
+            let meant = due.saturating_duration_since(was_due);
+            self.hitch += held.saturating_sub(meant);
+        }
+        self.last_shown = Some((due, at));
     }
 
     /// Name what draws the frames from now on.
@@ -184,8 +200,6 @@ impl Jank {
         self.len = (self.len + 1).min(RING);
         if total > self.interval {
             self.over += 1;
-            let missed = total.as_nanos().div_ceil(self.interval.as_nanos().max(1)) - 1;
-            self.hitch += self.interval * u32::try_from(missed).unwrap_or(u32::MAX);
             let send = send.unwrap_or(FrameSend {
                 dirty: Painted::Classic,
                 ..FrameSend::default()
@@ -326,17 +340,20 @@ mod tests {
         assert!(logged.contains("janks=0"), "{logged}");
     }
 
-    /// An overrun holds the last frame a whole interval for each tick it
-    /// missed: a frame of one and a half intervals one, of just over two
-    /// intervals two; a frame within its interval none.
+    /// A late frame holds the one before it past their schedule by its
+    /// lateness alone, and a slower schedule is no hitch. Due at 0, 33, 66
+    /// and 191 ms, shown at 5, 48, 71 and 192: the second shows 43 ms after
+    /// the first against 33 due, 10 ms late; the third 23 against 33; the
+    /// fourth 121 against a beat's 125.
     #[test]
-    fn an_overrun_holds_the_screen_whole_intervals() {
+    fn a_late_frame_holds_the_last_by_its_lateness() {
         let t0 = Instant::now();
-        let tick = Duration::from_millis(PAINT_FRAME_MS);
+        let ms = Duration::from_millis;
         let logged = crate::test_capture::capture(|| {
             let mut jank = Jank::new(t0);
-            for total in [tick, tick * 3 / 2, slow()] {
-                jank.record(total, Duration::ZERO, None, None, t0);
+            for (due, at) in [(0, 5), (33, 48), (66, 71), (191, 192)] {
+                jank.record(ms(1), Duration::ZERO, None, None, t0);
+                jank.shown(t0 + ms(due), t0 + ms(at));
             }
             jank.finish();
         });
@@ -344,9 +361,9 @@ mod tests {
             .lines()
             .find(|l| l.contains("frame pacing"))
             .unwrap_or_default();
-        let held = (tick * 3).as_secs_f64() * 1000.0;
-        assert!(line.contains(&format!("hitch_ms={held}")), "{line}");
-        let interval = tick.as_secs_f64() * 1000.0;
+        let late = ms(10).as_secs_f64() * 1000.0;
+        assert!(line.contains(&format!("hitch_ms={late:?} ")), "{line}");
+        let interval = Duration::from_millis(PAINT_FRAME_MS).as_secs_f64() * 1000.0;
         assert!(line.contains(&format!("interval_ms={interval}")), "{line}");
     }
 

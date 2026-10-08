@@ -647,7 +647,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         let mut now = ui.now();
         loop {
             tokio::select! {
-                _ = frames.tick() => {
+                due = frames.tick() => {
+                    renderer.due_at(due.into_std());
                     now = ui.now();
                     snapshot = scene_rx.borrow_and_update().clone();
                     let health = source_health.borrow_and_update().clone();
