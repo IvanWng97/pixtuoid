@@ -443,7 +443,7 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
 /// `density`, `office_scale` fitted to it and never below it, so the window
 /// never falls back to the classic, over the window above its
-/// [`footer_band`]. The ONE place this geometry lives, so the desk capacity
+/// `footer_band`. The ONE place this geometry lives, so the desk capacity
 /// derived from it can't drift from the office drawn.
 ///
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
@@ -471,7 +471,7 @@ pub(crate) fn footer_band(fit: PixelFit) -> u16 {
 /// The smallest window, in logical px, whose office lays out:
 /// [`min_layout_size`](pixtuoid_scene::layout::min_layout_size) at the pack's
 /// `density`, which [`window_geometry`] never draws below, and its
-/// [`footer_band`], on a display that gives a logical px one physical px.
+/// `footer_band`, on a display that gives a logical px one physical px.
 pub(crate) fn min_window(density: Density) -> LogicalSize<u32> {
     let min = pixtuoid_scene::layout::min_layout_size();
     let px = |units: u16| units.saturating_mul(density.get());
@@ -697,7 +697,7 @@ pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
     u16::try_from(room / usize::from(cell.w.max(1))).unwrap_or(u16::MAX)
 }
 
-/// Paint the shared status footer in `at`'s [`footer_band`] at the window's
+/// Paint the shared status footer in `at`'s `footer_band` at the window's
 /// foot: the theme's ground, the TUI footer row's terminal background, and
 /// the line in `at`'s screen cells over it — the window's twin of the TUI's
 /// status row, from the same [`build_footer`] model.
