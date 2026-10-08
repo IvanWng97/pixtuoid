@@ -1,12 +1,12 @@
 //! The Sources panel painter (ratatui). Pure presentation over the pre-built row
-//! list + per-frame live facet from `tui::connection`; all model logic lives
+//! list + per-frame live facet from `panels::connection`; all model logic lives
 //! there.
 
 use std::time::{Duration, SystemTime};
 
 use super::{Overflow, Panel, marquee_or_truncate, marquee_window, source_badge_span, to_color};
 
-use crate::tui::connection::{
+use crate::panels::connection::{
     ConnState, ConnectionFrame, ConnectionRow, LiveFacet, LiveInfo, no_action_hint,
 };
 use pixtuoid_scene::theme::Theme;
@@ -252,8 +252,8 @@ mod tests {
         )
     }
     use super::*;
+    use crate::panels::connection::DaemonRollup;
     use crate::sources::{RowFacts, RowInput};
-    use crate::tui::connection::DaemonRollup;
     use pixtuoid_core::state::DaemonState;
     use pixtuoid_scene::theme::NORMAL;
 

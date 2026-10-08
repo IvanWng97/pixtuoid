@@ -155,7 +155,7 @@ pub(crate) fn window_range(
     scroll: usize,
     viewport: usize,
 ) -> ListWindow {
-    use crate::tui::dashboard::clamp_scroll_idx;
+    use crate::panels::dashboard::clamp_scroll_idx;
     let overflow = list_len > viewport;
     let reserved = if overflow {
         viewport.saturating_sub(1)
