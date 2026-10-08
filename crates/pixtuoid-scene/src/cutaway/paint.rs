@@ -495,6 +495,19 @@ pub struct CutawayCache {
     marks: Option<RgbBuffer>,
 }
 
+impl CutawayCache {
+    /// Drop the figures of agents no longer in `scene`.
+    pub(crate) fn evict_missing(&mut self, scene: &pixtuoid_core::SceneState) {
+        self.figures.evict_missing(scene);
+    }
+
+    /// How many recoloured figure frames it holds.
+    #[cfg(test)]
+    pub(crate) fn figures_len(&self) -> usize {
+        self.figures.len()
+    }
+}
+
 /// Art found by recolouring, kept across frames; keyed by sprite name, so one
 /// cache serves one pack.
 #[derive(Debug, Default)]

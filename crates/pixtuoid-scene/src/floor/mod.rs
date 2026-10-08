@@ -564,11 +564,13 @@ impl PerOffice {
         }
     }
 
-    /// The office half of the dual eviction. `chitchat` is deliberately
-    /// untouched — conversations self-expire inside
-    /// `chitchat::update_and_collect`, so there is no per-agent entry to leak.
+    /// The office half of the dual eviction: the coffee, and the cutaway's
+    /// recoloured figures. `chitchat` is deliberately untouched —
+    /// conversations self-expire inside `chitchat::update_and_collect`, so
+    /// there is no per-agent entry to leak.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.coffee.evict_missing(scene);
+        self.raster.evict_missing(scene);
     }
 }
 

@@ -227,6 +227,32 @@ fn a_refused_classic_frame_names_no_one() {
     );
 }
 
+/// The cutaway's recoloured figures leave with their agents: a long run that
+/// sees sessions come and go holds none of the gone ones' art.
+#[test]
+fn the_cutaways_figures_leave_with_their_agents() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = office(t0);
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
+    let cutaway = Look::Cutaway {
+        scale: RenderScale::new(4).expect("nonzero"),
+    };
+    render(
+        &mut floor,
+        office.stores(),
+        cutaway,
+        inputs(&scene, &pack, t0),
+    )
+    .expect("lays out");
+    assert!(
+        office.raster.cutaway.figures_len() > 0,
+        "premise: the frame drew its agents"
+    );
+    office.evict_missing(&SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]));
+    assert_eq!(office.raster.cutaway.figures_len(), 0);
+}
+
 /// A classic frame hands its badges, its bubbles and its signs over apart,
 /// and a refused frame leaves them empty.
 #[test]
