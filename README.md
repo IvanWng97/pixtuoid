@@ -118,7 +118,7 @@ _\* experimental — limited testing, unsigned binaries._
 ## Configuration
 
 Everything lives in `~/.config/pixtuoid/config.toml` (created on first launch;
-every key optional) — theme, desk cap, custom pet names, and sprite packs. CLI
+every key optional) — theme, desk cap and custom pet names. CLI
 flags override the file (`pixtuoid run --theme dracula`).
 
 The setting you'll reach for most is the **theme** — press `t` in the TUI for a
@@ -129,8 +129,7 @@ live-preview picker across six built-in palettes; your pick persists across sess
 </p>
 
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
-(defaults, system-managed keys), the custom sprite-pack workflow, and **logging /
-troubleshooting** (diagnostics go to `~/.cache/pixtuoid/logs/`) — or browse it live
+(defaults, system-managed keys) and **logging / troubleshooting** (diagnostics go to `~/.cache/pixtuoid/logs/`) — or browse it live
 at **[/config](https://pixtuoid.dev/config)**.
 
 ## How It Works

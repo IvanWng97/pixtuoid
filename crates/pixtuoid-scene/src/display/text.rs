@@ -13,17 +13,17 @@ use crate::display::pen::ArtPx;
 use crate::layout::Point;
 use crate::theme::Theme;
 
-/// A hand-drawn glyph's width in art pixels.
+/// A glyph's width in art pixels, its cell less the gap.
 pub(crate) const GLYPH_W: u16 = 3;
 /// A cell's width in art pixels: one glyph and its gap.
 pub(crate) const ADVANCE: u16 = GLYPH_W + 1;
 /// The rows above the capitals, which only accents and CJK ink.
 pub(crate) const ACCENT_ROWS: u16 = 2;
-/// A capital's height in art pixels.
+/// A hand-drawn symbol's capital height in art pixels, on Fusion Pixel's
+/// baseline.
 pub(crate) const CAP_H: u16 = 5;
 /// A line's height in art pixels: the accent rows, the capitals, and a row for
-/// descenders, Fusion Pixel 8px's own box. Pinned to the fallback font's
-/// header.
+/// descenders, Fusion Pixel 8px's own box. Pinned to `world.bin`'s header.
 pub(crate) const LINE_H: u16 = ACCENT_ROWS + CAP_H + 1;
 
 /// `text`'s width in art pixels, from its first ink column to its last: its

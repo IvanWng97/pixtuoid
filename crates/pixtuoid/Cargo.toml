@@ -4,7 +4,7 @@ description            = "Terminal pixel-art office for AI coding agents"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
-# Embeds Monaspace (fonts/) and links pixtuoid-scene's font.
+# Embeds Monaspace (fonts/) for the examples, and links pixtuoid-scene's font.
 license                = "MIT AND OFL-1.1"
 repository.workspace   = true
 authors.workspace      = true
@@ -22,7 +22,7 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.19.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.19.0" }
-# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces, split in
+# AA text rasterizer (Monaspace Neon) for the examples' cell text, split in
 # two on purpose — the WHY, and the rejected whole-stack alternatives, are on
 # `aa_text`'s module doc. Binary-only: the wasm-compiled engine never sees this,
 # and renders text as a DOM overlay instead.

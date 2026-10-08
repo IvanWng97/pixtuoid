@@ -18,7 +18,7 @@ Delete sections that don't apply. Keep it short — the diff speaks for itself.
 
 - [ ] Bug fix
 - [ ] New feature
-- [ ] New theme / sprite pack
+- [ ] New theme / sprite
 - [ ] New `Source` adapter (another agent CLI)
 - [ ] Docs only
 - [ ] Refactor / chore

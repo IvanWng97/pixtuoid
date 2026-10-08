@@ -192,26 +192,6 @@ impl Seat {
         }
     }
 
-    /// [`sprite_for`](Self::sprite_for) resolved against a PACK. Character
-    /// animations are never inherited from the bundled default (`merge_from` is
-    /// furniture-only), so a pre-`side_seated` custom pack degrades to the front
-    /// pose — a missing animation must never mean an invisible sitter. An
-    /// UPRIGHT kind goes through it too, so missing art degrades instead of
-    /// painting nothing; and a back-turned couch lacking `back_couch` falls to
-    /// `seated_back` when the pack HAS it, rather than to a face at the window.
-    pub(crate) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
-        let (anim, flip) = self.sprite_for(base);
-        if pack.animation(anim).is_some() {
-            return (anim, flip);
-        }
-        // A pose whose OWN back view the pack lacks still hides its face if the
-        // still one is there.
-        if self.view() == SeatView::Back && pack.animation(SEATED_BACK).is_some() {
-            return (SEATED_BACK, false);
-        }
-        (base, false)
-    }
-
     /// `(going_back, flip)` for the sit-down WALK glide that settles onto this
     /// seat — the SAME orientation as [`sprite_for`](Self::sprite_for),
     /// overriding the travel-direction rule for this terminal segment.
