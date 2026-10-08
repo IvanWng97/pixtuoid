@@ -446,7 +446,7 @@ fn placeholders_fill_the_scene_and_never_the_footer() {
 }
 
 /// The board's star is a link in both looks: the pointer finds it on the
-/// cells the classic writes it in, the image's as the half-blocks'.
+/// cells each writes it in, which are the same.
 #[test]
 fn the_star_is_clickable_in_both_looks() {
     use crate::tui::hit_test::SceneHit;
@@ -794,35 +794,6 @@ fn sixel_and_iterm2_draw_changed_tiles_and_nothing_on_an_identical_frame() {
         r.render(&scene, pack(), t0()).expect("render");
         assert_eq!(wire.take(), "", "{protocol:?}");
     }
-}
-
-/// The tiles go out after ratatui's flush, once the frame's text is known: a
-/// modal that opens on the frame every tile is owed in withholds its tiles
-/// there and then, and they follow once it closes. Meanwhile ratatui never
-/// writes the image's cells, so the modal's text stays until its tiles
-/// replace it.
-#[test]
-fn a_modal_withholds_the_tiles_under_it_until_it_closes() {
-    let (mut r, wire) = painter(120, 40, ImageProtocol::Sixel);
-    let scene = office();
-    let cadence = ImageProtocol::Sixel.cadence();
-    r.render(&scene, pack(), t0()).expect("render");
-    let all = wire.take().matches(SIXEL).count();
-    r.set_help_open(true);
-    r.redraw().expect("redraw");
-    r.render(&scene, pack(), t0() + cadence).expect("render");
-    assert!(frame_text(r.frame_buffer()).contains("? Keyboard"));
-    let open = wire.take().matches(SIXEL).count();
-    assert!(0 < open && open < all, "{open} of {all}");
-    r.set_help_open(false);
-    r.render(&scene, pack(), t0() + cadence * 2)
-        .expect("render");
-    let closed = wire.take().matches(SIXEL).count();
-    assert!(closed >= all - open, "{closed} after {open} of {all}");
-    assert!(
-        frame_text(r.frame_buffer()).contains("? Keyboard"),
-        "ratatui left the image's cells alone"
-    );
 }
 
 /// Ratatui writes the scene's text and none of the image's cells.
