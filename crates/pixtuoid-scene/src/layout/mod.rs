@@ -388,7 +388,7 @@ pub(crate) const DESK_FOOT_H: u16 = 2;
 /// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
 /// Default character sprite height (px) — [`CHARACTER_SPRITE_W`]'s twin: the
-/// fallback where a custom pack's real frame isn't threaded. The pose offsets
+/// fallback where the pack's real frame isn't threaded. The pose offsets
 /// are a SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H: u16 = 12;
 /// Elevator-door sprite width in buffer px, read by the layout, the wall's

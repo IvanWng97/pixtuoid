@@ -38,7 +38,6 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
         socket,
         projects_root,
         codex_sessions_root,
-        pack,
         theme,
         pets,
         connected,
@@ -49,8 +48,8 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
-    let pack = pixtuoid_scene::pack::load_sprite_pack(pack)
-        .context("loading the sprite pack for the floating window")?;
+    let pack = pixtuoid_scene::pack::load_bundled_pack()
+        .context("loading the bundled sprite pack for the floating window")?;
     let min = offscreen::min_window(pack.max_density_variant());
     let floating_cfg = config::resolve_floating(&app_config).at_least(min.width, min.height);
 

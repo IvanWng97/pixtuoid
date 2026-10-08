@@ -874,7 +874,7 @@ pub(crate) fn resolve_characters(
             let facing = layout.desk_facing(agent.desk_index.single_floor_local());
             let seat = Seat::at_desk(desk, facing);
             let top_left = seat.render_top_left(char_w);
-            let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
+            let (anim_name, flip_x) = seat.sprite_for(base);
             let placement = CharacterPlacement {
                 agent_idx,
                 // Breath-independent sort row: the breath's 1 px rise must not flip
@@ -936,7 +936,7 @@ pub(crate) fn resolve_characters(
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let upright_top_left = seat.render_top_left(char_w);
-                    let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);
+                    let (anim_name, flip_x) = seat.sprite_for("seated");
                     let top_left = Point {
                         x: upright_top_left.x.saturating_add_signed(dx),
                         y: upright_top_left.y,

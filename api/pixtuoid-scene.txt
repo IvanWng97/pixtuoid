@@ -1215,27 +1215,7 @@ impl<'r> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Rende
 impl<'r> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Rendered<'r>
 pub fn pixtuoid_scene::look::render<'r>(&'r mut pixtuoid_scene::floor::PerFloor, pixtuoid_scene::floor::OfficeStores<'_>, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<pixtuoid_scene::look::Rendered<'r>>
 pub mod pixtuoid_scene::pack
-pub enum pixtuoid_scene::pack::PackSource
-pub pixtuoid_scene::pack::PackSource::Bundled
-pub pixtuoid_scene::pack::PackSource::Discovered(std::path::PathBuf)
-pub pixtuoid_scene::pack::PackSource::Explicit(std::path::PathBuf)
-impl core::clone::Clone for pixtuoid_scene::pack::PackSource
-pub fn pixtuoid_scene::pack::PackSource::clone(&self) -> pixtuoid_scene::pack::PackSource
-impl core::cmp::Eq for pixtuoid_scene::pack::PackSource
-impl core::cmp::PartialEq for pixtuoid_scene::pack::PackSource
-pub fn pixtuoid_scene::pack::PackSource::eq(&self, &pixtuoid_scene::pack::PackSource) -> bool
-impl core::fmt::Debug for pixtuoid_scene::pack::PackSource
-pub fn pixtuoid_scene::pack::PackSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pack::PackSource
-impl core::marker::Freeze for pixtuoid_scene::pack::PackSource
-impl core::marker::Send for pixtuoid_scene::pack::PackSource
-impl core::marker::Sync for pixtuoid_scene::pack::PackSource
-impl core::marker::Unpin for pixtuoid_scene::pack::PackSource
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pack::PackSource
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pack::PackSource
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::PackSource
-pub fn pixtuoid_scene::pack::load_bundled_pack() -> anyhow::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
-pub fn pixtuoid_scene::pack::load_sprite_pack(pixtuoid_scene::pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
+pub fn pixtuoid_scene::pack::load_bundled_pack() -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 pub fn pixtuoid_scene::pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::pathfind
 pub struct pixtuoid_scene::pathfind::AStarRouter
