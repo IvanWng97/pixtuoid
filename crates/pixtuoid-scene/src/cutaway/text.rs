@@ -252,9 +252,10 @@ const RULE_ROW: u16 = ACCENT_ROWS + CAP_H / 2;
 /// The art column a box-drawing line runs down: the glyph's middle.
 const RULE_COL: u16 = GLYPH_W / 2;
 
-/// `c`'s glyph when it is a box-drawing line or a block element, computed to
-/// fill the whole cell so neighbours join, as terminals draw them (WezTerm's
-/// `custom_block_glyphs`).
+/// `c`'s glyph when it is a box-drawing line or a block element: computed, not
+/// taken from a font, to fill the whole cell so neighbours join. The idea is
+/// WezTerm's for the same blocks (wezterm/wezterm `docs/config/lua/config/custom_block_glyphs.md`:
+/// "its own idea of what the glyphs … should be"); the geometry is ours.
 fn ruled(c: char) -> Option<Rows> {
     const FULL: std::ops::Range<u16> = 0..ADVANCE;
     const TALL: std::ops::Range<u16> = 0..LINE_H;
@@ -523,6 +524,23 @@ mod tests {
         assert!(
             !corner.contains(&(0, RULE_ROW)),
             "a └ reaches no further left"
+        );
+    }
+
+    /// No glyph inks past the width a run is measured by: a rule that joins
+    /// its neighbour reaches its cell's gap, and the width counts it.
+    #[test]
+    fn no_glyph_inks_past_its_width() {
+        let ruled_chars = ('\u{2500}'..='\u{259f}').filter(|&c| ruled(c).is_some());
+        for c in ruled_chars.chain(['I', '\u{25cf}']) {
+            let text = c.to_string();
+            let reach = ink(&text).iter().map(|&(x, _)| x + 1).max().unwrap_or(0);
+            assert!(reach <= width(&text).0, "{c:?} inks to {reach}");
+        }
+        assert_eq!(
+            width("\u{2500}\u{2500}"),
+            columns(2),
+            "a rule ends at its cell's edge"
         );
     }
 

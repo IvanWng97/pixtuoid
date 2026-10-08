@@ -53,12 +53,24 @@ impl Written {
     }
 }
 
+/// Whether an item compiles only under test: `#[test]`, or a `cfg` that holds
+/// only when `test` does (`test`, or `all(…)` naming it).
 fn is_test(attrs: &[syn::Attribute]) -> bool {
+    fn needs_test(meta: &syn::Meta) -> bool {
+        match meta {
+            syn::Meta::Path(p) => p.is_ident("test"),
+            syn::Meta::List(l) if l.path.is_ident("all") => l
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                )
+                .is_ok_and(|all| all.iter().any(needs_test)),
+            _ => false,
+        }
+    }
     attrs.iter().any(|a| {
         a.path().is_ident("test")
             || (a.path().is_ident("cfg")
-                && a.parse_args::<syn::Meta>()
-                    .is_ok_and(|m| m.path().is_ident("test")))
+                && a.parse_args::<syn::Meta>().is_ok_and(|m| needs_test(&m)))
     })
 }
 
@@ -95,8 +107,16 @@ impl<'ast> Visit<'ast> for Written {
         self.chars.push(c.value());
     }
 
+    /// A `matches!`'s pattern is no text: only its scrutinee counts.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        self.scan_tokens(mac.tokens.clone());
+        if mac.path.is_ident("matches") {
+            let scrutinee = mac.tokens.clone().into_iter().take_while(
+                |t| !matches!(t, proc_macro2::TokenTree::Punct(p) if p.as_char() == ','),
+            );
+            self.scan_tokens(scrutinee.collect());
+        } else {
+            self.scan_tokens(mac.tokens.clone());
+        }
     }
 }
 
