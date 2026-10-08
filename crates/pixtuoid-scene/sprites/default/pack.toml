@@ -692,22 +692,94 @@ frame_ms = 600
 # docs/CONFIGURATION.md#custom-sprite-packs. The layers are scripts/gen-art.py's
 # HAIRSTYLES, registered here by hand (`every_bundled_sprite_is_a_frame_the_pack_loads`
 # fails on one left out).
-# The symbols the office's text shows as art, by the name `display::Icon::art`
-# gives: `world` is one cell of the office's own text.
-[icons.lamp]
-world = "icon_lamp.sprite"
+# The symbols text shows as art, by the name `display::Icon::art` gives:
+# `world` is one cell of the office's own text, `screen` of screen text, a
+# cell wide per cell its terminal glyph takes.
+[icons.alert]
+world  = "icon_lamp.sprite"
+screen = "icon_alert_screen.sprite"
+
+[icons.active]
+world  = "icon_lamp.sprite"
+screen = "icon_active_screen.sprite"
+
+[icons.idle]
+world  = "icon_lamp.sprite"
+screen = "icon_idle_screen.sprite"
 
 [icons.star]
-world = "icon_star.sprite"
+world  = "icon_star.sprite"
+screen = "icon_star_screen.sprite"
 
 [icons.gateway]
-world = "icon_gateway.sprite"
+world  = "icon_gateway.sprite"
+screen = "icon_gateway_screen.sprite"
 
 [icons.floor_up]
 world = "icon_floor_up.sprite"
 
 [icons.floor_down]
 world = "icon_floor_down.sprite"
+
+[icons.waiting]
+screen = "icon_waiting_screen.sprite"
+
+[icons.exiting]
+screen = "icon_exiting_screen.sprite"
+
+[icons.arrow_left]
+screen = "icon_arrow_left_screen.sprite"
+
+[icons.arrow_up]
+screen = "icon_arrow_up_screen.sprite"
+
+[icons.arrow_right]
+screen = "icon_arrow_right_screen.sprite"
+
+[icons.arrow_down]
+screen = "icon_arrow_down_screen.sprite"
+
+[icons.link]
+screen = "icon_link_screen.sprite"
+
+[icons.child]
+screen = "icon_child_screen.sprite"
+
+[icons.more]
+screen = "icon_more_screen.sprite"
+
+[icons.enter]
+screen = "icon_enter_screen.sprite"
+
+[icons.folder]
+screen = "icon_folder_screen.sprite"
+
+[icons.meter_on]
+screen = "icon_meter_on_screen.sprite"
+
+[icons.meter_off]
+screen = "icon_meter_off_screen.sprite"
+
+[icons.pointer]
+screen = "icon_pointer_screen.sprite"
+
+[icons.fold]
+screen = "icon_fold_screen.sprite"
+
+[icons.clock]
+screen = "icon_clock_screen.sprite"
+
+[icons.coffee]
+screen = "icon_coffee_screen.sprite"
+
+[icons.sound]
+screen = "icon_sound_screen.sprite"
+
+[icons.warning]
+screen = "icon_warning_screen.sprite"
+
+[icons.check]
+screen = "icon_check_screen.sprite"
 
 [characters]
 outline = "κ"

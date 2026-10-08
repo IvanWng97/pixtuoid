@@ -10,13 +10,17 @@ pub const BADGE_MARKER: char = '\u{25cf}';
 /// A symbol in a line of text, named by what it means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
-    /// Agents waiting on you: the board's amber lamp.
-    Waiting,
-    /// Agents at work: the board's green lamp.
+    /// Agents waiting on you: the board's amber lamp, the footer's alarm.
+    Alert,
+    /// Agents at work.
     Active,
-    /// Agents idle: the board's grey lamp.
+    /// Agents idle.
     Idle,
-    /// The board's star, a link to the repo.
+    /// An agent waiting: the footer's and the dashboard's rung.
+    Waiting,
+    /// Agents leaving.
+    Exiting,
+    /// The board's star, a link to the repo; a model's name.
     Star,
     /// A gateway daemon.
     Gateway,
@@ -28,31 +32,105 @@ pub enum Icon {
     Down,
     /// Its arrow where no floor is below.
     NoDown,
+    /// A key hint's arrow keys.
+    ArrowLeft,
+    ArrowUp,
+    ArrowRight,
+    ArrowDown,
+    /// The enter key.
+    Enter,
+    /// A link out.
+    Link,
+    /// A subagent, under its parent.
+    Child,
+    /// More rows than a panel shows.
+    More,
+    /// A working directory.
+    Folder,
+    /// A meter's filled step.
+    MeterOn,
+    /// A meter's empty step.
+    MeterOff,
+    /// The selected row, or a group to open.
+    Pointer,
+    /// An open group.
+    Fold,
+    /// Time spent.
+    Clock,
+    /// Buying the author a coffee.
+    Coffee,
+    /// The office's sound.
+    Sound,
+    /// A warning.
+    Warning,
+    /// Done, or connected.
+    Check,
 }
 
 impl Icon {
-    pub const ALL: [Self; 9] = [
-        Self::Waiting,
+    pub const ALL: [Self; 29] = [
+        Self::Alert,
         Self::Active,
         Self::Idle,
+        Self::Waiting,
+        Self::Exiting,
         Self::Star,
         Self::Gateway,
         Self::Up,
         Self::NoUp,
         Self::Down,
         Self::NoDown,
+        Self::ArrowLeft,
+        Self::ArrowUp,
+        Self::ArrowRight,
+        Self::ArrowDown,
+        Self::Enter,
+        Self::Link,
+        Self::Child,
+        Self::More,
+        Self::Folder,
+        Self::MeterOn,
+        Self::MeterOff,
+        Self::Pointer,
+        Self::Fold,
+        Self::Clock,
+        Self::Coffee,
+        Self::Sound,
+        Self::Warning,
+        Self::Check,
     ];
 
-    /// Its `[icons]` name in the pack: the lamps are one lamp in their
-    /// tones' inks, and an arrow with no floor its way is the lit arrow in a
-    /// dim one.
+    /// Its `[icons]` name in the pack: an arrow with no floor its way is the
+    /// lit arrow in a dim ink.
     pub fn art(self) -> &'static str {
         match self {
-            Self::Waiting | Self::Active | Self::Idle => "lamp",
+            Self::Alert => "alert",
+            Self::Active => "active",
+            Self::Idle => "idle",
+            Self::Waiting => "waiting",
+            Self::Exiting => "exiting",
             Self::Star => "star",
             Self::Gateway => "gateway",
             Self::Up | Self::NoUp => "floor_up",
             Self::Down | Self::NoDown => "floor_down",
+            Self::ArrowLeft => "arrow_left",
+            Self::ArrowUp => "arrow_up",
+            Self::ArrowRight => "arrow_right",
+            Self::ArrowDown => "arrow_down",
+            Self::Enter => "enter",
+            Self::Link => "link",
+            Self::Child => "child",
+            Self::More => "more",
+            Self::Folder => "folder",
+            Self::MeterOn => "meter_on",
+            Self::MeterOff => "meter_off",
+            Self::Pointer => "pointer",
+            Self::Fold => "fold",
+            Self::Clock => "clock",
+            Self::Coffee => "coffee",
+            Self::Sound => "sound",
+            Self::Warning => "warning",
+            Self::Check => "check",
         }
     }
 
@@ -60,14 +138,34 @@ impl Icon {
     /// hollow.
     pub fn terminal(self) -> &'static str {
         match self {
-            Self::Waiting | Self::Up => "\u{25b2}",
+            Self::Alert | Self::Up => "\u{25b2}",
             Self::Active => "\u{25cf}",
             Self::Idle => "\u{25cb}",
+            Self::Waiting => "\u{25d0}",
+            Self::Exiting => "\u{25cc}",
             Self::Star => "\u{2605}",
             Self::Gateway => "\u{2b22}",
             Self::NoUp => "\u{25b3}",
             Self::Down => "\u{25bc}",
             Self::NoDown => "\u{25bd}",
+            Self::ArrowLeft => "\u{2190}",
+            Self::ArrowUp => "\u{2191}",
+            Self::ArrowRight => "\u{2192}",
+            Self::ArrowDown => "\u{2193}",
+            Self::Enter => "\u{23ce}",
+            Self::Link => "\u{2197}",
+            Self::Child => "\u{21b3}",
+            Self::More => "\u{22ee}",
+            Self::Folder => "\u{25a4}",
+            Self::MeterOn => "\u{25ae}",
+            Self::MeterOff => "\u{25af}",
+            Self::Pointer => "\u{25b8}",
+            Self::Fold => "\u{25be}",
+            Self::Clock => "\u{25f7}",
+            Self::Coffee => "\u{2615}",
+            Self::Sound => "\u{2669}",
+            Self::Warning => "\u{26a0}",
+            Self::Check => "\u{2713}",
         }
     }
 }
@@ -77,20 +175,29 @@ mod tests {
     use super::*;
     use crate::display::text::{LINE_H, cells, columns};
 
-    /// Every icon has world art in the bundled pack, one cell wide less the
-    /// gap per cell its terminal glyph takes, a line tall; and the pack draws
-    /// no icon nothing names.
+    /// Each icon's world art is one cell wide less the gap per cell its
+    /// terminal glyph takes, a line tall; every icon has art in some face,
+    /// and the pack draws no icon nothing names.
     #[test]
     fn every_icon_has_its_art_and_every_art_an_icon() {
         let pack = crate::pack::test_default_pack();
         for icon in Icon::ALL {
-            let art = pack
+            let Some(art) = pack
                 .icon(icon.art())
                 .and_then(|a| a.world())
                 .and_then(|s| s.frames().first())
-                .unwrap_or_else(|| panic!("{icon:?} has no world art"));
+            else {
+                continue;
+            };
             let w = columns(cells(icon.terminal())).0 - 1;
             assert_eq!((art.width(), art.height()), (w, LINE_H), "{icon:?}");
+        }
+        for icon in Icon::ALL {
+            let art = pack.icon(icon.art());
+            assert!(
+                art.is_some_and(|a| a.world().is_some() || a.screen().is_some()),
+                "{icon:?} has no art"
+            );
         }
         let named: std::collections::BTreeSet<&str> = Icon::ALL.iter().map(|i| i.art()).collect();
         let drawn: std::collections::BTreeSet<&str> = pack.icon_names().collect();
@@ -103,12 +210,15 @@ mod tests {
     fn every_icon_draws_in_its_texts_ink() {
         let pack = crate::pack::test_default_pack();
         for icon in Icon::ALL {
-            let inked = pack
-                .icon(icon.art())
-                .and_then(|a| a.world())
-                .and_then(|s| s.recolorable(0))
-                .is_some_and(|f| f.drawn_in(&[crate::pack::ICON_INK_KEY]).contains(&true));
-            assert!(inked, "{icon:?}");
+            let Some(art) = pack.icon(icon.art()) else {
+                continue;
+            };
+            for face in [art.world(), art.screen()].into_iter().flatten() {
+                let inked = face
+                    .recolorable(0)
+                    .is_some_and(|f| f.drawn_in(&[crate::pack::ICON_INK_KEY]).contains(&true));
+                assert!(inked, "{icon:?}");
+            }
         }
     }
 }

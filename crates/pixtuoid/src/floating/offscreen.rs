@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pixtuoid_core::sprite::format::Density;
+use pixtuoid_core::sprite::format::{Density, Pack};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
@@ -587,7 +587,7 @@ pub fn paint_tooltip_into_surface(
     sb: &mut XrgbSurface<'_>,
     tip: &pixtuoid_scene::tooltip::Tooltip,
     cursor: (f64, f64),
-    theme: &Theme,
+    (theme, pack): (&Theme, &Pack),
     cell: CellPx,
 ) {
     let card = tip.card(theme);
@@ -613,7 +613,7 @@ pub fn paint_tooltip_into_surface(
         halo: None,
         shadow: Some(CARD_SHADOW),
     };
-    paint_grid(sb, &card, at, cell, Face::Screen, ink);
+    paint_grid(sb, &card, (at, cell), (Face::Screen, pack), ink);
 }
 
 /// How many screen cells of `cell` fit across a `win_w`-pixel window
@@ -630,7 +630,7 @@ pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
 pub fn paint_footer_into_surface(
     sb: &mut XrgbSurface<'_>,
     model: &FooterModel,
-    theme: &Theme,
+    (theme, pack): (&Theme, &Pack),
     cell: CellPx,
 ) {
     let margin = i32::try_from(FOOTER_MARGIN_PX).unwrap_or(0);
@@ -640,7 +640,13 @@ pub fn paint_footer_into_surface(
         halo: Some(TEXT_SHADOW),
         shadow: None,
     };
-    paint_grid(sb, &model.line(theme), (margin, y), cell, Face::Screen, ink);
+    paint_grid(
+        sb,
+        &model.line(theme),
+        ((margin, y), cell),
+        (Face::Screen, pack),
+        ink,
+    );
 }
 
 #[cfg(test)]
@@ -1390,10 +1396,12 @@ mod tests {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let bg = pack_xrgb(theme.ui.tooltip_bg);
         let (w, h) = (320usize, 200usize);
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let painted = |tip: &pixtuoid_scene::tooltip::Tooltip, cursor: (f64, f64)| {
             let mut px = vec![0u32; w * h];
             let mut sb = XrgbSurface::new(&mut px, w, h).expect("sized");
-            paint_tooltip_into_surface(&mut sb, tip, cursor, theme, Face::Screen.cell(1));
+            let look = (theme, &pack);
+            paint_tooltip_into_surface(&mut sb, tip, cursor, look, Face::Screen.cell(1));
             let rows: Vec<usize> = (0..h)
                 .filter(|&y| px[y * w..(y + 1) * w].contains(&bg))
                 .collect();
@@ -1632,10 +1640,11 @@ mod tests {
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w, Face::Screen.cell(1)));
         let mut sb = vec![0u32; w * h];
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         paint_footer_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
             &model,
-            theme,
+            (theme, &pack),
             Face::Screen.cell(1),
         );
         let changed: Vec<usize> = sb
