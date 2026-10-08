@@ -131,6 +131,10 @@ mod tests {
         assert!(is_theme_cycle(&key("t"), false));
         assert!(!is_theme_cycle(&key("t"), true), "a held t must not spin");
         assert!(!is_theme_cycle(&key("T"), false));
+        // No other key's, so its place in the window's dispatch can't shadow one.
+        assert_eq!(audio_action(&key("t"), false), None);
+        assert!(!is_pause(&key("t"), false));
+        assert_eq!(floor_step(&key("t")), None);
         let mut seen = vec![ALL_THEMES[0].name];
         let mut theme = ALL_THEMES[0];
         for _ in 1..ALL_THEMES.len() {

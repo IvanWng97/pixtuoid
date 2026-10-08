@@ -204,7 +204,7 @@ fn reflect_onboarding_outcomes(
                 } else {
                     connection::FailedOp::Disconnect
                 };
-                tracing::warn!(source = %id, ?op, error = %e, "onboarding: hook change failed");
+                tracing::warn!(source = %id, ?op, error = ?e, "onboarding: hook change failed");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
                 // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
