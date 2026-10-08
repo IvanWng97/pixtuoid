@@ -2073,6 +2073,51 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
     );
 }
 
+/// A frame that drew no office keeps nothing of the last: a pointer hits
+/// nothing and the audio hears the floor as one never drawn.
+#[test]
+fn a_frame_without_the_office_forgets_the_last() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let scene = make_scene(3, 1);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let world = FloorInputs {
+        scene: &scene,
+        pack: &pack,
+        now: t0,
+        floor: FloorMeta::ground(),
+        pets: PetInputs::default(),
+    };
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    let drawn = office.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world,
+            theme,
+            size: Size { w: 160, h: 96 },
+            place: crate::look::Place::default(),
+            debug_walkable: false,
+        },
+        &[],
+        theme.surface.bg_fallback,
+    );
+    assert!(drawn.is_some(), "the office lays out");
+    office.drew_no_office();
+    let whole = crate::layout::Bounds {
+        x: 0,
+        y: 0,
+        width: 160,
+        height: 96,
+    };
+    assert!(office.hit_at(whole).is_none());
+    let mut never = OfficeSession::new(Arc::clone(&pack));
+    never.prepare(&scene, t0);
+    let heard = |o: &mut OfficeSession| {
+        format!("{:?}", o.audio_frame(&scene, FloorMeta::ground(), t0).stems)
+    };
+    assert_eq!(heard(&mut office), heard(&mut never));
+}
+
 /// An office whose upper floor empties shows one floor: the count, the
 /// breadcrumb and the way up all follow the live scene, not the views kept.
 #[test]

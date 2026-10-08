@@ -62,13 +62,18 @@ impl FloorView {
                 Some(frame.layout)
             }
             None => {
-                self.last_layout = None;
-                self.last_occupied.clear();
-                self.last_flash = crate::flash::FlashPhase::default();
-                self.last_dirty = crate::look::Dirty::All;
+                self.forget();
                 None
             }
         }
+    }
+
+    /// Keep nothing of the last frame: one that drew no office.
+    fn forget(&mut self) {
+        self.last_layout = None;
+        self.last_occupied.clear();
+        self.last_flash = crate::flash::FlashPhase::default();
+        self.last_dirty = crate::look::Dirty::All;
     }
 
     /// What the last frame shows a pointer over `area`, in layout units.
@@ -506,14 +511,13 @@ impl OfficeSession {
         }
     }
 
-    /// The layout the floor showing last drew; none in a slide.
-    pub fn layout(&self) -> Option<&Arc<crate::layout::SceneLayout>> {
-        self.slide
-            .is_none()
-            .then(|| self.views.get(self.nav.current()))
-            .flatten()?
-            .last_layout
-            .as_ref()
+    /// A frame drew no office (a painter's too-small screen): the floor
+    /// showing keeps nothing of its last, so its audio hears an empty floor
+    /// and a pointer hits nothing.
+    pub fn drew_no_office(&mut self) {
+        if let Some(view) = self.views.get_mut(self.nav.current()) {
+            view.forget();
+        }
     }
 
     /// What each of the last frame's two sides flashes: a slide's leaving and

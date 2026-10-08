@@ -730,6 +730,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &self.chrome.overlays(popup_scale),
             now,
         );
+        self.session.drew_no_office();
         self.record_drawn(
             scene,
             crate::tui::renderer::DrawOut::default(),
