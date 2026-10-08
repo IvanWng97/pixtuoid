@@ -288,6 +288,21 @@
     - .jobs["closed-pr"].permissions.contents = "write"
     - .jobs["closed-pr"].steps[0].uses = "actions/checkout@v7"
 
+- id: site-build-composites-leave-rust-cache-to-the-job
+  file:
+    - .github/actions/gen-demos/action.yml
+    - .github/actions/gen-wasm/action.yml
+  why: >-
+    The site jobs run both, and a second rust-cache in one job saves an empty
+    target: the first's cleanup removes cargo before the second's runs
+    `cargo metadata` (Swatinem/rust-cache README, "Known issues"). Every
+    cache miss then rebuilds release from scratch, and nothing goes red.
+  assert: |
+    all(.runs.steps[]; (.uses // "") | test("setup-cargo-just|rust-cache") | not)
+  break:
+    - '.runs.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
+    - '.runs.steps += [{"uses": "Swatinem/rust-cache@v2"}]'
+
 - id: media-regen-bounds-its-token
   file: .github/workflows/media-regen.yml
   why: >-

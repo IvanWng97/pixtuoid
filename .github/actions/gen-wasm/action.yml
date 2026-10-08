@@ -1,14 +1,9 @@
 name: 'Generate the site wasm'
-description: 'Installs the wasm toolchain and runs `just gen-wasm` into site/public/wasm/'
+description: 'Runs `just gen-wasm` into site/public/wasm/, on the Rust toolchain (with the wasm32 target) and cache its job set up'
 
 runs:
   using: 'composite'
   steps:
-    - uses: ./.github/actions/setup-cargo-just
-      with:
-        targets: wasm32-unknown-unknown
-        shared-key: gen-wasm
-
     # The CLI must match the crate's wasm-bindgen exactly; Cargo.lock is that authority.
     - id: bindgen
       shell: bash
