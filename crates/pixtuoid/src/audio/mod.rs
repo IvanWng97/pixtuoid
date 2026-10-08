@@ -790,7 +790,8 @@ pub fn yield_to_frames() {
 #[cfg(target_os = "linux")]
 const YIELD_NICE: libc::c_int = 2;
 
-#[cfg(test)]
+// The platforms whose class it reads back; elsewhere it yields nothing.
+#[cfg(all(test, any(target_os = "macos", target_os = "linux", windows)))]
 mod yield_tests {
     /// A thread that yields to the frames reads back below them on its own
     /// platform's scale, and the thread that spawned it doesn't.
