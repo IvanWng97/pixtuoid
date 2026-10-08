@@ -7,8 +7,14 @@ use std::path::{Path, PathBuf};
 
 use syn::visit::Visit;
 
-/// The source trees whose literals reach the screen.
-const RENDERERS: [&str; 3] = ["../pixtuoid-scene/src", "src/tui", "src/floating"];
+/// The source trees whose literals reach the screen, core's decoded labels
+/// and details among them.
+const RENDERERS: [&str; 4] = [
+    "../pixtuoid-core/src",
+    "../pixtuoid-scene/src",
+    "src/tui",
+    "src/floating",
+];
 
 /// The characters of a file's string and char literals outside tests,
 /// attributes and patterns, and the test modules it declares out of line.
@@ -105,10 +111,13 @@ fn module_dir(file: &Path) -> PathBuf {
     }
 }
 
-/// A private-use code point means nothing outside a private agreement
-/// (Unicode §23.5): here a painter's in-band marker, never text.
-fn is_private_use(c: char) -> bool {
-    matches!(c, '\u{e000}'..='\u{f8ff}' | '\u{f0000}'..='\u{10ffff}')
+/// Whether a written `c` reaches a glyph: one that takes no cell (a control,
+/// a bidi mark) draws nothing, and a private-use code point means nothing
+/// outside a private agreement (Unicode §23.5), here a painter's in-band
+/// marker.
+fn drawn(c: char) -> bool {
+    let private_use = matches!(c, '\u{e000}'..='\u{f8ff}' | '\u{f0000}'..='\u{10ffff}');
+    pixtuoid_scene::display::text::cells(c.encode_utf8(&mut [0; 4])) > 0 && !private_use
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -155,7 +164,7 @@ fn the_pixel_font_draws_every_character_the_office_writes() {
             continue;
         }
         for &c in &found.chars {
-            if !c.is_control() && !is_private_use(c) && !pixtuoid_scene::cutaway::draws(c) {
+            if drawn(c) && !pixtuoid_scene::cutaway::draws(c) {
                 let at = file
                     .strip_prefix(root)
                     .unwrap_or(file)
