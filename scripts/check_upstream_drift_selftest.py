@@ -111,8 +111,9 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CC_HOOKS_URL: "\n# Hooks reference\n",
     d.REASONIX_HOOK_URL: 'const (\n    SessionStart Event = "SessionStart"\n)\n',
     d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
+    d.CODEWHALE_SUBAGENT_URL: "fn parse_agent_tool_action(input: &Value) {\n}\n",
     d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
-    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "on_session_start",\n}\n',
+    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: set[str] = {\n    "on_session_start",\n}\n',
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
@@ -752,10 +753,10 @@ def test_the_hermes_blocking_watch_fires_on_an_appearance_not_a_vanish() -> None
 
         def plugins(unservable: list[str]) -> d.Report:
             body = (
-                "VALID_HOOKS: Set[str] = {\n"
+                "VALID_HOOKS: set[str] = {\n"
                 + "".join(f'    "{h}",\n' for h in registered)
                 + "}\n"
-                + "SHELL_UNSUPPORTED_HOOKS: Set[str] = {\n"
+                + "SHELL_UNSUPPORTED_HOOKS: set[str] = {\n"
                 + "".join(f'    "{h}",\n' for h in unservable)
                 + "}\n"
             )
@@ -849,16 +850,16 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
     third re-broke: a brace inside a comment moves the bounds. The dangerous
     outcome is not the empty parse (loud) but the TRUNCATED one — the size floor
     still passes and the tail of the set silently leaves the sweep."""
-    clean = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n    "b_two",\n}\n'
+    clean = 'VALID_HOOKS: set[str] = {\n    "a_one",\n    "b_two",\n}\n'
     want = {"a_one", "b_two"}
-    check(d.python_set_literal(clean, "VALID_HOOKS: Set[str] = {") == want, "clean baseline")
+    check(d.python_set_literal(clean, "VALID_HOOKS: set[str] = {") == want, "clean baseline")
     for label, comment in (
         ("unmatched open", '    # returns {"action": "continue"\n'),
         ("stray close", "    # anything else } lets the turn finish\n"),
         ("both", '    # {"a": 1} and a trailing }\n'),
     ):
-        poisoned = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
-        got = d.python_set_literal(poisoned, "VALID_HOOKS: Set[str] = {")
+        poisoned = 'VALID_HOOKS: set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
+        got = d.python_set_literal(poisoned, "VALID_HOOKS: set[str] = {")
         check(
             got == want,
             f"a comment with an {label} brace must not move the bounds: got {sorted(got)}",
@@ -1524,6 +1525,19 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "}\n"
             )
 
+        def codewhale_agent(tool: str, actions: list[str]) -> str:
+            """The `agent` tool's name and its action parser, with a non-delegating
+            arm a matcher must not take for Start/Wait."""
+            return (
+                "impl ToolSpec for AgentTool {\n"
+                f'    fn name(&self) -> &\'static str {{\n        "{tool}"\n    }}\n}}\n'
+                "fn parse_agent_tool_action(input: &Value) -> Result<AgentToolAction, ToolError> {\n"
+                "    match action {\n"
+                + "".join(f'        "{a}" => Ok(AgentToolAction::Start),\n' for a in actions)
+                + '        "status" | "list" => Ok(AgentToolAction::Status),\n'
+                "    }\n}\n"
+            )
+
         def omp_extension_docs(events: list[str], reads: list[str]) -> dict[str, str]:
             """The three extension-API docs, shaped like upstream: constant
             interface names (the anchors) whose `type:`/field lines exist only
@@ -1595,6 +1609,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"}),
             ("codewhale", pascal, lambda ns: {
                 d.CODEWHALE_HOOK_URL: bare_enum("HookEvent", ns)}),
+            ("codewhale_subagent_tool", str, lambda ns: {
+                d.CODEWHALE_SUBAGENT_URL: codewhale_agent(ns[0], full["codewhale_delegating_actions"])}),
+            ("codewhale_delegating_actions", str, lambda ns: {
+                d.CODEWHALE_SUBAGENT_URL: codewhale_agent(full["codewhale_subagent_tool"][0], ns)}),
             ("codex", str, lambda ns: {
                 d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)
                 + tagged_enum("EventMsg", full["codex_event_msg"])}),
@@ -1613,7 +1631,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.CODEX_ROLLOUT_ITEM_URL: tagged_enum("RolloutItem", ns)}),
             ("hermes", str, lambda ns: {
                 d.HERMES_PLUGINS_URL:
-                    "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
+                    "VALID_HOOKS: set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
             ("grok", str, lambda ns: {
                 d.GROK_HOOK_URL:
                     "macro_rules! hook_events {\n"

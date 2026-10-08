@@ -31,6 +31,13 @@ CODEWHALE_HOOK_URL = (
     "crates/tui/src/hooks/config.rs"
 )
 
+# The `agent` tool and the actions it resolves; a delegation the decoder
+# names wrong reads as an ordinary tool call, with no breadcrumb.
+CODEWHALE_SUBAGENT_URL = (
+    "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
+    "crates/tui/src/tools/subagent/mod.rs"
+)
+
 # The codex escalation pair is a BOOLEAN check with no breadcrumb possible: a
 # renamed field makes `is_escalated` silently false, and false is a legitimate
 # answer. The pair spans this file and models.rs, so the union is the document.
@@ -328,6 +335,9 @@ GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: the anchor IS the declaration the checked names live inside.
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
+    CODEWHALE_SUBAGENT_URL: Anchor(
+        r"fn parse_agent_tool_action\b", "`parse_agent_tool_action`"
+    ),
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
@@ -838,6 +848,8 @@ class OurNames:
     dispatch_names: set[str] | None = None
     codex: set[str] | None = None
     codewhale: set[str] | None = None
+    codewhale_subagent_tool: set[str] | None = None
+    codewhale_delegating_actions: set[str] | None = None
     hermes: set[str] | None = None
     grok: set[str] | None = None
     grok_xai_method: set[str] | None = None
@@ -909,6 +921,9 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("kimi", CORE_BIN_FRAGMENT, "registered", "kimi"),
     ("codex", CORE_BIN_FRAGMENT, "registered", "codex"),
     ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
+    ("codewhale_subagent_tool", CORE_LIB_FRAGMENT, "decoded", "codewhale.subagent_tool"),
+    ("codewhale_delegating_actions", CORE_LIB_FRAGMENT, "decoded",
+     "codewhale.delegating_actions"),
     ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
     ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
     ("grok_xai_method", CORE_LIB_FRAGMENT, "decoded", "grok.xai_method"),
@@ -1217,10 +1232,16 @@ def _enum_body(text: str, enum_name: str) -> str | None:
     variant truncates the enum into a phantom rename per variant, and `(.*?)\\n\\}`
     demands a column-0 brace, so an INDENTED enum runs on into the next `impl`.
     Comments go first; string literals stay, so callers still read `rename = "…"`."""
-    text = strip_rust_comments(text)
     # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
     # `HookEvent` must not bind to `enum HookEventName {`.
-    m = re.search(rf"enum\s+{enum_name}\s*\{{", text)
+    return _braced_body(text, rf"enum\s+{enum_name}\s*\{{")
+
+
+def _braced_body(text: str, opener: str) -> str | None:
+    """The brace-balanced body after `opener`, which ends at its `{`, with
+    comments stripped — `_enum_body`'s reasons hold for a fn too."""
+    text = strip_rust_comments(text)
+    m = re.search(opener, text)
     if not m:
         return None
     start = m.end() - 1
@@ -1300,6 +1321,26 @@ def upstream_codewhale_hooks(text: str) -> set[str] | None:
     return snake or None
 
 
+def upstream_codewhale_agent(text: str) -> tuple[set[str] | None, set[str] | None]:
+    """The `agent` tool's name, and the action aliases `parse_agent_tool_action`
+    resolves to `Start` or `Wait` — the ones that hand the turn to a child."""
+    m = sole_match(
+        r'impl\s+ToolSpec\s+for\s+AgentTool\s*\{\s*fn\s+name\(&self\)\s*->\s*'
+        r'&\'static\s+str\s*\{\s*"([^"]+)"',
+        strip_rust_comments(text),
+    )
+    tool = {m.group(1)} if m else None
+    body = _braced_body(text, r"fn\s+parse_agent_tool_action\b[^{]*\{")
+    if body is None:
+        return tool, None
+    arms = re.findall(
+        r'((?:"[^"]*"\s*\|\s*)*"[^"]*")\s*=>\s*Ok\(\s*AgentToolAction::(?:Start|Wait)\s*\)',
+        body,
+    )
+    actions = {a for arm in arms for a in re.findall(r'"([^"]*)"', arm) if a}
+    return tool, actions or None
+
+
 def upstream_codex_hooks(text: str) -> set[str] | None:
     body = _enum_body(text, "HookEventName")
     if body is None:
@@ -1323,7 +1364,7 @@ def sole_match(pattern: str, text: str) -> re.Match[str] | None:
 
 
 def python_set_literal(src: str, decl: str) -> set[str] | None:
-    """The string members of a `NAME: Set[str] = { … }` block.
+    """The string members of a `NAME: set[str] = { … }` block.
 
     Comments go BEFORE the brace scan: upstream interleaves prose here, and one
     comment quoting `{"action": "continue"}` truncated the set SILENTLY at the
@@ -1586,6 +1627,47 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"never fires, so the decoder is never reached (no sprite)."
                     )
 
+    if ours.codewhale_subagent_tool is not None or ours.codewhale_delegating_actions is not None:
+        text = fetch_anchored(CODEWHALE_SUBAGENT_URL, "CodeWhale agent tool source", report)
+        if text is not None:
+            tool, actions = upstream_codewhale_agent(text)
+            if ours.codewhale_subagent_tool is not None:
+                if tool is None:
+                    report.add_blind(
+                        "CodeWhale's `agent` tool name",
+                        CODEWHALE_SUBAGENT_URL,
+                        "No sole `impl ToolSpec for AgentTool` name was found, so the "
+                        "tool-name check was SKIPPED.",
+                    )
+                else:
+                    for name in sorted(ours.codewhale_subagent_tool - tool):
+                        report.add_breaking(
+                            f"CodeWhale's sub-agent tool `{name}` (SUBAGENT_TOOL in "
+                            f"source/codewhale.rs) is `{min(tool)}` upstream — no call "
+                            f"reads as a delegation."
+                        )
+            if ours.codewhale_delegating_actions is not None:
+                if actions is None:
+                    report.add_blind(
+                        "CodeWhale's delegating `agent` actions",
+                        CODEWHALE_SUBAGENT_URL,
+                        "`parse_agent_tool_action` yielded no Start/Wait arm, so the "
+                        "action check was SKIPPED.",
+                    )
+                else:
+                    for a in sorted(ours.codewhale_delegating_actions - actions):
+                        report.add_breaking(
+                            f"CodeWhale `agent` action `{a}` (DELEGATING_ACTIONS in "
+                            f"source/codewhale.rs) no longer starts or waits on a "
+                            f"sub-agent upstream — the parent reads Delegating wrongly."
+                        )
+                    for a in sorted(actions - ours.codewhale_delegating_actions):
+                        report.add_review(
+                            f"CodeWhale `agent` action `{a}` starts or waits on a "
+                            f"sub-agent upstream but is missing from DELEGATING_ACTIONS "
+                            f"in source/codewhale.rs."
+                        )
+
     if ours.codex is not None:
         text = fetch_anchored(CODEX_PROTOCOL_URL, "Codex protocol source", report)
         if text is not None:
@@ -1608,7 +1690,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     if ours.hermes is not None:
         text = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if text is not None:
-            valid = python_set_literal(text, "VALID_HOOKS: Set[str] = {")
+            valid = python_set_literal(text, "VALID_HOOKS: set[str] = {")
             if valid is None:
                 report.add_blind(
                     "the hermes hook names upstream declares",
@@ -1628,7 +1710,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if plugins is not None:
             unsupported = python_set_literal(
-                plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
+                plugins, "SHELL_UNSUPPORTED_HOOKS: set[str] = {"
             )
             if unsupported is None:
                 report.add_blind(

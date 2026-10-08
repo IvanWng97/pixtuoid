@@ -8,6 +8,18 @@
       "completed",
       "failed"
     ],
+    "codewhale.delegating_actions": [
+      "start",
+      "spawn",
+      "run",
+      "wait",
+      "join",
+      "await",
+      "block"
+    ],
+    "codewhale.subagent_tool": [
+      "agent"
+    ],
     "codex.escalation": [
       "require_escalated",
       "sandbox_permissions"

@@ -1,19 +1,17 @@
-//! Regression for the CodeWhale subagent hook lifecycle, driving a real
-//! spawn→complete flow through the reducer (the conformance harness's
-//! one-AgentId rule can't hold a two-sprite scenario). Payload shapes follow
-//! CodeWhale's documented observer-hook wire (Hmbown/CodeWhale
-//! `crates/tui/src/hooks/config.rs` `HookEvent` + `docs/CONFIGURATION.md`).
+//! Regression for the CodeWhale subagent hook lifecycle, driving a recorded
+//! start→status→wait run through the reducer (the conformance harness's
+//! one-AgentId rule can't hold a two-sprite scenario).
 
 use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::{AgentEvent, Transport};
+use pixtuoid_core::source::{AgentEvent, ToolDetail, Transport};
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::state::reducer::Reducer;
 
-const WORKSPACE: &str = "/Users/dev/cwproj";
-const CHILD: &str = "agent_12345678";
+const WORKSPACE: &str = "/private/tmp/pixtuoid-capture/proj";
+const CHILD: &str = "agent_95b721a7";
 
 fn hook_events() -> Vec<AgentEvent> {
     super::captures::fixture_lines(
@@ -39,28 +37,48 @@ fn codewhale_subagent_spawn_links_child_and_complete_ends_it() {
     let mut scene = SceneState::uniform(8);
     let mut r = Reducer::new();
     let now = SystemTime::now();
+    let mut completed = false;
     for ev in hook_events() {
+        let child_ends = matches!(ev, AgentEvent::SessionEnd { agent_id, .. } if agent_id == child);
         r.apply(&mut scene, ev, now, Transport::Hook);
+        if !child_ends {
+            continue;
+        }
+        completed = true;
+        let child_slot = scene
+            .agents
+            .get(&child)
+            .expect("subagent_spawn must create the child sprite");
+        assert_eq!(
+            child_slot.parent_id,
+            Some(parent),
+            "the child links to the workspace-keyed parent"
+        );
+        assert!(
+            child_slot.exiting_at.is_some(),
+            "subagent_complete must mark the child exiting"
+        );
+        let parent_slot = scene.agents.get(&parent).expect("parent still present");
+        assert!(
+            parent_slot.exiting_at.is_none(),
+            "the parent must keep running after the subagent completes"
+        );
     }
+    assert!(completed, "the recorded run must complete its subagent");
+}
 
-    let child_slot = scene
-        .agents
-        .get(&child)
-        .expect("subagent_spawn must create the child sprite");
-    assert_eq!(
-        child_slot.parent_id,
-        Some(parent),
-        "the child links to the workspace-keyed parent"
-    );
-    assert!(
-        child_slot.exiting_at.is_some(),
-        "subagent_complete must mark the child exiting"
-    );
-    let parent_slot = scene.agents.get(&parent).expect("parent still present");
-    assert!(
-        parent_slot.exiting_at.is_none(),
-        "the parent must keep running after the subagent completes"
-    );
+#[test]
+fn the_parent_delegates_on_start_and_wait_but_not_on_status() {
+    let delegating: Vec<bool> = hook_events()
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::ActivityStart { detail, .. } => {
+                Some(matches!(detail, Some(ToolDetail::Task)))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(delegating, [true, false, true]);
 }
 
 #[test]
