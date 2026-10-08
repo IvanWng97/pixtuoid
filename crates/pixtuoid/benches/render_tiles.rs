@@ -1,7 +1,8 @@
 //! A whole frame through the real TUI painter at the owner's 16x: the scene
-//! repainted and every tile cut, compressed and encoded. Local only (`just
-//! bench`): CodSpeed's simulation counts instructions on one thread, blind to
-//! the cross-core encode.
+//! repainted and every tile cut, compressed and encoded. CodSpeed's trend is
+//! its instructions on every thread, not the wall time the encode's split
+//! across cores saves: Valgrind runs one thread at a time and callgrind counts
+//! them all (CodSpeedHQ/runner `src/executor/valgrind/measure.rs`).
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
