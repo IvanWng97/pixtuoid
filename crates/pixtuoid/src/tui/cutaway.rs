@@ -98,10 +98,9 @@ pub(crate) struct TileCutaway {
     landing: Option<Landing>,
     /// What the last frame's transmits did, for its jank report.
     last: FrameSend,
-    /// The machine's cores.
+    /// The cores a frame's encode splits across: the platform's, or a test's
+    /// (`split_across`).
     cores: usize,
-    /// Whether an audio thread is up to synthesize tracks beside the encode.
-    audio: bool,
 }
 
 /// A staged write: the tiles it sends and the flashes they show, so only a
@@ -167,7 +166,6 @@ impl TileCutaway {
             landing: None,
             last: FrameSend::default(),
             cores: pixtuoid_scene::par::cores(),
-            audio: false,
         }
     }
 
@@ -423,14 +421,8 @@ impl TileCutaway {
             route: self.route,
             base: self.base,
             origin: self.origin,
-            threads: encode_cores(self.cores, self.audio),
+            threads: self.cores,
         }
-    }
-
-    /// Whether an audio thread is up: while one is, the encode leaves it a
-    /// core.
-    pub(crate) fn share_with_audio(&mut self, audio: bool) {
-        self.audio = audio;
     }
 
     /// A new frame, which has transmitted nothing until it paints.
@@ -452,14 +444,9 @@ impl TileCutaway {
     }
 
     /// Split a frame's encode across `cores` whatever the machine has.
+    #[cfg(test)]
     pub(crate) fn split_across(&mut self, cores: usize) {
         self.cores = cores;
-    }
-
-    /// The threads a frame's encode may take now.
-    #[cfg(test)]
-    pub(crate) fn encode_threads(&self) -> usize {
-        encode_cores(self.cores, self.audio)
     }
 
     /// The tile the grid sends in now, its image budget applied.
@@ -550,17 +537,6 @@ impl TileCutaway {
 /// ([`pixtuoid_scene::par`]).
 pub(crate) const TILES_PER_THREAD: usize = 2;
 
-/// The cores a frame's encode may take of `cores`: all but one while an
-/// `audio` thread is up, which synthesizes a track for seconds at its start
-/// and at a swap.
-pub(crate) fn encode_cores(cores: usize, audio: bool) -> usize {
-    if audio {
-        cores.saturating_sub(1).max(1)
-    } else {
-        cores
-    }
-}
-
 /// The threads a frame of `tiles` splits across on `cores`: one a
 /// [`TILES_PER_THREAD`] share, never more than the cores.
 fn threads_for(tiles: usize, cores: usize) -> usize {
@@ -626,17 +602,7 @@ fn image_cell(buf: &mut Buffer, scene: Rect, col: u16, row: u16) -> Option<&mut 
 
 #[cfg(test)]
 mod tests {
-    use super::{TILES_PER_THREAD, encode_cores, threads_for};
-
-    /// The encode leaves a core only to a live audio thread: a muted user,
-    /// who has none, keeps every core, two of them on a 2-core host.
-    #[test]
-    fn the_encode_leaves_a_core_only_to_live_audio() {
-        assert_eq!(encode_cores(2, false), 2);
-        assert_eq!(encode_cores(2, true), 1);
-        assert_eq!(encode_cores(10, true), 9);
-        assert_eq!(encode_cores(1, true), 1);
-    }
+    use super::{TILES_PER_THREAD, threads_for};
 
     /// A frame of two shares splits across two cores, one share short of
     /// that stays on one thread, and one core never splits: a serial
