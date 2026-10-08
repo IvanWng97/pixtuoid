@@ -1,17 +1,14 @@
-//! Shared anti-aliased text rasterizer (Monaspace Neon) for the binary's pixel
-//! surfaces — the floating window's footer and tooltips, and the examples'
-//! cell text and `--proof` panel. The cutaway paints its own pixel font
-//! (`pixtuoid_scene`'s `cutaway::text`).
+//! Anti-aliased text rasterizer (Monaspace Neon) for the examples' cell text
+//! and `--proof` panel. The office's painters draw text in the scene's pixel
+//! faces (`pixtuoid_scene::cutaway::Face`) or the terminal's.
 //!
 //! Kept BINARY-side on purpose: `pixtuoid-scene` also compiles to wasm for the
 //! web hero, so it stays font-dep-free — no font parser, no embedded font, no
 //! wasm bundle bloat.
 //!
-//! ONE face by DESIGN. Monaspace Neon natively covers the office's FULL symbol
-//! vocabulary (`★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤`), which JetBrains Mono does not — not even the
-//! Nerd Font patch, whose glyphs live entirely in the Private Use Area. A new
-//! render glyph MUST be Monaspace-covered, never a second face; the gate is
-//! `office_symbol_vocabulary_is_fully_covered`.
+//! Monaspace Neon covers the symbols the examples draw (`★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤`),
+//! which JetBrains Mono does not, Nerd Font patch included (its glyphs live in
+//! the Private Use Area); `office_symbol_vocabulary_is_fully_covered` pins it.
 //!
 //! The committed stills are pinned to [`ab_glyph_rasterizer`]'s AA curve, so
 //! only the PARSER moved to [`skrifa`] (`ab_glyph`'s pulled the unmaintained
