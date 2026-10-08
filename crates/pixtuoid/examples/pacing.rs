@@ -706,7 +706,7 @@ fn hitch(path: &Path) -> Result<()> {
                     BUILD_SEED, TrackId, bank::TrackBeds, dsp::NoiseStream,
                 };
                 // As the audio thread does.
-                pixtuoid::dev::yield_to_frames();
+                pixtuoid::dev::demote_to_utility();
                 let mut rng = NoiseStream::new(BUILD_SEED);
                 let mut builds = Vec::new();
                 let mut n = 0u64;

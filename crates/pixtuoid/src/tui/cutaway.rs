@@ -98,7 +98,8 @@ pub(crate) struct TileCutaway {
     landing: Option<Landing>,
     /// What the last frame's transmits did, for its jank report.
     last: FrameSend,
-    /// The cores a frame's encode splits across.
+    /// The cores a frame's encode splits across: the platform's, or a test's
+    /// (`split_across`).
     cores: usize,
 }
 
