@@ -5,8 +5,8 @@
 use std::fs;
 use std::path::Path;
 
-use pixtuoid::init_pack::init_pack;
-use pixtuoid::validate::validate_pack;
+use pixtuoid::dev::init_pack;
+use pixtuoid::dev::validate_pack;
 use tempfile::TempDir;
 
 #[test]

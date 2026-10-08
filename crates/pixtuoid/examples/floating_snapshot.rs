@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{OfficeRenderer, WindowFrame, XrgbSurface, window_geometry};
+use pixtuoid::dev::{OfficeRenderer, WindowFrame, XrgbSurface, window_geometry};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
@@ -106,8 +106,8 @@ fn main() -> Result<()> {
 
     const RETINA_SCALE_FACTOR: u32 = 2;
     let mut size = (
-        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_W * RETINA_SCALE_FACTOR)?,
-        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_H * RETINA_SCALE_FACTOR)?,
+        u16::try_from(pixtuoid::dev::FLOATING_DEFAULT_W * RETINA_SCALE_FACTOR)?,
+        u16::try_from(pixtuoid::dev::FLOATING_DEFAULT_H * RETINA_SCALE_FACTOR)?,
     );
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
@@ -236,7 +236,7 @@ fn main() -> Result<()> {
             from,
             window,
             at,
-            pixtuoid::floating::offscreen::Pressing {
+            pixtuoid::dev::Pressing {
                 scale_factor: 1.0,
                 petting: None,
                 now,
@@ -267,9 +267,9 @@ fn main() -> Result<()> {
     surf.fill_upscaled(buf, usize::from(at.upscale));
     let (bw, bh) = (buf.width(), buf.height());
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
-    let budget = pixtuoid::floating::offscreen::footer_budget(ww);
+    let budget = pixtuoid::dev::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None, None);
-    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut surf, &footer, theme);
+    pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, theme);
     if let Some(cursor) = hover {
         let world = FloorInputs {
             scene: &scene,
@@ -282,9 +282,7 @@ fn main() -> Result<()> {
             .hit_at(cursor, at)
             .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
         {
-            pixtuoid::floating::offscreen::paint_tooltip_into_surface(
-                &mut surf, &tip, cursor, theme,
-            );
+            pixtuoid::dev::paint_tooltip_into_surface(&mut surf, &tip, cursor, theme);
         }
     }
 

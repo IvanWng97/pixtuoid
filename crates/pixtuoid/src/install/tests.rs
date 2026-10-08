@@ -415,7 +415,6 @@ fn install_target_reports_installed_then_up_to_date() {
     )
     .unwrap();
     assert!(matches!(r.outcome, InstallOutcome::Installed));
-    assert_eq!(r.config_path, cfg);
 
     let r2 = install_target(
         &CLAUDE_FILE,

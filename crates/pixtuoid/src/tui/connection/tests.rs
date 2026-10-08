@@ -1,4 +1,5 @@
 use super::*;
+use crate::sources::{RowFacts, RowInput, build_rows_from};
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -329,7 +330,6 @@ fn format_connect_result_renders_connected_plus_path_note() {
     use crate::install::{InstallOutcome, InstallReport};
     let base = |outcome, path_warning| InstallReport {
         outcome,
-        config_path: PathBuf::from("/c"),
         path_warning,
         post_install_hint: None,
     };
@@ -347,7 +347,6 @@ fn format_connect_result_renders_connected_plus_path_note() {
     let hinted = format_connect_result(
         &InstallReport {
             outcome: InstallOutcome::Installed,
-            config_path: PathBuf::from("/c"),
             path_warning: false,
             post_install_hint: Some("restart the gateway to load it"),
         },
@@ -393,7 +392,6 @@ fn format_disconnect_result_renders_disconnected_plus_registration_note() {
     use crate::install::{UninstallOutcome, UninstallReport};
     let removed = UninstallReport {
         outcome: UninstallOutcome::Removed,
-        config_path: PathBuf::from("/c"),
         plugin_left_registered: false,
     };
     let s = format_disconnect_result(&removed, "Claude Code");
@@ -408,7 +406,6 @@ fn format_disconnect_result_renders_disconnected_plus_registration_note() {
 
     let nothing = UninstallReport {
         outcome: UninstallOutcome::NothingToRemove,
-        config_path: PathBuf::from("/c"),
         plugin_left_registered: false,
     };
     let s2 = format_disconnect_result(&nothing, "Codex");

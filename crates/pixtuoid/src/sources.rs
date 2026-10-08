@@ -446,13 +446,13 @@ pub struct ConnectionRow {
 /// Per-target filesystem facts, injected so `build_rows_from` is pure. `Some`
 /// exactly when the row has an install target.
 #[derive(Debug, Clone)]
-pub struct RowFacts {
+pub(crate) struct RowFacts {
     pub present: bool,
     pub config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RowInput {
+pub(crate) struct RowInput {
     pub source_id: &'static str,
     pub label_prefix: &'static str,
     pub target: Option<&'static Target>,
@@ -470,7 +470,7 @@ fn display_name_for(source_id: &'static str) -> &'static str {
     }
 }
 
-pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
+pub(crate) fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
     inputs
         .into_iter()
         .map(|input| {
@@ -504,7 +504,7 @@ pub fn build_rows_from(inputs: Vec<RowInput>) -> Vec<ConnectionRow> {
 
 /// Performs FS reads AND, for connected rows, the health rollup
 /// (`doctor::diagnose`). `log` is the warn-floor log text.
-pub fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> {
+pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<ConnectionRow> {
     let inputs = pixtuoid_core::source::registry::REGISTRY
         .iter()
         .map(|d| {

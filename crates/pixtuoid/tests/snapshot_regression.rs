@@ -9,7 +9,7 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use common::{fixture_scene, render_hash};
-use pixtuoid::tui::renderer::draw_scene;
+use pixtuoid::dev::draw_scene;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::pack::load_bundled_pack;

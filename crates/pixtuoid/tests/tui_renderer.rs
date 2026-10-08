@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use pixtuoid::tui::tui_renderer::TuiRenderer;
+use pixtuoid::dev::TuiRenderer;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
@@ -151,7 +151,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
     // Initial render so the renderer grows its per-floor state to nf=2.
     renderer.render(&scene, &pack, now).expect("initial render");
 
-    renderer.set_active_pet(Some(pixtuoid::tui::renderer::PetState {
+    renderer.set_active_pet(Some(pixtuoid::dev::PetState {
         petted_at: now,
         kind: pixtuoid_scene::pet::PetKind::Cat,
         floor_idx: 0,

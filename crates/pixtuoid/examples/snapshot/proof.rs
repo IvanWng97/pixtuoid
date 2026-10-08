@@ -6,7 +6,7 @@
 
 use anyhow::{Context as _, Result, anyhow};
 use image::{Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
+use pixtuoid::dev::{DrawCtx, draw_scene};
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::claude_code::{
     SOURCE_NAME, cc_derive_label, cc_id_from_path, decode_cc_line,
@@ -125,7 +125,7 @@ fn aa_draw_text_at(
     px: f32,
     color: Rgba<u8>,
 ) -> i32 {
-    pixtuoid::aa_text::draw_text_at(s, x, top_y, px, |gx, gy, coverage| {
+    pixtuoid::dev::draw_text_at(s, x, top_y, px, |gx, gy, coverage| {
         blend_px(img, gx, gy, color, coverage);
     })
 }
@@ -138,7 +138,7 @@ fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32)
         return;
     }
     let bg = *img.get_pixel(x as u32, y as u32);
-    let mix = |fg: u8, bg: u8| pixtuoid::aa_text::blend_channel(bg, fg, coverage);
+    let mix = |fg: u8, bg: u8| pixtuoid::dev::blend_channel(bg, fg, coverage);
     img.put_pixel(
         x as u32,
         y as u32,
@@ -152,10 +152,10 @@ fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32)
 }
 
 fn coda_lines(canvas_w: u32) -> Vec<String> {
-    let floor = pixtuoid::aa_text::text_width("M", CODA_FONT_PX);
+    let floor = pixtuoid::dev::text_width("M", CODA_FONT_PX);
     let max_w = (canvas_w as i32 - 2 * CODA_PAD as i32).max(floor);
     wrap_text(CODA_TEXT, max_w, |s| {
-        pixtuoid::aa_text::text_width(s, CODA_FONT_PX)
+        pixtuoid::dev::text_width(s, CODA_FONT_PX)
     })
 }
 
@@ -363,8 +363,8 @@ fn text(img: &mut RgbaImage, s: &str, x: i32, y: i32, c: Rgba<u8>) {
 /// A small filled disc, centered on `(cx, cy)` by its own metrics — reuses the AA
 /// face's `●` rather than a bespoke circle rasterizer.
 fn dot(img: &mut RgbaImage, cx: i32, cy: i32, px: f32, c: Rgba<u8>) {
-    let w = pixtuoid::aa_text::text_width("\u{25CF}", px);
-    let h = pixtuoid::aa_text::line_height(px);
+    let w = pixtuoid::dev::text_width("\u{25CF}", px);
+    let h = pixtuoid::dev::line_height(px);
     aa_draw_text_at(img, "\u{25CF}", cx - w / 2, cy - h / 2, px, c);
 }
 
@@ -414,7 +414,7 @@ fn panel_body(
     elapsed_ms: u64,
 ) {
     fill_rect(img, origin.0, origin.1, size.0, size.1, PANEL_BG);
-    let floor = pixtuoid::aa_text::text_width("M", PROOF_FONT_PX);
+    let floor = pixtuoid::dev::text_width("M", PROOF_FONT_PX);
     let max_w = (size.0 as i32 - 2 * PAD as i32).max(floor);
     let mut row = 0u32;
     for line in &script.lines {
@@ -427,7 +427,7 @@ fn panel_body(
         // string's character stream, so a long line pushes later lines down as
         // more of it becomes visible, like a real terminal.
         let wrapped = wrap_text(&line.text, max_w, |s| {
-            pixtuoid::aa_text::text_width(s, PROOF_FONT_PX)
+            pixtuoid::dev::text_width(s, PROOF_FONT_PX)
         });
         let color = if line.prompt { PROMPT } else { INK };
         let mut remaining = shown;
@@ -515,7 +515,7 @@ pub(crate) fn compose_frame(
         let anchor_y = desk.1 - GLOW_CLEARANCE;
         match layout {
             ProofLayout::Wide => {
-                let text_w = pixtuoid::aa_text::text_width(label, ANNOT_FONT_PX);
+                let text_w = pixtuoid::dev::text_width(label, ANNOT_FONT_PX);
                 let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
                 dashed_h(
                     &mut img,
@@ -537,7 +537,7 @@ pub(crate) fn compose_frame(
             ProofLayout::Tall => {
                 // No cross-panel connector line — the panel sits above, not
                 // beside.
-                let text_w = pixtuoid::aa_text::text_width(label, ANNOT_FONT_PX);
+                let text_w = pixtuoid::dev::text_width(label, ANNOT_FONT_PX);
                 let label_x = (desk.0 - text_w - 16).max(PAD as i32);
                 let label_y = anchor_y - 22;
                 text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
@@ -552,7 +552,7 @@ pub(crate) fn compose_frame(
     fill_rect(&mut img, 0, coda_y0, w, ch, CODA_BG);
     fill_rect(&mut img, 0, coda_y0, w, 1, EDGE);
     for (i, cline) in coda_lines(w).iter().enumerate() {
-        let lw = pixtuoid::aa_text::text_width(cline, CODA_FONT_PX);
+        let lw = pixtuoid::dev::text_width(cline, CODA_FONT_PX);
         let x = ((w as i32 - lw) / 2).max(0);
         let y = (coda_y0 + CODA_PAD) as i32 + i as i32 * CODA_LINE_H as i32;
         aa_draw_text_at(&mut img, cline, x, y, CODA_FONT_PX, CODA_INK);
@@ -578,7 +578,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
 
     // Anchor the burned callout to home_desks[0] in the SAME layout draw_scene
     // computes.
-    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(job.cols, job.rows);
+    let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(job.cols, job.rows);
     let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
         buf_w,
         buf_h,

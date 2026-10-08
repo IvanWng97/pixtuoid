@@ -20,7 +20,7 @@ pub struct WelcomeRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WelcomeUi {
+pub(crate) struct WelcomeUi {
     pub rows: Vec<WelcomeRow>,
     pub selected: usize,
 }
@@ -29,7 +29,7 @@ impl WelcomeUi {
     /// Build the roster from detected (present) CLI source ids, all PRE-CHECKED:
     /// the office is empty by definition on a first run, so "connect everything I
     /// have" is the friendly default and the user unchecks what they don't want.
-    pub fn from_detected(detected: &[&'static str]) -> Self {
+    pub(crate) fn from_detected(detected: &[&'static str]) -> Self {
         let rows = detected
             .iter()
             .map(|&sid| WelcomeRow {
@@ -42,21 +42,21 @@ impl WelcomeUi {
         Self { rows, selected: 0 }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
 
-    pub fn move_up(&mut self) {
+    pub(crate) fn move_up(&mut self) {
         self.selected = self.selected.saturating_sub(1);
     }
 
-    pub fn move_down(&mut self) {
+    pub(crate) fn move_down(&mut self) {
         if self.selected + 1 < self.rows.len() {
             self.selected += 1;
         }
     }
 
-    pub fn toggle_selected(&mut self) {
+    pub(crate) fn toggle_selected(&mut self) {
         if let Some(r) = self.rows.get_mut(self.selected) {
             r.checked = !r.checked;
         }
@@ -65,7 +65,7 @@ impl WelcomeUi {
     /// The CONFIRM decision list for `sources::apply_choices`. EVERY row is
     /// written, checked or not: that makes `[sources]` non-empty, so onboarding
     /// never re-triggers.
-    pub fn decisions(&self) -> Vec<(&'static str, bool)> {
+    pub(crate) fn decisions(&self) -> Vec<(&'static str, bool)> {
         self.rows.iter().map(|r| (r.source_id, r.checked)).collect()
     }
 }
@@ -98,9 +98,9 @@ impl Default for OnboardingFrame {
 
 /// Office brightness the backdrop dims to (0 = black, 1 = unchanged) and the ramp
 /// times — the shorter fade-out "lights up" a touch quicker than it went down.
-pub const DIM_FLOOR: f32 = 0.4;
-pub const DIM_RAMP_MS: u64 = 450;
-pub const DIM_FADE_OUT_MS: u64 = 300;
+pub(crate) const DIM_FLOOR: f32 = 0.4;
+pub(crate) const DIM_RAMP_MS: u64 = 450;
+pub(crate) const DIM_FADE_OUT_MS: u64 = 300;
 
 /// Dim factor `elapsed_ms` after the overlay OPENED — ramps `1.0 → DIM_FLOOR`.
 pub fn dim_opening(elapsed_ms: u64) -> f32 {
@@ -112,7 +112,7 @@ pub fn dim_opening(elapsed_ms: u64) -> f32 {
 /// once fully restored. `from` is the dim the OPEN ramp was INTERRUPTED at, not
 /// `DIM_FLOOR`: an overlay skipped mid-ramp would otherwise snap the whole office
 /// darker for a frame before climbing back.
-pub fn dim_closing(from: f32, elapsed_ms: u64) -> Option<f32> {
+pub(crate) fn dim_closing(from: f32, elapsed_ms: u64) -> Option<f32> {
     if elapsed_ms >= DIM_FADE_OUT_MS {
         return None;
     }

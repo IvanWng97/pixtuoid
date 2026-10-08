@@ -1,14 +1,14 @@
-pub mod connection;
+pub(crate) mod connection;
 #[cfg(feature = "graphics")]
 pub(crate) mod cutaway;
-pub mod dashboard;
+pub(crate) mod dashboard;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
-pub mod renderer;
-pub mod tui_renderer;
+pub(crate) mod renderer;
+pub(crate) mod tui_renderer;
 mod ui_state;
-pub mod welcome;
-pub mod widgets;
+pub(crate) mod welcome;
+pub(crate) mod widgets;
 
 use std::io::stdout;
 use std::sync::Arc;

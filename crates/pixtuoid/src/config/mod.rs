@@ -10,7 +10,7 @@ use pixtuoid_scene::pack::PackSource;
 /// `load`'s all-or-nothing malformed arm, which would silently revert EVERY user
 /// setting to defaults.
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PetEntry {
+pub(crate) struct PetEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,7 +18,7 @@ pub struct PetEntry {
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct AppConfig {
+pub(crate) struct AppConfig {
     pub theme: Option<String>,
     /// Per-floor desk cap; excess agents overflow to additional floors. Absent ⇒
     /// capacity is auto-computed from terminal size.
@@ -66,10 +66,10 @@ pub struct AppConfig {
 pub const FLOATING_DEFAULT_W: u32 = 480;
 pub const FLOATING_DEFAULT_H: u32 = 320;
 /// Below this the window is too transparent to read.
-pub const FLOATING_MIN_OPACITY: f32 = 0.2;
+pub(crate) const FLOATING_MIN_OPACITY: f32 = 0.2;
 
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct FloatingConfigRaw {
+pub(crate) struct FloatingConfigRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,7 +84,7 @@ pub struct FloatingConfigRaw {
 
 /// Position stays `Option` — `None` lets the OS place the window.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FloatingConfig {
+pub(crate) struct FloatingConfig {
     pub width: u32,
     pub height: u32,
     pub x: Option<i32>,
@@ -96,7 +96,7 @@ impl FloatingConfig {
     /// This geometry with its size raised to at least `min_w`×`min_h`, the
     /// one size the window opens at and is placed by.
     #[must_use]
-    pub fn at_least(self, min_w: u32, min_h: u32) -> Self {
+    pub(crate) fn at_least(self, min_w: u32, min_h: u32) -> Self {
         Self {
             width: self.width.max(min_w),
             height: self.height.max(min_h),
@@ -117,7 +117,7 @@ pub(crate) fn resolve_floating(config: &AppConfig) -> FloatingConfig {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct AudioConfigRaw {
+pub(crate) struct AudioConfigRaw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub muted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,7 +126,7 @@ pub struct AudioConfigRaw {
 
 /// `muted` is the ONE sound switch — there is deliberately no second `enabled`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AudioConfig {
+pub(crate) struct AudioConfig {
     pub muted: bool,
     pub volume: f32,
 }
@@ -489,7 +489,7 @@ pub(crate) fn resolve_graphics(
 
 /// How much of the office's ambient life moves: the `motion` config key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
-pub enum MotionMode {
+pub(crate) enum MotionMode {
     /// What the display affords: calmer where a repaint is dear.
     #[default]
     Auto,
@@ -503,7 +503,7 @@ pub enum MotionMode {
 
 impl MotionMode {
     /// The tier this mode names, `auto` being `afforded`.
-    pub fn or(self, afforded: pixtuoid_scene::anim::Motion) -> pixtuoid_scene::anim::Motion {
+    pub(crate) fn or(self, afforded: pixtuoid_scene::anim::Motion) -> pixtuoid_scene::anim::Motion {
         use pixtuoid_scene::anim::Motion;
         match self {
             Self::Auto => afforded,

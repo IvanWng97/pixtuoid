@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
+use pixtuoid::dev::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_scene::floor::{FloorMeta, PerFloor};
@@ -30,7 +30,7 @@ pub(crate) fn print_walkability_report(
     use pixtuoid_scene::layout::SceneLayout;
 
     let size = term.size()?;
-    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(size.width, size.height);
+    let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(size.width, size.height);
     // `None` = the SAME fill the renderer's draw_scene passes — the overlay
     // must mirror the real layout exactly (desks stamp the walkable mask).
     let Some(layout) = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed) else {
@@ -145,7 +145,7 @@ pub(crate) fn compute_crop_rect(
         match history.recent(slot.agent_id, u64::MAX, now) {
             Some(p) => p,
             None => {
-                let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+                let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(cols, rows);
                 // The agent's OWN floor: `desk_index` is global, and a scene with
                 // more agents than `--max-desks` puts them on floor 1+, whose
                 // geometry and seed both differ from floor 0's.
@@ -171,7 +171,7 @@ pub(crate) fn compute_crop_rect(
             }
         }
     } else if let Some(ref furniture_str) = args.crop_furniture {
-        let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+        let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(cols, rows);
         let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
             buf_w,
             buf_h,
@@ -284,7 +284,7 @@ fn rasterize_cells<I: image::GenericImage>(
                 fill_rect(img, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, px(bg));
             } else if symbol.trim().is_empty() {
                 fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
-            } else if pixtuoid::aa_text::has_glyph(ch) {
+            } else if pixtuoid::dev::has_glyph(ch) {
                 fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
                 draw_cell_text(ch, x0, y0, |tx, ty, cov| {
                     if tx < img_w && ty < img_h {
@@ -443,12 +443,8 @@ pub(crate) fn save_renderer_animation(
     navigations: &[(u64, usize)],
     pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
-    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(
-        term,
-        job.theme,
-        pets,
-        std::sync::Arc::clone(job.pack),
-    );
+    let mut r =
+        pixtuoid::dev::TuiRenderer::new(term, job.theme, pets, std::sync::Arc::clone(job.pack));
     r.set_weather(job.weather);
     let mut fired = vec![false; navigations.len()];
     // 0, not the caller's skip_ms: clap keeps every pre-roll flag off this path
@@ -531,9 +527,9 @@ const CELL_FONT_PX: f32 = 14.7;
 /// keep the raster locked to the grid.
 fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
     let s = ch.to_string();
-    let adv = pixtuoid::aa_text::text_width(&s, CELL_FONT_PX);
+    let adv = pixtuoid::dev::text_width(&s, CELL_FONT_PX);
     let dx = ((CELL_W as i32 - adv) / 2).max(0);
-    pixtuoid::aa_text::draw_text_at(
+    pixtuoid::dev::draw_text_at(
         &s,
         x0 as i32 + dx,
         y0 as i32,
@@ -552,7 +548,7 @@ fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)
 
 /// Per-channel mix of `fg` over `bg` by AA coverage.
 fn mix_rgb(bg: ImgRgb<u8>, fg: ImgRgb<u8>, cov: f32) -> ImgRgb<u8> {
-    let mix = |b: u8, f: u8| pixtuoid::aa_text::blend_channel(b, f, cov);
+    let mix = |b: u8, f: u8| pixtuoid::dev::blend_channel(b, f, cov);
     ImgRgb([mix(bg[0], fg[0]), mix(bg[1], fg[1]), mix(bg[2], fg[2])])
 }
 
@@ -607,12 +603,12 @@ mod tests {
         // A face/metric drift would silently clip descenders — the cell clip masks it
         // visually, so pin both halves of the claim.
         assert_eq!(
-            pixtuoid::aa_text::line_height(CELL_FONT_PX),
+            pixtuoid::dev::line_height(CELL_FONT_PX),
             CELL_H as i32,
             "line height fills the cell"
         );
         assert!(
-            pixtuoid::aa_text::text_width("M", CELL_FONT_PX) <= CELL_W as i32,
+            pixtuoid::dev::text_width("M", CELL_FONT_PX) <= CELL_W as i32,
             "the primary face's advance fits the cell width"
         );
     }
