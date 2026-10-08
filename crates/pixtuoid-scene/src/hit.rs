@@ -11,7 +11,7 @@ use crate::display::{HoverTarget, Hovers, PetHover};
 use crate::layout::{Bounds, SceneLayout};
 use crate::pet::{PetKind, PetState};
 
-/// The repository the board's star links to.
+/// The project repository.
 pub const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
 
 /// Where the coffee machine links.

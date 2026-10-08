@@ -1,5 +1,5 @@
 name: 'Generate the site demos'
-description: 'Renders site/public/demos/ (clips, posters, stills) from this checkout via gen-media.py --only site'
+description: 'Renders site/public/demos/ (clips, posters, stills) from this checkout via gen-media.py --only site, on the Rust toolchain and cache its job set up'
 
 runs:
   using: 'composite'
@@ -15,10 +15,6 @@ runs:
 
     - if: steps.cache.outputs.cache-hit != 'true'
       uses: ./.github/actions/setup-alsa
-    - if: steps.cache.outputs.cache-hit != 'true'
-      uses: ./.github/actions/setup-cargo-just
-      with:
-        shared-key: gen-demos
     - name: Install ffmpeg and gifsicle
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash

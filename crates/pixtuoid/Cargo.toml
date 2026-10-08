@@ -162,6 +162,9 @@ windows-sys = { workspace = true, features = [
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
 tempfile = { workspace = true }
 temp-env = { workspace = true }
+# tests/text_coverage.rs parses the source of everything that renders text.
+syn         = { workspace = true }
+proc-macro2 = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { workspace = true, features = ["json"] }

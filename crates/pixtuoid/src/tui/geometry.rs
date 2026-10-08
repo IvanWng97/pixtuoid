@@ -70,7 +70,7 @@ pub(crate) struct CellArea {
 }
 
 impl CellArea {
-    /// Under the half-block flush (`renderer::flush_buffer_to_term_at_offset`)
+    /// Under the half-block flush (`renderer::flush_buffer_to_term`)
     /// a cell shows one pixel column and two rows, its upper and lower half.
     pub(crate) fn half_block(col: u16, row: u16) -> Self {
         let y0 = row.saturating_mul(2);

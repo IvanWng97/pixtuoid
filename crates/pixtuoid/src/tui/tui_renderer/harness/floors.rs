@@ -158,7 +158,7 @@ fn floor_buffers_grow_on_overflow() {
     let now = t0();
     let one = scene_with(vec![idle("/g/0.jsonl", 0, t0())], cap);
     r.render(&one, pack(), now).unwrap();
-    assert!(r.floors.get(1).is_none(), "only one floor allocated");
+    assert!(r.session.floor(1).is_none(), "only one floor allocated");
 
     let two = scene_with(
         vec![
@@ -169,7 +169,7 @@ fn floor_buffers_grow_on_overflow() {
     );
     r.render(&two, pack(), now).unwrap();
     assert!(
-        r.floors.get(1).is_some(),
+        r.session.floor(1).is_some(),
         "floor-1 state allocated after overflow"
     );
 }
@@ -211,23 +211,23 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     let mut now = t0();
     for _ in 0..120 {
         r.render(&scene, pack(), now).expect("render");
-        if !r.floors[0].ctx.router.is_empty() {
+        if !r.session.floor(0).expect("a floor").ctx.router.is_empty() {
             break;
         }
         now += Duration::from_millis(500);
     }
     assert!(
-        !r.floors[0].ctx.router.is_empty(),
+        !r.session.floor(0).expect("a floor").ctx.router.is_empty(),
         "a warmed-up wandering agent should have populated the A* path cache"
     );
 
     r.invalidate_routes();
     assert!(
-        r.floors[0].ctx.router.is_empty(),
+        r.session.floor(0).expect("a floor").ctx.router.is_empty(),
         "invalidate_routes must drop every floor's cached A* paths"
     );
     assert_eq!(
-        r.floors[0].ctx.router.len(),
+        r.session.floor(0).expect("a floor").ctx.router.len(),
         0,
         "cache is empty after invalidate"
     );
@@ -392,7 +392,7 @@ fn a_too_small_slide_footers_the_destination_floor() {
 
 #[test]
 fn transition_on_too_small_terminal_clears_state_and_lands() {
-    // Under the `MIN_SCENE_*` gate: render_transition's too-small bail.
+    // Under the `MIN_SCENE_*` gate: draw_too_small's bail.
     let scene = two_floor_scene();
     let mut r = build(18, 10, vec![PetKind::Cat]);
     let now = t0();
@@ -527,7 +527,7 @@ fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
 #[test]
 fn every_painter_shows_the_one_board_of_a_floor() {
     use pixtuoid_scene::anim::Motion;
-    use pixtuoid_scene::floor::{num_floors, project_floor_scene};
+    use pixtuoid_scene::floor::project_floor_scene;
     let now = t0() + Duration::from_secs(90);
     let with_gateway = |mut scene: SceneState| {
         scene.insert_daemon(
@@ -544,13 +544,13 @@ fn every_painter_shows_the_one_board_of_a_floor() {
         );
         scene
     };
-    let r = build(120, 40, vec![]);
-    let tui = |scene: &SceneState, floor: usize| {
+    let mut r = build(120, 40, vec![]);
+    let mut tui = |scene: &SceneState, floor: usize| {
+        r.session.prepare(scene, now);
+        r.session.navigate(floor, now);
+        r.session.cancel_slide();
         let drawn = project_floor_scene(scene, floor);
-        let ctx = r
-            .chrome
-            .frame(scene, &drawn, pack(), now, floor, num_floors(scene))
-            .footer;
+        let ctx = r.chrome.footer(&r.session, scene);
         pixtuoid_scene::neon_sign::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
     };
 

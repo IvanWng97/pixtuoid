@@ -26,9 +26,41 @@ pub(crate) const CAP_H: u16 = 5;
 /// header.
 pub(crate) const LINE_H: u16 = ACCENT_ROWS + CAP_H + 1;
 
-/// `text`'s width in art pixels, from its first ink column to its last.
+/// `text`'s width in art pixels, from its first ink column to its last: its
+/// last cell's gap column is ink only when [`fills_cell`].
 pub(crate) fn width(text: &str) -> ArtPx {
-    ArtPx(advance(text).0.saturating_sub(1))
+    let joins = clusters(text)
+        .last()
+        .is_some_and(|(cluster, _)| cluster.chars().all(fills_cell));
+    let advance = advance(text).0;
+    ArtPx(if joins {
+        advance
+    } else {
+        advance.saturating_sub(1)
+    })
+}
+
+/// Whether `c` is one of the light box-drawing lines or block elements the
+/// cutaway draws to its cell's edges so neighbours join; every other glyph
+/// leaves its cell's last column as the gap.
+pub(crate) fn fills_cell(c: char) -> bool {
+    matches!(
+        c,
+        '\u{2500}'
+            | '\u{2502}'
+            | '\u{250c}'
+            | '\u{2510}'
+            | '\u{2514}'
+            | '\u{2518}'
+            | '\u{251c}'
+            | '\u{2524}'
+            | '\u{252c}'
+            | '\u{2534}'
+            | '\u{253c}'
+            | '\u{256d}'..='\u{2570}'
+            | '\u{2574}'..='\u{2577}'
+            | '\u{2580}'..='\u{259f}'
+    )
 }
 
 /// Art pixels from a run's left edge to where a run `n` cells on starts.

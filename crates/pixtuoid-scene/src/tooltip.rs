@@ -48,7 +48,7 @@ impl TipTone {
             Self::Plain => return None,
             Self::Rung(kind) => FooterTone::Rung(kind).rgb(theme),
             Self::Tool(kind) => theme.tool_glow.for_kind(kind),
-            Self::Source(tag) => theme.source.by_prefix(tag).unwrap_or(theme.ui.label_idle),
+            Self::Source(tag) => theme.source_hue(tag),
         })
     }
 }
