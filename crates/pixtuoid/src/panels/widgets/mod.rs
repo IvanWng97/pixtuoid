@@ -10,16 +10,16 @@ mod tooltip;
 mod version_popup;
 mod welcome;
 
-pub(super) use connection::paint_connection_panel;
-pub(super) use dashboard::paint_dashboard;
+pub(crate) use connection::paint_connection_panel;
+pub(crate) use dashboard::paint_dashboard;
 pub use footer::footer_context;
-pub(super) use footer::paint_footer;
-pub(super) use help::paint_help_overlay;
+pub(crate) use footer::paint_footer;
+pub(crate) use help::paint_help_overlay;
 pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
-pub(super) use theme_picker::paint_theme_picker;
+pub(crate) use theme_picker::paint_theme_picker;
 pub(crate) use tooltip::{TooltipAt, paint_badges, paint_text_runs, paint_tooltip};
-pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
-pub(super) use welcome::paint_welcome;
+pub(crate) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
+pub(crate) use welcome::paint_welcome;
 
 use std::time::SystemTime;
 
@@ -187,7 +187,7 @@ fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_o
 /// (`panel::RESERVED_FOOTER_ROWS`) is only half the rule — the silhouette is offset a row
 /// further DOWN.
 fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
-    let bounds = crate::tui::renderer::scene_rect(f.area());
+    let bounds = crate::panels::scene_rect(f.area());
     let sx = area.x.saturating_add(SHADOW_OFFSET);
     let sy = area.y.saturating_add(SHADOW_OFFSET);
     let last_row = sy.saturating_add(area.height.saturating_sub(1));
