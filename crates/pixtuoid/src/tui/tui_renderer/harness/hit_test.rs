@@ -321,7 +321,7 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
     for (cols, rows) in [(80, 30), (120, 52), (157, 41)] {
         let mut term = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
         let mut floor = PerFloor::new(pack_arc());
-        let mut office = PerOffice::new();
+        let mut office = pixtuoid_scene::floor::PerOffice::new();
         let mut ctx = DrawCtx::offscreen(
             &mut floor,
             office.stores(),

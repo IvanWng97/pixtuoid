@@ -59,7 +59,10 @@ fn occupied_floor_stays_lit() {
     ] {
         r.render(&scene, pack(), now).unwrap();
     }
-    assert_eq!(r.floors[0].ctx.vacancy_dim.level(), 1.0);
+    assert_eq!(
+        r.session.floor(0).expect("a floor").ctx.vacancy_dim.level(),
+        1.0
+    );
 }
 
 /// Each phase of a strike stays on screen at least the photosensitive floor

@@ -1912,6 +1912,61 @@ fn floor_nav_slides_lands_and_clamps() {
     assert_eq!(nav.current(), 0, "the floor showing stays in the building");
 }
 
+/// A slide's footer speaks for its destination from the first frame, so its
+/// count matches the breadcrumb it names.
+#[test]
+fn a_slides_footer_speaks_for_its_destination() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let scene = make_scene(3, 2);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut office = OfficeSession::new(pack);
+    office.prepare(&scene, t0);
+    assert_eq!(office.footer_floor(&scene).map(|f| f.current), Some(1));
+    assert!(office.navigate(1, t0));
+    assert_eq!(office.footer_floor(&scene).map(|f| f.current), Some(2));
+    assert_eq!(
+        office.footer_scene(&scene).agents.len(),
+        project_floor_scene(&scene, 1).agents.len()
+    );
+}
+
+/// Every painter's floor reads the one rule for its pet: a petting plays on
+/// its own floor alone, and only while it lasts.
+#[test]
+fn a_petting_plays_only_on_its_own_floor() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let scene = make_scene(3, 2);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    office.prepare(&scene, t0);
+    let petting = crate::pet::PetState {
+        petted_at: t0,
+        kind: crate::pet::PetKind::Cat,
+        floor_idx: 0,
+    };
+    let pets = [crate::pet::Pet::defaulted(crate::pet::PetKind::Cat)];
+    let world = |now| FloorInputs {
+        scene: &scene,
+        pack: &pack,
+        now,
+        floor: FloorMeta::ground(),
+        pets: PetInputs {
+            pet: None,
+            petting: Some(&petting),
+        },
+    };
+    let petted = |floor, now| {
+        office
+            .floor_world(world(now), &scene, floor, &pets)
+            .pets
+            .petting
+            .is_some()
+    };
+    assert!(petted(0, t0), "the petted floor");
+    assert!(!petted(1, t0), "another floor");
+    assert!(!petted(0, t0 + Duration::from_secs(3600)), "a petting over");
+}
+
 /// A lift goes to the floor showing and nothing during a slide; its carry and
 /// drop go to the floor it lifted on, whatever shows since, and nothing after.
 #[test]

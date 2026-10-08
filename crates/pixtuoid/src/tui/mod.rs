@@ -1184,7 +1184,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 _ = frames.tick() => {
                     now = ui.now();
                     snapshot = scene_rx.borrow_and_update().clone();
-                    renderer.evict_missing(&snapshot);
                     let health = source_health.borrow_and_update().clone();
                     ui.build_frames(now, &snapshot, &health)
                         .apply_to(&mut renderer, now);
