@@ -2,10 +2,10 @@
 //! art pixel, never anti-aliased, in the cells [`display::text`](crate::display::text)
 //! lays it out by.
 //!
-//! Box-drawing lines and block elements are [`ruled`], every character Fusion
-//! Pixel 8px draws as a terminal's cells comes from it (`scripts/gen-fonts.py`),
-//! and the symbols it draws only full-width are [`HAND_DRAWN`] on its lines.
-//! It is [`grid`](super::grid)'s world face.
+//! Box-drawing lines and block elements are [`ruled`], and every character
+//! Fusion Pixel 8px draws as a terminal's cells comes from it
+//! (`scripts/gen-fonts.py`); a symbol is an icon, not a glyph
+//! ([`paint_icon`]). It is [`grid`](super::grid)'s world face.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
@@ -50,9 +50,7 @@ fn fusion(c: char) -> Option<Rows> {
 
 /// `c`'s glyph, `None` when the face lacks it.
 pub(crate) fn glyph(c: char) -> Option<Rows> {
-    ruled(c)
-        .or_else(|| fusion(c))
-        .or_else(|| hand_drawn(c).map(rows_of))
+    ruled(c).or_else(|| fusion(c))
 }
 
 /// What `cluster`'s `n` cells show, each glyph with the cells it takes. When
@@ -82,20 +80,6 @@ pub(crate) fn glyphs_by<'a, G: 'a>(
     each.chain((!fits).then(|| (tofu(n), n)))
 }
 
-/// A hand-drawn glyph's [`Rows`], under the accent rows.
-fn rows_of(drawing: &str) -> Rows {
-    let mut rows = Rows::default();
-    let under_accents = rows.iter_mut().skip(usize::from(ACCENT_ROWS));
-    for (row, cells) in under_accents.zip(drawing.split(' ')) {
-        for (dx, cell) in cells.bytes().enumerate() {
-            if cell == b'#' {
-                *row |= LEFTMOST_PIXEL >> dx;
-            }
-        }
-    }
-    rows
-}
-
 /// What a character neither font draws is: a solid box `n` cells wide and a
 /// capital high, so a run never collapses.
 fn tofu(n: u16) -> Rows {
@@ -108,30 +92,6 @@ fn tofu(n: u16) -> Rows {
         *row = ink;
     }
     rows
-}
-
-/// The symbols world text writes that Fusion Pixel draws only full-width, by
-/// code point: each row's from the capital line down, its cells' width less
-/// the gap of `#` (ink) or `.`, [`GLYPH_W`](crate::display::text::GLYPH_W)
-/// for one cell; rows are separated by spaces and those not given are blank.
-const HAND_DRAWN: &[(char, &str)] = &[
-    ('\u{2026}', "... ... ... ... #.#"),
-    ('\u{2191}', ".#. #.# .#. .#. .#."),
-    ('\u{25b2}', "... .#. ### ###"),
-    ('\u{25bc}', "... ### ### .#."),
-    ('\u{25cb}', "... ### #.# ###"),
-    ('\u{25cf}', "... ### ### ###"),
-    ('\u{2605}', ".#. ### .#. #.#"),
-    ('\u{2b22}', "... .#. ### ### .#."),
-];
-
-/// `c`'s [`HAND_DRAWN`] drawing.
-fn hand_drawn(c: char) -> Option<&'static str> {
-    HAND_DRAWN
-        .binary_search_by_key(&c, |&(k, _)| k)
-        .ok()
-        .and_then(|i| HAND_DRAWN.get(i))
-        .map(|&(_, drawing)| drawing)
 }
 
 /// The art row a box-drawing line runs along: the capitals' middle.
@@ -278,20 +238,61 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
     }
 }
 
+/// `icon`'s world art from `pack` in the cell whose top-left is `(x, y)`, its
+/// [`ICON_INK_KEY`](crate::pack::ICON_INK_KEY) pixels in `ink`; nothing where
+/// the pack draws it none.
+pub(crate) fn paint_icon(
+    pen: Pen,
+    buf: &mut RgbBuffer,
+    (x, y): (ArtPx, ArtPx),
+    (pack, icon): (&pixtuoid_core::sprite::format::Pack, crate::display::Icon),
+    ink: Rgb,
+) {
+    let Some(art) = pack
+        .icon(icon.art())
+        .and_then(|a| a.world())
+        .and_then(|s| s.recolorable(0))
+    else {
+        return;
+    };
+    let frame = art.recolored(&[(crate::pack::ICON_INK_KEY, Some(ink))]);
+    for dy in 0..frame.height() {
+        for dx in 0..frame.width() {
+            if let Some(&Some(rgb)) = frame.get(dx, dy) {
+                let at = ArtRect {
+                    x: ArtPx(x.0.saturating_add(dx)),
+                    y: ArtPx(y.0.saturating_add(dy)),
+                    w: ArtPx(1),
+                    h: ArtPx(1),
+                };
+                pen.fill(buf, at, rgb);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::display::text::{advance, width};
 
-    /// Every character the wall board and the floor indicator write: each
-    /// mood over two flap cycles, each gateway state, many floors.
+    /// Every character the wall board and the floor indicator write as text:
+    /// each mood over two flap cycles, each gateway state, many floors.
     #[cfg(feature = "cutaway-assets")]
     fn signs() -> std::collections::BTreeSet<char> {
         use crate::anim::Motion;
         use crate::neon_sign::build_board;
         use crate::tally::StateCounts;
         use pixtuoid_core::state::DaemonState;
-        let mut text = crate::layout::floor_indicator_text(12);
+        let written = |content: &crate::display::Content| match content {
+            crate::display::Content::Text(text) => text.clone(),
+            crate::display::Content::Icon(_) => String::new(),
+        };
+        let mut text: String =
+            crate::layout::floor_indicator(crate::floor::FloorMeta::for_floor(11, 12))
+                .iter()
+                .map(written)
+                .collect();
         let moods = [
             StateCounts::default(),
             StateCounts {
@@ -333,12 +334,12 @@ mod tests {
             for ms in (0..32_000).step_by(20) {
                 let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
                 let board = build_board(counts, 3_700, Some((2, 3)), gateway, Motion::Full, now);
-                for seg in [&board.brand, &board.star]
-                    .into_iter()
+                for seg in std::iter::once(&board.brand)
+                    .chain(&board.star)
                     .chain(&board.mood)
                     .chain(&board.context)
                 {
-                    text.push_str(&seg.text);
+                    text.push_str(&written(&seg.content));
                 }
             }
         }
@@ -354,62 +355,6 @@ mod tests {
             .filter(|&c| glyph(c).is_none())
             .collect();
         assert_eq!(missing, []);
-    }
-
-    /// The table is sorted by code point, one drawing each, as its binary
-    /// search needs.
-    #[test]
-    fn the_hand_drawn_table_ascends_by_code_point() {
-        for pair in HAND_DRAWN.windows(2) {
-            assert!(pair[0].0 < pair[1].0, "{pair:?}");
-        }
-    }
-
-    /// Every hand-drawn glyph fits its cells: each row as wide as its cells
-    /// less the gap, none below [`LINE_H`], and nothing but ink or blank.
-    #[test]
-    fn every_glyph_fits_its_cells() {
-        for &(c, drawing) in HAND_DRAWN {
-            let rows: Vec<&str> = drawing.split(' ').collect();
-            let width = columns(cells(c.encode_utf8(&mut [0; 4]))).0 - 1;
-            assert!(
-                rows.len() <= usize::from(LINE_H - ACCENT_ROWS),
-                "{c:?}: {rows:?}"
-            );
-            for row in rows {
-                assert!(
-                    row.is_empty() || row.len() == usize::from(width),
-                    "{c:?}: row {row:?}"
-                );
-                assert!(row.bytes().all(|b| b == b'#' || b == b'.'), "{c:?}");
-            }
-        }
-    }
-
-    /// Each hand-drawn symbol draws its own shape: a sign never reads as
-    /// another.
-    #[test]
-    fn no_two_symbols_share_a_glyph() {
-        let mut seen = std::collections::HashMap::new();
-        for &(c, drawing) in HAND_DRAWN {
-            let shape = drawing.trim_end_matches([' ', '.']);
-            if let Some(other) = seen.insert(shape, c) {
-                panic!("{c:?} draws as {other:?}");
-            }
-        }
-    }
-
-    /// A symbol is drawn by hand only where Fusion Pixel draws none in its
-    /// cells: one it does is a drawing nothing paints.
-    #[cfg(feature = "cutaway-assets")]
-    #[test]
-    fn a_symbol_is_drawn_by_hand_only_where_fusion_pixel_lacks_it() {
-        let shadowed: Vec<char> = HAND_DRAWN
-            .iter()
-            .map(|&(c, _)| c)
-            .filter(|&c| fusion(c).is_some() || ruled(c).is_some())
-            .collect();
-        assert_eq!(shadowed, []);
     }
 
     /// Lines join their neighbours: a rule runs through every column of its
@@ -482,15 +427,14 @@ mod tests {
     fn a_glyph_pixel_is_one_art_pixel() {
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let fg = Rgb { r: 9, g: 9, b: 9 };
-        let unit = ink(crate::badge::BADGE_MARKER.encode_utf8(&mut [0; 4]));
+        let unit = ink("H");
         for (s, d) in [(4u16, 4u16), (8, 4)] {
             let pen = Pen::new(crate::render_scale::RenderScale::new(s).expect("s"), d)
                 .expect("d divides s");
             let k = s / d;
             let side = 1 + LINE_H;
             let mut buf = RgbBuffer::filled(side * k, side * k, bg);
-            let marker = crate::badge::BADGE_MARKER.to_string();
-            paint(pen, &mut buf, (ArtPx(1), ArtPx(1)), &marker, fg);
+            paint(pen, &mut buf, (ArtPx(1), ArtPx(1)), "H", fg);
             for y in 0..side * k {
                 for x in 0..side * k {
                     let art = (x / k).checked_sub(1).zip((y / k).checked_sub(1));
@@ -503,13 +447,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    /// Every painter's badge marker has a glyph: changing it can't leave the
-    /// cutaway's badges leading with a tofu box.
-    #[test]
-    fn the_font_draws_the_badge_marker() {
-        assert!(hand_drawn(crate::badge::BADGE_MARKER).is_some());
     }
 
     /// Where `text` painted from the origin leaves ink, as `(x, y)` art pixels.
@@ -619,13 +556,11 @@ mod tests {
         assert_eq!(fusion('e').is_some(), cfg!(feature = "cutaway-assets"));
     }
 
-    /// A hand-drawn symbol stands on Fusion Pixel's baseline, so a sign
-    /// mixing them reads as one line.
+    /// Fusion Pixel's CJK reaches the descender row its Latin does.
     #[cfg(feature = "cutaway-assets")]
     #[test]
-    fn the_hand_drawn_symbols_stand_on_fusion_pixels_baseline() {
+    fn cjk_reaches_the_descender_row() {
         let bottom = |c| glyph(c).and_then(|g| g.iter().rposition(|&row| row != 0));
-        assert_eq!(bottom('\u{2191}'), bottom('H'));
         assert_eq!(
             bottom('\u{65e5}'),
             bottom('g'),

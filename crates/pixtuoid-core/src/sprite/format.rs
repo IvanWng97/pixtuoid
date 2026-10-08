@@ -712,6 +712,17 @@ struct PackToml {
     characters: Option<CharactersToml>,
     #[serde(default)]
     hairstyles: BTreeMap<String, HairstyleToml>,
+    #[serde(default)]
+    icons: BTreeMap<String, IconToml>,
+}
+
+/// One `[icons.<name>]` table: the one-frame art an icon is drawn as in the
+/// office's text (`world`) and on screen (`screen`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IconToml {
+    world: Option<String>,
+    screen: Option<String>,
 }
 
 /// One `[buildings.<name>]` table (the base art, with the planes the building
@@ -784,6 +795,7 @@ pub struct Pack {
     city_materials: Option<CityMaterials>,
     hairstyles: BTreeMap<String, Hairstyle>,
     character_outline: Option<Rgb>,
+    icons: BTreeMap<String, IconArt>,
     /// [`Pack::density_variants`], counted whenever `animations` changes: a
     /// painter asks for it every frame.
     densities: Vec<Density>,
@@ -1025,6 +1037,16 @@ impl Pack {
     /// density of 2 and up, dressed or bare, from `[characters]`.
     pub fn character_outline(&self) -> Option<Rgb> {
         self.character_outline
+    }
+
+    /// The icon `name`'s art, from `[icons]`.
+    pub fn icon(&self, name: &str) -> Option<&IconArt> {
+        self.icons.get(name)
+    }
+
+    /// The names of the pack's icons, in order.
+    pub fn icon_names(&self) -> impl Iterator<Item = &str> {
+        self.icons.keys().map(String::as_str)
     }
 
     /// The palette the pack's own frames were drawn with. An animation
@@ -1364,6 +1386,24 @@ fn build_pack(
         });
     }
 
+    let mut icons = BTreeMap::new();
+    for (name, icon) in parsed.icons {
+        let mut art = |fname: Option<String>| -> Result<Option<Sprite>> {
+            let Some(fname) = fname else { return Ok(None) };
+            let src = get_src(&fname)?;
+            let frames = decode(&fname, &src, &palette)?;
+            if frames.len() != 1 {
+                return Err(PackError::IconFrames { file: fname });
+            }
+            Ok(Some(Sprite::new(frames, Arc::clone(&palette), 0, None)))
+        };
+        let art = IconArt {
+            world: art(icon.world)?,
+            screen: art(icon.screen)?,
+        };
+        icons.insert(name, art);
+    }
+
     let mut pack = Pack {
         name: parsed.pack.name,
         version: parsed.pack.version,
@@ -1373,10 +1413,30 @@ fn build_pack(
         city_materials,
         hairstyles,
         character_outline,
+        icons,
         densities: Vec::new(),
     };
     pack.count_densities();
     Ok(pack)
+}
+
+/// An icon's art: the one frame it is drawn as in each place text is.
+#[derive(Debug, Clone)]
+pub struct IconArt {
+    world: Option<Sprite>,
+    screen: Option<Sprite>,
+}
+
+impl IconArt {
+    /// As the office's own text draws it, on the art grid.
+    pub fn world(&self) -> Option<&Sprite> {
+        self.world.as_ref()
+    }
+
+    /// As screen text draws it, in a screen cell.
+    pub fn screen(&self) -> Option<&Sprite> {
+        self.screen.as_ref()
+    }
 }
 
 /// A building's one-frame sprite `fname`, checked to draw only in the
@@ -2552,6 +2612,36 @@ mod validation_floor_tests {
 
     fn pack_with(animations: &str) -> Pack {
         pack_with_frames(animations, &[("f.sprite", "@frame 0\nA")])
+    }
+
+    /// Pins [`Pack::icon`]: each art an `[icons]` table names loads, at
+    /// whichever of the two places it names.
+    #[test]
+    fn an_icon_loads_the_art_it_names() {
+        let pack = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [icons.star]\nworld=\"f.sprite\"\n",
+        );
+        let star = pack.icon("star").expect("the star loads");
+        assert_eq!(star.world().map(|s| s.frames().len()), Some(1));
+        assert!(star.screen().is_none());
+        assert_eq!(pack.icon_names().collect::<Vec<_>>(), ["star"]);
+    }
+
+    #[test]
+    fn an_icon_of_two_frames_is_refused() {
+        let toml = "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+                    [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+                    [icons.star]\nscreen=\"two.sprite\"\n";
+        let err = load_pack_from_strings(
+            toml,
+            &[
+                ("f.sprite", "@frame 0\nA"),
+                ("two.sprite", "@frame 0\nA\n@frame 1\nA"),
+            ],
+        )
+        .expect_err("two frames");
+        assert!(matches!(err, PackError::IconFrames { file } if file == "two.sprite"));
     }
 
     fn pack_with_animation(name: &str, frames_toml: &str) -> Pack {

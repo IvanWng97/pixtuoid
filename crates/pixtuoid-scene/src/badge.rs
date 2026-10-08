@@ -63,8 +63,12 @@ pub struct BadgeInk {
     pub name: Rgb,
 }
 
-/// The glyph every painter's badge leads with, in [`BadgeInk::marker`].
-pub const BADGE_MARKER: char = '\u{25cf}';
+pub use crate::display::BADGE_MARKER;
+
+// A decoded label ends in core's ELLIPSIS only past this cap, so a badge's
+// truncation drops the mark before it shows.
+const _: () =
+    assert!((BADGE_CELLS as usize) < pixtuoid_core::source::decoder::MAX_DECODED_FIELD_CHARS);
 
 /// A badge's width in terminal cells, its marker included: the classic
 /// painter clips its badge to it, and a label is truncated to what is left.

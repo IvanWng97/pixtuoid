@@ -633,11 +633,12 @@ fn badge_at(anchor: crate::layout::Point) -> TextRun {
     TextRun {
         at: anchor,
         align: Align::Over,
-        spans: vec![crate::display::TextSpan {
-            text: "cc".into(),
-            ink: pixtuoid_core::sprite::Rgb { r: 9, g: 9, b: 9 },
-        }],
+        spans: vec![crate::display::TextSpan::new(
+            "cc",
+            pixtuoid_core::sprite::Rgb { r: 9, g: 9, b: 9 },
+        )],
         plate: None,
+        strip: None,
         role: crate::display::TextRole::Badge(pixtuoid_core::AgentId::from_transcript_path(
             "/badge.jsonl",
         )),
@@ -676,13 +677,15 @@ fn the_floor_indicator_stays_in_its_cell() {
     assert!(!densities.is_empty(), "the pack draws a density");
     for d in densities {
         let pen = Pen::new(RenderScale::from(*d), d.get()).expect("d divides itself");
-        for floor in [1, 12, 99] {
+        for (floor, floors) in [(0, 1), (11, 12), (98, 99)] {
+            let floor = crate::floor::FloorMeta::for_floor(floor, floors);
             let run = TextRun::indicator(door, floor, &crate::theme::NORMAL);
             let plate = run_rect(&run, pen);
             let span = topmost_span(plate, pen);
             assert!(
                 rows.contains(&span.y0) && rows.contains(&span.y1),
-                "{d:?} floor {floor}: rows {}..={} outside {rows:?}",
+                "{d:?} floor {}: rows {}..={} outside {rows:?}",
+                floor.floor_idx,
                 span.y0,
                 span.y1
             );
@@ -729,13 +732,14 @@ fn no_run_overprints_another_on_its_line() {
             scale,
         };
         let pen = Pen::for_pack(scale, &pack);
-        let rects: Vec<(crate::display::TextRole, u16, ArtRect)> = signs(office, 0, quiet_board())
-            .into_iter()
-            .filter_map(|(_, kind)| match kind {
-                PieceKind::Text { run } => Some((run.role, run.at.y, run_rect(&run, pen))),
-                _ => None,
-            })
-            .collect();
+        let rects: Vec<(crate::display::TextRole, u16, ArtRect)> =
+            signs(office, crate::floor::FloorMeta::ground(), quiet_board())
+                .into_iter()
+                .filter_map(|(_, kind)| match kind {
+                    PieceKind::Text { run } => Some((run.role, run.at.y, run_rect(&run, pen))),
+                    _ => None,
+                })
+                .collect();
         assert!(
             rects
                 .iter()

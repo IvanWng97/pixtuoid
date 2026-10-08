@@ -29,6 +29,14 @@ const WORLD_WRITERS: [&str; 6] = [
     "../pixtuoid-scene/src/layout",
 ];
 
+/// The icons' terminal glyphs, which no face draws: a pixel painter draws an
+/// icon's art (`Icon::art`) in their place.
+const TERMINAL_ONLY: &str = "../pixtuoid-scene/src/display/icon.rs";
+
+/// What world text writes that no badge reaches: core's cap mark, which ends
+/// only a label longer than a badge keeps (`badge.rs` asserts it).
+const PAST_A_BADGE: [char; 1] = [pixtuoid_core::source::decoder::ELLIPSIS];
+
 /// The characters of a file's string and char literals outside tests,
 /// attributes and patterns, and the test modules it declares out of line.
 #[derive(Default)]
@@ -172,6 +180,7 @@ fn written() -> Vec<(PathBuf, Vec<char>)> {
     for tree in RENDERERS {
         rust_files(&root.join(tree), &mut files);
     }
+    files.retain(|file| *file != root.join(TERMINAL_ONLY));
     let parsed: Vec<(PathBuf, Written)> = files
         .into_iter()
         .map(|file| {
@@ -239,11 +248,15 @@ fn the_screen_face_draws_every_character_the_office_writes() {
 fn the_world_face_draws_every_character_the_signs_and_names_write() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let writers: Vec<PathBuf> = WORLD_WRITERS.iter().map(|w| root.join(w)).collect();
-    let all = written();
-    let world = all
-        .iter()
-        .filter(|(file, _)| writers.iter().any(|w| file.starts_with(w)));
-    let missing = tofu(world, Face::World);
+    let world: Vec<(PathBuf, Vec<char>)> = written()
+        .into_iter()
+        .filter(|(file, _)| writers.iter().any(|w| file.starts_with(w)))
+        .map(|(file, chars)| {
+            let reached = chars.into_iter().filter(|c| !PAST_A_BADGE.contains(c));
+            (file, reached.collect())
+        })
+        .collect();
+    let missing = tofu(&world, Face::World);
     assert!(
         missing.is_empty(),
         "the world face draws these as tofu: {missing:#?}"

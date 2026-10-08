@@ -168,7 +168,7 @@ pub(crate) fn compose_at<'a>(
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment, outside);
-    collected.extend(signs(office, floor.floor_idx, board));
+    collected.extend(signs(office, floor, board));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -530,14 +530,14 @@ pub(crate) fn ground_shadow(
 }
 
 /// The room's signs: the wall board's lines, and the floor indicator naming
-/// floor `floor_idx`'s number over the elevator.
+/// `floor` over the elevator.
 fn signs(
     office: Office<'_>,
-    floor_idx: usize,
+    floor: crate::floor::FloorMeta,
     board: &crate::neon_sign::BoardModel,
 ) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let indicator = TextRun::indicator(office.layout.door, floor_idx + 1, office.theme);
+    let indicator = TextRun::indicator(office.layout.door, floor, office.theme);
     let mut drawn: Vec<(u16, ArtRect)> = Vec::new();
     board
         .runs(office.theme)
