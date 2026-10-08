@@ -321,10 +321,9 @@ fn the_mascot_differential_is_signal_not_render_churn() {
     );
     // Bounded by the PACK's own lobster frame, not a transcribed size.
     let pk = pack();
-    let frame = &pk
-        .animation("lobster_walk")
-        .expect("the pack ships the lobster")
-        .frames()[0];
+    let frame = pk
+        .piece(pixtuoid_core::sprite::format::Piece::LobsterWalk)
+        .first();
     let (sw, sh) = (frame.width(), frame.height());
     assert!(
         w <= sw * 2 && h <= sh * 2,

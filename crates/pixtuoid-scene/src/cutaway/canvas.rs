@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::RgbBuffer;
-use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::paint::paint;
 use crate::display::light::Ambient;
@@ -20,7 +20,7 @@ use crate::render_scale::RenderScale;
 #[derive(Debug)]
 pub struct CutawayCanvas {
     // Held, so no other pack can take its place unnoticed.
-    pack: Arc<Pack>,
+    pack: Arc<OfficeArt>,
     buf: RgbBuffer,
     /// `None` until the first frame.
     shown: Option<Shown>,
@@ -192,7 +192,7 @@ struct Shown {
 
 impl CutawayCanvas {
     /// A canvas that draws with `pack`.
-    pub fn new(pack: Arc<Pack>) -> Self {
+    pub fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             pack,
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
@@ -372,7 +372,7 @@ mod tests {
     use crate::display::{HoverTarget, PieceKind};
     use crate::floor::FloorMeta;
     use crate::layout::SceneLayout;
-    use crate::pack::test_default_pack;
+    use crate::pack::test_office;
     use crate::sim::SimFrame;
     use crate::theme::Theme;
 
@@ -402,7 +402,7 @@ mod tests {
     /// theme.
     fn full_render(
         layout: &SceneLayout,
-        pack: &Pack,
+        pack: &OfficeArt,
         scale: RenderScale,
         (frame, floor): (&SimFrame, FloorMeta),
         now: SystemTime,
@@ -434,14 +434,14 @@ mod tests {
     /// pack's densest scale: every frame it shows, painted or skipped, is the
     /// full render, and every pixel two full renders in a row differ in lies in
     /// what it reported.
-    fn run(layout: SceneLayout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
+    fn run(layout: SceneLayout, pack: OfficeArt, steps: &[(SimFrame, SystemTime)]) -> Run {
         run_under(layout, pack, steps, clear_ground())
     }
 
     /// [`run`] on `floor`, under its weather.
     fn run_under(
         layout: SceneLayout,
-        pack: Pack,
+        pack: OfficeArt,
         steps: &[(SimFrame, SystemTime)],
         floor: FloorMeta,
     ) -> Run {
@@ -624,7 +624,7 @@ mod tests {
                 (frame, now)
             })
             .collect();
-        let tally = run(layout, test_default_pack(), &steps);
+        let tally = run(layout, test_office(), &steps);
         assert!(tally.partial > 0, "{tally:?}");
     }
 
@@ -638,7 +638,7 @@ mod tests {
         let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)
             .map(|now| (quiet.clone(), now))
             .collect();
-        let tally = run(layout, test_default_pack(), &steps);
+        let tally = run(layout, test_office(), &steps);
         assert!(tally.skipped > 0 && tally.partial > 0, "{tally:?}");
         assert_eq!(tally.whole, 0, "{tally:?}");
     }
@@ -657,7 +657,7 @@ mod tests {
             crate::cutaway::paint::CutawayCache::default(),
             crate::outside::OutsideCache::default(),
         );
-        let mut canvas = CutawayCanvas::new(Arc::new(test_default_pack()));
+        let mut canvas = CutawayCanvas::new(Arc::new(test_office()));
         let other = crate::theme::ALL_THEMES
             .iter()
             .copied()
@@ -684,7 +684,7 @@ mod tests {
     /// A walk to a desk, shown at scale 2.
     struct Hovering {
         layout: Arc<SceneLayout>,
-        pack: Arc<Pack>,
+        pack: Arc<OfficeArt>,
         frames: Vec<SimFrame>,
         scale: RenderScale,
     }
@@ -1020,7 +1020,7 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     fn the_star_link_is_the_drawn_star() {
         use crate::display::TextRole;
-        let pack = Arc::new(test_default_pack());
+        let pack = Arc::new(test_office());
         let now = crate::localclock::at_hour(12);
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let stepped = SteppedFloor {
@@ -1238,7 +1238,7 @@ mod tests {
     /// no address the allocator hands back decides either.
     #[test]
     fn a_new_layout_repaints_everything() {
-        let pack = Arc::new(test_default_pack());
+        let pack = Arc::new(test_office());
         let scale = RenderScale::new(2).expect("nonzero");
         let now = crate::localclock::at_hour(12);
         let (mut cache, mut outside) = (
@@ -1304,7 +1304,7 @@ mod tests {
     fn the_canvas_paints_the_pinned_frames() {
         use crate::sky::{Weather, WeatherPolicy};
         use std::fmt::Write as _;
-        let pack = Arc::new(test_default_pack());
+        let pack = Arc::new(test_office());
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walk_layout = Arc::new(walk_layout);
         let office = crate::floor::FloorSession::new(Arc::clone(&pack))

@@ -240,22 +240,20 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 
 /// `icon`'s world art from `pack` in the cell whose top-left is `(x, y)`, its
 /// [`ICON_INK_KEY`](crate::pack::ICON_INK_KEY) pixels in `ink`; nothing where
-/// the pack draws it none.
+/// the icon has no world face.
 pub(crate) fn paint_icon(
     pen: Pen,
     buf: &mut RgbBuffer,
     (x, y): (ArtPx, ArtPx),
-    (pack, icon): (&pixtuoid_core::sprite::format::Pack, crate::display::Icon),
+    (pack, icon): (&crate::pack::OfficeArt, crate::display::Icon),
     ink: Rgb,
 ) {
-    let Some(art) = pack
-        .icon(icon.art())
-        .and_then(|a| a.world())
-        .and_then(|s| s.recolorable(0))
-    else {
+    let Some(world) = pack.icon(icon).world() else {
         return;
     };
-    let frame = art.recolored(&[(crate::pack::ICON_INK_KEY, Some(ink))]);
+    let frame = world
+        .recolorable_at(0)
+        .recolored(&[(crate::pack::ICON_INK_KEY, Some(ink))]);
     for dy in 0..frame.height() {
         for dx in 0..frame.width() {
             if let Some(&Some(rgb)) = frame.get(dx, dy) {

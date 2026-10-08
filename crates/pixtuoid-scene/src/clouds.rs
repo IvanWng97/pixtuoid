@@ -1875,7 +1875,7 @@ mod tests {
         // Each window opens `AHEAD` early: a step within `AHEAD` of the first
         // frame has had no frames to be drawn ahead in.
         let lead = (AHEAD.as_millis() / frame.as_millis()) as u32;
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let d = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
         let wall = crate::outside::Wall {
             size: (crate::layout::WINDOW_W * 3, 32),

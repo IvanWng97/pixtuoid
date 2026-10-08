@@ -110,11 +110,10 @@ mod tests {
     #[test]
     fn the_glow_lands_on_the_desk_arts_monitor() {
         use crate::pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let art = pack
-            .animation("desk_north")
-            .and_then(|a| a.frames().first())
-            .expect("the bundled pack ships desk_north");
+            .piece(pixtuoid_core::sprite::format::Piece::DeskNorth)
+            .first();
         let screen: Vec<Rgb> = [SCREEN_GLASS_KEY, SCREEN_TEXT_KEY]
             .iter()
             .map(|&k| {

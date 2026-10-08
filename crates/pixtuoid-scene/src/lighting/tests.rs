@@ -9,7 +9,7 @@ use crate::sky::{Sky, Weather};
 const DESK: Point = Point { x: 40, y: 30 };
 
 fn bulbs() -> DeskBulbs {
-    DeskBulbs::of(&crate::pack::test_default_pack())
+    DeskBulbs::of(&crate::pack::test_office())
 }
 
 /// [`desk_lights`] of [`DESK`] facing `facing`, its bulb the bundled pack's.
@@ -22,11 +22,11 @@ fn lights(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> DeskLigh
 #[test]
 fn every_facing_lights_its_own_desks_bulb() {
     use crate::layout::Facing;
-    let pack = crate::pack::test_default_pack();
+    let pack = crate::pack::test_office();
     for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
         assert_eq!(
             DeskBulbs::of(&pack).at(facing),
-            crate::pack::desk_bulb_offset(&pack, facing),
+            pack.bulb_offset(crate::pack::Desk::facing(facing)),
             "{facing:?}"
         );
     }
@@ -41,9 +41,11 @@ fn a_bulb_above_the_desk_row_still_lights() {
         .replacen(" 9 ", " D ", 1)
         .replacen("\n. . .", "\n9 . .", 1)
         .leak();
-    let pack = crate::pack::test_pack_with(&[("desk.sprite", raised)]);
+    let pack =
+        crate::pack::OfficeArt::parse(crate::pack::test_pack_with(&[("desk.sprite", raised)]))
+            .expect("the raised bulb is still a bulb");
     let bulb = DeskBulbs::of(&pack).at(Facing::South);
-    let (_, dy) = bulb.expect("the raised bulb is still a bulb");
+    let (_, dy) = bulb;
     assert!(dy < 0, "it stands above the desk's row: {dy}");
     let lights = desk_lights(DESK, Facing::South, bulb, 1.0, 1.0);
     assert!(lights.lamp.strength > 0.0);
@@ -51,63 +53,6 @@ fn a_bulb_above_the_desk_row_still_lights() {
         panic!("a desk lamp throws a halo");
     };
     assert!(centre.y < DESK.y, "the pool centres on the raised bulb");
-}
-
-/// A pack whose desk art draws no bulb lights no lamp, however dark.
-#[test]
-fn desk_art_without_a_bulb_lights_no_lamp() {
-    use crate::layout::Facing;
-    // the bulb's cells recoloured to the desk's body
-    let unlit = |src: &str| -> &'static str {
-        src.lines()
-            .map(|line| {
-                if line.starts_with(['@', '#']) {
-                    line.to_owned()
-                } else {
-                    let cell = |c: &str| {
-                        if c == crate::pack::DESK_BULB_KEY.to_string() {
-                            "D"
-                        } else {
-                            c
-                        }
-                        .to_owned()
-                    };
-                    line.split(' ').map(cell).collect::<Vec<_>>().join(" ")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-            .leak()
-    };
-    let pack = crate::pack::test_pack_with(&[
-        (
-            "desk.sprite",
-            unlit(include_str!("../../sprites/default/desk.sprite")),
-        ),
-        (
-            "desk_north.sprite",
-            unlit(include_str!("../../sprites/default/desk_north.sprite")),
-        ),
-    ]);
-    let unlit: Vec<_> = crate::pack::validate_pack(&pack)
-        .missing_keys
-        .into_iter()
-        .map(|m| m.name)
-        .collect();
-    assert_eq!(
-        unlit,
-        ["desk", "desk_north"],
-        "validation names each unlit desk"
-    );
-    for facing in [Facing::North, Facing::South] {
-        assert!(
-            bulbs().at(facing).is_some(),
-            "the bundled {facing:?} desk draws a bulb"
-        );
-        let bulb = DeskBulbs::of(&pack).at(facing);
-        assert_eq!(bulb, None, "{facing:?}");
-        assert_eq!(desk_lights(DESK, facing, bulb, 1.0, 1.0).lamp.strength, 0.0);
-    }
 }
 
 /// A WALL-CLOCK-scale epoch — the magnitude [`neon_breath`]'s integer modulo
@@ -133,7 +78,7 @@ fn lights_at(w: u16, h: u16, hour: u32) -> (SceneLayout, Lights) {
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
             beat: Beat::at_ms(0),
-            bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_default_pack()),
+            bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_office()),
         },
     );
     (layout, lights)
@@ -290,7 +235,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
             beat: Beat::at_ms(0),
-            bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_default_pack()),
+            bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_office()),
         },
     );
     let kinds: Vec<_> = lights.monitor_halos.iter().map(|h| h.kind).collect();

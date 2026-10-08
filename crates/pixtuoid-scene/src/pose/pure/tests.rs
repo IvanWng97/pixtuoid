@@ -1,4 +1,5 @@
 use super::*;
+use pixtuoid_core::sprite::format::{Piece, Walk};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -73,8 +74,8 @@ fn active_state_is_seated_typing_with_cycling_frame() {
     let (s, now) = slot(typing(), 0);
     let l = layout();
     assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping));
-    let pack = crate::pack::test_default_pack();
-    let anim = pack.animation("typing").expect("the typing loop");
+    let pack = crate::pack::test_office();
+    let anim = pack.piece(Piece::Typing);
     let ms = u64::from(anim.frame_ms());
     let frame = |at| typing_frame(&s, crate::anim::Beat::at_ms(at), anim);
     assert_ne!(frame(0), frame(ms), "it keys every frame");
@@ -832,16 +833,16 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
 #[test]
 fn a_walking_person_never_slides() {
     use crate::physics::{SPEED_MULT_MAX, WalkIntent, speed_mult, walk_profile, walk_progress};
-    let pack = crate::pack::test_default_pack();
-    let walk = pack.animation("walking").expect("the walk");
-    let per_frame = f32::from(walk.stride().expect("a stride").get()) / walk.frames().len() as f32;
-    let now = SystemTime::UNIX_EPOCH;
+    let pack = crate::pack::test_office();
+    let walk = pack.piece(Piece::Walking);
+    let stride = pack.stride(Walk::Walking);
+    let per_frame = f32::from(stride.get()) / walk.frames().len() as f32;
     // sampled as a painter paints: a frame stepped past between two paints is lost
     let paint_ms = crate::anim::PAINT_FRAME_MS;
     let steps = |total_ms: u64, travelled_at: &dyn Fn(u64) -> u32| {
         let (mut turns, mut last) = (0.0_f32, None);
         for ms in (0..=total_ms).step_by(paint_ms as usize) {
-            let frame = walk_frame(travelled_at(ms), walk, now);
+            let frame = walk_frame(travelled_at(ms), walk, stride);
             turns += f32::from(u8::from(last.is_some_and(|f| f != frame)));
             last = Some(frame);
         }
@@ -898,25 +899,22 @@ fn a_walking_person_never_slides() {
 }
 
 /// A walk steps one frame each `stride / frames` of ground, wrapping each
-/// stride, whatever the clock says.
+/// stride.
 #[test]
 fn a_walk_steps_by_the_ground_it_covers() {
-    let pack = crate::pack::test_default_pack();
-    let walk = pack.animation("walking").expect("the walk");
-    let stride = u32::from(walk.stride().expect("a stride").get());
+    let pack = crate::pack::test_office();
+    let walk = pack.piece(Piece::Walking);
+    let stride = pack.stride(Walk::Walking);
     let frames = walk.frames().len() as u32;
-    let per_cycle = stride * crate::pathfind::OCTILE_STRAIGHT_COST;
+    let per_cycle = u32::from(stride.get()) * crate::pathfind::OCTILE_STRAIGHT_COST;
     // the first distance the second frame shows at
     let next = per_cycle.div_ceil(frames);
-    let later = SystemTime::UNIX_EPOCH + Duration::from_millis(12_345);
     for (travelled, frame) in [(0, 0), (next - 1, 0), (next, 1), (per_cycle, 0)] {
-        for now in [SystemTime::UNIX_EPOCH, later] {
-            assert_eq!(
-                walk_frame(travelled, walk, now),
-                frame as usize,
-                "{travelled} in"
-            );
-        }
+        assert_eq!(
+            walk_frame(travelled, walk, stride),
+            frame as usize,
+            "{travelled} in"
+        );
     }
 }
 
@@ -926,16 +924,13 @@ fn a_walk_steps_by_the_ground_it_covers() {
 /// foot may step out a column or clear the ground.
 #[test]
 fn a_base_walker_keeps_the_standing_figure() {
-    let pack = crate::pack::test_default_pack();
+    let pack = crate::pack::test_office();
     let opaque = |f: &pixtuoid_core::sprite::Frame, y: u16| -> Vec<u16> {
         (0..f.width())
             .filter(|&x| f.get(x, y).copied().flatten().is_some())
             .collect()
     };
-    let stand = &pack
-        .animation("standing")
-        .expect("the standing art")
-        .frames()[0];
+    let stand = pack.piece(Piece::Standing).first();
     let (w, h) = (stand.width(), stand.height());
     // a dropped hand hangs past the shirt's last full-width row
     let hips = 1
@@ -945,14 +940,9 @@ fn a_base_walker_keeps_the_standing_figure() {
             .expect("a full-width row");
     let ground = h - 1;
     let sides = [0, w - 1];
-    for name in crate::sim::WALKS {
-        for (i, f) in pack
-            .animation(name)
-            .expect("a walk")
-            .frames()
-            .iter()
-            .enumerate()
-        {
+    for walk in crate::sim::WALKS {
+        let name = walk.piece().name();
+        for (i, f) in pack.piece(walk.piece()).frames().iter().enumerate() {
             assert_eq!((f.width(), f.height()), (w, h), "{name} {i}");
             for y in 0..h {
                 let (walk, rest) = (opaque(f, y), opaque(stand, y));
@@ -983,10 +973,11 @@ fn a_base_walker_keeps_the_standing_figure() {
 /// foot touches the ground, under that one.
 #[test]
 fn a_walker_s_dust_rises_under_its_planted_foot() {
-    let pack = crate::pack::test_default_pack();
+    let pack = crate::pack::test_office();
     let mut passing = 0;
-    for name in crate::sim::WALKS {
-        let frames = pack.animation(name).expect("a walk").frames();
+    for walk in crate::sim::WALKS {
+        let name = walk.piece().name();
+        let frames = pack.piece(walk.piece()).frames();
         for (i, f) in frames.iter().enumerate() {
             for flip in [false, true] {
                 let ground = f.height() - 1;

@@ -622,7 +622,7 @@ fn transition_escapes_a_backward_clock_step() {
 /// One classic frame of `scene` at `now` through `session`'s entry.
 fn classic_frame(
     session: &mut FloorSession,
-    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+    pack: &Arc<crate::pack::OfficeArt>,
     scene: &SceneState,
     now: SystemTime,
     floor: FloorMeta,
@@ -650,7 +650,7 @@ fn classic_frame(
 fn the_classic_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
     // slot.model/effort fails here while the unit-level paint test stays green.
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
     let slot = scene.agents.values_mut().next().expect("one agent");
@@ -708,7 +708,7 @@ fn the_classic_paints_the_flame_crown_for_a_top_tier_agent() {
 
 #[test]
 fn the_classic_paints_records_coffee_state_and_survives_a_tiny_buffer() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let scene = SceneState::new([8; MAX_FLOORS]);
     let mut session = FloorSession::new(Arc::clone(&pack));
@@ -751,7 +751,7 @@ fn the_classic_paints_records_coffee_state_and_survives_a_tiny_buffer() {
 
 #[test]
 fn floor_session_render_owns_the_dual_eviction() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
@@ -795,7 +795,7 @@ fn floor_session_render_owns_the_dual_eviction() {
 fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     // `last_occupied` is the set the shared `AudioObserver` reads, so recording it
     // here is what lets a windowed painter avoid re-running the sim.
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
@@ -881,7 +881,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
 
 #[test]
 fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(1, 8);
     let id = AgentId::from_transcript_path("/p/0.jsonl");
     let t = t0() + Duration::from_millis(100); // 100ms in: entry walk in flight
@@ -934,7 +934,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
 /// `step` hands back the memoized layout itself, not an equal copy.
 #[test]
 fn step_hands_back_the_layout_the_sim_stepped_on() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(1, 8);
     let size = Size { w: 160, h: 96 };
     let meta = FloorMeta::ground();
@@ -963,7 +963,7 @@ fn step_hands_back_the_layout_the_sim_stepped_on() {
 /// other floor's agents: their coffee must outlive it.
 #[test]
 fn stepping_a_projected_floor_keeps_other_floors_coffee() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(17, 16);
     let downstairs = AgentId::from_transcript_path("/p/0.jsonl");
     assert_eq!(scene.agents[&downstairs].floor_idx, 0);
@@ -990,7 +990,7 @@ fn stepping_a_projected_floor_keeps_other_floors_coffee() {
 
 #[test]
 fn session_types_default_equals_new() {
-    let floor = PerFloor::new(Arc::new(crate::pack::test_default_pack()));
+    let floor = PerFloor::new(Arc::new(crate::pack::test_office()));
     assert_eq!(floor.ctx.door_anim_max_ms, 0);
     assert!(floor.raster.pixels().is_none());
     assert!(PerOffice::default().coffee.map().is_empty());
@@ -1094,7 +1094,7 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // clock alone.
     let clear = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Clear);
     let render = |now: SystemTime| {
-        let pack = Arc::new(crate::pack::test_default_pack());
+        let pack = Arc::new(crate::pack::test_office());
         let scene = make_scene(6, 8);
         let mut session = FloorSession::new(Arc::clone(&pack));
         classic_frame(
@@ -1553,7 +1553,7 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
 /// The classic looks out from its own floor.
 #[test]
 fn the_classic_sees_the_skyline_from_its_floors_altitude() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(1, 8);
     let render = |floor_meta: FloorMeta| {
@@ -1642,7 +1642,7 @@ fn looks() -> [crate::look::Look; 2] {
 
 /// `session`'s pixels for `scene` on `floor` at `now`, in `look`.
 fn paint(
-    (session, pack): (&mut FloorSession, &Arc<Pack>),
+    (session, pack): (&mut FloorSession, &Arc<OfficeArt>),
     look: crate::look::Look,
     scene: &SceneState,
     floor: FloorMeta,
@@ -1678,7 +1678,7 @@ fn both_painters(
     pet: Option<&Pet>,
     now: SystemTime,
 ) -> (Vec<Rgb>, Vec<Rgb>) {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let [classic, cutaway_px] = looks().map(|look| {
         let mut session = FloorSession::new(Arc::clone(&pack));
         paint((&mut session, &pack), look, scene, floor, pet, now)
@@ -1813,7 +1813,7 @@ fn a_floor_still_off_the_beat_paints_one_frame_until_the_beat_turns() {
             scale: crate::render_scale::RenderScale::new(1).expect("nonzero"),
         },
     ];
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     for (case, motion, weather, pet, before, after, window) in cases {
         let floor = FloorMeta::ground()
             .with_weather(WeatherPolicy::Forced(weather))
@@ -1924,7 +1924,7 @@ fn floor_nav_slides_lands_and_clamps() {
 /// count matches the breadcrumb it names.
 #[test]
 fn a_slides_footer_speaks_for_its_destination() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(3, 2);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let mut office = OfficeSession::new(pack);
@@ -1942,7 +1942,7 @@ fn a_slides_footer_speaks_for_its_destination() {
 /// its own floor alone, and only while it lasts.
 #[test]
 fn a_petting_plays_only_on_its_own_floor() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(3, 2);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let mut office = OfficeSession::new(Arc::clone(&pack));
@@ -2014,7 +2014,7 @@ fn a_grip_stays_on_the_floor_it_lifted_on() {
 /// nothing, and lands on its destination.
 #[test]
 fn an_office_session_shows_each_floor_and_slides_between_them() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let scene = make_scene(3, 2);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
@@ -2077,7 +2077,7 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
 /// nothing and the audio hears no one at the floor's waypoints.
 #[test]
 fn a_frame_without_the_office_forgets_the_last() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
@@ -2130,7 +2130,7 @@ fn a_frame_without_the_office_forgets_the_last() {
 /// breadcrumb and the way up all follow the live scene, not the views kept.
 #[test]
 fn an_office_session_follows_its_floors_down() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let mut office = OfficeSession::new(Arc::clone(&pack));
@@ -2174,7 +2174,7 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
     use crate::interact::{Figure, Gesture};
     use crate::layout::Point;
     use crate::pose::Pose;
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(1, 4);
     let id = *scene.agents.keys().next().expect("one agent");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
@@ -2252,7 +2252,7 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
 fn a_lifted_pet_rests_where_it_is_set_down() {
     use crate::interact::{Figure, Gesture};
     use crate::layout::Point;
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let scene = make_scene(1, 4);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let cat = crate::pet::Pet {

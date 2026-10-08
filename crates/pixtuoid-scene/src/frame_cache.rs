@@ -17,7 +17,7 @@ use pixtuoid_core::{AgentId, SceneState};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FrameKey {
     pub agent_id: AgentId,
-    pub anim_name: &'static str,
+    pub anim_name: pixtuoid_core::sprite::format::Piece,
     pub frame_idx: usize,
     pub flip_x: bool,
     pub glow_tint: Option<Rgb>,
@@ -96,7 +96,7 @@ mod tests {
     fn key_for(id: AgentId) -> FrameKey {
         FrameKey {
             agent_id: id,
-            anim_name: "standing",
+            anim_name: pixtuoid_core::sprite::format::Piece::Standing,
             frame_idx: 0,
             flip_x: false,
             glow_tint: None,
