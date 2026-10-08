@@ -320,6 +320,13 @@ mod tests {
         assert_eq!(super::take_span(&text, u16::MAX), text);
     }
 
+    /// A first cluster wider than the budget takes nothing, as a terminal
+    /// can't draw half of it.
+    #[test]
+    fn a_cluster_wider_than_the_budget_is_dropped() {
+        assert_eq!(super::take_span("\u{65e5}x", 1), "");
+    }
+
     #[test]
     fn a_label_of_zero_width_marks_never_shows_the_cap_mark() {
         use pixtuoid_core::source::decoder::{ELLIPSIS, MAX_DECODED_FIELD_CHARS};

@@ -2760,6 +2760,7 @@ dependencies = [
  "proptest",
  "serde_json",
  "snapbox",
+ "strum",
  "syn 3.0.6",
  "tempfile",
  "toml_edit",

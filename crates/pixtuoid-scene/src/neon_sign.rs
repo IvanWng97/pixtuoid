@@ -389,7 +389,10 @@ fn flap_roll(
             let settle = flap_settle_ms(col);
             // A blank's tone is invisible, so blank-to-blank is "not changing" too.
             let unchanged = old == new || (blank(old) && blank(new));
-            if since_ms >= settle || unchanged {
+            // An icon only re-inked takes its new tone at once, so the waiting
+            // lamp blinks through a roll.
+            let reinked = matches!(old.0, Flap::Icon(_)) && old.0 == new.0;
+            if since_ms >= settle || unchanged || reinked {
                 return new;
             }
             let (Flap::Char(target), Flap::Char(_)) = (new.0, old.0) else {
@@ -970,6 +973,18 @@ mod tests {
         assert_eq!(tone_of('\u{25b2}'), Some(BoardTone::Waiting));
         assert_eq!(tone_of('\u{25cf}'), Some(BoardTone::Active));
         assert_eq!(tone_of('\u{25cb}'), Some(BoardTone::Idle));
+    }
+
+    /// A lamp re-inked mid-roll shows its new tone at once: a roll never
+    /// holds a blink.
+    #[test]
+    fn a_lamp_blinks_through_a_roll() {
+        let rolled = flap_roll(
+            &[(Flap::Icon(Icon::Alert), BoardTone::Waiting)],
+            &[(Flap::Icon(Icon::Alert), BoardTone::Dim)],
+            0,
+        );
+        assert_eq!(rolled, [BoardSegment::icon(Icon::Alert, BoardTone::Dim)]);
     }
 
     /// The waiting lamp blinks, dim while it is off; the others hold.

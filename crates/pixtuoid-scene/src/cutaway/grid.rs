@@ -101,7 +101,7 @@ impl Face {
         if self != Self::Screen {
             return None;
         }
-        Icon::ALL
+        <Icon as strum::VariantArray>::VARIANTS
             .iter()
             .filter(|i| i.terminal() == symbol)
             .find_map(|i| pack.icon(i.art())?.screen())
@@ -555,7 +555,7 @@ mod tests {
         let pack = crate::pack::test_default_pack();
         let cell = Face::Screen.cell(1);
         let mut seen = std::collections::HashMap::new();
-        for icon in crate::display::Icon::ALL {
+        for icon in <crate::display::Icon as strum::VariantArray>::VARIANTS {
             let Some(art) = pack
                 .icon(icon.art())
                 .and_then(|a| a.screen())
