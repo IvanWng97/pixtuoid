@@ -342,16 +342,16 @@ pace-check *args:
     cargo build --release -p pixtuoid --bins --example pacing
     python3 scripts/pace-check.py "$@"
 
-# Catches code that silently only builds with `native` on (the wasm core builds
-# without it). `--no-dev-deps check` builds no test, so scene's no-default tests
+# Catches code that silently only builds, or is only used, with `native` or
+# `graphics` on. `--no-dev-deps` builds no test, so scene's no-default tests
 # lint and run on their own.
-[doc('Feature-powerset check — every feature subset compiles; scene no-default tests pass')]
+[doc('Feature-powerset clippy — every feature subset compiles warning-free; scene no-default tests pass')]
 [group('rust')]
 hack:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
-    cargo hack --feature-powerset --no-dev-deps check --workspace
+    cargo hack --feature-powerset --no-dev-deps clippy --workspace -- -D warnings
     cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
     just test -p pixtuoid-scene --no-default-features
 
@@ -836,10 +836,10 @@ gen-art-check:
     python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
 
 # Not in `gen`: it downloads its pinned fonts.
-[doc("Regenerate the cutaway's fallback font + its licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fallback-font.py")]
+[doc("Regenerate the scene's Fusion Pixel faces + their licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fonts.py")]
 [group('gen')]
-gen-fallback-font:
-    python3 scripts/gen-fallback-font.py
+gen-fonts:
+    python3 scripts/gen-fonts.py
 
 [doc('Sync README install/features/tools sections from site/src/*.json')]
 [group('gen')]

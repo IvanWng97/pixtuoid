@@ -1759,7 +1759,7 @@ mod tests {
     /// under the category line.
     #[test]
     fn terminal_category_leads_with_the_graphics_plan() {
-        use crate::graphics::{CellSize, ClassicReason, Fit, ImageProtocol, Plan};
+        use crate::graphics::{CellSize, ClassicReason, ImageProtocol, Plan, cutaway_fit};
         let mut r = summary_report(vec![]);
         let cell = CellSize { w: 17, h: 41 };
         let area = ratatui::layout::Size {
@@ -1768,7 +1768,7 @@ mod tests {
         };
         let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
         r.graphics_plan = Plan::Cutaway {
-            fit: Fit::new(cell, area, density).expect("fits"),
+            fit: cutaway_fit(cell, area, density).expect("fits"),
             route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
             forced: false,

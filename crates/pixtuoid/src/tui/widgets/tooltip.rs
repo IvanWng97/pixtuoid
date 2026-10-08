@@ -1,21 +1,14 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Padding, Paragraph};
+use ratatui::widgets::Paragraph;
 
-use super::{display_width, to_color};
+use super::to_color;
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_core::AgentId;
+use pixtuoid_scene::display::cells::CellRect;
 use pixtuoid_scene::display::{Badge, TextRole, TextRun};
-use pixtuoid_scene::tooltip::{TipAnchor, TipRow, TipSpan, TipTone, Tooltip};
-
-/// Borderless tooltip frame shared by every hover/click tooltip: just the padded
-/// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
-/// `tooltip_bg` fill + drop shadow); the 1-cell uniform padding is what the
-/// callers' `+2` size math accounts for.
-pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
-    Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
-}
+use pixtuoid_scene::tooltip::Tooltip;
 
 /// Where a cursor tooltip anchors: the hovered cell, and the scene rect it must
 /// stay inside.
@@ -24,17 +17,6 @@ pub(crate) struct TooltipAt {
     pub(crate) mx: u16,
     pub(crate) my: u16,
     pub(crate) scene_rect: Rect,
-}
-
-/// Horizontal anchor for a tooltip of width `tip_w`: just right of the cursor,
-/// flipped to the left if that would overflow the scene's right edge.
-fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
-    let tx = mx.saturating_add(2);
-    if tx.saturating_add(tip_w) > scene_rect.x + scene_rect.width {
-        mx.saturating_sub(tip_w + 1)
-    } else {
-        tx
-    }
 }
 
 /// Paint `badges` as terminal text on their plates, each a ● in its marker's
@@ -130,10 +112,9 @@ fn put_line(
     }
 }
 
-/// Paint `tip` by the pointer at `at`, in the shared card backing and frame.
-/// An agent's card opens below the pointer, flipping above when there is no
-/// room, at least 20 columns wide; a one-line label opens above it, flipping
-/// below.
+/// Paint `tip` by the pointer at `at`: its [`card`](Tooltip::card) where
+/// [`place`](pixtuoid_scene::tooltip::place) opens it, on the cards' drop
+/// shadow.
 pub(crate) fn paint_tooltip(
     f: &mut ratatui::Frame<'_>,
     tip: &Tooltip,
@@ -141,84 +122,25 @@ pub(crate) fn paint_tooltip(
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     let TooltipAt { mx, my, scene_rect } = at;
-    let span = |s: &TipSpan| {
-        let mut style = Style::default();
-        if let Some(c) = s.tone.rgb(theme) {
-            style = style.fg(to_color(c));
-        }
-        if s.tone == TipTone::Title {
-            style = style.add_modifier(ratatui::style::Modifier::BOLD);
-        }
-        Span::styled(s.text.clone(), style)
+    let card = tip.card(theme);
+    let area = CellRect {
+        x: scene_rect.x,
+        y: scene_rect.y,
+        w: scene_rect.width,
+        h: scene_rect.height,
     };
-    let width = |spans: &[TipSpan]| spans.iter().map(|s| display_width(&s.text)).sum::<usize>();
-    // The heading's right run flushes to the widest body row.
-    let body_w = tip
-        .rows
-        .iter()
-        .filter_map(|row| match row {
-            TipRow::Spans(spans) => Some(width(spans)),
-            TipRow::Heading { .. } | TipRow::Rule => None,
-        })
-        .max()
-        .unwrap_or(0);
-    let content_w = tip.rows.iter().fold(body_w, |w, row| match row {
-        TipRow::Heading { left, right } => w.max(width(left) + 2 + display_width(&right.text)),
-        TipRow::Spans(_) | TipRow::Rule => w,
-    });
-    let lines: Vec<Line> = tip
-        .rows
-        .iter()
-        .map(|row| match row {
-            TipRow::Spans(spans) => Line::from(spans.iter().map(span).collect::<Vec<_>>()),
-            TipRow::Heading { left, right } => {
-                let pad = content_w.saturating_sub(width(left) + display_width(&right.text));
-                let mut spans: Vec<Span> = left.iter().map(span).collect();
-                spans.push(Span::raw(" ".repeat(pad)));
-                spans.push(span(right));
-                Line::from(spans)
-            }
-            TipRow::Rule => Line::from(Span::styled(
-                "\u{2500}".repeat(content_w),
-                Style::default().fg(to_color(theme.ui.tooltip_dim)),
-            )),
-        })
-        .collect();
-    let content_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(20);
-    // +2 cols / +2 rows for the frame's 1-cell padding on all sides.
-    let tip_h = (lines.len() as u16 + 2).min(scene_rect.height);
-    let (tip_w, ty) = match tip.anchor {
-        TipAnchor::Below => {
-            let tip_w = (content_w + 2).min(scene_rect.width).max(20);
-            let mut ty = my.saturating_add(1);
-            if ty.saturating_add(tip_h) > scene_rect.y + scene_rect.height {
-                ty = my.saturating_sub(tip_h).max(scene_rect.y);
-            }
-            (tip_w, ty)
-        }
-        TipAnchor::Above => {
-            // Guard on geometry (cursor within tip_h of the top) rather than
-            // the post-saturation `ty`, which can't detect overflow when
-            // scene_rect.y == 0 (saturating_sub floors at 0, never < 0).
-            let ty = if my < scene_rect.y + tip_h {
-                my.saturating_add(1)
-            } else {
-                my.saturating_sub(tip_h)
-            };
-            ((content_w + 2).min(scene_rect.width), ty)
-        }
-    };
+    let placed = pixtuoid_scene::tooltip::place(card.rect(), (mx, my), area, tip.anchor);
     let rect = Rect {
-        x: flip_x_anchor(mx, tip_w, scene_rect),
-        y: ty,
-        width: tip_w,
-        height: tip_h,
+        x: placed.x,
+        y: placed.y,
+        width: placed.w,
+        height: placed.h,
     };
     let Some(clipped) = clip_widget_rect(rect, scene_rect) else {
         return;
     };
-    super::paint_card_backing(f, clipped, theme);
-    f.render_widget(framed_tooltip(lines), clipped);
+    super::cast_drop_shadow(f, clipped);
+    super::put_grid(f.buffer_mut(), &card, (placed.x, placed.y), clipped);
 }
 
 #[cfg(test)]
@@ -862,7 +784,7 @@ mod tests {
         let buf = term.backend().buffer();
         let shadowed = (0..buf.area.height).any(|y| {
             (0..buf.area.width).any(|x| {
-                matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8)
+                matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * pixtuoid_scene::display::cells::CARD_SHADOW) as u8)
             })
         });
         assert!(
@@ -1091,7 +1013,7 @@ mod tests {
         let buf = term.backend().buffer();
         let shadowed = (0..buf.area.height).any(|y| {
             (0..buf.area.width).any(|x| {
-                matches!(buf[(x, y)].bg, Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8)
+                matches!(buf[(x, y)].bg, Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * pixtuoid_scene::display::cells::CARD_SHADOW) as u8)
             })
         });
         assert!(

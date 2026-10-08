@@ -9,12 +9,14 @@ use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
+use pixtuoid_scene::cutaway::{CellPx, Face, GridInk, paint_grid};
+use pixtuoid_scene::display::cells::{CARD_SHADOW, CellRect};
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
 use pixtuoid_scene::layout::Size;
-use pixtuoid_scene::look::{Look, RenderInputs};
+use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::render_scale::PixelFit;
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -98,7 +100,7 @@ impl OfficeRenderer {
     /// footer row subtracted. `frame.world.scene` is the FULL scene, which the
     /// office projects onto each floor. A too-small layout leaves the buffer
     /// filled with the theme's `bg_fallback`.
-    pub fn render(&mut self, at: WindowGeometry, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
+    pub fn render(&mut self, at: PixelFit, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
         let WindowFrame {
             world,
             theme,
@@ -109,11 +111,11 @@ impl OfficeRenderer {
         } = world;
         let gap = theme.surface.bg_fallback;
         self.session.render(
-            at.look,
+            at.look(),
             RenderInputs {
                 world,
                 theme,
-                size: at.office,
+                size: at.logical(),
                 place,
                 debug_walkable: false,
             },
@@ -132,7 +134,7 @@ impl OfficeRenderer {
     /// frame shown is [`presented`](Self::presented) once it shows.
     pub fn render_live(
         &mut self,
-        at: WindowGeometry,
+        at: PixelFit,
         frame: WindowFrame<'_>,
         window: (u32, u32),
     ) -> bool {
@@ -165,7 +167,7 @@ impl OfficeRenderer {
         &mut self,
         cursor: (f64, f64),
         window: (u32, u32),
-        at: WindowGeometry,
+        at: PixelFit,
         pressing: Pressing<'_>,
     ) -> Press {
         if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
@@ -177,7 +179,9 @@ impl OfficeRenderer {
         let hit = self.session.hit_at(unit_bounds(unit));
         // The slop in this window's units, at least one.
         let slop_px = DRAG_SLOP_DIP * pressing.scale_factor;
-        let units = (slop_px / f64::from(at.unit_px.max(1))).ceil().max(1.0) as u16;
+        let units = (slop_px / f64::from(at.scale().get().max(1)))
+            .ceil()
+            .max(1.0) as u16;
         let slop = pixtuoid_scene::interact::Slop { x: units, y: units };
         let down = self
             .pointer
@@ -203,7 +207,7 @@ impl OfficeRenderer {
 
     /// The pointer moved to `cursor` over a frame drawn at `at`; whether a
     /// figure it carries moved, which the window redraws.
-    pub fn pointer_moved(&mut self, cursor: (f64, f64), at: WindowGeometry) -> bool {
+    pub fn pointer_moved(&mut self, cursor: (f64, f64), at: PixelFit) -> bool {
         let gesture = self.pointer.moved(unit_at(cursor, at));
         if let Some(gesture) = &gesture {
             self.session.grip(gesture);
@@ -216,7 +220,7 @@ impl OfficeRenderer {
     pub fn release(
         &mut self,
         cursor: (f64, f64),
-        at: WindowGeometry,
+        at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::HitAction> {
         match self.pointer.up(unit_in(cursor, at))? {
             Gesture::Click(action) => Some(action),
@@ -237,7 +241,7 @@ impl OfficeRenderer {
     pub fn hit_at(
         &self,
         cursor: (f64, f64),
-        at: WindowGeometry,
+        at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
         self.session.hit_at(unit_bounds(unit_at(cursor, at)))
     }
@@ -368,16 +372,16 @@ pub struct Pressing<'a> {
 
 /// The layout unit a frame drawn at `at` shows at `cursor`, or `None` off
 /// the office.
-fn unit_in(cursor: (f64, f64), at: WindowGeometry) -> Option<pixtuoid_scene::layout::Point> {
+fn unit_in(cursor: (f64, f64), at: PixelFit) -> Option<pixtuoid_scene::layout::Point> {
     let unit = unit_at(cursor, at);
-    (cursor.0 >= 0.0 && cursor.1 >= 0.0 && unit.x < at.office.w && unit.y < at.office.h)
+    (cursor.0 >= 0.0 && cursor.1 >= 0.0 && unit.x < at.logical().w && unit.y < at.logical().h)
         .then_some(unit)
 }
 
 /// The layout unit a frame drawn at `at` shows at `cursor` (physical px).
-fn unit_at(cursor: (f64, f64), at: WindowGeometry) -> pixtuoid_scene::layout::Point {
+fn unit_at(cursor: (f64, f64), at: PixelFit) -> pixtuoid_scene::layout::Point {
     let unit = |px: f64| {
-        (px.max(0.0) as u32 / u32::from(at.unit_px.max(1))).min(u32::from(u16::MAX)) as u16
+        (px.max(0.0) as u32 / u32::from(at.scale().get().max(1))).min(u32::from(u16::MAX)) as u16
     };
     pixtuoid_scene::layout::Point {
         x: unit(cursor.0),
@@ -398,7 +402,7 @@ fn unit_bounds(unit: pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::B
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 /// One floor's frame for the window: a [`RenderInputs`] whose office extent
-/// the window's `WindowGeometry` owns.
+/// the window's [`window_geometry`] owns.
 #[derive(Debug, Clone, Copy)]
 pub struct WindowFrame<'a> {
     pub world: FloorInputs<'a>,
@@ -416,19 +420,6 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
         .max(1.0) as u32
 }
 
-/// What a window draws its office as: the look, the office's logical extent
-/// (which the desk capacity is derived from), and the whole factor the
-/// rendered buffer is upscaled by to the window. Everything the window paints
-/// reads it, so another look is another [`window_geometry`] arm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WindowGeometry {
-    pub look: Look,
-    pub office: Size,
-    pub upscale: u16,
-    /// Window pixels per layout unit, which a pointer maps back through.
-    pub unit_px: u16,
-}
-
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
 /// `density`, `office_scale` fitted to it and never below it, so the window
 /// never falls back to the classic. The ONE place this geometry lives, so the
@@ -437,24 +428,16 @@ pub struct WindowGeometry {
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI mis-seed (#803).
-pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeometry {
+pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> PixelFit {
     let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
-    let fit = PixelFit::at_least_density(
+    PixelFit::at_least_density(
         px(office_scale(size.height)),
         density,
         Size {
             w: px(size.width),
             h: px(size.height),
         },
-    );
-    WindowGeometry {
-        look: Look::Cutaway {
-            scale: fit.render_scale(),
-        },
-        office: fit.logical(),
-        upscale: fit.upscale(),
-        unit_px: fit.scale().get(),
-    }
+    )
 }
 
 /// The smallest window, in logical px, whose office lays out:
@@ -489,7 +472,7 @@ pub(crate) fn boot_capacities_for_window(
     size: PhysicalSize<u32>,
     density: Density,
 ) -> [usize; MAX_FLOORS] {
-    let office = window_geometry(size, density).office;
+    let office = window_geometry(size, density).logical();
     floor_caps_for_buffer(office.w, office.h)
 }
 
@@ -524,12 +507,9 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// The footer's AA font size (px), drawn at NATIVE surface res so it stays a
-/// crisp fixed-height caption whatever the office's scale.
-const FOOTER_FONT_PX: f32 = 12.0;
-/// The footer text's drop shadow: it draws straight over the office, so a 1px
-/// offset shadow keeps it legible over bright windows and plants.
-const TEXT_SHADOW: u32 = 0x0000_0000;
+/// The footer text's drop shadow: it draws straight over the office, so a
+/// one-pixel shadow keeps it legible over bright windows and plants.
+const TEXT_SHADOW: Rgb = Rgb { r: 0, g: 0, b: 0 };
 
 /// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
 /// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
@@ -537,7 +517,7 @@ const TEXT_SHADOW: u32 = 0x0000_0000;
 const FOOTER_KEYS: &str = " [p]ause [m]ute [+/-]vol ";
 /// Breathing room from the window edges for the footer band — both the paint and the
 /// [`footer_budget`] column math read it, so they can't drift.
-const FOOTER_MARGIN_PX: i32 = 6;
+const FOOTER_MARGIN_PX: usize = 6;
 
 /// The window's row-major `0x00RRGGBB` pixel surface, `w`×`h`, that the text
 /// overlays composite into.
@@ -574,150 +554,93 @@ impl<'a> XrgbSurface<'a> {
             }
         }
     }
+}
 
-    /// Alpha-composite `color` over the pixel at `(x, y)` by `coverage` — a straight
-    /// linear blend in `0x00RRGGBB` space; the footer sits on opaque office
-    /// pixels, so there is no alpha channel to keep. Off-surface is a no-op.
-    fn blend(&mut self, x: i32, y: i32, color: u32, coverage: f32) {
-        if x < 0 || y < 0 || (x as usize) >= self.w || (y as usize) >= self.h {
-            return;
-        }
-        let idx = y as usize * self.w + x as usize;
-        let bg = self.px[idx];
-        let chan = |v: u32, sh: u32| ((v >> sh) & 0xff) as u8;
-        let mix = |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage);
-        self.px[idx] = pack_xrgb(Rgb {
-            r: mix(16),
-            g: mix(8),
-            b: mix(0),
-        });
-    }
-
-    /// Fill the `w`×`h` rect from `(x, y)` with `color`, clipped to the
-    /// surface.
-    fn fill(&mut self, (x, y): (i32, i32), (w, h): (i32, i32), color: u32) {
-        let (x0, y0) = (x.max(0), y.max(0));
-        let (x1, y1) = ((x + w).min(self.w as i32), (y + h).min(self.h as i32));
-        for py in y0..y1 {
-            let row = py as usize * self.w;
-            for px in x0..x1 {
-                self.px[row + px as usize] = color;
+impl pixtuoid_scene::cutaway::Canvas for XrgbSurface<'_> {
+    fn pixel(&self, x: i32, y: i32) -> Option<Rgb> {
+        let (x, y) = (usize::try_from(x).ok()?, usize::try_from(y).ok()?);
+        (x < self.w && y < self.h).then(|| {
+            let v = self.px[y * self.w + x];
+            Rgb {
+                r: (v >> 16) as u8,
+                g: (v >> 8) as u8,
+                b: v as u8,
             }
-        }
+        })
     }
 
-    /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
-    fn draw_shadowed_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
-        crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
-            self.blend(gx, gy, TEXT_SHADOW, cov)
-        });
-        crate::aa_text::draw_text_at(text, x, top_y, font_px, |gx, gy, cov| {
-            self.blend(gx, gy, color, cov)
-        });
+    fn set(&mut self, x: i32, y: i32, rgb: Rgb) {
+        if let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y))
+            && x < self.w
+            && y < self.h
+        {
+            self.px[y * self.w + x] = pack_xrgb(rgb);
+        }
     }
 }
 
-/// Window pixels between a tooltip's box and its text.
-const TOOLTIP_PAD_PX: i32 = 6;
-/// Window pixels from the pointer to a tooltip's box.
-const TOOLTIP_GAP_PX: i32 = 14;
-
-/// Paint `tip` by the pointer at `cursor` (physical px) — the floating twin
-/// of the TUI's `paint_tooltip`, laying out the SAME shared model: an agent's
-/// card opens below the pointer and a label above it, each flipping when the
-/// window has no room, and each shifting left to stay inside it.
+/// Paint `tip` by the pointer at `cursor` (physical px): the shared
+/// [`card`](pixtuoid_scene::tooltip::Tooltip::card) where
+/// [`place`](pixtuoid_scene::tooltip::place) opens it, in screen cells of
+/// `cell`, as the TUI draws it in terminal cells.
 pub fn paint_tooltip_into_surface(
     sb: &mut XrgbSurface<'_>,
     tip: &pixtuoid_scene::tooltip::Tooltip,
     cursor: (f64, f64),
     theme: &Theme,
+    cell: CellPx,
 ) {
-    use pixtuoid_scene::tooltip::{TipAnchor, TipRow, TipSpan};
-    let width = |spans: &[TipSpan]| -> i32 {
-        spans
-            .iter()
-            .map(|s| crate::aa_text::text_width(&s.text, FOOTER_FONT_PX))
-            .sum()
+    let card = tip.card(theme);
+    let cells =
+        |px: usize, size: u16| u16::try_from(px / usize::from(size.max(1))).unwrap_or(u16::MAX);
+    let area = CellRect {
+        x: 0,
+        y: 0,
+        w: cells(sb.w, cell.w),
+        h: cells(sb.h, cell.h),
     };
-    let gap = crate::aa_text::text_width("  ", FOOTER_FONT_PX);
-    let content_w = tip
-        .rows
-        .iter()
-        .map(|row| match row {
-            TipRow::Spans(spans) => width(spans),
-            TipRow::Heading { left, right } => {
-                width(left) + gap + crate::aa_text::text_width(&right.text, FOOTER_FONT_PX)
-            }
-            TipRow::Rule => 0,
-        })
-        .max()
-        .unwrap_or(0);
-    let line_h = crate::aa_text::line_height(FOOTER_FONT_PX);
-    let (box_w, box_h) = (
-        content_w + 2 * TOOLTIP_PAD_PX,
-        line_h * tip.rows.len() as i32 + 2 * TOOLTIP_PAD_PX,
+    let pointer = (
+        cells(cursor.0.max(0.0) as usize, cell.w),
+        cells(cursor.1.max(0.0) as usize, cell.h),
     );
-    let (cx, cy) = (cursor.0 as i32, cursor.1 as i32);
-    let (sw, sh) = (sb.w as i32, sb.h as i32);
-    let below = cy + TOOLTIP_GAP_PX;
-    let above = cy - TOOLTIP_GAP_PX - box_h;
-    let y = match tip.anchor {
-        TipAnchor::Below if below + box_h > sh => above,
-        TipAnchor::Below => below,
-        TipAnchor::Above if above < 0 => below,
-        TipAnchor::Above => above,
-    }
-    .clamp(0, (sh - box_h).max(0));
-    let x = (cx + TOOLTIP_GAP_PX).min(sw - box_w).max(0);
-    sb.fill((x, y), (box_w, box_h), pack_xrgb(theme.ui.tooltip_bg));
-    let ink = |s: &TipSpan| pack_xrgb(s.tone.rgb(theme).unwrap_or(theme.ui.tooltip_text));
-    let left = x + TOOLTIP_PAD_PX;
-    for (i, row) in tip.rows.iter().enumerate() {
-        let top = y + TOOLTIP_PAD_PX + line_h * i as i32;
-        let mut run = |spans: &[TipSpan], mut at: i32| {
-            for s in spans {
-                sb.draw_shadowed_text(&s.text, at, top, FOOTER_FONT_PX, ink(s));
-                at += crate::aa_text::text_width(&s.text, FOOTER_FONT_PX);
-            }
-        };
-        match row {
-            TipRow::Spans(spans) => run(spans, left),
-            TipRow::Heading { left: l, right } => {
-                run(l, left);
-                let right_x =
-                    left + content_w - crate::aa_text::text_width(&right.text, FOOTER_FONT_PX);
-                run(std::slice::from_ref(right), right_x);
-            }
-            TipRow::Rule => sb.fill(
-                (left, top + line_h / 2),
-                (content_w, 1),
-                pack_xrgb(theme.ui.tooltip_dim),
-            ),
-        }
-    }
+    let placed = pixtuoid_scene::tooltip::place(card.rect(), pointer, area, tip.anchor);
+    let at = (
+        i32::from(placed.x) * i32::from(cell.w),
+        i32::from(placed.y) * i32::from(cell.h),
+    );
+    let ink = GridInk {
+        text: theme.ui.tooltip_text,
+        halo: None,
+        shadow: Some(CARD_SHADOW),
+    };
+    paint_grid(sb, &card, at, cell, Face::Screen, ink);
 }
 
-/// Column budget for the floating footer at `win_w` px — how many monospace Monaspace
-/// advances fit between the margins. Monaspace is fixed-advance, so a column budget maps
-/// cleanly to pixels.
-pub fn footer_budget(win_w: usize) -> u16 {
-    let advance = crate::aa_text::text_width("M", FOOTER_FONT_PX).max(1);
-    (((win_w as i32 - 2 * FOOTER_MARGIN_PX).max(0)) / advance) as u16
+/// How many screen cells of `cell` fit across a `win_w`-pixel window
+/// between the footer's margins: its column budget.
+pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
+    let room = win_w.saturating_sub(2 * FOOTER_MARGIN_PX);
+    u16::try_from(room / usize::from(cell.w.max(1))).unwrap_or(u16::MAX)
 }
 
-/// Paint the shared status footer as a bottom-overlay band — the floating twin of the
-/// TUI's status row, rendering the SAME [`build_footer`] model so the two can't drift.
-/// An OVERLAY over the office's bottom rows: it never insets the buffer (that would
-/// shift the desk-capacity lockstep). Fixed caption height, so it stays crisp at any
-/// office scale.
-pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, theme: &Theme) {
-    let y = (sb.h as i32 - crate::aa_text::line_height(FOOTER_FONT_PX) - FOOTER_MARGIN_PX).max(0);
-    let mut x = FOOTER_MARGIN_PX;
-    for seg in &model.segments {
-        let color = pack_xrgb(seg.tone.rgb(theme));
-        sb.draw_shadowed_text(&seg.text, x, y, FOOTER_FONT_PX, color);
-        x += crate::aa_text::text_width(&seg.text, FOOTER_FONT_PX);
-    }
+/// Paint the shared status footer as a band over the office's bottom rows, in
+/// screen cells of `cell` on a one-pixel shadow: the window's twin of the
+/// TUI's status row, from the same [`build_footer`] model. An overlay, so it
+/// never insets the buffer the desk capacity is derived from.
+pub fn paint_footer_into_surface(
+    sb: &mut XrgbSurface<'_>,
+    model: &FooterModel,
+    theme: &Theme,
+    cell: CellPx,
+) {
+    let margin = i32::try_from(FOOTER_MARGIN_PX).unwrap_or(0);
+    let y = (i32::try_from(sb.h).unwrap_or(i32::MAX) - i32::from(cell.h) - margin).max(0);
+    let ink = GridInk {
+        text: theme.ui.label_idle,
+        halo: Some(TEXT_SHADOW),
+        shadow: None,
+    };
+    paint_grid(sb, &model.line(theme), (margin, y), cell, Face::Screen, ink);
 }
 
 #[cfg(test)]
@@ -729,23 +652,22 @@ mod tests {
 
     /// The bundled pack's densest art, which the window draws at.
     fn density() -> Density {
-        pixtuoid_scene::pack::load_bundled_pack()
-            .expect("bundled pack loads")
-            .max_density_variant()
+        crate::test_flash::pack().max_density_variant()
     }
 
     /// The window's geometry for an office `size` units big, at the test
     /// pack's densest art and no upscale.
-    fn cutaway(size: Size) -> WindowGeometry {
+    fn cutaway(size: Size) -> PixelFit {
         let density = density();
-        WindowGeometry {
-            look: Look::Cutaway {
-                scale: pixtuoid_scene::render_scale::RenderScale::from(density),
+        let px = |units: u16| units * density.get();
+        PixelFit::at_least_density(
+            density.get(),
+            density,
+            Size {
+                w: px(size.w),
+                h: px(size.h),
             },
-            office: size,
-            upscale: 1,
-            unit_px: density.get(),
-        }
+        )
     }
 
     use pixtuoid_scene::layout::Size;
@@ -1060,7 +982,7 @@ mod tests {
     #[test]
     fn boot_capacities_for_window_match_the_first_redraw_geometry_not_the_tui_overseed() {
         let (w, h) = (1280u32, 720u32);
-        let office = window_geometry(PhysicalSize::new(w, h), density()).office;
+        let office = window_geometry(PhysicalSize::new(w, h), density()).logical();
         let boot = boot_capacities_for_window(PhysicalSize::new(w, h), density());
         for (i, &got) in boot.iter().enumerate() {
             let want = pixtuoid_scene::floor::floor_capacity(
@@ -1115,7 +1037,7 @@ mod tests {
         ];
         for (sf, want_buf, want_floor0) in measured {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
-            let office = window_geometry(physical, density()).office;
+            let office = window_geometry(physical, density()).logical();
             assert_eq!(
                 (u32::from(office.w), u32::from(office.h)),
                 want_buf,
@@ -1142,7 +1064,7 @@ mod tests {
         // assert below went red. Derive so the next move can't reach it.
         let min = pixtuoid_scene::layout::min_layout_size();
         let tiny = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
-        let office = window_geometry(tiny, density()).office;
+        let office = window_geometry(tiny, density()).logical();
         assert_eq!(
             pixtuoid_scene::floor::floor_capacity(
                 office.w,
@@ -1210,7 +1132,7 @@ mod tests {
         ] {
             let seed = boot_capacities_for_window(window, density());
             let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
-            let office = window_geometry(window, density()).office;
+            let office = window_geometry(window, density()).logical();
             sync_floor_caps(&mut None, &caps, office.w, office.h);
             let published: [usize; MAX_FLOORS] =
                 std::array::from_fn(|i| caps[i].load(Ordering::Relaxed));
@@ -1328,12 +1250,13 @@ mod tests {
                 },
             )
             .expect("a frame");
-        let centre = |u: u16| f64::from(u) * f64::from(at.unit_px) + f64::from(at.unit_px) / 2.0;
+        let centre =
+            |u: u16| f64::from(u) * f64::from(at.scale().get()) + f64::from(at.scale().get()) / 2.0;
         let size = (window.width, window.height);
         let (mut hit_agent, mut dragged, mut fixture_drags, mut on_agent) =
             (false, false, false, None);
-        for y in 0..at.office.h {
-            for x in 0..at.office.w {
+        for y in 0..at.logical().h {
+            for x in 0..at.logical().w {
                 let cursor = (centre(x), centre(y));
                 match renderer.press_at(
                     cursor,
@@ -1410,7 +1333,7 @@ mod tests {
             ),
             Press::Pointer
         );
-        let away = (on_agent.0 + 10.0 * f64::from(at.unit_px), on_agent.1);
+        let away = (on_agent.0 + 10.0 * f64::from(at.scale().get()), on_agent.1);
         assert!(renderer.pointer_moved(away, at), "the move lifts it");
         assert!(renderer.carrying());
         assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");
@@ -1468,7 +1391,7 @@ mod tests {
         let painted = |tip: &pixtuoid_scene::tooltip::Tooltip, cursor: (f64, f64)| {
             let mut px = vec![0u32; w * h];
             let mut sb = XrgbSurface::new(&mut px, w, h).expect("sized");
-            paint_tooltip_into_surface(&mut sb, tip, cursor, theme);
+            paint_tooltip_into_surface(&mut sb, tip, cursor, theme, Face::Screen.cell(1));
             let rows: Vec<usize> = (0..h)
                 .filter(|&y| px[y * w..(y + 1) * w].contains(&bg))
                 .collect();
@@ -1684,7 +1607,7 @@ mod tests {
         let slot = active_on("/p/a.jsonl", 0, 0);
         scene.agents.insert(slot.agent_id, slot);
         let warning = crate::doctor::footer_warning(&[], &["cc"]);
-        let budget = footer_budget(960);
+        let budget = footer_budget(960, Face::Screen.cell(1));
         let calm = renderer.footer(&scene, budget, true, None, None).text();
         let warned = renderer
             .footer(&scene, budget, true, None, warning.as_deref())
@@ -1705,12 +1628,13 @@ mod tests {
             FooterContext::new(&scene, None, true, None, None, FOOTER_KEYS, FOOTER_KEYS),
         );
         let (w, h) = (400usize, 160usize);
-        let model = build_footer(&inputs, footer_budget(w));
+        let model = build_footer(&inputs, footer_budget(w, Face::Screen.cell(1)));
         let mut sb = vec![0u32; w * h];
         paint_footer_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
             &model,
             theme,
+            Face::Screen.cell(1),
         );
         let changed: Vec<usize> = sb
             .iter()

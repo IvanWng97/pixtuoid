@@ -397,7 +397,7 @@ mod tests {
     }
 
     /// The web hero's pack. Nothing runs this suite without `cutaway-assets`
-    /// (`just hack` only checks), so this is the one place it is loaded.
+    /// (`just hack` builds no tests), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
         let (_, dropped) = density_art::bundled_without_density_art(include_str!(

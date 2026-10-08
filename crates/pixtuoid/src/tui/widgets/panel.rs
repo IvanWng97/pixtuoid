@@ -389,8 +389,8 @@ mod tests {
     fn borderless_panel_casts_a_flat_offset_shadow() {
         use ratatui::style::Color;
         let bright = Color::Rgb(200, 200, 200);
-        let dim = (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8;
-        assert!(dim < 200, "SHADOW_FACTOR must actually darken");
+        let dim = (200.0 * pixtuoid_scene::display::cells::CARD_SHADOW) as u8;
+        assert!(dim < 200, "CARD_SHADOW must actually darken");
         let area = Rect::new(5, 4, 8, 4); // small, well inside the 20x12 buffer
         let mut term = Terminal::new(TestBackend::new(20, 12)).unwrap();
         term.draw(|f| {

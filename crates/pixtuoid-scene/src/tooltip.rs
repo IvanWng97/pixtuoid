@@ -10,6 +10,8 @@ use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, SceneState};
 
+use crate::display::cells::{CellGrid, CellRect};
+use crate::display::text::cells;
 use crate::display::{GatewayCard, HoverTarget, PetHover};
 use crate::floor::FloorInputs;
 use crate::footer::{FooterTone, RungKind};
@@ -104,7 +106,114 @@ impl Tooltip {
             anchor: TipAnchor::Above,
         }
     }
+
+    /// The card every painter draws: the rows on the tooltip's fill inside a
+    /// cell of padding, a heading's right run flush to the widest body row,
+    /// a rule across, the title bold. An agent's card is at least
+    /// [`MIN_CARD_W`] wide.
+    pub fn card(&self, theme: &Theme) -> CellGrid {
+        let width = |spans: &[TipSpan]| spans.iter().map(|s| cells(&s.text)).sum::<u16>();
+        let body_w = self
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                TipRow::Spans(spans) => Some(width(spans)),
+                TipRow::Heading { .. } | TipRow::Rule => None,
+            })
+            .max()
+            .unwrap_or(0);
+        let content_w = self.rows.iter().fold(body_w, |w, row| match row {
+            TipRow::Heading { left, right } => {
+                w.max(width(left) + HEADING_GAP + cells(&right.text))
+            }
+            TipRow::Spans(_) | TipRow::Rule => w,
+        });
+        let min_w = match self.anchor {
+            TipAnchor::Below => MIN_CARD_W,
+            TipAnchor::Above => 0,
+        };
+        let rows = u16::try_from(self.rows.len()).unwrap_or(u16::MAX);
+        let mut grid = CellGrid::new(
+            (content_w + 2 * CARD_PAD).max(min_w),
+            rows.saturating_add(2 * CARD_PAD),
+        );
+        grid.fill(theme.ui.tooltip_bg);
+        let put = |grid: &mut CellGrid, at: (u16, u16), s: &TipSpan| {
+            grid.put(at, &s.text, s.tone.rgb(theme), s.tone == TipTone::Title)
+        };
+        for (y, row) in (CARD_PAD..).zip(&self.rows) {
+            match row {
+                TipRow::Spans(spans) => {
+                    spans
+                        .iter()
+                        .fold(CARD_PAD, |x, s| put(&mut grid, (x, y), s));
+                }
+                TipRow::Heading { left, right } => {
+                    left.iter().fold(CARD_PAD, |x, s| put(&mut grid, (x, y), s));
+                    put(
+                        &mut grid,
+                        (CARD_PAD + content_w - cells(&right.text), y),
+                        right,
+                    );
+                }
+                TipRow::Rule => {
+                    let rule = RULE.repeat(usize::from(content_w));
+                    grid.put((CARD_PAD, y), &rule, Some(theme.ui.tooltip_dim), false);
+                }
+            }
+        }
+        grid
+    }
 }
+
+/// Cells of padding around a card's rows.
+const CARD_PAD: u16 = 1;
+/// The fewest cells between a heading's two runs.
+const HEADING_GAP: u16 = 2;
+/// The narrowest an agent's card is, in cells.
+pub const MIN_CARD_W: u16 = 20;
+/// The line a [`TipRow::Rule`] draws, a cell at a time.
+const RULE: &str = "\u{2500}";
+
+/// Where a card of `card` cells opens by the pointer at `pointer` inside
+/// `area`, all in cells: an agent's card (at least [`MIN_CARD_W`] wide) below
+/// the pointer, flipping above when it would cross the bottom; a label
+/// above, flipping below when it would cross the top; either just right of
+/// the pointer, flipping left when it would cross the right edge. The card
+/// is at most `area` big; a painter clips what still overflows.
+pub fn place(card: CellRect, pointer: (u16, u16), area: CellRect, anchor: TipAnchor) -> CellRect {
+    let (mx, my) = pointer;
+    let h = card.h.min(area.h);
+    let (w, y) = match anchor {
+        TipAnchor::Below => {
+            let below = my.saturating_add(1);
+            let y = if below.saturating_add(h) > area.y + area.h {
+                my.saturating_sub(h).max(area.y)
+            } else {
+                below
+            };
+            (card.w.min(area.w).max(MIN_CARD_W), y)
+        }
+        TipAnchor::Above => {
+            let y = if my < area.y + h {
+                my.saturating_add(1)
+            } else {
+                my.saturating_sub(h)
+            };
+            (card.w.min(area.w), y)
+        }
+    };
+    let right = mx.saturating_add(POINTER_GAP);
+    let x = if right.saturating_add(w) > area.x + area.w {
+        mx.saturating_sub(w + 1)
+    } else {
+        right
+    };
+    CellRect { x, y, w, h }
+}
+
+/// Cells from the pointer to a card opening right of it.
+const POINTER_GAP: u16 = 2;
 
 /// The tooltip for what `hit` names on `world`'s frame; `None` for the star,
 /// whose click is its whole story, and for an agent or gateway gone from the
@@ -323,5 +432,92 @@ pub fn mascot_text(card: &GatewayCard) -> String {
         format!(" {name} gateway \u{b7} {verb} \u{b7} {active_sessions} sessions ")
     } else {
         format!(" {name} gateway \u{b7} {verb} ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(text: &str, tone: TipTone) -> TipSpan {
+        TipSpan::new(text, tone)
+    }
+
+    fn row(card: &CellGrid, y: u16) -> String {
+        (0..card.width())
+            .filter_map(|x| card.get(x, y).map(|c| c.symbol.clone()))
+            .collect()
+    }
+
+    /// The card pads its rows a cell all round on the tooltip's fill, flushes
+    /// a heading's right run to the widest row and draws a rule across.
+    #[test]
+    fn a_card_lays_its_rows_out_in_padded_cells() {
+        let theme = crate::theme::ALL_THEMES[0];
+        let tip = Tooltip {
+            rows: vec![
+                TipRow::Heading {
+                    left: vec![span("ab", TipTone::Title)],
+                    right: span("z", TipTone::Dim),
+                },
+                TipRow::Rule,
+                TipRow::Spans(vec![span("0123456789", TipTone::Text)]),
+            ],
+            anchor: TipAnchor::Above,
+        };
+        let card = tip.card(theme);
+        assert_eq!((card.width(), card.height()), (12, 5));
+        assert_eq!(row(&card, 1), " ab       z ");
+        assert_eq!(row(&card, 2), format!(" {} ", "\u{2500}".repeat(10)));
+        assert_eq!(row(&card, 3), " 0123456789 ");
+        assert!((0..card.height()).all(|y| {
+            (0..card.width())
+                .all(|x| card.get(x, y).and_then(|c| c.bg) == Some(theme.ui.tooltip_bg))
+        }));
+        assert!(card.get(1, 1).is_some_and(|c| c.bold));
+    }
+
+    /// An agent's card is at least [`MIN_CARD_W`] wide; a label is its text.
+    #[test]
+    fn an_agents_card_is_never_narrower_than_its_minimum() {
+        let theme = crate::theme::ALL_THEMES[0];
+        let label = Tooltip::label("hi");
+        assert_eq!(label.card(theme).width(), 4);
+        let card = Tooltip {
+            anchor: TipAnchor::Below,
+            ..label
+        };
+        assert_eq!(card.card(theme).width(), MIN_CARD_W);
+    }
+
+    /// A card opens right of the pointer below (a label above) and flips
+    /// where it would cross the area's edge.
+    #[test]
+    fn a_card_flips_off_the_areas_edges() {
+        let area = CellRect {
+            x: 0,
+            y: 0,
+            w: 80,
+            h: 24,
+        };
+        let card = CellRect {
+            w: 20,
+            h: 5,
+            ..CellRect::default()
+        };
+        let at = |pointer, anchor| place(card, pointer, area, anchor);
+        assert_eq!(
+            at((10, 5), TipAnchor::Below),
+            CellRect {
+                x: 12,
+                y: 6,
+                w: 20,
+                h: 5
+            }
+        );
+        assert_eq!(at((10, 22), TipAnchor::Below).y, 17);
+        assert_eq!(at((70, 5), TipAnchor::Below).x, 49);
+        assert_eq!(at((10, 10), TipAnchor::Above).y, 5);
+        assert_eq!(at((10, 2), TipAnchor::Above).y, 3);
     }
 }

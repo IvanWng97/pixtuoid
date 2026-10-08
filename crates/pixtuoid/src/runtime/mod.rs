@@ -376,12 +376,12 @@ mod tests {
     /// seats agents at desks the cutaway never paints.
     #[test]
     fn a_cutaway_boot_seeds_no_desk_its_office_lacks() {
-        use crate::graphics::{CellSize, Fit, ImageProtocol};
+        use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
         let (cols, rows) = (120, 40);
         let cell = CellSize { w: 6, h: 12 };
         let area = crate::tui::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, cols, rows));
         let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
-        let fit = Fit::new(cell, area.as_size(), density).expect("fits");
+        let fit = cutaway_fit(cell, area.as_size(), density).expect("fits");
         assert_eq!(fit.scale().get(), 8);
         let cutaway = Plan::Cutaway {
             fit,
