@@ -272,7 +272,7 @@ impl Tiles {
             index % across * u32::from(self.shape.cols),
             index / across * u32::from(self.shape.rows),
         );
-        // The image is at most `u16::MAX` px a side (`Fit::new`), so its
+        // The image is at most `u16::MAX` px a side (`cutaway_fit`), so its
         // cells are too.
         let cells = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
         Tile {
