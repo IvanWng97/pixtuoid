@@ -387,7 +387,7 @@ mod tests {
             fit,
             route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
-            forced: false,
+            chosen: crate::graphics::Chosen::Answer,
         };
         let seed = resolve_boot_caps(None, Some(cutaway), || term(cols, rows));
         let painted = fit.logical();
