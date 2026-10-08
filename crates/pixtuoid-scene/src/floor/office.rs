@@ -425,7 +425,8 @@ impl OfficeSession {
     }
 
     /// Render one frame of `inputs.world.scene` in `look`: the floor showing,
-    /// or both floors of a slide composed into one, `gap` between them.
+    /// or both floors of a slide composed into one, `gap` between them and
+    /// their world text baked whatever `look` says.
     /// `inputs.world.scene` is the FULL live scene: the office evicts against
     /// it and projects each floor out of it. `inputs.world.floor` carries the
     /// office's weather and motion, `inputs.place.gateway` its gateway; each
@@ -445,7 +446,7 @@ impl OfficeSession {
         self.prepare(scene, now);
         let n_floors = self.n_floors;
         let total_agents = scene.agents.len();
-        let draw = |views: &mut Vec<FloorView>, office: &mut PerOffice, floor: usize| {
+        let draw = |views: &mut Vec<FloorView>, office: &mut PerOffice, floor: usize, look| {
             let floor_scene = super::project_floor_scene(scene, floor);
             let world = floor_world(inputs.world, &floor_scene, floor, n_floors, pets);
             views[floor].render(
@@ -465,12 +466,20 @@ impl OfficeSession {
             self.slide = None;
             let current = self.nav.current();
             self.shown_changed = self.shown.replace(current) != Some(current);
-            return draw(&mut self.views, &mut self.office, current);
+            return draw(&mut self.views, &mut self.office, current, look);
         };
         self.shown = None;
+        // A slide has no one layout for a host to set text on.
+        let look = match look {
+            crate::look::Look::Cutaway { scale, .. } => crate::look::Look::Cutaway {
+                scale,
+                text: crate::look::WorldText::Baked,
+            },
+            classic @ crate::look::Look::Classic => classic,
+        };
         let (from, to, t) = (tr.from_floor, tr.to_floor, tr.t(now));
-        draw(&mut self.views, &mut self.office, from);
-        draw(&mut self.views, &mut self.office, to);
+        draw(&mut self.views, &mut self.office, from, look);
+        draw(&mut self.views, &mut self.office, to, look);
         let slide = self
             .slide
             .get_or_insert_with(|| RgbBuffer::filled(0, 0, gap));

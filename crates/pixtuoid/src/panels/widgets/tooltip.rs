@@ -6,8 +6,9 @@ use ratatui::widgets::Paragraph;
 use super::to_color;
 use crate::panels::clip_widget_rect;
 use pixtuoid_core::AgentId;
-use pixtuoid_scene::display::cells::CellRect;
-use pixtuoid_scene::display::{Badge, TextRole, TextRun};
+use pixtuoid_scene::display::cells::{CellMap, CellRect};
+use pixtuoid_scene::display::{Badge, TextRole, TextRun, World};
+use pixtuoid_scene::layout::Bounds;
 use pixtuoid_scene::tooltip::Tooltip;
 
 /// Where a cursor tooltip anchors: the hovered cell, and the scene rect it must
@@ -19,13 +20,55 @@ pub(crate) struct TooltipAt {
     pub(crate) scene_rect: Rect,
 }
 
+/// Paint `world` as terminal text over the office in `scene_rect`, whose
+/// cells `map` lays over it: the badges, each bubble over them, then the
+/// signs, which a bubble must not cover.
+pub(crate) fn paint_world(
+    f: &mut ratatui::Frame<'_>,
+    world: World<'_>,
+    (scene_rect, map): (Rect, CellMap),
+    hovered: Option<AgentId>,
+) {
+    paint_badges(f, world.badges, (scene_rect, map), hovered);
+    paint_text_runs(f, world.bubbles, (scene_rect, map));
+    for (run, at) in set_signs(world.signs, map) {
+        put_line(f, run_line(run), at, scene_rect);
+    }
+}
+
+/// The logical units the cells of `map` show that the star among `signs`
+/// is set in by [`paint_world`], where a pointer opens the repo; `None`
+/// when none is set.
+pub(crate) fn star_area(signs: &[TextRun], map: CellMap) -> Option<Bounds> {
+    set_signs(signs, map)
+        .into_iter()
+        .find_map(|(run, at)| (run.role == TextRole::Star).then(|| map.area_of(at)))
+}
+
+/// Each of `signs` that is set, with its cells on `map`. A sign yields to one
+/// before it on its line: on a grid whose cells are wider than the classic's,
+/// the star would write over the brand.
+fn set_signs(signs: &[TextRun], map: CellMap) -> Vec<(&TextRun, CellRect)> {
+    let mut set: Vec<(&TextRun, CellRect)> = Vec::new();
+    for run in signs {
+        let at = run.line_at(line_width(&run_line(run)), map);
+        if !set
+            .iter()
+            .any(|(_, s)| s.y == at.y && s.x < at.x + at.w && at.x < s.x + s.w)
+        {
+            set.push((run, at));
+        }
+    }
+    set
+}
+
 /// Paint `badges` as terminal text on their plates, each a ● in its marker's
-/// ink then its name in the name's, in the cells [`Badge::place`] gives the
-/// line; `hovered`'s reads `▸name` in bold white.
+/// ink then its name in the name's, in the cells [`Badge::line_at`] gives
+/// the line on `map`; `hovered`'s reads `▸name` in bold white.
 pub(crate) fn paint_badges(
     f: &mut ratatui::Frame<'_>,
     badges: &[Badge],
-    scene_rect: Rect,
+    (scene_rect, map): (Rect, CellMap),
     hovered: Option<AgentId>,
 ) {
     use ratatui::style::Modifier;
@@ -50,67 +93,77 @@ pub(crate) fn paint_badges(
                 Span::styled(name.text().to_owned(), on_plate.fg(to_color(name.ink))),
             ])
         };
-        put_line(f, line, |w| badge.place(w), scene_rect);
+        let at = badge.line_at(line_width(&line), map);
+        put_line(f, line, at, scene_rect);
     }
 }
 
-/// Paint `runs` as terminal text, each in the cells [`TextRun::place`] gives
-/// the line it writes (`a_run_paints_where_place_puts_it`). The board's brand
-/// and star and the floor indicator are bold, the indicator and a chitchat
-/// bubble padded a cell each side on their plates.
-pub(crate) fn paint_text_runs(f: &mut ratatui::Frame<'_>, runs: &[TextRun], scene_rect: Rect) {
-    use ratatui::style::Modifier;
-    for run in runs {
-        let bold = matches!(
-            run.role,
-            TextRole::Brand | TextRole::Star | TextRole::Indicator
-        );
-        let style = |ink| {
-            let style = Style::default().fg(to_color(ink));
-            if bold {
-                style.add_modifier(Modifier::BOLD)
-            } else {
-                style
-            }
-        };
-        let spans: Vec<Span<'_>> = match (run.role, run.plate) {
-            (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => {
-                let on_plate = |s: Style| s.bg(to_color(plate));
-                let pad = || Span::styled(" ", on_plate(Style::default()));
-                std::iter::once(pad())
-                    .chain(
-                        run.spans
-                            .iter()
-                            .map(|s| Span::styled(s.text(), on_plate(style(s.ink)))),
-                    )
-                    .chain(std::iter::once(pad()))
-                    .collect()
-            }
-            _ => run
-                .spans
-                .iter()
-                .map(|s| Span::styled(s.text(), style(s.ink)))
-                .collect(),
-        };
-        put_line(f, Line::from(spans), |w| run.place(w), scene_rect);
-    }
-}
-
-/// Write `line` into the cells `place` gives a line its width, clipped to
-/// `scene_rect`.
-fn put_line(
+/// Paint `runs` as terminal text, each in the cells [`TextRun::line_at`]
+/// gives the line it writes on `map` (`world_text_paints_where_line_at_puts_it`).
+pub(crate) fn paint_text_runs(
     f: &mut ratatui::Frame<'_>,
-    line: Line<'_>,
-    place: impl Fn(u16) -> pixtuoid_scene::layout::Bounds,
-    scene_rect: Rect,
+    runs: &[TextRun],
+    (scene_rect, map): (Rect, CellMap),
 ) {
+    for run in runs {
+        let line = run_line(run);
+        let at = run.line_at(line_width(&line), map);
+        put_line(f, line, at, scene_rect);
+    }
+}
+
+/// The line a terminal writes `run` as. The board's brand and star and the
+/// floor indicator are bold, the indicator and a chitchat bubble padded a
+/// cell each side on their plates.
+fn run_line(run: &TextRun) -> Line<'_> {
+    use ratatui::style::Modifier;
+    let bold = matches!(
+        run.role,
+        TextRole::Brand | TextRole::Star | TextRole::Indicator
+    );
+    let style = |ink| {
+        let style = Style::default().fg(to_color(ink));
+        if bold {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
+        }
+    };
+    let spans: Vec<Span<'_>> = match (run.role, run.plate) {
+        (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => {
+            let on_plate = |s: Style| s.bg(to_color(plate));
+            let pad = || Span::styled(" ", on_plate(Style::default()));
+            std::iter::once(pad())
+                .chain(
+                    run.spans
+                        .iter()
+                        .map(|s| Span::styled(s.text(), on_plate(style(s.ink)))),
+                )
+                .chain(std::iter::once(pad()))
+                .collect()
+        }
+        _ => run
+            .spans
+            .iter()
+            .map(|s| Span::styled(s.text(), style(s.ink)))
+            .collect(),
+    };
+    Line::from(spans)
+}
+
+/// The cells `line` takes.
+fn line_width(line: &Line<'_>) -> u16 {
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-    let at = place(pixtuoid_scene::display::text::cells(&text));
+    pixtuoid_scene::display::text::cells(&text)
+}
+
+/// Write `line` into scene cells `at`, clipped to `scene_rect`.
+fn put_line(f: &mut ratatui::Frame<'_>, line: Line<'_>, at: CellRect, scene_rect: Rect) {
     if let Some(r) = clip_widget_rect(
         Rect {
-            x: scene_rect.x + at.x,
-            y: scene_rect.y + at.y / pixtuoid_scene::layout::CELL_ROWS,
-            width: at.width,
+            x: scene_rect.x.saturating_add(at.x),
+            y: scene_rect.y.saturating_add(at.y),
+            width: at.w,
             height: 1,
         },
         scene_rect,
@@ -209,6 +262,7 @@ mod tests {
     ) {
         paint_tooltip(f, &Tooltip::label(&mascot_tooltip_text(card)), at, theme);
     }
+    use pixtuoid_scene::display::cells::CellMap;
     use pixtuoid_scene::theme;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -297,7 +351,11 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(120, 44)).unwrap();
         let scene_rect = Rect::new(0, 0, 120, 44);
         term.draw(|f| {
-            super::paint_text_runs(f, &model.runs(&theme::NORMAL), scene_rect);
+            super::paint_text_runs(
+                f,
+                &model.runs(&theme::NORMAL),
+                (scene_rect, CellMap::HALF_BLOCK),
+            );
         })
         .unwrap();
         let buf = term.backend().buffer();
@@ -321,13 +379,12 @@ mod tests {
         assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
     }
 
-    /// A run is painted in exactly the cells
-    /// [`TextRun::place`](pixtuoid_scene::display::TextRun::place) gives its
-    /// line, and a badge in those [`Badge::place`](super::Badge::place) gives
-    /// its own, whichever row its anchor falls on: the board's lines, and a
-    /// badge over an odd and an even head.
+    /// World text paints in exactly the cells `line_at` gives its line on
+    /// any terminal's grid. On the classic's, a badge centres on its anchor
+    /// in the cell row `LABEL_GAP` rows over it, whichever row its anchor
+    /// falls on, and every sign is set; on a cutaway's, no two signs meet.
     #[test]
-    fn a_run_paints_where_place_puts_it() {
+    fn world_text_paints_where_line_at_puts_it() {
         use pixtuoid_core::state::DaemonState;
         use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
@@ -355,45 +412,63 @@ mod tests {
                 .filter(|&(x, y)| buf[(x, y)] != ratatui::buffer::Cell::default())
                 .collect()
         };
-        let terminal_cells = |b: pixtuoid_scene::layout::Bounds| -> Vec<(u16, u16)> {
-            (b.y / 2..(b.y + b.height).div_ceil(2))
-                .flat_map(|y| (b.x..b.x + b.width).map(move |x| (x, y)))
-                .collect()
-        };
-        for y in [9, 10] {
+        for (y, row) in [(9, 3), (10, 4)] {
             let badge = badge(
                 Point { x: 40, y },
                 "cc\u{b7}repo",
                 BadgeTone::Idle,
                 &theme::NORMAL,
             );
-            let line = format!(
-                "{}{}",
-                pixtuoid_scene::badge::BADGE_MARKER,
-                badge.name.text()
-            );
+            // The marker and the name.
+            let w = 1 + 7;
             assert_eq!(
-                painted(&|f| super::paint_badges(f, std::slice::from_ref(&badge), area, None)),
-                terminal_cells(badge.place(pixtuoid_scene::display::text::cells(&line))),
+                painted(&|f| super::paint_badges(
+                    f,
+                    std::slice::from_ref(&badge),
+                    (area, CellMap::HALF_BLOCK),
+                    None
+                )),
+                (40 - w / 2..40 - w / 2 + w)
+                    .map(|x| (x, row))
+                    .collect::<Vec<_>>(),
                 "a badge at {:?}",
                 badge.at
             );
         }
-        let mut stars = 0;
-        for run in model.runs(&theme::NORMAL) {
-            let painted = painted(&|f| super::paint_text_runs(f, std::slice::from_ref(&run), area));
-            let line: String = run.spans.iter().map(|s| s.text()).collect();
-            let placed = run.place(pixtuoid_scene::display::text::cells(&line));
-            assert_eq!(
-                painted,
-                terminal_cells(placed),
-                "{:?} at {:?}",
-                run.role,
-                run.at
-            );
-            stars += usize::from(run.role == super::TextRole::Star);
+        let runs = model.runs(&theme::NORMAL);
+        let stars = runs.iter().filter(|r| r.role == super::TextRole::Star);
+        assert_eq!(stars.count(), 1, "the board has its star");
+        let grid = |w, h, scale| CellMap {
+            scale,
+            cell: pixtuoid_scene::display::cells::CellPx { w, h },
+        };
+        for map in [
+            CellMap::HALF_BLOCK,
+            grid(14, 34, 16),
+            grid(8, 16, 4),
+            grid(10, 20, 4),
+        ] {
+            for run in &runs {
+                let at = run.line_at(super::line_width(&super::run_line(run)), map);
+                let cells: Vec<(u16, u16)> = (at.x..at.x + at.w).map(|x| (x, at.y)).collect();
+                assert_eq!(
+                    painted(&|f| super::paint_text_runs(f, std::slice::from_ref(run), (area, map))),
+                    cells,
+                    "{map:?}: {:?}",
+                    run.role
+                );
+            }
+            let set = super::set_signs(&runs, map);
+            for (i, (_, a)) in set.iter().enumerate() {
+                for (_, b) in &set[i + 1..] {
+                    let apart = a.y != b.y || a.x + a.w <= b.x || b.x + b.w <= a.x;
+                    assert!(apart, "{map:?}: {a:?} meets {b:?}");
+                }
+            }
+            if map == CellMap::HALF_BLOCK {
+                assert_eq!(set.len(), runs.len(), "the classic sets every sign");
+            }
         }
-        assert_eq!(stars, 1, "the board has its star");
     }
 
     /// A hovered badge reads `▸name` in place of its marker.
@@ -412,7 +487,7 @@ mod tests {
             super::paint_badges(
                 f,
                 std::slice::from_ref(&badge),
-                Rect::new(0, 0, 40, 8),
+                (Rect::new(0, 0, 40, 8), CellMap::HALF_BLOCK),
                 Some(badge.agent),
             )
         })
@@ -450,8 +525,10 @@ mod tests {
         };
         let text: String = run.spans.iter().map(|s| s.text()).collect();
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
-        term.draw(|f| super::paint_text_runs(f, &[run], Rect::new(0, 0, 80, 30)))
-            .unwrap();
+        term.draw(|f| {
+            super::paint_text_runs(f, &[run], (Rect::new(0, 0, 80, 30), CellMap::HALF_BLOCK))
+        })
+        .unwrap();
         let buf = term.backend().buffer();
         let bg = super::to_color(theme.ui.tooltip_bg);
         let cols: Vec<u16> = (0..80u16)
@@ -488,8 +565,15 @@ mod tests {
         };
         for hovered in [None, Some(badge.agent)] {
             let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
-            term.draw(|f| super::paint_badges(f, std::slice::from_ref(&badge), f.area(), hovered))
-                .unwrap();
+            term.draw(|f| {
+                super::paint_badges(
+                    f,
+                    std::slice::from_ref(&badge),
+                    (f.area(), CellMap::HALF_BLOCK),
+                    hovered,
+                )
+            })
+            .unwrap();
             let row = row_of(&term, "repo").expect("the badge painted");
             let buf = term.backend().buffer();
             let inked: Vec<_> = (0..buf.area.width)
@@ -522,7 +606,7 @@ mod tests {
             super::paint_badges(
                 f,
                 &[badge(anchor, text, BadgeTone::Idle, &theme::NORMAL)],
-                scene_rect,
+                (scene_rect, CellMap::HALF_BLOCK),
                 None,
             )
         })
@@ -557,7 +641,7 @@ mod tests {
                     super::paint_badges(
                         f,
                         &[badge(Point { x: 20, y: 8 }, text, tone, theme)],
-                        f.area(),
+                        (f.area(), CellMap::HALF_BLOCK),
                         None,
                     )
                 })
@@ -612,8 +696,13 @@ mod tests {
             role: super::TextRole::Bubble(id),
         };
         term.draw(|f| {
-            super::paint_badges(f, std::slice::from_ref(&speaker), scene_rect, None);
-            super::paint_text_runs(f, &[bubble], scene_rect);
+            super::paint_badges(
+                f,
+                std::slice::from_ref(&speaker),
+                (scene_rect, CellMap::HALF_BLOCK),
+                None,
+            );
+            super::paint_text_runs(f, &[bubble], (scene_rect, CellMap::HALF_BLOCK));
         })
         .unwrap();
         let buf = term.backend().buffer();

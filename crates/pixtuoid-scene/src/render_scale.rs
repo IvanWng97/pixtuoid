@@ -207,10 +207,11 @@ impl PixelFit {
     }
 
     /// The look a floor renders in under this fit: the cutaway at
-    /// [`Self::density`].
-    pub fn look(self) -> crate::look::Look {
+    /// [`Self::density`], its world text set by `text`.
+    pub fn look(self, text: crate::look::WorldText) -> crate::look::Look {
         crate::look::Look::Cutaway {
             scale: RenderScale::from(self.density),
+            text,
         }
     }
 
