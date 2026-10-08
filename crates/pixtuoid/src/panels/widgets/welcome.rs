@@ -1,5 +1,5 @@
 //! The first-run onboarding overlay painter (ratatui). Pure presentation over a
-//! `tui::welcome::WelcomeRow` snapshot + an `elapsed_ms` clock that drives the
+//! `panels::welcome::WelcomeRow` snapshot + an `elapsed_ms` clock that drives the
 //! typewriter reveal and the staged "move-in" of roster rows.
 
 use ratatui::layout::Rect;
@@ -7,7 +7,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{Overflow, Panel, badge_color_for, to_color};
-use crate::tui::welcome::OnboardingFrame;
+use crate::panels::welcome::OnboardingFrame;
 use pixtuoid_scene::theme::Theme;
 
 const WELCOME_W: u16 = 54;

@@ -1,5 +1,5 @@
 //! The agent-dashboard popup painter (ratatui). Pure presentation over the
-//! pre-built row list from `tui::dashboard`; all model / fold / selection logic
+//! pre-built row list from `panels::dashboard`; all model / fold / selection logic
 //! lives there.
 
 use std::time::SystemTime;
@@ -10,7 +10,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{Overflow, Panel, marquee_or_truncate, source_badge_span, to_color};
-use crate::tui::dashboard::{DASHBOARD_VIEWPORT_ROWS, DashboardFrame, DashboardRow, RowState};
+use crate::panels::dashboard::{DASHBOARD_VIEWPORT_ROWS, DashboardFrame, DashboardRow, RowState};
 use pixtuoid_scene::theme::Theme;
 
 const LABEL_W: usize = 32;

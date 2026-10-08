@@ -189,6 +189,13 @@ impl CellGrid {
             .flatten()
     }
 
+    /// Replace the cell at `(x, y)`; off the grid, nothing.
+    pub fn set(&mut self, (x, y): (u16, u16), cell: GridCell) {
+        if let Some(at) = self.get_mut(x, y) {
+            *at = cell;
+        }
+    }
+
     /// Fill every cell with `bg`.
     pub fn fill(&mut self, bg: Rgb) {
         for cell in &mut self.cells {

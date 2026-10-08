@@ -1,6 +1,6 @@
 //! The Sources panel: a modal listing every agent CLI with its connection
 //! state (bound / unbound) and its live activity. This module is the PURE model
-//! — no ratatui. The painter lives in `tui::widgets::connection`.
+//! — no ratatui. The painter lives in `panels::widgets::connection`.
 //!
 //! Rows are the UNION of install targets and registry sources, keyed on the
 //! source id (`SourceDescriptor.name`, joined to an install target via

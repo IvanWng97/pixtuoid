@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::to_color;
-use crate::tui::renderer::clip_widget_rect;
+use crate::panels::clip_widget_rect;
 use pixtuoid_core::AgentId;
 use pixtuoid_scene::display::cells::{CellMap, CellRect};
 use pixtuoid_scene::display::{Badge, TextRole, TextRun, World};

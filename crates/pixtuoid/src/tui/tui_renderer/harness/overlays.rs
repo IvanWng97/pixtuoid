@@ -153,7 +153,7 @@ fn help_overlay_renders_shortcuts() {
 
 #[test]
 fn onboarding_overlay_renders_roster_and_hint() {
-    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    use crate::panels::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/onboard/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 40, vec![]);
     // A large elapsed so the typewriter and every staggered row are fully revealed.
@@ -200,7 +200,7 @@ fn onboarding_overlay_renders_roster_and_hint() {
 
 #[test]
 fn onboarding_dims_the_office_buffer() {
-    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    use crate::panels::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/dim/0.jsonl", 0, t0())], 16);
 
     let mut base = build(100, 40, vec![]);
@@ -245,7 +245,7 @@ fn onboarding_dims_the_office_buffer() {
 
 #[test]
 fn onboarding_dims_the_composed_slide_on_the_transition_path() {
-    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    use crate::panels::welcome::{OnboardingFrame, WelcomeRow};
     let p = pack();
     let scene = two_floor_scene();
     let now = t0();

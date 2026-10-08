@@ -6,7 +6,6 @@
 // output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
-pub(crate) mod aa_text;
 mod app;
 pub use app::run;
 pub(crate) mod audio;
@@ -24,6 +23,7 @@ pub(crate) mod install;
 pub(crate) mod jank;
 #[cfg(feature = "graphics")]
 pub(crate) mod pacing;
+pub(crate) mod panels;
 pub(crate) mod run_log;
 pub(crate) mod runtime;
 pub(crate) mod setup;
@@ -38,7 +38,6 @@ pub(crate) mod version;
 /// reports. Not an API: it moves with them.
 #[doc(hidden)]
 pub mod dev {
-    pub use crate::aa_text::{blend_channel, draw_text_at, has_glyph, line_height, text_width};
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
     pub use crate::floating::offscreen::{
@@ -47,13 +46,13 @@ pub mod dev {
     };
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
+    pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
+    pub use crate::panels::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
+    pub use crate::panels::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
+    pub use crate::panels::widgets::{footer_context, grid_of};
     pub use crate::sources::{ConnState, ConnectionRow};
-    pub use crate::tui::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
-    pub use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
     pub use crate::tui::renderer::{DrawCtx, DrawOut, PetState, draw_scene, scene_buf_size};
     pub use crate::tui::tui_renderer::TuiRenderer;
-    pub use crate::tui::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
-    pub use crate::tui::widgets::footer_context;
 }
 
 /// Strip control characters (Cc) and bidi controls from an untrusted string

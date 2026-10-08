@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::tui::connection::ConnectionFrame;
+use crate::panels::connection::ConnectionFrame;
 
 #[test]
 fn too_small_terminal_returns_no_layout_no_panic() {
@@ -42,7 +42,7 @@ fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
 /// first run is also when the onboarding modal opens — over the same centred rows.
 #[test]
 fn the_too_small_notice_survives_an_open_onboarding_modal() {
-    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    use crate::panels::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
     let (cols, rows) = too_small_terminal();
     let mut r = build(cols, rows, vec![]);
@@ -197,7 +197,7 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
 
 #[test]
 fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
-    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    use crate::panels::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/tiny/0.jsonl", 0, t0())], 16);
 
     let (cols, rows) = too_small_terminal();

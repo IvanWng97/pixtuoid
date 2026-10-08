@@ -100,19 +100,6 @@ pub fn cells(text: &str) -> u16 {
     clusters(text).fold(0, |sum, (_, n)| sum.saturating_add(n))
 }
 
-/// The longest start of `text` that fits `budget` cells, its clusters whole.
-pub(crate) fn take(text: &str, budget: u16) -> &str {
-    let mut used = 0u16;
-    let end = text
-        .grapheme_indices(true)
-        .find(|&(_, cluster)| {
-            used = used.saturating_add(cluster_cells(cluster));
-            used > budget
-        })
-        .map_or(text.len(), |(i, _)| i);
-    &text[..end]
-}
-
 /// [`columns`] past all of `text`: where the run after it starts.
 pub(crate) fn advance(text: &str) -> ArtPx {
     columns(cells(text))
@@ -399,17 +386,6 @@ fn line_at(at: Point, align: Align, w: u16, map: CellMap) -> CellRect {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A budget never splits a grapheme cluster: a ZWJ sequence is kept whole
-    /// or dropped whole.
-    #[test]
-    fn a_take_keeps_clusters_whole() {
-        let coder = "\u{1f469}\u{200d}\u{1f4bb}";
-        let text = format!("a{coder}b");
-        assert_eq!(take(&text, 3), format!("a{coder}"));
-        assert_eq!(take(&text, 2), "a");
-        assert_eq!(take(&text, u16::MAX), text);
-    }
 
     /// The indicator's arrow is hollow and dim where no floor is its way:
     /// both lit between floors, the down arrow out on the ground floor, the up

@@ -89,9 +89,9 @@ struct Chrome {
     help_open: bool,
     /// Footer warning when a source has died; `None` while healthy.
     source_warning: Option<String>,
-    dashboard: crate::tui::dashboard::DashboardFrame,
-    connection: crate::tui::connection::ConnectionFrame,
-    onboarding: crate::tui::welcome::OnboardingFrame,
+    dashboard: crate::panels::dashboard::DashboardFrame,
+    connection: crate::panels::connection::ConnectionFrame,
+    onboarding: crate::panels::welcome::OnboardingFrame,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
@@ -172,7 +172,7 @@ impl Chrome {
         session: &OfficeSession,
         scene: &SceneState,
     ) -> pixtuoid_scene::footer::FooterContext<'a> {
-        crate::tui::widgets::footer_context(
+        crate::panels::widgets::footer_context(
             scene,
             session.footer_floor(scene),
             self.audio.is_audible(),
@@ -181,8 +181,8 @@ impl Chrome {
         )
     }
 
-    fn overlays(&self, popup_scale: f32) -> crate::tui::renderer::OverlayFrame<'_> {
-        crate::tui::renderer::OverlayFrame {
+    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
+        crate::panels::OverlayFrame {
             theme_picker: self.theme_picker,
             dashboard: &self.dashboard,
             connection: &self.connection,
@@ -226,7 +226,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 source_warning: None,
                 dashboard: Default::default(),
                 connection: Default::default(),
-                onboarding: crate::tui::welcome::OnboardingFrame::default(),
+                onboarding: crate::panels::welcome::OnboardingFrame::default(),
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
@@ -383,15 +383,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.volume_flash = flash;
     }
 
-    pub fn set_dashboard_frame(&mut self, frame: crate::tui::dashboard::DashboardFrame) {
+    pub fn set_dashboard_frame(&mut self, frame: crate::panels::dashboard::DashboardFrame) {
         self.chrome.dashboard = frame;
     }
 
-    pub fn set_connection_frame(&mut self, frame: crate::tui::connection::ConnectionFrame) {
+    pub fn set_connection_frame(&mut self, frame: crate::panels::connection::ConnectionFrame) {
         self.chrome.connection = frame;
     }
 
-    pub fn set_onboarding_frame(&mut self, frame: crate::tui::welcome::OnboardingFrame) {
+    pub fn set_onboarding_frame(&mut self, frame: crate::panels::welcome::OnboardingFrame) {
         self.chrome.onboarding = frame;
     }
 
@@ -673,9 +673,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// The slide the session just composed, as classic half-blocks, under the
     /// destination's footer.
     fn flush_classic_slide(&mut self, scene: &SceneState, now: SystemTime) -> Result<()> {
-        use crate::tui::renderer::{
-            flush_buffer_to_term, paint_footer, paint_overlays, scene_rect,
-        };
+        use crate::panels::paint_overlays;
+        use crate::tui::renderer::{flush_buffer_to_term, paint_footer, scene_rect};
         self.forget_drawn();
         let term_size = self.terminal.size()?;
         let footer_scene = self.session.footer_scene(scene);
@@ -955,11 +954,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         pack: &Pack,
         now: SystemTime,
     ) -> Result<()> {
+        use crate::panels::paint_overlays;
+        use crate::panels::widgets::{paint_world, star_area};
         use crate::tui::hit_test::SceneHit;
-        use crate::tui::renderer::{
-            DrawOut, TooltipAt, paint_footer, paint_overlays, scene_hit, scene_rect,
-        };
-        use crate::tui::widgets::{paint_world, star_area};
+        use crate::tui::renderer::{DrawOut, TooltipAt, paint_footer, scene_hit, scene_rect};
         use pixtuoid_scene::display::HoverTarget;
         if crate::tui::renderer::scene_too_small(fitted.scene) {
             return self.draw_too_small(scene, now);

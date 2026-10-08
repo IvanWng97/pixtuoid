@@ -384,9 +384,9 @@ where
     let scene = scene_with(vec![active("/click/0.jsonl", 0, "Edit", t0())], 16);
     r.render(&scene, pack(), now).unwrap();
     let (_tx, scene_rx) = tokio::sync::watch::channel(Arc::new(scene));
-    let mut ui = crate::tui::ui_state::UiState::new(
+    let mut ui = crate::panels::ui_state::UiState::new(
         normal_theme(),
-        crate::tui::welcome::WelcomeUi::from_detected(&[]),
+        crate::panels::welcome::WelcomeUi::from_detected(&[]),
         false,
         std::path::PathBuf::from("/tmp/sock"),
         None,
@@ -407,7 +407,7 @@ where
     };
     // A click is a press and its release; the release acts.
     let click = |r: &mut TuiRenderer<B>,
-                 ui: &mut crate::tui::ui_state::UiState,
+                 ui: &mut crate::panels::ui_state::UiState,
                  at,
                  focus: &mut dyn FnMut(&AgentSlot),
                  now| {
@@ -465,7 +465,7 @@ where
     // under the pointer, and a release clicks nothing but sets it down.
     let scene = scene_rx.borrow().clone();
     let away = (on_agent.0.saturating_sub(12), on_agent.1 + 4);
-    let send = |r: &mut TuiRenderer<B>, ui: &mut crate::tui::ui_state::UiState, kind, at| {
+    let send = |r: &mut TuiRenderer<B>, ui: &mut crate::panels::ui_state::UiState, kind, at| {
         crate::tui::handle_mouse_event(
             event(kind, at),
             ui,

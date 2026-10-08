@@ -23,7 +23,7 @@ const PANEL_MIN_H: u16 = 3;
 /// the terminal clamps to `bounds.height` and paints straight over it. Reserved
 /// HERE rather than by shrinking each caller's `bounds`, because centering in a
 /// shorter box would also move every panel that already fits.
-const RESERVED_FOOTER_ROWS: u16 = crate::tui::renderer::FOOTER_ROWS;
+const RESERVED_FOOTER_ROWS: u16 = crate::panels::FOOTER_ROWS;
 
 /// Inner content `Rect`: `outer` inset by `PANEL_PAD_*` with the title row (when
 /// present) dropped; the raw area when `outer` is too small to inset. Both
@@ -155,7 +155,7 @@ pub(crate) fn window_range(
     scroll: usize,
     viewport: usize,
 ) -> ListWindow {
-    use crate::tui::dashboard::clamp_scroll_idx;
+    use crate::panels::dashboard::clamp_scroll_idx;
     let overflow = list_len > viewport;
     let reserved = if overflow {
         viewport.saturating_sub(1)
@@ -461,7 +461,7 @@ mod tests {
         use ratatui::style::Color;
         let bright = Color::Rgb(200, 200, 200);
         let (w, h) = (20u16, 12u16);
-        let footer_y = h - crate::tui::renderer::FOOTER_ROWS;
+        let footer_y = h - crate::panels::FOOTER_ROWS;
         let area = Rect::new(2, footer_y - 4, 8, 4);
         assert_eq!(
             area.bottom(),
@@ -525,7 +525,7 @@ mod tests {
             .expect("renders");
         // Asserted against the FOOTER's own authority: `== b.bottom() -
         // RESERVED_FOOTER_ROWS` restates the constant under test and can't fail.
-        let footer_row = b.bottom() - crate::tui::renderer::FOOTER_ROWS;
+        let footer_row = b.bottom() - crate::panels::FOOTER_ROWS;
         assert!(
             tall.bottom() <= footer_row,
             "a clamped panel must leave the footer row (y={footer_row}) free, got {tall:?}"
