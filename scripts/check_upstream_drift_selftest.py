@@ -8,11 +8,13 @@ dependency on purpose — the repo has no Python test harness."""
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
 import json
 import pathlib
 import re
 import sys
+import tarfile
 import traceback
 import urllib.error
 
@@ -109,8 +111,9 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CC_HOOKS_URL: "\n# Hooks reference\n",
     d.REASONIX_HOOK_URL: 'const (\n    SessionStart Event = "SessionStart"\n)\n',
     d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
+    d.CODEWHALE_SUBAGENT_URL: "fn parse_agent_tool_action(input: &Value) {\n}\n",
     d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
-    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "on_session_start",\n}\n',
+    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: set[str] = {\n    "on_session_start",\n}\n',
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
@@ -148,7 +151,8 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
     d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
-    d.OPENCODE_EVENT_URLS[1]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
+    d.OPENCODE_EVENT_URLS[1]: 'export const Event = { Asked, Replied }\n',
+    d.OPENCODE_EVENT_URLS[2]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
 }
 
 # A document that satisfies NO anchor — the "upstream reorganized this file"
@@ -383,11 +387,17 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
     """Two one-line edits reopen the gate with every other test still green:
     dropping `also=` makes the half-anchor check SKIP rather than fail, and
     `UNANCHORED_BY_DESIGN` membership IS the exemption."""
-    # The three schemas are parsed STRUCTURALLY, so a failed parse already says
-    # what a text anchor would; nothing else may join them without saying why.
+    # The three schemas, and the Copilot release record, are parsed
+    # STRUCTURALLY, so a failed parse already says what a text anchor would;
+    # nothing else may join them without saying why.
     check(
         d.UNANCHORED_BY_DESIGN
-        == frozenset({d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL, d.COPILOT_SCHEMA_URL}),
+        == frozenset({
+            d.ACP_V1_SCHEMA_URL,
+            d.ACP_V1_SCHEMA_UNSTABLE_URL,
+            d.COPILOT_SCHEMA_SOURCE,
+            d.COPILOT_RELEASE_URL,
+        }),
         f"the anchor requirement is waived only for the JSON Schemas, got "
         f"{sorted(d.UNANCHORED_BY_DESIGN)}",
     )
@@ -743,10 +753,10 @@ def test_the_hermes_blocking_watch_fires_on_an_appearance_not_a_vanish() -> None
 
         def plugins(unservable: list[str]) -> d.Report:
             body = (
-                "VALID_HOOKS: Set[str] = {\n"
+                "VALID_HOOKS: set[str] = {\n"
                 + "".join(f'    "{h}",\n' for h in registered)
                 + "}\n"
-                + "SHELL_UNSUPPORTED_HOOKS: Set[str] = {\n"
+                + "SHELL_UNSUPPORTED_HOOKS: set[str] = {\n"
                 + "".join(f'    "{h}",\n' for h in unservable)
                 + "}\n"
             )
@@ -840,16 +850,16 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
     third re-broke: a brace inside a comment moves the bounds. The dangerous
     outcome is not the empty parse (loud) but the TRUNCATED one — the size floor
     still passes and the tail of the set silently leaves the sweep."""
-    clean = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n    "b_two",\n}\n'
+    clean = 'VALID_HOOKS: set[str] = {\n    "a_one",\n    "b_two",\n}\n'
     want = {"a_one", "b_two"}
-    check(d.python_set_literal(clean, "VALID_HOOKS: Set[str] = {") == want, "clean baseline")
+    check(d.python_set_literal(clean, "VALID_HOOKS: set[str] = {") == want, "clean baseline")
     for label, comment in (
         ("unmatched open", '    # returns {"action": "continue"\n'),
         ("stray close", "    # anything else } lets the turn finish\n"),
         ("both", '    # {"a": 1} and a trailing }\n'),
     ):
-        poisoned = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
-        got = d.python_set_literal(poisoned, "VALID_HOOKS: Set[str] = {")
+        poisoned = 'VALID_HOOKS: set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
+        got = d.python_set_literal(poisoned, "VALID_HOOKS: set[str] = {")
         check(
             got == want,
             f"a comment with an {label} brace must not move the bounds: got {sorted(got)}",
@@ -1515,6 +1525,19 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "}\n"
             )
 
+        def codewhale_agent(tool: str, actions: list[str]) -> str:
+            """The `agent` tool's name and its action parser, with a non-delegating
+            arm a matcher must not take for Start/Wait."""
+            return (
+                "impl ToolSpec for AgentTool {\n"
+                f'    fn name(&self) -> &\'static str {{\n        "{tool}"\n    }}\n}}\n'
+                "fn parse_agent_tool_action(input: &Value) -> Result<AgentToolAction, ToolError> {\n"
+                "    match action {\n"
+                + "".join(f'        "{a}" => Ok(AgentToolAction::Start),\n' for a in actions)
+                + '        "status" | "list" => Ok(AgentToolAction::Status),\n'
+                "    }\n}\n"
+            )
+
         def omp_extension_docs(events: list[str], reads: list[str]) -> dict[str, str]:
             """The three extension-API docs, shaped like upstream: constant
             interface names (the anchors) whose `type:`/field lines exist only
@@ -1586,6 +1609,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"}),
             ("codewhale", pascal, lambda ns: {
                 d.CODEWHALE_HOOK_URL: bare_enum("HookEvent", ns)}),
+            ("codewhale_subagent_tool", str, lambda ns: {
+                d.CODEWHALE_SUBAGENT_URL: codewhale_agent(ns[0], full["codewhale_delegating_actions"])}),
+            ("codewhale_delegating_actions", str, lambda ns: {
+                d.CODEWHALE_SUBAGENT_URL: codewhale_agent(full["codewhale_subagent_tool"][0], ns)}),
             ("codex", str, lambda ns: {
                 d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)
                 + tagged_enum("EventMsg", full["codex_event_msg"])}),
@@ -1604,7 +1631,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.CODEX_ROLLOUT_ITEM_URL: tagged_enum("RolloutItem", ns)}),
             ("hermes", str, lambda ns: {
                 d.HERMES_PLUGINS_URL:
-                    "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
+                    "VALID_HOOKS: set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
             ("grok", str, lambda ns: {
                 d.GROK_HOOK_URL:
                     "macro_rules! hook_events {\n"
@@ -1697,9 +1724,9 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "declare module '@deepseek-ai/cordis' {\n  interface Context {\n  }\n"
                     "  interface Events {\n"}),
             ("copilot", str, lambda ns: {
-                d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
+                d.COPILOT_SCHEMA_SOURCE: copilot_schema(ns, full["copilot_fields"])}),
             ("copilot_fields", str, lambda ns: {
-                d.COPILOT_SCHEMA_URL: copilot_schema(full["copilot"], ns)}),
+                d.COPILOT_SCHEMA_SOURCE: copilot_schema(full["copilot"], ns)}),
         ]
         covered = {c[0] for c in cases}
         rows = {f for f, *_ in d.SURFACE_ROWS}
@@ -1723,8 +1750,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         for field, spell, build in cases:
             names = full[field]
             check(bool(names), f"{field}: the fragment supplies a set")
-            pool = [n for n in names
-                    if field != "opencode" or n not in d.OPENCODE_TOLERATED]
+            pool = list(names)
             # `dispatch_names` is an ANY-of check — one surviving documented name
             # clears it — so its vanish arm has to take them all.
             victims = pool if field == "dispatch_names" else pool[:1]
@@ -1754,6 +1780,106 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                   f"(skipped as probe health? {rep.blind})")
     finally:
         d.fetch = real
+
+
+def _copilot_release(schema: bytes, member: str) -> dict[str, bytes]:
+    """The three documents a Copilot release serves the watcher, its tarball
+    holding `schema` at `member`."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, body in [("package/README.md", b"readme"), (member, schema)]:
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tf.addfile(info, io.BytesIO(body))
+    asset = buf.getvalue()
+    base = "https://github.com/github/copilot-cli/releases/download/v9.9.9/"
+    name = "github-copilot-9.9.9-linux-x64.tgz"
+    return {
+        d.COPILOT_RELEASE_URL: json.dumps({"tag_name": "v9.9.9"}).encode(),
+        base + name: asset,
+        base + "SHA256SUMS.txt": f"{hashlib.sha256(asset).hexdigest()}  {name}\n".encode(),
+    }
+
+
+def test_copilot_schema_is_read_from_the_verified_release_asset() -> None:
+    """Since 1.0.85 the schema ships only in the release's platform tarball."""
+    real = d.fetch_raw
+    try:
+        served = _copilot_release(b'{"ok": 1}', d.COPILOT_SCHEMA_MEMBER)
+        d.fetch_raw = lambda u, *_t, _m=served: _m[u]
+        check(d.fetch(d.COPILOT_SCHEMA_SOURCE) == '{"ok": 1}', "the asset's schema is read")
+
+        bad = dict(served)
+        sums = next(u for u in bad if u.endswith("SHA256SUMS.txt"))
+        bad[sums] = b"0" * 64 + b"  github-copilot-9.9.9-linux-x64.tgz\n"
+        d.fetch_raw = lambda u, *_t, _m=bad: _m[u]
+        rep = d.Report()
+        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
+              "a tarball its release's SHA256SUMS does not vouch for is not read")
+        check(bool(rep.errors) and not rep.blind, "a checksum miss is an error, not a pin move")
+
+        moved = _copilot_release(b"{}", "package/elsewhere.json")
+        d.fetch_raw = lambda u, *_t, _m=moved: _m[u]
+        rep = d.Report()
+        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
+              "a tarball without the schema member yields nothing")
+        check(bool(rep.blind), "a moved schema member is our pin going dark")
+
+        tagless = dict(served)
+        tagless[d.COPILOT_RELEASE_URL] = b"{}"
+        d.fetch_raw = lambda u, *_t, _m=tagless: _m[u]
+        rep = d.Report()
+        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
+              "a release reply naming no tag yields nothing")
+        check(bool(rep.errors) and not rep.blind, "a tagless reply is an error, not a pin move")
+    finally:
+        d.fetch_raw = real
+
+
+def test_only_the_copilot_tarball_gets_the_long_timeout() -> None:
+    """One stalled host must not hold a ~60-document sweep at the tarball's bound."""
+    real = d.urllib.request.urlopen
+    seen: dict[str, float] = {}
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    def stub(req, timeout):
+        seen[req.full_url] = timeout
+        body = b"x"
+        if req.full_url == d.COPILOT_RELEASE_URL:
+            body = json.dumps({"tag_name": "v9.9.9"}).encode()
+        return Resp(body)
+
+    try:
+        d.urllib.request.urlopen = stub
+        d.fetch_raw("https://example.invalid/doc.md")
+        try:
+            d.fetch_copilot_schema()
+        except OSError:
+            pass  # the stub serves no real tarball; only the bounds matter here
+        asset = next(u for u in seen if u.endswith("-linux-x64.tgz"))
+        check(seen["https://example.invalid/doc.md"] == d.FETCH_TIMEOUT_S, f"a document: {seen}")
+        check(seen[asset] == d.COPILOT_ASSET_TIMEOUT_S, f"the tarball: {seen}")
+        check(d.FETCH_TIMEOUT_S < d.COPILOT_ASSET_TIMEOUT_S, "the tarball's bound is the long one")
+    finally:
+        d.urllib.request.urlopen = real
+
+
+def test_opencode_watches_the_live_v1_permission_declaration() -> None:
+    """The CLI publishes v1 `permission.asked` (packages/opencode/src/permission),
+    so its declaring file is watched and nothing is tolerated unseen."""
+    check(any(u.endswith("/packages/schema/src/v1/permission.ts")
+              for u in d.OPENCODE_EVENT_URLS), "the v1 permission file is watched")
+    check(not hasattr(d, "OPENCODE_TOLERATED"), "no opencode name is exempt from the watch")
+
+
+def test_grok_turn_usage_is_a_known_omission() -> None:
+    check("turn_usage" in d.GROK_XAI_KNOWN_OMITTED, "turn_usage has its reason")
 
 
 def main() -> int:

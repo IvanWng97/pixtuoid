@@ -51,6 +51,14 @@ fn surface() -> Value {
         json!([EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]),
     );
     decoded.insert(
+        "codewhale.subagent_tool",
+        json!([crate::source::codewhale::SUBAGENT_TOOL]),
+    );
+    decoded.insert(
+        "codewhale.delegating_actions",
+        json!(crate::source::codewhale::DELEGATING_ACTIONS),
+    );
+    decoded.insert(
         "grok.xai_method",
         json!([crate::source::grok::DECODED_XAI_METHOD]),
     );
