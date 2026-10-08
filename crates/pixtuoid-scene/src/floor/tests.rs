@@ -2078,7 +2078,8 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
 }
 
 /// A cutaway slide bakes both floors' text whoever sets it on a floor
-/// showing, so the text moves with its floor.
+/// showing, so the text moves with its floor: it starts on the leaving
+/// floor's own frame, its board and badges included.
 #[test]
 fn a_cutaway_slide_bakes_its_floors_text() {
     use crate::look::{Look, WorldText};
@@ -2086,7 +2087,8 @@ fn a_cutaway_slide_bakes_its_floors_text() {
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let scene = make_scene(3, 2);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let frame = |text, slide: bool| {
+    // The slide `after` its start, or the floor showing.
+    let frame = |text, after: Option<u64>| {
         let mut office = OfficeSession::new(Arc::clone(&pack));
         let look = Look::Cutaway {
             scale: crate::render_scale::RenderScale::new(4).expect("nonzero"),
@@ -2113,20 +2115,26 @@ fn a_cutaway_slide_bakes_its_floors_text() {
             )
         };
         render(&mut office, t0);
-        if slide {
+        if let Some(after) = after {
             assert!(office.navigate(1, t0));
-            render(&mut office, t0 + Duration::from_millis(400));
+            render(&mut office, t0 + Duration::from_millis(after));
         }
         office.buf().expect("composed").as_slice().to_vec()
     };
+    let baked = frame(WorldText::Baked, None);
     assert_ne!(
-        frame(WorldText::Host, false),
-        frame(WorldText::Baked, false),
+        frame(WorldText::Host, None),
+        baked,
         "a floor showing leaves its text to the host"
     );
     assert_eq!(
-        frame(WorldText::Host, true),
-        frame(WorldText::Baked, true),
+        frame(WorldText::Host, Some(0)),
+        baked,
+        "a slide starts on it"
+    );
+    assert_eq!(
+        frame(WorldText::Host, Some(400)),
+        frame(WorldText::Baked, Some(400)),
         "a slide bakes it"
     );
 }

@@ -226,7 +226,7 @@ fn world_text(r: &TuiRenderer<Window>) -> ratatui::buffer::Buffer {
     let mut term = Terminal::new(TestBackend::new(area.width, area.height)).expect("terminal");
     term.draw(|f| {
         let scene = crate::tui::renderer::scene_rect(f.area());
-        crate::tui::widgets::paint_world(f, world, (scene, map), None);
+        crate::panels::widgets::paint_world(f, world, (scene, map), None);
     })
     .expect("draw");
     term.backend().buffer().clone()
@@ -1302,51 +1302,6 @@ fn a_cutaway_slide_runs_until_a_resize_lands_it() {
     r.render(&scene, pack(), at(frames - 1)).expect("render");
     assert!(r.transition().is_none());
     assert_eq!(r.current_floor(), 1);
-}
-
-/// Each floor slides out showing its own wall board: the first slide frame,
-/// before anything has moved, re-sends none of the tiles over the board,
-/// which a board borrowed from the other floor would change.
-#[test]
-fn a_sliding_floor_keeps_its_own_wall_board() {
-    let base = crate::graphics::kitty::process_base();
-    // The neon sign and the rows its board's three lines take, in cells.
-    let (cols, rows) = (
-        u32::from(pixtuoid_scene::layout::NEON_PANEL_W + 2),
-        u32::from(pixtuoid_scene::layout::NEON_PANEL_INNER_Y / 2 + 3),
-    );
-    let scene = two_floor_scene();
-    for (from, to) in [(0, 1), (1, 0)] {
-        let (mut r, wire) = kitty(120, 40);
-        let mut now = t0();
-        r.render(&scene, pack(), now).expect("render");
-        let tile = r.cutaway.as_ref().expect("a cutaway").tile_shape();
-        let across = 120u32.div_ceil(u32::from(tile.cols));
-        let board: Vec<u32> = (0..rows.div_ceil(u32::from(tile.rows)))
-            .flat_map(|ty| {
-                (0..cols.div_ceil(u32::from(tile.cols))).map(move |tx| base + ty * across + tx)
-            })
-            .collect();
-        if from == 1 {
-            r.navigate_floor(1, now);
-            render_until_settled(&mut r, &scene, pack(), &mut now, 1);
-        }
-        r.render(&scene, pack(), now).expect("render");
-        wire.take();
-        r.navigate_floor(to, now);
-        r.render(&scene, pack(), now).expect("render");
-        assert!(r.transition().is_some(), "{from} → {to}: sliding");
-        let resent: Vec<u32> = kitty_images(&wire.take())
-            .into_iter()
-            .map(|(id, _)| id)
-            .filter(|id| board.contains(id))
-            .collect();
-        assert_eq!(
-            resent,
-            Vec::<u32>::new(),
-            "{from} → {to}: floor {from}'s board changed"
-        );
-    }
 }
 
 /// A modal's tiles are sent but for its cells, and once it closes, the
