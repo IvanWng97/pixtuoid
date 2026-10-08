@@ -52,8 +52,6 @@ pub(crate) struct SourceArgs {
     /// Point at a temp dir to replay fixtures into a headless run.
     #[arg(long, value_hint = clap::ValueHint::DirPath)]
     pub codex_sessions_root: Option<PathBuf>,
-    #[arg(long, value_hint = clap::ValueHint::DirPath)]
-    pub pack_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -86,21 +84,6 @@ pub(crate) enum Cmd {
     Floating {
         #[command(flatten)]
         source: SourceArgs,
-    },
-    /// Validate a custom sprite pack directory.
-    ValidatePack {
-        /// Path to the pack directory (must contain pack.toml).
-        #[arg(value_hint = clap::ValueHint::DirPath)]
-        pack_dir: PathBuf,
-    },
-    /// Extract a skeleton sprite pack to a directory for customization.
-    InitPack {
-        /// Destination directory (created if absent).
-        #[arg(value_hint = clap::ValueHint::DirPath)]
-        dest: PathBuf,
-        /// Overwrite existing files.
-        #[arg(long, default_value_t = false)]
-        force: bool,
     },
     /// Diagnose source health: connection, hooks, and decode drift recorded in
     /// the log. Read-only.
@@ -218,7 +201,6 @@ impl Cli {
                 socket: None,
                 projects_root: None,
                 codex_sessions_root: None,
-                pack_dir: None,
             },
             max_desks: None,
             headless: false,
@@ -368,8 +350,8 @@ mod tests {
     #[test]
     fn cmd_or_default_preserves_explicit_subcommand() {
         let cli = Cli {
-            cmd: Some(Cmd::ValidatePack {
-                pack_dir: PathBuf::from("/some/pack"),
+            cmd: Some(Cmd::Doctor {
+                graphics: crate::GraphicsMode::Off,
             }),
             log_level: LogLevel::Debug,
             theme: Some("cyberpunk".into()),
@@ -377,7 +359,7 @@ mod tests {
         let (level, theme, cmd) = cli.cmd_or_default();
         assert_eq!(level, LogLevel::Debug);
         assert_eq!(theme.as_deref(), Some("cyberpunk"));
-        assert!(matches!(cmd, Cmd::ValidatePack { .. }));
+        assert!(matches!(cmd, Cmd::Doctor { .. }));
     }
 
     #[test]

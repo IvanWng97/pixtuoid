@@ -1118,8 +1118,7 @@ fn scanline(
 /// sprite's material without hardcoding it. The front face a top-down sprite
 /// never had has to be SOME colour, and the desk's lives in the PACK (the
 /// shaded wood, palette key `d`), not the theme, where `furniture.wood_top`
-/// reads nearly like the carpet; sampling also earns a custom pack's desk a
-/// match for free.
+/// reads nearly like the carpet.
 fn dominant_opaque_row(
     frame: &pixtuoid_core::sprite::Frame,
     row: u16,

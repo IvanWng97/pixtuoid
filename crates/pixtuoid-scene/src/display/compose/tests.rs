@@ -166,44 +166,6 @@ fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
     assert_eq!(drawn, vec!["desk", "plant", "seated"]);
 }
 
-/// A pack that draws only its own front sofa gets it flipped for the back
-/// view, never the default pack's back-view art in another style.
-#[test]
-fn a_pack_without_the_back_view_sofa_draws_its_own_front_one_flipped() {
-    let mut own = pixtuoid_core::sprite::format::load_pack_from_strings(
-        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-         [animations.meeting_sofa]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-        &[("one.sprite", "@frame 0\nA")],
-    )
-    .expect("pack builds");
-    own.merge_from(&test_default_pack());
-    let mut order = Vec::new();
-    push_sofa(
-        &mut order,
-        &own,
-        crate::layout::Point { x: 10, y: 10 },
-        true,
-        Tie::FixtureOver,
-    );
-    assert!(
-        matches!(
-            order.as_slice(),
-            [(
-                _,
-                PieceKind::Prop {
-                    art: Art {
-                        sprite: "meeting_sofa",
-                        flip: Flip::Vertical,
-                        ..
-                    },
-                    ..
-                }
-            )]
-        ),
-        "{order:?}"
-    );
-}
-
 /// A back-turned sitter and their chair are ONE piece, so nothing can sort
 /// between them: the occupied desk pushes no chair of its own, and the
 /// sitter's box covers the chair's at either phase of the breathing bob.

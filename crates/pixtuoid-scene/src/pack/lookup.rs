@@ -255,9 +255,8 @@ pub(crate) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames().get(frame_index(anim, idx))
 }
 
-/// `idx`, or `0` once it runs past the animation: a custom pack's animation
-/// with fewer frames than the shared cycle's `frame_idx` would
-/// otherwise vanish the sprite.
+/// `idx`, or `0` once it runs past the animation: an animation with fewer
+/// frames than the shared cycle's `frame_idx` would otherwise vanish.
 pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
     if idx < anim.frames().len() { idx } else { 0 }
 }

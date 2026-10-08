@@ -14,7 +14,7 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use pixtuoid::dev::{DrawCtx, DrawOut, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::pack::load_bundled_pack;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -56,10 +56,6 @@ struct SnapshotArgs {
     /// pixel in semi-transparent red so the restricted zones are visible.
     #[arg(long)]
     debug_walkable: bool,
-
-    /// Custom sprite pack directory.
-    #[arg(long)]
-    pack_dir: Option<std::path::PathBuf>,
 
     /// Override the snapshot terminal width (cells).
     #[arg(long)]
@@ -436,11 +432,7 @@ fn main() -> Result<()> {
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
-    let pack = std::sync::Arc::new(load_sprite_pack(
-        args.pack_dir
-            .clone()
-            .map_or(PackSource::Bundled, PackSource::Explicit),
-    )?);
+    let pack = std::sync::Arc::new(load_bundled_pack()?);
     let mut floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone(&pack));
     // A typo'd theme silently rendering NORMAL would put wrong-palette art into
     // the docs/site screenshot pipelines.

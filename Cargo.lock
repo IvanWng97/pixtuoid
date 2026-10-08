@@ -2751,7 +2751,6 @@ dependencies = [
 name = "pixtuoid-scene"
 version = "0.19.0"
 dependencies = [
- "anyhow",
  "chrono",
  "codspeed-criterion-compat",
  "foldhash",

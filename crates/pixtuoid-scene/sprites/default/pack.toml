@@ -172,7 +172,7 @@ version = "1"
 frames   = ["seated.sprite"]
 frame_ms = 600
 
-# Density variants (`@Nx`): docs/CONFIGURATION.md#custom-sprite-packs.
+# Density variants (`@Nx`): crates/pixtuoid-scene/AGENTS.md#the-sprite-format.
 [animations."seated@4x"]
 frames   = ["seated@4x.sprite"]
 frame_ms = 600
@@ -686,7 +686,7 @@ frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
 
 # Hairstyles and the line round every marked @Nx character:
-# docs/CONFIGURATION.md#custom-sprite-packs. The layers are scripts/gen-art.py's
+# crates/pixtuoid-scene/AGENTS.md#the-sprite-format. The layers are scripts/gen-art.py's
 # HAIRSTYLES, registered here by hand (`every_bundled_sprite_is_a_frame_the_pack_loads`
 # fails on one left out).
 [characters]
