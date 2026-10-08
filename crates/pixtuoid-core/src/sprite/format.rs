@@ -996,7 +996,9 @@ impl Pack {
         self.icons.get(name)
     }
 
-    /// The names of the pack's icons, in order.
+    /// The names of the pack's icons, in order: the icon tests' check that
+    /// the pack draws no icon nothing names.
+    #[doc(hidden)]
     pub fn icon_names(&self) -> impl Iterator<Item = &str> {
         self.icons.keys().map(String::as_str)
     }

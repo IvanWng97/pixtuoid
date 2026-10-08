@@ -8,7 +8,7 @@
 pub const BADGE_MARKER: char = '\u{25cf}';
 
 /// A symbol in a line of text, named by what it means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum Icon {
     /// Agents waiting on you: the board's amber lamp, the footer's alarm.
     Alert,
@@ -68,38 +68,6 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Self; 29] = [
-        Self::Alert,
-        Self::Active,
-        Self::Idle,
-        Self::Waiting,
-        Self::Exiting,
-        Self::Star,
-        Self::Gateway,
-        Self::Up,
-        Self::NoUp,
-        Self::Down,
-        Self::NoDown,
-        Self::ArrowLeft,
-        Self::ArrowUp,
-        Self::ArrowRight,
-        Self::ArrowDown,
-        Self::Enter,
-        Self::Link,
-        Self::Child,
-        Self::More,
-        Self::Folder,
-        Self::MeterOn,
-        Self::MeterOff,
-        Self::Pointer,
-        Self::Fold,
-        Self::Clock,
-        Self::Coffee,
-        Self::Sound,
-        Self::Warning,
-        Self::Check,
-    ];
-
     /// Its `[icons]` name in the pack: an arrow with no floor its way is the
     /// lit arrow in a dim ink.
     pub fn art(self) -> &'static str {
@@ -174,6 +142,7 @@ impl Icon {
 mod tests {
     use super::*;
     use crate::display::text::{LINE_H, cells, columns};
+    use strum::VariantArray;
 
     /// Each icon's world art is one cell wide less the gap per cell its
     /// terminal glyph takes, a line tall; every icon has art in some face,
@@ -181,7 +150,7 @@ mod tests {
     #[test]
     fn every_icon_has_its_art_and_every_art_an_icon() {
         let pack = crate::pack::test_default_pack();
-        for icon in Icon::ALL {
+        for icon in Icon::VARIANTS {
             let Some(art) = pack
                 .icon(icon.art())
                 .and_then(|a| a.world())
@@ -192,14 +161,15 @@ mod tests {
             let w = columns(cells(icon.terminal())).0 - 1;
             assert_eq!((art.width(), art.height()), (w, LINE_H), "{icon:?}");
         }
-        for icon in Icon::ALL {
+        for icon in Icon::VARIANTS {
             let art = pack.icon(icon.art());
             assert!(
                 art.is_some_and(|a| a.world().is_some() || a.screen().is_some()),
                 "{icon:?} has no art"
             );
         }
-        let named: std::collections::BTreeSet<&str> = Icon::ALL.iter().map(|i| i.art()).collect();
+        let named: std::collections::BTreeSet<&str> =
+            Icon::VARIANTS.iter().map(|i| i.art()).collect();
         let drawn: std::collections::BTreeSet<&str> = pack.icon_names().collect();
         assert_eq!(drawn, named);
     }
@@ -209,7 +179,7 @@ mod tests {
     #[test]
     fn every_icon_draws_in_its_texts_ink() {
         let pack = crate::pack::test_default_pack();
-        for icon in Icon::ALL {
+        for icon in Icon::VARIANTS {
             let Some(art) = pack.icon(icon.art()) else {
                 continue;
             };

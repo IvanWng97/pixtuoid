@@ -1451,7 +1451,6 @@ pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> &[pixtuoi
 pub fn pixtuoid_core::sprite::format::Pack::hairstyle(&self, &str, pixtuoid_core::sprite::format::Density) -> core::option::Option<&pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::hairstyles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::icon(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::format::IconArt>
-pub fn pixtuoid_core::sprite::format::Pack::icon_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> pixtuoid_core::sprite::format::Density
 pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::format::Pack::piece_or_source<'k>(&self, &'k str) -> core::option::Option<&'k str>
