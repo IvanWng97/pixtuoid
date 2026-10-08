@@ -18,7 +18,6 @@ use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
-use pixtuoid_core::walkable::OccupancyOverlay;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -383,7 +382,6 @@ fn every_sprite_a_seat_resolves_to_is_in_the_pack() {
 }
 
 #[test]
-#[cfg(feature = "native")]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     use crate::layout::{Facing, Point};
     let pack = crate::pack::test_default_pack();
@@ -486,15 +484,10 @@ fn the_bundled_pack_draws_every_key_an_agent_recolors() {
 #[test]
 #[cfg(feature = "cutaway-assets")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
-    use pixtuoid_core::sprite::format::{
-        Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
-    };
+    use pixtuoid_core::sprite::format::{CHARACTER_ANIMATIONS, Density, density_variant_name};
     let pack = crate::pack::test_default_pack();
     let mut variants = 0;
-    for &base in REQUIRED_CHARACTER_ANIMATIONS
-        .iter()
-        .chain(OPTIONAL_CHARACTER_ANIMATIONS)
-    {
+    for &base in CHARACTER_ANIMATIONS {
         let densities = std::iter::once(None).chain(
             (2..=pack.max_density_variant().get())
                 .filter_map(Density::new)
@@ -2255,7 +2248,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
         let fx = crate::sim::character_effects(
             slot,
             top_left,
-            drawn.map(|s| s.w),
+            drawn.expect("the pack draws the pose").w,
             crate::sim::Cues::default(),
             Motion::Full.timing(now),
         );
@@ -2324,7 +2317,6 @@ fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
             &poses,
             &layout,
             &pack,
-            CHARACTER_SPRITE_W,
             &HashMap::new(),
             Motion::Full.timing(now),
         );
@@ -2352,39 +2344,6 @@ fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
             y: p.top_left.y
         }]
     );
-}
-
-#[test]
-fn paint_character_at_missing_anim_is_a_noop() {
-    let pack = crate::pack::test_default_pack();
-    let mut cache = FrameCache::new();
-    let id = pixtuoid_core::AgentId::from_transcript_path("/c.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    let bg = Rgb { r: 4, g: 5, b: 6 };
-    let mut buf = RgbBuffer::filled(40, 40, bg);
-    paint_character_at(
-        &mut buf,
-        crate::character::SpritePose {
-            anim_name: "does_not_exist",
-            frame_idx: 0,
-            flip_x: false,
-            glow_tint: None,
-        },
-        Point { x: 20, y: 20 },
-        &slot,
-        &pack,
-        &mut cache,
-        SystemTime::UNIX_EPOCH,
-    );
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            assert_eq!(
-                buf.get(x, y),
-                bg,
-                "missing character anim must paint nothing"
-            );
-        }
-    }
 }
 
 #[test]
@@ -2838,103 +2797,6 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
     );
 }
 
-// One AtWaypoint agent ⇒ one blocked rect, so the bbox width IS char_w.
-fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16> {
-    let (mut lo, mut hi) = (None, None);
-    for y in 0..h {
-        for x in 0..w {
-            if overlay.blocks(x, y) {
-                lo = Some(lo.map_or(x, |m: u16| m.min(x)));
-                hi = Some(hi.map_or(x, |m: u16| m.max(x)));
-            }
-        }
-    }
-    Some(hi? - lo? + 1)
-}
-
-// The bundled pack's figures are `CHARACTER_SPRITE_W` wide, so it cannot tell
-// char_w apart from the const; the differential against a wide (10px) fixture
-// pack is what gives this teeth.
-#[test]
-fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
-    use crate::layout::TEST_DEFAULT_DESKS;
-    use crate::pose::Pose;
-    use std::time::Duration;
-
-    let wide = crate::pack::test_wide_pack();
-    let default = crate::pack::test_default_pack();
-    assert_eq!(
-        wide.animation("standing").expect("standing").frames()[0].width(),
-        10,
-        "the wide fixture's standing frame drives char_w"
-    );
-    assert_eq!(
-        default.animation("standing").expect("standing").frames()[0].width(),
-        CHARACTER_SPRITE_W,
-    );
-
-    let layout = SceneLayout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), 0)
-        .expect("240x160 lays out");
-    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let (bw, bh) = (layout.walkable.width(), layout.walkable.height());
-
-    // `pose::derive` is pack-INDEPENDENT, so the AtWaypoint instant it finds is
-    // the same for BOTH packs.
-    let mut found = None;
-    'search: for aid in 0..8u32 {
-        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/wp-{aid}.jsonl"));
-        let mut slot = make_slot(id, ActivityState::Idle);
-        slot.created_at = now0;
-        slot.state_started_at = now0;
-        slot.last_event_at = now0;
-        for secs in 1..1800u64 {
-            let now = now0 + Duration::from_secs(secs);
-            if matches!(
-                pose::derive(&slot, now, &layout),
-                Some(Pose::AtWaypoint { .. })
-            ) {
-                found = Some((slot.clone(), now));
-                break 'search;
-            }
-        }
-    }
-    let (slot, now) = found.expect("an idle agent visits a Named waypoint within the scan window");
-
-    let mut scene = SceneState::uniform(16);
-    scene.agents.insert(slot.agent_id, slot);
-    let coffee = HashMap::new();
-
-    let reserve = |pack: &Pack| {
-        let mut owned = OwnedSimStores::new();
-        sim_step(
-            &mut owned.stores(),
-            SimInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack,
-                    now,
-                    floor: crate::floor::FloorMeta::ground(),
-                    pets: PetInputs::default(),
-                },
-                layout: &layout,
-                coffee: &coffee,
-                door_anim_max_ms: 0,
-            },
-        );
-        reserved_bbox_width(&owned.route.overlay, bw, bh)
-    };
-    assert_eq!(
-        reserve(&wide),
-        Some(10),
-        "wide pack reserves char_w=10 at the AtWaypoint stand cell"
-    );
-    assert_eq!(
-        reserve(&default),
-        Some(CHARACTER_SPRITE_W),
-        "default pack reserves the bundled char_w=8 — the differential that pins char_w",
-    );
-}
-
 /// The cutaway reads `seat_desk` for its chair and its suppressed contact
 /// shadow; the classic painter never reads it. So flipping an arm to `None`
 /// breaks the second profile while every classic assertion stays green.
@@ -3263,10 +3125,9 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     assert_eq!(card.instance, None, "a lone instance needs no port");
 }
 
-/// A mascot whose anim the pack lacks paints nothing, so it lists nothing to
-/// hover; a drawn one is sized by the frame it blitted.
+/// A drawn mascot hovers sized by the frame it blitted.
 #[test]
-fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
+fn a_mascot_hovers_sized_by_its_frame() {
     use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
     use pixtuoid_core::state::DaemonInstanceId;
     use std::time::Duration;
@@ -3283,7 +3144,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
     );
     let now = now0 + Duration::from_secs(6);
     let mut owned = OwnedSimStores::new();
-    let mut frame = sim_step(
+    let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
             world: FloorInputs {
@@ -3306,10 +3167,6 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
         .and_then(|a| frame_at(a, drawn.frame_idx))
         .map(|f| (f.width(), f.height()))
         .expect("the bundled pack draws the mascot");
-    let mut ghost = drawn.clone();
-    ghost.anim_name = "does_not_exist";
-    ghost.key = crate::creatures::openclaw_key("18790");
-    frame.mascots.push(ghost);
 
     let hovers = paint_drawn(&owned, &scene, &layout, &pack, now, &frame).hovers;
     let listed: Vec<_> = hovers
@@ -3605,53 +3462,6 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
         a.overlaps(b),
         "premise: the two arrivals overlap: {a:?} {b:?}"
     );
-}
-
-/// A character or a pet whose anim the pack lacks paints nothing, so it
-/// neither hovers nor wears a badge.
-#[test]
-fn a_figure_whose_anim_is_missing_is_not_hoverable() {
-    let (layout, pack, frames, _) =
-        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
-    let mut frame = frames.last().expect("a walk").clone();
-    let walker = frame.agents[0].agent_id;
-    let mut ghost = frame.characters[0].clone();
-    ghost.anim_name = "does_not_exist";
-    ghost.agent_idx = frame.agents.len();
-    frame.agents.push(AgentSlot {
-        agent_id: pixtuoid_core::AgentId::from_transcript_path("/ghost.jsonl"),
-        ..frame.agents[0].clone()
-    });
-    frame.characters.push(ghost);
-    frame.pet = Some(crate::sim::PetPlacement {
-        kind: crate::pet::PetKind::Cat,
-        pos: frame.characters[0].top_left,
-        flip: false,
-        anim_name: "does_not_exist",
-        frame_idx: 0,
-        effects: Vec::new(),
-    });
-    let mut scene = SceneState::uniform(16);
-    for agent in &frame.agents {
-        scene.agents.insert(agent.agent_id, agent.clone());
-    }
-    let drawn = paint_drawn(
-        &OwnedSimStores::new(),
-        &scene,
-        &layout,
-        &pack,
-        SystemTime::UNIX_EPOCH,
-        &frame,
-    );
-    let hovered: Vec<_> = drawn
-        .hovers
-        .listed()
-        .iter()
-        .map(|h| h.target.clone())
-        .collect();
-    assert_eq!(hovered, vec![HoverTarget::Agent(walker)]);
-    let badged = badged_ids(&drawn);
-    assert_eq!(badged, vec![walker]);
 }
 
 /// Each figure on a walk to a desk hovers on exactly the box the classic
@@ -4915,9 +4725,7 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
 
 #[test]
 fn character_render_names_resolve_in_the_animation_registry() {
-    use pixtuoid_core::sprite::format::{
-        OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
-    };
+    use pixtuoid_core::sprite::format::CHARACTER_ANIMATIONS;
     for n in [
         "seated",
         "typing",
@@ -4932,10 +4740,8 @@ fn character_render_names_resolve_in_the_animation_registry() {
         "side_seated",
     ] {
         assert!(
-            REQUIRED_CHARACTER_ANIMATIONS.contains(&n)
-                || OPTIONAL_CHARACTER_ANIMATIONS.contains(&n),
-            "character render name {n:?} is not a registered \
-             REQUIRED_/OPTIONAL_CHARACTER_ANIMATIONS key"
+            CHARACTER_ANIMATIONS.contains(&n),
+            "character render name {n:?} is not a registered CHARACTER_ANIMATIONS key"
         );
     }
 }
@@ -5414,7 +5220,6 @@ fn a_typist_keys_on_the_art_its_seat_resolves_to() {
             &poses,
             &layout,
             &pack,
-            CHARACTER_SPRITE_W,
             &HashMap::new(),
             timing,
         );
@@ -5449,7 +5254,6 @@ fn only_a_placement_that_breathes_takes_the_breath() {
             &poses,
             &layout,
             &pack,
-            CHARACTER_SPRITE_W,
             &HashMap::new(),
             Motion::Full.timing(now),
         );
@@ -5505,7 +5309,6 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         &poses,
         &layout,
         &pack,
-        CHARACTER_SPRITE_W,
         &HashMap::new(),
         Motion::Full.timing(now),
     );

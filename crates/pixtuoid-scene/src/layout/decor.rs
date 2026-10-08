@@ -920,7 +920,7 @@ impl WallDecor {
     /// Pack-animation key for this decor's sprite. The blit lives in
     /// `pixel_painter::drawable`; the NAME lives on the enum so a new variant is a
     /// compile error HERE, not a forgotten call-site match arm. Every value must be
-    /// in `OPTIONAL_FURNITURE_ANIMATIONS`.
+    /// in `FURNITURE_ANIMATIONS`.
     pub const fn sprite_name(self) -> &'static str {
         match self {
             WallDecor::Bookshelf => "bookshelf",
@@ -1271,7 +1271,7 @@ mod tests {
 
     #[test]
     fn role_enum_sprite_names_resolve_in_the_animation_registry() {
-        use pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS;
+        use pixtuoid_core::sprite::format::FURNITURE_ANIMATIONS;
         let names: Vec<&str> = WallDecor::ALL
             .iter()
             .map(|w| w.sprite_name())
@@ -1280,8 +1280,8 @@ mod tests {
             .collect();
         for n in names {
             assert!(
-                OPTIONAL_FURNITURE_ANIMATIONS.contains(&n),
-                "sprite_name {n:?} is not a registered OPTIONAL_FURNITURE_ANIMATIONS key"
+                FURNITURE_ANIMATIONS.contains(&n),
+                "sprite_name {n:?} is not a registered FURNITURE_ANIMATIONS key"
             );
         }
     }

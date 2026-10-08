@@ -304,10 +304,6 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         timing,
     );
 
-    let char_w = pack
-        .animation("standing")
-        .and_then(|a| a.frames().first())
-        .map_or(CHARACTER_SPRITE_W, |f| f.width());
     // Per-frame occupancy from STATIONARY agent positions only, BEFORE the
     // routed pose pass (which routes Walking poses against THIS overlay).
     // Walkers are deliberately excluded: their position interpolates every
@@ -333,9 +329,9 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                 .unwrap_or(w.pos);
             let stand = layout.stand_point(w.kind, w.pos, origin, w.facing);
             stores.overlay.add(
-                stand.x.saturating_sub(char_w / 2),
+                stand.x.saturating_sub(CHARACTER_SPRITE_W / 2),
                 stand.y.saturating_sub(WALKING_Y_OFF / 2),
-                char_w,
+                CHARACTER_SPRITE_W,
                 WALKING_Y_OFF,
             );
         }
@@ -391,7 +387,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         .collect();
 
     let (characters, waypoint_visitors, new_coffee_carriers, occupied_waypoints) =
-        resolve_characters(&agents, &poses, layout, pack, char_w, coffee, timing);
+        resolve_characters(&agents, &poses, layout, pack, coffee, timing);
 
     let chitchat_bubbles =
         chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
@@ -431,12 +427,6 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     }
 }
 
-/// The size of `anim`'s frame `frame_idx`, or `fallback` where the pack lacks
-/// it, so a figure still sorts and fits sanely while its blit no-ops.
-pub(crate) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Size) -> Size {
-    pack_frame_size(pack, anim, frame_idx).unwrap_or(fallback)
-}
-
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
 pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
@@ -446,11 +436,6 @@ pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Opti
             h: f.height(),
         })
 }
-
-/// The bundled cat's size, for a pack that lacks the pet's anim.
-pub(crate) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
-/// The bundled lobster's size, for a pack that lacks the mascot's anim.
-const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 
 /// Carry out the floor's grip before anything steps: a creature held follows
 /// the pointer and one set down lands, an agent set down starts home; a hold
@@ -549,7 +534,7 @@ fn pet_placement(
         layout,
         Pivot::Center,
         at,
-        frame_size(pack, anim_name, frame_idx, PET_FALLBACK),
+        pack_frame_size(pack, anim_name, frame_idx)?,
     );
     Some(PetPlacement {
         kind,
@@ -719,7 +704,7 @@ fn mascot_placements(
                         crate::pack::animation_frame_at(pack, def.rest, beat),
                     ),
                 };
-                let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
+                let size = pack_frame_size(pack, anim_name, frame_idx)?;
                 let pos = on_canvas(ground.layout, Pivot::Center, at, size);
                 Some(MascotPlacement {
                     pos,
@@ -800,13 +785,12 @@ pub(crate) struct Cues {
     pub(crate) planted_foot: Option<usize>,
 }
 
-/// What rides on `agent`, whose `w`-wide frame (`None` where its pack lacks
-/// one) stands at `top_left` this tick, in paint order: dust underfoot, then a
+/// What rides on `agent`, whose `w`-wide frame stands at `top_left` this tick, in paint order: dust underfoot, then a
 /// burning head's crown, then a sleeper's z or a waiter's mark.
 pub(crate) fn character_effects(
     agent: &AgentSlot,
     top_left: Point,
-    w: Option<u16>,
+    w: u16,
     cues: Cues,
     timing: Timing,
 ) -> Vec<Effect> {
@@ -816,9 +800,7 @@ pub(crate) fn character_effects(
         cues.planted_foot
             .map(|f| effects::walking_dust(top_left, f)),
     );
-    if let Some(w) = w
-        && crate::burn::slot_burn_tier(agent, now) == crate::burn::BurnTier::Top
-    {
+    if crate::burn::slot_burn_tier(agent, now) == crate::burn::BurnTier::Top {
         out.push(effects::flame_crown(top_left, w, beat));
     }
     out.extend(
@@ -848,7 +830,6 @@ pub(crate) fn resolve_characters(
     poses: &HashMap<AgentId, Option<Pose>>,
     layout: &SceneLayout,
     pack: &Pack,
-    char_w: u16,
     coffee: &HashMap<AgentId, SystemTime>,
     timing: Timing,
 ) -> (
@@ -873,7 +854,7 @@ pub(crate) fn resolve_characters(
         let seated = |base: &'static str, glow: CharacterGlow, sleep_seed: Option<u64>| {
             let facing = layout.desk_facing(agent.desk_index.single_floor_local());
             let seat = Seat::at_desk(desk, facing);
-            let top_left = seat.render_top_left(char_w);
+            let top_left = seat.render_top_left(CHARACTER_SPRITE_W);
             let (anim_name, flip_x) = seat.sprite_for(base);
             let placement = CharacterPlacement {
                 agent_idx,
@@ -935,7 +916,7 @@ pub(crate) fn resolve_characters(
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
-                    let upright_top_left = seat.render_top_left(char_w);
+                    let upright_top_left = seat.render_top_left(CHARACTER_SPRITE_W);
                     let (anim_name, flip_x) = seat.sprite_for("seated");
                     let top_left = Point {
                         x: upright_top_left.x.saturating_add_signed(dx),
@@ -974,7 +955,7 @@ pub(crate) fn resolve_characters(
             }
             Pose::AimlessAt { dest: at } | Pose::Held { at } => {
                 let held = matches!(p, Pose::Held { .. });
-                let top_left = waypoint_top_left(at, char_w);
+                let top_left = waypoint_top_left(at, CHARACTER_SPRITE_W);
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
@@ -1014,7 +995,7 @@ pub(crate) fn resolve_characters(
                     new_coffee_carriers.push(agent.agent_id);
                 }
                 let pos = walking_position(from, to, t_x1000);
-                let walker_top_left = walking_top_left(pos, char_w);
+                let walker_top_left = walking_top_left(pos, CHARACTER_SPRITE_W);
                 let dx = i32::from(to.x) - i32::from(from.x);
                 let dy = i32::from(to.y) - i32::from(from.y);
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
@@ -1034,7 +1015,7 @@ pub(crate) fn resolve_characters(
                 // walking_back always wins (no back-facing coffee sprite).
                 let anim_name: &'static str = if going_back {
                     WALK_BACK
-                } else if carrying_coffee && pack.animation(WALK_COFFEE).is_some() {
+                } else if carrying_coffee {
                     WALK_COFFEE
                 } else {
                     WALK
@@ -1074,13 +1055,10 @@ pub(crate) fn resolve_characters(
     }
     // ONE fit for every pose arm, on the frame each placement will blit, read by
     // both the sprite and its badge. The sort row keeps pre-fit geometry.
-    let fallback = Size {
-        w: char_w,
-        h: crate::layout::CHARACTER_SPRITE_H,
-    };
     for (p, cues) in &mut placements {
-        let art = pack_frame_size(pack, p.anim_name, p.frame_idx);
-        let size = art.unwrap_or(fallback);
+        let Some(size) = pack_frame_size(pack, p.anim_name, p.frame_idx) else {
+            continue;
+        };
         let fitted = on_canvas(layout, Pivot::TopLeft, p.top_left, size);
         // The painter's own desk art: whatever it raises behind the sitter's
         // head, the badge clears.
@@ -1096,7 +1074,7 @@ pub(crate) fn resolve_characters(
         } else {
             fitted
         };
-        p.effects = character_effects(agent, p.top_left, art.map(|s| s.w), *cues, timing);
+        p.effects = character_effects(agent, p.top_left, size.w, *cues, timing);
     }
 
     // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint

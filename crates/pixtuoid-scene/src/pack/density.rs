@@ -4,7 +4,7 @@
 
 use std::num::NonZeroU16;
 
-use pixtuoid_core::sprite::format::{Density, Pack, density_variant_name_into, variant_redraws};
+use pixtuoid_core::sprite::format::{Density, Pack, density_variant_name_into};
 use pixtuoid_core::sprite::{Frame, RecolorableFrame};
 
 use crate::render_scale::RenderScale;
@@ -17,7 +17,8 @@ pub(crate) struct DenseFrame<'a> {
     /// The same art as palette indices, for a per-agent recolor.
     pub(crate) recolorable: RecolorableFrame<'a>,
     /// The piece's size in layout units: its base frame's, since a variant
-    /// redraws that frame's box on a finer grid ([`variant_redraws`]).
+    /// redraws that frame's box on a finer grid
+    /// ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws)).
     pub(crate) logical: (u16, u16),
     /// The grid the art is authored on: 1 for the base, `N` for `<name>@<N>x`.
     pub(crate) density: Density,
@@ -35,13 +36,11 @@ pub(crate) struct DenseFrame<'a> {
 /// painter's own `frame_index`.
 ///
 /// A variant is the same PIECE on an N-times grid — the base's logical box
-/// drawn finer — so it is taken only where it can honour that: at a scale its
-/// density divides (4x art at 8x blits at 2 rather than being discarded for not
-/// matching), and only if it redraws its base whole ([`variant_redraws`]), so an
-/// animation never mixes densities mid-cycle. A variant that does not redraw its
-/// base is SKIPPED rather than drawn wrong — `validate_pack_animations` reports
-/// it as a hard error, so this is the render-time backstop for a pack that was
-/// never validated.
+/// drawn finer — so it is taken only at a scale its density divides (4x art at
+/// 8x blits at 2 rather than being discarded for not matching). Validation
+/// holds each to redrawing its base whole
+/// ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws)), so an animation
+/// never mixes densities mid-cycle.
 ///
 /// A piece with no variant renders exactly as it did before variants existed,
 /// so richer art lands one piece at a time rather than as a flag day.
@@ -68,9 +67,6 @@ pub(crate) fn densest_frame<'a>(
         let Some(anim) = pack.animation(&key) else {
             continue;
         };
-        if !variant_redraws(base_anim, density, anim) {
-            continue;
-        }
         let (Some(art), Some(recolorable)) = (anim.frames().get(idx), anim.recolorable(idx)) else {
             continue;
         };
@@ -102,19 +98,13 @@ pub(crate) fn densest_frame<'a>(
 mod tests {
     use super::*;
 
-    /// `typing@4x` claims 4x but is drawn at 2x; `walking@2x` has one frame
-    /// against its base's two; `seated@2x`'s second frame is drawn at 3x;
-    /// `holding_coffee` has honest variants at both 2x and 4x; `desk` has none.
+    /// `typing` has a variant at 2x, `holding_coffee` at both 2x and 4x; `desk`
+    /// has none.
     fn variant_pack() -> Pack {
         pixtuoid_core::sprite::format::load_pack_from_strings(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\"B\"=\"#040506\"\n\
              [animations.typing]\nframes=[\"a1.sprite\", \"b1.sprite\"]\nframe_ms=100\n\
              [animations.\"typing@2x\"]\nframes=[\"a2.sprite\", \"b2.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@4x\"]\nframes=[\"a2.sprite\", \"b2.sprite\"]\nframe_ms=100\n\
-             [animations.walking]\nframes=[\"a1.sprite\", \"b1.sprite\"]\nframe_ms=100\n\
-             [animations.\"walking@2x\"]\nframes=[\"a2.sprite\"]\nframe_ms=100\n\
-             [animations.seated]\nframes=[\"a1.sprite\", \"b1.sprite\"]\nframe_ms=100\n\
-             [animations.\"seated@2x\"]\nframes=[\"a2.sprite\", \"c3.sprite\"]\nframe_ms=100\n\
              [animations.holding_coffee]\nframes=[\"a1.sprite\"]\nframe_ms=100\n\
              [animations.\"holding_coffee@2x\"]\nframes=[\"a2.sprite\"]\nframe_ms=100\n\
              [animations.\"holding_coffee@4x\"]\nframes=[\"a4.sprite\"]\nframe_ms=100\n\
@@ -124,7 +114,6 @@ mod tests {
                 ("b1.sprite", "@frame 0\nB"),
                 ("a2.sprite", "@frame 0\nA A\nA A"),
                 ("b2.sprite", "@frame 0\nB B\nB B"),
-                ("c3.sprite", "@frame 0\nB B B\nB B B\nB B B"),
                 ("a4.sprite", "@frame 0\nA A A A\nA A A A\nA A A A\nA A A A"),
             ],
         )
@@ -138,19 +127,19 @@ mod tests {
     }
 
     #[test]
-    fn the_densest_honest_variant_wins_and_blits_the_remainder() {
+    fn the_densest_dividing_variant_wins_and_blits_the_remainder() {
         let pack = variant_pack();
         assert_eq!(
             at(&pack, "typing", 0, 4),
             (2, 2, 2),
-            "4x lies, so 4 falls to 2"
+            "no 4x, so 4 falls to 2"
         );
         assert_eq!(at(&pack, "typing", 0, 2), (2, 2, 1));
         assert_eq!(at(&pack, "typing", 0, 3), (1, 1, 3), "2 does not divide 3");
         assert_eq!(at(&pack, "typing", 0, 1), (1, 1, 1));
     }
 
-    /// Two honest variants that both divide the scale: the DENSER one wins, and
+    /// Two variants that both divide the scale: the DENSER one wins, and
     /// blits whatever upscale is left.
     #[test]
     fn the_denser_of_two_honest_variants_wins() {
@@ -194,24 +183,6 @@ mod tests {
             d.recolorable.recolored(&[]).get(0, 0).copied().flatten(),
             Some(b)
         );
-    }
-
-    /// Frame 0 exists and fits in `walking@2x`, so only its frame count can
-    /// reject it.
-    #[test]
-    fn a_variant_with_the_wrong_frame_count_is_skipped() {
-        let pack = variant_pack();
-        assert_eq!(at(&pack, "walking", 0, 2), (1, 1, 2));
-        assert_eq!(at(&pack, "walking", 1, 2), (1, 1, 2));
-    }
-
-    /// Frame 0 of `seated@2x` fits; its frame 1 does not, so the variant is
-    /// skipped at every frame rather than drawn at 2x for half the cycle.
-    #[test]
-    fn a_variant_with_one_wrong_frame_is_skipped_whole() {
-        let pack = variant_pack();
-        assert_eq!(at(&pack, "seated", 0, 2), (1, 1, 2));
-        assert_eq!(at(&pack, "seated", 1, 2), (1, 1, 2));
     }
 
     /// Past the end reads the first frame, like the classic painter.
