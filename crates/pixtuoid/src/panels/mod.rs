@@ -281,7 +281,7 @@ fn reflect_onboarding_outcomes(
                 } else {
                     connection::FailedOp::Disconnect
                 };
-                tracing::warn!(source = %id, ?op, error = %e, "onboarding: hook change failed");
+                tracing::warn!(source = %id, ?op, error = ?e, "onboarding: hook change failed");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
                 // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
@@ -512,7 +512,7 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
             cx.ui.commit_theme(i);
             let name = theme::ALL_THEMES[i].name;
             if let Err(e) = crate::config::save(cx.config_path, name) {
-                tracing::warn!(error = %e, "failed to persist theme");
+                tracing::warn!(error = ?e, "failed to persist theme");
             }
         }
         KeyAction::ThemeCancel => {

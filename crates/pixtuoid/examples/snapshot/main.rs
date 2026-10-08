@@ -5,6 +5,13 @@
 
 mod encode;
 mod proof;
+
+/// The bundled pack the cell text draws its icons from, read once.
+fn icons() -> &'static pixtuoid_core::sprite::format::Pack {
+    static PACK: std::sync::LazyLock<pixtuoid_core::sprite::format::Pack> =
+        std::sync::LazyLock::new(|| load_bundled_pack().expect("the bundled pack loads"));
+    &PACK
+}
 mod scenes;
 
 use std::path::PathBuf;

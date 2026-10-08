@@ -344,7 +344,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     if decision.should_persist
         && let Err(e) = crate::config::save_version(config_path, current_ver)
     {
-        tracing::warn!(error = %e, "failed to persist version");
+        tracing::warn!(error = ?e, "failed to persist version");
     }
     decision.should_show_popup
 }

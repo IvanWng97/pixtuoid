@@ -52,6 +52,26 @@ pub(crate) fn is_pause(key: &Key, repeat: bool) -> bool {
     !repeat && matches!(key, Key::Character(s) if s.as_str() == "p")
 }
 
+/// Whether `key` moves to the next theme: the TUI's `t`, which opens its
+/// picker; the window, with no picker to draw, takes the next theme at once.
+/// Its repeats are swallowed, so a held key doesn't spin through them.
+pub(crate) fn is_theme_cycle(key: &Key, repeat: bool) -> bool {
+    !repeat && matches!(key, Key::Character(s) if s.as_str() == "t")
+}
+
+/// The theme after `theme` in [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES),
+/// the first after the last.
+pub(crate) fn next_theme(
+    theme: &'static pixtuoid_scene::theme::Theme,
+) -> &'static pixtuoid_scene::theme::Theme {
+    use pixtuoid_scene::theme::ALL_THEMES;
+    let at = ALL_THEMES
+        .iter()
+        .position(|t| std::ptr::eq(*t, theme))
+        .unwrap_or(0);
+    ALL_THEMES[(at + 1) % ALL_THEMES.len()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +123,29 @@ mod tests {
             audio_action(&Key::Named(winit::keyboard::NamedKey::Enter), false),
             None
         );
+    }
+
+    #[test]
+    fn t_cycles_every_theme_once_round_and_ignores_repeats() {
+        use pixtuoid_scene::theme::ALL_THEMES;
+        assert!(is_theme_cycle(&key("t"), false));
+        assert!(!is_theme_cycle(&key("t"), true), "a held t must not spin");
+        assert!(!is_theme_cycle(&key("T"), false));
+        // No other key's, so its place in the window's dispatch can't shadow one.
+        assert_eq!(audio_action(&key("t"), false), None);
+        assert!(!is_pause(&key("t"), false));
+        assert_eq!(floor_step(&key("t")), None);
+        let mut seen = vec![ALL_THEMES[0].name];
+        let mut theme = ALL_THEMES[0];
+        for _ in 1..ALL_THEMES.len() {
+            theme = next_theme(theme);
+            seen.push(theme.name);
+        }
+        let mut want: Vec<_> = ALL_THEMES.iter().map(|t| t.name).collect();
+        assert_eq!(seen, want, "in order");
+        assert!(std::ptr::eq(next_theme(theme), ALL_THEMES[0]), "wraps");
+        want.dedup();
+        assert_eq!(want.len(), ALL_THEMES.len());
     }
 
     #[test]
