@@ -77,8 +77,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
 }
 
-/// Everything a frame shows besides the floor: kept apart from `session` so a
-/// frame borrows it beside the floor it draws ([`Chrome::frame`]).
+/// Everything a frame shows besides the floors: kept apart from `session` so a
+/// frame borrows it while the session renders ([`Chrome::office_world`]).
 #[derive(Debug)]
 struct Chrome {
     theme: &'static pixtuoid_scene::theme::Theme,
