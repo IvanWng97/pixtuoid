@@ -6,7 +6,6 @@
 // output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
-pub(crate) mod aa_text;
 mod app;
 pub use app::run;
 pub(crate) mod audio;
@@ -38,7 +37,6 @@ pub(crate) mod version;
 /// reports. Not an API: it moves with them.
 #[doc(hidden)]
 pub mod dev {
-    pub use crate::aa_text::{blend_channel, draw_text_at, has_glyph, line_height, text_width};
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
     pub use crate::floating::offscreen::{
@@ -53,7 +51,7 @@ pub mod dev {
     pub use crate::tui::renderer::{DrawCtx, DrawOut, PetState, draw_scene, scene_buf_size};
     pub use crate::tui::tui_renderer::TuiRenderer;
     pub use crate::tui::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
-    pub use crate::tui::widgets::footer_context;
+    pub use crate::tui::widgets::{footer_context, grid_of};
 }
 
 /// Strip control characters (Cc) and bidi controls from an untrusted string

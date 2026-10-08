@@ -7,11 +7,11 @@ use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
 use pixtuoid::dev::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_scene::cutaway::{Canvas, CellPx, Face, GridInk, paint_grid};
 use pixtuoid_scene::floor::{FloorMeta, PerFloor};
 use pixtuoid_scene::theme::Theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
 
 use crate::{CELL_H, CELL_W, SnapshotArgs, due_navigations};
 
@@ -239,75 +239,62 @@ pub(crate) fn save_backend_as_png(
     path: &PathBuf,
     area: ratatui::layout::Rect,
 ) -> Result<()> {
-    let mut img = RgbImage::new(
+    let mut img = RgbImage::from_pixel(
         u32::from(area.width) * CELL_W,
         u32::from(area.height) * CELL_H,
+        ImgRgb(TERMINAL_BG),
     );
-    rasterize_cells(&mut img, term.backend().buffer(), area, |c| c);
+    rasterize_cells(&mut img, term.backend().buffer(), area);
     img.save(path)?;
     Ok(())
 }
 
 pub(crate) fn cells_to_rgba(term_buf: &ratatui::buffer::Buffer) -> RgbaImage {
     let area = term_buf.area;
-    let mut rgba = RgbaImage::new(
+    let [r, g, b] = TERMINAL_BG;
+    let mut rgba = RgbaImage::from_pixel(
         u32::from(area.width) * CELL_W,
         u32::from(area.height) * CELL_H,
+        Rgba([r, g, b, 255]),
     );
-    rasterize_cells(&mut rgba, term_buf, area, |c| Rgba([c[0], c[1], c[2], 255]));
+    rasterize_cells(&mut rgba, term_buf, area);
     rgba
 }
 
+/// The colours a cell the terminal colours itself (`Reset`) shows in.
+const TERMINAL_BG: [u8; 3] = [20, 22, 28];
+const TERMINAL_FG: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb {
+    r: 220,
+    g: 220,
+    b: 220,
+};
+
 /// Paint `area`'s cells of `term_buf` onto `img` from its origin, one
-/// [`CELL_W`]×[`CELL_H`] tile per cell: the ONE rasterizer behind the PNG and
-/// RGBA outputs, which differ only in the pixel `px` makes of a color.
+/// [`CELL_W`]×[`CELL_H`] cell each, in the window's screen face: the ONE
+/// rasterizer behind the PNG and RGBA outputs. A cell with no colour of its
+/// own leaves `img`'s ground and takes [`TERMINAL_FG`].
 fn rasterize_cells<I: image::GenericImage>(
     img: &mut I,
     term_buf: &ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
-    px: impl Fn(ImgRgb<u8>) -> I::Pixel,
-) {
-    let (img_w, img_h) = (img.width(), img.height());
-    for y in 0..area.height {
-        for x in 0..area.width {
-            let cell = &term_buf[(area.x + x, area.y + y)];
-            let symbol = cell.symbol();
-            let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
-            let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
-            let x0 = u32::from(x) * CELL_W;
-            let y0 = u32::from(y) * CELL_H;
-
-            let ch = symbol.chars().next().unwrap_or(' ');
-            if symbol == "▀" {
-                // The half-block splits the cell: top half = fg, bottom half = bg.
-                fill_rect(img, x0, y0, CELL_W, CELL_H / 2, px(fg));
-                fill_rect(img, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, px(bg));
-            } else if symbol.trim().is_empty() {
-                fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
-            } else if pixtuoid::dev::has_glyph(ch) {
-                fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
-                draw_cell_text(ch, x0, y0, |tx, ty, cov| {
-                    if tx < img_w && ty < img_h {
-                        img.put_pixel(tx, ty, px(mix_rgb(bg, fg, cov)));
-                    }
-                });
-            } else {
-                // No glyph in any face (a decorative symbol): a centered block still
-                // reads in the cell's fg color.
-                fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
-                let pad_x = 1;
-                let pad_y = 3;
-                fill_rect(
-                    img,
-                    x0 + pad_x,
-                    y0 + pad_y,
-                    CELL_W - pad_x * 2,
-                    CELL_H - pad_y * 2,
-                    px(fg),
-                );
-            }
-        }
-    }
+) where
+    I::Pixel: image::Pixel<Subpixel = u8>,
+{
+    let cell = CellPx {
+        w: u16::try_from(CELL_W).expect("a cell is small"),
+        h: u16::try_from(CELL_H).expect("a cell is small"),
+    };
+    paint_grid(
+        &mut ImageCanvas(img),
+        &pixtuoid::dev::grid_of(term_buf, area),
+        ((0, 0), cell),
+        (Face::Screen, crate::icons()),
+        GridInk {
+            text: TERMINAL_FG,
+            halo: None,
+            shadow: None,
+        },
+    );
 }
 
 /// A capture's frame clock — `secs` of frames at `fps` from `start` — shared by
@@ -497,6 +484,41 @@ pub(crate) fn save_animation(
     )
 }
 
+/// An `image` buffer as the scene's screen-text [`Canvas`]: the examples draw
+/// their text through the window's sink and face.
+pub(crate) struct ImageCanvas<'a, I>(pub(crate) &'a mut I);
+
+impl<I: image::GenericImage> Canvas for ImageCanvas<'_, I>
+where
+    I::Pixel: image::Pixel<Subpixel = u8>,
+{
+    fn pixel(&self, x: i32, y: i32) -> Option<pixtuoid_core::sprite::Rgb> {
+        use image::Pixel as _;
+        let (x, y) = (u32::try_from(x).ok()?, u32::try_from(y).ok()?);
+        (x < self.0.width() && y < self.0.height()).then(|| {
+            let c = self.0.get_pixel(x, y).to_rgb();
+            pixtuoid_core::sprite::Rgb {
+                r: c[0],
+                g: c[1],
+                b: c[2],
+            }
+        })
+    }
+
+    fn set(&mut self, x: i32, y: i32, rgb: pixtuoid_core::sprite::Rgb) {
+        use image::Pixel as _;
+        let (Ok(x), Ok(y)) = (u32::try_from(x), u32::try_from(y)) else {
+            return;
+        };
+        if x < self.0.width() && y < self.0.height() {
+            let mut px = self.0.get_pixel(x, y);
+            // Alpha, where the pixel has one, stays: every canvas here is opaque.
+            px.channels_mut()[..3].copy_from_slice(&[rgb.r, rgb.g, rgb.b]);
+            self.0.put_pixel(x, y, px);
+        }
+    }
+}
+
 /// Fill a rect, clipped to `img`.
 pub(crate) fn fill_rect<I: image::GenericImage>(
     img: &mut I,
@@ -517,110 +539,10 @@ pub(crate) fn fill_rect<I: image::GenericImage>(
     }
 }
 
-// Chosen so the face fits the cell: its line height rounds to CELL_H and the Monaspace
-// advance is ≤ CELL_W.
-const CELL_FONT_PX: f32 = 14.7;
-
-/// Anti-aliased cell text at the terminal grid: one char per [`CELL_W`]×[`CELL_H`] cell,
-/// centered on the cell's advance and CLIPPED to the cell rect so ink wider than the
-/// advance (★) can't bleed into a neighbor. Per-cell origins (never a running cursor)
-/// keep the raster locked to the grid.
-fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
-    let s = ch.to_string();
-    let adv = pixtuoid::dev::text_width(&s, CELL_FONT_PX);
-    let dx = ((CELL_W as i32 - adv) / 2).max(0);
-    pixtuoid::dev::draw_text_at(
-        &s,
-        x0 as i32 + dx,
-        y0 as i32,
-        CELL_FONT_PX,
-        |px, py, cov| {
-            if cov <= 0.0 || px < x0 as i32 || py < y0 as i32 {
-                return;
-            }
-            let (px, py) = (px as u32, py as u32);
-            if px < x0 + CELL_W && py < y0 + CELL_H {
-                put(px, py, cov.clamp(0.0, 1.0));
-            }
-        },
-    );
-}
-
-/// Per-channel mix of `fg` over `bg` by AA coverage.
-fn mix_rgb(bg: ImgRgb<u8>, fg: ImgRgb<u8>, cov: f32) -> ImgRgb<u8> {
-    let mix = |b: u8, f: u8| pixtuoid::dev::blend_channel(b, f, cov);
-    ImgRgb([mix(bg[0], fg[0]), mix(bg[1], fg[1]), mix(bg[2], fg[2])])
-}
-
-fn color_to_rgb(c: Color, default: ImgRgb<u8>) -> ImgRgb<u8> {
-    match c {
-        Color::Rgb(r, g, b) => ImgRgb([r, g, b]),
-        Color::Black => ImgRgb([0, 0, 0]),
-        Color::Red => ImgRgb([180, 50, 50]),
-        Color::Green => ImgRgb([60, 180, 60]),
-        Color::Yellow => ImgRgb([220, 200, 50]),
-        Color::Blue => ImgRgb([60, 120, 220]),
-        Color::Magenta => ImgRgb([200, 60, 200]),
-        Color::Cyan => ImgRgb([50, 200, 220]),
-        Color::Gray => ImgRgb([160, 160, 160]),
-        Color::DarkGray => ImgRgb([80, 80, 80]),
-        Color::White => ImgRgb([240, 240, 240]),
-        Color::LightRed => ImgRgb([230, 100, 100]),
-        Color::LightGreen => ImgRgb([100, 230, 100]),
-        Color::LightYellow => ImgRgb([240, 230, 100]),
-        Color::LightBlue => ImgRgb([130, 180, 250]),
-        Color::LightMagenta => ImgRgb([240, 130, 240]),
-        Color::LightCyan => ImgRgb([130, 240, 240]),
-        Color::Indexed(_) | Color::Reset => default,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use pixtuoid_scene::layout::Point;
-
-    #[test]
-    fn draw_cell_text_stays_inside_its_cell_and_lights_ink() {
-        // ★ ink can exceed the face's advance — the clip is what keeps it out of the
-        // neighbor cell.
-        for (ch, ox, oy) in [('M', 0u32, 0u32), ('g', 8, 16), ('\u{2605}', 24, 32)] {
-            let mut lit = 0usize;
-            draw_cell_text(ch, ox, oy, |px, py, cov| {
-                assert!(
-                    px >= ox && px < ox + CELL_W && py >= oy && py < oy + CELL_H,
-                    "{ch:?} pixel ({px},{py}) escaped its cell at ({ox},{oy})"
-                );
-                assert!((0.0..=1.0).contains(&cov));
-                lit += 1;
-            });
-            assert!(lit > 0, "{ch:?} lit no pixels");
-        }
-    }
-
-    #[test]
-    fn cell_font_px_fits_the_cell() {
-        // A face/metric drift would silently clip descenders — the cell clip masks it
-        // visually, so pin both halves of the claim.
-        assert_eq!(
-            pixtuoid::dev::line_height(CELL_FONT_PX),
-            CELL_H as i32,
-            "line height fills the cell"
-        );
-        assert!(
-            pixtuoid::dev::text_width("M", CELL_FONT_PX) <= CELL_W as i32,
-            "the primary face's advance fits the cell width"
-        );
-    }
-
-    #[test]
-    fn mix_rgb_endpoints_and_midpoint() {
-        let bg = ImgRgb([0u8, 100, 200]);
-        let fg = ImgRgb([200u8, 100, 0]);
-        assert_eq!(mix_rgb(bg, fg, 0.0), bg);
-        assert_eq!(mix_rgb(bg, fg, 1.0), fg);
-        assert_eq!(mix_rgb(bg, fg, 0.5), ImgRgb([100, 100, 100]));
-    }
 
     #[test]
     fn centered_crop_centers_in_the_open() {
