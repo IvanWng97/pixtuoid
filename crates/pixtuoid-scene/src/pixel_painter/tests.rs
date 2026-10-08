@@ -2818,6 +2818,7 @@ struct OwnedSimStores {
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
     creatures:
         std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
+    grip: Option<crate::interact::Grip>,
 }
 
 impl OwnedSimStores {
@@ -2828,6 +2829,7 @@ impl OwnedSimStores {
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
             creatures: std::collections::HashMap::new(),
+            grip: None,
         }
     }
 
@@ -2841,6 +2843,7 @@ impl OwnedSimStores {
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
             creatures: &mut self.creatures,
+            grip: &mut self.grip,
         }
     }
 }

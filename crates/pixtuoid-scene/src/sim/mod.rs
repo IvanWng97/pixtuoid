@@ -57,6 +57,8 @@ pub(crate) struct SimStores<'a> {
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
     pub creatures: &'a mut HashMap<CreatureKey, CreatureWalk>,
+    /// What a pointer holds on this floor, or just set down.
+    pub grip: &'a mut Option<crate::interact::Grip>,
 }
 
 /// A theme-free glow decision for a character sprite. Sim decides WHETHER a
@@ -293,6 +295,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let timing = floor.motion.timing(now);
     let beat = timing.beat;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+    let held_agent = take_grip(stores, layout, now);
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
@@ -361,6 +364,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     history: &mut *stores.history,
                     walks: &mut *stores.walks,
                     wanders: !beat.is_rest(),
+                    held: held_agent,
                 },
             );
             (a.agent_id, p)
@@ -447,6 +451,44 @@ pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Opti
 pub(crate) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
 /// The bundled lobster's size, for a pack that lacks the mascot's anim.
 const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
+
+/// Carry out the floor's grip before anything steps: a creature held follows
+/// the pointer and one set down lands, an agent set down starts home; a hold
+/// stays for the next step, a drop is spent. The agent held, if one is.
+fn take_grip(
+    stores: &mut SimStores<'_>,
+    layout: &SceneLayout,
+    now: SystemTime,
+) -> Option<(AgentId, Point)> {
+    use crate::interact::{Figure, Grip};
+    let grip = stores.grip.take()?;
+    let (Grip::Held { figure, at } | Grip::Dropped { figure, at }) = &grip;
+    let (figure, at) = (figure.clone(), *at);
+    let held = matches!(grip, Grip::Held { .. });
+    if held {
+        *stores.grip = Some(grip);
+    }
+    let creature = match figure {
+        Figure::Agent(id) if held => return Some((id, at)),
+        Figure::Agent(id) => {
+            // One gone mid-carry has nothing to walk home.
+            if let Some(walk) = stores.walks.get_mut(&id) {
+                walk.dropped = Some(crate::walk::Dropped::At(at));
+            }
+            return None;
+        }
+        Figure::Pet(kind) => CreatureKey::Pet(kind),
+        Figure::Mascot(key) => CreatureKey::Mascot(key),
+    };
+    if let Some(walk) = stores.creatures.get_mut(&creature) {
+        if held {
+            walk.carry(at);
+        } else {
+            walk.set_down(at, layout, now);
+        }
+    }
+    None
+}
 
 /// The floor's pet this tick, walking the people's walker: a pet being
 /// petted holds still where it stands, and a resting one naps beside an idle
@@ -930,12 +972,18 @@ pub(crate) fn resolve_characters(
                     ));
                 }
             }
-            Pose::AimlessAt { dest } => {
-                let top_left = waypoint_top_left(dest, char_w);
+            Pose::AimlessAt { dest: at } | Pose::Held { at } => {
+                let held = matches!(p, Pose::Held { .. });
+                let top_left = waypoint_top_left(at, char_w);
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        sort_row: top_left.y + WALKING_Y_OFF,
+                        // A figure in hand is in front of the whole room.
+                        sort_row: if held {
+                            u16::MAX
+                        } else {
+                            top_left.y + WALKING_Y_OFF
+                        },
                         anim_name: "standing",
                         frame_idx: 0,
                         top_left,
@@ -945,7 +993,7 @@ pub(crate) fn resolve_characters(
                         effects: Vec::new(),
                         seat_desk: None,
                         seated: false,
-                        breathes: true,
+                        breathes: !held,
                     },
                     Cues::default(),
                 ));

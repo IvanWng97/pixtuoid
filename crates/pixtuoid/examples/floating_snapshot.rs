@@ -4,7 +4,9 @@
 //! byte-faithful to what it blits.
 //!
 //! Usage:
-//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y]`
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y] [--pet cat|dog] [--drag X0,Y0:X1,Y1 [--drop-after MS]]`
+//! `--drag` presses at the first window point and carries what it lifts to the second,
+//! drawing it in hand; with `--drop-after` it releases there and draws `MS` later.
 //! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
 //! `... -- /tmp/f.png 960x640`.
 
@@ -110,6 +112,15 @@ fn main() -> Result<()> {
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
     let mut hover: Option<(f64, f64)> = None;
+    let mut pet: Option<pixtuoid_scene::pet::PetKind> = None;
+    let mut drag: Option<((f64, f64), (f64, f64))> = None;
+    let mut drop_after: Option<u64> = None;
+    let point = |v: &str, flag: &str| -> Result<(f64, f64)> {
+        let (x, y) = v
+            .split_once(',')
+            .ok_or_else(|| anyhow!("{flag} needs X,Y window px"))?;
+        Ok((x.parse().context("bad x")?, y.parse().context("bad y")?))
+    };
     let rest: Vec<String> = args.collect();
     let mut i = 0;
     while i < rest.len() {
@@ -130,6 +141,31 @@ fn main() -> Result<()> {
                     x.parse().context("bad --hover x")?,
                     y.parse().context("bad --hover y")?,
                 ));
+                i += 2;
+            }
+            "--pet" => {
+                pet = Some(match rest.get(i + 1).map(String::as_str) {
+                    Some("cat") => pixtuoid_scene::pet::PetKind::Cat,
+                    Some("dog") => pixtuoid_scene::pet::PetKind::Dog,
+                    _ => return Err(anyhow!("--pet needs cat or dog")),
+                });
+                i += 2;
+            }
+            "--drag" => {
+                let (from, to) = rest
+                    .get(i + 1)
+                    .and_then(|v| v.split_once(':'))
+                    .ok_or_else(|| anyhow!("--drag needs X0,Y0:X1,Y1"))?;
+                drag = Some((point(from, "--drag")?, point(to, "--drag")?));
+                i += 2;
+            }
+            "--drop-after" => {
+                drop_after = Some(
+                    rest.get(i + 1)
+                        .ok_or_else(|| anyhow!("--drop-after needs ms"))?
+                        .parse()
+                        .context("bad --drop-after")?,
+                );
                 i += 2;
             }
             "--agents" => {
@@ -160,13 +196,21 @@ fn main() -> Result<()> {
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+    renderer.set_pets(
+        pet.map(|kind| pixtuoid_scene::pet::Pet {
+            kind,
+            name: kind.default_name().to_string(),
+        })
+        .into_iter()
+        .collect(),
+    );
     let (win_w, win_h) = (u32::from(size.0), u32::from(size.1));
     let at = window_geometry(
         winit::dpi::PhysicalSize::new(win_w, win_h),
         pack.max_density_variant(),
     );
-    let buf = renderer
-        .render(
+    let render = |renderer: &mut OfficeRenderer, now| {
+        renderer.render(
             at,
             WindowFrame {
                 world: FloorInputs {
@@ -182,8 +226,41 @@ fn main() -> Result<()> {
                     floor: None,
                 },
             },
-        )
-        .expect("a frame");
+        );
+    };
+    render(&mut renderer, now);
+    let mut now = now;
+    if let Some((from, to)) = drag {
+        let window = (win_w, win_h);
+        renderer.press_at(
+            from,
+            window,
+            at,
+            pixtuoid::floating::offscreen::Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
+        if !renderer.pointer_moved(to, at) {
+            return Err(anyhow!("--drag lifted nothing at {from:?}"));
+        }
+        now += Duration::from_millis(100);
+        render(&mut renderer, now);
+        if let Some(ms) = drop_after {
+            renderer.release(to, at);
+            // The drop lands on the frame after; the walk then runs `ms`.
+            now += Duration::from_millis(100);
+            render(&mut renderer, now);
+            let step = Duration::from_millis(100);
+            let end = now + Duration::from_millis(ms);
+            while now < end {
+                now = (now + step).min(end);
+                render(&mut renderer, now);
+            }
+        }
+    }
+    let buf = renderer.buf().context("a frame")?;
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");

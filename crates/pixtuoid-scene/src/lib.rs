@@ -46,6 +46,8 @@ pub(crate) mod creatures;
 #[doc(hidden)]
 pub mod hit;
 #[doc(hidden)]
+pub mod interact;
+#[doc(hidden)]
 pub use creatures::PET_LONGEST_REST_MS;
 #[doc(hidden)]
 pub mod cutaway;

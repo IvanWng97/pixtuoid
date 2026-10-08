@@ -171,13 +171,12 @@ impl FloatingApp {
         }
     }
 
-    /// A left press: resize from the corner, carry out what the frame on
-    /// screen shows under the pointer as the TUI's click does, or drag the
+    /// A left press: resize from the corner, hand the pointer what the frame
+    /// on screen shows under it (a click or a drag follows), or drag the
     /// frameless window. Errors are non-fatal — some platforms refuse a drag
     /// outside a real press.
     fn press(&mut self) {
         use super::offscreen::Press;
-        use pixtuoid_scene::hit::HitAction;
         let Some(window) = &self.window else {
             return;
         };
@@ -188,7 +187,11 @@ impl FloatingApp {
                 (self.cursor.x, self.cursor.y),
                 (size.width, size.height),
                 at,
-                (self.petting.as_ref(), now),
+                super::offscreen::Pressing {
+                    scale_factor: window.scale_factor(),
+                    petting: self.petting.as_ref(),
+                    now,
+                },
             ),
             None => Press::Drag,
         };
@@ -199,7 +202,21 @@ impl FloatingApp {
             Press::Drag => {
                 let _ = window.drag_window();
             }
-            Press::Act(HitAction::Focus(id)) => {
+            Press::Pointer => {}
+        }
+    }
+
+    /// The left button released: carry out a click as the TUI's does, or set
+    /// a carried figure down.
+    fn release(&mut self) {
+        use pixtuoid_scene::hit::HitAction;
+        let Some(at) = self.shown else {
+            return;
+        };
+        let action = self.renderer.release((self.cursor.x, self.cursor.y), at);
+        let now = self.pause.now(SystemTime::now());
+        match action {
+            Some(HitAction::Focus(id)) => {
                 let slot = self
                     .live
                     .as_ref()
@@ -208,16 +225,20 @@ impl FloatingApp {
                     crate::focus::focus_slot(&slot, &self.focus_roots);
                 }
             }
-            Press::Act(HitAction::Pet(kind)) => {
+            Some(HitAction::Pet(kind)) => {
                 self.petting = Some(pixtuoid_scene::pet::PetState {
                     petted_at: now,
                     kind,
                     floor_idx: self.renderer.nav().current(),
                 });
             }
-            Press::Act(HitAction::Open(url)) => {
+            Some(HitAction::Open(url)) => {
                 let _ = open::that(url);
             }
+            None => {}
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -301,8 +322,8 @@ impl FloatingApp {
                     .and_then(super::LivePipeline::footer_warning)
                     .as_deref(),
             ),
-            tooltip: self
-                .cursor_in
+            // A figure in hand has no tooltip.
+            tooltip: (self.cursor_in && !self.renderer.carrying())
                 .then(|| self.renderer.hit_at(cursor, at))
                 .flatten()
                 .and_then(|hit| {
@@ -526,17 +547,36 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = position;
                 self.cursor_in = true;
+                let carried = self
+                    .shown
+                    .is_some_and(|at| self.renderer.pointer_moved((position.x, position.y), at));
+                if carried && let Some(window) = &self.window {
+                    window.request_redraw();
+                }
                 self.rehover();
             }
             WindowEvent::CursorLeft { .. } => {
                 self.cursor_in = false;
                 self.rehover();
             }
+            // Its release goes elsewhere now: a figure in hand is set down.
+            WindowEvent::Focused(false) => {
+                if self.renderer.cancel_pointer()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => self.press(),
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => self.release(),
             _ => {}
         }
     }
