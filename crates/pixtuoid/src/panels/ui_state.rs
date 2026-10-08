@@ -93,6 +93,54 @@ fn fake_now() -> Option<(Instant, SystemTime)> {
 }
 
 impl UiState {
+    /// The panels a run opens with: the onboarding on a first run that finds
+    /// an agent CLI to connect, else the version popup when this version is
+    /// new to the config at `config_path`.
+    pub(crate) fn boot(
+        boot_theme: &'static theme::Theme,
+        first_run: bool,
+        config_path: &std::path::Path,
+        socket_path: std::path::PathBuf,
+        log: Option<crate::run_log::LogLocation>,
+        drift: crate::doctor::DriftSeen,
+    ) -> Self {
+        let detected = if first_run {
+            crate::sources::detect()
+        } else {
+            Vec::new()
+        };
+        Self::boot_with(
+            boot_theme,
+            WelcomeUi::from_detected(&detected),
+            config_path,
+            (socket_path, log, drift),
+        )
+    }
+
+    fn boot_with(
+        boot_theme: &'static theme::Theme,
+        onboarding_ui: WelcomeUi,
+        config_path: &std::path::Path,
+        (socket_path, log, drift): (
+            std::path::PathBuf,
+            Option<crate::run_log::LogLocation>,
+            crate::doctor::DriftSeen,
+        ),
+    ) -> Self {
+        // Yields to the onboarding but still STAMPS `last_seen_version`: gated on
+        // the overlay SHOWING, not on `first_run`, which a no-CLI user carries
+        // forever.
+        let version_popup = resolve_version_popup(config_path) && onboarding_ui.is_empty();
+        Self::new(
+            boot_theme,
+            onboarding_ui,
+            version_popup,
+            socket_path,
+            log,
+            drift,
+        )
+    }
+
     pub(crate) fn new(
         boot_theme: &'static theme::Theme,
         onboarding_ui: WelcomeUi,
@@ -425,6 +473,22 @@ impl UiState {
     }
 }
 
+/// Whether this version's popup shows, stamping `last_seen_version` in the
+/// config at `config_path` at boot, so the popup shows at most once per
+/// upgrade however the run exits. The config's warnings are dropped: `main`'s
+/// pre-altscreen pass already surfaced them.
+fn resolve_version_popup(config_path: &std::path::Path) -> bool {
+    let current_ver = env!("CARGO_PKG_VERSION");
+    let cfg = crate::config::load(config_path, &mut Vec::new());
+    let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
+    if decision.should_persist
+        && let Err(e) = crate::config::save_version(config_path, current_ver)
+    {
+        tracing::warn!(error = ?e, "failed to persist version");
+    }
+    decision.should_show_popup
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +617,41 @@ mod tests {
         assert_eq!(a, ui.now(), "paused: the same frozen instant");
         ui.toggle_pause();
         assert_ne!(a, ui.now(), "unpaused: live time again");
+    }
+
+    /// A version new to the config shows its popup once, and stamps it; an
+    /// open onboarding holds the popup back but still stamps.
+    #[test]
+    fn a_new_version_pops_up_once_and_yields_to_the_onboarding() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let boot = |path: &std::path::Path, welcome: WelcomeUi| {
+            UiState::boot_with(
+                &theme::NORMAL,
+                welcome,
+                path,
+                (
+                    tmp.path().join("sock"),
+                    None,
+                    crate::doctor::DriftSeen::default(),
+                ),
+            )
+            .modal()
+            .version_popup
+        };
+        let stamped =
+            |path: &std::path::Path| crate::config::load(path, &mut Vec::new()).last_seen_version;
+        let path = tmp.path().join("config.toml");
+        crate::config::save_version(&path, "0.0.1").expect("seed an old version");
+        assert!(
+            boot(&path, WelcomeUi::from_detected(&[])),
+            "a new version pops up"
+        );
+        assert_eq!(stamped(&path).as_deref(), Some(env!("CARGO_PKG_VERSION")));
+        assert!(!boot(&path, WelcomeUi::from_detected(&[])), "only once");
+
+        let path = tmp.path().join("onboarding.toml");
+        crate::config::save_version(&path, "0.0.1").expect("seed an old version");
+        assert!(!boot(&path, WelcomeUi::from_detected(&["codex"])));
+        assert_eq!(stamped(&path).as_deref(), Some(env!("CARGO_PKG_VERSION")));
     }
 }

@@ -126,17 +126,10 @@ impl FloatingApp {
         renderer.set_audio(audio_ctl.handle().clone());
         renderer.set_pets(pets);
         let focus_roots = boot.focus_roots();
-        // As the TUI: with no agent CLI detected there is nothing to connect,
-        // and the overlay stays closed. The version popup is the TUI's.
-        let detected = if first_run {
-            crate::sources::detect()
-        } else {
-            Vec::new()
-        };
-        let ui = crate::panels::ui_state::UiState::new(
+        let ui = crate::panels::ui_state::UiState::boot(
             theme,
-            crate::panels::welcome::WelcomeUi::from_detected(&detected),
-            false,
+            first_run,
+            &config_path,
             boot.socket_path.clone(),
             log,
             boot.drift.clone(),
@@ -214,26 +207,49 @@ impl FloatingApp {
         }
     }
 
-    /// A left press: resize from the corner, hand the pointer what the frame
-    /// on screen shows under it (a click or a drag follows), or drag the
-    /// frameless window. Errors are non-fatal — some platforms refuse a drag
-    /// outside a real press.
+    /// A left press: the open panels' first, as the TUI's ladder
+    /// ([`crate::panels::modal_mouse`]); then resize from the corner, hand the
+    /// pointer what the frame on screen shows under it (a click or a drag
+    /// follows), or drag the frameless window. Errors are non-fatal — some
+    /// platforms refuse a drag outside a real press.
     fn press(&mut self) {
         use super::offscreen::Press;
+        use crate::panels::ModalMouse;
         let Some(window) = &self.window else {
             return;
         };
-        // An open panel swallows the press, as the TUI's modals do: the
-        // office behind it takes no click, and the window still drags.
-        if self.ui.modal().any_open() {
-            let _ = window.drag_window();
-            return;
-        }
         let size = window.inner_size();
+        let cursor = (self.cursor.x, self.cursor.y);
+        let cells = self.shown.map(|at| {
+            let cell = Face::chrome(at);
+            (
+                super::offscreen::cell_at(cursor, cell),
+                super::offscreen::panel_cells((size.width, size.height), cell),
+            )
+        });
+        let popup_scale = if self.ui.modal().version_popup {
+            1.0
+        } else {
+            0.0
+        };
+        match crate::panels::modal_mouse(&mut self.ui, popup_scale, cells.map(|(at, _)| at), || {
+            cells.map(|(_, screen)| screen)
+        }) {
+            ModalMouse::Office => {}
+            // A panel the press did nothing in leaves the window to drag.
+            ModalMouse::Inert => {
+                let _ = window.drag_window();
+                return;
+            }
+            ModalMouse::Took => {
+                window.request_redraw();
+                return;
+            }
+        }
         let now = self.ui.now();
         let press = match self.shown {
             Some(at) => self.renderer.press_at(
-                (self.cursor.x, self.cursor.y),
+                cursor,
                 (size.width, size.height),
                 at,
                 super::offscreen::Pressing {
@@ -256,13 +272,16 @@ impl FloatingApp {
     }
 
     /// The left button released: carry out a click as the TUI's does, or set
-    /// a carried figure down.
+    /// a carried figure down, even one a panel opened over mid-carry.
     fn release(&mut self) {
         use pixtuoid_scene::hit::HitAction;
-        let Some(at) = self.shown.filter(|_| !self.ui.modal().any_open()) else {
+        let Some(at) = self.shown else {
             return;
         };
-        let action = self.renderer.release((self.cursor.x, self.cursor.y), at);
+        let action = self
+            .renderer
+            .release((self.cursor.x, self.cursor.y), at)
+            .filter(|_| !self.ui.modal().any_open());
         let now = self.ui.now();
         match action {
             Some(HitAction::Focus(id)) => {
@@ -294,28 +313,18 @@ impl FloatingApp {
     /// A pressed key, through the TUI's dispatch and its panels; whether it
     /// asked to quit.
     fn key(&mut self, event: &winit::event::KeyEvent) -> bool {
-        let Some((code, mods)) = super::input::key(&event.logical_key, self.modifiers) else {
+        let Some(key) = super::input::key(&event.logical_key, self.modifiers, event.repeat) else {
             return false;
         };
-        if event.repeat && !super::input::repeats(code) {
-            return false;
-        }
         let Some(snapshot) = self.live.as_ref().map(|l| Arc::clone(&l.scene_rx.borrow())) else {
             return false;
         };
-        let nav = self.renderer.nav();
-        let floor = crate::panels::FloorNav {
-            n_floors: self.renderer.n_floors(),
-            current_floor: nav.current(),
-            in_transition: nav.transition().is_some(),
-        };
-        let action = crate::panels::dispatch_key(code, mods, self.ui.modal(), floor);
         let now = self.ui.now();
-        crate::panels::apply_key_action(
-            action,
+        super::offscreen::press_key(
+            key,
             &mut crate::panels::KeyCtx {
                 ui: &mut self.ui,
-                host: &mut WindowHost {
+                host: &mut super::offscreen::WindowHost {
                     renderer: &mut self.renderer,
                     theme: &mut self.theme,
                     screen: &mut self.screen,
@@ -436,13 +445,9 @@ impl FloatingApp {
                     .map(super::LivePipeline::health)
                     .unwrap_or_default();
                 let frames = self.ui.build_frames(now, &scene, &health);
-                let cell = Face::chrome(at);
-                let fits = |px: u32, size: u16| {
-                    u16::try_from(px / u32::from(size.max(1))).unwrap_or(u16::MAX)
-                };
                 super::offscreen::panels_grid(
                     &frames,
-                    (fits(win_w, cell.w), fits(win_h, cell.h)),
+                    super::offscreen::panel_cells((win_w, win_h), Face::chrome(at)),
                     now,
                     self.theme,
                 )
@@ -694,31 +699,5 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if paint {
             self.request_redraw();
         }
-    }
-}
-
-/// What an applied key changes in the window: its theme, its floor and its
-/// next frame.
-struct WindowHost<'a> {
-    renderer: &'a mut OfficeRenderer,
-    theme: &'a mut &'static Theme,
-    screen: &'a mut super::offscreen::Screen,
-}
-
-impl crate::panels::Host for WindowHost<'_> {
-    fn set_theme(&mut self, theme: &'static Theme) {
-        *self.theme = theme;
-    }
-
-    fn navigate_floor(&mut self, floor: usize, now: SystemTime) {
-        self.renderer.navigate(floor, now);
-    }
-
-    /// The window draws no walkable overlay: the TUI's debug view.
-    fn toggle_walkable_debug(&mut self) {}
-
-    fn redraw(&mut self) -> anyhow::Result<()> {
-        self.screen.stale();
-        Ok(())
     }
 }
