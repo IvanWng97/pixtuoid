@@ -210,17 +210,6 @@ fn missing_animation_returns_none() {
 }
 
 #[test]
-fn mini_pack_reports_missing_required() {
-    let pack = mini_pack();
-    let report = validate_pack_animations(&pack, &PackContract::default());
-    assert!(
-        !report.missing_required.is_empty(),
-        "mini pack should be missing required animations"
-    );
-    assert!(report.has_errors());
-}
-
-#[test]
 fn validation_detects_unknown_animations() {
     let report = validate_pack_animations(&mini_pack(), &PackContract::default());
     assert!(

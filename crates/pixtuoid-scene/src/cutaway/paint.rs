@@ -699,10 +699,9 @@ pub(crate) fn assert_variant_desk_foot(
     let feet: Vec<(u16, u16, u16)> = (0..layout.home_desks.len())
         .filter_map(|i| {
             let d = layout.home_desks[i];
-            let art = crate::pack::desk_art_name(
-                base_pack,
+            let art = crate::pack::desk_sprite_name(
                 layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
-            )?;
+            );
             let (w, h) = art_size(base_pack, art)?;
             Some((
                 d.x,
@@ -762,7 +761,6 @@ impl Flip {
     fn turn(self, frame: pixtuoid_core::sprite::Frame) -> pixtuoid_core::sprite::Frame {
         match self {
             Self::None => frame,
-            Self::Vertical => frame.mirror_vertical(),
             Self::Horizontal => frame.mirror_horizontal(),
         }
     }
@@ -998,7 +996,7 @@ fn paint_desk_front(
     art: &mut ArtCache,
     buf: &mut RgbBuffer,
 ) {
-    let Some(front) = crate::pack::desk_front(pack, art_name) else {
+    let Some(front) = crate::pack::desk_front(art_name) else {
         return;
     };
     let (Some(span), Some(f)) = (
@@ -1801,8 +1799,7 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     fn the_bundled_back_turned_desk_draws_its_screen_in_the_screen_keys() {
         let pack = test_default_pack();
-        let art =
-            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
+        let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
         let sentinel = pixtuoid_core::sprite::Rgb {
             r: 255,
             g: 0,
@@ -3701,7 +3698,7 @@ mod tests {
         assert_eq!(drawn(&buf), variant, "prop");
         let mut buf = blank();
         let flipped = Art {
-            flip: Flip::Vertical,
+            flip: Flip::Horizontal,
             ..Art::still("plant")
         };
         paint_art(
@@ -3833,11 +3830,8 @@ mod tests {
     fn a_back_turned_desk_grows_upward_and_keeps_its_base_row() {
         let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
-        let north =
-            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
-        let south =
-            crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
-        assert_ne!(north, south, "the bundled pack ships the raised art");
+        let north = crate::pack::desk_sprite_name(crate::layout::Facing::North);
+        let south = crate::pack::desk_sprite_name(crate::layout::Facing::South);
         let plain = desk_span(&pack, south, desk, RenderScale::ONE).expect("desk");
         let raised = desk_span(&pack, north, desk, RenderScale::ONE).expect("desk_north");
         assert_eq!(raised.depth, plain.depth);
@@ -3849,22 +3843,6 @@ mod tests {
         assert_eq!(plain.y0 - raised.y0, north_h - plain_h);
     }
 
-    /// A pack without the facing's own art draws the piece it derives from, the
-    /// classic painter's rule, rather than no desk.
-    #[test]
-    fn a_pack_without_the_back_turned_art_draws_the_plain_desk() {
-        let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-            &[("one.sprite", "@frame 0\nA")],
-        )
-        .expect("pack builds");
-        assert_eq!(
-            crate::pack::desk_art_name(&pack, crate::layout::Facing::North),
-            Some("desk")
-        );
-    }
-
     /// A desk's shadow centres on the row just under the one it sorts on: the
     /// row it meets the ground on. Pinned exactly, as the ordering tests compare
     /// depths by inequality, which a one-row shift passes.
@@ -3873,7 +3851,7 @@ mod tests {
         let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
-            let art = crate::pack::desk_art_name(&pack, facing).expect("desk art");
+            let art = crate::pack::desk_sprite_name(facing);
             for s in [1, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let span = desk_span(&pack, art, desk, scale).expect("desk");
@@ -3899,8 +3877,7 @@ mod tests {
     #[test]
     fn a_lit_screens_scanline_is_on_the_models_column() {
         let pack = test_default_pack();
-        let art =
-            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
+        let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
         let glow = pixtuoid_core::sprite::Rgb {
             r: 40,
             g: 180,
@@ -3972,8 +3949,7 @@ mod tests {
             .find(|p| matches!(p.kind, PieceKind::Text { .. }))
             .expect("the sitter has a badge")
             .span;
-        let art =
-            crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
+        let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
         let top = desk_span(&pack, art, desk, RenderScale::ONE)
             .expect("desk")
             .y0;
@@ -5443,10 +5419,9 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, &at)| {
-                    let art = crate::pack::desk_art_name(
-                        &pack,
+                    let art = crate::pack::desk_sprite_name(
                         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
-                    )?;
+                    );
                     let span = desk_span(&pack, art, at, scale)?;
                     let desk = crate::pack::densest_frame(&pack, art, 0, scale)?;
                     let cells = drawn_in(&desk, &[crate::pack::DESK_BULB_KEY]);
