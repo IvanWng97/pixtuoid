@@ -1174,6 +1174,41 @@ mod tests {
         assert_eq!(dirty, Dirty::within(want));
     }
 
+    /// A cutaway leaving its text to the host keeps no text piece to paint,
+    /// and hands over each one it dropped; the host may set more, as the star
+    /// at a scale the image draws none at.
+    #[test]
+    fn leaving_text_to_the_host_keeps_no_text_piece() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let office = Office {
+            layout: &h.layout,
+            pack: &h.pack,
+            theme: normal(),
+            scale: h.scale,
+        };
+        let mut list = compose(
+            seated,
+            office,
+            crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+            (
+                &mut crate::display::compose::LightCache::default(),
+                &mut crate::outside::OutsideCache::default(),
+            ),
+        );
+        let baked: Vec<crate::display::TextRun> = list.texts().cloned().collect();
+        assert!(!baked.is_empty(), "premise: the frame has text");
+        let world = list.host_text();
+        assert_eq!(list.texts().count(), 0, "a text piece stays to be painted");
+        for run in &baked {
+            let handed = match run.role {
+                crate::display::TextRole::Badge(id) => world.badges.iter().any(|b| b.agent == id),
+                _ => world.bubbles.contains(run) || world.signs.contains(run),
+            };
+            assert!(handed, "{:?} was dropped, not handed over", run.role);
+        }
+    }
+
     /// A frame's rects merge into at most the cap's boxes that cover every
     /// one of them, the nearest merging first: rects far apart stay apart,
     /// and overlapping ones become one.

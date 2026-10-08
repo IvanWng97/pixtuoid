@@ -234,11 +234,12 @@ fn a_refused_classic_frame_names_no_one() {
     );
 }
 
-/// A cutaway that leaves its world text to the host bakes none of it, and
-/// hands over the classic's: every agent's badge, the board and the floor
-/// indicator. One that bakes it hands over nothing.
+/// A cutaway that leaves its world text to the host hands over the
+/// classic's: every agent's badge, the board and the floor indicator. One
+/// that bakes it hands over nothing. That it then paints none is
+/// `leaving_text_to_the_host_keeps_no_text_piece`'s.
 #[test]
-fn a_cutaway_leaving_its_text_to_the_host_bakes_none() {
+fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
     let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
@@ -259,7 +260,11 @@ fn a_cutaway_leaving_its_text_to_the_host_bakes_none() {
     let (host, host_px) = frame(WorldText::Host);
     assert!(baked.raster.world().is_none());
     assert!(host.raster.star().is_none(), "the host sets the star");
-    assert_ne!(host_px.as_slice(), baked_px.as_slice(), "nothing was baked");
+    assert_ne!(
+        host_px.as_slice(),
+        baked_px.as_slice(),
+        "the text left the image"
+    );
     let world = host.raster.world().expect("handed over");
     let mut classic = PerFloor::new(Arc::clone(&pack));
     render(
