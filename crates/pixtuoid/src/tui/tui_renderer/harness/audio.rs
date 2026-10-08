@@ -212,7 +212,9 @@ fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
             .expect("render");
         assert!(r.transition().is_some(), "{w:?}: mid-slide");
         let halves = [0, 1].map(|f| {
-            r.floors[f]
+            r.session
+                .floor(f)
+                .expect("a floor")
                 .raster
                 .pixels()
                 .expect("a frame")

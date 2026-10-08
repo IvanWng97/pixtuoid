@@ -1516,14 +1516,18 @@ fn a_refused_cutaway_frame_keeps_the_doors_clamp_on_time() {
     let scene = office();
     r.render(&scene, pack(), t0()).expect("render");
     assert!(
-        r.floors[0].ctx.door_anim_max_ms > 0,
+        r.session.floor(0).expect("a floor").ctx.door_anim_max_ms > 0,
         "the entry walk holds the door"
     );
     let (small_cols, small_rows) = too_small_terminal();
     r.terminal.backend_mut().resize(small_cols, small_rows);
     r.render(&scene, pack(), t0() + Duration::from_secs(600))
         .expect("render");
-    assert_eq!(r.floors[0].ctx.door_anim_max_ms, 0, "the walk long arrived");
+    assert_eq!(
+        r.session.floor(0).expect("a floor").ctx.door_anim_max_ms,
+        0,
+        "the walk long arrived"
+    );
 }
 
 /// A slide cancelled on its first frame never paints, so nothing marks the
