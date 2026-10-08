@@ -142,9 +142,8 @@ fn draw_text(
     paint_grid(
         &mut ImageCanvas(img),
         &grid,
-        (x, top_y),
-        text_cell(),
-        Face::Screen,
+        ((x, top_y), text_cell()),
+        (Face::Screen, crate::icons()),
         GridInk {
             text: rgb(color),
             halo: halo.map(rgb),

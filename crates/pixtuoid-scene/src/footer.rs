@@ -15,7 +15,7 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS, ToolKind};
 
-use crate::neon_sign::{GATEWAY_GLYPH, gateway_label};
+use crate::neon_sign::gateway_label;
 use crate::tally::StateCounts;
 use crate::theme::Theme;
 
@@ -431,7 +431,11 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
         if let Some(g) = ctx.gateway {
             segs.push(FooterSegment::new(" · ".to_string(), FooterTone::Neutral));
             segs.push(FooterSegment::new(
-                format!("{}gw {}", GATEWAY_GLYPH, gateway_label(g)),
+                format!(
+                    "{}gw {}",
+                    crate::display::Icon::Gateway.terminal(),
+                    gateway_label(g)
+                ),
                 FooterTone::Gateway(g),
             ));
         }

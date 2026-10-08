@@ -323,7 +323,7 @@ impl Office {
             out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
             push_json_string(
                 &mut out,
-                &format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, name.text),
+                &format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, name.text()),
             );
             // The site paints the ● in `color` and the name in `badge`.
             out.push_str(&format!(
@@ -336,7 +336,7 @@ impl Office {
         out.push_str(&format!(
             "],\"board\":{{\"rect\":{{\"x\":{NEON_PANEL_INNER_X},\"y\":{NEON_PANEL_INNER_Y},\"w\":{NEON_PANEL_INNER_W},\"h\":{NEON_PANEL_INNER_H}}},"
         ));
-        push_board_segment(&mut out, "brand", &board.brand, theme);
+        push_board_segment(&mut out, "brand", std::slice::from_ref(&board.brand), theme);
         out.push(',');
         push_board_segment(&mut out, "star", &board.star, theme);
         out.push_str(",\"mood\":");
@@ -710,15 +710,21 @@ fn push_json_string(out: &mut String, s: &str) {
     out.push('"');
 }
 
+/// `segs` as one `key` segment: their terminal text end to end, in the first
+/// one's tone, which a brand or a star holds throughout.
 fn push_board_segment(
     out: &mut String,
     key: &str,
-    seg: &pixtuoid_scene::neon_sign::BoardSegment,
+    segs: &[pixtuoid_scene::neon_sign::BoardSegment],
     theme: &Theme,
 ) {
+    let text: String = segs.iter().map(|s| s.text()).collect();
+    let tone = segs
+        .first()
+        .map_or(pixtuoid_scene::neon_sign::BoardTone::Dim, |s| s.tone);
     out.push_str(&format!("\"{key}\":{{\"text\":"));
-    push_json_string(out, &seg.text);
-    out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, seg.tone)));
+    push_json_string(out, &text);
+    out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, tone)));
 }
 
 fn push_board_segments(
@@ -732,7 +738,11 @@ fn push_board_segments(
             out.push(',');
         }
         out.push_str("{\"text\":");
-        push_json_string(out, &seg.text);
+        push_json_string(out, seg.text());
+        // A lamp's `text` is its terminal glyph, which the site draws as a lamp.
+        if matches!(&seg.content, pixtuoid_scene::display::Content::Icon(i) if i.is_lamp()) {
+            out.push_str(",\"lamp\":true");
+        }
         out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, seg.tone)));
     }
     out.push(']');
@@ -1099,6 +1109,14 @@ mod tests {
         );
         assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
         assert!(board["mood"].is_array() && board["context"].is_array());
+        // A lamp is flagged beside its glyph, so the site draws the lamp.
+        let lamps = board["mood"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["lamp"] == true)
+            .count();
+        assert!(lamps > 0, "{board}");
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
             u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_W)
@@ -1139,7 +1157,7 @@ mod tests {
                 serde_json::json!({
                     "x": b.at.x,
                     "y": b.at.y,
-                    "text": format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, b.name.text),
+                    "text": format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, b.name.text()),
                     "color": hex(b.marker),
                     "badge": hex(b.name.ink),
                 })

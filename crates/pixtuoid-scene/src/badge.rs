@@ -57,17 +57,24 @@ pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
 /// text can fall below that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BadgeInk {
-    /// The leading `●`: the source's badge hue, else the tone.
+    /// The source's badge hue, else the tone: the terminal's leading `●`,
+    /// the pixel painters' strip.
     pub marker: Rgb,
     /// The label text: the tone.
     pub name: Rgb,
 }
 
-/// The glyph every painter's badge leads with, in [`BadgeInk::marker`].
-pub const BADGE_MARKER: char = '\u{25cf}';
+pub use crate::display::BADGE_MARKER;
 
-/// A badge's width in terminal cells, its marker included: the classic
-/// painter clips its badge to it, and a label is truncated to what is left.
+// A decoded label ends in core's ELLIPSIS only past this many chars, and a
+// badge keeps no more chars than cells (`truncate_label`), so it never shows
+// the mark.
+const _: () =
+    assert!((BADGE_CELLS as usize) < pixtuoid_core::source::decoder::MAX_DECODED_FIELD_CHARS);
+
+/// A badge's width in terminal cells, the terminal's marker included: the
+/// classic painter clips its badge to it, and a label is truncated to what is
+/// left.
 pub const BADGE_CELLS: u16 = DESK_W + BADGE_OVERHANG;
 /// The cells a badge may run past its desk's width.
 const BADGE_OVERHANG: u16 = 4;
@@ -128,25 +135,44 @@ pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
     theme.ui.tooltip_bg
 }
 
-/// Fit a label into `budget` terminal cells without losing the `·xxxx`
-/// session-id disambiguation suffix. Truncates from the base (left of the `·`),
-/// not the suffix — otherwise the disambig becomes useless ("TikTok-Android·a"
-/// tells us nothing the base alone wouldn't).
+/// Fit a label into `budget` terminal cells, and as many chars, without
+/// losing the `·xxxx` session-id disambiguation suffix. Truncates from the
+/// base (left of the `·`), not the suffix — otherwise the disambig becomes
+/// useless ("TikTok-Android·a" tells us nothing the base alone wouldn't).
 pub(crate) fn truncate_label(label: &str, budget: u16) -> std::borrow::Cow<'_, str> {
-    use crate::display::text::cells;
     use std::borrow::Cow;
-    if cells(label) <= budget {
+    if span(label) <= budget {
         return Cow::Borrowed(label);
     }
     if let Some(sep_byte) = label.rfind(LABEL_SEP) {
         let suffix = &label[sep_byte..];
-        let suffix_cells = cells(suffix);
-        if suffix_cells < budget {
-            let base = crate::display::text::take(&label[..sep_byte], budget - suffix_cells);
+        let suffix_span = span(suffix);
+        if suffix_span < budget {
+            let base = take_span(&label[..sep_byte], budget - suffix_span);
             return Cow::Owned(format!("{base}{suffix}"));
         }
     }
-    Cow::Borrowed(crate::display::text::take(label, budget))
+    Cow::Borrowed(take_span(label, budget))
+}
+
+/// What a label spends of a badge's budget: its cells, or its chars where a
+/// run of zero-width marks has more.
+fn span(text: &str) -> u16 {
+    let chars = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
+    crate::display::text::cells(text).max(chars)
+}
+
+/// The longest start of `text` whose [`span`] fits `budget`, its clusters
+/// whole.
+fn take_span(text: &str, budget: u16) -> &str {
+    use unicode_segmentation::UnicodeSegmentation;
+    let end = text
+        .grapheme_indices(true)
+        .map(|(i, cluster)| i + cluster.len())
+        .take_while(|&end| span(&text[..end]) <= budget)
+        .last()
+        .unwrap_or(0);
+    &text[..end]
 }
 
 /// 4-hex-char disambiguation suffix, hashed from the WHOLE `session_id` —
@@ -282,6 +308,36 @@ mod tests {
         assert_eq!(tone_of(&waiting), BadgeTone::Waiting);
         assert_eq!(tone_of(&idle), BadgeTone::Idle);
         assert_eq!(tone_of(&exiting), BadgeTone::Exiting);
+    }
+
+    /// A budget never splits a grapheme cluster: a ZWJ sequence is kept whole
+    /// or dropped whole.
+    #[test]
+    fn a_take_keeps_clusters_whole() {
+        let coder = "\u{1f469}\u{200d}\u{1f4bb}";
+        let text = format!("a{coder}b");
+        // The sequence is three chars in two cells, so it takes three.
+        assert_eq!(super::take_span(&text, 4), format!("a{coder}"));
+        assert_eq!(super::take_span(&text, 3), "a");
+        assert_eq!(super::take_span(&text, u16::MAX), text);
+    }
+
+    /// A first cluster wider than the budget takes nothing, as a terminal
+    /// can't draw half of it.
+    #[test]
+    fn a_cluster_wider_than_the_budget_is_dropped() {
+        assert_eq!(super::take_span("\u{65e5}x", 1), "");
+    }
+
+    #[test]
+    fn a_label_of_zero_width_marks_never_shows_the_cap_mark() {
+        use pixtuoid_core::source::decoder::{ELLIPSIS, MAX_DECODED_FIELD_CHARS};
+        let capped = format!(
+            "a{}{ELLIPSIS}",
+            "\u{301}".repeat(MAX_DECODED_FIELD_CHARS - 1)
+        );
+        let shown = truncate_label(&capped, super::BADGE_CELLS);
+        assert!(!shown.contains(ELLIPSIS), "{shown:?}");
     }
 
     #[test]

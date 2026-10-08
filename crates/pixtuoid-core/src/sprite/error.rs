@@ -211,6 +211,13 @@ pub enum PackError {
         /// The hairstyle's key.
         key: String,
     },
+    /// An icon's art is not one frame.
+    #[error("icon {file} must be one frame")]
+    #[non_exhaustive]
+    IconFrames {
+        /// The art's sprite file.
+        file: String,
+    },
     /// A hair layer is not one frame.
     #[error("hair layer {file} must be one frame")]
     #[non_exhaustive]

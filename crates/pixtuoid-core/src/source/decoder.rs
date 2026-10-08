@@ -667,7 +667,12 @@ pub(crate) const MAX_TOOL_TARGET_CHARS: usize = 40;
 /// crafted ~1 MiB hook/transcript line: every TUI display site is individually
 /// bounded, but the headless summary line is not, and the uncapped value would
 /// sit in `AgentSlot` for the session's lifetime either way.
-pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;
+#[doc(hidden)]
+pub const MAX_DECODED_FIELD_CHARS: usize = 80;
+
+/// What `ellipsize` ends a capped value with.
+#[doc(hidden)]
+pub const ELLIPSIS: char = '\u{2026}';
 
 /// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap
 /// at [`MAX_DECODED_FIELD_CHARS`]. For the HUMAN sinks that are NOT cell buffers —
@@ -700,7 +705,7 @@ fn is_bidi_control(c: char) -> bool {
 pub(crate) fn ellipsize(s: &str, max_chars: usize) -> String {
     let mut out: String = s.chars().take(max_chars).collect();
     if s.chars().count() > max_chars {
-        out.push('…');
+        out.push(ELLIPSIS);
     }
     out
 }

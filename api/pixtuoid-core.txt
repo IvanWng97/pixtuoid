@@ -977,6 +977,8 @@ pub pixtuoid_core::sprite::error::PackError::HairstyleDensity::key: alloc::strin
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer
 pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::first: pixtuoid_core::sprite::format::Density
 pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::other: pixtuoid_core::sprite::format::Density
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::IconFrames
+pub pixtuoid_core::sprite::error::PackError::IconFrames::file: alloc::string::String
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Manifest
 pub pixtuoid_core::sprite::error::PackError::Manifest::source: toml::de::error::Error
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::MissingEmbeddedFrame
@@ -1290,6 +1292,21 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::Hairstyle
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Hairstyle
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Hairstyle
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Hairstyle
+pub struct pixtuoid_core::sprite::format::IconArt
+impl pixtuoid_core::sprite::format::IconArt
+pub fn pixtuoid_core::sprite::format::IconArt::screen(&self) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
+pub fn pixtuoid_core::sprite::format::IconArt::world(&self) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
+impl core::clone::Clone for pixtuoid_core::sprite::format::IconArt
+pub fn pixtuoid_core::sprite::format::IconArt::clone(&self) -> pixtuoid_core::sprite::format::IconArt
+impl core::fmt::Debug for pixtuoid_core::sprite::format::IconArt
+pub fn pixtuoid_core::sprite::format::IconArt::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::format::IconArt
+impl core::marker::Send for pixtuoid_core::sprite::format::IconArt
+impl core::marker::Sync for pixtuoid_core::sprite::format::IconArt
+impl core::marker::Unpin for pixtuoid_core::sprite::format::IconArt
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::IconArt
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::IconArt
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::IconArt
 pub struct pixtuoid_core::sprite::format::MissingHairView
 pub pixtuoid_core::sprite::format::MissingHairView::name: alloc::string::String
 pub pixtuoid_core::sprite::format::MissingHairView::style: alloc::string::String
@@ -1375,6 +1392,7 @@ pub fn pixtuoid_core::sprite::format::Pack::city_materials(&self) -> core::optio
 pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> &[pixtuoid_core::sprite::format::Density]
 pub fn pixtuoid_core::sprite::format::Pack::hairstyle(&self, &str, pixtuoid_core::sprite::format::Density) -> core::option::Option<&pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::hairstyles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Hairstyle>
+pub fn pixtuoid_core::sprite::format::Pack::icon(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::format::IconArt>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> pixtuoid_core::sprite::format::Density
 pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
 impl core::clone::Clone for pixtuoid_core::sprite::format::Pack
