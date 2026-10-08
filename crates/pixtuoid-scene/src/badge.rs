@@ -57,7 +57,8 @@ pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
 /// text can fall below that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BadgeInk {
-    /// The leading `●`: the source's badge hue, else the tone.
+    /// The source's badge hue, else the tone: the terminal's leading `●`,
+    /// the pixel painters' strip.
     pub marker: Rgb,
     /// The label text: the tone.
     pub name: Rgb,
@@ -71,8 +72,9 @@ pub use crate::display::BADGE_MARKER;
 const _: () =
     assert!((BADGE_CELLS as usize) < pixtuoid_core::source::decoder::MAX_DECODED_FIELD_CHARS);
 
-/// A badge's width in terminal cells, its marker included: the classic
-/// painter clips its badge to it, and a label is truncated to what is left.
+/// A badge's width in terminal cells, the terminal's marker included: the
+/// classic painter clips its badge to it, and a label is truncated to what is
+/// left.
 pub const BADGE_CELLS: u16 = DESK_W + BADGE_OVERHANG;
 /// The cells a badge may run past its desk's width.
 const BADGE_OVERHANG: u16 = 4;
