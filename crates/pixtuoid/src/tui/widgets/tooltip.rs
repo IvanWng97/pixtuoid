@@ -40,14 +40,14 @@ pub(crate) fn paint_badges(
         let on_plate = Style::default().bg(to_color(*plate));
         let line = if hovered == Some(*agent) {
             let style = on_plate.fg(Color::White).add_modifier(Modifier::BOLD);
-            Line::from(Span::styled(format!("\u{25b8}{}", name.text), style))
+            Line::from(Span::styled(format!("\u{25b8}{}", name.text()), style))
         } else {
             Line::from(vec![
                 Span::styled(
                     pixtuoid_scene::badge::BADGE_MARKER.to_string(),
                     on_plate.fg(to_color(*marker)),
                 ),
-                Span::styled(name.text.clone(), on_plate.fg(to_color(name.ink))),
+                Span::styled(name.text().to_owned(), on_plate.fg(to_color(name.ink))),
             ])
         };
         put_line(f, line, |w| badge.place(w), scene_rect);
@@ -74,15 +74,22 @@ pub(crate) fn paint_text_runs(f: &mut ratatui::Frame<'_>, runs: &[TextRun], scen
             }
         };
         let spans: Vec<Span<'_>> = match (run.role, run.plate) {
-            (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => run
-                .spans
-                .iter()
-                .map(|s| Span::styled(format!(" {} ", s.text), style(s.ink).bg(to_color(plate))))
-                .collect(),
+            (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => {
+                let on_plate = |s: Style| s.bg(to_color(plate));
+                let pad = || Span::styled(" ", on_plate(Style::default()));
+                std::iter::once(pad())
+                    .chain(
+                        run.spans
+                            .iter()
+                            .map(|s| Span::styled(s.text(), on_plate(style(s.ink)))),
+                    )
+                    .chain(std::iter::once(pad()))
+                    .collect()
+            }
             _ => run
                 .spans
                 .iter()
-                .map(|s| Span::styled(s.text.clone(), style(s.ink)))
+                .map(|s| Span::styled(s.text(), style(s.ink)))
                 .collect(),
         };
         put_line(f, Line::from(spans), |w| run.place(w), scene_rect);
@@ -261,10 +268,7 @@ mod tests {
             agent: pixtuoid_core::AgentId::from_transcript_path("/badge/0.jsonl"),
             at,
             marker: ink.marker,
-            name: pixtuoid_scene::display::TextSpan {
-                text: name.into(),
-                ink: ink.name,
-            },
+            name: pixtuoid_scene::display::TextSpan::new(name, ink.name),
             plate: theme.ui.tooltip_bg,
         }
     }
@@ -363,7 +367,11 @@ mod tests {
                 BadgeTone::Idle,
                 &theme::NORMAL,
             );
-            let line = format!("{}{}", pixtuoid_scene::badge::BADGE_MARKER, badge.name.text);
+            let line = format!(
+                "{}{}",
+                pixtuoid_scene::badge::BADGE_MARKER,
+                badge.name.text()
+            );
             assert_eq!(
                 painted(&|f| super::paint_badges(f, std::slice::from_ref(&badge), area, None)),
                 terminal_cells(badge.place(pixtuoid_scene::display::text::cells(&line))),
@@ -374,7 +382,7 @@ mod tests {
         let mut stars = 0;
         for run in model.runs(&theme::NORMAL) {
             let painted = painted(&|f| super::paint_text_runs(f, std::slice::from_ref(&run), area));
-            let line: String = run.spans.iter().map(|s| s.text.as_str()).collect();
+            let line: String = run.spans.iter().map(|s| s.text()).collect();
             let placed = run.place(pixtuoid_scene::display::text::cells(&line));
             assert_eq!(
                 painted,
@@ -423,18 +431,24 @@ mod tests {
     fn the_indicator_centres_by_display_columns_on_its_plate() {
         use pixtuoid_scene::layout::Point;
         let theme = &theme::NORMAL;
-        let text = pixtuoid_scene::layout::floor_indicator_text(1);
         let at = Point { x: 28, y: 8 };
         let run = super::TextRun {
             at,
             align: pixtuoid_scene::display::Align::Centre,
-            spans: vec![pixtuoid_scene::display::TextSpan {
-                text: text.clone(),
+            spans: pixtuoid_scene::layout::floor_indicator(
+                pixtuoid_scene::floor::FloorMeta::ground(),
+            )
+            .into_iter()
+            .map(|content| pixtuoid_scene::display::TextSpan {
+                content,
                 ink: theme.ui.neon_brand,
-            }],
+            })
+            .collect(),
             plate: Some(theme.ui.tooltip_bg),
+            strip: None,
             role: super::TextRole::Indicator,
         };
+        let text: String = run.spans.iter().map(|s| s.text()).collect();
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
         term.draw(|f| super::paint_text_runs(f, &[run], Rect::new(0, 0, 80, 30)))
             .unwrap();
@@ -589,11 +603,12 @@ mod tests {
                 ..speaker.at
             },
             align: pixtuoid_scene::display::Align::Over,
-            spans: vec![pixtuoid_scene::display::TextSpan {
-                text: quip.into(),
-                ink: theme::NORMAL.ui.tooltip_text,
-            }],
+            spans: vec![pixtuoid_scene::display::TextSpan::new(
+                quip,
+                theme::NORMAL.ui.tooltip_text,
+            )],
             plate: Some(theme::NORMAL.ui.tooltip_bg),
+            strip: None,
             role: super::TextRole::Bubble(id),
         };
         term.draw(|f| {

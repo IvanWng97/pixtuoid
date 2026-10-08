@@ -10,6 +10,9 @@ pub(crate) const SCREEN_GLASS_KEY: char = 'j';
 /// The pack key of the dim content an idle screen shows on its glass.
 pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 
+/// The pack key an icon draws in its text's ink.
+pub(crate) const ICON_INK_KEY: char = '\u{3b9}';
+
 /// The pack key of a desk lamp's bulb, which glows of its own at any hour.
 pub(crate) const DESK_BULB_KEY: char = '9';
 /// The monitor's keys in the bundled desks: gen-art's casing, top and stand

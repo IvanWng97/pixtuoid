@@ -15,6 +15,7 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::DaemonState;
 
+use crate::display::{Content, Icon};
 use crate::tally::{StateCounts, scene_stats};
 use crate::theme::Theme;
 
@@ -31,7 +32,7 @@ pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
 }
 
 /// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
-/// string (no prefix — the board's uptime badge prepends "↑").
+/// string, with no prefix.
 pub fn compact_hms(secs: u64) -> String {
     if secs >= 3600 {
         format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
@@ -76,21 +77,40 @@ impl BoardTone {
     }
 }
 
-/// One tone-tagged text run of the board. The model bakes in the inter-segment
-/// separators so no painter re-derives them.
+/// One tone-tagged stretch of the board: text, or an icon. The model bakes in
+/// the inter-segment separators so no painter re-derives them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoardSegment {
-    pub text: String,
+    pub content: Content,
     pub tone: BoardTone,
 }
 
 impl BoardSegment {
     fn new(text: impl Into<String>, tone: BoardTone) -> Self {
         Self {
-            text: text.into(),
+            content: Content::Text(text.into()),
             tone,
         }
     }
+
+    fn icon(icon: Icon, tone: BoardTone) -> Self {
+        Self {
+            content: Content::Icon(icon),
+            tone,
+        }
+    }
+
+    /// It as a terminal writes it: [`Content::text`].
+    pub fn text(&self) -> &str {
+        self.content.text()
+    }
+}
+
+/// The cells `segs` take, end to end.
+fn segs_cells(segs: &[BoardSegment]) -> usize {
+    segs.iter()
+        .map(|s| usize::from(crate::display::text::cells(s.text())))
+        .sum()
 }
 
 /// The whole board, as tone-tagged segments — L1 `brand` + `star`, L2 `mood`,
@@ -99,7 +119,7 @@ impl BoardSegment {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoardModel {
     pub brand: BoardSegment,
-    pub star: BoardSegment,
+    pub star: Vec<BoardSegment>,
     pub mood: Vec<BoardSegment>,
     pub context: Vec<BoardSegment>,
 }
@@ -108,19 +128,38 @@ pub struct BoardModel {
 /// still, so a version here made each release re-render all of them.
 pub const BOARD_BRAND: &str = "pixtuoid";
 
-/// The board's L1 ★ CTA text — the ONE definition every painter renders AND the
-/// star's hit area ([`Raster::star`](crate::look::Raster::star)) measures.
-pub const BOARD_STAR: &str = "\u{2605} Star";
+/// The board's L1 star CTA: the star, then its word.
+fn board_star() -> Vec<BoardSegment> {
+    vec![
+        BoardSegment::icon(Icon::Star, BoardTone::Star),
+        BoardSegment::new(" Star", BoardTone::Star),
+    ]
+}
 
-/// The waiting/active/idle glyphs — one definition for the tally AND the persona
-/// line, so the two L2 faces can't drift apart.
-const GLYPH_WAITING: char = '\u{25b2}';
-const GLYPH_ACTIVE: char = '\u{25cf}';
-const GLYPH_IDLE: char = '\u{25cb}';
+/// How long the waiting lamp holds lit, then dark. A whole number of them
+/// fits gen-media's hour grid, so a committed frame shows it lit.
+const BLINK_HALF_MS: u64 = 600;
+const _: () = assert!(crate::anim::HOUR_MS.is_multiple_of(2 * BLINK_HALF_MS));
 
-/// The gateway chip's GLYPH — one definition for the footer chip AND the board
-/// context row (`⬢gw ok`).
-pub const GATEWAY_GLYPH: char = '\u{2b22}';
+/// Whether the waiting lamp is lit `now_ms` into the beat.
+fn lamp_lit(now_ms: u64) -> bool {
+    (now_ms / BLINK_HALF_MS).is_multiple_of(2)
+}
+
+/// The lamp for agents in `tone`, the waiting one dark while it blinks off.
+fn lamp(tone: BoardTone, lit: bool) -> BoardSegment {
+    let icon = match tone {
+        BoardTone::Waiting => Icon::Waiting,
+        BoardTone::Active => Icon::Active,
+        _ => Icon::Idle,
+    };
+    let tone = if tone == BoardTone::Waiting && !lit {
+        BoardTone::Dim
+    } else {
+        tone
+    };
+    BoardSegment::icon(icon, tone)
+}
 
 /// The `⬢gw` chip's terse liveness word.
 pub fn gateway_label(state: DaemonState) -> &'static str {
@@ -183,14 +222,13 @@ impl OfficeMood {
     }
 }
 
-/// The board's "mood pulse" tally — one tone-tagged segment per non-zero
-/// present state. Exiting agents are absent by design: a walkout isn't the mood.
+/// The board's "mood pulse" tally — a lamp and a count per non-zero present
+/// state, the waiting lamp dark unless `lit`. Exiting agents are absent by
+/// design: a walkout isn't the mood.
 ///
-/// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
-/// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so
-/// [`cells`](crate::display::text::cells) equals `chars().count()` here (pinned by
-/// the TUI's `every_l2_face_is_one_terminal_column_per_char`).
-pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
+/// Its text is ASCII and each lamp one cell, so a roll keeps every column in
+/// place (pinned by the TUI's `every_l2_face_is_one_terminal_column_per_char`).
+pub fn board_mood_segments(counts: StateCounts, lit: bool) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
             "\u{2014} office empty \u{2014}",
@@ -199,25 +237,25 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     }
     let build = |words: [&str; 3]| -> Vec<BoardSegment> {
         let rows = [
-            (counts.waiting, GLYPH_WAITING, words[0], BoardTone::Waiting),
-            (counts.active, GLYPH_ACTIVE, words[1], BoardTone::Active),
-            (counts.idle, GLYPH_IDLE, words[2], BoardTone::Idle),
+            (counts.waiting, words[0], BoardTone::Waiting),
+            (counts.active, words[1], BoardTone::Active),
+            (counts.idle, words[2], BoardTone::Idle),
         ];
         let mut segs: Vec<BoardSegment> = Vec::new();
-        for (n, glyph, word, tone) in rows {
+        for (n, word, tone) in rows {
             if n == 0 {
                 continue;
             }
             if !segs.is_empty() {
                 segs.push(BoardSegment::new("  ", BoardTone::Dim));
             }
-            segs.push(BoardSegment::new(format!("{glyph}{n} {word}"), tone));
+            segs.push(lamp(tone, lit));
+            segs.push(BoardSegment::new(format!("{n} {word}"), tone));
         }
         segs
     };
     let full = build(["wait", "work", "idle"]);
-    let width: usize = full.iter().map(|s| s.text.chars().count()).sum();
-    if width <= crate::layout::NEON_PANEL_INNER_W as usize {
+    if segs_cells(&full) <= crate::layout::NEON_PANEL_INNER_W as usize {
         full
     } else {
         build(["wt", "wk", "id"])
@@ -262,34 +300,28 @@ const _: () = assert!(
         && !PERSONA_CALM.is_empty()
 );
 
-/// L2's plain-English face for `mood`; `pick` rotates the pool. Same 1-col
-/// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the
+/// L2's plain-English face for `mood`, after its lamp; `pick` rotates the
+/// pool. Same 1-col vocabulary as the tally (see [`board_mood_segments`]).
+/// `None` = L2 stays on the
 /// tally: a line too wide for the panel (the tally abbreviates, this can't), and
 /// an EMPTY office — its tally already reads in plain English, and the floating
 /// window paints an empty office only as its beat turns (the binary's
 /// `floating::cadence`), which would hold a roll mid-scramble on screen.
-fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegment>> {
-    let (glyph, pool, n, tone) = match mood {
-        OfficeMood::Alert { waiting: 1 } => {
-            (GLYPH_WAITING, PERSONA_ALERT_ONE, 1, BoardTone::Waiting)
-        }
-        OfficeMood::Alert { waiting } => (
-            GLYPH_WAITING,
-            PERSONA_ALERT_MANY,
-            waiting,
-            BoardTone::Waiting,
-        ),
-        OfficeMood::Busy { active: 1 } => (GLYPH_ACTIVE, PERSONA_BUSY_ONE, 1, BoardTone::Active),
-        OfficeMood::Busy { active } => (GLYPH_ACTIVE, PERSONA_BUSY_MANY, active, BoardTone::Active),
-        OfficeMood::Calm => (GLYPH_IDLE, PERSONA_CALM, 0, BoardTone::Idle),
+fn board_persona_segments(mood: OfficeMood, pick: u64, lit: bool) -> Option<Vec<BoardSegment>> {
+    let (pool, n, tone) = match mood {
+        OfficeMood::Alert { waiting: 1 } => (PERSONA_ALERT_ONE, 1, BoardTone::Waiting),
+        OfficeMood::Alert { waiting } => (PERSONA_ALERT_MANY, waiting, BoardTone::Waiting),
+        OfficeMood::Busy { active: 1 } => (PERSONA_BUSY_ONE, 1, BoardTone::Active),
+        OfficeMood::Busy { active } => (PERSONA_BUSY_MANY, active, BoardTone::Active),
+        OfficeMood::Calm => (PERSONA_CALM, 0, BoardTone::Idle),
         OfficeMood::Empty => return None,
     };
     let text = match pool[(pick % pool.len() as u64) as usize] {
-        Persona::Says(line) => format!("{glyph} {line}"),
-        Persona::Counts(rest) => format!("{glyph} {n} {rest}"),
+        Persona::Says(line) => format!(" {line}"),
+        Persona::Counts(rest) => format!(" {n} {rest}"),
     };
-    (text.chars().count() <= crate::layout::NEON_PANEL_INNER_W as usize)
-        .then(|| vec![BoardSegment::new(text, tone)])
+    let segs = vec![lamp(tone, lit), BoardSegment::new(text, tone)];
+    (segs_cells(&segs) <= crate::layout::NEON_PANEL_INNER_W as usize).then_some(segs)
 }
 
 /// L2 alternates in equal halves — tally, persona, tally, … — each HOLDING and
@@ -305,7 +337,8 @@ const FLAP_SETTLE_STEP_MS: u64 = 24;
 /// How long one drum glyph shows.
 const FLAP_TICK_MS: u64 = 60;
 /// The flap drum, in rolling order. ASCII, so a rolling line keeps the 1-col
-/// vocabulary [`board_mood_segments`] depends on.
+/// vocabulary [`board_mood_segments`] depends on. Only text rolls: an icon's
+/// column switches when it lands.
 const FLAP_DRUM: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*+=<>/?";
 
 /// When column `col` lands, in ms from the roll's start.
@@ -318,9 +351,24 @@ fn flap_roll_ms(cols: usize) -> u64 {
     flap_settle_ms(cols.saturating_sub(1))
 }
 
-fn flap_cells(segs: &[BoardSegment]) -> Vec<(char, BoardTone)> {
+/// A column of a rolling line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flap {
+    Char(char),
+    Icon(Icon),
+}
+
+const BLANK: (Flap, BoardTone) = (Flap::Char(' '), BoardTone::Dim);
+
+fn flap_cells(segs: &[BoardSegment]) -> Vec<(Flap, BoardTone)> {
     segs.iter()
-        .flat_map(|s| s.text.chars().map(move |c| (c, s.tone)))
+        .flat_map(|s| {
+            let cells: Vec<Flap> = match &s.content {
+                Content::Text(text) => text.chars().map(Flap::Char).collect(),
+                Content::Icon(icon) => vec![Flap::Icon(*icon)],
+            };
+            cells.into_iter().map(move |c| (c, s.tone))
+        })
         .collect()
 }
 
@@ -328,40 +376,50 @@ fn flap_cells(segs: &[BoardSegment]) -> Vec<(char, BoardTone)> {
 /// FORWARD and stops ON its letter, so a column shows the drum glyphs leading up
 /// to its target, never noise; a column that isn't changing doesn't move.
 fn flap_roll(
-    from: &[(char, BoardTone)],
-    to: &[(char, BoardTone)],
+    from: &[(Flap, BoardTone)],
+    to: &[(Flap, BoardTone)],
     since_ms: u64,
 ) -> Vec<BoardSegment> {
-    const BLANK: (char, BoardTone) = (' ', BoardTone::Dim);
     let drum_len = FLAP_DRUM.len() as u64;
-    let mut cells: Vec<(char, BoardTone)> = (0..from.len().max(to.len()))
+    let blank = |c: (Flap, BoardTone)| c.0 == BLANK.0;
+    let mut cells: Vec<(Flap, BoardTone)> = (0..from.len().max(to.len()))
         .map(|col| {
             let old = from.get(col).copied().unwrap_or(BLANK);
             let new = to.get(col).copied().unwrap_or(BLANK);
             let settle = flap_settle_ms(col);
             // A blank's tone is invisible, so blank-to-blank is "not changing" too.
-            let unchanged = old == new || (old.0 == ' ' && new.0 == ' ');
+            let unchanged = old == new || (blank(old) && blank(new));
             if since_ms >= settle || unchanged {
                 return new;
             }
-            // A glyph the drum lacks (▲●○, punctuation) rolls in from a per-column spot.
+            let (Flap::Char(target), Flap::Char(_)) = (new.0, old.0) else {
+                return old;
+            };
+            // A glyph the drum lacks (punctuation) rolls in from a per-column spot.
             let home = FLAP_DRUM
                 .iter()
-                .position(|&b| b as char == new.0.to_ascii_uppercase())
+                .position(|&b| b as char == target.to_ascii_uppercase())
                 .map_or(col as u64 % drum_len, |i| i as u64);
             let flips_left = (settle - since_ms).div_ceil(FLAP_TICK_MS);
             let idx = (home + drum_len - flips_left % drum_len) % drum_len;
-            (FLAP_DRUM[idx as usize] as char, BoardTone::Dim)
+            (Flap::Char(FLAP_DRUM[idx as usize] as char), BoardTone::Dim)
         })
         .collect();
-    while cells.last() == Some(&BLANK) {
+    while cells.last().is_some_and(|&c| blank(c)) {
         cells.pop();
     }
     let mut segs: Vec<BoardSegment> = Vec::new();
-    for (ch, tone) in cells {
-        match segs.last_mut() {
-            Some(last) if last.tone == tone => last.text.push(ch),
-            _ => segs.push(BoardSegment::new(ch.to_string(), tone)),
+    for (cell, tone) in cells {
+        match (cell, segs.last_mut()) {
+            (Flap::Icon(icon), _) => segs.push(BoardSegment::icon(icon, tone)),
+            (
+                Flap::Char(ch),
+                Some(BoardSegment {
+                    content: Content::Text(text),
+                    tone: last,
+                }),
+            ) if *last == tone => text.push(ch),
+            (Flap::Char(ch), _) => segs.push(BoardSegment::new(ch.to_string(), tone)),
         }
     }
     segs
@@ -369,9 +427,10 @@ fn flap_roll(
 
 /// L2 at `now_ms` — see [`FLAP_HALF_MS`] for the timeline.
 fn board_mood_at(counts: StateCounts, now_ms: u64) -> Vec<BoardSegment> {
-    let tally = board_mood_segments(counts);
+    let lit = lamp_lit(now_ms);
+    let tally = board_mood_segments(counts, lit);
     let half = now_ms / FLAP_HALF_MS;
-    let Some(persona) = board_persona_segments(OfficeMood::of(counts), half / 2) else {
+    let Some(persona) = board_persona_segments(OfficeMood::of(counts), half / 2, lit) else {
         return tally;
     };
     let (showing, next) = if half.is_multiple_of(2) {
@@ -379,8 +438,7 @@ fn board_mood_at(counts: StateCounts, now_ms: u64) -> Vec<BoardSegment> {
     } else {
         (persona, tally)
     };
-    let cols = |segs: &[BoardSegment]| segs.iter().map(|s| s.text.chars().count()).sum();
-    let roll_ms = flap_roll_ms(usize::max(cols(&showing), cols(&next)));
+    let roll_ms = flap_roll_ms(usize::max(segs_cells(&showing), segs_cells(&next)));
     match (now_ms % FLAP_HALF_MS + roll_ms).checked_sub(FLAP_HALF_MS) {
         Some(since_ms) => flap_roll(&flap_cells(&showing), &flap_cells(&next), since_ms),
         None => showing,
@@ -401,7 +459,7 @@ pub fn build_board(
     now: SystemTime,
 ) -> BoardModel {
     let mut context = vec![BoardSegment::new(
-        format!("\u{2191}{}", compact_hms(uptime_secs)),
+        format!("up {}", compact_hms(uptime_secs)),
         BoardTone::Dim,
     )];
     if let Some((current, total)) = floor {
@@ -411,14 +469,16 @@ pub fn build_board(
         ));
     }
     if let Some(state) = gateway {
-        context.push(BoardSegment::new(
-            format!("  {GATEWAY_GLYPH}gw {}", gateway_label(state)),
-            gateway_tone(state),
-        ));
+        let tone = gateway_tone(state);
+        context.extend([
+            BoardSegment::new("  ", tone),
+            BoardSegment::icon(Icon::Gateway, tone),
+            BoardSegment::new(format!("gw {}", gateway_label(state)), tone),
+        ]);
     }
     BoardModel {
         brand: BoardSegment::new(BOARD_BRAND, BoardTone::Brand),
-        star: BoardSegment::new(BOARD_STAR, BoardTone::Star),
+        star: board_star(),
         mood: board_mood_at(counts, motion.beat(now).ms()),
         context,
     }
@@ -454,7 +514,7 @@ impl BoardModel {
             CELL_ROWS, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
         };
         let span = |s: &BoardSegment| TextSpan {
-            text: s.text.clone(),
+            content: s.content.clone(),
             ink: s.tone.rgb(theme),
         };
         let line = |n: u16| crate::layout::Point {
@@ -466,6 +526,7 @@ impl BoardModel {
             align,
             spans,
             plate: None,
+            strip: None,
             role,
         };
         vec![
@@ -481,7 +542,7 @@ impl BoardModel {
                     ..line(0)
                 },
                 Align::Right,
-                vec![span(&self.star)],
+                self.star.iter().map(span).collect(),
                 TextRole::Star,
             ),
             run(
@@ -525,7 +586,7 @@ mod tests {
             for ms in (0..A_MINUTE_MS).step_by(FRAME_MS) {
                 let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
                 let model = build_board(counts, 0, None, None, Motion::Full, now);
-                let l2: String = model.mood.iter().map(|s| s.text.as_str()).collect();
+                let l2: String = model.mood.iter().map(|s| s.text()).collect();
                 let n = usize::from(cells(&l2));
                 assert_eq!(n, l2.chars().count(), "{l2:?} at {ms}ms");
                 assert!(
@@ -537,9 +598,9 @@ mod tests {
     }
 
     fn mood_text(counts: StateCounts) -> String {
-        board_mood_segments(counts)
+        board_mood_segments(counts, true)
             .into_iter()
-            .map(|s| s.text)
+            .map(|s| s.text().to_owned())
             .collect()
     }
 
@@ -554,16 +615,16 @@ mod tests {
     }
 
     fn text_of(segs: &[BoardSegment]) -> String {
-        segs.iter().map(|s| s.text.as_str()).collect()
+        segs.iter().map(|s| s.text()).collect()
     }
 
     fn persona_of(c: StateCounts) -> Vec<BoardSegment> {
-        board_persona_segments(OfficeMood::of(c), 0).expect("this office has a persona line")
+        board_persona_segments(OfficeMood::of(c), 0, true).expect("this office has a persona line")
     }
 
     /// How long the roll between `c`'s tally and its first persona line takes.
     fn roll_ms(c: StateCounts) -> u64 {
-        let tally = text_of(&board_mood_segments(c)).chars().count();
+        let tally = text_of(&board_mood_segments(c, true)).chars().count();
         let persona = text_of(&persona_of(c)).chars().count();
         flap_roll_ms(tally.max(persona))
     }
@@ -606,7 +667,7 @@ mod tests {
             Motion::Full,
             SystemTime::UNIX_EPOCH,
         );
-        assert_eq!(b.brand.text, BOARD_BRAND);
+        assert_eq!(b.brand.text(), BOARD_BRAND);
     }
 
     #[test]
@@ -636,29 +697,32 @@ mod tests {
     #[test]
     fn l2_holds_the_tally_then_the_persona_and_rolls_only_between_them() {
         let c = counts(4, 2, 6);
-        let tally = board_mood_segments(c);
-        let persona = persona_of(c);
-        assert_ne!(tally, persona);
+        let mood = OfficeMood::of(c);
+        // Each face as `ms` shows its waiting lamp, which blinks underneath.
+        let tally = |ms| board_mood_segments(c, lamp_lit(ms));
+        let persona = |ms| board_persona_segments(mood, 0, lamp_lit(ms)).expect("fits");
+        assert_ne!(tally(0), persona(0));
         let at = |ms| board_mood_at(c, ms);
         let roll_starts = FLAP_HALF_MS - roll_ms(c);
-        assert_eq!(at(0), tally, "an even half OPENS on the settled tally");
-        assert_eq!(at(roll_starts - 1), tally, "held until the roll");
-        assert_ne!(at(roll_starts + FLAP_TICK_MS), tally, "rolling");
-        assert_ne!(at(FLAP_HALF_MS - 1), persona, "last column still rolling");
-        assert_eq!(at(FLAP_HALF_MS), persona, "the roll ENDS on the hand-over");
+        assert_eq!(at(0), tally(0), "an even half OPENS on the settled tally");
+        let held = roll_starts - 1;
+        assert_eq!(at(held), tally(held), "held until the roll");
+        let rolling = roll_starts + FLAP_TICK_MS;
+        assert_ne!(at(rolling), tally(rolling), "rolling");
+        let last = FLAP_HALF_MS - 1;
+        assert_ne!(at(last), persona(last), "last column still rolling");
         assert_eq!(
-            at(FLAP_HALF_MS + roll_starts - 1),
-            persona,
-            "held until the roll"
+            at(FLAP_HALF_MS),
+            persona(FLAP_HALF_MS),
+            "the roll ENDS on the hand-over"
         );
-        assert_ne!(
-            at(2 * FLAP_HALF_MS - 1),
-            tally,
-            "last column still rolling back"
-        );
+        let held = FLAP_HALF_MS + roll_starts - 1;
+        assert_eq!(at(held), persona(held), "held until the roll");
+        let last = 2 * FLAP_HALF_MS - 1;
+        assert_ne!(at(last), tally(last), "last column still rolling back");
         assert_eq!(
             at(2 * FLAP_HALF_MS),
-            tally,
+            tally(2 * FLAP_HALF_MS),
             "and the next pair opens settled"
         );
     }
@@ -669,11 +733,11 @@ mod tests {
         let shown = |pair: u64| board_mood_at(c, (2 * pair + 1) * FLAP_HALF_MS);
         assert_eq!(
             shown(0),
-            board_persona_segments(OfficeMood::of(c), 0).unwrap()
+            board_persona_segments(OfficeMood::of(c), 0, true).unwrap()
         );
         assert_eq!(
             shown(1),
-            board_persona_segments(OfficeMood::of(c), 1).unwrap()
+            board_persona_segments(OfficeMood::of(c), 1, true).unwrap()
         );
         assert_ne!(shown(0), shown(1));
     }
@@ -685,7 +749,7 @@ mod tests {
         let mid = FLAP_HALF_MS - roll_ms(c) / 2;
         let cells: Vec<(char, BoardTone)> = board_mood_at(c, mid)
             .iter()
-            .flat_map(|s| s.text.chars().map(move |ch| (ch, s.tone)))
+            .flat_map(|s| s.text().chars().map(move |ch| (ch, s.tone)))
             .collect();
         let settled = persona
             .chars()
@@ -736,7 +800,7 @@ mod tests {
     #[test]
     fn a_column_blank_on_both_sides_stays_blank_through_the_roll() {
         let c = counts(4, 2, 6);
-        let tally = text_of(&board_mood_segments(c));
+        let tally = text_of(&board_mood_segments(c, true));
         let persona = text_of(&persona_of(c));
         let cell = |text: &str, col: usize| text.chars().nth(col).unwrap_or(' ');
         let cols = tally.chars().count().max(persona.chars().count());
@@ -759,7 +823,7 @@ mod tests {
                 OfficeMood::Calm,
             ] {
                 for pick in 0..8 {
-                    let Some(line) = board_persona_segments(mood, pick) else {
+                    let Some(line) = board_persona_segments(mood, pick, true) else {
                         continue;
                     };
                     let line = text_of(&line);
@@ -770,12 +834,12 @@ mod tests {
                 }
             }
         }
-        assert!(board_persona_segments(OfficeMood::Busy { active: 999 }, 1).is_some());
+        assert!(board_persona_segments(OfficeMood::Busy { active: 999 }, 1, true).is_some());
         let absurd = OfficeMood::Alert {
             waiting: usize::MAX,
         };
         assert_eq!(
-            board_persona_segments(absurd, 0),
+            board_persona_segments(absurd, 0, true),
             None,
             "withheld, not clipped"
         );
@@ -789,8 +853,8 @@ mod tests {
             ..StateCounts::default()
         };
         for c in [StateCounts::default(), absurd] {
-            let tally = board_mood_segments(c);
             for ms in (0..2 * FLAP_HALF_MS).step_by(FLAP_TICK_MS as usize) {
+                let tally = board_mood_segments(c, lamp_lit(ms));
                 assert_eq!(board_mood_at(c, ms), tally, "{ms}ms");
             }
         }
@@ -798,9 +862,9 @@ mod tests {
 
     #[test]
     fn a_counted_persona_line_reads_glyph_count_text() {
-        let line = board_persona_segments(OfficeMood::Alert { waiting: 3 }, 0).expect("fits");
+        let line = board_persona_segments(OfficeMood::Alert { waiting: 3 }, 0, true).expect("fits");
         assert_eq!(text_of(&line), "\u{25b2} 3 agents need you!");
-        let line = board_persona_segments(OfficeMood::Busy { active: 12 }, 1).expect("fits");
+        let line = board_persona_segments(OfficeMood::Busy { active: 12 }, 1, true).expect("fits");
         assert_eq!(text_of(&line), "\u{25cf} 12 brains at work");
     }
 
@@ -811,7 +875,7 @@ mod tests {
                 OfficeMood::Alert { waiting: 1 },
                 OfficeMood::Busy { active: 1 },
             ] {
-                let line = text_of(&board_persona_segments(mood, pick).expect("fits"));
+                let line = text_of(&board_persona_segments(mood, pick, true).expect("fits"));
                 assert!(!line.contains("1 "), "{mood:?}/{pick}: {line:?}");
             }
         }
@@ -833,7 +897,7 @@ mod tests {
         }
         assert_eq!(
             board_mood_at(counts(4, 2, 6), 0),
-            board_mood_segments(counts(4, 2, 6)),
+            board_mood_segments(counts(4, 2, 6), true),
             "and a frame ON the hour grid shows the tally"
         );
     }
@@ -889,7 +953,7 @@ mod tests {
             exiting: 1,
             total: 11,
         };
-        let segs = board_mood_segments(c);
+        let segs = board_mood_segments(c, true);
         let text = mood_text(c);
         assert!(text.contains("\u{25b2}2 wait"), "waiting beacon: {text}");
         assert!(text.contains("\u{25cf}3 work"), "active: {text}");
@@ -900,12 +964,29 @@ mod tests {
         assert!(w < a, "waiting leads active: {text}");
         let tone_of = |glyph: char| {
             segs.iter()
-                .find(|s| s.text.starts_with(glyph))
+                .find(|s| s.text().starts_with(glyph))
                 .map(|s| s.tone)
         };
         assert_eq!(tone_of('\u{25b2}'), Some(BoardTone::Waiting));
         assert_eq!(tone_of('\u{25cf}'), Some(BoardTone::Active));
         assert_eq!(tone_of('\u{25cb}'), Some(BoardTone::Idle));
+    }
+
+    /// The waiting lamp blinks, dim while it is off; the others hold.
+    #[test]
+    fn the_waiting_lamp_blinks() {
+        let c = counts(1, 1, 1);
+        let lamps = |ms| -> Vec<BoardTone> {
+            board_mood_at(c, ms)
+                .into_iter()
+                .filter(|s| matches!(s.content, Content::Icon(_)))
+                .map(|s| s.tone)
+                .collect()
+        };
+        use BoardTone::{Active, Dim, Idle, Waiting};
+        assert_eq!(lamps(0), [Waiting, Active, Idle]);
+        assert_eq!(lamps(BLINK_HALF_MS), [Dim, Active, Idle]);
+        assert_eq!(lamps(2 * BLINK_HALF_MS), [Waiting, Active, Idle]);
     }
 
     #[test]
@@ -927,9 +1008,9 @@ mod tests {
 
     #[test]
     fn mood_empty_office_reads_plainly_and_is_dim() {
-        let segs = board_mood_segments(StateCounts::default());
+        let segs = board_mood_segments(StateCounts::default(), true);
         assert_eq!(segs.len(), 1);
-        assert_eq!(segs[0].text, "\u{2014} office empty \u{2014}");
+        assert_eq!(segs[0].text(), "\u{2014} office empty \u{2014}");
         assert_eq!(segs[0].tone, BoardTone::Dim);
     }
 
@@ -985,11 +1066,15 @@ mod tests {
         };
         let b = build_board(c, 3661, None, None, Motion::Full, SystemTime::UNIX_EPOCH);
         assert_eq!(b.brand.tone, BoardTone::Brand);
-        assert_eq!(b.mood, board_mood_segments(c), "the epoch is a whole hour");
-        assert_eq!(b.star.text, BOARD_STAR);
-        assert_eq!(b.star.tone, BoardTone::Star);
+        assert_eq!(
+            b.mood,
+            board_mood_segments(c, true),
+            "the epoch is a whole hour"
+        );
+        assert_eq!(text_of(&b.star), "\u{2605} Star");
+        assert!(b.star.iter().all(|s| s.tone == BoardTone::Star));
         assert_eq!(b.context.len(), 1);
-        assert_eq!(b.context[0].text, "\u{2191}1h1m");
+        assert_eq!(b.context[0].text(), "up 1h1m");
         assert_eq!(b.context[0].tone, BoardTone::Dim);
 
         let b2 = build_board(
@@ -1000,8 +1085,8 @@ mod tests {
             Motion::Full,
             SystemTime::UNIX_EPOCH,
         );
-        let ctx: String = b2.context.iter().map(|s| s.text.clone()).collect();
-        assert_eq!(ctx, "\u{2191}<1m  F2/3  \u{2b22}gw busy");
+        let ctx: String = b2.context.iter().map(BoardSegment::text).collect();
+        assert_eq!(ctx, "up <1m  F2/3  \u{2b22}gw busy");
         let chip = b2.context.last().unwrap();
         assert_eq!(chip.tone, BoardTone::Active, "busy gateway chip tone");
     }
