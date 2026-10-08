@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::tui::connection::ConnectionFrame;
-use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
+use crate::panels::connection::ConnectionFrame;
+use crate::panels::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
 
 #[test]
 fn dashboard_popup_renders_labels_states_and_live_tool() {
@@ -35,7 +35,7 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
 
 #[test]
 fn connection_panel_renders_both_facets_borderless() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveFacet, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveFacet, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![
@@ -108,7 +108,7 @@ fn connection_panel_renders_both_facets_borderless() {
 // per-row flag the painter adds — proving the flag specifically.
 #[test]
 fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
@@ -145,7 +145,7 @@ fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
 
 #[test]
 fn connection_panel_armed_shows_confirm_prompt() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
@@ -175,7 +175,7 @@ fn connection_panel_armed_shows_confirm_prompt() {
 
 #[test]
 fn connection_panel_disconnected_selected_shows_connect_hint() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
@@ -208,7 +208,7 @@ fn connection_panel_disconnected_selected_shows_connect_hint() {
 
 #[test]
 fn connection_panel_no_cli_selected_shows_not_detected_hint() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
@@ -241,7 +241,7 @@ fn connection_panel_no_cli_selected_shows_not_detected_hint() {
 
 #[test]
 fn connection_panel_connected_without_config_path_shows_connected() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
@@ -274,7 +274,7 @@ fn connection_panel_connected_without_config_path_shows_connected() {
 
 #[test]
 fn connection_panel_last_result_overrides_per_state_detail() {
-    use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![], 16);
     let rows = vec![ConnectionRow {
@@ -341,7 +341,7 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     root.label = "cc\u{b7}root".into();
     let mut agents = vec![root];
     // Past the threshold → the root auto-collapses on open.
-    let children = crate::tui::dashboard::AUTO_COLLAPSE_THRESHOLD + 1;
+    let children = crate::panels::dashboard::AUTO_COLLAPSE_THRESHOLD + 1;
     for i in 0..children {
         let cid = AgentId::from_transcript_path(&format!("/h/root/subagents/agent-{i}.jsonl"));
         let mut c = slot(cid, 0, 1 + i, t0());
@@ -608,7 +608,7 @@ fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
         tight_n < roomy_n,
         "the band must track the CLAMPED inner height, not the {}-row cap: \
          {tight_n} rows at 80×18 vs {roomy_n} at 80×44",
-        crate::tui::dashboard::DASHBOARD_VIEWPORT_ROWS,
+        crate::panels::dashboard::DASHBOARD_VIEWPORT_ROWS,
     );
     for (label, text) in [("80×44", &roomy), ("80×18", &tight)] {
         assert!(

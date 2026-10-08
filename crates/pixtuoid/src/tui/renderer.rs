@@ -20,13 +20,11 @@ use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
 
+pub(crate) use crate::panels::widgets::{TooltipAt, paint_tooltip};
+pub(super) use crate::panels::widgets::{paint_badges, paint_footer, paint_text_runs};
+pub(crate) use crate::panels::{FOOTER_ROWS, scene_rect};
 use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
-pub(crate) use crate::tui::widgets::{TooltipAt, paint_tooltip};
-pub(super) use crate::tui::widgets::{
-    paint_badges, paint_connection_panel, paint_dashboard, paint_footer, paint_help_overlay,
-    paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
-};
 
 pub use pixtuoid_scene::pet::PetState;
 
@@ -43,14 +41,14 @@ pub struct DrawCtx<'a> {
     pub debug_walkable: bool,
     pub theme: &'static pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
-    /// From [`footer_context`](crate::tui::widgets::footer_context).
+    /// From [`footer_context`](crate::panels::widgets::footer_context).
     pub footer: FooterContext<'a>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
-    pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
-    pub connection: &'a crate::tui::connection::ConnectionFrame,
-    pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
+    pub dashboard: &'a crate::panels::dashboard::DashboardFrame,
+    pub connection: &'a crate::panels::connection::ConnectionFrame,
+    pub onboarding: &'a crate::panels::welcome::OnboardingFrame,
     /// The flashes the terminal shows, for a live painter; a still has none
     /// to hold.
     pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
@@ -71,11 +69,11 @@ impl<'a> DrawCtx<'a> {
         meta: pixtuoid_scene::floor::FloorMeta,
     ) -> Self {
         use std::sync::LazyLock;
-        static CLOSED_DASHBOARD: LazyLock<crate::tui::dashboard::DashboardFrame> =
+        static CLOSED_DASHBOARD: LazyLock<crate::panels::dashboard::DashboardFrame> =
             LazyLock::new(Default::default);
-        static CLOSED_CONNECTION: LazyLock<crate::tui::connection::ConnectionFrame> =
+        static CLOSED_CONNECTION: LazyLock<crate::panels::connection::ConnectionFrame> =
             LazyLock::new(Default::default);
-        static CLOSED_ONBOARDING: LazyLock<crate::tui::welcome::OnboardingFrame> =
+        static CLOSED_ONBOARDING: LazyLock<crate::panels::welcome::OnboardingFrame> =
             LazyLock::new(Default::default);
         Self {
             world: FloorInputs {
@@ -91,7 +89,7 @@ impl<'a> DrawCtx<'a> {
             debug_walkable: false,
             theme,
             theme_picker: None,
-            footer: crate::tui::widgets::footer_context(scene, None, false, None, None),
+            footer: crate::panels::widgets::footer_context(scene, None, false, None, None),
             popup_scale: 0.0,
             help_open: false,
             dashboard: &CLOSED_DASHBOARD,
@@ -118,31 +116,6 @@ pub struct DrawOut {
     pub held: bool,
 }
 
-/// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
-/// Prevents ratatui's "index outside of buffer" panic when label/notice widgets
-/// land near the right or bottom edge.
-pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
-    if rect.x >= bounds.x + bounds.width || rect.y >= bounds.y + bounds.height {
-        return None;
-    }
-    if rect.x + rect.width <= bounds.x || rect.y + rect.height <= bounds.y {
-        return None;
-    }
-    let x = rect.x.max(bounds.x);
-    let y = rect.y.max(bounds.y);
-    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
-    let bot = (rect.y + rect.height).min(bounds.y + bounds.height);
-    if right <= x || bot <= y {
-        return None;
-    }
-    Some(Rect {
-        x,
-        y,
-        width: right - x,
-        height: bot - y,
-    })
-}
-
 /// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
@@ -152,32 +125,11 @@ pub(crate) fn scene_too_small(scene: Rect) -> bool {
     scene.width < MIN_SCENE_WIDTH || scene.height < MIN_SCENE_HEIGHT
 }
 
-/// How many rows at the bottom of the terminal the status footer owns.
-pub(crate) const FOOTER_ROWS: u16 = 1;
-
-pub(crate) fn scene_rect(full: Rect) -> Rect {
-    Rect {
-        x: 0,
-        y: 0,
-        width: full.width,
-        height: full.height.saturating_sub(FOOTER_ROWS),
-    }
-}
-
 /// The pixel buffer a `cols`×`rows` terminal's scene paints, two half-block pixels a row.
 #[doc(hidden)]
 pub fn scene_buf_size(cols: u16, rows: u16) -> (u16, u16) {
     let scene = scene_rect(Rect::new(0, 0, cols, rows));
     (scene.width, scene.height.saturating_mul(2))
-}
-
-pub(crate) struct OverlayFrame<'a> {
-    pub theme_picker: Option<usize>,
-    pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
-    pub connection: &'a crate::tui::connection::ConnectionFrame,
-    pub popup_scale: f32,
-    pub help_open: bool,
-    pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
 }
 
 /// Paint the footer-only frame shown when the terminal is too small to render the
@@ -192,13 +144,13 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     footer: &FooterInputs<'_>,
     theme: &pixtuoid_scene::theme::Theme,
-    overlays: &OverlayFrame<'_>,
+    overlays: &crate::panels::OverlayFrame<'_>,
     now: SystemTime,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
         paint_footer(f, footer, actual, theme);
-        paint_overlays(f, overlays, now, actual, theme);
+        crate::panels::paint_overlays(f, overlays, now, actual, theme);
         // LAST: a modal centres on the same rows, and first run opens one here —
         // so painting the notice first left the black screen unexplained in the
         // one case it exists for.
@@ -336,7 +288,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let world = ctx.world;
     let FloorInputs { scene, now, .. } = world;
     let footer = FooterInputs::new(scene, ctx.footer);
-    let overlays = OverlayFrame {
+    let overlays = crate::panels::OverlayFrame {
         theme_picker: ctx.theme_picker,
         dashboard: ctx.dashboard,
         connection: ctx.connection,
@@ -400,7 +352,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 /// painter rendered it.
 pub(crate) struct ClassicFrame<'f> {
     pub(crate) footer: &'f FooterInputs<'f>,
-    pub(crate) overlays: &'f OverlayFrame<'f>,
+    pub(crate) overlays: &'f crate::panels::OverlayFrame<'f>,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
     /// The floor's inputs, which a tooltip reads.
     pub(crate) world: &'f FloorInputs<'f>,
@@ -477,7 +429,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         if let (Some(hit), Some(at)) = (&hit, at) {
             paint_scene_tooltip(f, hit, world, at, theme);
         }
-        paint_overlays(f, overlays, now, actual_full, theme);
+        crate::panels::paint_overlays(f, overlays, now, actual_full, theme);
     })?;
     Ok(DrawOut {
         layout: Some(layout),
@@ -486,44 +438,6 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         geometry: Some(geometry),
         held: false,
     })
-}
-
-/// The modal-overlay dispatch, centralized so the draw paths can't drift in
-/// ordering or args. `bounds` is the FULL terminal area — a modal is centered over
-/// the whole frame, and `PanelGeometry` keeps it off the footer row itself.
-pub(super) fn paint_overlays(
-    f: &mut ratatui::Frame<'_>,
-    ov: &OverlayFrame<'_>,
-    now: SystemTime,
-    bounds: Rect,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    let &OverlayFrame {
-        theme_picker,
-        dashboard,
-        connection,
-        popup_scale,
-        help_open,
-        onboarding,
-    } = ov;
-    if let Some(idx) = theme_picker {
-        paint_theme_picker(f, idx, bounds, theme);
-    }
-    if dashboard.open {
-        paint_dashboard(f, dashboard, now, bounds, theme);
-    }
-    if connection.open {
-        paint_connection_panel(f, connection, now, bounds, theme);
-    }
-    if popup_scale > 0.0 {
-        paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);
-    }
-    if help_open {
-        paint_help_overlay(f, bounds, theme);
-    }
-    if onboarding.open {
-        paint_welcome(f, onboarding, bounds, theme);
-    }
 }
 
 /// `buf`'s pixels into `scene_rect`'s cells, two rows a half-block.
@@ -579,6 +493,7 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panels::clip_widget_rect;
     use crate::tui::geometry::CellArea;
 
     #[test]

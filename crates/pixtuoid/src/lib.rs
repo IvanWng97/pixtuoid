@@ -23,6 +23,7 @@ pub(crate) mod install;
 pub(crate) mod jank;
 #[cfg(feature = "graphics")]
 pub(crate) mod pacing;
+pub(crate) mod panels;
 pub(crate) mod run_log;
 pub(crate) mod runtime;
 pub(crate) mod setup;
@@ -45,13 +46,13 @@ pub mod dev {
     };
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
+    pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
+    pub use crate::panels::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
+    pub use crate::panels::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
+    pub use crate::panels::widgets::{footer_context, grid_of};
     pub use crate::sources::{ConnState, ConnectionRow};
-    pub use crate::tui::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
-    pub use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
     pub use crate::tui::renderer::{DrawCtx, DrawOut, PetState, draw_scene, scene_buf_size};
     pub use crate::tui::tui_renderer::TuiRenderer;
-    pub use crate::tui::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
-    pub use crate::tui::widgets::{footer_context, grid_of};
 }
 
 /// Strip control characters (Cc) and bidi controls from an untrusted string

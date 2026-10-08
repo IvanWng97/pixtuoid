@@ -1,6 +1,6 @@
 //! The agent dashboard model: a `SceneState` flattened into a navigable
 //! parent→subagent row list, plus the fold + selection logic. PURE — no
-//! ratatui (the painter lives in `tui::widgets::dashboard`).
+//! ratatui (the painter lives in `panels::widgets::dashboard`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

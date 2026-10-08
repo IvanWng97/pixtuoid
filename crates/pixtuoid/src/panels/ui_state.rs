@@ -20,29 +20,13 @@ use welcome::{OnboardingFrame, WelcomeUi};
 /// One frame's renderer mirrors — bundling them keeps the compute (here) and
 /// the push (one call in the loop) from drifting apart per surface.
 pub(crate) struct RenderFrames {
-    theme_picker: Option<usize>,
-    version_popup: bool,
-    help_open: bool,
-    source_warning: Option<String>,
-    dashboard: DashboardFrame,
-    connection: ConnectionFrame,
-    onboarding: OnboardingFrame,
-}
-
-impl RenderFrames {
-    pub(crate) fn apply_to<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-        self,
-        renderer: &mut super::TuiRenderer<B>,
-        now: SystemTime,
-    ) {
-        renderer.set_theme_picker(self.theme_picker);
-        renderer.set_version_popup(self.version_popup, now);
-        renderer.set_help_open(self.help_open);
-        renderer.set_source_warning(self.source_warning);
-        renderer.set_dashboard_frame(self.dashboard);
-        renderer.set_connection_frame(self.connection);
-        renderer.set_onboarding_frame(self.onboarding);
-    }
+    pub(crate) theme_picker: Option<usize>,
+    pub(crate) version_popup: bool,
+    pub(crate) help_open: bool,
+    pub(crate) source_warning: Option<String>,
+    pub(crate) dashboard: DashboardFrame,
+    pub(crate) connection: ConnectionFrame,
+    pub(crate) onboarding: OnboardingFrame,
 }
 
 /// The per-surface UI state. Fields stay `pub(crate)` where the loop's I/O arms
