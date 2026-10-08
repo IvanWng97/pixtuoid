@@ -29,6 +29,21 @@ pub(crate) struct RenderFrames {
     pub(crate) onboarding: OnboardingFrame,
 }
 
+impl RenderFrames {
+    /// Its panels as [`paint_overlays`](super::paint_overlays) draws them,
+    /// the version popup whole: a painter with no animation of its own.
+    pub(crate) fn overlays(&self) -> super::OverlayFrame<'_> {
+        super::OverlayFrame {
+            theme_picker: self.theme_picker,
+            dashboard: &self.dashboard,
+            connection: &self.connection,
+            popup_scale: if self.version_popup { 1.0 } else { 0.0 },
+            help_open: self.help_open,
+            onboarding: &self.onboarding,
+        }
+    }
+}
+
 /// The per-surface UI state. Fields stay `pub(crate)` where the loop's I/O arms
 /// read/write them directly: state lives here, side effects stay in the loop.
 pub(crate) struct UiState {

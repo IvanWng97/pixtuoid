@@ -64,6 +64,18 @@ pub(crate) struct OverlayFrame<'a> {
     pub(crate) onboarding: &'a crate::panels::welcome::OnboardingFrame,
 }
 
+impl OverlayFrame<'_> {
+    /// Whether any panel shows.
+    pub(crate) fn any_open(&self) -> bool {
+        self.theme_picker.is_some()
+            || self.dashboard.open
+            || self.connection.open
+            || self.popup_scale > 0.0
+            || self.help_open
+            || self.onboarding.open
+    }
+}
+
 /// The modal-overlay dispatch, centralized so the draw paths can't drift in
 /// ordering or args. `bounds` is the FULL terminal area — a modal is centered over
 /// the whole frame, and `PanelGeometry` keeps it off the footer row itself.
@@ -125,6 +137,18 @@ pub(crate) struct ModalState {
     /// A disconnect is armed on the Sources panel, awaiting y/n.
     pub(crate) connection_confirm: bool,
     pub(crate) n_themes: usize,
+}
+
+impl ModalState {
+    /// Whether any panel owns input, so the office behind takes no click.
+    pub(crate) fn any_open(&self) -> bool {
+        self.onboarding_open
+            || self.help_open
+            || self.version_popup
+            || self.theme_picker.is_some()
+            || self.dashboard_open
+            || self.connection_open
+    }
 }
 
 #[derive(Clone, Copy)]

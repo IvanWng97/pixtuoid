@@ -10,10 +10,10 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::cutaway::{CellPx, Face, GridInk, paint_grid};
-use pixtuoid_scene::display::cells::{CARD_SHADOW, CellRect};
+use pixtuoid_scene::display::cells::{CARD_SHADOW, CellGrid, CellRect};
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
-use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
+use pixtuoid_scene::footer::{FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::RenderInputs;
@@ -265,14 +265,12 @@ impl OfficeRenderer {
         let floor_scene = self.session.footer_scene(scene);
         let inputs = FooterInputs::new(
             &floor_scene,
-            FooterContext::new(
+            crate::panels::widgets::footer_context(
                 scene,
                 self.session.footer_floor(scene),
                 audio_audible,
                 volume_flash,
                 warning,
-                super::input::footer_keys(),
-                super::input::footer_keys(),
             ),
         );
         build_footer(&inputs, budget)
@@ -286,6 +284,28 @@ pub(crate) struct Overlays {
     pub(crate) window: (u32, u32),
     pub(crate) footer: FooterModel,
     pub(crate) tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
+    /// The open panels, as the TUI paints them: [`panels_grid`].
+    pub(crate) panels: Option<CellGrid>,
+}
+
+/// `frames`' open panels over a window `cols`×`rows` screen cells big, as
+/// the TUI paints them over its terminal, read back as a grid; `None` when
+/// none is open.
+pub(crate) fn panels_grid(
+    frames: &crate::panels::ui_state::RenderFrames,
+    (cols, rows): (u16, u16),
+    now: std::time::SystemTime,
+    theme: &Theme,
+) -> Option<CellGrid> {
+    let overlays = frames.overlays();
+    if !overlays.any_open() {
+        return None;
+    }
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(cols, rows)).ok()?;
+    term.draw(|f| crate::panels::paint_overlays(f, &overlays, now, f.area(), theme))
+        .ok()?;
+    let buf = term.backend().buffer();
+    Some(crate::panels::widgets::grid_of(buf, buf.area))
 }
 
 /// What the window shows, as far as a frame may skip presenting: the overlays
@@ -620,6 +640,54 @@ pub fn paint_tooltip_into_surface(
         shadow: Some(CARD_SHADOW),
     };
     paint_grid(sb, &card, (at, cell), (Face::Screen, pack), ink);
+}
+
+/// The panel `name` (`help`, `dashboard`, `sources` or `theme`) open over
+/// `scene` in a window `cols`×`rows` screen cells big, for a snapshot to
+/// paint; `None` for a name it doesn't know.
+#[doc(hidden)]
+pub fn panel_preview(
+    name: &str,
+    scene: &SceneState,
+    theme: &'static Theme,
+    size: (u16, u16),
+    now: std::time::SystemTime,
+) -> Option<CellGrid> {
+    let mut ui = crate::panels::ui_state::UiState::new(
+        theme,
+        crate::panels::welcome::WelcomeUi::from_detected(&[]),
+        false,
+        std::path::PathBuf::new(),
+        None,
+        crate::doctor::DriftSeen::default(),
+    );
+    match name {
+        "help" => ui.toggle_help(),
+        "dashboard" => ui.toggle_dashboard(scene),
+        "sources" => ui.open_connection(crate::panels::connection::build_rows(
+            &crate::runtime::ConnectedSources::default().snapshot(),
+            &ui.read_conn_log(),
+        )),
+        "theme" => ui.open_theme_picker(),
+        _ => return None,
+    }
+    panels_grid(&ui.build_frames(now, scene, &[]), size, now, theme)
+}
+
+/// Paint `panels` over the window from its top-left, in screen cells of
+/// `cell`: the TUI's panels, cell for cell.
+pub fn paint_panels_into_surface(
+    sb: &mut XrgbSurface<'_>,
+    panels: &CellGrid,
+    (theme, pack): (&Theme, &Pack),
+    cell: CellPx,
+) {
+    let ink = GridInk {
+        text: theme.ui.tooltip_text,
+        halo: None,
+        shadow: None,
+    };
+    paint_grid(sb, panels, ((0, 0), cell), (Face::Screen, pack), ink);
 }
 
 /// How many screen cells of `cell` fit across a `win_w`-pixel window
@@ -1485,6 +1553,36 @@ mod tests {
     }
 
     /// A frame presents when its office changed or anything over it did, an
+    /// The open panels read back as the TUI paints them, and nothing when
+    /// none is open.
+    #[test]
+    fn the_window_shows_the_tuis_panels() {
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut ui = crate::panels::ui_state::UiState::new(
+            theme,
+            crate::panels::welcome::WelcomeUi::from_detected(&[]),
+            false,
+            tmp.path().join("sock"),
+            None,
+            crate::doctor::DriftSeen::default(),
+        );
+        let now = std::time::SystemTime::UNIX_EPOCH;
+        let size = (100, 40);
+        let shut = ui.build_frames(now, &scene, &[]);
+        assert_eq!(panels_grid(&shut, size, now, theme), None);
+        ui.toggle_help();
+        let help = ui.build_frames(now, &scene, &[]);
+        let grid = panels_grid(&help, size, now, theme).expect("help is open");
+        let text: String = (0..grid.height())
+            .flat_map(|y| (0..grid.width()).map(move |x| (x, y)))
+            .filter_map(|(x, y)| grid.get(x, y))
+            .map(|c| c.symbol.as_str())
+            .collect();
+        assert!(text.contains("switch floor"), "{text}");
+    }
+
     /// unchanged office under the same overlays is the frame on screen, and a
     /// frame rendered but not shown leaves nothing to skip against.
     #[test]
@@ -1499,6 +1597,7 @@ mod tests {
                 }],
             },
             tooltip: None,
+            panels: None,
         };
         let shown = overlays(200, "a");
         let mut screen = Screen::new(true);
@@ -1667,15 +1766,7 @@ mod tests {
         scene.agents.insert(slot.agent_id, slot);
         let inputs = FooterInputs::new(
             &scene,
-            FooterContext::new(
-                &scene,
-                None,
-                true,
-                None,
-                None,
-                crate::floating::input::footer_keys(),
-                crate::floating::input::footer_keys(),
-            ),
+            crate::panels::widgets::footer_context(&scene, None, true, None, None),
         );
         let (w, h) = (640usize, 400usize);
         let at = window_geometry(PhysicalSize::new(w as u32, h as u32), density());
