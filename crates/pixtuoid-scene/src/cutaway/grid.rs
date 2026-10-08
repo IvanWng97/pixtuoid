@@ -23,7 +23,7 @@ const LEFTMOST: u16 = 1 << (u16::BITS - 1);
 /// The screen face's cell, in its pixels.
 const SCREEN_CELL_W: u16 = 6;
 const SCREEN_LINE_H: u16 = 12;
-/// Its capitals' top row and height: the box a hand-drawn symbol centres in.
+/// Its capitals' top row and height.
 const SCREEN_CAP_TOP: u16 = 2;
 const SCREEN_CAP_H: u16 = 8;
 

@@ -61,8 +61,8 @@ SCREEN_ASCENT = 10
 # `text.rs`'s LINE_H and the art pixels a cell is wide (its ADVANCE).
 LINE_H = 8
 CELL_W = 4
-# Rows down to and including the baseline: Fusion Pixel's own, which the
-# hand-drawn symbols share: capitals five rows under two of accent room.
+# Rows down to and including the baseline: Fusion Pixel's own, capitals
+# five rows under two of accent room.
 ASCENT = 7
 
 # Screen text adds the symbol blocks Fusion Pixel 12px draws half-width.
