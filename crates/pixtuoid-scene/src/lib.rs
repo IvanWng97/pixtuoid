@@ -76,6 +76,8 @@ pub(crate) mod outside;
 #[doc(hidden)]
 pub use outside::OutsideCache;
 pub mod pack;
+#[doc(hidden)]
+pub mod par;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
 pub mod pet;

@@ -123,9 +123,6 @@ chrono             = { version = "0.4", default-features = false }
 foldhash           = { version = "0.2", default-features = false }
 image              = { version = "0.25", default-features = false, features = ["png"] }
 libc               = "0.2"
-# A frame's independent work across cores, on a pool made once; sequential
-# where the platform starts no thread (wasm32).
-rayon              = "1"
 rustix             = "1"
 # Already in the tree through ratatui; `IntoStaticStr` + `EnumString` write and
 # read an enum's names from one declaration.
