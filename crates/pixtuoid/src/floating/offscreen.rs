@@ -287,8 +287,15 @@ pub(crate) struct Overlays {
 /// What the window shows, as far as a frame may skip presenting: the overlays
 /// of the frame on screen, known only while the screen holds the last frame
 /// rendered, which an office's dirt is measured against.
-#[derive(Debug, Default)]
-pub(crate) struct Screen(Option<Overlays>);
+#[derive(Debug)]
+pub(crate) struct Screen {
+    shown: Option<Overlays>,
+    /// Whether the platform keeps the window's pixels between presents. X11
+    /// does not ("X does not guarantee to preserve the contents of windows",
+    /// Xlib's overview), and winit hands its `Expose` over as the same
+    /// `RedrawRequested` a paint tick asks for, so no frame may skip there.
+    retains: bool,
+}
 
 impl Screen {
     /// Whether a frame showing `next` over an office `dirty` against the last
@@ -300,18 +307,39 @@ impl Screen {
         next: &Overlays,
         dirty: &pixtuoid_scene::cutaway::canvas::Dirty,
     ) -> bool {
-        *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged || self.0.as_ref() != Some(next)
+        !self.retains
+            || *dirty != pixtuoid_scene::cutaway::canvas::Dirty::Unchanged
+            || self.shown.as_ref() != Some(next)
+    }
+
+    /// A window on a platform that keeps its pixels (`retains`) or not.
+    pub(crate) fn new(retains: bool) -> Self {
+        Self {
+            shown: None,
+            retains,
+        }
+    }
+
+    /// The screen of the window whose handle is `raw`: X11's (Xlib or XCB)
+    /// keeps no pixels, and a window that names no handle is taken as one
+    /// that might not.
+    pub(crate) fn of_window(raw: Option<winit::raw_window_handle::RawWindowHandle>) -> Self {
+        use winit::raw_window_handle::RawWindowHandle;
+        Self::new(!matches!(
+            raw,
+            None | Some(RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_))
+        ))
     }
 
     /// A frame was rendered that may not reach the screen — held back, or
     /// about to present: until one shows, the screen matches nothing rendered.
     pub(crate) fn stale(&mut self) {
-        self.0 = None;
+        self.shown = None;
     }
 
     /// A frame with `overlays` reached the screen.
     pub(crate) fn shown(&mut self, overlays: Overlays) {
-        self.0 = Some(overlays);
+        self.shown = Some(overlays);
     }
 }
 
@@ -1508,7 +1536,7 @@ mod tests {
             tooltip: None,
         };
         let shown = overlays(200, "a");
-        let mut screen = Screen::default();
+        let mut screen = Screen::new(true);
         assert!(screen.needs(&shown, &Dirty::Unchanged), "the first frame");
         screen.shown(shown.clone());
         assert!(!screen.needs(&shown, &Dirty::Unchanged));
@@ -1526,6 +1554,28 @@ mod tests {
         assert!(
             screen.needs(&shown, &Dirty::Unchanged),
             "after a held frame"
+        );
+        // Where the platform keeps no pixels, every frame presents: X11's
+        // windows, and one that names no handle.
+        use winit::raw_window_handle::{
+            RawWindowHandle, Win32WindowHandle, XcbWindowHandle, XlibWindowHandle,
+        };
+        let x11 = [
+            RawWindowHandle::Xlib(XlibWindowHandle::new(1)),
+            RawWindowHandle::Xcb(XcbWindowHandle::new(std::num::NonZeroU32::MIN)),
+        ];
+        assert!(
+            x11.into_iter()
+                .all(|raw| !Screen::of_window(Some(raw)).retains)
+        );
+        assert!(!Screen::of_window(None).retains);
+        let win32 = Win32WindowHandle::new(std::num::NonZeroIsize::MIN);
+        assert!(Screen::of_window(Some(RawWindowHandle::Win32(win32))).retains);
+        let mut forgetful = Screen::new(false);
+        forgetful.shown(shown.clone());
+        assert!(
+            forgetful.needs(&shown, &Dirty::Unchanged),
+            "X11 retains nothing"
         );
     }
 

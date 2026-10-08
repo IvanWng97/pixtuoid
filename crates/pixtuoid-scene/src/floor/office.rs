@@ -149,13 +149,6 @@ impl FloorNav {
         true
     }
 
-    /// Begin `transition` whatever it is, as no navigation could: a seam for
-    /// painters' tests of slides navigation refuses (a floor to itself).
-    #[doc(hidden)]
-    pub fn begin_unchecked(&mut self, transition: FloorTransition) {
-        self.transition = Some(transition);
-    }
-
     /// The floor above, of `n_floors`, while no slide is under way.
     pub fn up(&self, n_floors: usize) -> Option<usize> {
         (self.transition.is_none() && self.current + 1 < n_floors).then_some(self.current + 1)
@@ -194,7 +187,7 @@ impl FloorNav {
 }
 
 /// Floor `floor` of `n_floors` under `office`'s weather and motion.
-fn office_floor(office: FloorMeta, floor: usize, n_floors: usize) -> FloorMeta {
+fn floor_meta(office: FloorMeta, floor: usize, n_floors: usize) -> FloorMeta {
     FloorMeta::for_floor(floor, n_floors)
         .with_weather(office.weather)
         .with_motion(office.motion)
@@ -369,7 +362,7 @@ impl OfficeSession {
         let total_agents = scene.agents.len();
         let draw = |views: &mut Vec<FloorView>, office: &mut PerOffice, floor: usize| {
             let floor_scene = super::project_floor_scene(scene, floor);
-            let meta = office_floor(inputs.world.floor, floor, n_floors);
+            let meta = floor_meta(inputs.world.floor, floor, n_floors);
             let world = FloorInputs {
                 scene: &floor_scene,
                 floor: meta,
@@ -467,7 +460,7 @@ impl OfficeSession {
     ) -> AudioFrame {
         // `nav` settles within `n_floors`, and a view is kept for each.
         let current = self.nav.current().min(self.n_floors - 1);
-        let floor = self::office_floor(office_floor, current, self.n_floors);
+        let floor = floor_meta(office_floor, current, self.n_floors);
         self.views[current].audio_frame(&mut self.office, scene, floor, now)
     }
 

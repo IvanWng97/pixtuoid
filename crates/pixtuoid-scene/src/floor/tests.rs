@@ -1892,6 +1892,7 @@ fn floor_nav_slides_lands_and_clamps() {
     let done = t0 + Duration::from_secs(2);
     let mut nav = FloorNav::default();
     assert_eq!((nav.up(3), nav.down()), (Some(1), None));
+    assert!(!nav.navigate(0, t0), "no floor slides to itself");
     assert!(nav.navigate(1, t0));
     assert!(!nav.navigate(2, t0), "no slide begins during one");
     assert_eq!((nav.up(3), nav.down()), (None, None));
