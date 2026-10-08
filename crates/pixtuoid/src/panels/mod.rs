@@ -1408,22 +1408,19 @@ mod dispatch_tests {
 
     /// The gate follows the fact after a FAILED change, not the change's outcome: a
     /// disconnect that could not write leaves the source connected, and so the gate.
-    #[cfg(unix)]
     #[test]
     fn a_failed_disconnect_leaves_the_gate_on_the_fact() {
-        use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().join("pixtuoid");
-        std::fs::create_dir_all(&dir).unwrap();
-        let cfg = dir.join("config.toml");
+        let cfg = tmp.path().join("config.toml");
         std::fs::write(&cfg, "[sources]\nantigravity = true\n").unwrap();
         let connected = crate::runtime::ConnectedSources::new(
             std::iter::once("antigravity".to_string()).collect(),
         );
-        // A read-only dir refuses the lock sidecar, so the rewrite fails.
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // A held lock refuses the rewrite (`lock_config` fails on contention)
+        // while the flag still reads back.
+        let held = crate::install::io::lock_config(&cfg).unwrap();
         let res = disconnect_source(&cfg, &connected, "antigravity", "Antigravity");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        drop(held);
         assert!(res.contains("disconnect failed"), "result: {res}");
         assert!(
             connected.is_connected("antigravity"),

@@ -680,7 +680,9 @@ mod tests {
     fn a_failed_install_leaves_no_flag_behind() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
-        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
+        // A registered hook-bearing id, so a flag written for it would persist.
+        std::fs::write(&cfg, "[sources]\ncodex = true\n").unwrap();
+        let err = connect_target(&cfg, "codex", Some(&FAIL_TARGET)).unwrap_err();
         assert!(err.to_string().contains("forced install failure"), "{err}");
         let app = config::load(&cfg, &mut Vec::new());
         assert!(app.sources.is_empty(), "{:?}", app.sources);
