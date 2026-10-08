@@ -74,7 +74,7 @@ pub(crate) fn put_grid(
     }
 }
 
-/// `area`'s cells of `buf` as a [`CellGrid`], [`put_grid`]'s inverse: what a
+/// `area`'s cells of `buf` as a [`CellGrid`], `put_grid`'s inverse: what a
 /// painter with no terminal draws the same cells from. A colour the terminal
 /// picks (`Reset`, `Indexed`) reads as the painter's own, and a cell a wide
 /// cluster covers, which ratatui resets, as [`CellGrid::put`] writes it: empty,

@@ -763,3 +763,31 @@ fn grid_of_reads_back_what_put_grid_wrote() {
     put_grid(&mut buf, &grid, (0, 0), area);
     assert_eq!(grid_of(&buf, area), grid);
 }
+
+/// A colour the cell names reads back as a colour, a named one at xterm's
+/// default, and one the terminal picks (`Reset`, `Indexed`) as the painter's.
+#[test]
+fn grid_of_reads_a_named_colour_and_leaves_the_terminals_to_the_painter() {
+    use ratatui::style::Color;
+    let area = ratatui::layout::Rect::new(0, 0, 3, 1);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    for (x, fg, bg) in [
+        (0, Color::White, Color::Rgb(1, 2, 3)),
+        (1, Color::Red, Color::Indexed(4)),
+        (2, Color::Reset, Color::DarkGray),
+    ] {
+        let cell = &mut buf[(x, 0)];
+        cell.set_symbol("x");
+        cell.fg = fg;
+        cell.bg = bg;
+    }
+    let grid = grid_of(&buf, area);
+    let rgb = |r, g, b| Some(Rgb { r, g, b });
+    let colours = |x| {
+        let c = grid.get(x, 0).expect("a cell");
+        (c.fg, c.bg)
+    };
+    assert_eq!(colours(0), (rgb(255, 255, 255), rgb(1, 2, 3)));
+    assert_eq!(colours(1), (rgb(205, 0, 0), None));
+    assert_eq!(colours(2), (None, rgb(127, 127, 127)));
+}
