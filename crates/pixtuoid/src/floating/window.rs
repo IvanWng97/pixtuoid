@@ -84,9 +84,6 @@ pub(crate) struct FloatingApp {
     /// The animation-tick deadline — see [`super::cadence`] for why the redraw
     /// REQUEST (not just the wait) has to be gated on it.
     clock: super::cadence::FrameClock,
-    /// When the clock scheduled the redraw it asked for; an event's redraw
-    /// has none.
-    due: Option<Instant>,
     window: Option<Rc<Window>>,
     // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
     context: Option<softbuffer::Context<Rc<Window>>>,
@@ -163,7 +160,6 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
-            due: None,
             window: None,
             context: None,
             surface: None,
@@ -503,9 +499,6 @@ impl FloatingApp {
             None,
             now,
         );
-        if let Some(due) = self.due.take() {
-            self.jank.shown(due, now);
-        }
     }
 }
 
@@ -694,7 +687,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .poll(Instant::now(), SystemTime::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         if let Some(due) = paint {
-            self.due = Some(due);
+            self.jank.due_at(due);
             self.request_redraw();
         }
     }

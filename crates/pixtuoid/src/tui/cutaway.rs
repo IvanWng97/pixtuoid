@@ -553,7 +553,7 @@ pub(crate) const TILES_PER_THREAD: usize = 2;
 /// The cores a frame's encode may take of `cores`: all but one while an
 /// `audio` thread is up, which synthesizes a track for seconds at its start
 /// and at a swap.
-fn encode_cores(cores: usize, audio: bool) -> usize {
+pub(crate) fn encode_cores(cores: usize, audio: bool) -> usize {
     if audio {
         cores.saturating_sub(1).max(1)
     } else {

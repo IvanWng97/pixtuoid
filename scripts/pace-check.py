@@ -163,14 +163,22 @@ def main():
     wanted = ("classic", "1") if args.scale == "classic" else (args.graphics, args.scale)
     if (w0.get("look"), w0.get("scale")) != wanted:
         sys.exit(f"pace-check: ran {w0.get('look')} x{w0.get('scale')}, not {wanted[0]} x{wanted[1]}: {log}")
+    # The verdict reads these; a binary that logs none, or whose loop gives
+    # no frame its due, must not PASS.
+    if any(k not in w for w in windows for k in ("scheduled", "hitch_ms", "interval_ms")):
+        sys.exit(f"pace-check: a `frame pacing` summary lacks scheduled, hitch_ms or interval_ms: {log}")
+    if not sum(int(w["scheduled"]) for w in windows):
+        sys.exit(f"pace-check: no frame was shown on a schedule: {log}")
     over = sum(int(w.get("over", 0)) for w in windows)
     p99 = max(float(w.get("p99", 0)) for w in windows)
     worst = max(float(w.get("max", 0)) for w in windows)
     frames = sum(int(w.get("frames", 0)) for w in windows)
     # The frames' own schedule, the binary's interval a frame each.
-    ran_s = sum(int(w.get("frames", 0)) * float(w.get("interval_ms", 0)) for w in windows) / 1000
-    hitch_ms = sum(float(w.get("hitch_ms", 0)) for w in windows)
-    rate = hitch_ms / ran_s if ran_s else 0.0
+    ran_s = sum(int(w.get("frames", 0)) * float(w["interval_ms"]) for w in windows) / 1000
+    hitch_ms = sum(float(w["hitch_ms"]) for w in windows)
+    if not ran_s:
+        sys.exit(f"pace-check: the summaries schedule no time to rate: {log}")
+    rate = hitch_ms / ran_s
     terminal = w0.get("terminal") if args.live else "pty"
     print(
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
