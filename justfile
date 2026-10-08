@@ -836,10 +836,10 @@ gen-art-check:
     python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
 
 # Not in `gen`: it downloads its pinned fonts.
-[doc("Regenerate the cutaway's fallback font + its licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fallback-font.py")]
+[doc("Regenerate the scene's Fusion Pixel faces + their licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fonts.py")]
 [group('gen')]
-gen-fallback-font:
-    python3 scripts/gen-fallback-font.py
+gen-fonts:
+    python3 scripts/gen-fonts.py
 
 [doc('Sync README install/features/tools sections from site/src/*.json')]
 [group('gen')]

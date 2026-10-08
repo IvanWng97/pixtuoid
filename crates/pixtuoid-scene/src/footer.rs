@@ -40,7 +40,7 @@ impl RungKind {
     ];
 
     /// A distinct geometric glyph per state — all East-Asian *ambiguous* width
-    /// (1 cell in a non-CJK terminal), and all Monaspace-Neon-native.
+    /// (1 cell in a non-CJK terminal).
     pub fn glyph(self) -> char {
         match self {
             RungKind::Active => '\u{25cf}',
@@ -154,6 +154,16 @@ impl FooterModel {
     /// lock the exact footer wording through.
     pub fn text(&self) -> String {
         self.segments.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    /// The footer as one row of screen text, each segment in its tone.
+    pub fn line(&self, theme: &Theme) -> crate::display::cells::CellGrid {
+        let text = self.text();
+        let mut grid = crate::display::cells::CellGrid::new(crate::display::text::cells(&text), 1);
+        self.segments.iter().fold(0, |x, seg| {
+            grid.put((x, 0), &seg.text, Some(seg.tone.rgb(theme)), false)
+        });
+        grid
     }
 }
 

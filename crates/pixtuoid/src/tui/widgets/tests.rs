@@ -2,6 +2,7 @@ use super::*;
 use footer::{build_status_spans, build_status_summary, footer_context};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_scene::display::text::cells;
 use pixtuoid_scene::footer::{FooterFloor, FooterInputs};
 use pixtuoid_scene::tally::{StateCounts, gateway_rollup, per_floor_counts, scene_stats};
 use std::path::PathBuf;
@@ -99,18 +100,18 @@ fn state_vocab_is_total_and_distinct() {
 }
 
 #[test]
-fn display_width_counts_terminal_columns_not_chars() {
+fn cells_count_terminal_columns_not_chars() {
     // The state/HUD glyphs are all East-Asian *ambiguous* = 1 column under the
     // non-CJK `.width()`, so this measure == chars().count() for them.
-    assert_eq!(display_width("\u{b7}\u{d7}\u{2191}\u{2193}"), 4); // · × ↑ ↓
+    assert_eq!(cells("\u{b7}\u{d7}\u{2191}\u{2193}"), 4); // · × ↑ ↓
     assert_eq!(
-        display_width("\u{25cf}\u{25d0}\u{25cb}\u{25cc}"),
+        cells("\u{25cf}\u{25d0}\u{25cb}\u{25cc}"),
         4,
         "● ◐ ○ ◌ are one column each"
     );
-    assert_eq!(display_width("[q]uit"), 6);
-    assert_eq!(display_width("\u{1f99e}"), 2); // 🦞
-    assert_eq!(display_width("a\u{0301}"), 1);
+    assert_eq!(cells("[q]uit"), 6);
+    assert_eq!(cells("\u{1f99e}"), 2); // 🦞
+    assert_eq!(cells("a\u{0301}"), 1);
 }
 
 /// The one width rule is the cells ratatui's buffer writes, one grapheme
@@ -133,20 +134,19 @@ fn every_width_is_the_cells_the_buffer_writes() {
     ] {
         let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 40, 1));
         let (x, _) = buf.set_stringn(0, 0, text, usize::MAX, ratatui::style::Style::default());
-        assert_eq!(pixtuoid_scene::display::text::cells(text), x, "{text:?}");
-        assert_eq!(display_width(text), usize::from(x), "{text:?}");
+        assert_eq!(cells(text), x, "{text:?}");
     }
 }
 
 #[test]
-fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_display_width() {
+fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_cells() {
     let vocab = "\u{b7}\u{d7}\u{2191}\u{2193}\u{25cf}\u{25d0}\u{25cb}\u{25cc}\u{2b22}\u{25b2}\u{2669}\u{26a0}\u{2026}";
     for c in vocab.chars() {
         let s = c.to_string();
         assert_eq!(
-            display_width(&s),
+            usize::from(cells(&s)),
             s.chars().count(),
-            "footer glyph U+{:04X} {c:?} must be single-column, else scene's chars().count() drifts from display_width",
+            "footer glyph U+{:04X} {c:?} must be single-column, else scene's chars().count() drifts from cells",
             c as u32,
         );
     }
