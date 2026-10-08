@@ -244,6 +244,23 @@ impl OfficeRenderer {
         self.pointer.carrying()
     }
 
+    /// [`release`](Self::release) under the panels `modal`: a carried figure
+    /// is set down either way, and the click lands only with none open.
+    pub(crate) fn release_under(
+        &mut self,
+        cursor: (f64, f64),
+        at: PixelFit,
+        modal: &crate::panels::ModalState,
+    ) -> Option<pixtuoid_scene::hit::HitAction> {
+        self.release(cursor, at).filter(|_| !modal.any_open())
+    }
+
+    /// Whether a pointer `cursor_in` the window shows its tooltip: not over a
+    /// figure in hand, nor over the office under a panel.
+    pub(crate) fn tooltip_shows(&self, cursor_in: bool, modal: &crate::panels::ModalState) -> bool {
+        cursor_in && !self.carrying() && !modal.any_open()
+    }
+
     /// What the last frame, drawn at `at`, shows the pointer at `cursor`
     /// (physical px).
     pub fn hit_at(
@@ -330,6 +347,25 @@ pub(crate) fn cell_at((x, y): (f64, f64), cell: CellPx) -> (u16, u16) {
         u16::try_from(p.max(0.0) as u32 / u32::from(size.max(1))).unwrap_or(u16::MAX)
     };
     (at(x, cell.w), at(y, cell.h))
+}
+
+/// What the open panels make of a left press at window point `cursor` on a
+/// `window`-px window showing `shown`: [`crate::panels::modal_mouse`] in its
+/// panel cells, the popup drawn whole.
+pub(crate) fn modal_press(
+    ui: &mut crate::panels::ui_state::UiState,
+    cursor: (f64, f64),
+    window: (u32, u32),
+    shown: Option<PixelFit>,
+) -> crate::panels::ModalMouse {
+    let cells = shown.map(|at| {
+        let cell = Face::chrome(at);
+        (cell_at(cursor, cell), panel_cells(window, cell))
+    });
+    let popup_scale = crate::panels::ui_state::popup_whole(ui.modal().version_popup);
+    crate::panels::modal_mouse(ui, popup_scale, cells.map(|(at, _)| at), || {
+        cells.map(|(_, screen)| screen)
+    })
 }
 
 /// What an applied key changes in the window: its theme, its floor and its
@@ -710,14 +746,14 @@ pub fn paint_tooltip_into_surface(
 }
 
 /// The panel `name` (`help`, `dashboard`, `sources` or `theme`) open over
-/// `scene` in a window `cols`×`rows` screen cells big, for a snapshot to
+/// `scene` in a `window`-px window of screen cells `cell`, for a snapshot to
 /// paint; `None` for a name it doesn't know.
 #[doc(hidden)]
 pub fn panel_preview(
     name: &str,
     scene: &SceneState,
     theme: &'static Theme,
-    size: (u16, u16),
+    (window, cell): ((u32, u32), CellPx),
     now: std::time::SystemTime,
 ) -> Option<CellGrid> {
     let mut ui = crate::panels::ui_state::UiState::new(
@@ -738,7 +774,12 @@ pub fn panel_preview(
         "theme" => ui.open_theme_picker(),
         _ => return None,
     }
-    panels_grid(&ui.build_frames(now, scene, &[]), size, now, theme)
+    panels_grid(
+        &ui.build_frames(now, scene, &[]),
+        panel_cells(window, cell),
+        now,
+        theme,
+    )
 }
 
 /// Paint `panels` over the window from its top-left, in screen cells of
@@ -1513,6 +1554,49 @@ mod tests {
         assert!(renderer.carrying());
         assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");
         assert!(!renderer.carrying());
+        // Under a panel a carry still sets down, and a click lands nowhere.
+        let open = crate::panels::ModalState {
+            help_open: true,
+            ..closed_modal()
+        };
+        assert!(renderer.tooltip_shows(true, &closed_modal()));
+        assert!(
+            !renderer.tooltip_shows(true, &open),
+            "no tooltip under a panel"
+        );
+        assert!(!renderer.tooltip_shows(false, &closed_modal()));
+        let press = |renderer: &mut OfficeRenderer| {
+            renderer.press_at(
+                on_agent,
+                size,
+                at,
+                Pressing {
+                    scale_factor: 1.0,
+                    petting: None,
+                    now,
+                },
+            )
+        };
+        press(&mut renderer);
+        assert!(renderer.pointer_moved(away, at));
+        assert!(
+            !renderer.tooltip_shows(true, &closed_modal()),
+            "nor in hand"
+        );
+        assert_eq!(renderer.release_under(away, at, &open), None);
+        assert!(
+            !renderer.carrying(),
+            "a panel opened mid-carry sets it down"
+        );
+        press(&mut renderer);
+        assert_eq!(renderer.release_under(on_agent, at, &open), None);
+        press(&mut renderer);
+        assert!(
+            renderer
+                .release_under(on_agent, at, &closed_modal())
+                .is_some(),
+            "with no panel the click lands"
+        );
         // A carry whose release goes elsewhere is set down when the window
         // loses focus, or at the next press.
         renderer.press_at(
@@ -2164,5 +2248,62 @@ mod tests {
         assert_eq!(cell_at((0.0, 0.0), cell), (0, 0));
         assert_eq!(cell_at((15.9, 16.0), cell), (1, 1));
         assert_eq!(cell_at((-3.0, 40.0), cell), (0, 2));
+    }
+
+    fn closed_modal() -> crate::panels::ModalState {
+        crate::panels::ModalState {
+            onboarding_open: false,
+            help_open: false,
+            version_popup: false,
+            theme_picker: None,
+            dashboard_open: false,
+            connection_open: false,
+            connection_confirm: false,
+            n_themes: pixtuoid_scene::theme::ALL_THEMES.len(),
+        }
+    }
+
+    /// A press reaches the office only with no panel open; the help closes
+    /// on it, and the popup, drawn whole, swallows a press off its link.
+    #[test]
+    fn a_press_meets_the_open_panels_first() {
+        use crate::panels::ModalMouse;
+        let window = (960, 640);
+        let shown = Some(window_geometry(
+            PhysicalSize::new(window.0, window.1),
+            density(),
+        ));
+        let boot = |popup: bool| {
+            crate::panels::ui_state::UiState::new(
+                pixtuoid_scene::theme::ALL_THEMES[0],
+                crate::panels::welcome::WelcomeUi::from_detected(&[]),
+                popup,
+                std::path::PathBuf::new(),
+                None,
+                crate::doctor::DriftSeen::default(),
+            )
+        };
+        let corner = (1.0, 1.0);
+        let mut ui = boot(false);
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Office
+        );
+        ui.toggle_help();
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Took
+        );
+        assert!(!ui.help_open());
+        ui.open_theme_picker();
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Inert
+        );
+        let mut ui = boot(true);
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Inert
+        );
     }
 }

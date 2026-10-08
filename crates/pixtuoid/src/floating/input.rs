@@ -46,6 +46,9 @@ pub(crate) fn key(
     if mods.control_key() {
         held |= KeyModifiers::CONTROL;
     }
+    if mods.alt_key() {
+        held |= KeyModifiers::ALT;
+    }
     Some((code, held))
 }
 
@@ -81,6 +84,10 @@ mod tests {
         assert_eq!(
             key(&Key::Character("c".into()), ModifiersState::CONTROL, false),
             Some((KeyCode::Char('c'), KeyModifiers::CONTROL))
+        );
+        assert_eq!(
+            key(&Key::Character("q".into()), ModifiersState::ALT, false),
+            Some((KeyCode::Char('q'), KeyModifiers::ALT))
         );
         assert_eq!(
             key(&Key::Named(NamedKey::Tab), none, false),

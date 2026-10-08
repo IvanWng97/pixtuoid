@@ -304,15 +304,8 @@ fn main() -> Result<()> {
         }
     }
     if let Some(name) = panel {
-        let fits = |px: u32, size: u16| u16::try_from(px / u32::from(size)).unwrap_or(u16::MAX);
-        let grid = pixtuoid::dev::panel_preview(
-            &name,
-            &scene,
-            theme,
-            (fits(win_w, cell.w), fits(win_h, cell.h)),
-            now,
-        )
-        .ok_or_else(|| anyhow!("no panel named {name}"))?;
+        let grid = pixtuoid::dev::panel_preview(&name, &scene, theme, ((win_w, win_h), cell), now)
+            .ok_or_else(|| anyhow!("no panel named {name}"))?;
         pixtuoid::dev::paint_panels_into_surface(&mut surf, &grid, (theme, &pack), cell);
     }
 

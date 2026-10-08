@@ -220,21 +220,12 @@ impl FloatingApp {
         };
         let size = window.inner_size();
         let cursor = (self.cursor.x, self.cursor.y);
-        let cells = self.shown.map(|at| {
-            let cell = Face::chrome(at);
-            (
-                super::offscreen::cell_at(cursor, cell),
-                super::offscreen::panel_cells((size.width, size.height), cell),
-            )
-        });
-        let popup_scale = if self.ui.modal().version_popup {
-            1.0
-        } else {
-            0.0
-        };
-        match crate::panels::modal_mouse(&mut self.ui, popup_scale, cells.map(|(at, _)| at), || {
-            cells.map(|(_, screen)| screen)
-        }) {
+        match super::offscreen::modal_press(
+            &mut self.ui,
+            cursor,
+            (size.width, size.height),
+            self.shown,
+        ) {
             ModalMouse::Office => {}
             // A panel the press did nothing in leaves the window to drag.
             ModalMouse::Inert => {
@@ -278,10 +269,9 @@ impl FloatingApp {
         let Some(at) = self.shown else {
             return;
         };
-        let action = self
-            .renderer
-            .release((self.cursor.x, self.cursor.y), at)
-            .filter(|_| !self.ui.modal().any_open());
+        let action =
+            self.renderer
+                .release_under((self.cursor.x, self.cursor.y), at, &self.ui.modal());
         let now = self.ui.now();
         match action {
             Some(HitAction::Focus(id)) => {
@@ -420,9 +410,9 @@ impl FloatingApp {
                     .and_then(super::LivePipeline::footer_warning)
                     .as_deref(),
             ),
-            // A figure in hand has no tooltip, nor does the office under a
-            // panel.
-            tooltip: (self.cursor_in && !self.renderer.carrying() && !self.ui.modal().any_open())
+            tooltip: self
+                .renderer
+                .tooltip_shows(self.cursor_in, &self.ui.modal())
                 .then(|| self.renderer.hit_at(cursor, at))
                 .flatten()
                 .and_then(|hit| {

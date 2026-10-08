@@ -37,11 +37,17 @@ impl RenderFrames {
             theme_picker: self.theme_picker,
             dashboard: &self.dashboard,
             connection: &self.connection,
-            popup_scale: if self.version_popup { 1.0 } else { 0.0 },
+            popup_scale: popup_whole(self.version_popup),
             help_open: self.help_open,
             onboarding: &self.onboarding,
         }
     }
+}
+
+/// The version popup's scale for a painter that draws it whole, with no
+/// animation of its own.
+pub(crate) fn popup_whole(open: bool) -> f32 {
+    if open { 1.0 } else { 0.0 }
 }
 
 /// The per-surface UI state. Fields stay `pub(crate)` where the loop's I/O arms
