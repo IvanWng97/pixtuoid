@@ -748,3 +748,18 @@ fn footer_cross_floor_alarm_points_at_waiting_floor() {
         "cross-floor waiting cue: {line}"
     );
 }
+
+/// `grid_of` reads back what `put_grid` wrote: symbols (a wide one's covered
+/// cell empty), colours, an unset fill as the terminal's, and bold.
+#[test]
+fn grid_of_reads_back_what_put_grid_wrote() {
+    use pixtuoid_scene::display::cells::CellGrid;
+    let ink = Rgb { r: 1, g: 2, b: 3 };
+    let mut grid = CellGrid::new(5, 2);
+    grid.put((0, 0), "a\u{65e5}b", Some(ink), true);
+    grid.put((1, 1), "x", None, false);
+    let area = ratatui::layout::Rect::new(0, 0, 5, 2);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    put_grid(&mut buf, &grid, (0, 0), area);
+    assert_eq!(grid_of(&buf, area), grid);
+}

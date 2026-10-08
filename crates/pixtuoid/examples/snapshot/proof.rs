@@ -18,8 +18,11 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 
-use crate::encode::{FrameSink, Timeline, cells_to_rgba, fill_rect};
+use crate::encode::{FrameSink, ImageCanvas, Timeline, cells_to_rgba, fill_rect};
 use crate::{CELL_H, CELL_W};
+use pixtuoid_scene::cutaway::{CellPx, Face, GridInk, paint_grid};
+use pixtuoid_scene::display::cells::CellGrid;
+use pixtuoid_scene::display::text::cells;
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.
 // PANEL_W targets the pinned mock's ~44/56 typed-panel/office split against the
@@ -29,7 +32,6 @@ const TALL_PANEL_H: u32 = 400;
 const HEADER_H: u32 = 32;
 const PAD: u32 = 16;
 const LINE_H: u32 = 28;
-const ANNOT_FONT_PX: f32 = 16.0;
 const TYPE_CPS: u64 = 30;
 const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first fixture line
 
@@ -39,11 +41,6 @@ const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first f
 // later beat). Tuned to sit just above the other transitions' natural gaps, so
 // only the outlier is shortened.
 const ANNOTATION_MAX_HOLD_MS: u64 = 4200;
-
-// The PANEL's own text: anti-aliased Monaspace Neon (OFL 1.1, `fonts/`), sized to
-// 16px line metrics so LINE_H/wrap math stays proportioned.
-const PROOF_FONT_PX: f32 = 16.0;
-const CODA_FONT_PX: f32 = 12.0;
 
 const CODA_LINE_H: u32 = 18;
 const CODA_PAD: u32 = 10;
@@ -114,49 +111,53 @@ fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<
     lines
 }
 
-/// Draws `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`,
-/// alpha-composited onto the existing pixels. Returns the total advance width so
-/// the typing-cursor block needn't recompute it.
-fn aa_draw_text_at(
-    img: &mut RgbaImage,
-    s: &str,
-    x: i32,
-    top_y: i32,
-    px: f32,
-    color: Rgba<u8>,
-) -> i32 {
-    pixtuoid::dev::draw_text_at(s, x, top_y, px, |gx, gy, coverage| {
-        blend_px(img, gx, gy, color, coverage);
-    })
+/// The cell the frames' text draws in: the window's screen face, a glyph
+/// pixel to a pixel.
+fn text_cell() -> CellPx {
+    Face::Screen.cell(1)
 }
 
-/// Alpha-composite `color` onto the existing pixel at `coverage`. The panel's
-/// text always sits on an opaque dark ground, never a transparent surface, so a
-/// straight linear blend with no alpha channel to preserve is correct.
-fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32) {
-    if x < 0 || y < 0 || (x as u32) >= img.width() || (y as u32) >= img.height() {
-        return;
-    }
-    let bg = *img.get_pixel(x as u32, y as u32);
-    let mix = |fg: u8, bg: u8| pixtuoid::dev::blend_channel(bg, fg, coverage);
-    img.put_pixel(
-        x as u32,
-        y as u32,
-        Rgba([
-            mix(color[0], bg[0]),
-            mix(color[1], bg[1]),
-            mix(color[2], bg[2]),
-            255,
-        ]),
+/// `s`'s width in pixels in [`text_cell`]s.
+fn text_width(s: &str) -> i32 {
+    i32::from(cells(s)) * i32::from(text_cell().w)
+}
+
+/// Draw `s` in the screen face, top-left at `(x, top_y)`, over what is
+/// there, with an optional one-pixel `halo` under each glyph. Returns its
+/// width so the typing-cursor block needn't recompute it.
+fn draw_text(
+    img: &mut RgbaImage,
+    s: &str,
+    (x, top_y): (i32, i32),
+    color: Rgba<u8>,
+    halo: Option<Rgba<u8>>,
+) -> i32 {
+    let rgb = |c: Rgba<u8>| pixtuoid_core::sprite::Rgb {
+        r: c[0],
+        g: c[1],
+        b: c[2],
+    };
+    let mut grid = CellGrid::new(cells(s), 1);
+    grid.put((0, 0), s, None, false);
+    paint_grid(
+        &mut ImageCanvas(img),
+        &grid,
+        (x, top_y),
+        text_cell(),
+        Face::Screen,
+        GridInk {
+            text: rgb(color),
+            halo: halo.map(rgb),
+            shadow: None,
+        },
     );
+    text_width(s)
 }
 
 fn coda_lines(canvas_w: u32) -> Vec<String> {
-    let floor = pixtuoid::dev::text_width("M", CODA_FONT_PX);
+    let floor = text_width("M");
     let max_w = (canvas_w as i32 - 2 * CODA_PAD as i32).max(floor);
-    wrap_text(CODA_TEXT, max_w, |s| {
-        pixtuoid::dev::text_width(s, CODA_FONT_PX)
-    })
+    wrap_text(CODA_TEXT, max_w, text_width)
 }
 
 fn coda_height(canvas_w: u32) -> u32 {
@@ -356,16 +357,20 @@ fn put(img: &mut RgbaImage, x: i32, y: i32, c: Rgba<u8>) {
     }
 }
 
-fn text(img: &mut RgbaImage, s: &str, x: i32, y: i32, c: Rgba<u8>) {
-    aa_draw_text_at(img, s, x, y, ANNOT_FONT_PX, c);
+/// A filled disc of radius `r` centred on `(cx, cy)`.
+fn dot(img: &mut RgbaImage, (cx, cy): (i32, i32), r: i32, c: Rgba<u8>) {
+    for y in -r..=r {
+        for x in -r..=r {
+            if x * x + y * y <= r * r {
+                put(img, cx + x, cy + y, c);
+            }
+        }
+    }
 }
 
-/// A small filled disc, centered on `(cx, cy)` by its own metrics — reuses the AA
-/// face's `●` rather than a bespoke circle rasterizer.
-fn dot(img: &mut RgbaImage, cx: i32, cy: i32, px: f32, c: Rgba<u8>) {
-    let w = pixtuoid::dev::text_width("\u{25CF}", px);
-    let h = pixtuoid::dev::line_height(px);
-    aa_draw_text_at(img, "\u{25CF}", cx - w / 2, cy - h / 2, px, c);
+/// The top of a [`text_cell`] centred in a band `h` tall from `y`.
+fn centred_in(y: u32, h: u32) -> i32 {
+    (y + (h - u32::from(text_cell().h)) / 2) as i32
 }
 
 fn dashed_h(img: &mut RgbaImage, x0: i32, x1: i32, y: i32, c: Rgba<u8>) {
@@ -382,27 +387,30 @@ fn dashed_h(img: &mut RgbaImage, x0: i32, x1: i32, y: i32, c: Rgba<u8>) {
 const DOT_RED: Rgba<u8> = Rgba([255, 95, 86, 255]);
 const DOT_YELLOW: Rgba<u8> = Rgba([255, 189, 46, 255]);
 const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
-const CHROME_DOT_PX: f32 = 8.0;
-// Centre to centre, off the font size: the ● glyph's advance is narrower.
-const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1;
+const CHROME_DOT_R: i32 = 4;
+/// The annotation's anchor dot at the desk.
+const ANNOT_DOT_R: i32 = 4;
+// Centre to centre: a pixel's gap between the dots.
+const DOT_PITCH: i32 = 2 * CHROME_DOT_R + 2;
 const DOT_GAP_AFTER: i32 = 6;
 
-/// `is_panel` gates the traffic-light dots + the title size — only the left panel
-/// is a typed terminal window.
+/// `is_panel` gates the traffic-light dots — only the left panel is a typed
+/// terminal window.
 fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bool) {
     fill_rect(img, x, y, w, HEADER_H, CHROME_BG);
     fill_rect(img, x, y + HEADER_H - 1, w, 1, EDGE);
+    let top = centred_in(y, HEADER_H);
     if is_panel {
         let cy = (y + HEADER_H / 2) as i32;
-        let mut cx = x as i32 + PAD as i32 + 4;
+        let mut cx = x as i32 + PAD as i32 + CHROME_DOT_R;
         for c in [DOT_RED, DOT_YELLOW, DOT_GREEN] {
-            dot(img, cx, cy, CHROME_DOT_PX, c);
+            dot(img, (cx, cy), CHROME_DOT_R, c);
             cx += DOT_PITCH;
         }
-        let title_x = cx + DOT_GAP_AFTER;
-        aa_draw_text_at(img, title, title_x, (y + 8) as i32, PROOF_FONT_PX, INK);
+        let title_x = cx - CHROME_DOT_R + DOT_GAP_AFTER;
+        draw_text(img, title, (title_x, top), INK, None);
     } else {
-        text(img, title, (x + PAD) as i32, (y + 8) as i32, INK);
+        draw_text(img, title, ((x + PAD) as i32, top), INK, None);
     }
 }
 
@@ -414,7 +422,7 @@ fn panel_body(
     elapsed_ms: u64,
 ) {
     fill_rect(img, origin.0, origin.1, size.0, size.1, PANEL_BG);
-    let floor = pixtuoid::dev::text_width("M", PROOF_FONT_PX);
+    let floor = text_width("M");
     let max_w = (size.0 as i32 - 2 * PAD as i32).max(floor);
     let mut row = 0u32;
     for line in &script.lines {
@@ -426,9 +434,7 @@ fn panel_body(
         // Wrapped purely at render time: the typewriter reveal walks the FLAT
         // string's character stream, so a long line pushes later lines down as
         // more of it becomes visible, like a real terminal.
-        let wrapped = wrap_text(&line.text, max_w, |s| {
-            pixtuoid::dev::text_width(s, PROOF_FONT_PX)
-        });
+        let wrapped = wrap_text(&line.text, max_w, text_width);
         let color = if line.prompt { PROMPT } else { INK };
         let mut remaining = shown;
         for sub in &wrapped {
@@ -442,17 +448,19 @@ fn panel_body(
                 return; // panel full — the timeline is authored to fit; guard anyway
             }
             let visible: String = sub.chars().take(take).collect();
-            let advance = aa_draw_text_at(
-                img,
-                &visible,
-                (origin.0 + PAD) as i32,
-                y as i32,
-                PROOF_FONT_PX,
-                color,
-            );
+            let top = centred_in(y, LINE_H);
+            let advance = draw_text(img, &visible, ((origin.0 + PAD) as i32, top), color, None);
             if take < sub_len {
                 let cx = origin.0 as i32 + PAD as i32 + advance;
-                fill_rect(img, cx.max(0) as u32, y, 10, 16, INK);
+                let cell = text_cell();
+                fill_rect(
+                    img,
+                    cx.max(0) as u32,
+                    top as u32,
+                    u32::from(cell.w),
+                    u32::from(cell.h),
+                    INK,
+                );
             }
             row += 1;
             remaining -= take;
@@ -513,10 +521,8 @@ pub(crate) fn compose_frame(
         // margin, so the connector/dot never sits inside the glow.
         const GLOW_CLEARANCE: i32 = 24;
         let anchor_y = desk.1 - GLOW_CLEARANCE;
-        match layout {
+        let left_edge = match layout {
             ProofLayout::Wide => {
-                let text_w = pixtuoid::dev::text_width(label, ANNOT_FONT_PX);
-                let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
                 dashed_h(
                     &mut img,
                     (PANEL_W - PAD) as i32,
@@ -524,27 +530,16 @@ pub(crate) fn compose_frame(
                     anchor_y,
                     ANNOT,
                 );
-                text(
-                    &mut img,
-                    label,
-                    label_x,
-                    anchor_y - 22 + 1,
-                    Rgba([0, 0, 0, 255]),
-                );
-                text(&mut img, label, label_x, anchor_y - 22, ANNOT);
-                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
+                (PANEL_W + PAD) as i32
             }
-            ProofLayout::Tall => {
-                // No cross-panel connector line — the panel sits above, not
-                // beside.
-                let text_w = pixtuoid::dev::text_width(label, ANNOT_FONT_PX);
-                let label_x = (desk.0 - text_w - 16).max(PAD as i32);
-                let label_y = anchor_y - 22;
-                text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
-                text(&mut img, label, label_x, label_y, ANNOT);
-                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-            }
-        }
+            // No cross-panel connector line — the panel sits above, not beside.
+            ProofLayout::Tall => PAD as i32,
+        };
+        let label_x = (desk.0 - text_width(label) - 16).max(left_edge);
+        // Its halo keeps it legible over the office it is drawn on.
+        let shade = Some(Rgba([0, 0, 0, 255]));
+        draw_text(&mut img, label, (label_x, anchor_y - 22), ANNOT, shade);
+        dot(&mut img, (desk.0 - 6, anchor_y), ANNOT_DOT_R, ANNOT);
     }
 
     let ch = coda_height(w);
@@ -552,10 +547,9 @@ pub(crate) fn compose_frame(
     fill_rect(&mut img, 0, coda_y0, w, ch, CODA_BG);
     fill_rect(&mut img, 0, coda_y0, w, 1, EDGE);
     for (i, cline) in coda_lines(w).iter().enumerate() {
-        let lw = pixtuoid::dev::text_width(cline, CODA_FONT_PX);
-        let x = ((w as i32 - lw) / 2).max(0);
+        let x = ((w as i32 - text_width(cline)) / 2).max(0);
         let y = (coda_y0 + CODA_PAD) as i32 + i as i32 * CODA_LINE_H as i32;
-        aa_draw_text_at(&mut img, cline, x, y, CODA_FONT_PX, CODA_INK);
+        draw_text(&mut img, cline, (x, y), CODA_INK, None);
     }
     img
 }
