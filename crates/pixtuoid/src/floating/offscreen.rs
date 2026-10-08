@@ -1040,8 +1040,6 @@ mod tests {
         assert_eq!(office_scale(0), 1);
     }
 
-    /// A saved size below the pack's minimum opens, and is placed, at the
-    /// minimum: an office that seats every floor.
     /// The footer's band holds no office: the fit stops above it, a pointer
     /// in it finds no unit, and the capacity is the office's.
     #[test]
@@ -1066,6 +1064,8 @@ mod tests {
         }
     }
 
+    /// A saved size below the pack's minimum opens, and is placed, at the
+    /// minimum: an office that seats every floor.
     #[test]
     fn a_saved_size_below_the_minimum_opens_where_every_floor_seats() {
         let min = min_window(density());
