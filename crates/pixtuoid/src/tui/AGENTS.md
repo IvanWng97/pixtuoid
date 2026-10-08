@@ -10,7 +10,7 @@ workspace [`AGENTS.md`](../../../../AGENTS.md).
 
 ## When refactoring
 
-Changes to `draw_scene`, the widgets, or the dispatch precedence add or update
+Changes to `flush_classic`, the widgets, or the dispatch precedence add or update
 a harness test (`tui_renderer/harness` drives the real `TuiRenderer` through a
 ratatui `TestBackend`, output-first). Don't reach back into `floating/` from
 here.
