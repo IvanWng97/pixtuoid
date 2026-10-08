@@ -306,12 +306,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .ok()
             .and_then(crate::graphics::CellSize::of_window);
         let fitted = self.cutaway.as_mut()?.fit_to(scene_area, window)?;
-        Some((
-            Look::Cutaway {
-                scale: fitted.fit.render_scale(),
-            },
-            fitted.fit.logical(),
-        ))
+        Some((fitted.fit.look(), fitted.fit.logical()))
     }
 
     /// Report the frames since the last pacing summary, at exit.
@@ -969,9 +964,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             scene,
             pack,
             now,
-            Look::Cutaway {
-                scale: fitted.fit.render_scale(),
-            },
+            fitted.fit.look(),
             fitted.fit.logical(),
             false,
         );
