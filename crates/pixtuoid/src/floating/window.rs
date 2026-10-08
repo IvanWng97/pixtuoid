@@ -152,7 +152,7 @@ impl FloatingApp {
             pos.map(|p| p.x),
             pos.map(|p| p.y),
         ) {
-            tracing::warn!(error = %e, "pixtuoid floating: could not persist window geometry");
+            tracing::warn!(error = ?e, "pixtuoid floating: could not persist window geometry");
         }
     }
 
@@ -525,6 +525,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                         Instant::now(),
                         crate::audio::respawn,
                     );
+                } else if super::input::is_theme_cycle(key, event.repeat) {
+                    self.theme = cycle_theme(self.theme, &self.config_path);
                 } else if super::input::is_pause(key, event.repeat) {
                     self.pause.toggle();
                     // Unpause restores the user's own m-key state rather than clobbering it.
@@ -608,5 +610,36 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if paint {
             self.request_redraw();
         }
+    }
+}
+
+/// The theme after `theme`, saved to the config at `path` so the next start
+/// opens on it.
+fn cycle_theme(theme: &'static Theme, path: &std::path::Path) -> &'static Theme {
+    let next = super::input::next_theme(theme);
+    if let Err(e) = crate::config::save(path, next.name) {
+        tracing::warn!(error = ?e, "failed to persist theme");
+    }
+    next
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `t` takes the next theme and the config keeps it, an unwritable
+    /// config costing only the save.
+    #[test]
+    fn a_theme_cycle_takes_the_next_theme_and_saves_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let first = pixtuoid_scene::theme::ALL_THEMES[0];
+        let next = cycle_theme(first, &path);
+        assert!(std::ptr::eq(next, super::super::input::next_theme(first)));
+        let saved = crate::config::load(&path, &mut Vec::new()).theme;
+        assert_eq!(saved.as_deref(), Some(next.name));
+        let unwritable = dir.path().join("missing").join("config.toml");
+        std::fs::write(dir.path().join("missing"), "a file, not a dir").expect("write");
+        assert!(std::ptr::eq(cycle_theme(first, &unwritable), next));
     }
 }
