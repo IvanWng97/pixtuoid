@@ -373,7 +373,7 @@ impl FloatingApp {
             surf.fill_upscaled(office, usize::from(at.upscale()));
         }
         let cell = Face::chrome(at);
-        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme, cell);
+        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme, at);
         if let Some((tip, _)) = &next.tooltip {
             super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, self.theme, cell);
         }
