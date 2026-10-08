@@ -4,7 +4,7 @@ description            = "Terminal pixel-art office for AI coding agents"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
-# Embeds Monaspace (fonts/) for the examples, and links pixtuoid-scene's font.
+# Links pixtuoid-scene's Fusion Pixel faces (OFL-1.1).
 license                = "MIT AND OFL-1.1"
 repository.workspace   = true
 authors.workspace      = true
@@ -22,12 +22,6 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.19.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.19.0" }
-# AA text rasterizer (Monaspace Neon) for the examples' cell text, split in
-# two on purpose — the WHY, and the rejected whole-stack alternatives, are on
-# `aa_text`'s module doc. Binary-only: the wasm-compiled engine never sees this,
-# and renders text as a DOM overlay instead.
-skrifa = "0.47"
-ab_glyph_rasterizer = "0.1"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
 # Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway profile — capability
