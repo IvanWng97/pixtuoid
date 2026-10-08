@@ -20,7 +20,6 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::flash::{FlashHold, FlashPhase, Flashes};
 use pixtuoid_scene::layout::Size;
-use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
 
@@ -29,17 +28,6 @@ use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::jank::FrameSend;
 use crate::tui::geometry::SceneGeometry;
 use crate::tui::renderer::set_half_block;
-
-/// A floor slide's two floors' frames at progress `t` of a
-/// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
-pub(crate) struct Slide<'a> {
-    pub(crate) leaving: &'a RgbBuffer,
-    pub(crate) arriving: &'a RgbBuffer,
-    /// What of each flashes, the leaving floor's first.
-    pub(crate) flashes: Flashes,
-    pub(crate) t: f32,
-    pub(crate) going_down: bool,
-}
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
 pub(crate) type Sink = Box<dyn Write + Send>;
@@ -250,29 +238,22 @@ impl TileCutaway {
         self.stage(&dirty, fresh, flashes, now, fitted.scene.as_position());
     }
 
-    /// Show both floors of `slide`, composed as it places them, and queue the
-    /// tiles that changed as [`Self::paint`] does.
+    /// Show a slide's `composed` frame, whose two floors show `flashes`, and
+    /// queue the tiles that changed as [`Self::paint`] does.
     pub(crate) fn paint_slide(
         &mut self,
         fitted: Fitted,
-        slide: Slide<'_>,
-        theme: &'static Theme,
+        composed: &RgbBuffer,
+        flashes: Flashes,
         now: SystemTime,
     ) {
-        let flashes = slide.flashes;
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&Dirty::All);
             self.image_behind = true;
             self.pending = None;
             return;
         }
-        pixtuoid_scene::floor::compose_slide(
-            &mut self.image,
-            (slide.leaving, slide.arriving),
-            slide.t,
-            slide.going_down,
-            theme.surface.bg_fallback,
-        );
+        self.image.clone_from(composed);
         self.shown = Some(Shown::Slide);
         self.stage(&Dirty::All, true, flashes, now, fitted.scene.as_position());
     }

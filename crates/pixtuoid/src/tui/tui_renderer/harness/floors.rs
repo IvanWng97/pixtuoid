@@ -547,11 +547,10 @@ fn every_painter_shows_the_one_board_of_a_floor() {
     let mut r = build(120, 40, vec![]);
     let mut tui = |scene: &SceneState, floor: usize| {
         r.session.prepare(scene, now);
+        r.session.navigate(floor, now);
+        r.session.cancel_slide();
         let drawn = project_floor_scene(scene, floor);
-        let ctx = r
-            .chrome
-            .frame(&r.session, scene, &drawn, pack(), now, floor)
-            .footer;
+        let ctx = r.chrome.footer(&r.session, scene);
         pixtuoid_scene::neon_sign::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
     };
 

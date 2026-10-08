@@ -244,7 +244,7 @@ fn onboarding_dims_the_office_buffer() {
 }
 
 #[test]
-fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
+fn onboarding_dims_the_composed_slide_on_the_transition_path() {
     use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
     let p = pack();
     let scene = two_floor_scene();
@@ -256,7 +256,7 @@ fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
     bright_r.navigate_floor(1, now);
     bright_r.render(&scene, p, mid).unwrap();
     assert!(bright_r.transition().is_some(), "baseline still mid-slide");
-    let bb = bright_r.floor_buf(0).expect("from-floor buffer exists");
+    let bb = bright_r.session.buf().expect("the composed slide");
     let bright = avg_lum(bb, 0, 0, bb.width(), bb.height());
 
     let mut dim_r = build(100, 40, vec![]);
@@ -276,12 +276,12 @@ fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
     });
     dim_r.render(&scene, p, mid).unwrap();
     assert!(dim_r.transition().is_some(), "dimmed still mid-slide");
-    let db = dim_r.floor_buf(0).expect("from-floor buffer exists");
+    let db = dim_r.session.buf().expect("the composed slide");
     let dim = avg_lum(db, 0, 0, db.width(), db.height());
 
     assert!(
         dim < bright * 0.6,
-        "the transition path must dim the sliding buffers: dim={dim} vs bright={bright}"
+        "the transition path must dim the composed slide: dim={dim} vs bright={bright}"
     );
 }
 

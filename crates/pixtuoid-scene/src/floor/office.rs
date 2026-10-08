@@ -237,8 +237,7 @@ pub fn footer_floor(current: usize, n_floors: usize, total_agents: usize) -> Opt
 
 /// How far down the floor being left and the one arriving sit, `t` through a
 /// slide over a scene `h` units tall, a divider's gap between them.
-#[doc(hidden)]
-pub fn slide_offsets(t: f32, going_down: bool, h: f32) -> (i32, i32) {
+fn slide_offsets(t: f32, going_down: bool, h: f32) -> (i32, i32) {
     // `t` applies to the total travel (screen height + divider gap) so the
     // easing covers the full distance including the gap.
     const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
@@ -260,8 +259,7 @@ pub fn slide_offsets(t: f32, going_down: bool, h: f32) -> (i32, i32) {
 /// `leaving` and `arriving` placed as [`slide_offsets`] places them, `t`
 /// through a slide, into `into` (resized to `leaving`'s size), `gap` where
 /// neither reaches.
-#[doc(hidden)]
-pub fn compose_slide(
+fn compose_slide(
     into: &mut RgbBuffer,
     (leaving, arriving): (&RgbBuffer, &RgbBuffer),
     t: f32,
@@ -409,17 +407,6 @@ impl OfficeSession {
         Some((&mut view.floor, &mut self.office))
     }
 
-    /// The two floors of a slide, and the office-wide state both draw beside;
-    /// `None` unless both are grown and distinct.
-    pub fn slide_floors_mut(
-        &mut self,
-        from: usize,
-        to: usize,
-    ) -> Option<([&mut PerFloor; 2], &mut PerOffice)> {
-        let [a, b] = self.views.get_disjoint_mut([from, to]).ok()?;
-        Some(([&mut a.floor, &mut b.floor], &mut self.office))
-    }
-
     /// Every floor grown so far, for what reaches all of them at once (a
     /// theme's sprite cache, a resize's routes).
     pub fn floors_mut(&mut self) -> impl Iterator<Item = &mut PerFloor> {
@@ -521,6 +508,37 @@ impl OfficeSession {
                 .map(FloorView::flash)
                 .unwrap_or_default(),
         }
+    }
+
+    /// The layout the floor showing last drew; none in a slide.
+    pub fn layout(&self) -> Option<&Arc<crate::layout::SceneLayout>> {
+        self.slide
+            .is_none()
+            .then(|| self.views.get(self.nav.current()))
+            .flatten()?
+            .last_layout
+            .as_ref()
+    }
+
+    /// What each of the last frame's two sides flashes: a slide's leaving and
+    /// arriving floors, else the floor showing's twice.
+    pub fn flashes(&self) -> crate::flash::Flashes {
+        let of = |floor: usize| {
+            self.views
+                .get(floor)
+                .map(FloorView::flash)
+                .unwrap_or_default()
+        };
+        match (&self.slide, self.nav.transition()) {
+            (Some(_), Some(tr)) => [of(tr.from_floor), of(tr.to_floor)],
+            _ => [of(self.nav.current()); 2],
+        }
+    }
+
+    /// The last slide's composed frame, for a painter's own pass over it (a
+    /// modal's dim); `None` outside a slide.
+    pub fn slide_mut(&mut self) -> Option<&mut RgbBuffer> {
+        self.slide.as_mut()
     }
 
     /// What the last frame shows a pointer over `area`, in layout units; none
