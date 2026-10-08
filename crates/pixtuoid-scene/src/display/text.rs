@@ -10,6 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::display::Icon;
+use crate::display::cells::{CellMap, CellRect};
 use crate::display::pen::ArtPx;
 use crate::layout::Point;
 use crate::theme::Theme;
@@ -235,10 +236,40 @@ impl Badge {
         }
     }
 
-    /// The logical cells a line `w` cells wide takes over its anchor:
-    /// [`TextRun::place`] for its run.
-    pub fn place(&self, w: u16) -> crate::layout::Bounds {
-        place(self.at, Align::Over, w)
+    /// The cells of `map` a line `w` cells wide takes over its anchor.
+    pub fn line_at(&self, w: u16, map: CellMap) -> CellRect {
+        line_at(self.at, Align::Over, w, map)
+    }
+}
+
+/// The world text a host sets over a frame in its own font, in paint order:
+/// the badges, each bubble over them, then the signs over every badge and
+/// bubble.
+#[derive(Debug, Clone, Copy)]
+pub struct World<'a> {
+    /// Each drawn agent's badge.
+    pub badges: &'a [Badge],
+    /// Each chitchat bubble, hung over its speaker's badge.
+    pub bubbles: &'a [TextRun],
+    /// The wall board's lines and the floor indicator.
+    pub signs: &'a [TextRun],
+}
+
+/// A frame's [`World`], held.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct WorldRuns {
+    pub(crate) badges: Vec<Badge>,
+    pub(crate) bubbles: Vec<TextRun>,
+    pub(crate) signs: Vec<TextRun>,
+}
+
+impl WorldRuns {
+    pub(crate) fn view(&self) -> World<'_> {
+        World {
+            badges: &self.badges,
+            bubbles: &self.bubbles,
+            signs: &self.signs,
+        }
     }
 }
 
@@ -299,6 +330,19 @@ impl TextRun {
         }
     }
 
+    /// The room's signs: `board`'s lines, then the floor indicator naming
+    /// `floor` over the elevator at `door`.
+    pub(crate) fn signs(
+        board: &crate::neon_sign::BoardModel,
+        door: Point,
+        floor: crate::floor::FloorMeta,
+        theme: &Theme,
+    ) -> Vec<Self> {
+        let mut runs = board.runs(theme);
+        runs.push(Self::indicator(door, floor, theme));
+        runs
+    }
+
     /// `bubble` over its speaker's badge, which hangs over `badge_at`, in
     /// the tooltip's ink on its plate.
     pub(crate) fn bubble(
@@ -324,41 +368,32 @@ impl TextRun {
         self.spans.iter().map(TextSpan::text).collect()
     }
 
-    /// The star's hit area: the logical cells its line covers on the
-    /// terminal's cell grid, one per cell of its text, where the classic
-    /// writes it.
-    pub(crate) fn hit_box(&self) -> crate::layout::Bounds {
-        self.place(cells(&self.text()))
-    }
-
-    /// The logical cells a line `w` cells wide takes where its align puts it:
-    /// the one placement the hit test and every terminal painter read. It
-    /// fills the cell row its anchor's row lies in, `LABEL_GAP` rows up for
-    /// [`Align::Over`].
-    pub fn place(&self, w: u16) -> crate::layout::Bounds {
-        place(self.at, self.align, w)
+    /// The cells of `map` a line `w` cells wide takes where its align puts
+    /// it: the one placement every terminal painter and the star's hit test
+    /// read.
+    pub fn line_at(&self, w: u16, map: CellMap) -> CellRect {
+        line_at(self.at, self.align, w, map)
     }
 }
 
-/// The logical cells a line `w` cells wide takes, placed by `at` as `align`
-/// says.
-fn place(at: Point, align: Align, w: u16) -> crate::layout::Bounds {
-    let h = crate::layout::CELL_ROWS;
+/// The cells of `map` a line `w` cells wide takes, placed by `at` as `align`
+/// says: the row `at`'s cell lies in, `LABEL_GAP` rows up for
+/// [`Align::Over`].
+fn line_at(at: Point, align: Align, w: u16, map: CellMap) -> CellRect {
+    let anchor = match align {
+        Align::Over => Point {
+            y: at.y.saturating_sub(LABEL_GAP),
+            ..at
+        },
+        Align::Left | Align::Right | Align::Centre => at,
+    };
+    let (col, row) = map.cell_of(anchor);
     let x = match align {
-        Align::Left => at.x,
-        Align::Right => at.x.saturating_sub(w),
-        Align::Over | Align::Centre => at.x.saturating_sub(w / 2),
+        Align::Left => col,
+        Align::Right => col.saturating_sub(w),
+        Align::Over | Align::Centre => col.saturating_sub(w / 2),
     };
-    let row = match align {
-        Align::Over => at.y.saturating_sub(LABEL_GAP),
-        Align::Left | Align::Right | Align::Centre => at.y,
-    };
-    crate::layout::Bounds {
-        x,
-        y: row / h * h,
-        width: w,
-        height: h,
-    }
+    CellRect { x, y: row, w, h: 1 }
 }
 
 #[cfg(test)]

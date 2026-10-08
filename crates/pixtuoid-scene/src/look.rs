@@ -31,7 +31,19 @@ pub enum Look {
     Cutaway {
         /// Buffer pixels per layout unit.
         scale: RenderScale,
+        /// Who sets its world text.
+        text: WorldText,
     },
+}
+
+/// Who sets a cutaway's world text: the badges, bubbles, wall board and floor
+/// indicator. The classic's is always the host's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldText {
+    /// The image, in the scene's pixel font.
+    Baked,
+    /// The host, in its own font over the image ([`Raster::world`]).
+    Host,
 }
 
 /// What only the office knows about the floor a painter draws: its wall
@@ -159,19 +171,24 @@ struct Classic {
     signs: Vec<crate::display::TextRun>,
 }
 
+impl Classic {
+    fn world(&self) -> crate::display::World<'_> {
+        crate::display::World {
+            badges: &self.hits.badges,
+            bubbles: &self.hits.bubbles,
+            signs: &self.signs,
+        }
+    }
+}
+
 /// What the last classic frame drew besides its pixels, for a painter that
 /// sets the classic's text and hit-tests it itself.
 #[derive(Debug)]
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
-    /// Each drawn agent's badge, in paint order.
-    pub badges: &'a [crate::display::Badge],
-    /// Each chitchat bubble, hung over its speaker's badge.
-    pub bubbles: &'a [crate::display::TextRun],
-    /// The wall board's lines and the floor indicator, over every badge and
-    /// bubble.
-    pub signs: &'a [crate::display::TextRun],
+    /// The text the painter sets over it.
+    pub world: crate::display::World<'a>,
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
 }
@@ -203,13 +220,27 @@ impl Raster {
             .classic
             .as_mut()
             .filter(|_| self.shown == Some(Look::Classic))?;
+        let Classic {
+            buf, hits, signs, ..
+        } = classic;
         Some(ClassicDrawn {
-            pixels: &mut classic.buf,
-            badges: &classic.hits.badges,
-            bubbles: &classic.hits.bubbles,
-            signs: &classic.signs,
-            hovers: &classic.hits.hovers,
+            pixels: buf,
+            world: crate::display::World {
+                badges: &hits.badges,
+                bubbles: &hits.bubbles,
+                signs,
+            },
+            hovers: &hits.hovers,
         })
+    }
+
+    /// The world text the last frame left to its host, in either look;
+    /// `None` before the first and for a cutaway that baked its own.
+    pub fn world(&self) -> Option<crate::display::World<'_>> {
+        match self.shown? {
+            Look::Classic => self.classic.as_ref().map(Classic::world),
+            Look::Cutaway { .. } => self.cutaway.as_ref()?.world(),
+        }
     }
 
     /// What the last frame drawn answers a pointer with, in either look;
@@ -235,17 +266,12 @@ impl Raster {
             .filter(|_| self.shown == Some(Look::Classic))
     }
 
-    /// The cells of the star the last frame drew, where a pointer opens the
-    /// repo, in either look; `None` before the first or when it drew none.
+    /// The cells of the star the last frame baked, where a pointer opens the
+    /// repo; `None` before the first, when it drew none, or where its host
+    /// sets it ([`Self::world`]), which then places it.
     pub fn star(&self) -> Option<crate::layout::Bounds> {
         match self.shown? {
-            Look::Classic => self
-                .classic
-                .as_ref()?
-                .signs
-                .iter()
-                .find(|run| run.role == crate::display::TextRole::Star)
-                .map(crate::display::TextRun::hit_box),
+            Look::Classic => None,
             Look::Cutaway { .. } => self.cutaway.as_ref()?.star(),
         }
     }
@@ -362,16 +388,11 @@ pub fn render<'r>(
             );
             let flash = paint.flash(&stepped.frame);
             classic.hits = paint_frame(&mut paint, &stepped.frame);
-            classic.signs.clear();
-            classic.signs.extend(board.runs(theme));
-            classic.signs.push(crate::display::TextRun::indicator(
-                stepped.layout.door,
-                world.floor,
-                theme,
-            ));
+            classic.signs =
+                crate::display::TextRun::signs(&board, stepped.layout.door, world.floor, theme);
             (&classic.buf, Dirty::All, flash)
         }
-        Look::Cutaway { scale } => {
+        Look::Cutaway { scale, text } => {
             let canvas = raster
                 .cutaway
                 .get_or_insert_with(|| CutawayCanvas::new(Arc::clone(&raster.pack)));
@@ -389,6 +410,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
+                text,
                 (&mut office.raster.cutaway, &mut office.raster.outside),
             );
             if let Some(note) = &mut raster.note {

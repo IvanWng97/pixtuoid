@@ -13,6 +13,7 @@ use ratatui::style::Color;
 
 use std::sync::Arc;
 
+use pixtuoid_scene::display::cells::CellMap;
 use pixtuoid_scene::display::{HoverTarget, Hovers};
 use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
@@ -24,8 +25,8 @@ use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_tooltip};
 pub(super) use crate::tui::widgets::{
-    paint_badges, paint_connection_panel, paint_dashboard, paint_footer, paint_help_overlay,
-    paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
+    paint_connection_panel, paint_dashboard, paint_footer, paint_help_overlay, paint_theme_picker,
+    paint_version_popup, paint_welcome, paint_world, star_area,
 };
 
 pub use pixtuoid_scene::pet::PetState;
@@ -430,12 +431,9 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         dim,
     } = frame;
     let now = world.now;
-    let star = floor.raster.star();
     let Some(ClassicDrawn {
         pixels,
-        badges,
-        bubbles,
-        signs,
+        world: text,
         hovers,
     }) = floor.raster.classic_drawn()
     else {
@@ -445,6 +443,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
     let size = term.size()?;
     let scene_rect = scene_rect(Rect::new(0, 0, size.width, size.height));
     let geometry = SceneGeometry::half_block(scene_rect);
+    let star = star_area(text.signs, geometry.map());
     let hit =
         mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
     let hovered = match hit {
@@ -464,11 +463,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        // Badges first, then a bubble over them, then the signs, which a
-        // bubble must not cover.
-        paint_badges(f, badges, actual_scene, hovered);
-        paint_text_runs(f, bubbles, actual_scene);
-        paint_text_runs(f, signs, actual_scene);
+        paint_world(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,
@@ -553,7 +548,7 @@ pub(crate) fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, 
 
 /// Show `top` over `bottom` in `cell`: the half-block every flush of the
 /// office paints with.
-pub(crate) fn set_half_block(
+fn set_half_block(
     cell: &mut ratatui::buffer::Cell,
     top: pixtuoid_core::sprite::Rgb,
     bottom: pixtuoid_core::sprite::Rgb,

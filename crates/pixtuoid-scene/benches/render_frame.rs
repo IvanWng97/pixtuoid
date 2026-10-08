@@ -349,7 +349,14 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     board,
                 };
                 canvas
-                    .frame(floor, theme, scale, showing, (&mut cache, &mut outside))
+                    .frame(
+                        floor,
+                        theme,
+                        scale,
+                        showing,
+                        pixtuoid_scene::look::WorldText::Baked,
+                        (&mut cache, &mut outside),
+                    )
                     .dirty
             });
         });

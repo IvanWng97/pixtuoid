@@ -1,5 +1,6 @@
 //! Where the office sits under the terminal's cells.
 
+use pixtuoid_scene::display::cells::{CellMap, CellPx};
 use pixtuoid_scene::layout::Bounds;
 #[cfg(test)]
 use pixtuoid_scene::layout::Point;
@@ -43,20 +44,21 @@ impl SceneGeometry {
     pub(crate) fn area_at(self, col: u16, row: u16) -> Option<CellArea> {
         let (Self::HalfBlock { origin } | Self::Cutaway { origin, .. }) = self;
         let (col, row) = (col.checked_sub(origin.x)?, row.checked_sub(origin.y)?);
-        Some(match self {
-            Self::HalfBlock { .. } => CellArea::half_block(col, row),
-            Self::Cutaway { cell, scale, .. } => {
-                // u32: a far cell's pixel offset passes `u16::MAX`.
-                let units = |i: u16, px: u16| {
-                    let first = u32::from(i) * u32::from(px);
-                    let unit =
-                        |p: u32| u16::try_from(p / u32::from(scale.get())).unwrap_or(u16::MAX);
-                    (unit(first), unit((first + u32::from(px)).saturating_sub(1)))
-                };
-                let ((x0, x1), (y0, y1)) = (units(col, cell.w), units(row, cell.h));
-                CellArea { x0, x1, y0, y1 }
-            }
-        })
+        Some(CellArea::of(self.map().area(col, row)))
+    }
+
+    /// The scene's cells over the office, from its top-left.
+    pub(crate) fn map(self) -> CellMap {
+        match self {
+            Self::HalfBlock { .. } => CellMap::HALF_BLOCK,
+            Self::Cutaway { cell, scale, .. } => CellMap {
+                scale: scale.get(),
+                cell: CellPx {
+                    w: cell.w,
+                    h: cell.h,
+                },
+            },
+        }
     }
 }
 
@@ -72,13 +74,17 @@ pub(crate) struct CellArea {
 impl CellArea {
     /// Under the half-block flush (`renderer::flush_buffer_to_term`)
     /// a cell shows one pixel column and two rows, its upper and lower half.
+    #[cfg(test)]
     pub(crate) fn half_block(col: u16, row: u16) -> Self {
-        let y0 = row.saturating_mul(2);
+        Self::of(CellMap::HALF_BLOCK.area(col, row))
+    }
+
+    fn of(b: Bounds) -> Self {
         Self {
-            x0: col,
-            x1: col,
-            y0,
-            y1: y0.saturating_add(1),
+            x0: b.x,
+            x1: b.x + (b.width - 1),
+            y0: b.y,
+            y1: b.y + (b.height - 1),
         }
     }
 

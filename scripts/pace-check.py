@@ -9,9 +9,13 @@ minute each and one at exit, are what this reads, from the log it writes.
 whose writes meet a real terminal's parser; without it, a pseudo-terminal
 sized for `--scale` stands in, which catches our side alone.
 
+`--hover` sweeps the pointer to and fro along the scene's middle row, so a
+tooltip opens over each figure and fixture it crosses and moves with it; the
+pty alone takes it, a live run's pointer being the user's.
+
 Usage:
     just pace-check [--live] [--scale classic|4|16] [--graphics kitty|sixel|iterm2]
-                    [--run storm|dusk] [--secs N]
+                    [--run storm|dusk] [--secs N] [--hover]
 """
 
 import argparse
@@ -25,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import termios
+import threading
 import time
 from pathlib import Path
 
@@ -37,6 +42,8 @@ P99_MS = 20.0
 SCALES = ["classic", "4", "16"]
 # The lead into the storm transition: a boot and some steady frames first.
 LEAD_S = 10
+# How long `--hover`'s pointer rests on a cell: a hand's slow sweep.
+HOVER_STEP_S = 0.1
 
 
 def pacing(*args):
@@ -60,7 +67,21 @@ def start_at(run):
     return int(pacing("next-storm")[0]) - LEAD_S
 
 
-def run_pty(argv, env, geometry, secs):
+def sweep(fd, cols, rows, stop):
+    """Move the pointer a cell at a time along the scene's middle row, to and
+    fro, until `stop`: SGR reports of motion, 32, with no button, 3
+    (https://invisible-island.net/xterm/ctlseqs/ctlseqs.html, "Button-event
+    tracking" and "Extended coordinates")."""
+    y, x, step = rows // 2, 1, 1
+    while not stop.is_set():
+        os.write(fd, f"\x1b[<35;{x};{y}M".encode())
+        if not 1 <= x + step <= cols:
+            step = -step
+        x += step
+        stop.wait(HOVER_STEP_S)
+
+
+def run_pty(argv, env, geometry, secs, hover):
     cols, rows, cell_w, cell_h = geometry
     pid, fd = pty.fork()
     if pid == 0:
@@ -74,7 +95,11 @@ def run_pty(argv, env, geometry, secs):
     # `cat` drains the pty: a reader slower than the binary's writes would
     # block them, and charge this script's speed to its frames.
     drain = subprocess.Popen(["cat"], stdin=fd, stdout=subprocess.DEVNULL)
+    stop = threading.Event()
+    if hover:
+        threading.Thread(target=sweep, args=(fd, cols, rows, stop), daemon=True).start()
     time.sleep(secs)
+    stop.set()
     os.kill(pid, signal.SIGTERM)
     os.waitpid(pid, 0)
     drain.terminate()
@@ -124,7 +149,10 @@ def main():
     ap.add_argument("--graphics", choices=["kitty", "sixel", "iterm2"], default="kitty")
     ap.add_argument("--run", choices=["storm", "dusk"], default="storm")
     ap.add_argument("--secs", type=float, default=200.0)
+    ap.add_argument("--hover", action="store_true")
     args = ap.parse_args()
+    if args.hover and args.live:
+        sys.exit("pace-check: --hover drives the pty's pointer; live, hover by hand")
     if not os.access(BIN, os.X_OK):
         sys.exit(f"pace-check: no {BIN}: run it as `just pace-check`, which builds it")
 
@@ -146,7 +174,7 @@ def main():
         env.update(TERM="xterm-256color", TERM_PROGRAM="WezTerm")
         env.pop("TMUX", None)
         geometry = tuple(int(n) for n in pacing("terminal", "16" if args.scale == "classic" else args.scale))
-        run_pty(argv, env, geometry, args.secs)
+        run_pty(argv, env, geometry, args.secs, args.hover)
 
     if not any(events(log, "the clock starts at PIXTUOID_FAKE_NOW")):
         sys.exit(f"pace-check: the binary ran on the real clock, not the run's: {log}")
@@ -163,7 +191,7 @@ def main():
     terminal = w0.get("terminal") if args.live else "pty"
     print(
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
-        f"run={args.run}: {frames} frames, worst window p99 {p99:.1f} ms, over {over} | log {log}"
+        f"run={args.run} hover={args.hover}: {frames} frames, worst window p99 {p99:.1f} ms, over {over} | log {log}"
     )
     for (dirty, *why), n in causes(log):
         print(f"  over-interval: {n:4} dirty={dirty} {' '.join(why)}")

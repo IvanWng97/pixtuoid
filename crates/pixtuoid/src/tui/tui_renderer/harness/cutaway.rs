@@ -213,6 +213,63 @@ fn placeholders_in_row(r: &TuiRenderer<Window>, y: u16) -> usize {
         .count()
 }
 
+/// The last frame's world text alone, painted where the renderer painted it
+/// over the image: the only text of the scene's.
+fn world_text(r: &TuiRenderer<Window>) -> ratatui::buffer::Buffer {
+    let area = r.frame_buffer().area;
+    let world = r
+        .session
+        .floor(r.session.nav().current())
+        .and_then(|floor| floor.raster.world())
+        .expect("the host sets the world's text");
+    let map = r.last_geometry.expect("a frame drawn").map();
+    let mut term = Terminal::new(TestBackend::new(area.width, area.height)).expect("terminal");
+    term.draw(|f| {
+        let scene = crate::tui::renderer::scene_rect(f.area());
+        crate::tui::widgets::paint_world(f, world, (scene, map), None);
+    })
+    .expect("draw");
+    term.backend().buffer().clone()
+}
+
+/// The scene's cells of `buf` that hold text: any ratatui wrote.
+fn text_cells(buf: &ratatui::buffer::Buffer) -> std::collections::BTreeSet<(u16, u16)> {
+    let scene = crate::tui::renderer::scene_rect(buf.area);
+    scene
+        .positions()
+        .filter(|&p| buf[p] != ratatui::buffer::Cell::default())
+        .map(|p| (p.x, p.y))
+        .collect()
+}
+
+/// The cells the SIXEL images on `wire` draw, each read back from its cursor
+/// move and its raster size in [`CELL`]s.
+fn sixel_cells(wire: &str) -> std::collections::BTreeSet<(u16, u16)> {
+    let mut cells = std::collections::BTreeSet::new();
+    for (at, _) in wire.match_indices(SIXEL) {
+        let head = &wire[..at];
+        let open = head.rfind("\x1b[").expect("a cursor move");
+        let (row, col) = head[open + 2..]
+            .strip_suffix('H')
+            .and_then(|at| at.split_once(';'))
+            .expect("row;col");
+        let (row, col): (u16, u16) = (row.parse().expect("row"), col.parse().expect("col"));
+        let raster = wire[at + SIXEL.len()..]
+            .strip_prefix("\"1;1;")
+            .expect("raster attributes");
+        let mut px = raster
+            .split(|c: char| !c.is_ascii_digit())
+            .map(|n| n.parse::<u16>().expect("px"));
+        let (w, h) = (px.next().expect("w"), px.next().expect("h"));
+        for y in 0..h / CELL.h {
+            for x in 0..w / CELL.w {
+                cells.insert((col - 1 + x, row - 1 + y));
+            }
+        }
+    }
+    cells
+}
+
 #[test]
 fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
     let (mut r, wire) = kitty(120, 40);
@@ -368,15 +425,22 @@ fn a_held_frame_reports_no_transmits() {
     }
 }
 
-/// Text and image never share a cell: the footer row stays text.
+/// Text and image never share a cell: placeholders fill the scene but the
+/// world's text, and never the footer row.
 #[test]
 fn placeholders_fill_the_scene_and_never_the_footer() {
     let (cols, rows) = (120, 40);
     let (mut r, _wire) = kitty(cols, rows);
     r.render(&office(), pack(), t0()).expect("render");
-    let scene = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows));
-    for y in 0..scene.height {
-        assert_eq!(placeholders_in_row(&r, y), usize::from(cols), "row {y}");
+    let text = text_cells(&world_text(&r));
+    assert!(
+        !text.is_empty(),
+        "premise: the office has a board and a badge"
+    );
+    let buf = r.frame_buffer();
+    for p in crate::tui::renderer::scene_rect(buf.area).positions() {
+        let placeholder = buf[p].symbol().starts_with(PLACEHOLDER);
+        assert_eq!(placeholder, !text.contains(&(p.x, p.y)), "{p:?}");
     }
     assert_eq!(placeholders_in_row(&r, rows - 1), 0);
 }
@@ -452,28 +516,36 @@ fn a_terminal_restored_from_too_small_gets_every_tile_again() {
         (ImageProtocol::Sixel, SIXEL),
         (ImageProtocol::Iterm2, ITERM2),
     ] {
-        // Every tile, then those the last of three frames sends.
+        let scene = office();
+        let cadence = protocol.cadence();
+        // The images the last of three frames sends.
         let sent = |between: (u16, u16)| {
             let (mut r, wire) = painter(cols, rows, protocol);
-            let scene = office();
-            let cadence = protocol.cadence();
             r.render(&scene, pack(), t0()).expect("render");
-            let all = wire.take().matches(intro).count();
+            wire.take();
             r.terminal.backend_mut().resize(between.0, between.1);
             r.render(&scene, pack(), t0() + cadence).expect("render");
             r.terminal.backend_mut().resize(cols, rows);
             r.render(&scene, pack(), t0() + cadence * 2)
                 .expect("render");
-            (all, wire.take().matches(intro).count())
+            wire.take().matches(intro).count()
         };
-        let (all, steady) = sent((cols, rows));
+        // Every tile, as a fresh terminal gets that last frame: the text it
+        // carves moves with the board's flap.
+        let all = {
+            let (mut r, wire) = painter(cols, rows, protocol);
+            r.render(&scene, pack(), t0() + cadence * 2)
+                .expect("render");
+            wire.take().matches(intro).count()
+        };
+        let steady = sent((cols, rows));
         assert!(
             steady < all,
             "{protocol:?}: {steady} of {all} change anyway"
         );
         for (small_cols, small_rows) in smalls {
             assert_eq!(
-                sent((small_cols, small_rows)).1,
+                sent((small_cols, small_rows)),
                 all,
                 "{protocol:?} from {small_cols}x{small_rows}"
             );
@@ -481,11 +553,11 @@ fn a_terminal_restored_from_too_small_gets_every_tile_again() {
     }
 }
 
-/// The image's top-left SIXEL tile, whole, for a `cell`-sized cell.
-fn first_tile(cell: CellSize) -> String {
+/// A whole SIXEL tile, no text carved out of it, for a `cell`-sized cell.
+fn whole_tile(cell: CellSize) -> String {
     let shape = ImageProtocol::Sixel.tile();
     format!(
-        "\x1b[1;1H{SIXEL}\"1;1;{};{}",
+        "{SIXEL}\"1;1;{};{}",
         shape.cols * cell.w,
         shape.rows * cell.h
     )
@@ -506,7 +578,7 @@ fn the_plans_cell_holds_until_the_windows_moves() {
     let scene = office();
     let cadence = ImageProtocol::Sixel.cadence();
     r.render(&scene, pack(), t0()).expect("render");
-    assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
+    assert!(wire.take().contains(&whole_tile(CELL)), "the plan's cell");
     let plan = crate::graphics::Plan::Cutaway {
         fit: fit(cols, rows),
         route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
@@ -526,11 +598,11 @@ fn the_plans_cell_holds_until_the_windows_moves() {
     };
     r.terminal.backend_mut().zoom(zoomed);
     r.render(&scene, pack(), t0() + cadence).expect("render");
-    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed in");
+    assert!(wire.take().contains(&whole_tile(zoomed)), "zoomed in");
     r.terminal.backend_mut().zoom(padded);
     r.render(&scene, pack(), t0() + cadence * 2)
         .expect("render");
-    assert!(wire.take().contains(&first_tile(CELL)), "zoomed back");
+    assert!(wire.take().contains(&whole_tile(CELL)), "zoomed back");
 }
 
 /// A window that reports 0 px on the first frame has read nothing, so the
@@ -546,7 +618,7 @@ fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
     r.terminal.backend_mut().zoom(CellSize { w: 0, h: 0 });
     let scene = office();
     r.render(&scene, pack(), t0()).expect("render");
-    assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
+    assert!(wire.take().contains(&whole_tile(CELL)), "the plan's cell");
     r.terminal.backend_mut().zoom(padded);
     r.render(&scene, pack(), t0() + ImageProtocol::Sixel.cadence())
         .expect("render");
@@ -575,7 +647,7 @@ fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
     let scene = office();
     let cadence = ImageProtocol::Sixel.cadence();
     r.render(&scene, pack(), t0()).expect("render");
-    assert!(wire.take().contains(&first_tile(CELL)));
+    assert!(wire.take().contains(&whole_tile(CELL)));
 
     let zoomed = CellSize {
         w: CELL.w * 2,
@@ -583,7 +655,7 @@ fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
     };
     r.terminal.backend_mut().zoom(zoomed);
     r.render(&scene, pack(), t0() + cadence).expect("render");
-    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed in");
+    assert!(wire.take().contains(&whole_tile(zoomed)), "zoomed in");
 
     let tiny = CellSize {
         w: CELL.w / 2,
@@ -603,7 +675,7 @@ fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
     r.terminal.backend_mut().zoom(zoomed);
     r.render(&scene, pack(), t0() + cadence * 3)
         .expect("render");
-    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed back in");
+    assert!(wire.take().contains(&whole_tile(zoomed)), "zoomed back in");
 }
 
 /// While classic paints in the cutaway's place, a click hit-tests classic's
@@ -753,17 +825,17 @@ fn a_modal_withholds_the_tiles_under_it_until_it_closes() {
     );
 }
 
+/// Ratatui writes the scene's text and none of the image's cells.
 #[test]
 fn the_image_cells_are_never_written_by_ratatui() {
     let (cols, rows) = (120, 40);
     let (mut r, _wire) = painter(cols, rows, ImageProtocol::Sixel);
     r.render(&office(), pack(), t0()).expect("render");
+    let world = world_text(&r);
+    assert!(!text_cells(&world).is_empty(), "premise: there is text");
+    assert_eq!(text_cells(r.frame_buffer()), text_cells(&world));
     let text = frame_text(r.frame_buffer());
     let lines: Vec<&str> = text.lines().collect();
-    let scene = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows));
-    for line in &lines[..usize::from(scene.height)] {
-        assert_eq!(line.trim(), "");
-    }
     assert_ne!(
         lines[usize::from(rows - 1)].trim(),
         "",
@@ -993,13 +1065,11 @@ fn a_pause_inside_a_hold_never_wedges_the_repaint() {
     );
 }
 
-/// When a modal covers every tile, a strike shows in the half-blocks of the
-/// cells it leaves free, and each phase there holds the floor too: a frame
-/// that sends no tile still marks its phase as shown.
+/// When a modal reaches every tile, a strike shows in the cells it leaves
+/// free, and each phase there holds the floor too.
 #[test]
-fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
+fn each_strike_phase_holds_the_floor_in_the_cells_a_full_modal_leaves() {
     use crate::test_flash::{assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike};
-    const HALF_BLOCK: &str = "\u{2580}";
     let strike = storm_strike();
     let tick = crate::tui::frame_tick();
     for (frame, offset) in frame_grid(tick) {
@@ -1012,27 +1082,15 @@ fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
         let now = strike.start - lead(frame) + offset;
         screen.at(now);
         r.render(&scene, pack(), now).expect("render");
-        let free: Vec<ratatui::layout::Position> = r
-            .frame_buffer()
-            .area
-            .positions()
-            .filter(|&p| r.frame_buffer()[p].symbol() == HALF_BLOCK)
-            .collect();
-        let half_blocks = |r: &TuiRenderer<Window>| -> Vec<ratatui::buffer::Cell> {
-            free.iter().map(|&p| r.frame_buffer()[p].clone()).collect()
-        };
-        let mut shown = half_blocks(&r);
+        let free = sixel_cells(&wire.take());
+        assert!(!free.is_empty(), "the modal leaves cells free");
         let mut changed = Vec::new();
         for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
-            assert!(!wire.take().contains(SIXEL), "the modal covers every tile");
-            let flushed = half_blocks(&r);
-            let differ = flushed.iter().zip(&shown).filter(|(a, b)| a != b).count();
-            if 2 * differ > free.len() {
+            if 2 * sixel_cells(&wire.take()).len() > free.len() {
                 changed.push(now);
             }
-            shown = flushed;
         }
         let at = format!("a frame each {frame:?} from +{offset:?}");
         assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
@@ -1291,32 +1349,10 @@ fn a_sliding_floor_keeps_its_own_wall_board() {
     }
 }
 
-/// The image's cells, by tile, as `(tile col, tile row)` → the symbols there.
-fn image_tiles(
-    r: &TuiRenderer<Window>,
-    rows: u16,
-) -> std::collections::BTreeMap<(u16, u16), Vec<String>> {
-    let shape = ImageProtocol::Sixel.tile();
-    let buf = r.frame_buffer();
-    let mut tiles = std::collections::BTreeMap::<_, Vec<String>>::new();
-    for y in 0..rows - 1 {
-        for x in 0..buf.area.width {
-            let at = (x / shape.cols, y / shape.rows);
-            tiles
-                .entry(at)
-                .or_default()
-                .push(buf[(x, y)].symbol().to_string());
-        }
-    }
-    tiles
-}
-
-/// A withheld tile's cells the modal leaves free show the frame as
-/// half-blocks, and only those: a tile no modal reaches would be half-blocks
-/// throughout. Once the modal closes, each such tile is drawn again.
+/// A modal's tiles are sent but for its cells, and once it closes, the
+/// cells it held go back to the image: all of them but the world's text.
 #[test]
-fn a_withheld_tiles_free_cells_show_half_blocks_until_it_returns() {
-    const HALF_BLOCK: &str = "\u{2580}";
+fn the_cells_a_modal_held_go_back_to_the_image_when_it_closes() {
     let (cols, rows) = (120, 40);
     let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
     let scene = office();
@@ -1325,36 +1361,21 @@ fn a_withheld_tiles_free_cells_show_half_blocks_until_it_returns() {
     wire.take();
     r.set_help_open(true);
     r.render(&scene, pack(), t0() + cadence).expect("render");
-    let filled: Vec<(u16, u16)> = image_tiles(&r, rows)
-        .into_iter()
-        .filter(|(_, cells)| cells.iter().any(|s| s == HALF_BLOCK))
-        .inspect(|(at, cells)| {
-            assert!(
-                cells.iter().any(|s| s != HALF_BLOCK),
-                "tile {at:?} is all half-blocks: no modal reaches it"
-            );
-        })
-        .map(|(at, _)| at)
-        .collect();
-    assert!(!filled.is_empty());
+    let held = text_cells(r.frame_buffer());
+    let open = sixel_cells(&wire.take());
+    assert!(!open.is_empty(), "the modal's tiles are sent");
+    assert!(open.is_disjoint(&held), "never over its text");
 
     r.set_help_open(false);
     r.render(&scene, pack(), t0() + cadence * 2)
         .expect("render");
-    let sent = wire.take();
-    let shape = ImageProtocol::Sixel.tile();
-    for (tx, ty) in &filled {
-        let to = format!(
-            "\x1b[{};{}H{SIXEL}",
-            ty * shape.rows + 1,
-            tx * shape.cols + 1
-        );
-        assert!(sent.contains(&to), "tile ({tx}, {ty}) drawn again");
-    }
-    r.redraw().expect("redraw");
-    r.render(&scene, pack(), t0() + cadence * 3)
-        .expect("render");
-    assert!(!frame_text(r.frame_buffer()).contains(HALF_BLOCK));
+    let sent = sixel_cells(&wire.take());
+    let text = text_cells(&world_text(&r));
+    let lost: Vec<_> = held
+        .iter()
+        .filter(|c| !text.contains(c) && !sent.contains(c))
+        .collect();
+    assert!(lost.is_empty(), "left to the modal's text: {lost:?}");
 }
 
 #[test]
@@ -1370,10 +1391,10 @@ fn a_grid_image_arms_the_unwinds_erase() {
     assert!(erases(in_grid));
 }
 
-/// While a modal stays open, the tile under its title is never sent, tick
-/// after tick, though every tile is owed.
+/// While a modal stays open, no image is drawn over its text, tick after
+/// tick, though every tile is owed.
 #[test]
-fn a_covered_tile_is_never_sent() {
+fn no_image_is_drawn_over_text() {
     let (mut r, wire) = painter(120, 40, ImageProtocol::Sixel);
     let scene = office();
     let cadence = ImageProtocol::Sixel.cadence();
@@ -1381,35 +1402,24 @@ fn a_covered_tile_is_never_sent() {
     wire.take();
     r.set_help_open(true);
     r.redraw().expect("redraw");
-    let shape = ImageProtocol::Sixel.tile();
-    let mut under = None;
+    // The backend keeps a cell's last text under an image ratatui skips, so
+    // a frame's text is the modal's, as the cleared screen first got it, and
+    // the world's of that frame.
+    let mut modal = None;
     for tick in 1..4 {
         r.render(&scene, pack(), t0() + cadence * tick)
             .expect("render");
-        let at = *under.get_or_insert_with(|| {
-            let text = frame_text(r.frame_buffer());
-            let (y, line) = text
-                .lines()
-                .enumerate()
-                .find(|(_, l)| l.contains("? Keyboard"))
-                .expect("the modal's title");
-            let x = line[..line.find("? Keyboard").expect("title")]
-                .chars()
-                .count();
-            (
-                x as u16 / shape.cols * shape.cols,
-                y as u16 / shape.rows * shape.rows,
-            )
+        let sent = sixel_cells(&wire.take());
+        let world = text_cells(&world_text(&r));
+        let modal = modal.get_or_insert_with(|| {
+            assert!(!sent.is_empty(), "the cells the modal leaves free are sent");
+            &text_cells(r.frame_buffer()) - &world
         });
-        let sent = wire.take();
-        if tick == 1 {
-            assert!(
-                sent.contains(SIXEL),
-                "the tiles the modal leaves free are sent"
-            );
-        }
-        let to = format!("\x1b[{};{}H{SIXEL}", at.1 + 1, at.0 + 1);
-        assert!(!sent.contains(&to), "tick {tick}");
+        assert!(sent.is_disjoint(modal), "tick {tick}: over the modal");
+        assert!(
+            sent.is_disjoint(&world),
+            "tick {tick}: over the world's text"
+        );
     }
 }
 

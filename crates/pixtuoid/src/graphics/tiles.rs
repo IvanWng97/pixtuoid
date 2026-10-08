@@ -5,7 +5,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 
 use crossterm::{Command, cursor::MoveTo};
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::layout::Bounds;
 use ratatui::layout::Position;
@@ -40,7 +40,59 @@ impl Tile {
         .write_ansi(&mut out);
         out
     }
+
+    /// Its cell `(col, row)`'s bit in a [`Carve`], counted from its top-left.
+    pub(crate) fn bit(self, col: u16, row: u16) -> Carve {
+        1 << (u32::from(row) * u32::from(self.cols) + u32::from(col))
+    }
+
+    /// What of it the image draws when the cells `carve` marks hold text:
+    /// each run of image cells along a row, a run alike on the rows under it
+    /// merged into one, so an uncarved tile is itself.
+    pub(crate) fn pieces(self, carve: Carve) -> Vec<Tile> {
+        let mut done = Vec::new();
+        // The pieces that reach the last row, which this one may extend.
+        let mut open: Vec<Tile> = Vec::new();
+        for row in 0..self.rows {
+            let mut next = Vec::new();
+            let mut col = 0;
+            while col < self.cols {
+                if carve & self.bit(col, row) != 0 {
+                    col += 1;
+                    continue;
+                }
+                let start = col;
+                while col < self.cols && carve & self.bit(col, row) == 0 {
+                    col += 1;
+                }
+                let (at, cols) = (self.col + start, col - start);
+                match open.iter().position(|p| p.col == at && p.cols == cols) {
+                    Some(i) => {
+                        let mut piece = open.swap_remove(i);
+                        piece.rows += 1;
+                        next.push(piece);
+                    }
+                    None => next.push(Tile {
+                        col: at,
+                        row: self.row + row,
+                        cols,
+                        rows: 1,
+                        ..self
+                    }),
+                }
+            }
+            done.append(&mut open);
+            open = next;
+        }
+        done.append(&mut open);
+        done
+    }
 }
+
+/// A tile's cells that hold text, one bit each ([`Tile::bit`]). Only SIXEL's
+/// and iTerm2's tiles are carved, and they keep the protocol's [`TileShape`]
+/// (`a_carved_tile_fits_its_bits`).
+pub(crate) type Carve = u64;
 
 /// A tile's pixels as the terminal shows them: upscaled, in whole cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,14 +107,24 @@ pub(crate) struct TileImage {
     pub(crate) rgb: Vec<u8>,
 }
 
-/// A tile whose pixels differ from what it was last [`sent`](Tiles::sent) with.
+/// A tile whose pixels, or the text cells carved out of it, differ from what
+/// it was last [`sent`](Tiles::sent) with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Changed {
     /// The tile.
     pub(crate) tile: Tile,
+    /// The cells left to text, which its image leaves alone.
+    pub(crate) carve: Carve,
     hash: u64,
     /// The buffer size the tile was cut from.
     size: (u16, u16),
+}
+
+/// What a tile was last sent with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Sent {
+    hash: u64,
+    carve: Carve,
 }
 
 /// The tile grid over one image and the hash each tile was last sent with.
@@ -75,8 +137,8 @@ pub(crate) struct Tiles {
     upscale: u32,
     /// The buffer size `sent` describes.
     size: (u16, u16),
-    /// Per tile, its pixels' hash as last sent; `None` until then.
-    sent: Vec<Option<u64>>,
+    /// Per tile, what it was last sent with; `None` until then.
+    sent: Vec<Option<Sent>>,
     /// The tiles a frame reached that may still differ from what was sent: a
     /// frame whose bytes never reached the terminal leaves its tiles here.
     owed: BTreeSet<u32>,
@@ -113,9 +175,15 @@ impl Tiles {
         owed.retain(|&index| {
             let tile = self.tile(index);
             let hash = self.hash(buf, tile);
-            let differs = self.sent[index as usize] != Some(hash);
+            let sent = self.sent[index as usize];
+            let differs = sent.map(|s| s.hash) != Some(hash);
             if differs {
-                changed.push(Changed { tile, hash, size });
+                changed.push(Changed {
+                    tile,
+                    carve: sent.map_or(0, |s| s.carve),
+                    hash,
+                    size,
+                });
             }
             differs
         });
@@ -139,9 +207,37 @@ impl Tiles {
     /// Record `tiles` as on the terminal, once their bytes are written.
     pub(crate) fn sent(&mut self, tiles: &[Changed]) {
         for c in tiles.iter().filter(|c| c.size == self.size) {
-            self.sent[c.tile.index as usize] = Some(c.hash);
+            self.sent[c.tile.index as usize] = Some(Sent {
+                hash: c.hash,
+                carve: c.carve,
+            });
             self.owed.remove(&c.tile.index);
         }
+    }
+
+    /// `changed`, each carved as `carves` (by tile index) says, then every
+    /// other tile last sent with another carve than its own now: text that
+    /// left a cell leaves it to the image again.
+    pub(crate) fn carved(&self, changed: &[Changed], carves: &[Carve]) -> Vec<Changed> {
+        let carve = |index: u32| carves.get(index as usize).copied().unwrap_or(0);
+        let recarved = self.sent.iter().zip(0u32..).filter_map(|(sent, index)| {
+            let sent = (*sent)?;
+            let moved = sent.carve != carve(index);
+            (moved && !changed.iter().any(|c| c.tile.index == index)).then(|| Changed {
+                tile: self.tile(index),
+                carve: carve(index),
+                hash: sent.hash,
+                size: self.size,
+            })
+        });
+        changed
+            .iter()
+            .map(|&c| Changed {
+                carve: carve(c.tile.index),
+                ..c
+            })
+            .chain(recarved)
+            .collect()
     }
 
     /// Every tile of the grid [`changed`](Self::changed) last cut.
@@ -153,14 +249,6 @@ impl Tiles {
     pub(crate) fn forget(&mut self) {
         self.sent.fill(None);
         self.owed.extend(0..self.sent.len() as u32);
-    }
-
-    /// Owe tile `index` again, whatever was sent for it.
-    pub(crate) fn forget_tile(&mut self, index: u32) {
-        if let Some(sent) = self.sent.get_mut(index as usize) {
-            *sent = None;
-            self.owed.insert(index);
-        }
     }
 
     /// `tile`'s pixels from `buf`, upscaled. A cell the image only partly
@@ -184,24 +272,6 @@ impl Tiles {
             height,
             rgb,
         }
-    }
-
-    /// The image as the classic flush shows it, one buffer column and two rows
-    /// a cell: each the buffer pixel at the middle of that half of the cell.
-    pub(crate) fn half_blocks(&self, buf: &RgbBuffer) -> RgbBuffer {
-        let (cw, ch) = (u32::from(self.cell.w), u32::from(self.cell.h));
-        let (iw, ih) = self.image_px();
-        let (cols, rows) = (iw.div_ceil(cw), ih.div_ceil(ch));
-        let side = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
-        let mut out = RgbBuffer::filled(side(cols), side(rows * 2), Rgb { r: 0, g: 0, b: 0 });
-        for y in 0..out.height() {
-            let by = self.source_px(u32::from(y) * ch / 2 + ch / 4, buf.height());
-            for x in 0..out.width() {
-                let bx = self.source_px(u32::from(x) * cw + cw / 2, buf.width());
-                out.put(x, y, buf.get(bx, by));
-            }
-        }
-        out
     }
 
     /// The buffer pixel image pixel `px` upscales, clamped to a buffer `edge`
@@ -357,43 +427,6 @@ mod tests {
         RgbBuffer::from_pixels(w, h, px)
     }
 
-    /// Each half-block shows the buffer pixel the classic flush would: the
-    /// one under the middle of that half of its cell. A 6x13 cell (odd, so
-    /// the halves' middles round) fits 2x art at scale 6, upscale 3; each
-    /// pixel holds its own (x, y).
-    #[test]
-    fn a_half_block_samples_the_middle_of_its_half_cell() {
-        let cell = CellSize { w: 6, h: 13 };
-        let area = TermSize {
-            width: 4,
-            height: 3,
-        };
-        let fit = crate::graphics::cutaway_fit(cell, area, Density::new(2).expect("nonzero"))
-            .expect("fits");
-        assert_eq!(fit.upscale(), 3);
-        let mut t = Tiles::new(ImageProtocol::Sixel, cell, fit);
-        let (w, h) = (8, 12);
-        let px = (0..h)
-            .flat_map(|y| (0..w).map(move |x| Rgb { r: x, g: y, b: 0 }))
-            .collect();
-        let buf = RgbBuffer::from_pixels(u16::from(w), u16::from(h), px);
-        t.changed(&buf, &Dirty::All);
-        let halves = t.half_blocks(&buf);
-        assert_eq!((halves.width(), halves.height()), (4, 6));
-        let shows = |col: u16, row: u16| {
-            let (top, bottom) = (halves.get(col, row * 2), halves.get(col, row * 2 + 1));
-            ((top.r, top.g), (bottom.r, bottom.g))
-        };
-        // Image px x = 6c + 3, y = 13r + 3 (top) and 13r + 9 (bottom), over 3.
-        assert_eq!(shows(0, 0), ((1, 1), (1, 3)));
-        assert_eq!(shows(1, 1), ((3, 5), (3, 7)));
-        assert_eq!(
-            shows(3, 2),
-            ((7, 9), (7, 11)),
-            "the last cell, which the art only partly covers"
-        );
-    }
-
     fn rect(x: u16, y: u16, width: u16, height: u16) -> Dirty {
         Dirty::within(vec![Bounds {
             x,
@@ -500,6 +533,51 @@ mod tests {
             t.changed(&buffer(1000, 500), &Dirty::All);
             assert_eq!(t.shape, p.tile());
         }
+    }
+
+    /// A carved tile's cells fit a [`Carve`]'s bits at any size, since the
+    /// carved protocols keep their tile.
+    #[test]
+    fn a_carved_tile_fits_its_bits() {
+        for p in [ImageProtocol::Sixel, ImageProtocol::Iterm2] {
+            let TileShape { cols, rows } = p.tile();
+            assert!(u32::from(cols) * u32::from(rows) <= Carve::BITS, "{p:?}");
+        }
+    }
+
+    /// A tile with a badge's run carved out of its second row draws the row
+    /// above whole, the run's left and right, and the two rows below as one
+    /// image; an uncarved tile is itself, and an all-text one draws nothing.
+    #[test]
+    fn a_carved_tile_draws_the_runs_of_cells_text_leaves() {
+        let tile = Tile {
+            index: 7,
+            col: 8,
+            row: 4,
+            cols: 8,
+            rows: 4,
+        };
+        let piece = |col, row, cols, rows| Tile {
+            index: 7,
+            col,
+            row,
+            cols,
+            rows,
+        };
+        let badge = (2..5).fold(0, |carve, col| carve | tile.bit(col, 1));
+        let mut pieces = tile.pieces(badge);
+        pieces.sort_by_key(|p| (p.row, p.col));
+        assert_eq!(
+            pieces,
+            [
+                piece(8, 4, 8, 1),
+                piece(8, 5, 2, 1),
+                piece(13, 5, 3, 1),
+                piece(8, 6, 8, 2),
+            ]
+        );
+        assert_eq!(tile.pieces(0), [tile]);
+        assert_eq!(tile.pieces(Carve::MAX >> (Carve::BITS - 32)), []);
     }
 
     #[test]

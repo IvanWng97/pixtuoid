@@ -1636,7 +1636,10 @@ fn looks() -> [crate::look::Look; 2] {
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
     [
         crate::look::Look::Classic,
-        crate::look::Look::Cutaway { scale },
+        crate::look::Look::Cutaway {
+            scale,
+            text: crate::look::WorldText::Baked,
+        },
     ]
 }
 
@@ -1811,6 +1814,7 @@ fn a_floor_still_off_the_beat_paints_one_frame_until_the_beat_turns() {
         crate::look::Look::Classic,
         crate::look::Look::Cutaway {
             scale: crate::render_scale::RenderScale::new(1).expect("nonzero"),
+            text: crate::look::WorldText::Baked,
         },
     ];
     let pack = Arc::new(crate::pack::test_default_pack());

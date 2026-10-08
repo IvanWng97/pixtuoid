@@ -188,6 +188,8 @@ struct Shown {
     hovers: Hovers,
     /// The cells of the star it drew, if it drew one.
     star: Option<Bounds>,
+    /// The world text it left to the host, if it baked none.
+    world: Option<crate::display::text::WorldRuns>,
 }
 
 impl CutawayCanvas {
@@ -202,13 +204,15 @@ impl CutawayCanvas {
     }
 
     /// Paint `stepped` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
-    /// does, unless the frame would be the one already shown.
+    /// does, its world text as `text` says, unless the frame would be the one
+    /// already shown.
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
         theme: &crate::theme::Theme,
         scale: RenderScale,
         showing: Showing<'_>,
+        text: crate::look::WorldText,
         (cache, outside): (
             &mut crate::cutaway::paint::CutawayCache,
             &mut crate::outside::OutsideCache,
@@ -221,8 +225,9 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let list = tracing::trace_span!("canvas.compose")
+        let mut list = tracing::trace_span!("canvas.compose")
             .in_scope(|| compose(&stepped.frame, office, showing, (&mut self.lights, outside)));
+        let world = (text == crate::look::WorldText::Host).then(|| list.host_text());
         let epoch = Epoch {
             backdrop: list.backdrop().clone(),
             recolours: list.recolours().clone(),
@@ -292,6 +297,7 @@ impl CutawayCanvas {
                         crate::display::pen::Pen::for_pack(scale, &self.pack),
                     )
                 }),
+            world,
         });
         CanvasFrame {
             buf: &self.buf,
@@ -320,6 +326,12 @@ impl CutawayCanvas {
     /// when it drew none.
     pub(crate) fn star(&self) -> Option<Bounds> {
         self.shown.as_ref()?.star
+    }
+
+    /// The world text the last frame left to the host; `None` before the
+    /// first or when it baked its own.
+    pub(crate) fn world(&self) -> Option<crate::display::World<'_>> {
+        self.shown.as_ref()?.world.as_ref().map(|w| w.view())
     }
 }
 
@@ -494,6 +506,7 @@ mod tests {
                 theme,
                 scale,
                 crate::display::compose::tests::showing(floor, *now),
+                crate::look::WorldText::Baked,
                 (&mut cache, &mut outside),
             );
             assert!(
@@ -671,6 +684,7 @@ mod tests {
                     theme,
                     scale,
                     crate::display::compose::tests::showing(clear_ground(), now),
+                    crate::look::WorldText::Baked,
                     (&mut cache, &mut outside),
                 )
                 .dirty
@@ -754,6 +768,7 @@ mod tests {
                 normal(),
                 self.scale,
                 crate::display::compose::tests::showing(clear_ground(), Self::now()),
+                crate::look::WorldText::Baked,
                 (&mut cache, &mut outside),
             );
             canvas.hovers().expect("a frame").clone()
@@ -995,6 +1010,7 @@ mod tests {
                 normal(),
                 h.scale,
                 crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
+                crate::look::WorldText::Baked,
                 (&mut cache, &mut outside),
             )
             .dirty;
@@ -1037,6 +1053,7 @@ mod tests {
                 normal(),
                 scale,
                 showing,
+                crate::look::WorldText::Baked,
                 (
                     &mut crate::cutaway::paint::CutawayCache::default(),
                     &mut crate::outside::OutsideCache::default(),
@@ -1130,6 +1147,7 @@ mod tests {
                 normal(),
                 h.scale,
                 busy,
+                crate::look::WorldText::Baked,
                 (&mut cache, &mut outside),
             )
             .dirty;
@@ -1259,6 +1277,7 @@ mod tests {
             normal(),
             scale,
             crate::display::compose::tests::showing(floor, now),
+            crate::look::WorldText::Baked,
             (&mut cache, &mut outside),
         );
         let again = canvas.frame(
@@ -1266,6 +1285,7 @@ mod tests {
             normal(),
             scale,
             crate::display::compose::tests::showing(floor, now),
+            crate::look::WorldText::Baked,
             (&mut cache, &mut outside),
         );
         assert_eq!(
@@ -1279,6 +1299,7 @@ mod tests {
             normal(),
             scale,
             crate::display::compose::tests::showing(floor, now),
+            crate::look::WorldText::Baked,
             (&mut cache, &mut outside),
         );
         assert_eq!(shown.dirty, Dirty::All);
@@ -1381,6 +1402,7 @@ mod tests {
                             floor,
                             crate::localclock::on_day(new_moon, hour),
                         ),
+                        crate::look::WorldText::Baked,
                         (
                             &mut crate::cutaway::paint::CutawayCache::default(),
                             &mut crate::outside::OutsideCache::default(),

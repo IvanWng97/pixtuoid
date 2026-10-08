@@ -11,7 +11,7 @@ use super::{
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-use crate::display::text::{Align, LABEL_GAP, TextRole, TextRun};
+use crate::display::text::{Align, LABEL_GAP, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
@@ -167,8 +167,9 @@ pub(crate) fn compose_at<'a>(
         pack, theme, scale, ..
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
-    let mut collected = collect_pieces(frame, office, moment, outside);
-    collected.extend(signs(office, floor, board));
+    let (mut collected, mut world) = collect_pieces(frame, office, moment, outside);
+    world.signs = TextRun::signs(board, office.layout.door, floor, theme);
+    collected.extend(signs(office, &world.signs));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -200,35 +201,36 @@ pub(crate) fn compose_at<'a>(
         pieces,
         backdrop: crate::display::Backdrop::of(office.layout, theme),
         recolours: crate::display::Recolours::of(theme),
+        world,
         pack,
         scale,
     }
 }
 
-/// Each chitchat bubble over its speaker's badge, among the badges `order`
-/// already holds.
-fn push_bubbles(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+/// Each chitchat bubble over its speaker's badge among `badges`; returns
+/// them, as queued.
+fn push_bubbles(
+    frame: &SimFrame,
+    office: Office<'_>,
+    badges: &[crate::display::Badge],
+    order: &mut Vec<(Span, PieceKind)>,
+) -> Vec<TextRun> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let bubbles: Vec<_> = frame
+    let bubbles: Vec<TextRun> = frame
         .chitchat_bubbles
         .iter()
         .filter_map(|bubble| {
-            let badge_at = order.iter().find_map(|(_, kind)| match kind {
-                PieceKind::Text { run } if run.role == TextRole::Badge(bubble.speaker) => {
-                    Some(run.at)
-                }
-                _ => None,
-            })?;
-            Some(TextRun::bubble(bubble, badge_at, office.theme))
-        })
-        .map(|run| {
-            (
-                topmost_span(run_rect(&run, pen), pen),
-                PieceKind::Text { run },
-            )
+            let badge = badges.iter().find(|b| b.agent == bubble.speaker)?;
+            Some(TextRun::bubble(bubble, badge.at, office.theme))
         })
         .collect();
-    order.extend(bubbles);
+    order.extend(bubbles.iter().map(|run| {
+        (
+            topmost_span(run_rect(run, pen), pen),
+            PieceKind::Text { run: run.clone() },
+        )
+    }));
+    bubbles
 }
 
 /// The pet and the gateway mascots, each a figure sorted on its feet's row
@@ -529,22 +531,13 @@ pub(crate) fn ground_shadow(
     }
 }
 
-/// The room's signs: the wall board's lines, and the floor indicator naming
-/// `floor` over the elevator.
-fn signs(
-    office: Office<'_>,
-    floor: crate::floor::FloorMeta,
-    board: &crate::neon_sign::BoardModel,
-) -> Vec<(Span, PieceKind)> {
+/// The room's signs, `runs`, as the pixel font sets them.
+fn signs(office: Office<'_>, runs: &[TextRun]) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let indicator = TextRun::indicator(office.layout.door, floor, office.theme);
     let mut drawn: Vec<(u16, ArtRect)> = Vec::new();
-    board
-        .runs(office.theme)
-        .into_iter()
-        .chain([indicator])
+    runs.iter()
         .filter_map(|run| {
-            let rect = run_rect(&run, pen);
+            let rect = run_rect(run, pen);
             // A run yields to one before it on its line: on the base art's grid
             // the pixel font is too wide for the sign, and the star would write
             // over the brand (`no_run_overprints_another_on_its_line`).
@@ -552,7 +545,10 @@ fn signs(
                 return None;
             }
             drawn.push((run.at.y, rect));
-            Some((topmost_span(rect, pen), PieceKind::Text { run }))
+            Some((
+                topmost_span(rect, pen),
+                PieceKind::Text { run: run.clone() },
+            ))
         })
         .collect()
 }
@@ -583,7 +579,7 @@ fn collect_pieces(
     office: Office<'_>,
     moment: &Moment,
     outside: &mut crate::outside::OutsideCache,
-) -> Vec<(Span, PieceKind)> {
+) -> (Vec<(Span, PieceKind)>, crate::display::text::WorldRuns) {
     let layout = office.layout;
     let inputs = ComposeInputs {
         frame,
@@ -598,14 +594,20 @@ fn collect_pieces(
         &mut order,
         outside,
     );
-    let carried = push_characters(frame, office, moment.timing.now, &mut order);
-    push_bubbles(frame, office, &mut order);
+    let mut world = crate::display::text::WorldRuns::default();
+    let carried = push_characters(
+        frame,
+        office,
+        moment.timing.now,
+        (&mut order, &mut world.badges),
+    );
+    world.bubbles = push_bubbles(frame, office, &world.badges, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
     wall_segments(layout, crate::glass::WallTrim::of(office.theme), &mut order);
-    order
+    (order, world)
 }
 
 #[derive(Clone, Copy)]
@@ -1182,13 +1184,13 @@ fn chair_span(
     Some((span, at))
 }
 
-/// Queue every character, and return the desks whose chairs they carry, so
-/// [`push_fixture`] stands none of those again.
+/// Queue every character and its badge, and return the desks whose chairs
+/// they carry, so [`push_fixture`] stands none of those again.
 fn push_characters(
     frame: &SimFrame,
     office: Office<'_>,
     now: std::time::SystemTime,
-    order: &mut Vec<(Span, PieceKind)>,
+    (order, badges): (&mut Vec<(Span, PieceKind)>, &mut Vec<crate::display::Badge>),
 ) -> Vec<crate::layout::Point> {
     let Office {
         layout,
@@ -1269,7 +1271,9 @@ fn push_characters(
             crate::layout::Size { w, h: h + hair },
             badge_ceiling,
         );
-        let run = crate::display::Badge::new(anchor, agent, &namesakes, theme).run();
+        let badge = crate::display::Badge::new(anchor, agent, &namesakes, theme);
+        let run = badge.run();
+        badges.push(badge);
         order.push((
             topmost_span(badge_plate(&run, pen), pen),
             PieceKind::Text { run },

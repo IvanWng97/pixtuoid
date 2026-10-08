@@ -12,7 +12,7 @@ use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use super::text::{self, LEFTMOST_PIXEL as WORLD_LEFTMOST, Rows};
 use crate::display::Icon;
-use crate::display::cells::CellGrid;
+use crate::display::cells::{CellGrid, CellPx};
 use crate::display::text::{ADVANCE, LINE_H, clusters};
 
 /// A glyph in either face: rows of ink from the cell's top, the high bit its
@@ -185,13 +185,6 @@ impl Canvas for RgbBuffer {
             self.put_checked(x, y, rgb);
         }
     }
-}
-
-/// A screen cell's size in pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CellPx {
-    pub w: u16,
-    pub h: u16,
 }
 
 /// How [`paint_grid`] inks what a grid leaves to the painter.

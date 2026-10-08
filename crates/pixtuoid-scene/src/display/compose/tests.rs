@@ -271,7 +271,7 @@ fn a_walker_sorts_on_the_sims_sort_row() {
                 scale: RenderScale::ONE,
             },
             std::time::UNIX_EPOCH,
-            &mut order,
+            (&mut order, &mut Vec::new()),
         );
         let (span, _) = order.first().expect("the walker is drawn");
         assert_eq!(span.depth, c.sort_row);
@@ -419,7 +419,7 @@ fn a_sitter_the_pack_cannot_draw_leaves_their_chair_standing() {
                 scale: RenderScale::ONE
             },
             std::time::UNIX_EPOCH,
-            &mut order
+            (&mut order, &mut Vec::new())
         ),
         vec![desk]
     );
@@ -443,7 +443,7 @@ fn a_sitter_the_pack_cannot_draw_leaves_their_chair_standing() {
             scale: RenderScale::ONE,
         },
         std::time::UNIX_EPOCH,
-        &mut order,
+        (&mut order, &mut Vec::new()),
     );
     assert!(carried.is_empty() && order.is_empty(), "no character art");
     order.extend(queued(
@@ -487,7 +487,8 @@ fn chair_over_person(
             Motion::Full.timing(std::time::UNIX_EPOCH),
         ),
         &mut crate::outside::OutsideCache::default(),
-    );
+    )
+    .0;
     let (person, person_span) = order
         .iter()
         .enumerate()
@@ -573,7 +574,7 @@ fn a_sitters_depth_holds_through_their_breath() {
                 scale: RenderScale::ONE,
             },
             std::time::UNIX_EPOCH,
-            &mut order,
+            (&mut order, &mut Vec::new()),
         );
         let (span, _) = order.first().expect("the sitter is drawn");
         depths.insert(span.depth);
@@ -694,14 +695,21 @@ fn no_run_overprints_another_on_its_line() {
             scale,
         };
         let pen = Pen::for_pack(scale, &pack);
-        let rects: Vec<(crate::display::TextRole, u16, ArtRect)> =
-            signs(office, crate::floor::FloorMeta::ground(), quiet_board())
-                .into_iter()
-                .filter_map(|(_, kind)| match kind {
-                    PieceKind::Text { run } => Some((run.role, run.at.y, run_rect(&run, pen))),
-                    _ => None,
-                })
-                .collect();
+        let rects: Vec<(crate::display::TextRole, u16, ArtRect)> = signs(
+            office,
+            &TextRun::signs(
+                quiet_board(),
+                layout.door,
+                crate::floor::FloorMeta::ground(),
+                &crate::theme::NORMAL,
+            ),
+        )
+        .into_iter()
+        .filter_map(|(_, kind)| match kind {
+            PieceKind::Text { run } => Some((run.role, run.at.y, run_rect(&run, pen))),
+            _ => None,
+        })
+        .collect();
         assert!(
             rects
                 .iter()
@@ -811,7 +819,9 @@ fn a_sitters_chair_casts_the_shadow_they_do_not() {
                 Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
             &mut crate::outside::OutsideCache::default(),
-        ) {
+        )
+        .0
+        {
             let PieceKind::Character {
                 ref figure,
                 body,

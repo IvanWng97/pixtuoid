@@ -19,5 +19,6 @@ pub(crate) mod pen;
 pub(crate) mod shade;
 pub(crate) mod text;
 #[doc(hidden)]
-pub use grid::{Canvas, CellPx, Face, GridInk, paint_grid};
+pub use crate::display::cells::CellPx;
+pub use grid::{Canvas, Face, GridInk, paint_grid};
 pub(crate) mod wall;

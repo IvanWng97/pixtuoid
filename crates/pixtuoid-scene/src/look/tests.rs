@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
@@ -126,7 +127,10 @@ fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
     let scale = RenderScale::new(2).expect("nonzero");
-    let cutaway = Look::Cutaway { scale };
+    let cutaway = Look::Cutaway {
+        scale,
+        text: WorldText::Baked,
+    };
     let mut frame = |floor: &mut PerFloor, look, ms: u64| {
         let r = render(
             floor,
@@ -211,6 +215,7 @@ fn a_refused_classic_frame_names_no_one() {
             .raster
             .classic_drawn()
             .expect("shown")
+            .world
             .signs
             .is_empty(),
         "the office is drawn"
@@ -222,9 +227,57 @@ fn a_refused_classic_frame_names_no_one() {
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
     let drawn = floor.raster.classic_drawn().expect("shown");
     assert!(
-        drawn.badges.is_empty() && drawn.bubbles.is_empty() && drawn.signs.is_empty(),
+        drawn.world.badges.is_empty()
+            && drawn.world.bubbles.is_empty()
+            && drawn.world.signs.is_empty(),
         "no badge, bubble or sign"
     );
+}
+
+/// A cutaway that leaves its world text to the host bakes none of it, and
+/// hands over the classic's: every agent's badge, the board and the floor
+/// indicator. One that bakes it hands over nothing.
+#[test]
+fn a_cutaway_leaving_its_text_to_the_host_bakes_none() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = office(t0);
+    let mut office = PerOffice::new();
+    let mut frame = |text| {
+        let mut floor = PerFloor::new(Arc::clone(&pack));
+        let look = Look::Cutaway {
+            scale: RenderScale::new(4).expect("nonzero"),
+            text,
+        };
+        let pixels = render(&mut floor, office.stores(), look, inputs(&scene, &pack, t0))
+            .expect("lays out")
+            .pixels
+            .clone();
+        (floor, pixels)
+    };
+    let (baked, baked_px) = frame(WorldText::Baked);
+    let (host, host_px) = frame(WorldText::Host);
+    assert!(baked.raster.world().is_none());
+    assert!(baked.raster.star().is_some(), "the baked star");
+    assert!(host.raster.star().is_none(), "the host sets the star");
+    assert_ne!(host_px.as_slice(), baked_px.as_slice(), "nothing was baked");
+    let world = host.raster.world().expect("handed over");
+    let mut classic = PerFloor::new(Arc::clone(&pack));
+    render(
+        &mut classic,
+        office.stores(),
+        Look::Classic,
+        inputs(&scene, &pack, t0),
+    )
+    .expect("lays out");
+    let classic = classic.raster.world().expect("shown");
+    // Each look's badges come in its own paint order.
+    let agents = |w: crate::display::World<'_>| -> HashSet<AgentId> {
+        w.badges.iter().map(|b| b.agent).collect()
+    };
+    assert!(!world.badges.is_empty());
+    assert_eq!(agents(world), agents(classic));
+    assert_eq!(world.signs, classic.signs);
 }
 
 /// A classic frame hands its badges, its bubbles and its signs over apart,
@@ -244,8 +297,11 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     )
     .expect("lays out");
     let drawn = floor.raster.classic_drawn().expect("shown");
-    assert!(!drawn.badges.is_empty(), "the office badges its agents");
-    let signs: Vec<TextRole> = drawn.signs.iter().map(|r| r.role).collect();
+    assert!(
+        !drawn.world.badges.is_empty(),
+        "the office badges its agents"
+    );
+    let signs: Vec<TextRole> = drawn.world.signs.iter().map(|r| r.role).collect();
     assert!(
         signs.contains(&TextRole::Star) && signs.contains(&TextRole::Indicator),
         "{signs:?}"
@@ -260,7 +316,11 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
     let drawn = floor.raster.classic_drawn().expect("shown");
-    assert!(drawn.badges.is_empty() && drawn.bubbles.is_empty() && drawn.signs.is_empty());
+    assert!(
+        drawn.world.badges.is_empty()
+            && drawn.world.bubbles.is_empty()
+            && drawn.world.signs.is_empty()
+    );
 }
 
 /// The sim and the raster draw one pack: a frame stepped with another is
