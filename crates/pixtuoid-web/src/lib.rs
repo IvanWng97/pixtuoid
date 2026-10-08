@@ -739,9 +739,9 @@ fn push_board_segments(
         }
         out.push_str("{\"text\":");
         push_json_string(out, seg.text());
-        // An icon's `text` is its terminal glyph; `icon` names its art.
-        if let pixtuoid_scene::display::Content::Icon(icon) = &seg.content {
-            out.push_str(&format!(",\"icon\":\"{}\"", icon.art()));
+        // A lamp's `text` is its terminal glyph, which the site draws as a lamp.
+        if matches!(&seg.content, pixtuoid_scene::display::Content::Icon(i) if i.is_lamp()) {
+            out.push_str(",\"lamp\":true");
         }
         out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, seg.tone)));
     }
@@ -1109,20 +1109,14 @@ mod tests {
         );
         assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
         assert!(board["mood"].is_array() && board["context"].is_array());
-        // A lamp names its art beside its glyph, so the site draws the lamp.
-        let lamps: Vec<&str> = board["mood"]
+        // A lamp is flagged beside its glyph, so the site draws the lamp.
+        let lamps = board["mood"]
             .as_array()
             .unwrap()
             .iter()
-            .filter_map(|s| s["icon"].as_str())
-            .collect();
-        assert!(
-            !lamps.is_empty()
-                && lamps
-                    .iter()
-                    .all(|i| ["alert", "active", "idle"].contains(i)),
-            "{lamps:?}"
-        );
+            .filter(|s| s["lamp"] == true)
+            .count();
+        assert!(lamps > 0, "{board}");
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
             u64::from(pixtuoid_scene::layout::NEON_PANEL_INNER_W)

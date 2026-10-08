@@ -451,8 +451,7 @@ pub(crate) fn dispatch_key(
     }
     if let Some(idx) = modal.theme_picker {
         return match (code, mods) {
-            // Safe to quit mid-preview: the run_tui quit arm reverts the previewed
-            // theme before breaking.
+            // Safe to quit mid-preview: only a commit saves the theme.
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::ThemePreview(idx.saturating_sub(1)),
             (KeyCode::Down | KeyCode::Char('j'), _) => {
@@ -514,7 +513,7 @@ pub(crate) struct KeyCtx<'a, H: Host> {
 /// Apply one decoded [`KeyAction`], returning whether it asked to QUIT — the single piece
 /// of control flow the caller's event loop keeps. Paired with [`dispatch_key`], which
 /// decodes; splitting them is what makes the arms reachable from a test at all, since
-/// `run_tui` needs a real terminal.
+/// a painter's event loop needs a real terminal or window.
 pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H>) -> bool {
     match action {
         KeyAction::None => {}
