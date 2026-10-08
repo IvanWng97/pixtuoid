@@ -49,12 +49,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# An ISOLATED config marking Codex connected. `resolve_connected` treats a missing
-# [sources] key as DISCONNECTED and the driver drops a disconnected source's events
-# ahead of the reducer, so without this a box that never connected Codex replays
-# into zero agents — silently, since the drop sits above the gate's own log line.
-mkdir -p "$cfgdir/pixtuoid"
-printf '[sources]\ncodex = true\n' >"$cfgdir/pixtuoid/config.toml"
+# Codex connected in an ISOLATED home: a source is connected when its hooks are
+# installed, and the driver drops a disconnected source's events ahead of the
+# reducer, so a box that never connected Codex would replay into zero agents —
+# silently, since the drop sits above the gate's own log line. The replay rides
+# the rollout, so the shim the hooks name never runs.
+home="$sb/home"
+mkdir -p "$home"
+HOME="$home" CODEX_HOME="" XDG_CONFIG_HOME="$cfgdir" PIXTUOID_HOOK=/usr/bin/true \
+    "$bin" connect codex --json >/dev/null || {
+    echo "FAIL: connect codex in the isolated home" >&2
+    exit 1
+}
 
 mkdir -p "$root/replay"
 # The filename's trailing UUID is the Codex session key (codex_id_from_path); any
@@ -64,7 +70,7 @@ file="$root/replay/rollout-2026-01-01T00-00-00-0a0a0a0a-0b0b-0c0c-0d0d-0e0e0e0e0
 # The isolated socket matters for the ASSERTION, not just for hygiene: on the
 # default socket a live CC session's hook traffic lands in this run's scene and
 # satisfies the success grep, so a totally broken Codex path would report PASS.
-XDG_CONFIG_HOME="$cfgdir" PIXTUOID_SOCKET="$sock" \
+HOME="$home" CODEX_HOME="" XDG_CONFIG_HOME="$cfgdir" PIXTUOID_SOCKET="$sock" \
     "$bin" run --headless --codex-sessions-root "$root" --projects-root "$proj" \
     --log-level error >"$out" 2>&1 &
 hpid=$!

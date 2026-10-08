@@ -62,10 +62,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Isolated pixtuoid config marking OpenClaw connected — the presence connection-gate
-# drops every delta for a DISconnected source, so a clean box would else time out.
+# An isolated pixtuoid config; each gateway's own `connect` below installs the
+# plugin, which is what connects OpenClaw.
 mkdir -p "$MG/proj" "$MG/cfg/pixtuoid"
-printf '[sources]\nopenclaw = true\n' >"$MG/cfg/pixtuoid/config.toml"
 
 # One throwaway state dir per gateway. `gateway.mode` is REQUIRED — `gateway run`
 # refuses a config without it as possibly-clobbered.
@@ -87,7 +86,9 @@ for port in "${PORTS[@]}"; do
     echo "  port $port: plugin installed, and OpenClaw itself reports it enabled"
 done
 
-XDG_CONFIG_HOME="$MG/cfg" PIXTUOID_SOCKET="$SOCK" \
+# Connected is read from ONE state dir; any gateway's install marks it, and the
+# presence connection-gate drops every delta for a source with none.
+OPENCLAW_HOME="$MG/home${PORTS[0]}" XDG_CONFIG_HOME="$MG/cfg" PIXTUOID_SOCKET="$SOCK" \
     "$PIX" run --headless --projects-root "$MG/proj" >"$OUT" 2>&1 &
 PIXPID=$!
 for _ in $(seq 1 50); do

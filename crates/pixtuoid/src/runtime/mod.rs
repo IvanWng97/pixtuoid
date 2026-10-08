@@ -49,8 +49,8 @@ pub(crate) struct RunConfig {
     pub(crate) log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
     pub(crate) drift: crate::doctor::DriftSeen,
-    /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the
-    /// one-time onboarding "move-in" overlay. Ignored by headless + `floating`.
+    /// Nothing is connected over a config that loaded (`sources::is_first_run`) —
+    /// the TUI plays the onboarding "move-in" overlay. Ignored by headless + `floating`.
     pub(crate) first_run: bool,
     /// Resolved `[audio]` settings — muted defaults TRUE (the lazy spawn waits for the
     /// first `m`), volume pre-clamped by `config::resolve_audio`. Headless ignores it.
@@ -62,8 +62,8 @@ pub(crate) struct RunConfig {
     pub(crate) motion: crate::config::MotionMode,
 }
 
-/// A live, shared set of connected source ids — the runtime mirror of the persisted
-/// `[sources]` flags. On lock poison it recovers the set via `into_inner`: the data is
+/// A live, shared set of connected source ids — the runtime mirror of
+/// `sources::connected`. On lock poison it recovers the set via `into_inner`: the data is
 /// always valid (insert/remove/contains never panic), and losing it would mass-evict
 /// the office.
 #[derive(Debug, Clone, Default)]
