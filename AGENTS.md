@@ -22,7 +22,7 @@ formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
 `completions <shell>` on clean stdout — breakage surfaces in THEIR CI on an
 autobump we never see, while our suite stays green (it asserts the same
 strings as goldens). The asserted rows are marked "homebrew-core contract" at
-`validate.rs`, `sources_cli.rs`, `codex.rs`; release-side consequences
+`sources_cli.rs`, `codex.rs`; release-side consequences
 in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## What this is
@@ -36,7 +36,7 @@ five crates. Overview: [`README.md`](README.md).
 ```
 crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps; `native` feature gates the async
-│                    source runtime and disk pack reads (off = wasm32-clean decode/reduce)
+│                    source runtime (off = wasm32-clean decode/reduce)
 ├── pixtuoid-scene/  render+sim engine — terminal- AND window-free BY CRATE BOUNDARY
 ├── pixtuoid/        binary — two thin painters over pixtuoid-scene: `tui/`, `floating/`
 ├── pixtuoid-web/    third painter — wasm canvas, publish=false; a SITE BUILD INPUT

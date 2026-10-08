@@ -20,7 +20,6 @@ pub(crate) mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;
 pub(crate) use graphics::GraphicsMode;
-pub(crate) mod init_pack;
 pub(crate) mod install;
 pub(crate) mod jank;
 #[cfg(feature = "graphics")]
@@ -32,7 +31,6 @@ pub(crate) mod setup;
 pub(crate) mod sources;
 pub(crate) mod term;
 pub(crate) mod tui;
-pub(crate) mod validate;
 pub(crate) mod version;
 
 /// What the examples, the integration tests and the benches reach: each is a
@@ -48,7 +46,6 @@ pub mod dev {
         OfficeRenderer, Pressing, WindowFrame, XrgbSurface, footer_budget,
         paint_footer_into_surface, paint_tooltip_into_surface, window_geometry,
     };
-    pub use crate::init_pack::init_pack;
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
     pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
@@ -58,7 +55,6 @@ pub mod dev {
     pub use crate::sources::{ConnState, ConnectionRow};
     pub use crate::tui::renderer::{DrawCtx, DrawOut, PetState, draw_scene, scene_buf_size};
     pub use crate::tui::tui_renderer::TuiRenderer;
-    pub use crate::validate::validate_pack;
 }
 
 /// Strip control characters (Cc) and bidi controls from an untrusted string

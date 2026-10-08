@@ -1,10 +1,20 @@
-use std::path::Path;
-
 use pixtuoid_core::sprite::error::{LineError, PackError, SpriteError};
 use pixtuoid_core::sprite::format::{
-    PackContract, load_pack, load_pack_from_strings, validate_pack_animations,
+    Pack, PackContract, load_pack_from_strings, validate_pack_animations,
 };
 use pixtuoid_core::sprite::{Frame, Rgb};
+
+/// The `mini_pack` fixture: one one-frame animation, short of what a pack needs.
+fn mini_pack() -> Pack {
+    load_pack_from_strings(
+        include_str!("fixtures/mini_pack/pack.toml"),
+        &[(
+            "idle.sprite",
+            include_str!("fixtures/mini_pack/idle.sprite"),
+        )],
+    )
+    .expect("mini pack loads")
+}
 
 /// `src` as the one sprite file of a pack whose palette is `A`, `B` and `.`.
 fn parse(src: &str) -> anyhow::Result<Vec<Frame>> {
@@ -186,7 +196,7 @@ fn validate_reports_insufficient_frames_for_single_frame_typing() {
 
 #[test]
 fn loads_mini_pack() {
-    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
+    let pack = mini_pack();
     let idle = pack.animation("idle").expect("idle animation");
     assert_eq!(idle.frame_ms(), 500);
     assert_eq!(idle.frames().len(), 1);
@@ -195,96 +205,13 @@ fn loads_mini_pack() {
 
 #[test]
 fn missing_animation_returns_none() {
-    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
+    let pack = mini_pack();
     assert!(pack.animation("nope").is_none());
 }
 
 #[test]
-fn default_pack_loads_with_required_animations() {
-    let pack = load_pack(Path::new("../pixtuoid-scene/sprites/default")).unwrap();
-    for name in &[
-        "seated",
-        "typing",
-        "standing",
-        "walking",
-        "desk",
-        "plant",
-        "pantry",
-        "whiteboard",
-        "bookshelf",
-    ] {
-        assert!(pack.animation(name).is_some(), "missing animation: {name}");
-    }
-    let seated = pack.animation("seated").unwrap();
-    assert_eq!(seated.frames()[0].width(), 8);
-    assert_eq!(seated.frames()[0].height(), 10);
-
-    let standing = pack.animation("standing").unwrap();
-    assert_eq!(standing.frames()[0].width(), 8);
-    assert_eq!(standing.frames()[0].height(), 12);
-
-    let walking = pack.animation("walking").unwrap();
-    assert!(walking.frames().len() > 1, "a walk steps");
-}
-
-#[test]
-fn default_pack_passes_validation() {
-    let pack = load_pack(Path::new("../pixtuoid-scene/sprites/default")).unwrap();
-    let report = validate_pack_animations(&pack, &PackContract::default());
-    assert!(
-        report.missing_required.is_empty(),
-        "missing required: {:?}",
-        report.missing_required
-    );
-    assert!(
-        report.insufficient_frames.is_empty(),
-        "insufficient frames: {:?}",
-        report.insufficient_frames
-    );
-}
-
-#[test]
-fn robot_pack_passes_validation() {
-    let pack = load_pack(Path::new("../pixtuoid/sprites/robot")).unwrap();
-    let report = validate_pack_animations(&pack, &PackContract::default());
-    assert!(
-        report.missing_required.is_empty(),
-        "missing required: {:?}",
-        report.missing_required
-    );
-    assert!(
-        report.insufficient_frames.is_empty(),
-        "insufficient frames: {:?}",
-        report.insufficient_frames
-    );
-    // Every animation a bundled pack ships must be IN the registry, or
-    // validate-pack falsely reports it "unused by renderer" to pack authors.
-    assert!(
-        report.unknown.is_empty(),
-        "bundled-pack animation missing from the registry: {:?}",
-        report.unknown
-    );
-}
-
-#[test]
-fn skeleton_pack_passes_validation() {
-    let pack = load_pack(Path::new("../pixtuoid/sprites/skeleton")).unwrap();
-    let report = validate_pack_animations(&pack, &PackContract::default());
-    assert!(
-        report.missing_required.is_empty(),
-        "missing required: {:?}",
-        report.missing_required
-    );
-    assert!(
-        report.unknown.is_empty(),
-        "bundled-pack animation missing from the registry: {:?}",
-        report.unknown
-    );
-}
-
-#[test]
 fn mini_pack_reports_missing_required() {
-    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
+    let pack = mini_pack();
     let report = validate_pack_animations(&pack, &PackContract::default());
     assert!(
         !report.missing_required.is_empty(),
@@ -295,102 +222,10 @@ fn mini_pack_reports_missing_required() {
 
 #[test]
 fn validation_detects_unknown_animations() {
-    let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
-    let report = validate_pack_animations(&pack, &PackContract::default());
+    let report = validate_pack_animations(&mini_pack(), &PackContract::default());
     assert!(
         report.unknown.contains(&"idle".to_string()),
         "mini pack's 'idle' animation should be flagged as unknown"
-    );
-}
-
-fn write_pack_files(dir: &Path, pack_toml: &str, frames: &[(&str, &str)]) {
-    std::fs::write(dir.join("pack.toml"), pack_toml).unwrap();
-    for (name, content) in frames {
-        std::fs::write(dir.join(name), content).unwrap();
-    }
-}
-
-#[test]
-fn load_pack_rejects_parent_dir_frame_path() {
-    let dir = tempfile::TempDir::new().unwrap();
-    write_pack_files(
-        dir.path(),
-        "[pack]\nname=\"x\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
-         [animations.idle]\nframes=[\"../escape.sprite\"]\nframe_ms=100\n",
-        &[],
-    );
-    let err = load_pack(dir.path()).unwrap_err();
-    assert!(
-        format!("{err:#}").contains("not allowed"),
-        "a '..' frame path must be rejected; got: {err:#}"
-    );
-}
-
-#[test]
-fn load_pack_rejects_absolute_frame_path_escaping_dir() {
-    let dir = tempfile::TempDir::new().unwrap();
-    // `dir.join("/etc/hosts")` resolves to `/etc/hosts` (Path::join replaces on
-    // a leading '/'), which the '..'-component check does NOT catch — the
-    // canonicalize + starts_with(canon_dir) guard is what must reject it.
-    write_pack_files(
-        dir.path(),
-        "[pack]\nname=\"x\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
-         [animations.idle]\nframes=[\"/etc/hosts\"]\nframe_ms=100\n",
-        &[],
-    );
-    let err = load_pack(dir.path()).unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("escapes the pack directory") || msg.contains("resolving"),
-        "an absolute path escaping the pack dir must be rejected; got: {msg}"
-    );
-}
-
-#[test]
-fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
-    // base: a furniture anim custom lacks (plant), a furniture anim custom owns
-    // (desk, wider here), and a REQUIRED_CHARACTER anim (standing).
-    let base_dir = tempfile::TempDir::new().unwrap();
-    write_pack_files(
-        base_dir.path(),
-        "[pack]\nname=\"base\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\"A\"=\"#010203\"\n\
-         [animations.desk]\nframes=[\"d.sprite\"]\nframe_ms=100\n\
-         [animations.plant]\nframes=[\"p.sprite\"]\nframe_ms=100\n\
-         [animations.standing]\nframes=[\"s.sprite\"]\nframe_ms=100\n",
-        &[
-            ("d.sprite", "@frame 0\nA A"),
-            ("p.sprite", "@frame 0\nA"),
-            ("s.sprite", "@frame 0\nA"),
-        ],
-    );
-    // custom: owns a 1-wide desk; lacks plant (furniture), standing (character).
-    let custom_dir = tempfile::TempDir::new().unwrap();
-    write_pack_files(
-        custom_dir.path(),
-        "[pack]\nname=\"custom\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\"A\"=\"#010203\"\n\
-         [animations.desk]\nframes=[\"d.sprite\"]\nframe_ms=100\n",
-        &[("d.sprite", "@frame 0\nA")],
-    );
-
-    let base = load_pack(base_dir.path()).unwrap();
-    let mut custom = load_pack(custom_dir.path()).unwrap();
-    assert_eq!(custom.animation("desk").unwrap().frames()[0].width(), 1);
-
-    custom.merge_from(&base);
-
-    assert_eq!(
-        custom.animation("desk").unwrap().frames()[0].width(),
-        1,
-        "merge_from must not overwrite an animation the custom pack already defines"
-    );
-    assert!(
-        custom.animation("plant").is_some(),
-        "missing OPTIONAL_FURNITURE anim should be inherited"
-    );
-    // A robot pack must not show human sprites for poses it lacks.
-    assert!(
-        custom.animation("standing").is_none(),
-        "REQUIRED_CHARACTER anim must never be inherited via merge_from"
     );
 }
 

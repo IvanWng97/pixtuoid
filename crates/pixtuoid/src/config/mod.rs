@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use pixtuoid_scene::pack::PackSource;
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
@@ -24,9 +23,6 @@ pub(crate) struct AppConfig {
     /// capacity is auto-computed from terminal size.
     #[serde(rename = "max-desks")]
     pub max_desks: Option<usize>,
-    /// Supports `~` expansion.
-    #[serde(rename = "pack-dir")]
-    pub pack_dir: Option<String>,
     /// A `GraphicsMode` name, raw so a typo warns in `resolve_graphics` instead
     /// of failing the whole load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -152,41 +148,6 @@ pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
     update_config(path, |doc| {
         doc["audio"]["volume"] = toml_edit::value(f64::from(percent));
     })
-}
-
-fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
-    cli_pack_dir.or_else(|| {
-        config.pack_dir.as_ref().map(|p| {
-            // The ONE tilde-expander: it handles `~\` as well as `~/` and stays in
-            // PathBuf-land, so `pack-dir` expands the same way on Windows.
-            let home = pixtuoid_core::platform::user_home_opt();
-            crate::install::io::expand_tilde(Path::new(p), home.as_deref())
-        })
-    })
-}
-
-/// The sprite pack `run` draws: `--pack-dir`, else config's `pack-dir` (both
-/// named by the user), else their own pack in `pixtuoid/sprites/` beside the
-/// config when it holds a `pack.toml`, else the bundled default.
-pub(crate) fn resolve_pack_source(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> PackSource {
-    pack_source(config, cli_pack_dir, config_base())
-}
-
-/// [`resolve_pack_source`] against an explicit config base.
-fn pack_source(
-    config: &AppConfig,
-    cli_pack_dir: Option<PathBuf>,
-    base: Option<PathBuf>,
-) -> PackSource {
-    if let Some(dir) = resolve_pack_dir(config, cli_pack_dir) {
-        return PackSource::Explicit(dir);
-    }
-    base.map(|b| b.join("pixtuoid").join("sprites"))
-        .filter(|dir| {
-            dir.join(pixtuoid_core::sprite::format::PACK_MANIFEST)
-                .is_file()
-        })
-        .map_or(PackSource::Bundled, PackSource::Discovered)
 }
 
 /// The directory `pixtuoid/` config lives under: a set `XDG_CONFIG_HOME`, else

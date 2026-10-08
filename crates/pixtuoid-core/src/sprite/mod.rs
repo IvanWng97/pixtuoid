@@ -509,9 +509,7 @@ pub struct Sprite {
     indexed: Vec<IndexedFrame>,
     /// Each frame's `@mark`s.
     marks: Vec<Vec<Mark>>,
-    /// The palette `indexed` refers to: the sprite's own pack's, which it keeps
-    /// when a custom pack inherits it, so a recolor never reads its indices
-    /// through another pack's keys.
+    /// The palette `indexed` refers to: its pack's.
     palette: Arc<Palette>,
     frame_ms: u32,
     stride: Option<std::num::NonZeroU16>,
@@ -598,7 +596,7 @@ impl RecolorableFrame<'_> {
     ///
     /// An override replaces a color and never adds one: a key the palette
     /// lacks or holds transparent stays as it is, so a pack that leaves a part
-    /// out (a robot with no hair) keeps it out for every agent.
+    /// out (a character with no hair) keeps it out for every agent.
     pub fn recolored(&self, overrides: &[(char, Pixel)]) -> Frame {
         let mut palette = self.palette.clone();
         for &(key, pixel) in overrides {

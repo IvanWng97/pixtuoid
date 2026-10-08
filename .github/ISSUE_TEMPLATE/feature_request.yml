@@ -1,5 +1,5 @@
 name: ✨ Feature request
-description: Suggest a new theme, sprite pack, agent-CLI source, or capability.
+description: Suggest a new theme, sprite, agent-CLI source, or capability.
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -27,7 +27,7 @@ body:
       label: Area
       options:
         - New theme
-        - New sprite pack / character
+        - New sprite / character
         - New agent-CLI source (Copilot / Cursor / OpenCode / …)
         - Office layout / decoration
         - Motion / animation

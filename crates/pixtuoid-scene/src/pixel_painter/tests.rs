@@ -359,6 +359,29 @@ fn seat_view_maps_facing_to_sprite_and_flip() {
     );
 }
 
+/// Every sprite a seat resolves to, at every kind and facing, is one the pack
+/// draws: the pack is the bundled one, so a seat never needs a fallback.
+#[test]
+fn every_sprite_a_seat_resolves_to_is_in_the_pack() {
+    use crate::layout::{Facing, Point, WaypointKind};
+    let pack = crate::pack::test_default_pack();
+    let at = Point { x: 40, y: 30 };
+    let facings = [Facing::North, Facing::South, Facing::East, Facing::West];
+    let seats = facings.iter().flat_map(|&f| {
+        std::iter::once(Seat::at_desk(at, f)).chain(
+            WaypointKind::ALL
+                .iter()
+                .map(move |&k| Seat::at_waypoint(k, at, f)),
+        )
+    });
+    for seat in seats {
+        for base in ["seated", "typing", "seated_sleeping"] {
+            let (anim, _) = seat.sprite_for(base);
+            assert!(pack.animation(anim).is_some(), "{seat:?} {base} → {anim}");
+        }
+    }
+}
+
 #[test]
 #[cfg(feature = "native")]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
@@ -374,116 +397,14 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
         // rather than showing a face at the window.
         ("seated_sleeping", "seated_back"),
     ] {
+        assert_eq!(back.sprite_for(base), (want, false), "{base} back");
+        assert!(pack.animation(want).is_some(), "{want} is drawn");
         assert_eq!(
-            back.sprite_in_pack(base, &pack),
-            (want, false),
-            "{base} back"
-        );
-        assert_eq!(
-            front.sprite_in_pack(base, &pack),
+            front.sprite_for(base),
             (base, false),
             "{base} stays itself when the sitter faces the camera"
         );
     }
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack = crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(fixture))
-        .expect("fixture pack");
-    assert!(
-        old_pack.animation("seated_back").is_none(),
-        "fixture must lack every back view to bite"
-    );
-    assert_eq!(
-        back.sprite_in_pack("typing", &old_pack),
-        ("typing", false),
-        "a pack with no back view at all degrades to the front pose, never to nothing"
-    );
-}
-
-/// The skeleton fixture pack with the `[animations.X]` sections named in
-/// `without` removed and `extra` appended — the only way to reach `sprite_in_pack`'s
-/// degradation rungs, since the bundled pack has every animation.
-#[cfg(feature = "native")]
-fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
-    let dir = tmp.join("pack");
-    std::fs::create_dir_all(&dir).expect("mkdir");
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    for entry in std::fs::read_dir(&fixture).expect("fixture dir") {
-        let entry = entry.expect("entry");
-        std::fs::copy(entry.path(), dir.join(entry.file_name())).expect("copy");
-    }
-    let manifest = std::fs::read_to_string(dir.join("pack.toml")).expect("read manifest");
-    let kept: String = manifest
-        .split("\n[animations.")
-        .enumerate()
-        .filter(|(i, sec)| *i == 0 || !without.iter().any(|w| sec.starts_with(&format!("{w}]"))))
-        .map(|(i, sec)| {
-            if i == 0 {
-                sec.to_string()
-            } else {
-                format!("\n[animations.{sec}")
-            }
-        })
-        .collect();
-    std::fs::write(dir.join("pack.toml"), format!("{kept}{extra}")).expect("write manifest");
-    crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(dir)).expect("fixture pack")
-}
-
-/// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
-/// not the pose's own still hides a back-turned sitter's face.
-#[test]
-#[cfg(feature = "native")]
-fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
-    use crate::layout::{Facing, Point};
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let pack = fixture_pack(
-        &[],
-        "\n[animations.seated_back]\nframes = [\"placeholder.sprite\"]\nframe_ms = 500\n",
-        tmp.path(),
-    );
-    assert!(
-        pack.animation("seated_back").is_some() && pack.animation("typing_back").is_none(),
-        "the fixture must have the still back view and NOT typing's for this rung to bite"
-    );
-    let back = Seat::at_desk(Point { x: 40, y: 30 }, Facing::North);
-    assert_eq!(
-        back.sprite_in_pack("typing", &pack),
-        ("seated_back", false),
-        "typing has no back view here, so the still one stands in — never the face"
-    );
-}
-
-#[test]
-#[cfg(feature = "native")]
-fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
-    use crate::layout::{Facing, WaypointKind};
-    let full = crate::pack::test_default_pack();
-    assert_eq!(
-        Seat::at_waypoint(
-            WaypointKind::MeetingChair,
-            Point { x: 40, y: 30 },
-            Facing::West
-        )
-        .sprite_in_pack("seated", &full),
-        ("side_seated", true),
-        "a pack WITH the profile sprite uses it"
-    );
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack = crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(fixture))
-        .expect("fixture pack");
-    assert!(
-        old_pack.animation("side_seated").is_none(),
-        "fixture must lack the profile sprite for this test to bite"
-    );
-    assert_eq!(
-        Seat::at_waypoint(
-            WaypointKind::MeetingChair,
-            Point { x: 40, y: 30 },
-            Facing::West
-        )
-        .sprite_in_pack("seated", &old_pack),
-        ("seated", false),
-        "a pack WITHOUT it degrades to the front pose"
-    );
 }
 
 /// Every look of frame `i` of `anim` a viewer could see under `overrides`:
@@ -5791,53 +5712,6 @@ fn paint_flame_crown_draws_its_pattern() {
             "the crown painted outside its own box at ({x}, {y})"
         );
     }
-}
-
-#[test]
-#[cfg(feature = "native")]
-fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
-    use crate::layout::{Facing, Point, WaypointKind};
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let pack = fixture_pack(
-        &["back_couch"],
-        "\n[animations.seated_back]\nframes = [\"placeholder.sprite\"]\nframe_ms = 500\n",
-        tmp.path(),
-    );
-    assert!(
-        pack.animation("back_couch").is_none() && pack.animation("seated_back").is_some(),
-        "the fixture must lack the couch art and carry the still back view"
-    );
-    let seat = Seat::at_waypoint(WaypointKind::Couch, Point { x: 40, y: 30 }, Facing::North);
-    assert_eq!(seat.sprite_for("seated"), ("back_couch", false));
-    assert_eq!(
-        seat.sprite_in_pack("seated", &pack),
-        ("seated_back", false),
-        "a window-facing sitter keeps their back to the camera"
-    );
-}
-
-#[test]
-#[cfg(feature = "native")]
-fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
-    use crate::layout::{Facing, Point, WaypointKind};
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let pack = fixture_pack(&["holding_coffee"], "", tmp.path());
-    assert!(
-        pack.animation("holding_coffee").is_none(),
-        "the fixture must lack the coffee pose for this rung to bite"
-    );
-    let seat = Seat::at_waypoint(WaypointKind::Pantry, Point { x: 40, y: 30 }, Facing::South);
-    assert_eq!(seat.sprite_for("seated"), ("holding_coffee", false));
-    let got = seat.sprite_in_pack("seated", &pack);
-    assert_eq!(
-        got,
-        ("seated", false),
-        "a pack without the coffee pose still shows someone at the counter"
-    );
-    assert!(
-        pack.animation(got.0).is_some(),
-        "and the name it degrades to must be one the pack can actually paint"
-    );
 }
 
 /// The two sideways kinds mirror on OPPOSITE facings, and the shipped `standing`

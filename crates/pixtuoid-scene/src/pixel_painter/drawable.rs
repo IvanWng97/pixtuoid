@@ -509,7 +509,7 @@ fn paint_desk_props(
 }
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
-/// site centres on what is actually drawn even under a custom pack.
+/// site centres on what is actually drawn.
 pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
     pack.animation(DESK_CHAIR_SPRITE)
         .and_then(|a| a.frames().first())
