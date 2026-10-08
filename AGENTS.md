@@ -132,8 +132,9 @@ first-sight, liveness ladder, subagent parenting, feature boundaries) ·
 **scene** owns look/motion (per-agent palette recolor, walk timing,
 footprints, sky/light invariants, reachability) · **binary** owns
 install/runtime wiring (config rewriting, desk growth, boot order, doctor,
-daemon announce-only) · **tui** owns the flush (popup geometry, hit-test
-ladders, key dispatch). Terminal cell aspect drives sprite design: the
+daemon announce-only) · **tui** owns the flush (popup geometry, the
+office's hit-test ladder) · **panels** owns what both painters' panels share
+(their key dispatch and mouse ladder). Terminal cell aspect drives sprite design: the
 half-block ▀ technique assumes ~1:2 cells, so sprites past ~16×16 px break on
 taller-cell terminals; bundled base character sprites max at 8×12 px (their
 `@Nx` variants are cutaway art the half-block painter never draws).

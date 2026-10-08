@@ -10,10 +10,10 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::cutaway::{CellPx, Face, GridInk, paint_grid};
-use pixtuoid_scene::display::cells::{CARD_SHADOW, CellRect};
+use pixtuoid_scene::display::cells::{CARD_SHADOW, CellGrid, CellRect};
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
-use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
+use pixtuoid_scene::footer::{FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::RenderInputs;
@@ -46,6 +46,8 @@ pub struct OfficeRenderer {
     /// The flash the last [`render_live`](Self::render_live) handed out, and
     /// the window it was for.
     rendered: (FlashPhase, (u32, u32)),
+    /// The walkable debug layer, the TUI's `w`; not persisted.
+    debug_walkable: bool,
 }
 
 impl OfficeRenderer {
@@ -58,7 +60,13 @@ impl OfficeRenderer {
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             rendered: (FlashPhase::default(), (0, 0)),
+            debug_walkable: false,
         }
+    }
+
+    /// Show or hide the walkable debug layer.
+    pub(crate) fn toggle_walkable_debug(&mut self) {
+        self.debug_walkable = !self.debug_walkable;
     }
 
     /// The pets each floor picks its own from.
@@ -117,7 +125,7 @@ impl OfficeRenderer {
                 theme,
                 size: at.logical(),
                 place,
-                debug_walkable: false,
+                debug_walkable: self.debug_walkable,
             },
             &self.pets,
             gap,
@@ -236,6 +244,23 @@ impl OfficeRenderer {
         self.pointer.carrying()
     }
 
+    /// [`release`](Self::release) under the panels `modal`: a carried figure
+    /// is set down either way, and the click lands only with none open.
+    pub(crate) fn release_under(
+        &mut self,
+        cursor: (f64, f64),
+        at: PixelFit,
+        modal: &crate::panels::ModalState,
+    ) -> Option<pixtuoid_scene::hit::HitAction> {
+        self.release(cursor, at).filter(|_| !modal.any_open())
+    }
+
+    /// Whether a pointer `cursor_in` the window shows its tooltip: not over a
+    /// figure in hand, nor over the office under a panel.
+    pub(crate) fn tooltip_shows(&self, cursor_in: bool, modal: &crate::panels::ModalState) -> bool {
+        cursor_in && !self.carrying() && !modal.any_open()
+    }
+
     /// What the last frame, drawn at `at`, shows the pointer at `cursor`
     /// (physical px).
     pub fn hit_at(
@@ -265,14 +290,12 @@ impl OfficeRenderer {
         let floor_scene = self.session.footer_scene(scene);
         let inputs = FooterInputs::new(
             &floor_scene,
-            FooterContext::new(
+            crate::panels::widgets::footer_context(
                 scene,
                 self.session.footer_floor(scene),
                 audio_audible,
                 volume_flash,
                 warning,
-                super::input::footer_keys(),
-                super::input::footer_keys(),
             ),
         );
         build_footer(&inputs, budget)
@@ -286,6 +309,106 @@ pub(crate) struct Overlays {
     pub(crate) window: (u32, u32),
     pub(crate) footer: FooterModel,
     pub(crate) tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
+    /// The open panels, as the TUI paints them: [`panels_grid`].
+    pub(crate) panels: Option<CellGrid>,
+}
+
+/// `frames`' open panels over a window `cols`×`rows` screen cells big, as
+/// the TUI paints them over its terminal, read back as a grid; `None` when
+/// none is open.
+pub(crate) fn panels_grid(
+    frames: &crate::panels::ui_state::RenderFrames,
+    (cols, rows): (u16, u16),
+    now: std::time::SystemTime,
+    theme: &Theme,
+) -> Option<CellGrid> {
+    let overlays = frames.overlays();
+    if !overlays.any_open() {
+        return None;
+    }
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(cols, rows)).ok()?;
+    term.draw(|f| crate::panels::paint_overlays(f, &overlays, now, f.area(), theme))
+        .ok()?;
+    let buf = term.backend().buffer();
+    Some(crate::panels::widgets::grid_of(buf, buf.area))
+}
+
+/// A window `window` physical px big, in screen cells of `cell`: the
+/// surface the panels are laid out on.
+pub(crate) fn panel_cells((w, h): (u32, u32), cell: CellPx) -> (u16, u16) {
+    let fits = |px: u32, size: u16| u16::try_from(px / u32::from(size.max(1))).unwrap_or(u16::MAX);
+    (fits(w, cell.w), fits(h, cell.h))
+}
+
+/// The screen cell of `cell` under window point `(x, y)`: the panels paint
+/// from the window's top-left ([`paint_panels_into_surface`]).
+pub(crate) fn cell_at((x, y): (f64, f64), cell: CellPx) -> (u16, u16) {
+    let at = |p: f64, size: u16| {
+        u16::try_from(p.max(0.0) as u32 / u32::from(size.max(1))).unwrap_or(u16::MAX)
+    };
+    (at(x, cell.w), at(y, cell.h))
+}
+
+/// What the open panels make of a left press at window point `cursor` on a
+/// `window`-px window showing `shown`: [`crate::panels::modal_mouse`] in its
+/// panel cells, the popup drawn whole.
+pub(crate) fn modal_press(
+    ui: &mut crate::panels::ui_state::UiState,
+    cursor: (f64, f64),
+    window: (u32, u32),
+    shown: Option<PixelFit>,
+) -> crate::panels::ModalMouse {
+    let cells = shown.map(|at| {
+        let cell = Face::chrome(at);
+        (cell_at(cursor, cell), panel_cells(window, cell))
+    });
+    let popup_scale = crate::panels::ui_state::popup_whole(ui.modal().version_popup);
+    crate::panels::modal_mouse(ui, popup_scale, cells.map(|(at, _)| at), || {
+        cells.map(|(_, screen)| screen)
+    })
+}
+
+/// What an applied key changes in the window: its theme, its floor and its
+/// next frame.
+pub(crate) struct WindowHost<'a> {
+    pub(crate) renderer: &'a mut OfficeRenderer,
+    pub(crate) theme: &'a mut &'static Theme,
+    pub(crate) screen: &'a mut Screen,
+}
+
+impl crate::panels::Host for WindowHost<'_> {
+    fn set_theme(&mut self, theme: &'static Theme) {
+        *self.theme = theme;
+    }
+
+    fn navigate_floor(&mut self, floor: usize, now: std::time::SystemTime) {
+        self.renderer.navigate(floor, now);
+    }
+
+    fn toggle_walkable_debug(&mut self) {
+        self.renderer.toggle_walkable_debug();
+    }
+
+    fn redraw(&mut self) -> anyhow::Result<()> {
+        self.screen.stale();
+        Ok(())
+    }
+}
+
+/// A key read as the TUI's, through its dispatch and panels, the window
+/// hosting; whether it asked to quit.
+pub(crate) fn press_key(
+    (code, mods): (crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    cx: &mut crate::panels::KeyCtx<'_, WindowHost<'_>>,
+) -> bool {
+    let nav = cx.host.renderer.nav();
+    let floor = crate::panels::FloorNav {
+        n_floors: cx.host.renderer.n_floors(),
+        current_floor: nav.current(),
+        in_transition: nav.transition().is_some(),
+    };
+    let action = crate::panels::dispatch_key(code, mods, cx.ui.modal(), floor);
+    crate::panels::apply_key_action(action, cx)
 }
 
 /// What the window shows, as far as a frame may skip presenting: the overlays
@@ -620,6 +743,59 @@ pub fn paint_tooltip_into_surface(
         shadow: Some(CARD_SHADOW),
     };
     paint_grid(sb, &card, (at, cell), (Face::Screen, pack), ink);
+}
+
+/// The panel `name` (`help`, `dashboard`, `sources` or `theme`) open over
+/// `scene` in a `window`-px window of screen cells `cell`, for a snapshot to
+/// paint; `None` for a name it doesn't know.
+#[doc(hidden)]
+pub fn panel_preview(
+    name: &str,
+    scene: &SceneState,
+    theme: &'static Theme,
+    (window, cell): ((u32, u32), CellPx),
+    now: std::time::SystemTime,
+) -> Option<CellGrid> {
+    let mut ui = crate::panels::ui_state::UiState::new(
+        theme,
+        crate::panels::welcome::WelcomeUi::from_detected(&[]),
+        false,
+        std::path::PathBuf::new(),
+        None,
+        crate::doctor::DriftSeen::default(),
+    );
+    match name {
+        "help" => ui.toggle_help(),
+        "dashboard" => ui.toggle_dashboard(scene),
+        "sources" => ui.open_connection(crate::panels::connection::build_rows(
+            &crate::runtime::ConnectedSources::default().snapshot(),
+            &ui.read_conn_log(),
+        )),
+        "theme" => ui.open_theme_picker(),
+        _ => return None,
+    }
+    panels_grid(
+        &ui.build_frames(now, scene, &[]),
+        panel_cells(window, cell),
+        now,
+        theme,
+    )
+}
+
+/// Paint `panels` over the window from its top-left, in screen cells of
+/// `cell`: the TUI's panels, cell for cell.
+pub fn paint_panels_into_surface(
+    sb: &mut XrgbSurface<'_>,
+    panels: &CellGrid,
+    (theme, pack): (&Theme, &Pack),
+    cell: CellPx,
+) {
+    let ink = GridInk {
+        text: theme.ui.tooltip_text,
+        halo: None,
+        shadow: None,
+    };
+    paint_grid(sb, panels, ((0, 0), cell), (Face::Screen, pack), ink);
 }
 
 /// How many screen cells of `cell` fit across a `win_w`-pixel window
@@ -1378,6 +1554,49 @@ mod tests {
         assert!(renderer.carrying());
         assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");
         assert!(!renderer.carrying());
+        // Under a panel a carry still sets down, and a click lands nowhere.
+        let open = crate::panels::ModalState {
+            help_open: true,
+            ..closed_modal()
+        };
+        assert!(renderer.tooltip_shows(true, &closed_modal()));
+        assert!(
+            !renderer.tooltip_shows(true, &open),
+            "no tooltip under a panel"
+        );
+        assert!(!renderer.tooltip_shows(false, &closed_modal()));
+        let press = |renderer: &mut OfficeRenderer| {
+            renderer.press_at(
+                on_agent,
+                size,
+                at,
+                Pressing {
+                    scale_factor: 1.0,
+                    petting: None,
+                    now,
+                },
+            )
+        };
+        press(&mut renderer);
+        assert!(renderer.pointer_moved(away, at));
+        assert!(
+            !renderer.tooltip_shows(true, &closed_modal()),
+            "nor in hand"
+        );
+        assert_eq!(renderer.release_under(away, at, &open), None);
+        assert!(
+            !renderer.carrying(),
+            "a panel opened mid-carry sets it down"
+        );
+        press(&mut renderer);
+        assert_eq!(renderer.release_under(on_agent, at, &open), None);
+        press(&mut renderer);
+        assert!(
+            renderer
+                .release_under(on_agent, at, &closed_modal())
+                .is_some(),
+            "with no panel the click lands"
+        );
         // A carry whose release goes elsewhere is set down when the window
         // loses focus, or at the next press.
         renderer.press_at(
@@ -1484,6 +1703,36 @@ mod tests {
         );
     }
 
+    /// The open panels read back as the TUI paints them, and nothing when
+    /// none is open.
+    #[test]
+    fn the_window_shows_the_tuis_panels() {
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut ui = crate::panels::ui_state::UiState::new(
+            theme,
+            crate::panels::welcome::WelcomeUi::from_detected(&[]),
+            false,
+            tmp.path().join("sock"),
+            None,
+            crate::doctor::DriftSeen::default(),
+        );
+        let now = std::time::SystemTime::UNIX_EPOCH;
+        let size = (100, 40);
+        let shut = ui.build_frames(now, &scene, &[]);
+        assert_eq!(panels_grid(&shut, size, now, theme), None);
+        ui.toggle_help();
+        let help = ui.build_frames(now, &scene, &[]);
+        let grid = panels_grid(&help, size, now, theme).expect("help is open");
+        let text: String = (0..grid.height())
+            .flat_map(|y| (0..grid.width()).map(move |x| (x, y)))
+            .filter_map(|(x, y)| grid.get(x, y))
+            .map(|c| c.symbol.as_str())
+            .collect();
+        assert!(text.contains("switch floor"), "{text}");
+    }
+
     /// A frame presents when its office changed or anything over it did, an
     /// unchanged office under the same overlays is the frame on screen, and a
     /// frame rendered but not shown leaves nothing to skip against.
@@ -1499,6 +1748,7 @@ mod tests {
                 }],
             },
             tooltip: None,
+            panels: None,
         };
         let shown = overlays(200, "a");
         let mut screen = Screen::new(true);
@@ -1667,15 +1917,7 @@ mod tests {
         scene.agents.insert(slot.agent_id, slot);
         let inputs = FooterInputs::new(
             &scene,
-            FooterContext::new(
-                &scene,
-                None,
-                true,
-                None,
-                None,
-                crate::floating::input::footer_keys(),
-                crate::floating::input::footer_keys(),
-            ),
+            crate::panels::widgets::footer_context(&scene, None, true, None, None),
         );
         let (w, h) = (640usize, 400usize);
         let at = window_geometry(PhysicalSize::new(w as u32, h as u32), density());
@@ -1842,6 +2084,226 @@ mod tests {
         assert!(
             on_floor.contains(&pixtuoid_scene::audio::OneShot::DoorChime),
             "a ground-floor walk-in must chime the floating window: {on_floor:?}"
+        );
+    }
+
+    /// The window's keys through the TUI's dispatch, the window hosting.
+    struct Keys {
+        ui: crate::panels::ui_state::UiState,
+        renderer: OfficeRenderer,
+        theme: &'static Theme,
+        screen: Screen,
+        audio_ctl: crate::audio::AudioController,
+        connected: crate::runtime::ConnectedSources,
+        snapshot: SceneState,
+        focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+        config_path: std::path::PathBuf,
+        _tmp: tempfile::TempDir,
+    }
+
+    /// Stands in for `crate::audio::respawn`, which opens a real output device.
+    fn no_respawn(_: &crate::audio::AudioHandle, _: f32) {}
+
+    impl Keys {
+        fn new() -> Self {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let config_path = tmp.path().join("config.toml");
+            let theme = pixtuoid_scene::theme::ALL_THEMES[0];
+            Self {
+                ui: crate::panels::ui_state::UiState::new(
+                    theme,
+                    crate::panels::welcome::WelcomeUi::from_detected(&[]),
+                    false,
+                    tmp.path().join("sock"),
+                    None,
+                    crate::doctor::DriftSeen::default(),
+                ),
+                renderer: OfficeRenderer::new(std::sync::Arc::new(
+                    pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"),
+                )),
+                theme,
+                screen: Screen::new(true),
+                audio_ctl: crate::audio::AudioController::new_with(
+                    crate::config::AudioConfig {
+                        muted: true,
+                        volume: 1.0,
+                    },
+                    config_path.clone(),
+                    no_respawn,
+                ),
+                connected: crate::runtime::ConnectedSources::default(),
+                snapshot: SceneState::uniform(4),
+                focus_roots: (None, None),
+                config_path,
+                _tmp: tmp,
+            }
+        }
+
+        /// Press `code`; whether it quit.
+        fn press(&mut self, code: crossterm::event::KeyCode) -> bool {
+            press_key(
+                (code, crossterm::event::KeyModifiers::NONE),
+                &mut crate::panels::KeyCtx {
+                    ui: &mut self.ui,
+                    host: &mut WindowHost {
+                        renderer: &mut self.renderer,
+                        theme: &mut self.theme,
+                        screen: &mut self.screen,
+                    },
+                    audio_ctl: &mut self.audio_ctl,
+                    config_path: &self.config_path,
+                    connected: &self.connected,
+                    snapshot: &self.snapshot,
+                    focus_roots: &self.focus_roots,
+                    now: SystemTime::UNIX_EPOCH,
+                    respawn: no_respawn,
+                },
+            )
+        }
+
+        fn saved_theme(&self) -> Option<String> {
+            crate::config::load(&self.config_path, &mut Vec::new()).theme
+        }
+    }
+
+    /// A previewed theme shows in the window at once, and only a commit
+    /// saves it: quitting or cancelling mid-preview leaves the config as it
+    /// was.
+    #[test]
+    fn only_a_committed_theme_is_saved() {
+        use crossterm::event::KeyCode;
+        let first = pixtuoid_scene::theme::ALL_THEMES[0];
+        let mut k = Keys::new();
+        assert!(!k.press(KeyCode::Char('t')));
+        assert!(k.ui.theme_picker.is_some(), "t opens the picker");
+        assert!(!k.press(KeyCode::Char('j')));
+        assert!(!std::ptr::eq(k.theme, first), "j previews in the window");
+        assert!(k.press(KeyCode::Char('q')), "q quits mid-preview");
+        assert_eq!(k.saved_theme(), None);
+
+        let mut k = Keys::new();
+        k.press(KeyCode::Char('t'));
+        k.press(KeyCode::Char('j'));
+        assert!(
+            !k.press(KeyCode::Esc),
+            "Esc closes the picker, not the window"
+        );
+        assert!(std::ptr::eq(k.theme, first), "and restores the theme");
+        assert_eq!(k.saved_theme(), None);
+
+        k.press(KeyCode::Char('t'));
+        k.press(KeyCode::Char('j'));
+        assert!(!k.press(KeyCode::Enter));
+        assert_eq!(k.saved_theme().as_deref(), Some(k.theme.name));
+    }
+
+    /// An unwritable config costs only the save: the committed theme still
+    /// shows.
+    #[test]
+    fn an_unwritable_config_keeps_the_committed_theme() {
+        use crossterm::event::KeyCode;
+        let mut k = Keys::new();
+        let blocker = k._tmp.path().join("missing");
+        std::fs::write(&blocker, "a file, not a dir").expect("write");
+        k.config_path = blocker.join("config.toml");
+        k.press(KeyCode::Char('t'));
+        k.press(KeyCode::Char('j'));
+        assert!(!k.press(KeyCode::Enter));
+        assert!(!std::ptr::eq(k.theme, pixtuoid_scene::theme::ALL_THEMES[0]));
+    }
+
+    /// Esc closes an open panel before it quits the window.
+    #[test]
+    fn esc_closes_a_panel_before_it_quits() {
+        use crossterm::event::KeyCode;
+        let mut k = Keys::new();
+        assert!(!k.press(KeyCode::Char('?')));
+        assert!(k.ui.help_open());
+        assert!(!k.press(KeyCode::Esc));
+        assert!(!k.ui.help_open());
+        assert!(k.press(KeyCode::Esc), "with nothing open Esc quits");
+    }
+
+    /// The walkable debug key reaches the window's renderer.
+    #[test]
+    fn the_walkable_debug_key_flips_the_windows_layer() {
+        use crate::panels::Host;
+        let mut k = Keys::new();
+        let mut host = WindowHost {
+            renderer: &mut k.renderer,
+            theme: &mut k.theme,
+            screen: &mut k.screen,
+        };
+        host.toggle_walkable_debug();
+        assert!(host.renderer.debug_walkable);
+        host.toggle_walkable_debug();
+        assert!(!host.renderer.debug_walkable);
+    }
+
+    /// A window point reads as the panel cell painted under it.
+    #[test]
+    fn a_window_point_reads_as_its_panel_cell() {
+        let cell = CellPx { w: 8, h: 16 };
+        assert_eq!(panel_cells((80, 160), cell), (10, 10));
+        assert_eq!(cell_at((0.0, 0.0), cell), (0, 0));
+        assert_eq!(cell_at((15.9, 16.0), cell), (1, 1));
+        assert_eq!(cell_at((-3.0, 40.0), cell), (0, 2));
+    }
+
+    fn closed_modal() -> crate::panels::ModalState {
+        crate::panels::ModalState {
+            onboarding_open: false,
+            help_open: false,
+            version_popup: false,
+            theme_picker: None,
+            dashboard_open: false,
+            connection_open: false,
+            connection_confirm: false,
+            n_themes: pixtuoid_scene::theme::ALL_THEMES.len(),
+        }
+    }
+
+    /// A press reaches the office only with no panel open; the help closes
+    /// on it, and the popup, drawn whole, swallows a press off its link.
+    #[test]
+    fn a_press_meets_the_open_panels_first() {
+        use crate::panels::ModalMouse;
+        let window = (960, 640);
+        let shown = Some(window_geometry(
+            PhysicalSize::new(window.0, window.1),
+            density(),
+        ));
+        let boot = |popup: bool| {
+            crate::panels::ui_state::UiState::new(
+                pixtuoid_scene::theme::ALL_THEMES[0],
+                crate::panels::welcome::WelcomeUi::from_detected(&[]),
+                popup,
+                std::path::PathBuf::new(),
+                None,
+                crate::doctor::DriftSeen::default(),
+            )
+        };
+        let corner = (1.0, 1.0);
+        let mut ui = boot(false);
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Office
+        );
+        ui.toggle_help();
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Took
+        );
+        assert!(!ui.help_open());
+        ui.open_theme_picker();
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Inert
+        );
+        let mut ui = boot(true);
+        assert_eq!(
+            modal_press(&mut ui, corner, window, shown),
+            ModalMouse::Inert
         );
     }
 }
