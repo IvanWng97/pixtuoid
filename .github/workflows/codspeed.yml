@@ -85,3 +85,6 @@ jobs:
         with:
           mode: memory
           run: cargo codspeed run
+          # Resident memory in a multi-threaded bench moves from run to run
+          # with no code change; what the code asks the allocator for doesn't.
+          disable-memory-track-physical: true
