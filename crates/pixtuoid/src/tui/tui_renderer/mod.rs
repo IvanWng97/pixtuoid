@@ -961,7 +961,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         now: SystemTime,
     ) -> Result<()> {
         use crate::panels::paint_overlays;
-        use crate::panels::widgets::{paint_world, star_area};
+        use crate::panels::widgets::{paint_host_text, star_area};
         use crate::tui::hit_test::SceneHit;
         use crate::tui::renderer::{DrawOut, TooltipAt, paint_footer, scene_hit, scene_rect};
         use pixtuoid_scene::display::HoverTarget;
@@ -997,7 +997,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         /// the pointer is on, and the tooltip by the pointer.
         struct Over<'w> {
             text: Option<(
-                pixtuoid_scene::display::World<'w>,
+                pixtuoid_scene::display::HostText<'w>,
                 Option<pixtuoid_core::AgentId>,
             )>,
             tooltip: Option<(u16, u16, pixtuoid_scene::tooltip::Tooltip)>,
@@ -1019,7 +1019,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let raster = self.session.floor(current).map(|floor| &floor.raster);
             let hovers = raster.and_then(|r| r.hovers().cloned()).unwrap_or_default();
             let geometry = fitted.geometry();
-            let text = raster.and_then(pixtuoid_scene::look::Raster::world);
+            let text = raster.and_then(pixtuoid_scene::look::Raster::host_text);
             let star = text.and_then(|text| star_area(text.signs, geometry.map()));
             let mouse = self.tooltip_pos().and_then(|(mx, my)| {
                 let hit = scene_hit(&hovers, star, &layout, geometry.area_at(mx, my)?)?;
@@ -1055,7 +1055,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             cutaway.place(f.buffer_mut(), scene_area);
             let over = shown.as_ref().map(|(_, over)| over);
             if let Some((text, hovered)) = over.and_then(|o| o.text) {
-                paint_world(f, text, (scene_area, fitted.geometry().map()), hovered);
+                paint_host_text(f, text, (scene_area, fitted.geometry().map()), hovered);
             }
             if let Some((mx, my, tip)) = over.and_then(|o| o.tooltip.as_ref()) {
                 let at = TooltipAt {

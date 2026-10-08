@@ -220,13 +220,13 @@ fn world_text(r: &TuiRenderer<Window>) -> ratatui::buffer::Buffer {
     let world = r
         .session
         .floor(r.session.nav().current())
-        .and_then(|floor| floor.raster.world())
+        .and_then(|floor| floor.raster.host_text())
         .expect("the host sets the world's text");
     let map = r.last_geometry.expect("a frame drawn").map();
     let mut term = Terminal::new(TestBackend::new(area.width, area.height)).expect("terminal");
     term.draw(|f| {
         let scene = crate::tui::renderer::scene_rect(f.area());
-        crate::panels::widgets::paint_world(f, world, (scene, map), None);
+        crate::panels::widgets::paint_host_text(f, world, (scene, map), None);
     })
     .expect("draw");
     term.backend().buffer().clone()

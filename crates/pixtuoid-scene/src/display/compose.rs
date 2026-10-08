@@ -165,9 +165,9 @@ pub(crate) fn compose_at<'a>(
         pack, theme, scale, ..
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
-    let (mut collected, mut world) = collect_pieces(frame, office, moment, outside);
-    world.signs = TextRun::signs(board, office.layout.door, floor, theme);
-    collected.extend(signs(office, &world.signs));
+    let (mut collected, mut host_text) = collect_pieces(frame, office, moment, outside);
+    host_text.signs = TextRun::signs(board, office.layout.door, floor, theme);
+    collected.extend(signs(office, &host_text.signs));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -199,7 +199,7 @@ pub(crate) fn compose_at<'a>(
         pieces,
         backdrop: crate::display::Backdrop::of(office.layout, theme),
         recolours: crate::display::Recolours::of(theme),
-        world,
+        host_text,
         pack,
         scale,
     }
@@ -539,7 +539,7 @@ fn collect_pieces(
     office: Office<'_>,
     moment: &Moment,
     outside: &mut crate::outside::OutsideCache,
-) -> (Vec<(Span, PieceKind)>, crate::display::text::WorldRuns) {
+) -> (Vec<(Span, PieceKind)>, crate::display::text::HostRuns) {
     let layout = office.layout;
     let inputs = ComposeInputs {
         frame,
@@ -554,20 +554,20 @@ fn collect_pieces(
         &mut order,
         outside,
     );
-    let mut world = crate::display::text::WorldRuns::default();
+    let mut host_text = crate::display::text::HostRuns::default();
     let carried = push_characters(
         frame,
         office,
         moment.timing.now,
-        (&mut order, &mut world.badges),
+        (&mut order, &mut host_text.badges),
     );
-    world.bubbles = push_bubbles(frame, office, &world.badges, &mut order);
+    host_text.bubbles = push_bubbles(frame, office, &host_text.badges, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
     wall_segments(layout, crate::glass::WallTrim::of(office.theme), &mut order);
-    (order, world)
+    (order, host_text)
 }
 
 #[derive(Clone, Copy)]

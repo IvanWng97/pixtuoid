@@ -233,7 +233,7 @@ impl Badge {
 /// the badges, each bubble over them, then the signs over every badge and
 /// bubble.
 #[derive(Debug, Clone, Copy)]
-pub struct World<'a> {
+pub struct HostText<'a> {
     /// Each drawn agent's badge.
     pub badges: &'a [Badge],
     /// Each chitchat bubble, hung over its speaker's badge.
@@ -242,17 +242,17 @@ pub struct World<'a> {
     pub signs: &'a [TextRun],
 }
 
-/// A frame's [`World`], held.
+/// A frame's [`HostText`], held.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct WorldRuns {
+pub(crate) struct HostRuns {
     pub(crate) badges: Vec<Badge>,
     pub(crate) bubbles: Vec<TextRun>,
     pub(crate) signs: Vec<TextRun>,
 }
 
-impl WorldRuns {
-    pub(crate) fn view(&self) -> World<'_> {
-        World {
+impl HostRuns {
+    pub(crate) fn view(&self) -> HostText<'_> {
+        HostText {
             badges: &self.badges,
             bubbles: &self.bubbles,
             signs: &self.signs,

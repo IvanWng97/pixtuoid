@@ -7,7 +7,7 @@ use super::to_color;
 use crate::panels::clip_widget_rect;
 use pixtuoid_core::AgentId;
 use pixtuoid_scene::display::cells::{CellMap, CellRect};
-use pixtuoid_scene::display::{Badge, TextRole, TextRun, World};
+use pixtuoid_scene::display::{Badge, HostText, TextRole, TextRun};
 use pixtuoid_scene::layout::Bounds;
 use pixtuoid_scene::tooltip::Tooltip;
 
@@ -23,9 +23,9 @@ pub(crate) struct TooltipAt {
 /// Paint `world` as terminal text over the office in `scene_rect`, whose
 /// cells `map` lays over it: the badges, each bubble over them, then the
 /// signs, which a bubble must not cover.
-pub(crate) fn paint_world(
+pub(crate) fn paint_host_text(
     f: &mut ratatui::Frame<'_>,
-    world: World<'_>,
+    world: HostText<'_>,
     (scene_rect, map): (Rect, CellMap),
     hovered: Option<AgentId>,
 ) {
@@ -37,7 +37,7 @@ pub(crate) fn paint_world(
 }
 
 /// The logical units the cells of `map` show that the star among `signs`
-/// is set in by [`paint_world`], where a pointer opens the repo; `None`
+/// is set in by [`paint_host_text`], where a pointer opens the repo; `None`
 /// when none is set.
 pub(crate) fn star_area(signs: &[TextRun], map: CellMap) -> Option<Bounds> {
     set_signs(signs, map)

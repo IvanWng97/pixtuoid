@@ -215,7 +215,7 @@ fn a_refused_classic_frame_names_no_one() {
             .raster
             .classic_drawn()
             .expect("shown")
-            .world
+            .text
             .signs
             .is_empty(),
         "the office is drawn"
@@ -227,9 +227,9 @@ fn a_refused_classic_frame_names_no_one() {
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
     let drawn = floor.raster.classic_drawn().expect("shown");
     assert!(
-        drawn.world.badges.is_empty()
-            && drawn.world.bubbles.is_empty()
-            && drawn.world.signs.is_empty(),
+        drawn.text.badges.is_empty()
+            && drawn.text.bubbles.is_empty()
+            && drawn.text.signs.is_empty(),
         "no badge, bubble or sign"
     );
 }
@@ -258,14 +258,14 @@ fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
     };
     let (baked, baked_px) = frame(WorldText::Baked);
     let (host, host_px) = frame(WorldText::Host);
-    assert!(baked.raster.world().is_none());
+    assert!(baked.raster.host_text().is_none());
     assert!(host.raster.star().is_none(), "the host sets the star");
     assert_ne!(
         host_px.as_slice(),
         baked_px.as_slice(),
         "the text left the image"
     );
-    let world = host.raster.world().expect("handed over");
+    let world = host.raster.host_text().expect("handed over");
     let mut classic = PerFloor::new(Arc::clone(&pack));
     render(
         &mut classic,
@@ -274,9 +274,9 @@ fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
         inputs(&scene, &pack, t0),
     )
     .expect("lays out");
-    let classic = classic.raster.world().expect("shown");
+    let classic = classic.raster.host_text().expect("shown");
     // Each look's badges come in its own paint order.
-    let agents = |w: crate::display::World<'_>| -> HashSet<AgentId> {
+    let agents = |w: crate::display::HostText<'_>| -> HashSet<AgentId> {
         w.badges.iter().map(|b| b.agent).collect()
     };
     assert!(!world.badges.is_empty());
@@ -329,10 +329,10 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     .expect("lays out");
     let drawn = floor.raster.classic_drawn().expect("shown");
     assert!(
-        !drawn.world.badges.is_empty(),
+        !drawn.text.badges.is_empty(),
         "the office badges its agents"
     );
-    let signs: Vec<TextRole> = drawn.world.signs.iter().map(|r| r.role).collect();
+    let signs: Vec<TextRole> = drawn.text.signs.iter().map(|r| r.role).collect();
     assert!(
         signs.contains(&TextRole::Star) && signs.contains(&TextRole::Indicator),
         "{signs:?}"
@@ -348,9 +348,9 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
     let drawn = floor.raster.classic_drawn().expect("shown");
     assert!(
-        drawn.world.badges.is_empty()
-            && drawn.world.bubbles.is_empty()
-            && drawn.world.signs.is_empty()
+        drawn.text.badges.is_empty()
+            && drawn.text.bubbles.is_empty()
+            && drawn.text.signs.is_empty()
     );
 }
 
