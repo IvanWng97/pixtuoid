@@ -658,7 +658,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             })
     }
 
-    /// Drop the agents gone from `scene`: [`OfficeSession::evict_missing`].
+    /// Drop the agents gone from `scene`: [`OfficeSession::evict_missing`],
+    /// which every frame's `prepare` runs.
+    #[cfg(test)]
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.session.evict_missing(scene);
     }
