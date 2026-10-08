@@ -831,7 +831,10 @@ fn probe_roots() -> ProbeRoots {
 /// All probing, no formatting. `log_at` is injected by `main` (resolved by
 /// [`LogLocation::from_env`](crate::run_log::LogLocation::from_env));
 /// `graphics` is the `--graphics` flag.
-fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) -> DoctorReport {
+fn collect(
+    log_at: &crate::run_log::LogLocation,
+    graphics: crate::GraphicsMode,
+) -> anyhow::Result<DoctorReport> {
     let mut config_warnings = Vec::new();
     let config_path = crate::config::config_path();
     let cfg = crate::config::load(&config_path, &mut config_warnings);
@@ -856,10 +859,7 @@ fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) 
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    let max_density = pixtuoid_scene::pack::load_bundled_pack()
-        .map_or(pixtuoid_core::sprite::format::Density::ONE, |pack| {
-            pack.max_density_variant()
-        });
+    let max_density = pixtuoid_scene::pack::load_bundled_pack()?.max_density_variant();
     let (truecolor_probe, graphics_plan) = probe_terminal_caps(probe_ok, graphics, max_density);
     let run_graphics = crate::config::resolve_graphics(&cfg, None, &mut config_warnings);
 
@@ -911,7 +911,7 @@ fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) 
     );
 
     let (backend, backend_healthy) = activation_backend();
-    DoctorReport {
+    Ok(DoctorReport {
         log_path: ShownPath::new(log_at.path()),
         config_path: ShownPath::new(config_path),
         config_warnings,
@@ -932,7 +932,7 @@ fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) 
         grok_registry: (ShownPath::new(grok_registry), grok_exists),
         home_split,
         color,
-    }
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1393,12 +1393,12 @@ fn render(r: &DoctorReport) -> String {
 ///
 /// # Errors
 ///
-/// Never: building the report is infallible, and the `Result` is the shape of the sibling subcommand handlers.
+/// If the bundled pack does not load.
 pub(crate) fn run(
     log_at: &crate::run_log::LogLocation,
     graphics: crate::GraphicsMode,
 ) -> anyhow::Result<String> {
-    Ok(render(&collect(log_at, graphics)))
+    Ok(render(&collect(log_at, graphics)?))
 }
 
 #[cfg(test)]
@@ -1771,7 +1771,7 @@ mod tests {
             fit: cutaway_fit(cell, area, density).expect("fits"),
             route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
-            forced: false,
+            chosen: crate::graphics::Chosen::Answer,
         };
         assert_eq!(
             terminal_category(&r).details[0],

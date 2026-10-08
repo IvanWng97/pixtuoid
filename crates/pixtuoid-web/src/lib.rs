@@ -15,10 +15,10 @@ use std::time::{Duration, SystemTime};
 use wasm_bindgen::prelude::*;
 
 use pixtuoid_core::source::daemon::apply_presence;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::{AgentEvent, AgentId, Transport};
+use pixtuoid_scene::pack::OfficeArt;
 
 use crate::script::{
     Beat, LOOP_MS, PresenceBeat, hero_gateway, hero_script, hire_beats, lobster_beats,
@@ -136,7 +136,7 @@ pub struct Office {
     /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
     /// view into wasm memory, so blitting is zero-copy on the JS side.
     rgba: Vec<u8>,
-    pack: std::sync::Arc<Pack>,
+    pack: std::sync::Arc<OfficeArt>,
     theme: &'static Theme,
     seed: u64,
     reducer: Reducer,

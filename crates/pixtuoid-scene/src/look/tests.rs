@@ -55,7 +55,7 @@ fn office(t0: SystemTime) -> SceneState {
     scene
 }
 
-fn inputs<'a>(scene: &'a SceneState, pack: &'a Pack, now: SystemTime) -> RenderInputs<'a> {
+fn inputs<'a>(scene: &'a SceneState, pack: &'a OfficeArt, now: SystemTime) -> RenderInputs<'a> {
     RenderInputs {
         world: FloorInputs {
             scene,
@@ -75,7 +75,7 @@ fn inputs<'a>(scene: &'a SceneState, pack: &'a Pack, now: SystemTime) -> RenderI
 /// stamped with the frame that saw it, and the door's clamp is the frame's own.
 #[test]
 fn the_entry_runs_the_epilogue_every_frame() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
@@ -122,7 +122,7 @@ fn the_entry_runs_the_epilogue_every_frame() {
 /// each look's raster, so switching back rebuilds nothing.
 #[test]
 fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
@@ -171,13 +171,13 @@ fn reset_sprite_cache_clears_cached_sprites() {
     use crate::frame_cache::FrameKey;
     use pixtuoid_core::sprite::Frame;
 
-    let mut raster = Raster::new(Arc::new(crate::pack::test_default_pack()));
+    let mut raster = Raster::new(Arc::new(crate::pack::test_office()));
     // Prime the cache, so the assertion below distinguishes a real reset from a
     // no-op on an already-empty cache.
     raster.classic().caches.sprites.get_or_make(
         FrameKey {
             agent_id: AgentId::from_parts("test", "agent"),
-            anim_name: "idle",
+            anim_name: pixtuoid_core::sprite::format::Piece::Seated,
             frame_idx: 0,
             flip_x: false,
             glow_tint: None,
@@ -199,7 +199,7 @@ fn reset_sprite_cache_clears_cached_sprites() {
 /// drawn one is still there.
 #[test]
 fn a_refused_classic_frame_names_no_one() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
@@ -239,7 +239,7 @@ fn a_refused_classic_frame_names_no_one() {
 /// indicator. One that bakes it hands over nothing.
 #[test]
 fn a_cutaway_leaving_its_text_to_the_host_bakes_none() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let mut office = PerOffice::new();
@@ -279,12 +279,39 @@ fn a_cutaway_leaving_its_text_to_the_host_bakes_none() {
     assert_eq!(world.signs, classic.signs);
 }
 
+/// The cutaway's recoloured figures leave with their agents: a long run that
+/// sees sessions come and go holds none of the gone ones' art.
+#[test]
+fn the_cutaways_figures_leave_with_their_agents() {
+    let pack = Arc::new(crate::pack::test_office());
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = office(t0);
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
+    let cutaway = Look::Cutaway {
+        scale: RenderScale::new(4).expect("nonzero"),
+        text: WorldText::Baked,
+    };
+    render(
+        &mut floor,
+        office.stores(),
+        cutaway,
+        inputs(&scene, &pack, t0),
+    )
+    .expect("lays out");
+    assert!(
+        office.raster.cutaway.figures_len() > 0,
+        "premise: the frame drew its agents"
+    );
+    office.evict_missing(&SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]));
+    assert_eq!(office.raster.cutaway.figures_len(), 0);
+}
+
 /// A classic frame hands its badges, its bubbles and its signs over apart,
 /// and a refused frame leaves them empty.
 #[test]
 fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
     use crate::display::TextRole;
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
@@ -326,8 +353,8 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
 /// refused rather than drawn with art the sim never placed.
 #[test]
 fn a_frame_stepped_with_another_pack_is_refused() {
-    let pack = Arc::new(crate::pack::test_default_pack());
-    let other = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_office());
+    let other = crate::pack::test_office();
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
@@ -343,14 +370,17 @@ fn a_new_pack_or_theme_empties_the_office_caches() {
     use crate::outside::{OutsideCache, Wall};
     let normal = &crate::theme::NORMAL;
     let cyberpunk = crate::theme::theme_by_name("cyberpunk").expect("a registry theme");
-    let one = Arc::new(crate::pack::test_default_pack());
+    let one = Arc::new(crate::pack::test_office());
     // the curtain wall drops out of the near plane
-    let other = Arc::new(crate::pack::test_pack_declaring(
-        "planes = [\"mid\", \"near\"]",
-        "planes = [\"mid\"]",
-    ));
+    let other = Arc::new(
+        OfficeArt::parse(crate::pack::test_pack_declaring(
+            "planes = [\"mid\", \"near\"]",
+            "planes = [\"mid\"]",
+        ))
+        .expect("the test pack parses"),
+    );
     let now = crate::localclock::at_hour(12);
-    let views = |outside: &mut OutsideCache, pack: &Pack, theme| {
+    let views = |outside: &mut OutsideCache, pack: &OfficeArt, theme| {
         let moment = crate::atmosphere::Moment::resolve(
             crate::sky::Sky::at_with(now, crate::sky::Weather::Overcast),
             theme,

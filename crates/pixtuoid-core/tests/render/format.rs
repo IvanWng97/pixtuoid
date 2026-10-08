@@ -1,16 +1,14 @@
 use pixtuoid_core::sprite::error::{LineError, PackError, SpriteError};
-use pixtuoid_core::sprite::format::{
-    Pack, PackContract, load_pack_from_strings, validate_pack_animations,
-};
+use pixtuoid_core::sprite::format::{Pack, Piece, load_filled_pack};
 use pixtuoid_core::sprite::{Frame, Rgb};
 
-/// The `mini_pack` fixture: one one-frame animation, short of what a pack needs.
+/// The `mini_pack` fixture: one one-frame piece, the rest filled in.
 fn mini_pack() -> Pack {
-    load_pack_from_strings(
+    load_filled_pack(
         include_str!("fixtures/mini_pack/pack.toml"),
         &[(
-            "idle.sprite",
-            include_str!("fixtures/mini_pack/idle.sprite"),
+            "seated.sprite",
+            include_str!("fixtures/mini_pack/seated.sprite"),
         )],
     )
     .expect("mini pack loads")
@@ -18,21 +16,20 @@ fn mini_pack() -> Pack {
 
 /// `src` as the one sprite file of a pack whose palette is `A`, `B` and `.`.
 fn parse(src: &str) -> anyhow::Result<Vec<Frame>> {
-    let pack = load_pack_from_strings(
-        "[pack]\nname=\"t\"\nversion=\"1\"\n\
-         [palette]\n\"A\"=\"#010203\"\n\"B\"=\"#040506\"\n\".\"=\"transparent\"\n\
-         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+    let pack = load_filled_pack(
+        "[palette]\n\"A\"=\"#010203\"\n\"B\"=\"#040506\"\n\".\"=\"transparent\"\n\
+         [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
         &[("f.sprite", src)],
     )?;
-    Ok(pack.animation("idle").expect("idle").frames().to_vec())
+    Ok(pack.piece(Piece::Seated).frames().to_vec())
 }
 
 /// A caller can match the failure, and `{:#}` names each step of it once.
 #[test]
 fn a_bad_pixel_is_matchable_and_its_chain_prints_each_step_once() {
-    let err = load_pack_from_strings(
-        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+    let err = load_filled_pack(
+        "[palette]\n\"A\"=\"#010203\"\n\
+         [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
         &[("f.sprite", "@frame 0\nA z")],
     )
     .unwrap_err();
@@ -59,9 +56,9 @@ fn a_bad_pixel_is_matchable_and_its_chain_prints_each_step_once() {
 
 #[test]
 fn a_shape_error_names_the_line_at_fault() {
-    let line_of = |sprite: &str| match load_pack_from_strings(
-        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+    let line_of = |sprite: &str| match load_filled_pack(
+        "[palette]\n\"A\"=\"#010203\"\n\
+         [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
         &[("f.sprite", sprite)],
     )
     .unwrap_err()
@@ -150,11 +147,10 @@ fn rejects_frame_block_with_no_rows() {
 
 #[test]
 fn rejects_palette_key_longer_than_one_char() {
-    let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
-         [palette]\n\"AB\"=\"#010203\"\n\
-         [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
+    let pack_toml = "[palette]\n\"AB\"=\"#010203\"\n\
+         [animations.seated]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
     let err = anyhow::Error::from(
-        load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
+        load_filled_pack(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
     );
     assert!(
         format!("{err:#}").contains("exactly one character"),
@@ -164,11 +160,10 @@ fn rejects_palette_key_longer_than_one_char() {
 
 #[test]
 fn rejects_palette_value_not_six_hex_digits() {
-    let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
-         [palette]\n\"A\"=\"#12345\"\n\
-         [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
+    let pack_toml = "[palette]\n\"A\"=\"#12345\"\n\
+         [animations.seated]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
     let err = anyhow::Error::from(
-        load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
+        load_filled_pack(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
     );
     assert!(
         format!("{err:#}").contains("6 hex digits"),
@@ -177,44 +172,39 @@ fn rejects_palette_value_not_six_hex_digits() {
 }
 
 #[test]
-fn validate_reports_insufficient_frames_for_single_frame_typing() {
-    // `typing` requires >= 2 frames (MULTI_FRAME_REQUIREMENTS).
-    let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
-         [palette]\n\"A\"=\"#010203\"\n\
-         [animations.typing]\nframes=[\"t.sprite\"]\nframe_ms=100\n";
-    let pack = load_pack_from_strings(pack_toml, &[("t.sprite", "@frame 0\nA")]).unwrap();
-    let report = validate_pack_animations(&pack, &PackContract::default());
+fn a_single_frame_typing_does_not_load() {
+    let err = load_filled_pack(
+        "[palette]\n\"A\"=\"#010203\"\n\
+         [animations.typing]\nframes=[\"t.sprite\"]\nframe_ms=100\n",
+        &[("t.sprite", "@frame 0\nA")],
+    )
+    .unwrap_err();
     assert!(
-        report
-            .insufficient_frames
-            .contains(&("typing".to_string(), 2, 1)),
-        "single-frame typing must report (typing, 2, 1); got: {:?}",
-        report.insufficient_frames
+        matches!(&err, PackError::TooFewFrames { key, need: 2, have: 1, .. } if key == "typing"),
+        "{err:?}"
     );
-    assert!(report.has_errors());
 }
 
 #[test]
 fn loads_mini_pack() {
     let pack = mini_pack();
-    let idle = pack.animation("idle").expect("idle animation");
-    assert_eq!(idle.frame_ms(), 500);
-    assert_eq!(idle.frames().len(), 1);
-    assert_eq!(idle.frames()[0].width(), 4);
+    let seated = pack.piece(Piece::Seated);
+    assert_eq!(seated.frame_ms(), 500);
+    assert_eq!(seated.frames().len(), 1);
+    assert_eq!(seated.first().width(), 4);
 }
 
 #[test]
-fn missing_animation_returns_none() {
-    let pack = mini_pack();
-    assert!(pack.animation("nope").is_none());
-}
-
-#[test]
-fn validation_detects_unknown_animations() {
-    let report = validate_pack_animations(&mini_pack(), &PackContract::default());
+fn an_unregistered_animation_does_not_load() {
+    let err = load_filled_pack(
+        "[palette]\n\"A\"=\"#010203\"\n\
+         [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n",
+        &[("i.sprite", "@frame 0\nA")],
+    )
+    .unwrap_err();
     assert!(
-        report.unknown.contains(&"idle".to_string()),
-        "mini pack's 'idle' animation should be flagged as unknown"
+        matches!(&err, PackError::UnknownAnimation { key, .. } if key == "idle"),
+        "{err:?}"
     );
 }
 

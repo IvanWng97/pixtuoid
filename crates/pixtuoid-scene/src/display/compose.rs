@@ -3,7 +3,8 @@
 //! ([`effects`](crate::display::effects)); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
-use pixtuoid_core::sprite::format::Pack;
+use crate::pack::{Desk, DeskProp, OfficeArt};
+use pixtuoid_core::sprite::format::Piece as PackPiece;
 
 use super::{
     Art, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span, StoodProp,
@@ -16,10 +17,7 @@ use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
 };
-use crate::pack::{
-    DESK_CUP_SPRITE, DOOR_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS,
-    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE,
-};
+use crate::pack::NORTH_SOFA_SEAT_ROWS;
 use crate::render_scale::RenderScale;
 use crate::sim::SimFrame;
 use crate::theme::Theme;
@@ -115,7 +113,7 @@ pub struct Office<'a> {
     /// Where everything stands, in LOGICAL units.
     pub layout: &'a SceneLayout,
     /// The art that draws it.
-    pub pack: &'a Pack,
+    pub pack: &'a OfficeArt,
     /// Its colours.
     pub theme: &'a Theme,
     /// Buffer pixels per logical unit.
@@ -263,11 +261,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
         )
     });
     for (at, sprite, frame_idx, flip, degraded, effects, who) in pet.chain(mascots) {
-        let Some(dense) = crate::pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE)
-        else {
-            continue;
-        };
-        let (w, h) = dense.logical;
+        let (w, h) = crate::pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE).logical;
         let depth = crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h);
         let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(depth)
@@ -286,9 +280,12 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
                 who,
             },
         ));
-        let Some(pen) = crate::pack::densest_frame(pack, sprite, frame_idx, scale)
-            .and_then(|d| Pen::new(scale, d.density.get()))
-        else {
+        let Some(pen) = Pen::new(
+            scale,
+            crate::pack::densest_frame(pack, sprite, frame_idx, scale)
+                .density
+                .get(),
+        ) else {
             continue;
         };
         for &effect in effects {
@@ -333,7 +330,6 @@ fn lights(
         },
     );
     let pen = Pen::for_pack(scale, pack);
-    let mut bulbs = DeskBulbCells::default();
     // Each desk's lamp shines from the bulb its art draws, which the cutaway's
     // art stands on the side the desk faces; the model's is the classic's.
     let lamps: Vec<crate::lighting::Emitter> = lights
@@ -345,7 +341,7 @@ fn lights(
             let bulb = layout
                 .home_desks
                 .get(i)
-                .and_then(|&at| bulbs.at(at, crate::pack::desk_sprite_name(facing), pack, scale));
+                .map(|&at| bulb_at(at, Desk::facing(facing), pack, scale));
             match (bulb, d.lamp.light) {
                 (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
                     crate::lighting::Emitter {
@@ -424,55 +420,20 @@ fn light_piece(inputs: &crate::display::light::ViewInputs) -> Option<LightPiece>
     })
 }
 
-/// Each desk art's bulb, scanned from its pixels the first time a frame asks
-/// for it: a frame's desks share a handful of arts.
-#[derive(Default)]
-struct DeskBulbCells<'p> {
-    seen: Vec<(&'p str, Option<(u16, u16)>)>,
-}
-
-impl<'p> DeskBulbCells<'p> {
-    /// The layout cell of the desk lamp's bulb the desk `art_name` at `at`
-    /// draws at `scale`: the middle of its
-    /// [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY) pixels, or `None` for art
-    /// that draws no bulb.
-    fn at(
-        &mut self,
-        at: crate::layout::Point,
-        art_name: &'p str,
-        pack: &Pack,
-        scale: RenderScale,
-    ) -> Option<crate::layout::Point> {
-        let cell = match self.seen.iter().find(|(art, _)| *art == art_name) {
-            Some(&(_, cell)) => cell,
-            None => {
-                let cell = bulb_in(art_name, pack, scale);
-                self.seen.push((art_name, cell));
-                cell
-            }
-        };
-        bulb_at(at, art_name, cell?, pack, scale)
-    }
-}
-
-/// Where in `art_name` at `scale` its bulb is, in cells.
-fn bulb_in(art_name: &str, pack: &Pack, scale: RenderScale) -> Option<(u16, u16)> {
-    crate::pack::bulb_cell(&crate::pack::densest_frame(pack, art_name, 0, scale)?)
-}
-
-/// [`DeskBulbCells::at`] given [`bulb_in`]'s cell.
+/// The layout cell of the lamp bulb the `desk` at `at` draws at `scale`: the
+/// middle of its [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY) pixels.
 fn bulb_at(
     at: crate::layout::Point,
-    art_name: &str,
-    (x, y): (u16, u16),
-    pack: &Pack,
+    desk: Desk,
+    pack: &OfficeArt,
     scale: RenderScale,
-) -> Option<crate::layout::Point> {
-    let span = desk_span(pack, art_name, at, scale)?;
-    Some(crate::layout::Point {
+) -> crate::layout::Point {
+    let (x, y) = pack.desk(desk).at(scale).0.bulb;
+    let span = desk_span(pack, desk, at, scale);
+    crate::layout::Point {
         x: span.x0 + x,
         y: span.y0 + y,
-    })
+    }
 }
 
 /// Where a piece meets the ground, as the shadow it casts there: on the row under
@@ -483,7 +444,7 @@ fn bulb_at(
 pub(crate) fn ground_shadow(
     span: Span,
     kind: &PieceKind,
-    pack: &Pack,
+    pack: &OfficeArt,
 ) -> Option<crate::ground::Contact> {
     let under = |s: Span| {
         Some(crate::ground::Contact::under(
@@ -512,14 +473,14 @@ pub(crate) fn ground_shadow(
                 under(body)
             } else {
                 let at = chair?;
-                let (w, h) = art_size(pack, crate::pack::DESK_CHAIR_SPRITE)?;
+                let (w, h) = art_size(pack, PackPiece::DeskChair);
                 under(Span::new(at.x, at.y, w, h, 0))
             }
         }
         // Only the band that reaches the prop's foot meets the ground.
-        PieceKind::PropBand { sprite, rows, .. } => art_size(pack, sprite)
-            .filter(|&(_, h)| rows.1 == h)
-            .and_then(|_| under(span)),
+        PieceKind::PropBand { sprite, rows, .. } => (rows.1 == art_size(pack, sprite).1)
+            .then(|| under(span))
+            .flatten(),
         PieceKind::Desk { .. }
         | PieceKind::DeskProp(_)
         | PieceKind::Chair { .. }
@@ -705,7 +666,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still("filing_cabinet"),
+            Art::still(PackPiece::FilingCabinet),
             depth,
             Playback::Held,
         ),
@@ -742,17 +703,15 @@ fn push_fixture(
                     order,
                     pack,
                     wp.pos,
-                    Art::still("snack_shelf"),
+                    Art::still(PackPiece::SnackShelf),
                     depth,
                     Playback::Held,
                 ),
                 Station::VendingMachine | Station::Printer => {
-                    let Some(sprite) = crate::pack::appliance_sprite(wp.kind) else {
+                    let Some(sprite) = crate::pack::appliance_piece(wp.kind) else {
                         return;
                     };
-                    let Some(anim) = pack.animation(sprite) else {
-                        return;
-                    };
+                    let anim = pack.piece(sprite);
                     let busy = frame.occupied_waypoints.contains(&waypoint);
                     let art = Art {
                         sprite,
@@ -767,7 +726,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still(kind.sprite_name()),
+            Art::still(kind.piece()),
             depth,
             Playback::Held,
         ),
@@ -775,7 +734,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still(kind.sprite_name()),
+            Art::still(kind.piece()),
             depth,
             Playback::Held,
         ),
@@ -783,12 +742,12 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still(kind.sprite_name()),
+            Art::still(kind.piece()),
             depth,
             Playback::Held,
         ),
-        K::Wall { kind, .. } => push_hung(order, pack, top_left, kind.sprite_name(), depth),
-        K::NoticeBoard { .. } => push_hung(order, pack, top_left, "notice_board", depth),
+        K::Wall { kind, .. } => push_hung(order, pack, top_left, kind.piece(), depth),
+        K::NoticeBoard { .. } => push_hung(order, pack, top_left, PackPiece::NoticeBoard, depth),
         // A back-view sofa splits into bands its sitter sorts between
         // ([`push_sofa`]), so it lays its own layers.
         K::MeetingSofa {
@@ -814,7 +773,7 @@ fn push_fixture(
         }
         K::MeetingTable { .. } => {
             let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
-            let face = face_rows(pack, crate::pack::MEETING_TABLE_SPRITE, office.scale);
+            let face = face_rows(pack, PackPiece::MeetingTable, office.scale);
             order.push((
                 piece_span(crate::layout::Pivot::Center, centre, table.w, table.h, face)
                     .with_depth(depth),
@@ -829,7 +788,7 @@ fn push_fixture(
                 Flip::Horizontal
             };
             let art = Art {
-                sprite: "meeting_chair",
+                sprite: PackPiece::MeetingChair,
                 frame: 0,
                 flip,
             };
@@ -839,7 +798,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still("coat_rack"),
+            Art::still(PackPiece::CoatRack),
             depth,
             Playback::Held,
         ),
@@ -847,7 +806,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still("side_table"),
+            Art::still(PackPiece::SideTable),
             depth,
             Playback::Held,
         ),
@@ -855,7 +814,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still("floor_lamp"),
+            Art::still(PackPiece::FloorLamp),
             depth,
             Playback::Held,
         ),
@@ -863,7 +822,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still("kitchen_island"),
+            Art::still(PackPiece::KitchenIsland),
             depth,
             Playback::Held,
         ),
@@ -871,7 +830,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            Art::still("pantry_bin"),
+            Art::still(PackPiece::PantryBin),
             depth,
             Playback::Held,
         ),
@@ -879,7 +838,7 @@ fn push_fixture(
             order,
             pack,
             centre,
-            crate::pack::FISH_TANK_SPRITE,
+            PackPiece::FishTank,
             moment.timing.beat,
             depth,
         ),
@@ -887,14 +846,12 @@ fn push_fixture(
             order,
             pack,
             centre,
-            crate::pack::WATER_COOLER_SPRITE,
+            PackPiece::WaterCooler,
             moment.timing.beat,
             depth,
         ),
         K::Door => {
-            let Some((w, h)) = art_size(pack, DOOR_SPRITE) else {
-                return;
-            };
+            let (w, h) = art_size(pack, PackPiece::Door);
             order.push((
                 piece_span(crate::layout::Pivot::TopLeft, top_left, w, h, 0).with_depth(depth),
                 PieceKind::Door {
@@ -951,15 +908,13 @@ enum Playback {
 
 fn push_art(
     order: &mut Vec<(Span, PieceKind)>,
-    pack: &Pack,
+    pack: &OfficeArt,
     at: Point,
     art: Art,
     depth: u16,
     playback: Playback,
 ) {
-    let Some((w, h)) = art_size(pack, art.sprite) else {
-        return;
-    };
+    let (w, h) = art_size(pack, art.sprite);
     let kind = match playback {
         Playback::Held => PieceKind::Prop { at, art },
         Playback::Looping => PieceKind::Animated { at, art },
@@ -972,18 +927,15 @@ fn push_art(
 
 fn push_looping(
     order: &mut Vec<(Span, PieceKind)>,
-    pack: &Pack,
+    pack: &OfficeArt,
     at: Point,
-    sprite: &'static str,
+    sprite: PackPiece,
     beat: crate::anim::Beat,
     depth: u16,
 ) {
-    let Some(anim) = pack.animation(sprite) else {
-        return;
-    };
     let art = Art {
         sprite,
-        frame: crate::pack::looping_frame_index(anim, beat),
+        frame: crate::pack::looping_frame_index(pack.piece(sprite), beat),
         flip: Flip::None,
     };
     push_art(order, pack, at, art, depth, Playback::Looping);
@@ -991,17 +943,16 @@ fn push_looping(
 
 fn push_hung(
     order: &mut Vec<(Span, PieceKind)>,
-    pack: &Pack,
+    pack: &OfficeArt,
     at: Point,
-    sprite: &'static str,
+    sprite: PackPiece,
     depth: u16,
 ) {
-    if let Some((w, h)) = art_size(pack, sprite) {
-        order.push((
-            piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0).with_depth(depth),
-            PieceKind::Hung { at, sprite },
-        ));
-    }
+    let (w, h) = art_size(pack, sprite);
+    order.push((
+        piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0).with_depth(depth),
+        PieceKind::Hung { at, sprite },
+    ));
 }
 
 /// Desk `i` in its facing's art, its screen lit by the classic painter's own
@@ -1029,7 +980,7 @@ fn push_desk(
         return;
     };
     let facing = layout.desk_facing(i);
-    let art = crate::pack::desk_sprite_name(facing);
+    let desk = Desk::facing(facing);
     let props = frame.desk(i);
     let screen = Screen::of(
         crate::lighting::desk_screen_glow(
@@ -1042,41 +993,51 @@ fn push_desk(
         crate::lighting::screen_idle(facing, moment.look.darkness, frame.indoor_scale),
         theme,
     );
-    if let Some(span) = desk_span(pack, art, d, scale) {
-        let span = span.with_depth(depth);
-        order.push((span, PieceKind::Desk { at: d, art, screen }));
-        push_desk_props(&props, (art, span), office, order);
-        if crate::pack::desk_front(art).is_some() {
-            order.push((span, PieceKind::DeskFront { at: d, art, screen }));
-        }
+    let span = desk_span(pack, desk, d, scale).with_depth(depth);
+    order.push((
+        span,
+        PieceKind::Desk {
+            at: d,
+            desk,
+            screen,
+        },
+    ));
+    push_desk_props(&props, (desk, span), office, order);
+    if desk.front().is_some() {
+        order.push((
+            span,
+            PieceKind::DeskFront {
+                at: d,
+                desk,
+                screen,
+            },
+        ));
     }
 }
 
-/// What stands on the desk whose `art` paints `span`, each at the art's own
+/// What stands on the `desk` that paints `span`, each at the art's own
 /// mark for it, sorted with the desk: the cup where there is one, the token
 /// tower at its tier and the sheet falling onto it.
 fn push_desk_props(
     props: &crate::sim::DeskProps,
-    (art, span): (&'static str, Span),
+    (desk, span): (Desk, Span),
     office: Office<'_>,
     order: &mut Vec<(Span, PieceKind)>,
 ) {
     let Office { pack, scale, .. } = office;
-    let Some(desk) = crate::pack::densest_frame(pack, art, 0, scale) else {
-        return;
-    };
-    let k = desk.blit_at.get();
+    let (art, _, k) = pack.desk(desk).at(scale);
+    let k = k.get();
     let (x0, y0) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
     // A mark's cell, as the buffer column of its west edge and row past its foot.
-    let mark = |name: &str| {
-        let m = desk.marks.iter().find(|m| m.name() == name)?;
-        Some((x0 + m.x() * k, y0 + (m.y() + 1) * k))
+    let mark = |prop: DeskProp| {
+        let (mx, my) = art.props[prop];
+        (x0 + mx * k, y0 + (my + 1) * k)
     };
-    let mirrored = crate::pack::desk_props_mirrored(art);
+    let mirrored = desk.mirrors_props();
     // Stand frame `frame` of `sprite` on the mark cell at `(x, foot)`, turned as
     // its desk turns it; where its top lands.
-    let mut stand = |sprite: &'static str, frame: usize, (x, foot): (u16, u16)| {
-        let f = crate::pack::densest_frame(pack, sprite, frame, scale)?;
+    let mut stand = |sprite: PackPiece, frame: usize, (x, foot): (u16, u16)| {
+        let f = crate::pack::densest_frame(pack, sprite, frame, scale);
         let b = f.blit_at.get();
         let (w, h) = (f.frame.width() * b, f.frame.height() * b);
         let x = crate::pack::prop_left(x, k, w, mirrored)?;
@@ -1102,17 +1063,17 @@ fn push_desk_props(
         ));
         Some(y)
     };
-    if let (Some(_), Some(at)) = (props.cup, mark(crate::pack::CUP_MARK)) {
-        stand(DESK_CUP_SPRITE, 0, at);
+    if props.cup.is_some() {
+        stand(PackPiece::DeskCup, 0, mark(DeskProp::Cup));
     }
     let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
         return;
     };
-    let Some((x, top)) = mark(crate::pack::TOWER_MARK)
-        .and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
-    else {
+    let tower = mark(DeskProp::Tower);
+    let Some(top) = stand(PackPiece::TokenTower, tier, tower) else {
         return;
     };
+    let x = tower.0;
     // The sheet lands as the pile's next sheet: at its full fall it is gone.
     let rest = props
         .sheet_fall
@@ -1121,33 +1082,33 @@ fn push_desk_props(
     if let Some(rest) = rest {
         let foot = top.checked_sub((rest - 1) * scale.get());
         if let Some(foot) = foot {
-            stand(TOKEN_SHEET_SPRITE, 0, (x, foot));
+            stand(PackPiece::TokenSheet, 0, (x, foot));
         }
     }
 }
 
-/// The box a desk drawn with `art` at `desk` occupies at `scale`: the art and
-/// the face rows [`face_rows`] derives under it, sorted on the last of
-/// those. A taller art grows upward from the same bottom row
+/// The box a `desk` at `at` occupies at `scale`: the art and the face rows
+/// [`face_rows`] derives under it, sorted on the last of those. A taller art
+/// grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pack::desk_art_top)), so its depth never moves.
 pub(crate) fn desk_span(
-    pack: &Pack,
-    art: &str,
-    desk: crate::layout::Point,
+    pack: &OfficeArt,
+    desk: Desk,
+    at: crate::layout::Point,
     scale: RenderScale,
-) -> Option<Span> {
-    let (w, h) = art_size(pack, art)?;
-    let span = piece_span(
+) -> Span {
+    let art = desk.piece();
+    let (w, h) = art_size(pack, art);
+    piece_span(
         crate::layout::Pivot::TopLeft,
         crate::layout::Point {
-            x: desk.x,
-            y: crate::pack::desk_art_top(pack, desk.y, h),
+            x: at.x,
+            y: crate::pack::desk_art_top(pack, at.y, h),
         },
         w,
         h,
         face_rows(pack, art, scale),
-    );
-    Some(span)
+    )
 }
 
 /// The rows of front face the cutaway derives under a top-down piece's `art`
@@ -1157,10 +1118,15 @@ pub(crate) fn desk_span(
 /// where `densest_frame` returns the base), so `@Nx` art is authored for this
 /// profile with its whole front; a derived face under it would read as a plank
 /// on the ground.
-pub(crate) fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
-    match crate::pack::densest_frame(pack, art, 0, scale) {
-        Some(d) if d.density.get() > 1 => 0,
-        _ => desk_front_h(),
+pub(crate) fn face_rows(pack: &OfficeArt, art: PackPiece, scale: RenderScale) -> u16 {
+    if crate::pack::densest_frame(pack, art, 0, scale)
+        .density
+        .get()
+        > 1
+    {
+        0
+    } else {
+        desk_front_h()
     }
 }
 
@@ -1168,14 +1134,14 @@ pub(crate) fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
 /// the layout's rules
 /// ([`desk_chair_top_left`](crate::layout::desk_chair_top_left),
 /// [`desk_chair_sort_row`](crate::layout::desk_chair_sort_row)); `None` where
-/// those stand no chair or the pack has none.
+/// those stand no chair.
 fn chair_span(
-    pack: &Pack,
+    pack: &OfficeArt,
     facing: crate::layout::Facing,
     desk: crate::layout::Point,
 ) -> Option<(Span, crate::layout::Point)> {
     let at = crate::layout::desk_chair_top_left(desk, facing)?;
-    let (w, h) = art_size(pack, crate::pack::DESK_CHAIR_SPRITE)?;
+    let (w, h) = art_size(pack, PackPiece::DeskChair);
     let span = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0)
         .with_depth(crate::layout::desk_chair_sort_row(desk, facing));
     Some((span, at))
@@ -1205,23 +1171,17 @@ fn push_characters(
         let pose = crate::character::SpritePose::of(c, agent, theme);
         // The frame `paint_figure` draws: an animation's frames need not
         // share a size.
-        let Some((w, h)) =
+        let (w, h) =
             crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, RenderScale::ONE)
-                .map(|d| d.logical)
-        else {
-            continue;
-        };
-        let Some(key) = crate::character::character_key(pose, agent, pack, scale, now) else {
-            continue;
-        };
+                .logical;
+        let key = crate::character::character_key(pose, agent, pack, scale, now);
         let seat = c.seat_desk.map(|d| (d, layout.desk_facing_at(d)));
         let chair = seat.and_then(|(d, facing)| chair_span(pack, facing, d));
         if let (Some((d, _)), Some(_)) = (seat, chair) {
             carried.push(d);
         }
-        let badge_ceiling = seat.and_then(|(d, facing)| {
-            desk_span(pack, crate::pack::desk_sprite_name(facing), d, scale).map(|s| s.y0)
-        });
+        let badge_ceiling =
+            seat.map(|(d, facing)| desk_span(pack, Desk::facing(facing), d, scale).y0);
         let at = cutaway_top_left(c);
         let shadow = !c.seated;
         // The drawn box reaches up over the hair its style dresses it in.
@@ -1340,28 +1300,26 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
 }
 
 /// Queue one sofa body, sorted with its sitters at `tie`: the front view, or
-/// the `back_view` ([`MEETING_SOFA_NORTH_SPRITE`]) as two bands, the seat under
+/// the `back_view` ([`PackPiece::MeetingSofaNorth`]) as two bands, the seat under
 /// its sitter and the backrest over their lap ([`NORTH_SOFA_SEAT_ROWS`]).
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
 fn push_sofa(
     order: &mut Vec<(Span, PieceKind)>,
-    pack: &Pack,
+    pack: &OfficeArt,
     at: crate::layout::Point,
     back_view: bool,
     tie: Tie,
 ) {
     let sitters = crate::sim::seat::sofa_sitter_sort_row(at);
     if back_view {
-        let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH_SPRITE) else {
-            return;
-        };
+        let (w, h) = art_size(pack, PackPiece::MeetingSofaNorth);
         let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
         let band = |rows| PieceKind::PropBand {
             at,
-            sprite: MEETING_SOFA_NORTH_SPRITE,
+            sprite: PackPiece::MeetingSofaNorth,
             rows,
         };
         // Its own south edge lies rows north of where the sofa stands, where a
@@ -1374,22 +1332,21 @@ fn push_sofa(
         ));
         return;
     }
-    if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
-            .with_depth(sitters)
-            .with_layer(Layer::from(tie));
-        order.push((
-            span,
-            PieceKind::Prop {
-                at,
-                art: Art {
-                    sprite: "meeting_sofa",
-                    frame: 0,
-                    flip: Flip::None,
-                },
+    let (w, h) = art_size(pack, PackPiece::MeetingSofa);
+    let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
+        .with_depth(sitters)
+        .with_layer(Layer::from(tie));
+    order.push((
+        span,
+        PieceKind::Prop {
+            at,
+            art: Art {
+                sprite: PackPiece::MeetingSofa,
+                frame: 0,
+                flip: Flip::None,
             },
-        ));
-    }
+        },
+    ));
 }
 
 /// Queue every room wall's [sort bands](crate::layout::WallPiece::sort_bands) as
@@ -1433,8 +1390,8 @@ fn piece_span(
 /// Frame 0's LOGICAL size: the size the sort space lays a static piece out in,
 /// whichever density it is drawn from. An animated figure sizes from the frame
 /// it draws (`push_characters`).
-pub(crate) fn art_size(pack: &Pack, sprite: &str) -> Option<(u16, u16)> {
-    crate::pack::densest_frame(pack, sprite, 0, RenderScale::ONE).map(|d| d.logical)
+pub(crate) fn art_size(pack: &OfficeArt, sprite: PackPiece) -> (u16, u16) {
+    crate::pack::densest_frame(pack, sprite, 0, RenderScale::ONE).logical
 }
 
 /// Rows of front face derived under a top-down desk: its thickness.

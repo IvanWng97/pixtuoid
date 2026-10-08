@@ -3,9 +3,10 @@
 //! frame's head. A frame is dressed only at a density of 2 and up
 //! ([`dress_for`]), so the classic 1x art never is.
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::id::{fnv1a, splitmix64};
-use pixtuoid_core::sprite::format::{Density, Hairstyle, Pack};
+use pixtuoid_core::sprite::format::{Density, Hairstyle};
 use pixtuoid_core::sprite::{Frame, HeadMark, Pixel, Rgb, Sprite};
 
 /// Separates the pick's seed from the other per-agent draws that finalize the
@@ -17,7 +18,7 @@ const HAIRSTYLE_SALT: u64 = 0x6861_6972_7374_796c;
 /// rendezvous hashing, so adding a style to a pack moves only the agents that
 /// now prefer it. It is picked by name, whatever the density, so an agent keeps
 /// their style when the renderer lands on another.
-fn pick(pack: &Pack, agent: AgentId) -> Option<&str> {
+fn pick(pack: &OfficeArt, agent: AgentId) -> Option<&str> {
     let seed = splitmix64(splitmix64(agent.raw() ^ HAIRSTYLE_SALT));
     pack.hairstyles()
         .map(Hairstyle::name)
@@ -40,7 +41,7 @@ pub(crate) struct Dress {
 /// `None` at 1x, in a build without `cutaway-assets`, or on an unmarked frame,
 /// which is drawn as it is.
 pub(crate) fn dress_for(
-    pack: &Pack,
+    pack: &OfficeArt,
     agent: AgentId,
     body: &Frame,
     head: Option<HeadMark>,
@@ -48,26 +49,16 @@ pub(crate) fn dress_for(
 ) -> Option<Dress> {
     let head = head.filter(|_| cfg!(feature = "cutaway-assets") && density.get() > 1)?;
     let style = pick(pack, agent).and_then(|name| pack.hairstyle(name, density));
-    Some(Dress::of(
-        body,
-        head,
-        style,
-        pack.character_outline().is_some(),
-    ))
+    Some(Dress::of(body, head, style))
 }
 
 impl Dress {
-    /// `body`, its head `head`, dressed in `style` and outlined or not.
-    pub(crate) fn of(
-        body: &Frame,
-        head: HeadMark,
-        style: Option<&Hairstyle>,
-        outlined: bool,
-    ) -> Self {
+    /// `body`, its head `head`, dressed in `style`.
+    pub(crate) fn of(body: &Frame, head: HeadMark, style: Option<&Hairstyle>) -> Self {
         Dress {
             head,
             style: style.map(|s| s.name().to_owned()),
-            crest: crest(body, head, style, outlined),
+            crest: crest(body, head, style),
         }
     }
 
@@ -84,7 +75,7 @@ fn opaque_top(f: &Frame) -> Option<u16> {
 
 /// [`Dress::crest`] of `body` dressed in `style`: its hair's top or its own,
 /// and the outline's row above that.
-fn crest(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool) -> i32 {
+fn crest(body: &Frame, head: HeadMark, style: Option<&Hairstyle>) -> i32 {
     let hair = style
         .and_then(|s| s.layers(head.view))
         .into_iter()
@@ -96,7 +87,7 @@ fn crest(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool
                 .filter_map(|(f, _, dy)| Some(dy + i32::from(opaque_top(f)?)))
         });
     let top = hair.chain(opaque_top(body).map(i32::from)).min();
-    top.map_or(0, |top| top - i32::from(outlined))
+    top.map_or(0, |top| top - 1)
 }
 
 /// `body` dressed as `dress` says: `style`'s behind layer for its head's view,
@@ -110,7 +101,7 @@ pub(crate) fn dress(
     dress: &Dress,
     style: Option<&Hairstyle>,
     overrides: &[(char, Pixel)],
-    outline: Option<Rgb>,
+    line: Rgb,
 ) -> Frame {
     let (head, up) = (dress.head, dress.rise());
     let layers = style.and_then(|s| s.layers(head.view));
@@ -135,7 +126,7 @@ pub(crate) fn dress(
     let dressed = |layer: Option<&Sprite>| {
         let sprite = layer?;
         let (_, dx, dy) = sprite.laid_on(head)?;
-        Some((sprite.recolorable(0)?.recolored(overrides), dx, dy))
+        Some((sprite.recolorable_at(0).recolored(overrides), dx, dy))
     };
     if let Some((f, dx, dy)) = dressed(layers.and_then(|l| l.behind())) {
         lay(&f, dx, dy);
@@ -144,40 +135,38 @@ pub(crate) fn dress(
     if let Some((f, dx, dy)) = dressed(layers.and_then(|l| l.over())) {
         lay(&f, dx, dy);
     }
-    if let Some(line) = outline {
-        let (w_i, h_i) = (i32::from(w), i32::from(h));
-        let idx = |x: i32, y: i32| y as usize * usize::from(w) + x as usize;
-        let opaque = |px: &[Pixel], x: i32, y: i32| {
-            (0..w_i).contains(&x) && (0..h_i).contains(&y) && px[idx(x, y)].is_some()
-        };
-        let cells = || (0..h_i).flat_map(move |y| (0..w_i).map(move |x| (x, y)));
-        let edge: Vec<usize> = cells()
-            .filter(|&(x, y)| {
-                !opaque(&px, x, y)
-                    && [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                        .iter()
-                        .any(|(dx, dy)| opaque(&px, x + dx, y + dy))
-            })
-            .map(|(x, y)| idx(x, y))
-            .collect();
-        for i in edge {
-            px[i] = Some(line);
-        }
-        // A gap the line closes to one pixel takes the line too: a style laid
-        // on a body it was not drawn against can leave one between chin and
-        // hair, and no author can see it to close it.
-        let holes: Vec<usize> = cells()
-            .filter(|&(x, y)| {
-                !opaque(&px, x, y)
-                    && [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                        .iter()
-                        .all(|(dx, dy)| opaque(&px, x + dx, y + dy))
-            })
-            .map(|(x, y)| idx(x, y))
-            .collect();
-        for i in holes {
-            px[i] = Some(line);
-        }
+    let (w_i, h_i) = (i32::from(w), i32::from(h));
+    let idx = |x: i32, y: i32| y as usize * usize::from(w) + x as usize;
+    let opaque = |px: &[Pixel], x: i32, y: i32| {
+        (0..w_i).contains(&x) && (0..h_i).contains(&y) && px[idx(x, y)].is_some()
+    };
+    let cells = || (0..h_i).flat_map(move |y| (0..w_i).map(move |x| (x, y)));
+    let edge: Vec<usize> = cells()
+        .filter(|&(x, y)| {
+            !opaque(&px, x, y)
+                && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|(dx, dy)| opaque(&px, x + dx, y + dy))
+        })
+        .map(|(x, y)| idx(x, y))
+        .collect();
+    for i in edge {
+        px[i] = Some(line);
+    }
+    // A gap the line closes to one pixel takes the line too: a style laid
+    // on a body it was not drawn against can leave one between chin and
+    // hair, and no author can see it to close it.
+    let holes: Vec<usize> = cells()
+        .filter(|&(x, y)| {
+            !opaque(&px, x, y)
+                && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .all(|(dx, dy)| opaque(&px, x + dx, y + dy))
+        })
+        .map(|(x, y)| idx(x, y))
+        .collect();
+    for i in holes {
+        px[i] = Some(line);
     }
     Frame::from_pixels(w, h, px)
 }
@@ -185,7 +174,9 @@ pub(crate) fn dress(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_core::sprite::format::load_pack_from_strings;
+    use pixtuoid_core::sprite::format::{Piece, load_filled_pack};
+    #[cfg(feature = "cutaway-assets")]
+    use strum::VariantArray as _;
 
     const H: Rgb = Rgb {
         r: 200,
@@ -206,9 +197,9 @@ mod tests {
     /// A pack of `body` marked `head` (the `head.front` mark's column and row),
     /// outlined, and the styles `styles` at 2x, each a front-view over layer of
     /// one pixel a row above its mark.
-    fn pack_of(body: &str, head: (u16, u16), styles: &[&str]) -> Pack {
+    fn pack_of(body: &str, head: (u16, u16), styles: &[&str]) -> OfficeArt {
         let mut toml = String::from(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\"H\"=\"#c86432\"\n\"S\"=\"#f0c0a0\"\n\
+            "[palette]\n\".\"=\"transparent\"\n\"H\"=\"#c86432\"\n\"S\"=\"#f0c0a0\"\n\
              \"k\"=\"#010101\"\n[characters]\noutline=\"k\"\n\
              [animations.seated]\nframes=[\"b.sprite\"]\nframe_ms=100\n",
         );
@@ -218,14 +209,13 @@ mod tests {
             ));
         }
         let body = format!("@frame 0\n@mark head.front {} {}\n{body}", head.0, head.1);
-        load_pack_from_strings(
+        crate::pack::test_office_with(
             &toml,
             &[
                 ("b.sprite", body.as_str()),
                 ("o.sprite", "@frame 0\n@mark head.front 0 1\nH\n. \n"),
             ],
         )
-        .expect("the test pack loads")
     }
 
     /// The one-skin-pixel body the tests dress.
@@ -233,9 +223,9 @@ mod tests {
 
     /// `pack`'s body dressed as it would be for `agent` at 2x.
     #[cfg(feature = "cutaway-assets")]
-    fn dressed(pack: &Pack, agent: AgentId) -> (Dress, Frame) {
-        let sprite = pack.animation("seated").expect("the body");
-        let body = &sprite.frames()[0];
+    fn dressed(pack: &OfficeArt, agent: AgentId) -> (Dress, Frame) {
+        let sprite = pack.piece(Piece::Seated);
+        let body = sprite.first();
         let dress = dress_for(pack, agent, body, sprite.head(0), TWO).expect("a marked 2x frame");
         let style = dress.style.as_deref().and_then(|n| pack.hairstyle(n, TWO));
         let f = super::dress(
@@ -273,8 +263,8 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     fn a_frame_is_dressed_only_at_2x_and_up_and_where_it_marks_a_head() {
         let pack = pack_of(BODY, (1, 0), &["mop"]);
-        let sprite = pack.animation("seated").expect("the body");
-        let body = &sprite.frames()[0];
+        let sprite = pack.piece(Piece::Seated);
+        let body = sprite.first();
         let agent = AgentId::from_parts("x", "y");
         assert!(dress_for(&pack, agent, body, sprite.head(0), Density::ONE).is_none());
         assert!(dress_for(&pack, agent, body, None, TWO).is_none());
@@ -357,8 +347,7 @@ mod tests {
             "@frame 0\n@mark head.front {mark} {mark}\n{}",
             rows(side, &|_, _| "S")
         );
-        let toml = "[pack]\nname=\"t\"\nversion=\"1\"\n\
-                    [palette]\n\".\"=\"transparent\"\n\"H\"=\"#c86432\"\n\"S\"=\"#f0c0a0\"\n\
+        let toml = "[palette]\n\".\"=\"transparent\"\n\"H\"=\"#c86432\"\n\"S\"=\"#f0c0a0\"\n\
                     [animations.seated]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
                     [animations.\"seated@2x\"]\nframes=[\"b.sprite\"]\nframe_ms=100\n\
                     [hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n";
@@ -370,7 +359,7 @@ mod tests {
                     "@frame 0\n@mark head.front {side} {side}\n{}",
                     rows(reach, &pixel)
                 );
-                let pack = load_pack_from_strings(
+                let pack = load_filled_pack(
                     toml,
                     &[
                         ("one.sprite", "@frame 0\nS S\nS S"),
@@ -379,15 +368,15 @@ mod tests {
                     ],
                 )
                 .expect("the test pack loads");
-                let sprite = pack.animation("seated@2x").expect("the body");
-                let (frame, head) = (&sprite.frames()[0], sprite.head(0).expect("marked"));
+                let sprite = &pack.variants_of(Piece::Seated)[&Density::new(2).expect("nonzero")];
+                let (frame, head) = (sprite.first(), sprite.head(0).expect("marked"));
                 let style = pack.hairstyles().next();
                 let f = dress(
                     frame,
-                    &Dress::of(frame, head, style, false),
+                    &Dress::of(frame, head, style),
                     style,
                     &[],
-                    None,
+                    pack.character_outline(),
                 );
                 let dropped = !(0..f.height())
                     .any(|y| (0..f.width()).any(|x| f.get(x, y).copied().flatten() == Some(H)));
@@ -411,19 +400,27 @@ mod tests {
     #[test]
     #[cfg(feature = "cutaway-assets")]
     fn every_bundled_character_dressed_in_every_style_keeps_its_outline_whole() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let line = pack.character_outline();
-        assert!(line.is_some(), "the bundled pack outlines its characters");
         let (mut dressed, mut flaws) = (0, Vec::new());
-        for name in pack.animation_names() {
-            let sprite = pack.animation(&name).expect("a listed animation");
+        let arts = Piece::VARIANTS
+            .iter()
+            .filter(|p| p.kind() == pixtuoid_core::sprite::format::PieceKind::Character)
+            .flat_map(|&p| {
+                std::iter::once((p.name().to_owned(), pack.piece(p))).chain(
+                    pack.variants_of(p)
+                        .iter()
+                        .map(move |(d, s)| (format!("{}@{d}x", p.name()), s)),
+                )
+            });
+        for (name, sprite) in arts {
             for (i, body) in sprite.frames().iter().enumerate() {
                 let Some(head) = sprite.head(i) else {
                     continue;
                 };
                 let styles = pack.hairstyles().map(Some).chain([None]);
                 for style in styles {
-                    let d = Dress::of(body, head, style, true);
+                    let d = Dress::of(body, head, style);
                     let f = dress(body, &d, style, &[], line);
                     let (w, h) = (f.width(), f.height());
                     let at = |x: u16, y: u16| f.get(x, y).copied().flatten();
@@ -435,7 +432,7 @@ mod tests {
                     };
                     for y in 0..h {
                         for x in [0, w - 1] {
-                            if at(x, y).is_some() && at(x, y) != line {
+                            if at(x, y).is_some() && at(x, y) != Some(line) {
                                 flaw("unoutlined on the edge", x, y);
                             }
                         }

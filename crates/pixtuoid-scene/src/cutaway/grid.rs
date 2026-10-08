@@ -7,7 +7,7 @@
 //! a screen's size. A symbol is an [`Icon`]: screen text writes its terminal
 //! glyph, which the screen face draws as the icon's art from the pack.
 
-use pixtuoid_core::sprite::format::Pack;
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use super::text::{self, LEFTMOST_PIXEL as WORLD_LEFTMOST, Rows};
@@ -90,21 +90,25 @@ impl Face {
     }
 
     /// Whether it draws `c`, rather than tofu.
-    pub fn draws(self, c: char, pack: &Pack) -> bool {
+    pub fn draws(self, c: char, pack: &OfficeArt) -> bool {
         self.glyph(c).is_some() || self.icon(c.encode_utf8(&mut [0; 4]), pack).is_some()
     }
 
     /// The art of the icon whose terminal glyph `symbol` is, where this face
     /// draws one: only the screen face reads symbols as icons, the world
     /// face's text naming its icons ([`Content::Icon`](crate::display::Content::Icon)).
-    fn icon<'p>(self, symbol: &str, pack: &'p Pack) -> Option<&'p pixtuoid_core::sprite::Sprite> {
+    fn icon<'p>(
+        self,
+        symbol: &str,
+        pack: &'p OfficeArt,
+    ) -> Option<&'p pixtuoid_core::sprite::Sprite> {
         if self != Self::Screen {
             return None;
         }
         <Icon as strum::VariantArray>::VARIANTS
             .iter()
             .filter(|i| i.terminal() == symbol)
-            .find_map(|i| pack.icon(i.art())?.screen())
+            .find_map(|&i| pack.icon(i).screen())
     }
 
     fn glyph(self, c: char) -> Option<Bitmap> {
@@ -211,7 +215,7 @@ pub fn paint_grid(
     canvas: &mut impl Canvas,
     grid: &CellGrid,
     (at, cell): ((i32, i32), CellPx),
-    (face, pack): (Face, &Pack),
+    (face, pack): (Face, &OfficeArt),
     ink: GridInk,
 ) {
     let (cw, ch) = (i32::from(cell.w), i32::from(cell.h));
@@ -282,7 +286,7 @@ fn paint_cell_glyph(
     canvas: &mut impl Canvas,
     symbol: &str,
     (at, cell): ((i32, i32), CellPx),
-    (face, pack): (Face, &Pack),
+    (face, pack): (Face, &OfficeArt),
     stroke: Stroke,
 ) {
     let ink = stroke.rgb();
@@ -308,7 +312,7 @@ fn paint_cell_glyph(
     let unit = face.unit();
     let s = i32::from(face.scale(cell));
     let top = at.1 + (ch - i32::from(unit.h) * s) / 2;
-    if let Some(art) = face.icon(symbol, pack).and_then(|a| a.recolorable(0)) {
+    if let Some(art) = face.icon(symbol, pack).map(|a| a.recolorable_at(0)) {
         let frame = match stroke {
             Stroke::Ink(rgb) => art.recolored(&[(crate::pack::ICON_INK_KEY, Some(rgb))]),
             Stroke::Shadow(_) => art.recolored(&[]),
@@ -399,7 +403,7 @@ mod tests {
         grid.put((0, 0), text, None, bold);
         let (w, h) = (grid.width() * cell.w * 2, cell.h * 2);
         let mut buf = RgbBuffer::filled(w, h, BG);
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         paint_grid(&mut buf, &grid, ((0, 0), cell), (Face::World, &pack), ink);
         buf
     }
@@ -477,7 +481,7 @@ mod tests {
         grid.put((0, 0), "\u{65e5}", None, false);
         let cell = Face::Screen.cell(1);
         let mut buf = RgbBuffer::filled(2 * cell.w, cell.h, BG);
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         paint_grid(&mut buf, &grid, ((0, 0), cell), (Face::Screen, &pack), INK);
         assert!(
             inked(&buf, FG).iter().any(|&(x, _)| x >= cell.w),
@@ -497,7 +501,7 @@ mod tests {
             shadow: Some(0.5),
             ..INK
         };
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         paint_grid(
             &mut buf,
             &grid,
@@ -527,7 +531,7 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     #[test]
     fn the_screen_face_draws_latin_and_cjk_in_their_cells() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         for c in ['M', 'g', '\u{5c0f}', '\u{660e}', '\u{d55c}', '\u{416}'] {
             assert!(Face::Screen.draws(c, &pack), "{c:?}");
         }
@@ -545,15 +549,11 @@ mod tests {
     /// by glyph share one, or the screen face could not tell them apart.
     #[test]
     fn every_screen_icon_fits_its_cells_and_owns_its_glyph() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let cell = Face::Screen.cell(1);
         let mut seen = std::collections::HashMap::new();
         for icon in <crate::display::Icon as strum::VariantArray>::VARIANTS {
-            let Some(art) = pack
-                .icon(icon.art())
-                .and_then(|a| a.screen())
-                .and_then(|s| s.frames().first())
-            else {
+            let Some(art) = pack.icon(*icon).screen().map(|s| s.first()) else {
                 continue;
             };
             let n = crate::display::text::cells(icon.terminal());
@@ -572,7 +572,7 @@ mod tests {
         let mut grid = CellGrid::new(crate::display::text::cells(text), 1);
         grid.put((0, 0), text, None, false);
         let mut buf = RgbBuffer::filled(grid.width() * cell.w * 2, cell.h * 2, BG);
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         paint_grid(&mut buf, &grid, ((0, 0), cell), (face, &pack), INK);
         buf
     }

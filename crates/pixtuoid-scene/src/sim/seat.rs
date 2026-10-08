@@ -5,6 +5,7 @@
 //! not the authority.
 
 use super::*;
+use pixtuoid_core::sprite::format::Piece;
 
 use crate::sim::anchors::{back_couch_top_left, waypoint_top_left};
 use pixtuoid_core::state::FloorLocalDeskIndex;
@@ -12,10 +13,13 @@ use pixtuoid_core::state::FloorLocalDeskIndex;
 /// The still back view — also the fallback for a pose that has none of its own,
 /// so a back-turned sitter keeps their back to the camera whenever the pack has
 /// this one.
-const SEATED_BACK: &str = "seated_back";
+const SEATED_BACK: Piece = Piece::SeatedBack;
 
 /// A table, not `format!("{base}_back")`, because sprite names are `&'static str`.
-const SEATED_BACK_VIEWS: &[(&str, &str)] = &[("seated", SEATED_BACK), ("typing", "typing_back")];
+const SEATED_BACK_VIEWS: &[(Piece, Piece)] = &[
+    (Piece::Seated, SEATED_BACK),
+    (Piece::Typing, Piece::TypingBack),
+];
 
 /// Which VIEW of a character a seat shows. ONLY the look: what they sit ON
 /// decides the art and the geometry ([`Seat`]), not this.
@@ -157,7 +161,7 @@ impl Seat {
     /// only decides which side of it shows. The furniture with art of its own —
     /// the couch's `back_couch`, the chair's profile, an upright stander —
     /// answers with that and ignores `base`; nobody types on a sofa.
-    pub(crate) fn sprite_for(self, base: &'static str) -> (&'static str, bool) {
+    pub(crate) fn sprite_for(self, base: Piece) -> (Piece, bool) {
         use crate::layout::WaypointKind;
         let view = self.view();
         match self.kind {
@@ -172,14 +176,15 @@ impl Seat {
                 _ => (base, false),
             },
             SeatKind::Waypoint(WaypointKind::Couch | WaypointKind::MeetingSofa) => match view {
-                SeatView::Back => ("back_couch", false),
+                SeatView::Back => (Piece::BackCouch, false),
                 _ => (base, false),
             },
-            SeatKind::Waypoint(WaypointKind::MeetingChair) => {
-                ("side_seated", matches!(view, SeatView::Side { flip: true }))
-            }
+            SeatKind::Waypoint(WaypointKind::MeetingChair) => (
+                Piece::SideSeated,
+                matches!(view, SeatView::Side { flip: true }),
+            ),
             // You leave the counter holding what you came for.
-            SeatKind::Waypoint(WaypointKind::Pantry) => ("holding_coffee", false),
+            SeatKind::Waypoint(WaypointKind::Pantry) => (Piece::HoldingCoffee, false),
             // The island's bartender and the stand-beside appliances.
             SeatKind::Waypoint(
                 WaypointKind::Island
@@ -188,7 +193,10 @@ impl Seat {
                 | WaypointKind::VendingMachine
                 | WaypointKind::Printer
                 | WaypointKind::SnackShelf,
-            ) => ("standing", matches!(view, SeatView::Side { flip: true })),
+            ) => (
+                Piece::Standing,
+                matches!(view, SeatView::Side { flip: true }),
+            ),
         }
     }
 

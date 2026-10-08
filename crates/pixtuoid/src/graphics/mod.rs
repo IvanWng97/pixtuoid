@@ -296,7 +296,7 @@ pub(crate) enum ClassicReason {
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
-        /// The pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant).
+        /// The pack's [`max_density_variant`](pixtuoid_scene::pack::OfficeArt::max_density_variant).
         max_density: Density,
     },
 }
@@ -317,14 +317,25 @@ pub(crate) enum Plan {
         route: Route,
         /// The cell the scale was fitted to.
         cell: CellSize,
-        /// `--graphics` named the protocol, rather than the terminal.
-        forced: bool,
+        /// What named the protocol.
+        chosen: Chosen,
     },
     /// The half-block office: one buffer pixel per half-block.
     Classic {
         /// Why this run is not painting the cutaway.
         reason: ClassicReason,
     },
+}
+
+/// What named a cutaway's protocol, as `doctor` reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Chosen {
+    /// `--graphics`, over the terminal.
+    Forced,
+    /// The terminal's answer to the query.
+    Answer,
+    /// The terminal's name alone ([`Detected::named`]).
+    Name,
 }
 
 /// A text variable: `None` when unset, blank or not UTF-8.
@@ -439,6 +450,8 @@ pub(crate) struct Detected {
     /// The terminal has no image protocol the cutaway animates with, so
     /// `protocol` is `None` unless `--graphics` forces one.
     pub(crate) unanimated: bool,
+    /// `protocol` rests on the terminal's name alone, not its answer.
+    pub(crate) named: bool,
     /// Whether the terminal answered that it reads kitty images from this
     /// host's shared memory.
     pub(crate) shm: bool,
@@ -497,7 +510,7 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 
 /// The cutaway's geometry on one terminal: `cell`'s natural scale fitted to
 /// `max_density` (the pack's
-/// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
+/// [`max_density_variant`](pixtuoid_scene::pack::OfficeArt::max_density_variant)),
 /// over an image `area` cells big. `None` when no multiple of it lies within
 /// the fit's bound, or the scale is 1.
 pub(crate) fn cutaway_fit(
@@ -525,7 +538,7 @@ fn image_px(cell: CellSize, area: TermSize) -> Size {
 }
 
 /// Decide what to paint. Pure — [`probe()`] supplies the probe, `max_density`
-/// is the pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant),
+/// is the pack's [`max_density_variant`](pixtuoid_scene::pack::OfficeArt::max_density_variant),
 /// and `area` is the image's extent in cells.
 pub(crate) fn resolve(
     mode: GraphicsMode,
@@ -566,7 +579,13 @@ pub(crate) fn resolve(
         fit,
         route: Route::of(protocol, d.tmux, d.shm),
         cell,
-        forced: mode.forced().is_some(),
+        chosen: if mode.forced().is_some() {
+            Chosen::Forced
+        } else if d.named {
+            Chosen::Name
+        } else {
+            Chosen::Answer
+        },
     }
 }
 
@@ -687,7 +706,7 @@ impl Plan {
                 fit,
                 route,
                 cell,
-                forced,
+                chosen,
             } => {
                 let (protocol, tmux, medium) = (route.protocol(), route.tmux(), route.medium());
                 let shape = protocol.tile();
@@ -700,7 +719,7 @@ impl Plan {
                     ms => format!("at most every {ms} ms"),
                 };
                 // A forced plan names its protocol: `auto` may pick another.
-                let mode = if forced {
+                let mode = if chosen == Chosen::Forced {
                     GraphicsMode::from(protocol)
                 } else {
                     GraphicsMode::Auto
@@ -720,10 +739,10 @@ impl Plan {
                      ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles{budget} \
                      {cadence}{how}",
                     protocol.name(),
-                    if forced {
-                        "forced by --graphics"
-                    } else {
-                        "the terminal's answer"
+                    match chosen {
+                        Chosen::Forced => "forced by --graphics",
+                        Chosen::Answer => "the terminal's answer",
+                        Chosen::Name => "guessed from the terminal's name",
                     },
                     cell.w,
                     cell.h,
@@ -884,6 +903,7 @@ mod tests {
             cell: Some(cell),
             tmux,
             unanimated: false,
+            named: false,
             shm: false,
         })
     }
@@ -1056,14 +1076,14 @@ mod tests {
                 fit,
                 route,
                 cell,
-                forced,
+                chosen,
             } = got
             else {
                 panic!("{protocol:?}: {got:?}");
             };
             assert_eq!(
-                (route, cell, forced),
-                (Route::direct(protocol, false), CELL_8X16, false)
+                (route, cell, chosen),
+                (Route::direct(protocol, false), CELL_8X16, Chosen::Answer)
             );
             assert_eq!((fit.scale().get(), fit.upscale()), (8, 2));
         }
@@ -1113,7 +1133,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { route, forced: true, .. } if route.protocol() == want),
+                    matches!(got, Plan::Cutaway { route, chosen: Chosen::Forced, .. } if route.protocol() == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -1246,6 +1266,7 @@ mod tests {
                     cell: None,
                     tmux: false,
                     unanimated: false,
+                    named: false,
                     shm: false,
                 }),
                 BASE_ONLY,
@@ -1309,6 +1330,19 @@ mod tests {
                 "graphics: iterm2 (forced by --graphics) on a 8x16 cell, direct — the cutaway \
                  at 8x (4x art upscaled 2x), a 120x78 office, sent as 8x4-cell tiles at most \
                  every 100 ms",
+            ),
+            (
+                GraphicsMode::Auto,
+                Probe::Answered(Detected {
+                    named: true,
+                    ..match answered(Some(ImageProtocol::Iterm2), cell(8, 16), false) {
+                        Probe::Answered(d) => d,
+                        _ => unreachable!(),
+                    }
+                }),
+                "graphics: iterm2 (guessed from the terminal's name) on a 8x16 cell, direct — \
+                 the cutaway at 8x (4x art upscaled 2x), a 120x78 office, sent as 8x4-cell \
+                 tiles at most every 100 ms",
             ),
         ];
         let rows: Vec<String> = cases
@@ -1420,6 +1454,7 @@ mod tests {
                     cell: Some(CELL_8X16),
                     tmux: false,
                     unanimated: true,
+                    named: false,
                     shm: false,
                 }),
                 BUNDLED,
@@ -1433,6 +1468,7 @@ mod tests {
                     cell: None,
                     tmux: false,
                     unanimated: false,
+                    named: false,
                     shm: false,
                 }),
                 BUNDLED,
@@ -1496,6 +1532,7 @@ mod tests {
                 cell: Some(CELL_8X16),
                 tmux,
                 unanimated: false,
+                named: false,
                 shm,
             })
         };
@@ -1532,6 +1569,7 @@ mod tests {
             cell: Some(CELL_8X16),
             tmux: false,
             unanimated: true,
+            named: false,
             shm: false,
         });
         assert!(matches!(

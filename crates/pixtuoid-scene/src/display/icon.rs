@@ -8,7 +8,7 @@
 pub const BADGE_MARKER: char = '\u{25cf}';
 
 /// A symbol in a line of text, named by what it means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, enum_map::Enum, strum::VariantArray)]
 pub enum Icon {
     /// Agents waiting on you: the board's amber lamp, the footer's alarm.
     Alert,
@@ -155,28 +155,24 @@ mod tests {
     /// and the pack draws no icon nothing names.
     #[test]
     fn every_icon_has_its_art_and_every_art_an_icon() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         for icon in Icon::VARIANTS {
-            let Some(art) = pack
-                .icon(icon.art())
-                .and_then(|a| a.world())
-                .and_then(|s| s.frames().first())
-            else {
+            let Some(art) = pack.icon(*icon).world().map(|s| s.first()) else {
                 continue;
             };
             let w = columns(cells(icon.terminal())).0 - 1;
             assert_eq!((art.width(), art.height()), (w, LINE_H), "{icon:?}");
         }
         for icon in Icon::VARIANTS {
-            let art = pack.icon(icon.art());
+            let art = pack.icon(*icon);
             assert!(
-                art.is_some_and(|a| a.world().is_some() || a.screen().is_some()),
+                art.world().is_some() || art.screen().is_some(),
                 "{icon:?} has no art"
             );
         }
         let named: std::collections::BTreeSet<&str> =
             Icon::VARIANTS.iter().map(|i| i.art()).collect();
-        let drawn: std::collections::BTreeSet<&str> = pack.icon_names().collect();
+        let drawn: std::collections::BTreeSet<&str> = pack.pack().icon_names().collect();
         assert_eq!(drawn, named);
     }
 
@@ -184,15 +180,14 @@ mod tests {
     /// colour whatever its text's tone.
     #[test]
     fn every_icon_draws_in_its_texts_ink() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         for icon in Icon::VARIANTS {
-            let Some(art) = pack.icon(icon.art()) else {
-                continue;
-            };
+            let art = pack.icon(*icon);
             for face in [art.world(), art.screen()].into_iter().flatten() {
                 let inked = face
-                    .recolorable(0)
-                    .is_some_and(|f| f.drawn_in(&[crate::pack::ICON_INK_KEY]).contains(&true));
+                    .recolorable_at(0)
+                    .drawn_in(&[crate::pack::ICON_INK_KEY])
+                    .contains(&true);
                 assert!(inked, "{icon:?}");
             }
         }

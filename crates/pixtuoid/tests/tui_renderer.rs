@@ -6,17 +6,17 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use pixtuoid::dev::TuiRenderer;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_scene::pack::OfficeArt;
 use pixtuoid_scene::pack::load_bundled_pack;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 /// Build an `AgentSlot` for these render tests — fills the boilerplate fields so each
 /// call site only varies what it cares about.
-fn pack() -> Arc<Pack> {
-    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
+fn pack() -> Arc<OfficeArt> {
+    static PACK: OnceLock<Arc<OfficeArt>> = OnceLock::new();
     Arc::clone(PACK.get_or_init(|| Arc::new(load_bundled_pack().expect("pack"))))
 }
 

@@ -4,9 +4,10 @@
 //! byte-faithful to what it blits.
 //!
 //! Usage:
-//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y] [--pet cat|dog] [--drag X0,Y0:X1,Y1 [--drop-after MS]]`
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y] [--pet cat|dog] [--drag X0,Y0:X1,Y1 [--drop-after MS]] [--panel help|dashboard|sources|theme]`
 //! `--drag` presses at the first window point and carries what it lifts to the second,
 //! drawing it in hand; with `--drop-after` it releases there and draws `MS` later.
+//! `--panel` opens that panel over the office, as its key does.
 //! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
 //! `... -- /tmp/f.png 960x640`.
 
@@ -116,6 +117,7 @@ fn main() -> Result<()> {
     let mut pet: Option<pixtuoid_scene::pet::PetKind> = None;
     let mut drag: Option<((f64, f64), (f64, f64))> = None;
     let mut drop_after: Option<u64> = None;
+    let mut panel: Option<String> = None;
     let point = |v: &str, flag: &str| -> Result<(f64, f64)> {
         let (x, y) = v
             .split_once(',')
@@ -158,6 +160,14 @@ fn main() -> Result<()> {
                     .and_then(|v| v.split_once(':'))
                     .ok_or_else(|| anyhow!("--drag needs X0,Y0:X1,Y1"))?;
                 drag = Some((point(from, "--drag")?, point(to, "--drag")?));
+                i += 2;
+            }
+            "--panel" => {
+                panel = Some(
+                    rest.get(i + 1)
+                        .cloned()
+                        .ok_or_else(|| anyhow!("--panel needs a name"))?,
+                );
                 i += 2;
             }
             "--drop-after" => {
@@ -271,7 +281,7 @@ fn main() -> Result<()> {
     let cell = Face::chrome(at);
     let budget = pixtuoid::dev::footer_budget(ww, cell);
     let footer = renderer.footer(&scene, budget, true, None, None);
-    pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, (theme, &pack), cell);
+    pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, (theme, &pack), at);
     if let Some(cursor) = hover {
         let world = FloorInputs {
             scene: &scene,
@@ -292,6 +302,11 @@ fn main() -> Result<()> {
                 cell,
             );
         }
+    }
+    if let Some(name) = panel {
+        let grid = pixtuoid::dev::panel_preview(&name, &scene, theme, ((win_w, win_h), cell), now)
+            .ok_or_else(|| anyhow!("no panel named {name}"))?;
+        pixtuoid::dev::paint_panels_into_surface(&mut surf, &grid, (theme, &pack), cell);
     }
 
     let mut img = RgbImage::new(win_w, win_h);

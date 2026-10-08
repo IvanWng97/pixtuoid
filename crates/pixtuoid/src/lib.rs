@@ -42,7 +42,8 @@ pub mod dev {
     pub use crate::doctor::footer_warning;
     pub use crate::floating::offscreen::{
         OfficeRenderer, Pressing, WindowFrame, XrgbSurface, footer_budget,
-        paint_footer_into_surface, paint_tooltip_into_surface, window_geometry,
+        paint_footer_into_surface, paint_panels_into_surface, paint_tooltip_into_surface,
+        panel_preview, window_geometry,
     };
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
@@ -289,29 +290,29 @@ pub(crate) mod test_flash {
     use std::sync::{Arc, OnceLock};
     use std::time::{Duration, SystemTime};
 
-    use pixtuoid_core::sprite::format::Pack;
     use pixtuoid_core::state::{MAX_FLOORS, SceneState};
     use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
     use pixtuoid_scene::flash::FlashPhase;
     use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
     use pixtuoid_scene::look::{Look, Place, RenderInputs};
+    use pixtuoid_scene::pack::OfficeArt;
     use pixtuoid_scene::sky::{Weather, WeatherPolicy};
 
     /// How long a probe looks for a flash before the test gives up on it.
     const MINUTE_MS: u64 = 60_000;
 
     /// The bundled pack, parsed once per test process.
-    pub(crate) fn pack() -> &'static Pack {
+    pub(crate) fn pack() -> &'static OfficeArt {
         pack_static()
     }
 
     /// [`pack`], shared: a floor's raster draws the pack its frames step.
-    pub(crate) fn pack_arc() -> Arc<Pack> {
+    pub(crate) fn pack_arc() -> Arc<OfficeArt> {
         Arc::clone(pack_static())
     }
 
-    fn pack_static() -> &'static Arc<Pack> {
-        static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
+    fn pack_static() -> &'static Arc<OfficeArt> {
+        static PACK: OnceLock<Arc<OfficeArt>> = OnceLock::new();
         PACK.get_or_init(|| {
             Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"))
         })

@@ -6,9 +6,9 @@ use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
 use pixtuoid::dev::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_scene::cutaway::{Canvas, CellPx, Face, GridInk, paint_grid};
 use pixtuoid_scene::floor::{FloorMeta, PerFloor};
+use pixtuoid_scene::pack::OfficeArt;
 use pixtuoid_scene::theme::Theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -384,7 +384,7 @@ pub(crate) struct AnimJob<'a> {
     pub(crate) frames_dir: Option<&'a Path>,
     pub(crate) timeline: Timeline,
     pub(crate) scene: &'a SceneState,
-    pub(crate) pack: &'a std::sync::Arc<Pack>,
+    pub(crate) pack: &'a std::sync::Arc<OfficeArt>,
     pub(crate) theme: &'static Theme,
     pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }

@@ -142,7 +142,7 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
 /// and poses advance. The state lives outside criterion's per-sample closure
 /// and is rebuilt at each wrap, where `now` steps back.
 fn floor_frames<'a>(
-    pack: &'a Arc<pixtuoid_core::sprite::format::Pack>,
+    pack: &'a Arc<pixtuoid_scene::pack::OfficeArt>,
     theme: &'static pixtuoid_scene::theme::Theme,
     scene: &'a SceneState,
     size: Size,

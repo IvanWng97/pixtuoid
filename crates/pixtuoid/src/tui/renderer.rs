@@ -65,7 +65,7 @@ impl<'a> DrawCtx<'a> {
         office: OfficeStores<'a>,
         theme: &'static pixtuoid_scene::theme::Theme,
         scene: &'a SceneState,
-        pack: &'a pixtuoid_core::sprite::format::Pack,
+        pack: &'a pixtuoid_scene::pack::OfficeArt,
         now: SystemTime,
         meta: pixtuoid_scene::floor::FloorMeta,
     ) -> Self {

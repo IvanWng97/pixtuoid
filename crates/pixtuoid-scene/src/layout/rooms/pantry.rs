@@ -1,5 +1,7 @@
 //! The pantry aggregate: bounds + the counter size + the island.
 
+use pixtuoid_core::sprite::format::Piece;
+
 use crate::layout::placement::centred;
 use crate::layout::{
     Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size, WALL_THICK_H,
@@ -19,12 +21,12 @@ pub(crate) const LARGE_COUNTER: Size = Size {
     h: 10,
 };
 
-/// The pantry counter sprites, compact then large.
-pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
+/// The pantry counter pieces, compact then large.
+pub(crate) const PANTRY_COUNTER_ANIMS: [Piece; 2] = [Piece::PantrySmall, Piece::Pantry];
 
-/// The pantry counter sprite for a counter `counter_w` px wide: the large
+/// The pantry counter piece for a counter `counter_w` px wide: the large
 /// kitchen run when the room fits it, else the compact one.
-pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
+pub(crate) fn pantry_counter_anim(counter_w: u16) -> Piece {
     let [compact, large] = PANTRY_COUNTER_ANIMS;
     if counter_w >= PANTRY_COUNTER_LARGE_W {
         large

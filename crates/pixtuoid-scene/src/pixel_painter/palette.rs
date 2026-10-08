@@ -96,6 +96,8 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
 mod tests {
     use super::*;
     use crate::pack::{appliance_overrides, fixture_overrides};
+    #[cfg(feature = "cutaway-assets")]
+    use pixtuoid_core::sprite::format::{Density, Piece};
 
     #[test]
     fn blend_pixel_composites_in_bounds_and_noops_out_of_bounds() {
@@ -124,7 +126,7 @@ mod tests {
     /// not recolour still shows the normal office.
     #[test]
     fn the_packs_appliance_keys_are_the_normal_themes_colours() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let normal = crate::theme::theme_by_name("normal").expect("theme");
         for (key, pixel) in appliance_overrides(&normal.appliance) {
             assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
@@ -135,7 +137,7 @@ mod tests {
     /// theme's.
     #[test]
     fn the_packs_fixture_keys_are_the_normal_themes_colours() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let normal = crate::theme::theme_by_name("normal").expect("theme");
         for (key, pixel) in fixture_overrides(normal) {
             assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
@@ -146,11 +148,9 @@ mod tests {
     #[test]
     #[cfg(feature = "cutaway-assets")]
     fn a_recolour_rethemes_the_fixture_art() {
-        let pack = crate::pack::test_default_pack();
-        let art = pack
-            .animation("fish_tank@4x")
-            .and_then(|a| a.recolorable(0))
-            .expect("the aquarium art");
+        let pack = crate::pack::test_office();
+        let art =
+            pack.variants_of(Piece::FishTank)[&Density::new(4).expect("nonzero")].recolorable_at(0);
         let water = pack.palette().get('Д').flatten().expect("the water");
         let plain = art.recolored(&[]);
         let (x, y) = (0..plain.height())
@@ -169,11 +169,9 @@ mod tests {
     #[test]
     #[cfg(feature = "cutaway-assets")]
     fn a_recolour_reshades_the_appliance_art() {
-        let pack = crate::pack::test_default_pack();
-        let art = pack
-            .animation("vending_machine@4x")
-            .and_then(|a| a.recolorable(0))
-            .expect("the vending art");
+        let pack = crate::pack::test_office();
+        let art = pack.variants_of(Piece::VendingMachine)[&Density::new(4).expect("nonzero")]
+            .recolorable_at(0);
         let [a, b] = ["normal", "cyberpunk"].map(|name| {
             let theme = crate::theme::theme_by_name(name).expect("theme");
             art.recolored(&appliance_overrides(&theme.appliance))

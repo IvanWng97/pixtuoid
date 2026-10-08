@@ -2,12 +2,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use pixtuoid_core::sprite::format::Piece;
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::frame_cache::{FrameCache, FrameKey};
 
-fn key(id: AgentId, anim_name: &'static str, frame_idx: usize, flip_x: bool) -> FrameKey {
+fn key(id: AgentId, anim_name: Piece, frame_idx: usize, flip_x: bool) -> FrameKey {
     FrameKey {
         agent_id: id,
         anim_name,
@@ -69,7 +70,7 @@ fn get_or_make_caches_by_full_key() {
     let compute_calls = Cell::new(0u32);
 
     let f1 = cache
-        .get_or_make(key(id, "walking", 0, false), || {
+        .get_or_make(key(id, Piece::Walking, 0, false), || {
             compute_calls.set(compute_calls.get() + 1);
             dummy_frame(1)
         })
@@ -78,7 +79,7 @@ fn get_or_make_caches_by_full_key() {
     assert_eq!(f1.as_slice()[0], Some(Rgb { r: 1, g: 1, b: 1 }));
 
     let f2 = cache
-        .get_or_make(key(id, "walking", 0, false), || {
+        .get_or_make(key(id, Piece::Walking, 0, false), || {
             compute_calls.set(compute_calls.get() + 1);
             dummy_frame(99)
         })
@@ -90,19 +91,19 @@ fn get_or_make_caches_by_full_key() {
     );
     assert_eq!(f2.as_slice()[0], Some(Rgb { r: 1, g: 1, b: 1 }));
 
-    cache.get_or_make(key(id, "walking", 1, false), || {
+    cache.get_or_make(key(id, Piece::Walking, 1, false), || {
         compute_calls.set(compute_calls.get() + 1);
         dummy_frame(2)
     });
     assert_eq!(compute_calls.get(), 2);
 
-    cache.get_or_make(key(id, "walking", 0, true), || {
+    cache.get_or_make(key(id, Piece::Walking, 0, true), || {
         compute_calls.set(compute_calls.get() + 1);
         dummy_frame(3)
     });
     assert_eq!(compute_calls.get(), 3);
 
-    cache.get_or_make(key(id, "seated", 0, false), || {
+    cache.get_or_make(key(id, Piece::Seated, 0, false), || {
         compute_calls.set(compute_calls.get() + 1);
         dummy_frame(4)
     });
@@ -117,9 +118,9 @@ fn evict_missing_drops_entries_for_absent_agents() {
     let kept = AgentId::from_transcript_path("/kept.jsonl");
     let gone = AgentId::from_transcript_path("/gone.jsonl");
 
-    cache.get_or_make(key(kept, "walking", 0, false), || dummy_frame(1));
-    cache.get_or_make(key(gone, "walking", 0, false), || dummy_frame(2));
-    cache.get_or_make(key(gone, "seated", 0, false), || dummy_frame(3));
+    cache.get_or_make(key(kept, Piece::Walking, 0, false), || dummy_frame(1));
+    cache.get_or_make(key(gone, Piece::Walking, 0, false), || dummy_frame(2));
+    cache.get_or_make(key(gone, Piece::Seated, 0, false), || dummy_frame(3));
     assert_eq!(cache.len(), 3);
 
     let mut scene = SceneState::uniform(4);
@@ -132,7 +133,7 @@ fn evict_missing_drops_entries_for_absent_agents() {
         1,
         "two entries for the absent agent should be dropped"
     );
-    let _ = cache.get_or_make(key(kept, "walking", 0, false), || {
+    let _ = cache.get_or_make(key(kept, Piece::Walking, 0, false), || {
         panic!("evict must not have dropped the kept agent's entry")
     });
 }

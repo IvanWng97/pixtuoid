@@ -8,9 +8,9 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use crate::pack::OfficeArt;
 use crate::physics::{WalkProfile, walk_arrived};
 use pixtuoid_core::AgentId;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -357,7 +357,7 @@ pub struct FloorInputs<'a> {
     /// The scene to render (the full live scene, or a projected single-floor one).
     pub scene: &'a SceneState,
     /// The sprite pack.
-    pub pack: &'a Pack,
+    pub pack: &'a OfficeArt,
     /// This frame's time — a parameter; the engine never reads the clock (wasm).
     pub now: SystemTime,
     /// This floor's index, altitude, and layout seed.
@@ -413,7 +413,7 @@ impl PerFloor {
     }
 
     /// Fresh floor stores, drawn with `pack`.
-    pub fn new(pack: Arc<Pack>) -> Self {
+    pub fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             ctx: FloorCtx::new(),
             raster: crate::look::Raster::new(pack),
@@ -564,11 +564,13 @@ impl PerOffice {
         }
     }
 
-    /// The office half of the dual eviction. `chitchat` is deliberately
-    /// untouched — conversations self-expire inside
-    /// `chitchat::update_and_collect`, so there is no per-agent entry to leak.
+    /// The office half of the dual eviction: the coffee, and the cutaway's
+    /// recoloured figures. `chitchat` is deliberately untouched —
+    /// conversations self-expire inside `chitchat::update_and_collect`, so
+    /// there is no per-agent entry to leak.
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.coffee.evict_missing(scene);
+        self.raster.evict_missing(scene);
     }
 }
 
@@ -588,7 +590,7 @@ pub struct FloorSession {
 impl FloorSession {
     /// An empty session drawing with `pack` — fresh floor + office state,
     /// nothing laid out yet.
-    pub fn new(pack: Arc<Pack>) -> Self {
+    pub fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             view: FloorView::new(pack),
             office: PerOffice::default(),

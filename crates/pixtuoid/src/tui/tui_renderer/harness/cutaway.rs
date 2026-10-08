@@ -583,7 +583,7 @@ fn the_plans_cell_holds_until_the_windows_moves() {
         fit: fit(cols, rows),
         route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
         cell: CELL,
-        forced: false,
+        chosen: crate::graphics::Chosen::Answer,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(
@@ -627,7 +627,7 @@ fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
         fit: fit(cols, rows),
         route: crate::graphics::Route::direct(ImageProtocol::Sixel, false),
         cell: CELL,
-        forced: false,
+        chosen: crate::graphics::Chosen::Answer,
     };
     let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
     assert_eq!(

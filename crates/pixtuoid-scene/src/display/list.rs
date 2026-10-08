@@ -1,6 +1,6 @@
 //! The display list's types: what one frame shows, piece by piece.
 
-use pixtuoid_core::sprite::format::Pack;
+use crate::pack::OfficeArt;
 
 use super::Span;
 use crate::atmosphere::Carpet;
@@ -90,7 +90,7 @@ pub(crate) struct DisplayList<'a> {
     pub(super) world: super::text::WorldRuns,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
-    pub(super) pack: &'a Pack,
+    pub(super) pack: &'a OfficeArt,
     pub(super) scale: RenderScale,
 }
 
@@ -218,7 +218,7 @@ impl<'a> DisplayList<'a> {
         self.flash_phase
     }
 
-    pub(crate) fn pack(&self) -> &'a Pack {
+    pub(crate) fn pack(&self) -> &'a OfficeArt {
         self.pack
     }
 
@@ -275,8 +275,8 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
         PieceKind::WallSeg { piece, rows, trim } => (piece, rows, trim).hash(&mut h),
-        PieceKind::Desk { at, art, screen } | PieceKind::DeskFront { at, art, screen } => {
-            (at, art, screen).hash(&mut h);
+        PieceKind::Desk { at, desk, screen } | PieceKind::DeskFront { at, desk, screen } => {
+            (at, desk, screen).hash(&mut h);
         }
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
@@ -435,7 +435,7 @@ pub(crate) enum PieceKind {
     /// Decor hung on the north band, blitted at its top-left `at`.
     Hung {
         at: crate::layout::Point,
-        sprite: &'static str,
+        sprite: pixtuoid_core::sprite::format::Piece,
     },
     /// One segment of a room's wall run.
     WallSeg {
@@ -447,17 +447,17 @@ pub(crate) enum PieceKind {
     },
     Desk {
         at: crate::layout::Point,
-        /// The facing's art ([`desk_sprite_name`](crate::pack::desk_sprite_name)).
-        art: &'static str,
+        /// The facing's desk ([`Desk::facing`](crate::pack::Desk::facing)).
+        desk: crate::pack::Desk,
         screen: Screen,
     },
     /// What of the desk at `at` stands nearer the viewer than its props
-    /// ([`desk_front`](crate::pack::desk_front)), drawn over them as the desk
-    /// is drawn.
+    /// ([`Desk::front`](crate::pack::Desk::front)), drawn over them as the
+    /// desk is drawn.
     DeskFront {
         at: crate::layout::Point,
-        /// The desk's art, which the front covers.
-        art: &'static str,
+        /// The desk, which the front covers.
+        desk: crate::pack::Desk,
         screen: Screen,
     },
     Chair {
@@ -478,7 +478,7 @@ pub(crate) enum PieceKind {
     /// between (`push_sofa`).
     PropBand {
         at: crate::layout::Point,
-        sprite: &'static str,
+        sprite: pixtuoid_core::sprite::format::Piece,
         rows: (u16, u16),
     },
     Table {
@@ -534,7 +534,7 @@ pub(crate) enum PieceKind {
 /// `at`, where the desk art's mark for it stands it, turned as its desk turns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StoodProp {
-    pub(crate) sprite: &'static str,
+    pub(crate) sprite: pixtuoid_core::sprite::format::Piece,
     pub(crate) frame: usize,
     pub(crate) at: (u16, u16),
     pub(crate) flip: Flip,
@@ -543,14 +543,14 @@ pub(crate) struct StoodProp {
 /// Which art a prop draws: a sprite's frame, turned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Art {
-    pub(crate) sprite: &'static str,
+    pub(crate) sprite: pixtuoid_core::sprite::format::Piece,
     pub(crate) frame: usize,
     pub(crate) flip: Flip,
 }
 
 impl Art {
     /// `sprite`'s first frame, as drawn.
-    pub(crate) fn still(sprite: &'static str) -> Self {
+    pub(crate) fn still(sprite: pixtuoid_core::sprite::format::Piece) -> Self {
         Self {
             sprite,
             frame: 0,

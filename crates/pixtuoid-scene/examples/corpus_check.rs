@@ -21,8 +21,8 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::harness::{Drive, LineFailure};
 use pixtuoid_core::source::decoder::TailActivity;
 use pixtuoid_core::source::registry;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
+use pixtuoid_scene::pack::OfficeArt;
 use pixtuoid_scene::pack::load_bundled_pack;
 
 /// The instant the whole census runs at — the drive's fold and the step
@@ -80,7 +80,7 @@ fn epoch(t: SystemTime) -> Option<u64> {
 /// but never rendered" for a reason that has nothing to do with the decoder. The
 /// seed's own events are then excluded from every count, or the census would
 /// report a verdict on bytes that decoded to nothing.
-fn check_file(source: &str, path: &Path, pack: &std::sync::Arc<Pack>) -> Verdict {
+fn check_file(source: &str, path: &Path, pack: &std::sync::Arc<OfficeArt>) -> Verdict {
     let mut v = Verdict {
         mtime: std::fs::metadata(path)
             .ok()
