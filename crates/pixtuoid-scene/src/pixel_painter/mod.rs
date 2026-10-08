@@ -365,15 +365,13 @@ fn enqueue_pet<'a>(
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     let pos = pet.pos;
-    let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
+    let Some(size) = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx) else {
+        return;
+    };
     drawables.push(Drawable {
-        sort_row: sort_row_at(
-            Pivot::Center,
-            pos,
-            size.unwrap_or(crate::sim::PET_FALLBACK).h,
-        ),
+        sort_row: sort_row_at(Pivot::Center, pos, size.h),
         layer: Layer::Figure,
-        hover: size.map(|size| Hover::figure(Pivot::Center, pos, size, pet.target())),
+        hover: Some(Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
             pos,
             flip: pet.flip,

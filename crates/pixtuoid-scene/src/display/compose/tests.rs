@@ -45,7 +45,7 @@ fn sort_row(pivot: crate::layout::Pivot, pos: crate::layout::Point, h: u16, belo
 fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
     let pack = test_default_pack();
     let desk = crate::layout::Point { x: 0, y: 10 };
-    let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
+    let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
     let desk_z = desk_span(&pack, art, desk, RenderScale::ONE)
         .expect("desk")
         .depth;
@@ -65,7 +65,7 @@ fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
     let pack = test_default_pack();
     let scale = RenderScale::from(pack.max_density_variant());
     let desk = crate::layout::Point { x: 0, y: 20 };
-    let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
+    let art = crate::pack::desk_sprite_name(crate::layout::Facing::South);
     let desk_box = desk_span(&pack, art, desk, scale).expect("desk");
     let (_, art_h) = art_size(&pack, art).expect("desk");
     // The first row south of the ART, measured from its placement.
@@ -109,7 +109,7 @@ fn a_character_north_of_the_desk_sorts_behind_it() {
     let desk = crate::layout::Point { x: 0, y: 20 };
     let (_, body_h) = base_size(&pack, "standing");
 
-    let plain = crate::pack::desk_art_name(&pack, crate::layout::Facing::South).expect("desk art");
+    let plain = crate::pack::desk_sprite_name(crate::layout::Facing::South);
     let desk_z = desk_span(&pack, plain, desk, RenderScale::ONE)
         .expect("desk")
         .depth;
@@ -135,7 +135,7 @@ fn a_character_north_of_the_desk_sorts_behind_it() {
 fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
     let pack = test_default_pack();
     let desk = crate::layout::Point { x: 0, y: 10 };
-    let art = crate::pack::desk_art_name(&pack, crate::layout::Facing::North).expect("desk art");
+    let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
     let desk_box = desk_span(&pack, art, desk, RenderScale::ONE).expect("desk");
     let seated = seated_back_span(&pack, desk);
     let (plant_w, plant_h) = base_size(&pack, "plant");
@@ -402,10 +402,9 @@ pub(crate) fn sit_down_as(
     panic!("the agent never sat at their desk");
 }
 
-/// Who carries a chair is ONE decision: a sitter skipped for art the pack
-/// lacks carries nothing, so their desk still stands its own chair.
+/// A seated sitter carries their desk's chair.
 #[test]
-fn a_sitter_the_pack_cannot_draw_leaves_their_chair_standing() {
+fn a_seated_sitter_carries_their_chair() {
     let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 0);
     let seated = frames.last().expect("a seated frame");
     let mut order = Vec::new();
@@ -422,43 +421,6 @@ fn a_sitter_the_pack_cannot_draw_leaves_their_chair_standing() {
             (&mut order, &mut Vec::new())
         ),
         vec![desk]
-    );
-
-    let chair_only = pixtuoid_core::sprite::format::load_pack_from_strings(
-        &format!(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.{}]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-            crate::pack::DESK_CHAIR_SPRITE
-        ),
-        &[("one.sprite", "@frame 0\nA")],
-    )
-    .expect("pack builds");
-    let mut order = Vec::new();
-    let carried = push_characters(
-        seated,
-        Office {
-            layout: &layout,
-            pack: &chair_only,
-            theme: &crate::theme::NORMAL,
-            scale: RenderScale::ONE,
-        },
-        std::time::UNIX_EPOCH,
-        (&mut order, &mut Vec::new()),
-    );
-    assert!(carried.is_empty() && order.is_empty(), "no character art");
-    order.extend(queued(
-        &layout,
-        &chair_only,
-        RenderScale::ONE,
-        &carried,
-        |k| matches!(k, FixtureKind::DeskChair(_)),
-    ));
-    assert!(
-        order
-            .iter()
-            .any(|(_, k)| matches!(k, PieceKind::Chair { at } if Some(*at)
-                == crate::layout::desk_chair_top_left(desk, crate::layout::Facing::North))),
-        "the undrawn sitter's desk lost its chair"
     );
 }
 
@@ -852,43 +814,6 @@ fn a_sitters_chair_casts_the_shadow_they_do_not() {
         }
     }
     assert!(standing && sitting, "the walk in and the sit");
-}
-
-/// A pack with no back-view art flips its front view, over the sitters.
-#[test]
-fn a_flipped_sofa_sorts_in_front_of_its_sitters() {
-    let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
-        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
-         \"F\"=\"#202020\"\n[animations.meeting_sofa]\nframes=[\"s.sprite\"]\nframe_ms=100\n",
-        &[("s.sprite", "@frame 0\nF F F\nF F F\n")],
-    )
-    .expect("a pack of one sofa loads");
-    let at = crate::layout::Point { x: 40, y: 30 };
-    let mut order = Vec::new();
-    push_sofa(&mut order, &pack, at, true, Tie::FixtureOver);
-    let [
-        (
-            span,
-            PieceKind::Prop {
-                art:
-                    Art {
-                        flip: Flip::Vertical,
-                        ..
-                    },
-                ..
-            },
-        ),
-    ] = order.as_slice()
-    else {
-        panic!("a flipped sofa is one mirrored prop: {order:?}");
-    };
-    let sitter = Span::new(at.x, at.y, 1, 1, 0)
-        .with_depth(crate::sim::seat::sofa_sitter_sort_row(at))
-        .with_layer(Layer::Figure);
-    assert_eq!(
-        crate::display::depth_sort(vec![(*span, "sofa"), (sitter, "sitter")]),
-        ["sitter", "sofa"]
-    );
 }
 
 /// A frame of an office nobody is in, its room lights full and its sign

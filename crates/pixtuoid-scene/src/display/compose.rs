@@ -345,8 +345,7 @@ fn lights(
             let bulb = layout
                 .home_desks
                 .get(i)
-                .zip(crate::pack::desk_art_name(pack, facing))
-                .and_then(|(&at, art)| bulbs.at(at, art, pack, scale));
+                .and_then(|&at| bulbs.at(at, crate::pack::desk_sprite_name(facing), pack, scale));
             match (bulb, d.lamp.light) {
                 (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
                     crate::lighting::Emitter {
@@ -1030,9 +1029,7 @@ fn push_desk(
         return;
     };
     let facing = layout.desk_facing(i);
-    let Some(art) = crate::pack::desk_art_name(pack, facing) else {
-        return;
-    };
+    let art = crate::pack::desk_sprite_name(facing);
     let props = frame.desk(i);
     let screen = Screen::of(
         crate::lighting::desk_screen_glow(
@@ -1049,7 +1046,7 @@ fn push_desk(
         let span = span.with_depth(depth);
         order.push((span, PieceKind::Desk { at: d, art, screen }));
         push_desk_props(&props, (art, span), office, order);
-        if crate::pack::desk_front(pack, art).is_some() {
+        if crate::pack::desk_front(art).is_some() {
             order.push((span, PieceKind::DeskFront { at: d, art, screen }));
         }
     }
@@ -1223,7 +1220,7 @@ fn push_characters(
             carried.push(d);
         }
         let badge_ceiling = seat.and_then(|(d, facing)| {
-            desk_span(pack, crate::pack::desk_art_name(pack, facing)?, d, scale).map(|s| s.y0)
+            desk_span(pack, crate::pack::desk_sprite_name(facing), d, scale).map(|s| s.y0)
         });
         let at = cutaway_top_left(c);
         let shadow = !c.seated;
@@ -1343,10 +1340,8 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
 }
 
 /// Queue one sofa body, sorted with its sitters at `tie`: the front view, or
-/// the `back_view`. A pack that draws [`MEETING_SOFA_NORTH_SPRITE`] gets it as two
-/// bands, the seat under its sitter and the backrest over their lap
-/// ([`NORTH_SOFA_SEAT_ROWS`]); one that draws only its own `meeting_sofa` gets
-/// that flipped top-to-bottom, as the classic painter draws it.
+/// the `back_view` ([`MEETING_SOFA_NORTH_SPRITE`]) as two bands, the seat under
+/// its sitter and the backrest over their lap ([`NORTH_SOFA_SEAT_ROWS`]).
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
@@ -1358,7 +1353,10 @@ fn push_sofa(
     tie: Tie,
 ) {
     let sitters = crate::sim::seat::sofa_sitter_sort_row(at);
-    if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH_SPRITE).filter(|_| back_view) {
+    if back_view {
+        let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH_SPRITE) else {
+            return;
+        };
         let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
         let band = |rows| PieceKind::PropBand {
@@ -1387,11 +1385,7 @@ fn push_sofa(
                 art: Art {
                     sprite: "meeting_sofa",
                     frame: 0,
-                    flip: if back_view {
-                        Flip::Vertical
-                    } else {
-                        Flip::None
-                    },
+                    flip: Flip::None,
                 },
             },
         ));

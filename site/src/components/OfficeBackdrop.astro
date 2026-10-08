@@ -421,14 +421,12 @@ const officeDriverUrl = asset('office-driver.js');
     }
 
     // Segment counts vary with the office's mood/context, so rebuild, not diff.
-    // The board's status lamps, which the office draws as lamps rather than glyphs.
-    const LAMPS = new Set(['alert', 'active', 'idle']);
     function setSegments(rowEl, segs) {
       while (rowEl.firstChild) rowEl.removeChild(rowEl.firstChild);
       for (let i = 0; i < segs.length; i++) {
         const s = document.createElement('span');
         s.textContent = segs[i].text; // textContent, never innerHTML (agent cwds are untrusted)
-        if (LAMPS.has(segs[i].icon)) {
+        if (segs[i].lamp) {
           s.className = 'ov-lamp';
           s.style.setProperty('--lamp', segs[i].color);
         } else {
