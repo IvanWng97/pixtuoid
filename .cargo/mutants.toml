@@ -10,9 +10,10 @@ test_tool = "nextest"
 
 exclude_globs = [
     # winit / async glue: no headless test can kill these. Shared with codecov.yml's
-    # ignore list — edit together. These four are that list's intersection, so a
+    # ignore list — edit together. These five are that list's intersection, so a
     # decision here is measured by NOTHING: move it out instead of widening (#827).
     "crates/pixtuoid/src/main.rs",
+    "crates/pixtuoid/src/app/mod.rs",
     "crates/pixtuoid/src/runtime/pipeline.rs",
     "crates/pixtuoid/src/floating/mod.rs",
     "crates/pixtuoid/src/floating/window.rs",

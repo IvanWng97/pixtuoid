@@ -1,12 +1,12 @@
 //! Logging bootstrap: installs the tracing subscriber over the sink
-//! [`pixtuoid::run_log`] opens.
+//! [`crate::run_log`] opens.
 
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use pixtuoid::doctor::DriftSeen;
-use pixtuoid::run_log::LogLocation;
+use crate::doctor::DriftSeen;
+use crate::run_log::LogLocation;
 use std::time::SystemTime;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
@@ -121,7 +121,7 @@ impl std::io::Write for MutexFileWriter {
 fn log_open_failure(path: &Path, e: &std::io::Error) -> String {
     format!(
         "⚠ pixtuoid: cannot open log file {} ({e}) — runtime warnings will not be recorded",
-        pixtuoid::display_path(path)
+        crate::display_path(path)
     )
 }
 
@@ -135,7 +135,7 @@ mod tests {
             Path::new("/tmp/\u{1b}]0;pwned\u{7}\u{202e}.log"),
             &std::io::ErrorKind::PermissionDenied.into(),
         );
-        assert_eq!(pixtuoid::strip_control_chars(&notice), notice);
+        assert_eq!(crate::strip_control_chars(&notice), notice);
         assert!(notice.contains("/tmp/]0;pwned.log"), "{notice:?}");
     }
 

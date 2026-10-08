@@ -59,10 +59,11 @@ ignore:
   # runtime/driver.rs, which stay WHOLLY ignored here. Keep the shared entries in
   # sync. When a decision appears in one of these files, move it out rather than
   # widening this list.
-  - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
-  - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (pure helpers stay unit-tested)
-  - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; pure helpers unit-tested)
-  - "crates/pixtuoid/src/sources_cli.rs"        # stdout presenters over the real config path (covered by the cli_json e2e binary run)
+  - "crates/pixtuoid/src/main.rs"               # binary entry: calls `pixtuoid::run`, reports its error
+  - "crates/pixtuoid/src/app/mod.rs"            # arg-parse + dispatch + terminal preflights
+  - "crates/pixtuoid/src/app/crash.rs"          # panic hook: terminal restore + crash.log (pure helpers stay unit-tested)
+  - "crates/pixtuoid/src/app/logging.rs"        # global tracing-subscriber init (once per process; pure helpers unit-tested)
+  - "crates/pixtuoid/src/app/sources_cli.rs"    # stdout presenters over the real config path (covered by the cli_json e2e binary run)
   - "crates/pixtuoid/src/tui/mod.rs"            # crossterm event loop + terminal lifecycle: reads/writes the real TTY
   - "crates/pixtuoid/src/runtime/driver.rs"     # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
   - "crates/pixtuoid/src/runtime/pipeline.rs"   # the shared source-to-reducer spine: same channel/spawn glue class as driver.rs

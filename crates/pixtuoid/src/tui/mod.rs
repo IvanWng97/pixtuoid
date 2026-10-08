@@ -596,9 +596,9 @@ pub(crate) fn setup_terminal(out: FrameOut, _armed: &QuitArms) -> Result<Term> {
     })
 }
 
-/// THE terminal-mode unwind: the ONE definition of the order every exit path takes. `pub`
-/// for the panic hook in `crash.rs`, a module of the BIN crate. It also unlinks every
-/// shared-memory object this process published.
+/// THE terminal-mode unwind: the ONE definition of the order every exit path takes,
+/// the panic hook in `app/crash.rs` included. It also unlinks every shared-memory
+/// object this process published.
 ///
 /// Every step runs even when an earlier one fails and the FIRST error is returned — a `?`
 /// after the escape write would skip `disable_raw` exactly when it is needed most. And
@@ -609,7 +609,7 @@ pub(crate) fn setup_terminal(out: FrameOut, _armed: &QuitArms) -> Result<Term> {
 /// # Errors
 ///
 /// If writing the graphics unwind, the mouse-capture and alternate-screen escapes, or `disable_raw` fails; every step still runs.
-pub fn unwind_terminal_modes<W: std::io::Write>(
+pub(crate) fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {

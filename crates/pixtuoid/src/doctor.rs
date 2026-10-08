@@ -1414,7 +1414,7 @@ fn render(r: &DoctorReport) -> String {
 /// # Errors
 ///
 /// Never: building the report is infallible, and the `Result` is the shape of the sibling subcommand handlers.
-pub fn run(
+pub(crate) fn run(
     log_at: &crate::run_log::LogLocation,
     graphics: crate::GraphicsMode,
 ) -> anyhow::Result<String> {

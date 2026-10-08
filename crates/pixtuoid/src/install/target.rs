@@ -322,7 +322,7 @@ pub(crate) const OMP: Target = Target {
     host: None,
 };
 
-pub const TARGETS: &[&Target] = &[
+pub(crate) const TARGETS: &[&Target] = &[
     &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW, &GROK, &KIMI,
     &OMP, &DSH,
 ];

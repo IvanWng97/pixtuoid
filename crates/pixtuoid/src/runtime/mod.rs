@@ -6,7 +6,7 @@ pub(crate) mod driver;
 pub(crate) mod gate;
 pub(crate) mod pipeline;
 
-pub use driver::run;
+pub(crate) use driver::run;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ use crate::graphics::Plan;
 /// The reducer publishes a fresh `Arc<SceneState>` on every mutation through this watch
 /// channel. Consumers (renderer, headless summary loop) hold a `Receiver`, call
 /// `borrow()` for an O(1) pointer read, and never block the writer.
-pub type SceneRx = watch::Receiver<Arc<SceneState>>;
+pub(crate) type SceneRx = watch::Receiver<Arc<SceneState>>;
 
 /// Fallback desk capacity when the terminal cannot be queried (e.g. headless mode).
 pub(crate) const FALLBACK_DESKS: usize = 16;
@@ -33,34 +33,34 @@ pub(crate) const FALLBACK_DESKS: usize = 16;
 /// can't reach the runtime by construction.
 #[derive(Debug)]
 pub struct RunConfig {
-    pub socket: Option<PathBuf>,
-    pub projects_root: Option<PathBuf>,
-    pub codex_sessions_root: Option<PathBuf>,
-    pub pack: pixtuoid_scene::pack::PackSource,
-    pub desk_cap: Option<usize>,
-    pub headless: bool,
-    pub config_path: PathBuf,
-    pub theme: &'static pixtuoid_scene::theme::Theme,
-    pub pets: Vec<pixtuoid_scene::pet::Pet>,
+    pub(crate) socket: Option<PathBuf>,
+    pub(crate) projects_root: Option<PathBuf>,
+    pub(crate) codex_sessions_root: Option<PathBuf>,
+    pub(crate) pack: pixtuoid_scene::pack::PackSource,
+    pub(crate) desk_cap: Option<usize>,
+    pub(crate) headless: bool,
+    pub(crate) config_path: PathBuf,
+    pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
+    pub(crate) pets: Vec<pixtuoid_scene::pet::Pet>,
     /// The resolved set of CONNECTED source ids (registry names). A disconnected
     /// source's events are dropped + its sprites evicted.
-    pub connected: HashSet<String>,
+    pub(crate) connected: HashSet<String>,
     /// Where the warn-floor log lives, which the Sources panel reads for each
     /// source's drift history. `None` = no log.
-    pub log: Option<crate::run_log::LogLocation>,
+    pub(crate) log: Option<crate::run_log::LogLocation>,
     /// The sources this run's decode drift has named, for the footer nudge.
-    pub drift: crate::doctor::DriftSeen,
+    pub(crate) drift: crate::doctor::DriftSeen,
     /// First launch ever (no `[sources]` flags persisted yet) — the TUI plays the
     /// one-time onboarding "move-in" overlay. Ignored by headless + `floating`.
-    pub first_run: bool,
+    pub(crate) first_run: bool,
     /// Resolved `[audio]` settings — muted defaults TRUE (the lazy spawn waits for the
     /// first `m`), volume pre-clamped by `config::resolve_audio`. Headless ignores it.
-    pub audio: crate::config::AudioConfig,
+    pub(crate) audio: crate::config::AudioConfig,
     /// Resolved by `config::resolve_graphics`. Headless and `floating` ignore it.
-    pub graphics: crate::GraphicsMode,
+    pub(crate) graphics: crate::GraphicsMode,
     /// Resolved by `config::resolve_motion`; `auto` is what the TUI's graphics
     /// plan affords, and Full in the floating window.
-    pub motion: crate::config::MotionMode,
+    pub(crate) motion: crate::config::MotionMode,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the persisted
@@ -68,22 +68,22 @@ pub struct RunConfig {
 /// always valid (insert/remove/contains never panic), and losing it would mass-evict
 /// the office.
 #[derive(Debug, Clone, Default)]
-pub struct ConnectedSources(Arc<Mutex<HashSet<String>>>);
+pub(crate) struct ConnectedSources(Arc<Mutex<HashSet<String>>>);
 
 impl ConnectedSources {
-    pub fn new(initial: HashSet<String>) -> Self {
+    pub(crate) fn new(initial: HashSet<String>) -> Self {
         Self(Arc::new(Mutex::new(initial)))
     }
     fn guard(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
-    pub fn is_connected(&self, source_id: &str) -> bool {
+    pub(crate) fn is_connected(&self, source_id: &str) -> bool {
         self.guard().contains(source_id)
     }
-    pub fn snapshot(&self) -> HashSet<String> {
+    pub(crate) fn snapshot(&self) -> HashSet<String> {
         self.guard().clone()
     }
-    pub fn set(&self, source_id: &str, connected: bool) {
+    pub(crate) fn set(&self, source_id: &str, connected: bool) {
         let mut g = self.guard();
         if connected {
             g.insert(source_id.to_string());

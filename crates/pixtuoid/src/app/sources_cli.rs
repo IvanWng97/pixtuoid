@@ -1,20 +1,20 @@
-//! The scriptable sources-CLI presenters over `pixtuoid::sources` (the TUI-free
+//! The scriptable sources-CLI presenters over `crate::sources` (the TUI-free
 //! core): `setup` / `sources [set]` / the shared `connect`/`disconnect` runner.
 //! A SIBLING of `sources.rs`, kept out of it on purpose so the core stays
 //! presenter-free. The `--json` row shape is the typed
-//! [`pixtuoid::sources::OutcomeRow`] wire contract.
+//! [`crate::sources::OutcomeRow`] wire contract.
 
 use std::io::Write;
 use std::path::Path;
 
+use crate::{config, sources};
 use anyhow::Result;
-use pixtuoid::{config, sources};
 
 /// `pixtuoid setup [--yes]` — the headless onboarding twin. Without `--yes` it is
 /// a DRY RUN: writing to another tool's config is opt-in. Exits non-zero if any
 /// connect fails, so a `$?`-checking caller gets a real signal.
 pub(crate) fn run_setup(yes: bool) -> Result<()> {
-    let mut out = pixtuoid::cli_stdout();
+    let mut out = crate::cli_stdout();
     let detected = sources::detect();
     if detected.is_empty() {
         writeln!(
@@ -55,12 +55,12 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
 
 /// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
 pub(crate) fn run_sources_list(json: bool) -> Result<()> {
-    let mut out = pixtuoid::cli_stdout();
+    let mut out = crate::cli_stdout();
     let cfg = config::config_path();
     // An unreadable log leaves `health` under-reported, so say so instead of
     // returning a silent clean bill — via tracing, never stdout, because `--json`
     // stdout is the frozen Raycast array.
-    let (log, log_warning) = pixtuoid::run_log::LogLocation::from_env().read();
+    let (log, log_warning) = crate::run_log::LogLocation::from_env().read();
     if let Some(w) = log_warning {
         tracing::warn!("{w}");
     }
@@ -141,7 +141,7 @@ fn report_batch(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
 /// Print an [`sources::OutcomeRow`] batch as a text table or the `--json` array —
 /// the schema-backed envelope the Raycast extension parses back.
 fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
-    let mut out = pixtuoid::cli_stdout();
+    let mut out = crate::cli_stdout();
     if json {
         writeln!(out, "{}", serde_json::to_string_pretty(rows)?)?;
     } else {
