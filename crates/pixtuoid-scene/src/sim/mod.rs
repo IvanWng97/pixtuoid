@@ -785,8 +785,9 @@ pub(crate) struct Cues {
     pub(crate) planted_foot: Option<usize>,
 }
 
-/// What rides on `agent`, whose `w`-wide frame stands at `top_left` this tick, in paint order: dust underfoot, then a
-/// burning head's crown, then a sleeper's z or a waiter's mark.
+/// What rides on `agent`, whose `w`-wide frame stands at `top_left` this
+/// tick, in paint order: dust underfoot, then a burning head's crown, then a
+/// sleeper's z or a waiter's mark.
 pub(crate) fn character_effects(
     agent: &AgentSlot,
     top_left: Point,
@@ -813,11 +814,13 @@ pub(crate) fn character_effects(
     out
 }
 
-/// A sitter's poses, each a base [`Seat::sprite_for`](seat::Seat::sprite_for)
-/// turns to its seat's view: upright, typing, and the two sleeps an agent's id
-/// splits between, so a row of sleepers isn't one pose.
+/// A sitter upright: a base [`Seat::sprite_for`](seat::Seat::sprite_for)
+/// turns to its seat's view, as it does each of these poses.
 const SEATED: &str = "seated";
+/// A sitter typing.
 const TYPING: &str = "typing";
+/// A sitter asleep, split between by agent id so a row of sleepers isn't one
+/// pose.
 const SLEEPS: [&str; 2] = ["seated_sleeping", "seated_sleeping_alt"];
 /// Every pose a seat resolves.
 #[cfg(test)]
