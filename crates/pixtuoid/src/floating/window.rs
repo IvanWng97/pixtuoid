@@ -686,7 +686,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .clock
             .poll(Instant::now(), SystemTime::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        if paint {
+        if let Some(due) = paint {
+            self.jank.due_at(due);
             self.request_redraw();
         }
     }

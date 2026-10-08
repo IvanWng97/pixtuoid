@@ -330,6 +330,7 @@ impl OutsideCache {
         }
         let views: Views = outside
             .views()
+            .into_iter()
             .map(|(bay, view)| (bay, Arc::new(view)))
             .collect();
         self.last = Some(Last {
@@ -415,9 +416,12 @@ impl Outside {
         }
     }
 
-    /// Each of the wall's bays, and what its glass shows.
-    pub(crate) fn views(&self) -> impl Iterator<Item = (WindowBay, WindowView)> + '_ {
-        self.bays.iter().map(|&bay| (bay, self.through(bay)))
+    /// Each of the wall's bays, and what its glass shows, the bays drawn
+    /// across the cores ([`crate::par`]).
+    pub(crate) fn views(&self) -> Vec<(WindowBay, WindowView)> {
+        crate::par::map(&self.bays, crate::par::cores(), |&bay| {
+            (bay, self.through(bay))
+        })
     }
 
     /// What `bay`'s glass shows: each part of the outside, back to front, in
