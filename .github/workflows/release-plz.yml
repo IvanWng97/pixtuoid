@@ -72,7 +72,7 @@ jobs:
           formula="$(curl -fsSL --retry 3 \
             https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/p/pixtuoid.rb)"
           subs="$(sed -n '/^  test do/,/^  end/p' <<<"$formula" \
-            | grep -oE 'pixtuoid("?, "| )[a-z][a-z0-9-]*' \
+            | { grep -oE 'pixtuoid("?, "| )[a-z][a-z0-9-]*' || true; } \
             | sed -E 's/^pixtuoid("?, "| )//' | sort -u)"
           if [ -z "$subs" ]; then
             echo "::error::found no pixtuoid subcommand in homebrew-core's test block; its shape changed"
