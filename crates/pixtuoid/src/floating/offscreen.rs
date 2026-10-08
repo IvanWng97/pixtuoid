@@ -271,8 +271,8 @@ impl OfficeRenderer {
                 audio_audible,
                 volume_flash,
                 warning,
-                FOOTER_KEYS,
-                FOOTER_KEYS,
+                super::input::footer_keys(),
+                super::input::footer_keys(),
             ),
         );
         build_footer(&inputs, budget)
@@ -511,10 +511,6 @@ pub(crate) fn sync_floor_caps(
 /// one-pixel shadow keeps it legible over bright windows and plants.
 const TEXT_SHADOW: Rgb = Rgb { r: 0, g: 0, b: 0 };
 
-/// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
-/// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
-/// footer model; everything else is TUI-identical.
-const FOOTER_KEYS: &str = " [p]ause [m]ute [+/-]vol ";
 /// Breathing room from the window edges for the footer band — both the paint and the
 /// [`footer_budget`] column math read it, so they can't drift.
 const FOOTER_MARGIN_PX: usize = 6;
@@ -1627,7 +1623,15 @@ mod tests {
         scene.agents.insert(slot.agent_id, slot);
         let inputs = FooterInputs::new(
             &scene,
-            FooterContext::new(&scene, None, true, None, None, FOOTER_KEYS, FOOTER_KEYS),
+            FooterContext::new(
+                &scene,
+                None,
+                true,
+                None,
+                None,
+                crate::floating::input::footer_keys(),
+                crate::floating::input::footer_keys(),
+            ),
         );
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w, Face::Screen.cell(1)));
