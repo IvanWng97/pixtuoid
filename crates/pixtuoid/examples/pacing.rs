@@ -231,7 +231,6 @@ fn run(
         case.cell,
         pets,
         Arc::clone(pack),
-        false,
     )?;
     r.set_weather(WeatherPolicy::Forced(Weather::Storm));
     r.set_motion(case.motion);
@@ -297,7 +296,6 @@ fn real_clock(
         HALF_BLOCK_CELL,
         vec![Pet::defaulted(PetKind::Cat)],
         Arc::clone(pack),
-        false,
     )?;
     r.set_weather(WeatherPolicy::Forced(Weather::Storm));
     r.set_motion(Motion::Full);
@@ -697,7 +695,6 @@ fn hitch(path: &Path) -> Result<()> {
             term.cell,
             pets,
             Arc::clone(&pack),
-            run.lofi,
         )?;
         r.set_weather(run.weather);
         r.set_motion(run.motion);
@@ -708,6 +705,8 @@ fn hitch(path: &Path) -> Result<()> {
                 use pixtuoid_scene::audio::{
                     BUILD_SEED, TrackId, bank::TrackBeds, dsp::NoiseStream,
                 };
+                // As the audio thread does.
+                pixtuoid::dev::yield_to_frames();
                 let mut rng = NoiseStream::new(BUILD_SEED);
                 let mut builds = Vec::new();
                 let mut n = 0u64;

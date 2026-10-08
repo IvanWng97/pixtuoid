@@ -32,7 +32,6 @@ fn whole_frame(c: &mut Criterion) {
             CELL,
             vec![],
             Arc::clone(&pack),
-            false,
         )
         .expect("a 16x cutaway");
         warm(&mut r, &scene, &pack, now);

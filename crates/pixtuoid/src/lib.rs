@@ -38,6 +38,7 @@ pub(crate) mod version;
 /// reports. Not an API: it moves with them.
 #[doc(hidden)]
 pub mod dev {
+    pub use crate::audio::yield_to_frames;
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
     pub use crate::floating::offscreen::{
