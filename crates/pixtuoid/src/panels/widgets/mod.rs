@@ -187,7 +187,7 @@ fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_o
 /// (`panel::RESERVED_FOOTER_ROWS`) is only half the rule — the silhouette is offset a row
 /// further DOWN.
 fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
-    let bounds = crate::tui::renderer::scene_rect(f.area());
+    let bounds = crate::panels::scene_rect(f.area());
     let sx = area.x.saturating_add(SHADOW_OFFSET);
     let sy = area.y.saturating_add(SHADOW_OFFSET);
     let last_row = sy.saturating_add(area.height.saturating_sub(1));

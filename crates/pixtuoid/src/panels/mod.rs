@@ -16,6 +16,44 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use pixtuoid_scene::theme;
 use ratatui::layout::Rect;
 
+/// How many rows at the bottom of a surface of cells the status footer owns.
+pub(crate) const FOOTER_ROWS: u16 = 1;
+
+/// `full` less its footer rows: where the office and the panels are.
+pub(crate) fn scene_rect(full: Rect) -> Rect {
+    Rect {
+        x: 0,
+        y: 0,
+        width: full.width,
+        height: full.height.saturating_sub(FOOTER_ROWS),
+    }
+}
+
+/// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
+/// Prevents ratatui's "index outside of buffer" panic when label/notice widgets
+/// land near the right or bottom edge.
+pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
+    if rect.x >= bounds.x + bounds.width || rect.y >= bounds.y + bounds.height {
+        return None;
+    }
+    if rect.x + rect.width <= bounds.x || rect.y + rect.height <= bounds.y {
+        return None;
+    }
+    let x = rect.x.max(bounds.x);
+    let y = rect.y.max(bounds.y);
+    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
+    let bot = (rect.y + rect.height).min(bounds.y + bounds.height);
+    if right <= x || bot <= y {
+        return None;
+    }
+    Some(Rect {
+        x,
+        y,
+        width: right - x,
+        height: bot - y,
+    })
+}
+
 /// One frame's open panels, as [`paint_overlays`] draws them.
 pub(crate) struct OverlayFrame<'a> {
     pub(crate) theme_picker: Option<usize>,
