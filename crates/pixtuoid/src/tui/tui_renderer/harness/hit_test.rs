@@ -1,7 +1,9 @@
 use super::*;
 use crate::tui::geometry::CellArea;
 use crate::tui::hit_test::SceneHit;
+use crate::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_scene::display::HoverTarget;
+use pixtuoid_scene::floor::PerFloor;
 
 #[test]
 fn furniture_hit_test_resolves_against_rendered_layout() {
