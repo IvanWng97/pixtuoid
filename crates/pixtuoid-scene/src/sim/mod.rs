@@ -813,6 +813,16 @@ pub(crate) fn character_effects(
     out
 }
 
+/// A sitter's poses, each a base [`Seat::sprite_for`](seat::Seat::sprite_for)
+/// turns to its seat's view: upright, typing, and the two sleeps an agent's id
+/// splits between, so a row of sleepers isn't one pose.
+const SEATED: &str = "seated";
+const TYPING: &str = "typing";
+const SLEEPS: [&str; 2] = ["seated_sleeping", "seated_sleeping_alt"];
+/// Every pose a seat resolves.
+#[cfg(test)]
+pub(crate) const SEATED_POSES: [&str; 4] = [SEATED, TYPING, SLEEPS[0], SLEEPS[1]];
+
 /// A person's walks, the sim's pick by the leg: facing the camera, walking
 /// away, carrying a coffee.
 const WALK: &str = "walking";
@@ -884,14 +894,10 @@ pub(crate) fn resolve_characters(
             Pose::SeatedIdle if is_waiting => {
                 // Waiting is the one state that WANTS the human — the `N wait`
                 // counter's twin. Asleep-with-zzz reads as the opposite.
-                placements.push(seated("seated", CharacterGlow::None, None));
+                placements.push(seated(SEATED, CharacterGlow::None, None));
             }
             Pose::SeatedIdle => {
-                let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
-                    "seated_sleeping"
-                } else {
-                    "seated_sleeping_alt"
-                };
+                let sleep_variant = SLEEPS[usize::from(agent.agent_id.raw() % 2 != 0)];
                 placements.push(seated(
                     sleep_variant,
                     CharacterGlow::None,
@@ -899,10 +905,10 @@ pub(crate) fn resolve_characters(
                 ));
             }
             Pose::SeatedThinking => {
-                placements.push(seated("seated", CharacterGlow::Thinking, None));
+                placements.push(seated(SEATED, CharacterGlow::Thinking, None));
             }
             Pose::SeatedTyping => {
-                let (mut placement, cues) = seated("typing", CharacterGlow::Tool, None);
+                let (mut placement, cues) = seated(TYPING, CharacterGlow::Tool, None);
                 // the art the seat resolved to, a back view's own loop included
                 placement.frame_idx = pack
                     .animation(placement.anim_name)
@@ -917,7 +923,7 @@ pub(crate) fn resolve_characters(
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let upright_top_left = seat.render_top_left(CHARACTER_SPRITE_W);
-                    let (anim_name, flip_x) = seat.sprite_for("seated");
+                    let (anim_name, flip_x) = seat.sprite_for(SEATED);
                     let top_left = Point {
                         x: upright_top_left.x.saturating_add_signed(dx),
                         y: upright_top_left.y,

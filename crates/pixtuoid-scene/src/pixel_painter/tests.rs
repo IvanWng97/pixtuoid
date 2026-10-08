@@ -374,7 +374,7 @@ fn every_sprite_a_seat_resolves_to_is_in_the_pack() {
         )
     });
     for seat in seats {
-        for base in ["seated", "typing", "seated_sleeping"] {
+        for base in crate::sim::SEATED_POSES {
             let (anim, _) = seat.sprite_for(base);
             assert!(pack.animation(anim).is_some(), "{seat:?} {base} → {anim}");
         }

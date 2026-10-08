@@ -11,7 +11,7 @@ use crate::grid::Grid;
 /// Compositing a `Frame` onto an `RgbBuffer`, skipping transparent pixels.
 pub mod blit;
 pub mod error;
-/// Sprite-pack file format: `pack.toml` + `.sprite` parsing and pack loading.
+/// Sprite-pack file format: `pack.toml` + `.sprite` parsing and in-memory pack building.
 pub mod format;
 
 /// An opaque 24-bit color.

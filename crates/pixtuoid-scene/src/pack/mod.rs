@@ -400,11 +400,11 @@ mod tests {
     /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
+        let (_, dropped) = density_art::bundled_without_density_art(include_str!(
+            "../../sprites/default/pack.toml"
+        ));
+        assert!(!dropped.is_empty(), "the bundled pack ships density art");
         let (toml, srcs) = base_pack_srcs();
-        assert!(
-            srcs.len() < bundled_sprite_srcs().len(),
-            "the bundled pack ships density art"
-        );
         let pack = load_pack_from_strings(&toml, &srcs).expect("loads without density art");
         assert_eq!(pack.max_density_variant(), Density::ONE);
         assert!(
