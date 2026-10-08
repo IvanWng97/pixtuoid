@@ -10,7 +10,6 @@ optional** — omit a key to use its default. CLI flags override the file
 ```toml
 theme = "cyberpunk"
 max-desks = 8
-pack-dir = "~/.config/pixtuoid/packs/robot"
 
 # One stanza per pet. Omit the whole section to show all pets with default
 # names; use `pets = []` to disable all pets. `name` is optional (shown in
@@ -29,7 +28,6 @@ kind = "dog"        # name omitted → "Office Dog"
 |-----|---------|-------------|
 | `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
 | `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
-| `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. Without it, a pack in `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` is used when present, and the bundled one if that fails to load. See [Custom sprite packs](#custom-sprite-packs). |
 | `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. Terminal graphics need macOS or Linux; on Windows `run` and `doctor` stay classic. `pixtuoid doctor` shows what your terminal supports. |
 | `motion` | `"auto"` | How much of the office's ambient life moves — flickers, twinkles, idle wandering, lightning. `full` moves all of it; `calm` plays it at a quarter of the pace, with a quarter of the repaints; `still` holds it still and flashes no lightning, for reduced motion. Agents still walk where they're going. `auto` is `full`, except `calm` over SIXEL or iTerm2 graphics, inside tmux or over ssh; the floating window's `auto` is `full`. An unknown value is ignored with a warning. |
 | `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
@@ -50,98 +48,6 @@ Press `t` in the TUI to switch themes with a live preview picker (`j`/`k` or
 across sessions. Override for a single run with `--theme <name>`. Six themes ship
 built-in: `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`,
 `gruvbox`.
-
-## Custom sprite packs
-
-Create your own character sprites:
-
-```bash
-pixtuoid init-pack ./my-pack     # extract skeleton template
-# edit the .sprite files in ./my-pack
-pixtuoid validate-pack ./my-pack # check for missing animations
-pixtuoid run --pack-dir ./my-pack
-```
-
-A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`.
-
-Characters are recolored per agent by palette key: whatever a pack draws with `B`
-(shirt), `H` (hair), `S` (skin) or `P` (pants) takes each agent's colors, and
-every other key keeps the pack's color, even one with the same RGB. A `[ramps]`
-entry such as `"h" = { of = "H", level = -1 }` is a key with no color of its own:
-`H` one step darker and cooler (a positive level is lighter and warmer), so it
-follows whatever color replaces `H`. `of` must name a key with an opaque color in
-`[palette]`, and a key is declared in one table, never both.
-
-A pack can also redraw an animation on a denser grid, registered as
-`<name>@<N>x` (`desk@4x` is `desk` drawn on a 4x grid). Each frame is exactly
-`N` times the size of the matching base frame, and the frame counts match;
-`validate-pack` reports a variant that breaks either rule, and it is never
-drawn. The classic renderers — the half-block terminal office and the site's
-live office — draw the base art. Variants are for the pixel-graphics cutaway,
-which the `floating` window paints, and `run --graphics` over kitty's
-graphics protocol, SIXEL or iTerm2's inline images: it takes the
-densest variant whose `N` divides its render scale and draws it as it is — a
-variant carries its own front, where a desk's top-down base art gets a front
-face derived under it. The recolor keys and `[ramps]` apply at every density.
-A variant plays its base's `frame_ms` and `stride`, and `validate-pack` warns
-on one that sets them apart (a single-frame base's `frame_ms`, which nothing
-steps, excepted); it also warns on a looping animation whose
-`frame_ms` is not a whole number of the office's beats.
-
-A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
-mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
-
-A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, and draws its lamp's bulb in palette key `9`, at every density: the lamp's pool centres on those pixels. Without the marks neither look stands the props, without the bulb neither look lights the lamp, and `validate-pack` warns of each.
-
-`desk_north` is `desk` seen from its sitter's side, so it stands its props
-mirrored, each mark naming the prop's bottom-right cell instead of its
-bottom-left; a `desk_north` marked before this needs its marks moved there. `desk_front` is drawn over a `desk`'s props on the desk's own
-canvas: whatever of the desk stands between the viewer and its sitter's props,
-the bundled one its monitor. It comes only with the desk it covers, so a pack
-with a `desk` of its own and no `desk_front` draws its props over the desk.
-
-A walk (a person's `walking`, `walking_back` and `walking_coffee`, a pet's
-`cat_walk` and `dog_walk`, the gateway mascot's `lobster_walk`) takes
-`stride = <pixels>`: how far, on the base grid, the walker travels in one full
-cycle of its frames. Its frames, and its `@Nx` variants', then step by the
-ground covered, not by `frame_ms`. A walk without one steps on its `frame_ms`,
-and `validate-pack` warns that its feet slide.
-
-A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
-its `@frame` block, at column `x` and row `y` from the frame's top-left. A
-frame names each mark once. `head.<view>` is its head, with `view` one of
-`front`, `back`, `side` or `crown`; a frame has at most one.
-
-A pack can dress its variant characters in hairstyles. A
-`[hairstyles."<name>@<N>x"]` table gives any of the views a `behind` layer, drawn
-under the body, and an `over` layer, drawn on top. Each layer is a one-frame
-sprite marking its own head in that view, and it is laid mark on mark on the
-frame's. Every agent wears one of the pack's styles, picked by name from its id,
-so a pack ships the same styles at every density it dresses. The layers take
-the agent's recolor as the body does. A frame whose view its style leaves out is
-drawn bare, as is a variant frame with no head mark, and a layer reaching past
-the frame's sides is cut off: `validate-pack` warns of each, and fails a style
-at a density the pack draws no character at.
-
-`[characters] outline = "<key>"` draws one line round every marked variant
-frame, bare or dressed: a pack that sets it draws its bodies and layers
-unoutlined, so no line runs between hair and face. A dressed frame may rise
-above its body's box, by the hair and the line over it. Base art is never
-dressed or outlined, and a custom pack never wears the default pack's styles.
-
-A pack can also ship the city seen through the office's windows. `[city]` names
-the palette key of each of its seven materials — `facade`, `shade`, `roof`,
-`glass`, `mullion`, `detail` and `sign` — and a building is drawn in those keys
-alone, since its colours come from its depth and the sky rather than the pack.
-`[buildings.<name>]` is one building: a one-frame `sprite` and the `planes`
-(`"mid"`, `"near"`) it may stand in. `[buildings."<name>@<N>x"]` redraws its
-sprite at exactly `N` times the size. A building that breaks these rules fails
-the pack's load. Each connected run of `glass` is one window, and more of them
-burn as night falls. How tall the city stands is a share of the window, so a
-short window shows the tops of the towers and a tall one shows them whole. Every window
-looks out on one city, the pack's buildings standing in front of plain blocks
-on the horizon. A pack with no `[buildings]` of its own takes the bundled city
-whole, materials and all.
 
 ## Logging & troubleshooting
 
@@ -164,7 +70,7 @@ and the full error is in the log file.
 Crashes are reported separately, to `crash.log` in the same directory as the
 default log path.
 
-Non-TUI commands (`--headless`, `validate-pack`, …) log to stderr directly.
+Non-TUI commands (`--headless`, `doctor`, …) log to stderr directly.
 
 ### `pixtuoid connect` says it can't locate `pixtuoid-hook`
 

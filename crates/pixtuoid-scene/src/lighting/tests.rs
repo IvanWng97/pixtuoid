@@ -97,7 +97,7 @@ fn desk_art_without_a_bulb_lights_no_lamp() {
     assert_eq!(
         unlit,
         ["desk", "desk_north"],
-        "validate-pack names each unlit desk"
+        "validation names each unlit desk"
     );
     for facing in [Facing::North, Facing::South] {
         assert!(

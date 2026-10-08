@@ -658,9 +658,7 @@ mod tests {
 
     /// The bundled pack's densest art, which the window draws at.
     fn density() -> Density {
-        pixtuoid_scene::pack::load_bundled_pack()
-            .expect("bundled pack loads")
-            .max_density_variant()
+        crate::test_flash::pack().max_density_variant()
     }
 
     /// The window's geometry for an office `size` units big, at the test

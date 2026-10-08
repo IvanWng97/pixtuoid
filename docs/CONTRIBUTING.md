@@ -159,11 +159,13 @@ our release never builds. Two consequences:
   adding a system-library dependency needs a matching `depends_on` in the core
   formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
-  contract" comments at `crates/pixtuoid/src/validate.rs`,
-  `crates/pixtuoid/src/app/sources_cli.rs`,
+  contract" comments at `crates/pixtuoid/src/app/sources_cli.rs`,
   `crates/pixtuoid-core/src/source/codex.rs`. Change homebrew-core's `test do`
   first, against the released version, so the next autobump stays green; the
   packaging-build action replays the block, so it changes in the same PR.
+  **Before the next tag:** their block still runs `init-pack` and
+  `validate-pack`, which pixtuoid no longer has; a core PR dropping those two
+  lines lands first.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the

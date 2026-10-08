@@ -2,8 +2,6 @@
 //! A variant that wraps a cause keeps the cause out of its own message, so
 //! `{:#}` prints each step of the chain once.
 
-use std::path::{Path, PathBuf};
-
 use super::HeadView;
 use super::format::{DENSITY_VARIANT_SEP, Material, PACK_MANIFEST};
 
@@ -11,68 +9,13 @@ use super::format::{DENSITY_VARIANT_SEP, Material, PACK_MANIFEST};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PackError {
-    /// A pack file could not be read.
-    #[error("reading {}", path.display())]
-    #[non_exhaustive]
-    Read {
-        /// `pack.toml` as joined onto the pack directory, or a frame file as
-        /// resolved.
-        path: PathBuf,
-        /// The OS error.
-        #[source]
-        source: std::io::Error,
-    },
-    /// The pack directory holds no [`PACK_MANIFEST`], or does not exist.
-    #[error("{} holds no {PACK_MANIFEST}", dir.display())]
-    #[non_exhaustive]
-    NoManifest {
-        /// The directory.
-        dir: PathBuf,
-    },
-    /// The pack directory could not be canonicalized.
-    #[error("canonicalizing {}", path.display())]
-    #[non_exhaustive]
-    Canonicalize {
-        /// The directory.
-        path: PathBuf,
-        /// The OS error.
-        #[source]
-        source: std::io::Error,
-    },
-    /// A frame file's path could not be resolved: where a frame file the
-    /// manifest names but the pack lacks lands.
-    #[error("resolving {}", path.display())]
-    #[non_exhaustive]
-    Resolve {
-        /// The frame file's path under the pack directory.
-        path: PathBuf,
-        /// The OS error.
-        #[source]
-        source: std::io::Error,
-    },
     /// `pack.toml` is not valid TOML, or does not match the manifest schema.
-    #[error("parsing {}", path.as_deref().map_or(Path::new(PACK_MANIFEST), |p| p).display())]
+    #[error("parsing {PACK_MANIFEST}")]
     #[non_exhaustive]
     Manifest {
-        /// The manifest's path; `None` for an in-memory pack.
-        path: Option<PathBuf>,
         /// The parser's diagnostic.
         #[source]
         source: toml::de::Error,
-    },
-    /// A frame path has a `..` component, wherever it sits.
-    #[error("frame path {file:?} contains '..' and is not allowed")]
-    #[non_exhaustive]
-    FramePathParent {
-        /// The frame path as the manifest names it.
-        file: String,
-    },
-    /// A frame path resolves outside the pack directory, as through a symlink.
-    #[error("frame path {file:?} escapes the pack directory")]
-    #[non_exhaustive]
-    FramePathEscapes {
-        /// The frame path as the manifest names it.
-        file: String,
     },
     /// An in-memory pack names a frame it was not given.
     #[error("missing embedded frame {file}")]
@@ -475,25 +418,9 @@ mod tests {
 
     /// Every error with a cause, built once — a new wrapping variant joins here.
     fn wrapping() -> Vec<PackError> {
-        let io = || std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
         let toml = toml::from_str::<toml::Table>("= broken").expect_err("not TOML");
         vec![
-            PackError::Read {
-                path: "p/pack.toml".into(),
-                source: io(),
-            },
-            PackError::Canonicalize {
-                path: "p".into(),
-                source: io(),
-            },
-            PackError::Resolve {
-                path: "p/f.sprite".into(),
-                source: io(),
-            },
-            PackError::Manifest {
-                path: None,
-                source: toml,
-            },
+            PackError::Manifest { source: toml },
             PackError::Color {
                 key: "A".into(),
                 source: ColorError::Hex {

@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::num::NonZeroU16;
-#[cfg(feature = "native")]
-use std::path::Path;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -371,31 +369,6 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_without_a_city_inherits_the_whole_city() {
-        let city = city_pack(
-            &format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n"),
-            &[("t.sprite", TOWER)],
-        )
-        .expect("the city pack loads");
-        let mut bare = city_pack("", &[]).expect("a pack with no city loads");
-        bare.merge_from(&city);
-        assert_eq!(bare.buildings().count(), 1, "its buildings");
-        assert!(
-            bare.city_materials().is_some(),
-            "with the materials they are drawn in"
-        );
-
-        let mut own = city_pack(
-            &format!("{CITY}[buildings.walkup]\nsprite=\"t.sprite\"\nplanes=[\"mid\"]\n"),
-            &[("t.sprite", TOWER)],
-        )
-        .expect("a pack with its own city loads");
-        own.merge_from(&city);
-        let names: Vec<_> = own.buildings().map(Building::name).collect();
-        assert_eq!(names, ["walkup"], "a city of its own is kept whole");
-    }
-
-    #[test]
     fn a_hairstyle_loads_its_layers_per_view_at_its_density() {
         let pack = hair_pack(
             "[characters]\noutline=\"k\"\n\
@@ -476,21 +449,6 @@ mod tests {
             .is_ok(),
             "one style at two densities"
         );
-    }
-
-    #[test]
-    fn merge_from_never_dresses_a_pack_in_anothers_styles() {
-        let styled = hair_pack(
-            "[hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n",
-            &[
-                ("f.sprite", "@frame 0\nH\n"),
-                ("o.sprite", "@frame 0\n@mark head.front 0 0\nH\n"),
-            ],
-        )
-        .expect("loads");
-        let mut bare = hair_pack("", &[("f.sprite", "@frame 0\nH\n")]).expect("loads");
-        bare.merge_from(&styled);
-        assert!(bare.hairstyles().next().is_none());
     }
 
     fn ramp_pack(palette: &str, ramps: &str, sprite: &str) -> anyhow::Result<Pack> {
@@ -596,9 +554,8 @@ mod tests {
         }
     }
 
-    /// Pack keys are untrusted, and these errors reach the terminal through
-    /// `validate-pack`: a key that is an ESC or a bidi override must come out
-    /// escaped, never raw.
+    /// A key that is an ESC or a bidi override comes out escaped in every ramp
+    /// error, never raw.
     #[test]
     fn a_control_character_key_is_escaped_in_every_ramp_error() {
         for ramps in [
@@ -1009,9 +966,6 @@ impl HairLayers {
 
 impl Pack {
     /// The buildings of the city behind the windows, in name order.
-    /// [`merge_from`](Self::merge_from) inherits them only with their
-    /// [`city_materials`](Self::city_materials), into a pack with no city of
-    /// its own.
     pub fn buildings(&self) -> impl Iterator<Item = &Building> {
         self.buildings.values()
     }
@@ -1022,8 +976,6 @@ impl Pack {
     }
 
     /// The pack's hairstyles, every density of each, in name order.
-    /// [`merge_from`](Self::merge_from) never inherits one: a pack's characters
-    /// are dressed only in its own.
     pub fn hairstyles(&self) -> impl Iterator<Item = &Hairstyle> {
         self.hairstyles.values()
     }
@@ -1049,8 +1001,7 @@ impl Pack {
         self.icons.keys().map(String::as_str)
     }
 
-    /// The palette the pack's own frames were drawn with. An animation
-    /// inherited by [`merge_from`](Self::merge_from) keeps its own.
+    /// The palette the pack's frames were drawn with.
     pub fn palette(&self) -> &Palette {
         &self.palette
     }
@@ -1113,42 +1064,7 @@ impl Pack {
         self.densities = densities.into_iter().rev().collect();
     }
 
-    /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] and [`OPTIONAL_CREATURE_ANIMATIONS`]
-    /// — and their density variants —
-    /// from `base` into self: the keys `RegisteredKey::is_inherited` passes;
-    /// and `base`'s whole city, its buildings and `[city]`, when self has no
-    /// buildings.
-    ///
-    /// Driven by what `base` HAS rather than by the registry: the registry names
-    /// PIECES, not the densities each is drawn at, so enumerating from it would
-    /// probe every piece at every density to find the few `base` ships.
-    pub fn merge_from(&mut self, base: &Pack) {
-        let inherited: Vec<(String, Sprite)> = base
-            .animations
-            .iter()
-            .filter(|(name, _)| RegisteredKey::parse(name).is_some_and(RegisteredKey::is_inherited))
-            .filter(|(name, _)| {
-                !self.animations.contains_key(*name)
-                    && self.own_redrawn_piece(name).is_none()
-                    && self.own_overlaid_piece(name).is_none()
-            })
-            .map(|(name, sprite)| (name.clone(), sprite.clone()))
-            .collect();
-        self.animations.extend(inherited);
-        self.count_densities();
-        // A city comes whole or not at all: its buildings are drawn in its own
-        // `[city]` materials, which a pack with a city of its own renames.
-        if self.buildings.is_empty() {
-            self.buildings = base.buildings.clone();
-            self.city_materials = base.city_materials.clone();
-        }
-    }
-
-    /// The piece of this pack's own that `name` redraws, if it ships one. Art
-    /// that redraws another piece only comes along with that piece: over this
-    /// pack's own `desk`, the default's `desk@Nx` or `desk_north` would draw the
-    /// default's desk wherever it is picked, so [`Pack::merge_from`] inherits
-    /// nothing a piece of this pack's own answers for.
+    /// The piece of this pack's own that `name` redraws, if it ships one.
     fn own_redrawn_piece<'n>(&self, name: &'n str) -> Option<&'n str> {
         redrawn_pieces(name).find(|piece| self.animations.contains_key(*piece))
     }
@@ -1205,14 +1121,7 @@ fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
     variant_base.into_iter().chain(source)
 }
 
-/// The path-traversal guard MUST stay inside `load_pack`'s `get_src`:
-/// [`load_pack_from_strings`] has no filesystem and no untrusted paths to escape.
-fn build_pack(
-    parsed: PackToml,
-    // `dyn`, not generic, so this body compiles once for both loaders instead
-    // of once per closure.
-    get_src: &mut dyn FnMut(&str) -> Result<String>,
-) -> Result<Pack> {
+fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
@@ -1522,65 +1431,7 @@ fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)
 /// The file a pack directory's manifest is read from.
 pub const PACK_MANIFEST: &str = "pack.toml";
 
-/// Load a `Pack` from `dir`'s [`PACK_MANIFEST`] and its on-disk frame files,
-/// guarding each frame path against directory traversal outside `dir`.
-///
-/// # Errors
-///
-/// [`PackError::NoManifest`] if `dir` has no [`PACK_MANIFEST`]; otherwise if a file cannot be read or parsed, a frame path leaves `dir`, or the pack fails validation.
-#[cfg(feature = "native")]
-pub fn load_pack(dir: &Path) -> Result<Pack> {
-    let toml_path = dir.join(PACK_MANIFEST);
-    let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            PackError::NoManifest {
-                dir: dir.to_owned(),
-            }
-        } else {
-            PackError::Read {
-                path: toml_path.clone(),
-                source,
-            }
-        }
-    })?;
-    let parsed: PackToml = toml::from_str(&toml_src).map_err(|source| PackError::Manifest {
-        path: Some(toml_path.clone()),
-        source,
-    })?;
-
-    let canon_dir = dir
-        .canonicalize()
-        .map_err(|source| PackError::Canonicalize {
-            path: dir.to_owned(),
-            source,
-        })?;
-
-    build_pack(parsed, &mut |fname| {
-        if Path::new(fname)
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
-        {
-            return Err(PackError::FramePathParent {
-                file: fname.to_owned(),
-            });
-        }
-        let path = dir.join(fname);
-        let canon_path = path
-            .canonicalize()
-            .map_err(|source| PackError::Resolve { path, source })?;
-        if !canon_path.starts_with(&canon_dir) {
-            return Err(PackError::FramePathEscapes {
-                file: fname.to_owned(),
-            });
-        }
-        std::fs::read_to_string(&canon_path).map_err(|source| PackError::Read {
-            path: canon_path,
-            source,
-        })
-    })
-}
-
-/// `load_pack` from in-memory strings, so it reads no files.
+/// A `Pack` from in-memory strings: its manifest and each frame file it names.
 ///
 /// # Errors
 ///
@@ -1609,7 +1460,7 @@ fn load_from_strings(
     on_read: &mut dyn FnMut(&str),
 ) -> Result<Pack> {
     let parsed: PackToml =
-        toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
+        toml::from_str(pack_toml).map_err(|source| PackError::Manifest { source })?;
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
 
     build_pack(parsed, &mut |fname| {
@@ -1796,18 +1647,17 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
 }
 
 /// Every registered animation: the required and optional character poses, then
-/// the [`inherited_animation_names`].
+/// the [`optional_piece_names`].
 fn registered_animation_names() -> impl Iterator<Item = &'static str> {
     REQUIRED_CHARACTER_ANIMATIONS
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
         .copied()
-        .chain(inherited_animation_names())
+        .chain(optional_piece_names())
 }
 
-/// The animations [`Pack::merge_from`] inherits: the optional furniture and
-/// the optional creatures.
-fn inherited_animation_names() -> impl Iterator<Item = &'static str> {
+/// The optional furniture and the optional creatures.
+fn optional_piece_names() -> impl Iterator<Item = &'static str> {
     OPTIONAL_FURNITURE_ANIMATIONS
         .iter()
         .chain(OPTIONAL_CREATURE_ANIMATIONS)
@@ -1816,14 +1666,10 @@ fn inherited_animation_names() -> impl Iterator<Item = &'static str> {
 
 /// A pack key that names a registered animation: the animation itself, or a
 /// density variant of it (`desk@4x`). Any registered animation takes variants,
-/// since a character is redrawn at density like furniture; only furniture and
-/// creatures are inherited ([`RegisteredKey::is_inherited`]).
+/// since a character is redrawn at density like furniture.
 ///
-/// Variants are legal BY DERIVATION rather than by their own registry rows. A
-/// second list would have to be kept in step with the first, and forgetting an
-/// entry fails QUIETLY in its least visible direction: the variant loads for
-/// the bundled pack but [`Pack::merge_from`] never inherits it, so a
-/// `--pack-dir` user silently drops back to the upscale.
+/// Variants are legal BY DERIVATION rather than by their own registry rows: a
+/// second list would have to be kept in step with the first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RegisteredKey {
     /// The registered animation the key names or redraws.
@@ -1841,17 +1687,9 @@ impl RegisteredKey {
             .find(|&known| known == base)
             .map(|base| Self { base, density })
     }
-
-    /// Whether [`Pack::merge_from`] inherits this key: furniture, creatures and
-    /// their variants only, because a robot pack must not fall back to human
-    /// sprites.
-    fn is_inherited(self) -> bool {
-        inherited_animation_names().any(|n| n == self.base)
-    }
 }
 
-/// Environment/furniture animation names a pack MAY provide: the ones
-/// [`Pack::merge_from`] inherits.
+/// Environment/furniture animation names a pack MAY provide.
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "desk_north",
@@ -1894,9 +1732,9 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "meeting_chair",
 ];
 
-/// The pets' and the gateway mascots' animation names a pack MAY provide, which
-/// [`Pack::merge_from`] inherits like the furniture: they stand on their feet
-/// wherever their frame ends, so they are kept apart from it.
+/// The pets' and the gateway mascots' animation names a pack MAY provide: they
+/// stand on their feet wherever their frame ends, so they are kept apart from
+/// the furniture.
 pub const OPTIONAL_CREATURE_ANIMATIONS: &[&str] = &[
     "cat_walk",
     "cat_sit",
@@ -1982,17 +1820,15 @@ pub struct FrameCountMismatch {
 /// What draws an optional animation a pack leaves out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandIn {
-    /// The default pack's piece, which [`Pack::merge_from`] inherits.
-    DefaultPack,
-    /// The pack's own piece that this one redraws (`desk` for `desk_north`):
-    /// [`Pack::merge_from`] inherits nothing over it, and a painter draws it
-    /// ([`Pack::animation_or_source`]).
+    /// No stand-in: the piece is absent and nothing replaces it.
+    Absent,
+    /// The pack's own piece that this one redraws (`desk` for `desk_north`),
+    /// which a painter draws ([`Pack::animation_or_source`]).
     OwnPiece(&'static str),
-    /// Another of the pack's own poses: character animations are never
-    /// inherited.
+    /// Another of the pack's own poses.
     OwnPose,
-    /// Nothing: an overlay is never stood in for, so the pack's own piece it
-    /// would cover (`desk` for `desk_front`) draws bare.
+    /// The pack's own piece draws bare: an overlay is never stood in for, so
+    /// the piece it would cover (`desk` for `desk_front`) shows uncovered.
     Bare(&'static str),
 }
 
@@ -2345,12 +2181,12 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
     let missing_optional: Vec<MissingOptional> = OPTIONAL_CHARACTER_ANIMATIONS
         .iter()
         .map(|&name| (name, StandIn::OwnPose))
-        .chain(inherited_animation_names().map(|name| {
+        .chain(optional_piece_names().map(|name| {
             let stand_in = match pack.own_overlaid_piece(name) {
                 Some(piece) => StandIn::Bare(piece),
                 None => pack
                     .own_redrawn_piece(name)
-                    .map_or(StandIn::DefaultPack, StandIn::OwnPiece),
+                    .map_or(StandIn::Absent, StandIn::OwnPiece),
             };
             (name, stand_in)
         }))
@@ -2415,8 +2251,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             // Implicit min-1 floor: a `frames = []` entry deserializes and makes
             // `animation()` return Some (dodging the missing-required check)
             // while every render consumer guards with `.frames().first()` and
-            // draws nothing; an empty OPTIONAL entry also SHADOWS the bundled
-            // default in `Pack::merge_from` (`contains_key` is true).
+            // draws nothing.
             .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name)
             && anim.frames().len() < min_frames
@@ -2826,18 +2661,6 @@ mod validation_floor_tests {
         assert_eq!(RegisteredKey::parse("desk@1x"), None);
     }
 
-    /// Pins [`RegisteredKey::is_inherited`].
-    #[test]
-    fn only_furniture_and_its_variants_are_inherited() {
-        let inherited = |name| {
-            RegisteredKey::parse(name)
-                .expect("registered")
-                .is_inherited()
-        };
-        assert!(inherited("desk") && inherited("desk@4x") && inherited("phone_booth@2x"));
-        assert!(!inherited("standing") && !inherited("standing@2x"));
-    }
-
     /// Pins [`split_density_variant`]'s one spelling per density.
     #[test]
     fn a_density_with_a_leading_zero_is_not_a_variant() {
@@ -2870,75 +2693,6 @@ mod validation_floor_tests {
         assert_eq!(split_density_variant("desk@-2x"), None);
     }
 
-    /// Pins [`Pack::merge_from`]'s variant inheritance, which the bundled pack
-    /// alone never exercises.
-    #[test]
-    fn merge_from_inherits_a_density_variant_so_a_custom_pack_keeps_the_richer_art() {
-        let base = pack_with(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
-        );
-        let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        custom.merge_from(&base);
-        assert!(
-            custom.animation("desk").is_some(),
-            "the base piece inherits"
-        );
-        assert!(
-            custom.animation("desk@4x").is_some(),
-            "its density variant must inherit too"
-        );
-    }
-
-    #[test]
-    fn a_pack_that_redraws_a_piece_does_not_inherit_the_defaults_variant_of_it() {
-        let base = pack_with(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
-        );
-        let mut custom = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        custom.merge_from(&base);
-        assert!(custom.animation("desk@4x").is_none());
-    }
-
-    /// An overlay comes only with its piece's own art: over a pack's own desk,
-    /// at either density, the default's `desk_front` would draw the default's
-    /// monitor.
-    #[test]
-    fn an_overlay_is_inherited_only_with_the_piece_it_covers() {
-        let base = pack_with(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.desk_front]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk_front@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
-        );
-        let mut plant = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        plant.merge_from(&base);
-        assert!(
-            plant.animation("desk_front").is_some(),
-            "with the default desk"
-        );
-        assert!(plant.animation("desk_front@4x").is_some());
-        for own in ["desk", "\"desk@4x\""] {
-            let mut custom = pack_with(&format!(
-                "[animations.{own}]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
-            ));
-            custom.merge_from(&base);
-            for front in ["desk_front", "desk_front@4x"] {
-                assert!(
-                    custom.animation(front).is_none(),
-                    "over its own {own}, no {front}"
-                );
-            }
-        }
-        let mut desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        desk.merge_from(&base);
-        assert!(
-            desk.animation("desk_front").is_none(),
-            "over its own desk, no front"
-        );
-    }
-
     /// An overlay never stands in: a pack's own desk without its front draws
     /// bare, and nothing draws the front in its place.
     #[test]
@@ -2956,7 +2710,9 @@ mod validation_floor_tests {
 
     #[test]
     fn every_derived_piece_and_its_source_are_registered_furniture() {
-        let furniture = |name| RegisteredKey::parse(name).is_some_and(RegisteredKey::is_inherited);
+        let furniture = |name| {
+            RegisteredKey::parse(name).is_some_and(|k| optional_piece_names().any(|n| n == k.base))
+        };
         for &(derived, source) in DERIVED_PIECES {
             assert!(furniture(derived), "{derived}");
             assert!(furniture(source), "{source}");
@@ -2986,31 +2742,6 @@ mod validation_floor_tests {
         assert_eq!(plant_only.piece_or_source("desk_north"), None);
     }
 
-    /// Pins a character variant: validated, counted by
-    /// [`Pack::max_density_variant`], never inherited
-    /// ([`RegisteredKey::is_inherited`]).
-    #[test]
-    fn a_character_animation_takes_density_variants_that_are_never_inherited() {
-        let pack = pack_with_frames(
-            "[animations.typing_back]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing_back@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert!(
-            report.unknown.is_empty()
-                && report.mismatched_density.is_empty()
-                && report.mismatched_frame_counts.is_empty()
-                && report.orphan_variants.is_empty(),
-            "{report:?}"
-        );
-        assert_eq!(pack.max_density_variant(), d(2));
-
-        let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        custom.merge_from(&pack);
-        assert!(custom.animation("typing_back@2x").is_none());
-    }
-
     /// Pins [`Pack::density_variants`]: densest first, each density once, and
     /// only variants that redraw their base.
     #[test]
@@ -3032,24 +2763,6 @@ mod validation_floor_tests {
         assert_eq!(pack.max_density_variant(), d(4));
         let plain = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert!(plain.density_variants().is_empty());
-    }
-
-    /// A density inherited through [`Pack::merge_from`] counts in
-    /// [`Pack::density_variants`], which the pack keeps rather than recounts.
-    #[test]
-    fn an_inherited_variant_counts_in_the_densities() {
-        let mut own = pack_with_frames(
-            "[animations.typing]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        assert!(own.density_variants().is_empty());
-        own.merge_from(&pack_with_frames(
-            "[animations.plant]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"plant@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        ));
-        assert_eq!(own.density_variants(), [d(2)]);
-        assert_eq!(own.max_density_variant(), d(2));
     }
 
     /// Pins [`variant_redraws`]' every-frame proof.
@@ -3190,27 +2903,6 @@ mod validation_floor_tests {
     }
 
     #[test]
-    fn a_pack_that_redraws_a_desk_does_not_inherit_the_defaults_north_desk() {
-        let base = pack_with(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.desk_north]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk_north@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
-        );
-        let mut custom = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        custom.merge_from(&base);
-        assert!(custom.animation("desk_north").is_none());
-        assert!(custom.animation("desk_north@4x").is_none());
-
-        let mut bare = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        bare.merge_from(&base);
-        assert!(
-            bare.animation("desk_north").is_some(),
-            "comes along with the desk"
-        );
-        assert!(bare.animation("desk_north@4x").is_some());
-    }
-
-    #[test]
     fn an_unauthored_density_variant_is_not_reported_missing() {
         let report = validate("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert!(
@@ -3302,44 +2994,6 @@ mod validation_floor_tests {
         }
     }
 
-    /// Pins [`StandIn`] against [`Pack::merge_from`]'s own rule.
-    #[test]
-    fn a_missing_optional_piece_names_what_draws_in_its_place() {
-        let report = validate(&format!(
-            "[animations.desk]\n{ONE}[animations.meeting_sofa]\n{ONE}"
-        ));
-        let stand_in = |name: &str| {
-            report
-                .missing_optional
-                .iter()
-                .find(|m| m.name == name)
-                .unwrap_or_else(|| panic!("{name} is reported missing"))
-                .stand_in
-        };
-        assert_eq!(stand_in("desk_north"), StandIn::OwnPiece("desk"));
-        assert_eq!(
-            stand_in("meeting_sofa_north"),
-            StandIn::OwnPiece("meeting_sofa")
-        );
-        assert_eq!(stand_in("plant"), StandIn::DefaultPack);
-        assert_eq!(stand_in("cat_walk"), StandIn::DefaultPack);
-        assert_eq!(stand_in("walking_coffee"), StandIn::OwnPose);
-
-        let mut merged = pack_with(&format!(
-            "[animations.desk]\n{ONE}[animations.meeting_sofa]\n{ONE}"
-        ));
-        merged.merge_from(&pack_with(&format!(
-            "[animations.desk_north]\n{ONE}[animations.meeting_sofa_north]\n{ONE}\
-             [animations.plant]\n{ONE}"
-        )));
-        assert!(
-            merged.animation("desk_north").is_none()
-                && merged.animation("meeting_sofa_north").is_none()
-                && merged.animation("plant").is_some(),
-            "the merge must agree with the classification"
-        );
-    }
-
     #[test]
     fn a_gap_another_finding_names_is_not_also_reported_missing() {
         let report = validate(&format!("[animations.cat_walk]\n{TWO}"));
@@ -3368,7 +3022,7 @@ mod validation_floor_tests {
             missing_required: vec!["seated".to_string()],
             missing_optional: vec![MissingOptional {
                 name: "plant",
-                stand_in: StandIn::DefaultPack,
+                stand_in: StandIn::Absent,
             }],
             insufficient_frames: vec![("typing".to_string(), 2, 1)],
             unknown: vec!["foo".to_string()],
@@ -3574,7 +3228,7 @@ mod validation_floor_tests {
         );
         assert!(
             report.has_errors(),
-            "a lying variant must fail validate-pack, not merely be noted"
+            "a lying variant must fail validation, not merely be noted"
         );
     }
 

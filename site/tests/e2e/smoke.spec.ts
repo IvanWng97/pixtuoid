@@ -1534,15 +1534,15 @@ test('nav menus + docs: dropdown, TOC scrollspy, 404, mobile burger', async ({ p
   await expect(page.locator('#docs-menu')).not.toHaveClass(/is-open/);
   await expect(btn).toBeFocused();
   // The anchored heading must clear the 60px sticky nav.
-  await page.locator('[data-toc-link="custom-sprite-packs"]').click();
-  await expect(page.locator('[data-toc-link="custom-sprite-packs"]')).toHaveAttribute(
+  await page.locator('[data-toc-link="logging--troubleshooting"]').click();
+  await expect(page.locator('[data-toc-link="logging--troubleshooting"]')).toHaveAttribute(
     'aria-current',
     'location'
   );
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.getElementById('custom-sprite-packs')!.getBoundingClientRect().top
+        () => document.getElementById('logging--troubleshooting')!.getBoundingClientRect().top
       )
     )
     .toBeGreaterThan(60);
