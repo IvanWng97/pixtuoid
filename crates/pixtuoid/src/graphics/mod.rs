@@ -727,15 +727,11 @@ impl Plan {
         match self {
             Plan::Cutaway {
                 fit,
-                route:
-                    Route {
-                        protocol,
-                        tmux,
-                        medium,
-                    },
+                route,
                 cell,
                 forced,
             } => {
+                let (protocol, tmux, medium) = (route.protocol(), route.tmux(), route.medium());
                 let shape = protocol.tile();
                 let budget = protocol
                     .image_budget()
@@ -1159,7 +1155,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { route, forced: true, .. } if route.protocol == want),
+                    matches!(got, Plan::Cutaway { route, forced: true, .. } if route.protocol() == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -1546,7 +1542,7 @@ mod tests {
             })
         };
         let medium = |mode, probe| match resolve(mode, probe, BUNDLED, AREA) {
-            Plan::Cutaway { route, .. } => route.medium,
+            Plan::Cutaway { route, .. } => route.medium(),
             plan => panic!("no cutaway: {plan:?}"),
         };
         for mode in [GraphicsMode::Auto, GraphicsMode::Kitty] {
