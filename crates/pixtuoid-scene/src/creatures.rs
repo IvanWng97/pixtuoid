@@ -6,13 +6,13 @@
 //! and runs on the beat, so a calmer motion tier starts fewer walks and a still
 //! one starts none, while a walk under way always finishes.
 
+use std::num::NonZeroU16;
 use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::AgentSlot;
 use pixtuoid_core::SceneState;
 use pixtuoid_core::id::splitmix64;
 use pixtuoid_core::source::daemon::DaemonInstanceKey;
-use pixtuoid_core::sprite::Sprite;
 use pixtuoid_core::state::{ActivityState, DaemonState};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
@@ -21,7 +21,7 @@ use crate::layout::{Point, SceneLayout};
 use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable};
 use crate::pet::PetKind;
 use crate::physics::{
-    Gait, V_CRUISE_WANDER, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
+    Gait, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
 };
 use crate::pose::{Leg, STALE_RESUME_GAP_BASE_MS, distance_at};
 use crate::walk::octile_path_len;
@@ -122,16 +122,11 @@ pub(crate) struct Roam {
 }
 
 impl Roam {
-    /// Cruising one stride of its walk `anim` per `ticks` Full ticks, resting
-    /// about `rest_ms`; a walk without a stride ambles at the people's wander
-    /// pace.
-    fn of(anim: Option<&Sprite>, ticks: u64, rest_ms: u64) -> Self {
-        let cruise = anim
-            .and_then(Sprite::stride)
-            .map_or(V_CRUISE_WANDER, |stride| {
-                (u64::from(stride.get()) * u64::from(OCTILE_STRAIGHT_COST)) as f32
-                    / (ticks * FULL_TICK_MS) as f32
-            });
+    /// Cruising one `stride` of its walk per `ticks` Full ticks, resting
+    /// about `rest_ms`.
+    fn of(stride: NonZeroU16, ticks: u64, rest_ms: u64) -> Self {
+        let cruise = (u64::from(stride.get()) * u64::from(OCTILE_STRAIGHT_COST)) as f32
+            / (ticks * FULL_TICK_MS) as f32;
         Roam {
             gait: Gait {
                 cruise,
@@ -142,23 +137,23 @@ impl Roam {
         }
     }
 
-    /// The pet's roam on its walk `anim`.
-    pub(crate) fn pet(anim: Option<&Sprite>) -> Self {
-        Self::of(anim, PET_TICKS_PER_STRIDE, PET_REST_MS)
+    /// The pet's roam on its walk's `stride`.
+    pub(crate) fn pet(stride: NonZeroU16) -> Self {
+        Self::of(stride, PET_TICKS_PER_STRIDE, PET_REST_MS)
     }
 
-    /// A gateway mascot's roam in `state` on its walk `anim`: the busier, the
-    /// brisker its step and the shorter its rests.
-    pub(crate) fn mascot(anim: Option<&Sprite>, state: DaemonState) -> Self {
+    /// A gateway mascot's roam in `state` on its walk's `stride`: the busier,
+    /// the brisker its step and the shorter its rests.
+    pub(crate) fn mascot(stride: NonZeroU16, state: DaemonState) -> Self {
         match state {
             // a downed gateway's mascot hurries out
             DaemonState::Busy | DaemonState::Down => {
-                Self::of(anim, MASCOT_TICKS_PER_STRIDE, MASCOT_BUSY_REST_MS)
+                Self::of(stride, MASCOT_TICKS_PER_STRIDE, MASCOT_BUSY_REST_MS)
             }
             DaemonState::Degraded => {
-                Self::of(anim, 3 * MASCOT_TICKS_PER_STRIDE, MASCOT_DEGRADED_REST_MS)
+                Self::of(stride, 3 * MASCOT_TICKS_PER_STRIDE, MASCOT_DEGRADED_REST_MS)
             }
-            _ => Self::of(anim, 2 * MASCOT_TICKS_PER_STRIDE, MASCOT_IDLE_REST_MS),
+            _ => Self::of(stride, 2 * MASCOT_TICKS_PER_STRIDE, MASCOT_IDLE_REST_MS),
         }
     }
 }
@@ -483,16 +478,16 @@ const fn longest_rest(rest_ms: u64) -> u64 {
 /// display name. The ONE place a new gateway registers its creature — `None` for
 /// non-gateway sources gates the whole mascot in the sim's `mascot_placements`.
 pub(crate) struct GatewayMascotDef {
-    pub walk: &'static str,
-    pub rest: &'static str,
+    pub walk: pixtuoid_core::sprite::format::Walk,
+    pub rest: pixtuoid_core::sprite::format::Piece,
     pub display_name: &'static str,
 }
 
 pub(crate) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
     match source {
         s if s == pixtuoid_core::source::openclaw::SOURCE_NAME => Some(GatewayMascotDef {
-            walk: "lobster_walk",
-            rest: "lobster_rest",
+            walk: pixtuoid_core::sprite::format::Walk::LobsterWalk,
+            rest: pixtuoid_core::sprite::format::Piece::LobsterRest,
             display_name: "OpenClaw",
         }),
         _ => None,
@@ -589,8 +584,9 @@ pub(crate) fn mascot_enter_delay(seed: u64) -> u64 {
 mod tests {
     use std::time::{Duration, SystemTime};
 
+    use crate::pack::OfficeArt;
     use pixtuoid_core::SceneState;
-    use pixtuoid_core::sprite::format::Pack;
+    use pixtuoid_core::sprite::format::{Piece, Walk};
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
 
     use super::*;
@@ -623,8 +619,8 @@ mod tests {
     /// One paint, as a painter repaints.
     const PAINT_MS: u64 = 1_000 / PAINT_FPS as u64;
 
-    fn test_pack() -> Pack {
-        crate::pack::test_default_pack()
+    fn test_pack() -> OfficeArt {
+        crate::pack::test_office()
     }
 
     fn at(ms: u64) -> SystemTime {
@@ -633,14 +629,14 @@ mod tests {
 
     /// Every creature's roam with the Full ticks it takes per cycle of its
     /// walk: each pet's, and the mascot's in every state.
-    fn roams(pack: &Pack) -> Vec<(&'static str, Roam, u64)> {
-        let lobster = pack.animation("lobster_walk");
+    fn roams(pack: &OfficeArt) -> Vec<(Walk, Roam, u64)> {
+        let lobster = pack.stride(Walk::LobsterWalk);
         PetKind::ALL
             .iter()
             .map(|k| {
                 (
                     k.walk_anim(),
-                    Roam::pet(pack.animation(k.walk_anim())),
+                    Roam::pet(pack.stride(k.walk_anim())),
                     PET_TICKS_PER_STRIDE,
                 )
             })
@@ -651,7 +647,7 @@ mod tests {
                     (DaemonState::Degraded, 3 * MASCOT_TICKS_PER_STRIDE),
                     (DaemonState::Down, MASCOT_TICKS_PER_STRIDE),
                 ]
-                .map(|(s, ticks)| ("lobster_walk", Roam::mascot(lobster, s), ticks)),
+                .map(|(s, ticks)| (Walk::LobsterWalk, Roam::mascot(lobster, s), ticks)),
             )
             .collect()
     }
@@ -716,12 +712,9 @@ mod tests {
             * u64::from(OCTILE_STRAIGHT_COST)
             / u64::from(crate::physics::PROGRESS_SCALE)
             + 1;
-        for (anim, roam, ticks) in roams(&pack) {
-            let stride = pack
-                .animation(anim)
-                .and_then(Sprite::stride)
-                .map(|s| u32::from(s.get()) * OCTILE_STRAIGHT_COST)
-                .expect("a creature's walk steps by the ground");
+        for (walk, roam, ticks) in roams(&pack) {
+            let anim = walk.piece().name();
+            let stride = u32::from(pack.stride(walk).get()) * OCTILE_STRAIGHT_COST;
             assert_eq!(
                 roam.gait.cruise,
                 stride as f32 / (ticks * FULL_TICK_MS) as f32,
@@ -767,8 +760,8 @@ mod tests {
     fn a_creature_walks_routed_ground_and_rests_on_clear_floor() {
         let pack = test_pack();
         let roams = [
-            Roam::mascot(pack.animation("lobster_walk"), DaemonState::Busy),
-            Roam::pet(pack.animation(PetKind::Cat.walk_anim())),
+            Roam::mascot(pack.stride(Walk::LobsterWalk), DaemonState::Busy),
+            Roam::pet(pack.stride(PetKind::Cat.walk_anim())),
         ];
         let min = crate::layout::min_layout_size();
         let (mut walking, mut resting) = (0u32, 0u32);
@@ -825,7 +818,7 @@ mod tests {
     #[test]
     fn a_calmer_tier_roams_a_quarter_as_often_and_a_still_one_never() {
         let pack = test_pack();
-        let roam = Roam::mascot(pack.animation("lobster_walk"), DaemonState::Busy);
+        let roam = Roam::mascot(pack.stride(Walk::LobsterWalk), DaemonState::Busy);
         let l = layout(192, 80);
         let starts_at = |motion| {
             (0..4)
@@ -849,7 +842,7 @@ mod tests {
     #[test]
     fn a_walk_under_way_finishes_when_the_office_stills() {
         let pack = test_pack();
-        let roam = Roam::pet(pack.animation(PetKind::Cat.walk_anim()));
+        let roam = Roam::pet(pack.stride(PetKind::Cat.walk_anim()));
         let l = layout(192, 80);
         let mut walk = CreatureWalk::at_home(&l, 3, at(0));
         let full = drive(&mut walk, roam, &l, Motion::Full, (0, 120_000));
@@ -881,7 +874,7 @@ mod tests {
     #[test]
     fn an_off_screen_floor_resumes_without_replaying_its_walks() {
         let pack = test_pack();
-        let roam = Roam::pet(pack.animation(PetKind::Dog.walk_anim()));
+        let roam = Roam::pet(pack.stride(PetKind::Dog.walk_anim()));
         let l = layout(192, 80);
         let mut walk = CreatureWalk::at_home(&l, 5, at(0));
         drive(&mut walk, roam, &l, Motion::Full, (0, 60_000));
@@ -912,7 +905,7 @@ mod tests {
     #[test]
     fn longest_rest_bounds_every_rest() {
         let walk = CreatureWalk::at_home(&layout(192, 80), 0, at(0));
-        let roam = Roam::pet(None);
+        let roam = Roam::pet(test_pack().stride(PetKind::Cat.walk_anim()));
         for roams in 0..2_000 {
             let w = CreatureWalk {
                 roams,
@@ -926,7 +919,7 @@ mod tests {
     /// a time.
     struct Office {
         session: FloorSession,
-        pack: Pack,
+        pack: OfficeArt,
         size: Size,
         floor: FloorMeta,
     }
@@ -998,7 +991,7 @@ mod tests {
                 office
                     .frame(&scene, Some(&cat), None, ms)
                     .pet
-                    .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim())
+                    .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim().piece())
             })
             .expect("the cat sets off");
         let held = office
@@ -1053,7 +1046,7 @@ mod tests {
         const SPRITE_H: u16 = 12;
         const CROWDED_MAX_PCT: usize = 60;
         let pack = test_pack();
-        let roam = Roam::mascot(pack.animation("lobster_walk"), DaemonState::Idle);
+        let roam = Roam::mascot(pack.stride(Walk::LobsterWalk), DaemonState::Idle);
         let l = layout(140, 120);
         let tracks: Vec<Vec<Point>> = (0..4u32)
             .map(|i| {
@@ -1089,7 +1082,7 @@ mod tests {
     #[test]
     fn a_pet_petted_mid_walk_walks_on_from_where_it_was_held() {
         let pack = test_pack();
-        let roam = Roam::pet(pack.animation(PetKind::Cat.walk_anim()));
+        let roam = Roam::pet(pack.stride(PetKind::Cat.walk_anim()));
         let l = layout(192, 80);
         let mut router = AStarRouter::new();
         let overlay = OccupancyOverlay::new();
@@ -1147,7 +1140,7 @@ mod tests {
             let walking = office
                 .frame(&scene, Some(&cat), None, ms)
                 .pet
-                .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim());
+                .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim().piece());
             let told = office.session.moves_off_beat();
             assert!(!walking || told, "the cat walks unseen at {ms} ms");
             rested |= !walking && !told;
@@ -1209,7 +1202,7 @@ mod tests {
                 .frame(&scene, Some(&dog), None, ms)
                 .pet
                 .expect("drawn");
-            if p.anim_name != PetKind::Dog.walk_anim() {
+            if p.anim_name != PetKind::Dog.walk_anim().piece() {
                 slept += usize::from(p.anim_name == PetKind::Dog.sleep_anim());
                 last = None;
                 continue;
@@ -1234,7 +1227,7 @@ mod tests {
         assert!(slept > 0, "with every agent idle a resting pet sleeps");
     }
 
-    fn lobsters(f: &SimFrame) -> Vec<(Point, &'static str)> {
+    fn lobsters(f: &SimFrame) -> Vec<(Point, Piece)> {
         f.mascots.iter().map(|m| (m.pos, m.anim_name)).collect()
     }
 
@@ -1254,7 +1247,7 @@ mod tests {
         gateway(&mut long_up, "18789", DaemonLiveness::UP, 0, 0);
         assert_eq!(
             lobsters(&Office::new(192, 80).frame(&long_up, None, None, 600_000))[0].1,
-            "lobster_rest",
+            Piece::LobsterRest,
             "first seen long after its walk-in, it rests at home"
         );
         assert!(
@@ -1272,7 +1265,7 @@ mod tests {
                 .expect("lays out"),
         )
         .expect("an elevator");
-        assert_eq!(anim, "lobster_walk", "it walks in");
+        assert_eq!(anim, Piece::LobsterWalk, "it walks in");
         assert!(
             pos.x.abs_diff(elevator.x) <= 8 && pos.y.abs_diff(elevator.y) <= 8,
             "from the elevator: {pos:?} vs {elevator:?}"
@@ -1288,7 +1281,7 @@ mod tests {
         gateway(&mut down, "18789", DaemonLiveness::Down, 0, ms);
         ms += PAINT_MS;
         let (out, anim) = lobsters(&office.frame(&down, None, None, ms))[0];
-        assert_eq!(anim, "lobster_walk", "it walks out");
+        assert_eq!(anim, Piece::LobsterWalk, "it walks out");
         assert!(
             out.x.abs_diff(stood.x) <= 1 && out.y.abs_diff(stood.y) <= 1,
             "from where it stood: {out:?} vs {stood:?}"
@@ -1301,7 +1294,7 @@ mod tests {
             let f = office.frame(&gone, None, None, ms);
             match lobsters(&f)[..] {
                 [] => break,
-                [(_, anim)] => assert_eq!(anim, "lobster_walk", "still walking out"),
+                [(_, anim)] => assert_eq!(anim, Piece::LobsterWalk, "still walking out"),
                 _ => panic!("one gateway, one lobster"),
             }
             assert_eq!(
@@ -1348,7 +1341,7 @@ mod tests {
             ms += PAINT_MS;
             assert_eq!(
                 lobsters(&office.frame(&down, None, None, ms))[0].1,
-                "lobster_walk"
+                Piece::LobsterWalk
             );
         }
 
@@ -1370,7 +1363,7 @@ mod tests {
         )
         .expect("an elevator");
         let (pos, anim) = first[0];
-        assert_eq!(anim, "lobster_walk", "it walks in again");
+        assert_eq!(anim, Piece::LobsterWalk, "it walks in again");
         assert!(
             pos.x.abs_diff(elevator.x) <= 8 && pos.y.abs_diff(elevator.y) <= 8,
             "from the elevator: {pos:?} vs {elevator:?}"
@@ -1485,7 +1478,7 @@ mod tests {
     }
 
     /// Whether `f`'s eye (the bundled pack's `e`) sits east of its middle.
-    fn faces_east(pack: &Pack, f: &pixtuoid_core::sprite::Frame) -> bool {
+    fn faces_east(pack: &OfficeArt, f: &pixtuoid_core::sprite::Frame) -> bool {
         let eye = pack.palette().get('e').flatten();
         let xs: Vec<u32> = (0..f.height())
             .flat_map(|y| (0..f.width()).map(move |x| (x, y)))
@@ -1501,9 +1494,13 @@ mod tests {
     fn every_pet_walk_faces_east() {
         let pack = test_pack();
         for kind in PetKind::ALL {
-            let walk = pack.animation(kind.walk_anim()).expect("the walk");
+            let walk = pack.piece(kind.walk_anim().piece());
             for (i, f) in walk.frames().iter().enumerate() {
-                assert!(faces_east(&pack, f), "{} {i} faces west", kind.walk_anim());
+                assert!(
+                    faces_east(&pack, f),
+                    "{} {i} faces west",
+                    kind.walk_anim().piece().name()
+                );
             }
         }
     }
@@ -1514,7 +1511,7 @@ mod tests {
     fn every_pet_walk_steps_its_legs_at_1x() {
         let pack = test_pack();
         for kind in PetKind::ALL {
-            let frames = pack.animation(kind.walk_anim()).expect("the walk").frames();
+            let frames = pack.piece(kind.walk_anim().piece()).frames();
             let ground = |i: usize| {
                 let f = &frames[i];
                 let y = f.height() - 1;
@@ -1528,7 +1525,7 @@ mod tests {
                     ground(contact),
                     ground((contact + quarter) % frames.len()),
                     "{}'s legs hold still from frame {contact} at 1x",
-                    kind.walk_anim()
+                    kind.walk_anim().piece().name()
                 );
             }
         }
@@ -1539,10 +1536,10 @@ mod tests {
     #[test]
     fn every_pet_walk_master_faces_east() {
         let pack = test_pack();
-        let n = pack.max_density_variant().get();
+        let n = pack.max_density_variant();
         for kind in PetKind::ALL {
-            let name = format!("{}@{n}x", kind.walk_anim());
-            let master = pack.animation(&name).expect("the master");
+            let name = format!("{}@{n}x", kind.walk_anim().piece().name());
+            let master = &pack.variants_of(kind.walk_anim().piece())[&n];
             for (i, f) in master.frames().iter().enumerate() {
                 assert!(faces_east(&pack, f), "{name} {i} faces west");
             }
@@ -1553,8 +1550,8 @@ mod tests {
     fn gateway_mascot_def_maps_openclaw_and_rejects_others() {
         let def = gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
             .expect("openclaw must have a mascot def");
-        assert_eq!(def.walk, "lobster_walk");
-        assert_eq!(def.rest, "lobster_rest");
+        assert_eq!(def.walk, Walk::LobsterWalk);
+        assert_eq!(def.rest, Piece::LobsterRest);
         assert_eq!(def.display_name, "OpenClaw");
         assert!(
             gateway_mascot_def("codex").is_none(),

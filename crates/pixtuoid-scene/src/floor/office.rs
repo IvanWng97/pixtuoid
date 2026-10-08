@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::SceneState;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::{
@@ -35,7 +35,7 @@ pub(crate) struct FloorView {
 }
 
 impl FloorView {
-    pub(super) fn new(pack: Arc<Pack>) -> Self {
+    pub(super) fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             floor: PerFloor::new(pack),
             last_layout: None,
@@ -291,7 +291,7 @@ fn compose_slide(
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct OfficeSession {
-    pack: Arc<Pack>,
+    pack: Arc<OfficeArt>,
     /// Each floor's view, kept past the last frame's floor count so a floor
     /// that empties and fills again resumes its own.
     views: Vec<FloorView>,
@@ -311,7 +311,7 @@ pub struct OfficeSession {
 
 impl OfficeSession {
     /// An empty office drawing with `pack`.
-    pub fn new(pack: Arc<Pack>) -> Self {
+    pub fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             views: vec![FloorView::new(Arc::clone(&pack))],
             n_floors: 1,

@@ -357,7 +357,7 @@ fn until_the_pet_walks(
         .find_map(|now| {
             r.render(scene, pack(), now).unwrap();
             r.drawn_pet()
-                .filter(|p| p.anim == p.kind.walk_anim())
+                .filter(|p| p.anim == p.kind.walk_anim().piece())
                 .map(|p| (p, now))
         })
         .expect("the pet sets off")

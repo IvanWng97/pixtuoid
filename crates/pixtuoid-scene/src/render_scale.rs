@@ -160,7 +160,7 @@ pub struct PixelFit {
 
 impl PixelFit {
     /// The surface's `natural` real pixels per unit fitted to `density` (the
-    /// pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant))
+    /// pack's [`max_density_variant`](crate::pack::OfficeArt::max_density_variant))
     /// over a surface `px` big; `None` when [`RenderScale::fit`] finds no
     /// scale.
     pub fn new(natural: u16, density: Density, px: crate::layout::Size) -> Option<Self> {

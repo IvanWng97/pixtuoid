@@ -54,7 +54,7 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
 
 /// The TUI's pack, the plan for painting it, and how its office moves.
 type Boot = (
-    Arc<pixtuoid_core::sprite::format::Pack>,
+    Arc<pixtuoid_scene::pack::OfficeArt>,
     crate::graphics::Plan,
     pixtuoid_scene::anim::Motion,
 );

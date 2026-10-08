@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use pixtuoid_core::sprite::format::Pack;
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
@@ -115,7 +115,7 @@ use drawable::{Drawable, DrawableKind, Layer, enqueue_room_walls, paint_drawable
 pub(crate) struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a SceneLayout,
-    pack: &'a Pack,
+    pack: &'a OfficeArt,
     /// Event ages and the wall clock, and the beat every ambient loop reads —
     /// every sky fact reads [`Self::sky`].
     timing: crate::anim::Timing,
@@ -338,14 +338,12 @@ fn enqueue_characters<'a>(
         drawables.push(Drawable {
             sort_row: p.sort_row,
             layer: Layer::Figure,
-            hover: pack_frame_size(ctx.pack, pose.anim_name, pose.frame_idx).map(|size| {
-                Hover::figure(
-                    Pivot::TopLeft,
-                    p.top_left,
-                    size,
-                    HoverTarget::Agent(agent.agent_id),
-                )
-            }),
+            hover: Some(Hover::figure(
+                Pivot::TopLeft,
+                p.top_left,
+                pack_frame_size(ctx.pack, pose.anim_name, pose.frame_idx),
+                HoverTarget::Agent(agent.agent_id),
+            )),
             kind: DrawableKind::Character {
                 agent,
                 pose,
@@ -365,9 +363,7 @@ fn enqueue_pet<'a>(
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     let pos = pet.pos;
-    let Some(size) = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx) else {
-        return;
-    };
+    let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
     drawables.push(Drawable {
         sort_row: sort_row_at(Pivot::Center, pos, size.h),
         layer: Layer::Figure,
@@ -383,7 +379,7 @@ fn enqueue_pet<'a>(
 }
 
 fn enqueue_gateway_mascots<'a>(
-    pack: &Pack,
+    pack: &OfficeArt,
     mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
@@ -391,9 +387,14 @@ fn enqueue_gateway_mascots<'a>(
         drawables.push(Drawable {
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
-            hover: pack_frame_size(pack, m.anim_name, m.frame_idx)
-                .zip(m.target())
-                .map(|(size, target)| Hover::figure(Pivot::Center, m.pos, size, target)),
+            hover: m.target().map(|target| {
+                Hover::figure(
+                    Pivot::Center,
+                    m.pos,
+                    pack_frame_size(pack, m.anim_name, m.frame_idx),
+                    target,
+                )
+            }),
             kind: DrawableKind::GatewayMascot {
                 pos: m.pos,
                 anim_name: m.anim_name,
@@ -513,8 +514,10 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => appliance(crate::pack::VENDING_MACHINE_SPRITE),
-                    Station::Printer => appliance(crate::pack::PRINTER_SPRITE),
+                    Station::VendingMachine => {
+                        appliance(pixtuoid_core::sprite::format::Piece::VendingMachine)
+                    }
+                    Station::Printer => appliance(pixtuoid_core::sprite::format::Piece::Printer),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

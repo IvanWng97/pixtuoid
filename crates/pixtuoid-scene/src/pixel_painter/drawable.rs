@@ -8,8 +8,9 @@
 
 use std::time::SystemTime;
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::blit::blit_frame;
-use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::sprite::format::Piece;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use crate::sim::DeskProps;
@@ -26,10 +27,7 @@ pub(super) use crate::display::Layer;
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 use crate::layout::{Pivot, Point, SceneLayout, Size, anchored_top_left};
-use crate::pack::{
-    DESK_CHAIR_SPRITE, DESK_CUP_SPRITE, MEETING_TABLE_SPRITE, TOKEN_SHEET_SPRITE,
-    TOKEN_TOWER_SPRITE, desk_art, desk_art_top, frame_at,
-};
+use crate::pack::{Desk, DeskProp, desk_art, desk_art_top};
 use crate::render_scale::RenderScale;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
@@ -39,7 +37,7 @@ const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
 /// The steam offset for `anim`, a [`pantry_counter_anim`](crate::layout::pantry_counter_anim) pick.
-fn pantry_steam_dx(anim: &str) -> i16 {
+fn pantry_steam_dx(anim: Piece) -> i16 {
     let [_, large] = crate::layout::PANTRY_COUNTER_ANIMS;
     if anim == large {
         PANTRY_STEAM_DX_LARGE
@@ -50,7 +48,7 @@ fn pantry_steam_dx(anim: &str) -> i16 {
 
 /// Where the steam rises from a pantry counter centred at `pos` drawn as
 /// `anim`.
-pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
+pub(super) fn pantry_steam_at(pos: Point, anim: Piece) -> Point {
     Point {
         x: (i32::from(pos.x) + i32::from(pantry_steam_dx(anim))).max(0) as u16,
         y: pos.y.saturating_sub(2),
@@ -60,7 +58,7 @@ pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
 pub(super) struct Drawable<'a> {
     pub(super) sort_row: u16,
     pub(super) layer: Layer,
-    /// Set only on a figure the pack can draw.
+    /// Set only on a figure.
     pub(super) hover: Option<crate::display::Hover>,
     pub(super) kind: DrawableKind<'a>,
 }
@@ -76,7 +74,7 @@ pub(super) enum DrawableKind<'a> {
     /// bottom-edge row.
     DeskCubicle {
         desk: Point,
-        /// Which way this desk seats its occupant; picks the art (`desk_sprite_name`).
+        /// Which way this desk seats its occupant; picks the art ([`Desk::facing`]).
         facing: crate::layout::Facing,
         screen_glow: Option<Rgb>,
         lights: crate::lighting::DeskLights,
@@ -101,7 +99,7 @@ pub(super) enum DrawableKind<'a> {
     /// in z-order. `anim` is [`pantry_counter_anim`](crate::layout::pantry_counter_anim)'s pick.
     WaypointPantry {
         pos: Point,
-        anim: &'static str,
+        anim: Piece,
         steam: [Effect; STEAM_PUFFS],
     },
     MeetingSofa {
@@ -151,18 +149,18 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    /// A corridor appliance: its pack art ([`crate::pack::appliance_sprite`]), centred at
+    /// A corridor appliance: its pack art ([`crate::pack::appliance_piece`]), centred at
     /// `pos`.
     Appliance {
         pos: Point,
-        sprite: &'static str,
+        sprite: Piece,
         /// An agent stands here this frame: the art plays its busy loop.
         busy: bool,
     },
     Pet {
         pos: Point,
         flip: bool,
-        anim_name: &'static str,
+        anim_name: Piece,
         frame_idx: usize,
         effects: &'a [Effect],
     },
@@ -171,7 +169,7 @@ pub(super) enum DrawableKind<'a> {
     /// like a pet.
     GatewayMascot {
         pos: Point,
-        anim_name: &'static str,
+        anim_name: Piece,
         frame_idx: usize,
         effects: &'a [Effect],
         /// Gateway up but model-broken → render the lobster sickly red.
@@ -227,18 +225,15 @@ fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
     blit_frame(frame, at.x, at.y, buf);
 }
 
-/// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`
-/// — a no-op if the pack lacks the animation.
-fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut RgbBuffer) {
-    if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames().first()) {
-        blit_centered(f, pos, buf);
-    }
+/// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`.
+fn blit_centered_first_frame(pack: &OfficeArt, anim_name: Piece, pos: Point, buf: &mut RgbBuffer) {
+    blit_centered(pack.piece(anim_name).first(), pos, buf);
 }
 
 /// The subset of `PaintCtx` a [`Drawable`] arm paints with.
 pub(super) struct DrawableCtx<'a> {
     pub buf: &'a mut RgbBuffer,
-    pub pack: &'a Pack,
+    pub pack: &'a OfficeArt,
     pub cache: &'a mut FrameCache,
     pub timing: crate::anim::Timing,
     pub theme: &'a crate::theme::Theme,
@@ -262,16 +257,11 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             let art = desk_art(pack, *facing);
             // The effects address the monitor by the sprite's OWN row numbering, so this is
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
-            let mut sprite_top = desk.y;
-            if let Some(frame) = art {
-                sprite_top = desk_art_top(pack, desk.y, frame.height());
-                blit_frame(frame, desk.x, sprite_top, buf);
-            }
+            let sprite_top = desk_art_top(pack, desk.y, art.height());
+            blit_frame(art, desk.x, sprite_top, buf);
             paint_desk_props(buf, (*desk, *facing), props, pack, theme);
-            if let Some(front) = crate::pack::desk_front(crate::pack::desk_sprite_name(*facing))
-                .and_then(|front| pack.animation(front)?.frames().first())
-            {
-                blit_frame(front, desk.x, sprite_top, buf);
+            if let Some(front) = Desk::facing(*facing).front() {
+                blit_frame(pack.piece(front).first(), desk.x, sprite_top, buf);
             }
             // The desk's light falls on the whole group, its front and props
             // included, as the cutaway lights every piece after painting it.
@@ -299,35 +289,26 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             paint_effects(buf, effects.iter().filter(|e| !e.kind.beneath()), theme);
         }
         DrawableKind::FilingCabinet { pos } => {
-            if let Some(cab) = pack
-                .animation("filing_cabinet")
-                .and_then(|a| a.frames().first())
-            {
-                blit_frame(cab, pos.x, pos.y, buf);
-            }
+            blit_frame(pack.piece(Piece::FilingCabinet).first(), pos.x, pos.y, buf);
         }
         DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
         DrawableKind::WaypointPantry { pos, anim, steam } => {
             // A character behind the counter is occluded by the counter's own
             // sprite (it y-sorts at the south base, and the mask south-anchors a
             // shallow strip there) — no synthetic cap needed.
-            blit_centered_first_frame(pack, anim, *pos, buf);
+            blit_centered_first_frame(pack, *anim, *pos, buf);
             paint_effects(buf, steam, theme);
         }
         DrawableKind::MeetingSofa { pos, mirrored } => {
-            if let Some(f) = pack
-                .animation("meeting_sofa")
-                .and_then(|a| a.frames().first())
-            {
-                if *mirrored {
-                    blit_centered(&f.mirror_vertical(), *pos, buf);
-                } else {
-                    blit_centered(f, *pos, buf);
-                }
+            let f = pack.piece(Piece::MeetingSofa).first();
+            if *mirrored {
+                blit_centered(&f.mirror_vertical(), *pos, buf);
+            } else {
+                blit_centered(f, *pos, buf);
             }
         }
         DrawableKind::MeetingTable { pos } => {
-            blit_centered_first_frame(pack, MEETING_TABLE_SPRITE, *pos, buf);
+            blit_centered_first_frame(pack, Piece::MeetingTable, *pos, buf);
         }
         DrawableKind::AreaRug(rug) => paint_area_rug(buf, *rug, theme),
         DrawableKind::LoungeSideTable { pos } => {
@@ -337,39 +318,36 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             paint_kitchen_island(buf, pos.x, pos.y, theme);
         }
         DrawableKind::SnackShelf { pos } => {
-            blit_centered_first_frame(pack, "snack_shelf", *pos, buf);
+            blit_centered_first_frame(pack, Piece::SnackShelf, *pos, buf);
         }
         DrawableKind::Plant { kind, pos } => {
             // Occlusion is the sprite's own job: the foliage overhangs north of
             // the mask's shallow south-anchored pot strip, so it hides a walker
             // parked behind it. No synthetic back-cap.
-            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
+            blit_centered_first_frame(pack, kind.piece(), *pos, buf);
         }
         DrawableKind::PodDecorItem { kind, pos } => {
-            blit_centered_first_frame(pack, kind.sprite_name(), *pos, buf);
+            blit_centered_first_frame(pack, kind.piece(), *pos, buf);
         }
         DrawableKind::FloorLamp { pos } => {
-            blit_centered_first_frame(pack, "floor_lamp", *pos, buf);
+            blit_centered_first_frame(pack, Piece::FloorLamp, *pos, buf);
         }
         DrawableKind::Door { pos, frame_idx } => {
-            if let Some(f) = pack.animation("door").and_then(|a| frame_at(a, *frame_idx)) {
-                blit_frame(f, pos.x, pos.y, buf);
-            }
+            blit_frame(
+                pack.piece(Piece::Door).frame_at(*frame_idx),
+                pos.x,
+                pos.y,
+                buf,
+            );
         }
         DrawableKind::WallDecor { kind, pos } => {
-            let anim_name = kind.sprite_name();
-            if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames().first()) {
-                blit_frame(f, pos.x, pos.y, buf);
-            }
+            blit_frame(pack.piece(kind.piece()).first(), pos.x, pos.y, buf);
         }
         DrawableKind::Appliance { pos, sprite, busy } => {
-            let art = pack.animation(sprite).and_then(|anim| {
-                anim.recolorable(crate::pack::appliance_frame_index(anim, *busy, beat))
-            });
-            if let Some(art) = art {
-                let themed = art.recolored(&crate::pack::appliance_overrides(&theme.appliance));
-                blit_centered(&themed, *pos, buf);
-            }
+            let anim = pack.piece(*sprite);
+            let art = anim.recolorable_at(crate::pack::appliance_frame_index(anim, *busy, beat));
+            let themed = art.recolored(&crate::pack::appliance_overrides(&theme.appliance));
+            blit_centered(&themed, *pos, buf);
         }
         DrawableKind::Pet {
             pos,
@@ -378,12 +356,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             frame_idx,
             effects,
         } => {
-            let Some(frame) = pack
-                .animation(anim_name)
-                .and_then(|a| frame_at(a, *frame_idx))
-            else {
-                return;
-            };
+            let frame = pack.piece(*anim_name).frame_at(*frame_idx);
             // Declared out here so the flipped path's temporary outlives the `if`.
             let mirrored;
             let final_frame = if *flip {
@@ -402,12 +375,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             effects,
             degraded,
         } => {
-            let Some(frame) = pack
-                .animation(anim_name)
-                .and_then(|a| frame_at(a, *frame_idx))
-            else {
-                return;
-            };
+            let frame = pack.piece(*anim_name).frame_at(*frame_idx);
             if *degraded {
                 blit_centered(&super::palette::degraded_frame(frame), *pos, buf);
             } else {
@@ -453,14 +421,14 @@ fn paint_desk_props(
     buf: &mut RgbBuffer,
     (desk, facing): (Point, crate::layout::Facing),
     props: &DeskProps,
-    pack: &Pack,
+    pack: &OfficeArt,
     theme: &crate::theme::Theme,
 ) {
     let overrides = crate::pack::desk_prop_overrides(theme);
     // Frame `frame` of `sprite` stood on `at`, turned as its desk turns it; its
     // top row.
-    let stand = |buf: &mut RgbBuffer, sprite: &str, frame: usize, at: crate::pack::PropMark| {
-        let f = crate::pack::densest_frame(pack, sprite, frame, RenderScale::ONE)?;
+    let stand = |buf: &mut RgbBuffer, sprite: Piece, frame: usize, at: crate::pack::PropMark| {
+        let f = crate::pack::densest_frame(pack, sprite, frame, RenderScale::ONE);
         let x = at.left(f.frame.width())?;
         let y = at.at.y.checked_sub(f.frame.height())?;
         let art = f.recolorable.recolored(&overrides);
@@ -472,20 +440,16 @@ fn paint_desk_props(
         blit_frame(&art, x, y, buf);
         Some(y)
     };
-    let mark = |name| crate::pack::desk_mark(pack, desk, facing, name);
-    if props.cup.is_some()
-        && let Some(at) = mark(crate::pack::CUP_MARK)
-    {
-        stand(buf, DESK_CUP_SPRITE, 0, at);
+    let mark = |prop| crate::pack::desk_mark(pack, desk, facing, prop);
+    if props.cup.is_some() {
+        stand(buf, Piece::DeskCup, 0, mark(DeskProp::Cup));
     }
     paint_effects(buf, &props.effects, theme);
     let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
         return;
     };
-    let Some(at) = mark(crate::pack::TOWER_MARK) else {
-        return;
-    };
-    let Some(top) = stand(buf, TOKEN_TOWER_SPRITE, tier, at) else {
+    let at = mark(DeskProp::Tower);
+    let Some(top) = stand(buf, Piece::TokenTower, tier, at) else {
         return;
     };
     // The sheet lands as the pile's next sheet: at its full fall it is gone,
@@ -503,22 +467,19 @@ fn paint_desk_props(
             },
             ..at
         };
-        stand(buf, TOKEN_SHEET_SPRITE, 0, at);
+        stand(buf, Piece::TokenSheet, 0, at);
     }
 }
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn.
-pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
-    pack.animation(DESK_CHAIR_SPRITE)
-        .and_then(|a| a.frames().first())
+pub(super) fn desk_chair_frame(pack: &OfficeArt) -> &Frame {
+    pack.piece(Piece::DeskChair).first()
 }
 
 /// Office-chair back, crossing a back-turned occupant's lower torso.
-pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack) {
-    if let Some(frame) = desk_chair_frame(pack) {
-        blit_frame(frame, top_left.x, top_left.y, buf);
-    }
+pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &OfficeArt) {
+    blit_frame(desk_chair_frame(pack), top_left.x, top_left.y, buf);
 }
 
 /// The task lamp's warm pool; the desk art draws the lamp itself.
@@ -540,10 +501,10 @@ pub(crate) fn paint_character_at(
     pose: SpritePose,
     top_left: Point,
     agent: &AgentSlot,
-    pack: &Pack,
+    pack: &OfficeArt,
     cache: &mut FrameCache,
     now: SystemTime,
-) -> Option<Size> {
+) -> Size {
     let CharacterFrame {
         frame: cached,
         blit_at: _,
@@ -555,13 +516,13 @@ pub(crate) fn paint_character_at(
         crate::render_scale::RenderScale::ONE,
         cache,
         now,
-    )?;
+    );
     let size = Size {
         w: cached.width(),
         h: cached.height(),
     };
     blit_frame(cached, top_left.x, top_left.y, buf);
-    Some(size)
+    size
 }
 
 /// Queue every room wall's bands into the y-sort, emitted after the fixtures so
@@ -594,10 +555,8 @@ mod tests {
 
     /// Where the 1x south desk at `desk` stands its tower: its west column and
     /// its base row.
-    fn tower_base(pack: &Pack, desk: Point) -> Point {
-        let foot = crate::pack::desk_mark(pack, desk, Facing::South, crate::pack::TOWER_MARK)
-            .expect("the tower's mark")
-            .at;
+    fn tower_base(pack: &OfficeArt, desk: Point) -> Point {
+        let foot = crate::pack::desk_mark(pack, desk, Facing::South, DeskProp::Tower).at;
         Point {
             x: foot.x,
             y: foot.y - 1,
@@ -610,8 +569,8 @@ mod tests {
     /// teeter.
     #[test]
     fn the_1x_token_art_is_the_classics_stack() {
-        let pack = crate::pack::test_default_pack();
-        let tower = pack.animation("token_tower").expect("the tower");
+        let pack = crate::pack::test_office();
+        let tower = pack.piece(Piece::TokenTower);
         let max = crate::token_meter::MAX_TIER;
         assert_eq!(tower.frames().len(), usize::from(max));
         for (tier, f) in (1..=max).zip(tower.frames()) {
@@ -630,14 +589,14 @@ mod tests {
                 "tier {tier} is not {STACK_W} wide with its teeter"
             );
         }
-        let sheet = &pack.animation("token_sheet").expect("the sheet").frames()[0];
+        let sheet = pack.piece(Piece::TokenSheet).first();
         assert_eq!((sheet.width(), sheet.height()), (STACK_W, 1));
     }
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
-        let pack = crate::pack::test_default_pack();
-        let width = |name: &str| pack.animation(name).expect(name).frames()[0].width() as i16;
+        let pack = crate::pack::test_office();
+        let width = |piece: Piece| pack.piece(piece).first().width() as i16;
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
@@ -652,8 +611,8 @@ mod tests {
         }
     }
 
-    fn test_pack() -> Pack {
-        crate::pack::test_default_pack()
+    fn test_pack() -> OfficeArt {
+        crate::pack::test_office()
     }
 
     fn desk_cubicle_drawable(
@@ -672,7 +631,7 @@ mod tests {
                 desk,
                 facing: crate::layout::Facing::South,
                 screen_glow: None,
-                lights: crate::lighting::DeskLights::new(desk, None, 0.0, 0.0),
+                lights: crate::lighting::DeskLights::new(desk, (0, 0), 0.0, 0.0),
                 props: DeskProps {
                     cup: None,
                     token_tier,
@@ -798,8 +757,13 @@ mod tests {
                 );
                 buf
             };
-            let name = crate::pack::desk_sprite_name(facing);
-            let art = crate::pack::densest_frame(&pack, name, 0, RenderScale::ONE).expect("art");
+            let name = Desk::facing(facing).piece().name();
+            let art = crate::pack::densest_frame(
+                &pack,
+                Desk::facing(facing).piece(),
+                0,
+                RenderScale::ONE,
+            );
             let w = usize::from(art.frame.width());
             let top = crate::pack::desk_art_top(&pack, desk.y, art.frame.height());
             let monitor: Vec<(u16, u16)> = crate::pack::drawn_in(&art, &crate::pack::MONITOR_KEYS)
@@ -874,14 +838,12 @@ mod tests {
                 theme: th,
             },
         );
-        let name = crate::pack::desk_sprite_name(Facing::South);
-        let art = crate::pack::densest_frame(&pack, name, 0, RenderScale::ONE).expect("art");
+        let art = crate::pack::densest_frame(&pack, Desk::South.piece(), 0, RenderScale::ONE);
         let top = crate::pack::desk_art_top(&pack, desk.y, art.frame.height());
         let mut lit = RgbBuffer::filled(120, 80, fill);
         blit_frame(art.frame, desk.x, top, &mut lit);
         paint_desk_lamp_pool(&mut lit, &lights, th);
-        let front_name = crate::pack::desk_front(name).expect("a front");
-        let front = &pack.animation(front_name).expect("the front").frames()[0];
+        let front = pack.piece(Desk::South.front().expect("a front")).first();
         let mut pooled = 0;
         for y in 0..front.height() {
             for x in 0..front.width() {
@@ -1016,7 +978,7 @@ mod tests {
         let pack = test_pack();
         // Pin the ASSET removal, not just its pixels: with no `trash_bin` in
         // the pack, a re-added blit would be dead code.
-        assert!(pack.animation("trash_bin").is_none());
+        assert!(Piece::from_name("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
         let layout = crate::layout::SceneLayout::compute(160, 120, None).expect("fits");
@@ -1027,10 +989,7 @@ mod tests {
             .find(|f| f.kind == crate::layout::FixtureKind::FilingCabinet(first))
             .expect("desk 0 stands a cabinet")
             .at;
-        let cab = pack
-            .animation("filing_cabinet")
-            .and_then(|a| a.frames().first())
-            .expect("filing_cabinet anim");
+        let cab = pack.piece(Piece::FilingCabinet).first();
         let bg = Rgb { r: 1, g: 2, b: 3 };
         let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, bg);
         for kind in [
@@ -1039,7 +998,7 @@ mod tests {
                 desk,
                 facing: crate::layout::Facing::South,
                 screen_glow: None,
-                lights: crate::lighting::DeskLights::new(desk, None, 0.0, 0.0),
+                lights: crate::lighting::DeskLights::new(desk, (0, 0), 0.0, 0.0),
                 props: DeskProps::default(),
             },
         ] {
@@ -1126,7 +1085,7 @@ mod tests {
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
         let pos = Point { x: 30, y: 40 };
-        let mut render = |anim_name: &'static str| {
+        let mut render = |anim_name: Piece| {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
             let effects =
                 crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, Motion::Full.beat(now));
@@ -1174,7 +1133,7 @@ mod tests {
     }
 
     /// Paint the appliance `sprite` at rest, centred at `pos`, in `th`.
-    fn appliance_at_rest(sprite: &'static str, pos: Point, th: &crate::theme::Theme) -> RgbBuffer {
+    fn appliance_at_rest(sprite: Piece, pos: Point, th: &crate::theme::Theme) -> RgbBuffer {
         let pack = test_pack();
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 1, g: 2, b: 3 });
@@ -1210,7 +1169,7 @@ mod tests {
         let (vx, vy) = (pos.x - vis.w / 2, pos.y - vis.h / 2);
         for th in crate::theme::ALL_THEMES {
             let a = &th.appliance;
-            let buf = appliance_at_rest("vending_machine", pos, th);
+            let buf = appliance_at_rest(Piece::VendingMachine, pos, th);
             for ((dx, dy), want, role) in [
                 ((0, 1), a.vending_panel, "the panel, under its lit top row"),
                 ((1, 2), a.vending_drinks[0], "the first drink"),
@@ -1232,7 +1191,7 @@ mod tests {
         let (px, py) = (pos.x - vis.w / 2, pos.y - vis.h / 2);
         for th in crate::theme::ALL_THEMES {
             let a = &th.appliance;
-            let buf = appliance_at_rest("printer", pos, th);
+            let buf = appliance_at_rest(Piece::Printer, pos, th);
             for ((dx, dy), want, role) in [
                 ((2, 1), a.printer_glass, "the scanner glass"),
                 ((4, 0), a.printer_top, "the lid, east of its lit end"),

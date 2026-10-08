@@ -5,8 +5,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::RgbBuffer;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::DaemonState;
 
 /// Where a [`Rendered`] frame may differ from the last: the frame entry's
@@ -106,7 +106,7 @@ pub struct OfficeRaster {
     pub(crate) outside: crate::outside::OutsideCache,
     /// The pack and the theme every cache holds art of, by identity: the
     /// `Arc` keeps the pack's address its own while it is held.
-    serving: Option<(Arc<Pack>, &'static Theme)>,
+    serving: Option<(Arc<OfficeArt>, &'static Theme)>,
 }
 
 impl OfficeRaster {
@@ -120,7 +120,7 @@ impl OfficeRaster {
 
     /// Draw `pack` in `theme` from now on: every cache holds one pack's art
     /// in one theme's colours, so a frame of another empties them first.
-    fn serve(&mut self, pack: &Arc<Pack>, theme: &'static Theme) {
+    fn serve(&mut self, pack: &Arc<OfficeArt>, theme: &'static Theme) {
         match &self.serving {
             Some((p, t)) if Arc::ptr_eq(p, pack) && std::ptr::eq(*t, theme) => {}
             Some(_) => {
@@ -141,7 +141,7 @@ impl OfficeRaster {
 #[derive(Debug)]
 pub struct Raster {
     // The pack the cutaway draws; the sim's (`FloorInputs::pack`) must be it.
-    pack: Arc<Pack>,
+    pack: Arc<OfficeArt>,
     classic: Option<Classic>,
     cutaway: Option<CutawayCanvas>,
     /// The look of the last frame drawn; the first frame in another repaints whole.
@@ -178,7 +178,7 @@ pub struct ClassicDrawn<'a> {
 
 impl Raster {
     /// A floor drawn with `pack`, in no look yet.
-    pub(crate) fn new(pack: Arc<Pack>) -> Self {
+    pub(crate) fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             pack,
             classic: None,

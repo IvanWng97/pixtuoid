@@ -2,6 +2,8 @@
 //! furniture and waypoint kind in the office, plus THE table giving each its
 //! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
+use pixtuoid_core::sprite::format::Piece;
+
 use super::{DESK_FOOT_H, DESK_H, DESK_W, Pivot, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
@@ -917,17 +919,15 @@ impl WallDecor {
         furniture_def(self.furniture()).footprint.is_some()
     }
 
-    /// Pack-animation key for this decor's sprite. The blit lives in
-    /// `pixel_painter::drawable`; the NAME lives on the enum so a new variant is a
-    /// compile error HERE, not a forgotten call-site match arm. Every value must be
-    /// in `FURNITURE_ANIMATIONS`.
-    pub const fn sprite_name(self) -> &'static str {
+    /// The piece it draws: here, so a new variant is a compile error HERE,
+    /// not a forgotten call-site match arm.
+    pub const fn piece(self) -> Piece {
         match self {
-            WallDecor::Bookshelf => "bookshelf",
-            WallDecor::Whiteboard => "whiteboard",
-            WallDecor::BulletinBoard => "bulletin_board",
-            WallDecor::ExitSign => "exit_sign",
-            WallDecor::MeetingScreen => "meeting_screen",
+            WallDecor::Bookshelf => Piece::Bookshelf,
+            WallDecor::Whiteboard => Piece::Whiteboard,
+            WallDecor::BulletinBoard => Piece::BulletinBoard,
+            WallDecor::ExitSign => Piece::ExitSign,
+            WallDecor::MeetingScreen => Piece::MeetingScreen,
         }
     }
 }
@@ -965,13 +965,13 @@ impl PlantKind {
         }
     }
 
-    /// Pack-animation key for this plant's sprite (blit in `drawable.rs`).
-    pub const fn sprite_name(self) -> &'static str {
+    /// The piece it draws.
+    pub const fn piece(self) -> Piece {
         match self {
-            PlantKind::Ficus => "plant",
-            PlantKind::Tall => "plant_tall",
-            PlantKind::Flower => "plant_flower",
-            PlantKind::Succulent => "plant_succulent",
+            PlantKind::Ficus => Piece::Plant,
+            PlantKind::Tall => Piece::PlantTall,
+            PlantKind::Flower => Piece::PlantFlower,
+            PlantKind::Succulent => Piece::PlantSucculent,
         }
     }
 }
@@ -1027,14 +1027,14 @@ impl PodDecor {
         }
     }
 
-    /// Pack-animation key for this pod-decor's sprite (blit in `drawable.rs`).
-    pub const fn sprite_name(self) -> &'static str {
+    /// The piece it draws.
+    pub const fn piece(self) -> Piece {
         match self {
-            PodDecor::PlantTall => "plant_tall",
-            PodDecor::Whiteboard => "whiteboard",
-            PodDecor::Tv => "tv_stand",
-            PodDecor::PhoneBooth => "phone_booth",
-            PodDecor::StandingDesk => "standing_desk",
+            PodDecor::PlantTall => Piece::PlantTall,
+            PodDecor::Whiteboard => Piece::Whiteboard,
+            PodDecor::Tv => Piece::TvStand,
+            PodDecor::PhoneBooth => Piece::PhoneBooth,
+            PodDecor::StandingDesk => Piece::StandingDesk,
         }
     }
 }
@@ -1266,23 +1266,6 @@ mod tests {
                     d.visual.h
                 );
             }
-        }
-    }
-
-    #[test]
-    fn role_enum_sprite_names_resolve_in_the_animation_registry() {
-        use pixtuoid_core::sprite::format::FURNITURE_ANIMATIONS;
-        let names: Vec<&str> = WallDecor::ALL
-            .iter()
-            .map(|w| w.sprite_name())
-            .chain(PlantKind::ALL.iter().map(|p| p.sprite_name()))
-            .chain(PodDecor::ALL.iter().map(|p| p.sprite_name()))
-            .collect();
-        for n in names {
-            assert!(
-                FURNITURE_ANIMATIONS.contains(&n),
-                "sprite_name {n:?} is not a registered FURNITURE_ANIMATIONS key"
-            );
         }
     }
 }

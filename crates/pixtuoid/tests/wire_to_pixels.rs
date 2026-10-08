@@ -15,7 +15,7 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::harness::{DRIVEN_DESKS, Drive, Reach};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
-use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_scene::pack::OfficeArt;
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::Terminal;
@@ -49,8 +49,8 @@ fn read_nonblank_lines(path: &Path) -> Vec<String> {
         .collect()
 }
 
-fn pack() -> Arc<Pack> {
-    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
+fn pack() -> Arc<OfficeArt> {
+    static PACK: OnceLock<Arc<OfficeArt>> = OnceLock::new();
     Arc::clone(PACK.get_or_init(|| Arc::new(load_bundled_pack().expect("pack"))))
 }
 
@@ -467,7 +467,7 @@ fn dsh_plugin_lifecycle_renders_a_painted_sprite() {
 fn lobster_px(
     r: &mut TuiRenderer<TestBackend>,
     scene: &SceneState,
-    pack: &pixtuoid_core::sprite::format::Pack,
+    pack: &pixtuoid_scene::pack::OfficeArt,
     times: &[SystemTime],
 ) -> usize {
     let baseline = SceneState::uniform(16);

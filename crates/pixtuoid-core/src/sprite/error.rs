@@ -121,12 +121,51 @@ pub enum PackError {
         /// The key.
         key: char,
     },
-    /// A building stands in a pack with no `[city]` table.
-    #[error("building {key:?} needs a [city] table naming its materials")]
+    /// The pack does not draw a piece.
+    #[error("[animations] has no {}", piece.name())]
     #[non_exhaustive]
-    BuildingWithoutCity {
-        /// The building's key.
+    MissingPiece {
+        /// The piece.
+        piece: super::format::Piece,
+    },
+    /// An `[animations]` key names no piece, nor a density variant of one.
+    #[error("[animations] key {key:?} names no piece")]
+    #[non_exhaustive]
+    UnknownAnimation {
+        /// The key.
         key: String,
+    },
+    /// An animation has fewer frames than its piece moves through.
+    #[error("{key} has {have} frames; it needs at least {need}")]
+    #[non_exhaustive]
+    TooFewFrames {
+        /// The `[animations]` key.
+        key: String,
+        /// The fewest it needs.
+        need: usize,
+        /// How many it has.
+        have: usize,
+    },
+    /// A walk declares no `stride`.
+    #[error("{} is a walk and needs a stride", walk.name())]
+    #[non_exhaustive]
+    WalkWithoutStride {
+        /// The walk's piece.
+        walk: super::format::Piece,
+    },
+    /// A density variant does not redraw its piece frame for frame at the
+    /// size its density claims.
+    #[error(
+        "{key} does not redraw its piece: {variant_frames} frames against its {base_frames}, each its frame's size times the density"
+    )]
+    #[non_exhaustive]
+    VariantDoesNotRedraw {
+        /// The variant's key.
+        key: String,
+        /// The piece's frames.
+        base_frames: usize,
+        /// The variant's.
+        variant_frames: usize,
     },
     /// A building key uses the density separator without a valid density.
     #[error(

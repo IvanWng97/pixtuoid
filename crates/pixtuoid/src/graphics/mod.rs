@@ -296,7 +296,7 @@ pub(crate) enum ClassicReason {
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
-        /// The pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant).
+        /// The pack's [`max_density_variant`](pixtuoid_scene::pack::OfficeArt::max_density_variant).
         max_density: Density,
     },
 }
@@ -497,7 +497,7 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 
 /// The cutaway's geometry on one terminal: `cell`'s natural scale fitted to
 /// `max_density` (the pack's
-/// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
+/// [`max_density_variant`](pixtuoid_scene::pack::OfficeArt::max_density_variant)),
 /// over an image `area` cells big. `None` when no multiple of it lies within
 /// the fit's bound, or the scale is 1.
 pub(crate) fn cutaway_fit(
@@ -525,7 +525,7 @@ fn image_px(cell: CellSize, area: TermSize) -> Size {
 }
 
 /// Decide what to paint. Pure — [`probe()`] supplies the probe, `max_density`
-/// is the pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant),
+/// is the pack's [`max_density_variant`](pixtuoid_scene::pack::OfficeArt::max_density_variant),
 /// and `area` is the image's extent in cells.
 pub(crate) fn resolve(
     mode: GraphicsMode,

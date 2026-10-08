@@ -1,122 +1,448 @@
 //! The sprite pack: `sprites/default/`, compiled in (`include_str!`), so the
-//! binary ships standalone.
+//! binary ships standalone, and parsed into [`OfficeArt`]: the pieces and what
+//! the scene reads off them, each guaranteed by the parse.
 
 mod density;
 mod lookup;
 
-pub(crate) use density::{DenseFrame, densest_frame};
-#[cfg(test)]
-pub(crate) use lookup::DESK_BEZEL_RAISE;
+use std::collections::BTreeMap;
+use std::num::NonZeroU16;
+
+use enum_map::EnumMap;
+use pixtuoid_core::sprite::Sprite;
+use pixtuoid_core::sprite::error::PackError;
+use pixtuoid_core::sprite::format::{
+    Density, IconArt, Pack, PackContract, Piece, ValidationReport, load_pack_from_strings,
+    validate_pack_animations,
+};
+use strum::VariantArray as _;
+
+use crate::display::Icon;
+use crate::render_scale::RenderScale;
+
+pub(crate) use density::{DenseFrame, densest, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::MONITOR_KEYS;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
-    DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, ICON_INK_KEY, MEETING_SOFA_NORTH_SPRITE,
-    MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, PropMark, SCREEN_GLASS_KEY,
-    SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
-    WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
-    appliance_sprite, bulb_cell, desk_art, desk_art_top, desk_bulb_offset, desk_front, desk_mark,
-    desk_prop_overrides, desk_props_mirrored, desk_sprite_name, drawn_in, fixture_overrides,
-    frame_at, looping_frame_index, prop_left,
+    CLOCK_FACE_KEY, COOLER_WATER, DESK_BEZEL_RAISE, DESK_BULB_KEY, ICON_INK_KEY,
+    NORTH_SOFA_SEAT_ROWS, PropMark, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, appliance_frame_index,
+    appliance_overrides, appliance_piece, desk_art, desk_art_top, desk_mark, desk_prop_overrides,
+    drawn_in, fixture_overrides, looping_frame_index, prop_left,
 };
 
-use pixtuoid_core::sprite::error::PackError;
-use pixtuoid_core::sprite::format::{
-    Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
-};
-
-/// Every walk a walker steps by the ground it covers: a person's, each pet's
-/// and each gateway mascot's.
-fn walks() -> Vec<&'static str> {
-    crate::sim::WALKS
-        .into_iter()
-        .chain(crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim()))
-        .chain(
-            pixtuoid_core::source::registry::registered_source_names()
-                .filter_map(crate::creatures::gateway_mascot_def)
-                .map(|d| d.walk),
-        )
-        .collect()
+/// Which desk art a seat faces: only a back-turned seat needs its own, since
+/// its occupant y-sorts in FRONT and covers the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, enum_map::Enum, strum::VariantArray)]
+pub enum Desk {
+    /// The viewer-facing desk, for a seat facing south, east or west.
+    South,
+    /// The back-turned desk, for a seat facing north.
+    North,
 }
 
-/// The animations a painter loops on the beat, each with the frame its loop
+impl Desk {
+    /// The desk a seat facing `facing` sits at.
+    pub(crate) fn facing(facing: crate::layout::Facing) -> Self {
+        match facing {
+            crate::layout::Facing::North => Desk::North,
+            crate::layout::Facing::South
+            | crate::layout::Facing::East
+            | crate::layout::Facing::West => Desk::South,
+        }
+    }
+
+    /// Its art.
+    pub fn piece(self) -> Piece {
+        match self {
+            Desk::South => Piece::Desk,
+            Desk::North => Piece::DeskNorth,
+        }
+    }
+
+    /// Whether it stands its props mirrored, each on its mark's bottom-right
+    /// cell: the back-turned desk is the viewer-facing one turned round, so
+    /// its props turn with it.
+    pub(crate) fn mirrors_props(self) -> bool {
+        self == Desk::North
+    }
+
+    /// The overlay drawn over the props on its art, if it has one: what of
+    /// the desk stands nearer the viewer than its sitter's props.
+    pub(crate) fn front(self) -> Option<Piece> {
+        Piece::VARIANTS
+            .iter()
+            .copied()
+            .find(|p| p.overlay_of() == Some(self.piece()))
+    }
+}
+
+/// A prop a desk stands at its mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, enum_map::Enum, strum::VariantArray)]
+pub enum DeskProp {
+    /// The cup, whose steam rises from it.
+    Cup,
+    /// The token tower.
+    Tower,
+}
+
+impl DeskProp {
+    /// The `@mark` a desk's first frame names it by.
+    pub fn mark(self) -> &'static str {
+        match self {
+            DeskProp::Cup => "cup",
+            DeskProp::Tower => "tower",
+        }
+    }
+}
+
+/// A desk's art at one density and what the scene reads off it.
+#[derive(Debug, Clone)]
+pub(crate) struct DeskArt {
+    pub(crate) sprite: Sprite,
+    /// Each prop's mark on the art's own grid.
+    pub(crate) props: EnumMap<DeskProp, (u16, u16)>,
+    /// The layout cell, from the art's top-left, that the middle of its
+    /// [`DESK_BULB_KEY`] pixels lies in: its lamp's pool centres there.
+    pub(crate) bulb: (u16, u16),
+}
+
+/// The wall clock's art at one density and how far its face reaches from its
+/// centre along its middle row, in that art's pixels: the hands stay inside
+/// the rim the art draws.
+#[derive(Debug, Clone)]
+pub(crate) struct ClockArt {
+    pub(crate) sprite: Sprite,
+    pub(crate) face_reach: f32,
+}
+
+/// A piece's art, or what the scene reads off it, at its base and at each
+/// density the pack redraws it at.
+#[derive(Debug, Clone)]
+pub(crate) struct Densities<T> {
+    base: T,
+    variants: BTreeMap<Density, T>,
+}
+
+impl<T> Densities<T> {
+    /// `piece`'s art in `pack`, each density read by `read`.
+    fn of(
+        pack: &Pack,
+        piece: Piece,
+        mut read: impl FnMut(&Sprite, Density) -> Result<T, ArtError>,
+    ) -> Result<Self, ArtError> {
+        Ok(Densities {
+            base: read(pack.piece(piece), Density::ONE)?,
+            variants: pack
+                .variants_of(piece)
+                .iter()
+                .map(|(&d, sprite)| Ok((d, read(sprite, d)?)))
+                .collect::<Result<_, ArtError>>()?,
+        })
+    }
+
+    /// The [`densest`] at `scale`.
+    pub(crate) fn at(&self, scale: RenderScale) -> (&T, Density, NonZeroU16) {
+        densest(&self.base, &self.variants, scale)
+    }
+
+    /// The base, at 1x.
+    pub(crate) fn base(&self) -> &T {
+        &self.base
+    }
+}
+
+/// Why the bundled pack can't draw the office.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ArtError {
+    /// The pack itself does not load.
+    #[error(transparent)]
+    Pack(#[from] PackError),
+    /// A desk leaves a prop's mark out.
+    #[error("{} at {density}x marks no {}", desk.piece().name(), prop.mark())]
+    #[non_exhaustive]
+    DeskMark {
+        /// The desk.
+        desk: Desk,
+        /// The density of the art that leaves it out.
+        density: Density,
+        /// The prop.
+        prop: DeskProp,
+    },
+    /// A desk draws no bulb, or one too far above it.
+    #[error("{} at {density}x draws no bulb in {DESK_BULB_KEY:?} the desk can hang", desk.piece().name())]
+    #[non_exhaustive]
+    DeskBulb {
+        /// The desk.
+        desk: Desk,
+        /// The density of the art.
+        density: Density,
+    },
+    /// The wall clock draws no face along its middle row.
+    #[error("wall_clock at {density}x draws no face in {CLOCK_FACE_KEY:?} along its middle row")]
+    #[non_exhaustive]
+    ClockFace {
+        /// The density of the art.
+        density: Density,
+    },
+    /// An icon has no `[icons]` art.
+    #[error("[icons] has no {}", icon.art())]
+    #[non_exhaustive]
+    IconArt {
+        /// The icon.
+        icon: Icon,
+    },
+}
+
+/// The pack, parsed into what the office draws: [`Pack`]'s pieces, and each
+/// desk's props and bulb, the clock's face and every icon's art, guaranteed by
+/// the parse rather than checked where a painter reads them.
+#[derive(Debug, Clone)]
+pub struct OfficeArt {
+    pack: Pack,
+    desks: EnumMap<Desk, Densities<DeskArt>>,
+    bulb_offsets: EnumMap<Desk, (u16, i16)>,
+    clock: Densities<ClockArt>,
+    icons: EnumMap<Icon, IconArt>,
+}
+
+impl OfficeArt {
+    /// `pack` parsed.
+    ///
+    /// # Errors
+    ///
+    /// If a desk leaves a prop or its bulb out, the clock its face, or an
+    /// icon its art.
+    pub fn parse(pack: Pack) -> Result<Self, ArtError> {
+        let desks = EnumMap::try_from_fn(|desk: Desk| {
+            Densities::of(&pack, desk.piece(), |sprite, density| {
+                read_desk(desk, sprite, density)
+            })
+        })?;
+        let bulb_offsets = EnumMap::try_from_fn(|desk: Desk| {
+            let (x, y) = desks[desk].base().bulb;
+            // the art's rows from the desk's: its top is `desk_art_top` off the desk
+            let art_h = desks[desk].base().sprite.first().height();
+            let above =
+                DESK_BEZEL_RAISE + art_h.saturating_sub(pack.piece(Piece::Desk).first().height());
+            i16::try_from(i32::from(y) - i32::from(above))
+                .map(|dy| (x, dy))
+                .map_err(|_| ArtError::DeskBulb {
+                    desk,
+                    density: Density::ONE,
+                })
+        })?;
+        let clock = Densities::of(&pack, Piece::WallClock, |sprite, density| {
+            let face_reach = face_reach(sprite).ok_or(ArtError::ClockFace { density })?;
+            Ok(ClockArt {
+                sprite: sprite.clone(),
+                face_reach,
+            })
+        })?;
+        let icons = EnumMap::try_from_fn(|icon: Icon| {
+            pack.icon(icon.art())
+                .cloned()
+                .ok_or(ArtError::IconArt { icon })
+        })?;
+        Ok(OfficeArt {
+            pack,
+            desks,
+            bulb_offsets,
+            clock,
+            icons,
+        })
+    }
+
+    /// The pieces.
+    #[cfg(test)]
+    pub(crate) fn pack(&self) -> &Pack {
+        &self.pack
+    }
+
+    /// [`Pack::palette`].
+    #[cfg(test)]
+    pub(crate) fn palette(&self) -> &pixtuoid_core::sprite::Palette {
+        self.pack.palette()
+    }
+
+    /// [`Pack::piece`].
+    pub fn piece(&self, piece: Piece) -> &Sprite {
+        self.pack.piece(piece)
+    }
+
+    /// [`Pack::variants_of`].
+    pub(crate) fn variants_of(&self, piece: Piece) -> &BTreeMap<Density, Sprite> {
+        self.pack.variants_of(piece)
+    }
+
+    /// [`Pack::stride`].
+    pub(crate) fn stride(&self, walk: pixtuoid_core::sprite::format::Walk) -> NonZeroU16 {
+        self.pack.stride(walk)
+    }
+
+    /// [`Pack::buildings`].
+    pub(crate) fn buildings(
+        &self,
+    ) -> impl Iterator<Item = &pixtuoid_core::sprite::format::Building> {
+        self.pack.buildings()
+    }
+
+    /// [`Pack::city_materials`].
+    pub(crate) fn city_materials(&self) -> &pixtuoid_core::sprite::format::CityMaterials {
+        self.pack.city_materials()
+    }
+
+    /// [`Pack::hairstyles`].
+    pub(crate) fn hairstyles(
+        &self,
+    ) -> impl Iterator<Item = &pixtuoid_core::sprite::format::Hairstyle> {
+        self.pack.hairstyles()
+    }
+
+    /// [`Pack::hairstyle`].
+    pub(crate) fn hairstyle(
+        &self,
+        name: &str,
+        density: Density,
+    ) -> Option<&pixtuoid_core::sprite::format::Hairstyle> {
+        self.pack.hairstyle(name, density)
+    }
+
+    /// [`Pack::character_outline`].
+    pub(crate) fn character_outline(&self) -> pixtuoid_core::sprite::Rgb {
+        self.pack.character_outline()
+    }
+
+    /// [`Pack::max_density_variant`].
+    pub fn max_density_variant(&self) -> Density {
+        self.pack.max_density_variant()
+    }
+
+    /// [`Pack::density_variants`].
+    pub(crate) fn density_variants(&self) -> &[Density] {
+        self.pack.density_variants()
+    }
+
+    /// `desk`'s art at each density.
+    pub(crate) fn desk(&self, desk: Desk) -> &Densities<DeskArt> {
+        &self.desks[desk]
+    }
+
+    /// Where `desk` hangs its lamp's bulb from the desk's point, at 1x, the
+    /// rows signed (a bulb may stand above the desk's row).
+    pub(crate) fn bulb_offset(&self, desk: Desk) -> (u16, i16) {
+        self.bulb_offsets[desk]
+    }
+
+    /// The wall clock's art at each density.
+    pub(crate) fn clock(&self) -> &Densities<ClockArt> {
+        &self.clock
+    }
+
+    /// `icon`'s art.
+    pub(crate) fn icon(&self, icon: Icon) -> &IconArt {
+        &self.icons[icon]
+    }
+}
+
+/// `desk`'s art `sprite` at `density`, its props' marks and bulb read.
+fn read_desk(desk: Desk, sprite: &Sprite, density: Density) -> Result<DeskArt, ArtError> {
+    let marks = sprite.marks(0);
+    let props = EnumMap::try_from_fn(|prop: DeskProp| {
+        marks
+            .iter()
+            .find(|m| m.name() == prop.mark())
+            .map(|m| (m.x(), m.y()))
+            .ok_or(ArtError::DeskMark {
+                desk,
+                density,
+                prop,
+            })
+    })?;
+    let bulb = lookup::bulb_cell(sprite, density).ok_or(ArtError::DeskBulb { desk, density })?;
+    Ok(DeskArt {
+        sprite: sprite.clone(),
+        props,
+        bulb,
+    })
+}
+
+/// How far `dial`'s face ([`CLOCK_FACE_KEY`]) reaches from its centre along
+/// its middle row, in its own pixels; `None` for art that draws no face there.
+fn face_reach(dial: &Sprite) -> Option<f32> {
+    let frame = dial.first();
+    let face = dial.recolorable_at(0).drawn_in(&[CLOCK_FACE_KEY]);
+    let (w, h) = (usize::from(frame.width()), usize::from(frame.height()));
+    let row = &face[h / 2 * w..(h / 2 + 1) * w];
+    let first = row.iter().position(|&f| f)?;
+    Some(w as f32 / 2.0 - first as f32)
+}
+
+/// Every piece the painters loop on the beat, each with the frame its loop
 /// starts at: the looping fixtures, the appliances' busy loops
-/// ([`appliance_frame_index`]), the typists
-/// (`pose::typing_frame`), and every creature pose.
-fn looped_animations() -> Vec<(&'static str, usize)> {
+/// ([`appliance_frame_index`]), the typists (`pose::typing_frame`), and every
+/// creature pose that is not a walk.
+fn looped_animations() -> Vec<(Piece, usize)> {
     let appliances =
-        [VENDING_MACHINE_SPRITE, PRINTER_SPRITE].map(|name| (name, lookup::APPLIANCE_IDLE_FRAMES));
-    let pets = crate::pet::PetKind::ALL
+        [Piece::VendingMachine, Piece::Printer].map(|p| (p, lookup::APPLIANCE_IDLE_FRAMES));
+    let creatures = Piece::VARIANTS
         .iter()
-        .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
-    let mascots = pixtuoid_core::source::registry::registered_source_names()
-        .filter_map(crate::creatures::gateway_mascot_def)
-        .flat_map(|def| [def.walk, def.rest]);
+        .copied()
+        .filter(|p| p.kind() == pixtuoid_core::sprite::format::PieceKind::Creature);
     [
-        FISH_TANK_SPRITE,
-        WATER_COOLER_SPRITE,
-        "typing",
-        "typing_back",
+        Piece::FishTank,
+        Piece::WaterCooler,
+        Piece::Typing,
+        Piece::TypingBack,
     ]
     .into_iter()
-    .chain(pets)
-    .chain(mascots)
-    .map(|name| (name, 0))
+    .chain(creatures)
+    .map(|p| (p, 0))
     .chain(appliances)
     .collect()
 }
 
-/// The marks every desk's first frame carries: the cup and the token tower
-/// stand there in both looks, and the cup's steam rises there — the
-/// cutaway's `push_desk_props` reads them, the classic and the steam through
-/// [`desk_mark`]. A desk that mirrors its props ([`desk_props_mirrored`])
-/// marks each one's bottom-right cell.
-const DESK_MARKS: [(&str, &[&str]); 2] = [
-    (lookup::DESK_SPRITE, &[CUP_MARK, TOWER_MARK]),
-    (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
-];
-
-/// The key every desk draws its lamp's bulb in: its pool centres there
-/// ([`bulb_cell`]).
-const DESK_BULBS: [(&str, char); 2] = [
-    (lookup::DESK_SPRITE, DESK_BULB_KEY),
-    (lookup::DESK_NORTH_SPRITE, DESK_BULB_KEY),
-];
-
-/// [`validate_pack_animations`], against this crate's painters' walks, desk
-/// marks, desk bulbs and loops on the Full beat.
+/// [`validate_pack_animations`], against the loops this crate's painters play
+/// on the Full beat.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
     validate_pack_animations(
         pack,
         &PackContract {
-            walks: &walks(),
-            marks: &DESK_MARKS,
             loops: &looped_animations(),
             beat_ms: crate::anim::FULL_TICK_MS,
-            keys: &DESK_BULBS,
         },
     )
 }
 
-/// The bundled pack, for unit tests: parsed once per process, since the parse
+/// The bundled art, for unit tests: parsed once per process, since the parse
 /// dominates a test that loads it per frame; each caller gets its own copy.
 #[cfg(test)]
-pub(crate) fn test_default_pack() -> Pack {
-    static PACK: std::sync::OnceLock<Pack> = std::sync::OnceLock::new();
-    PACK.get_or_init(|| load_bundled_pack().expect("default pack loads"))
+pub(crate) fn test_office() -> OfficeArt {
+    static ART: std::sync::OnceLock<OfficeArt> = std::sync::OnceLock::new();
+    ART.get_or_init(|| load_bundled_pack().expect("default pack loads"))
         .clone()
+}
+
+/// The bundled pack's pieces, for unit tests: [`test_office`]'s.
+#[cfg(test)]
+pub(crate) fn test_default_pack() -> Pack {
+    test_office().pack().clone()
 }
 
 /// The default pack's manifest, as `build.rs` embeds it.
 const BUNDLED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/bundled_pack.toml"));
 
-/// The compiled-in default pack alone: all a build without `native` can load.
+/// The compiled-in default pack, parsed: all a build without `native` can load.
 ///
 /// # Errors
 ///
-/// If the embedded manifest or a bundled sprite source fails to parse or validate.
-pub fn load_bundled_pack() -> Result<Pack, PackError> {
-    load_pack_from_strings(BUNDLED_PACK_TOML, &bundled_sprite_srcs())
+/// If the embedded manifest or a bundled sprite fails to load, or the pack
+/// can't draw the office ([`ArtError`]).
+pub fn load_bundled_pack() -> Result<OfficeArt, ArtError> {
+    OfficeArt::parse(load_pack_from_strings(
+        BUNDLED_PACK_TOML,
+        &bundled_sprite_srcs(),
+    )?)
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
@@ -155,6 +481,31 @@ fn base_pack_srcs() -> (String, Vec<(&'static str, &'static str)>) {
         .filter(|(name, _)| !dropped.contains(*name))
         .collect();
     (toml, srcs)
+}
+
+/// The bundled pack without its density art, parsed, with each table `extra`
+/// names laid over the bundled manifest's (a key it repeats replaces the
+/// bundled one) and `frames` added to its sprites: a test names only the pieces
+/// it changes and keeps the desks, clock and icons the parse requires.
+#[cfg(test)]
+pub(crate) fn test_office_with(extra: &str, frames: &[(&str, &str)]) -> OfficeArt {
+    let (toml, srcs) = base_pack_srcs();
+    let mut manifest: toml_edit::DocumentMut = toml.parse().expect("the bundled manifest parses");
+    let extra: toml_edit::DocumentMut = extra.parse().expect("the test tables parse");
+    for (name, tables) in extra.iter() {
+        let tables = tables.as_table_like().expect("a table of tables");
+        let into = manifest
+            .entry(name)
+            .or_insert_with(toml_edit::table)
+            .as_table_like_mut()
+            .expect("the bundled manifest has this table");
+        for (key, value) in tables.iter() {
+            into.insert(key, value.clone());
+        }
+    }
+    let srcs: Vec<(&str, &str)> = srcs.into_iter().chain(frames.iter().copied()).collect();
+    let pack = load_pack_from_strings(&manifest.to_string(), &srcs).expect("the test pack loads");
+    OfficeArt::parse(pack).expect("the test pack parses")
 }
 
 /// The bundled pack with its manifest's `old` text read as `new`, for a test
@@ -223,28 +574,28 @@ mod tests {
     /// reaching the prop.
     #[test]
     fn the_desk_props_draw_the_keys_the_theme_recolours() {
-        let pack = test_default_pack();
+        let pack = test_office();
         for s in [1, pack.max_density_variant().get()] {
             let scale = crate::render_scale::RenderScale::new(s).expect("nonzero");
             for (sprite, frame, keys) in [
                 (
-                    DESK_CUP_SPRITE,
+                    Piece::DeskCup,
                     0,
                     &[lookup::CUP_KEY, lookup::CUP_SHADE_KEY][..],
                 ),
                 (
-                    TOKEN_TOWER_SPRITE,
+                    Piece::TokenTower,
                     0,
                     &[lookup::PAPER_KEY, lookup::PAPER_SHADE_KEY],
                 ),
-                (TOKEN_SHEET_SPRITE, 0, &[lookup::PAPER_KEY]),
+                (Piece::TokenSheet, 0, &[lookup::PAPER_KEY]),
             ] {
-                let art = densest_frame(&pack, sprite, frame, scale)
-                    .expect("the bundled pack draws the prop");
+                let art = densest_frame(&pack, sprite, frame, scale);
                 for &key in keys {
                     assert!(
                         drawn_in(&art, &[key]).contains(&true),
-                        "{sprite} at scale {s} draws no {key:?}"
+                        "{} at scale {s} draws no {key:?}",
+                        sprite.name()
                     );
                 }
             }
@@ -266,14 +617,14 @@ mod tests {
     /// front paints as it always did.
     #[test]
     fn a_desk_front_is_its_desk_cut_down() {
-        let pack = test_default_pack();
-        let front = desk_front(lookup::DESK_SPRITE).expect("the bundled desk has a front");
+        let pack = test_office();
+        let front = Desk::South.front().expect("the bundled desk has a front");
         for scale in [
             RenderScale::ONE,
             RenderScale::from(pack.max_density_variant()),
         ] {
-            let desk = densest_frame(&pack, lookup::DESK_SPRITE, 0, scale).expect("the desk");
-            let over = densest_frame(&pack, front, 0, scale).expect("the front");
+            let desk = densest_frame(&pack, Piece::Desk, 0, scale);
+            let over = densest_frame(&pack, front, 0, scale);
             assert_eq!(
                 (over.frame.width(), over.frame.height(), over.blit_at),
                 (desk.frame.width(), desk.frame.height(), desk.blit_at),
@@ -295,7 +646,7 @@ mod tests {
             assert!(drawn > 0, "at {scale:?}, the front draws something");
         }
         assert_eq!(
-            desk_front(lookup::DESK_NORTH_SPRITE),
+            Desk::North.front(),
             None,
             "nothing stands before a back-turned sitter's props"
         );
@@ -306,9 +657,8 @@ mod tests {
     #[test]
     fn every_back_turned_desk_has_room_for_its_teeter() {
         use crate::layout::{Facing, SceneLayout};
-        let pack = test_default_pack();
-        let tower = densest_frame(&pack, TOKEN_TOWER_SPRITE, 0, RenderScale::ONE)
-            .expect("the tower")
+        let pack = test_office();
+        let tower = densest_frame(&pack, Piece::TokenTower, 0, RenderScale::ONE)
             .frame
             .width();
         let mut desks = 0;
@@ -322,7 +672,7 @@ mod tests {
                         continue;
                     }
                     desks += 1;
-                    let mark = desk_mark(&pack, desk, Facing::North, TOWER_MARK).expect("a mark");
+                    let mark = desk_mark(&pack, desk, Facing::North, DeskProp::Tower);
                     assert!(mark.mirrored, "the back-turned desk mirrors its props");
                     assert!(
                         mark.left(tower).is_some(),
@@ -340,33 +690,11 @@ mod tests {
     fn the_guide_names_the_desk_contract() {
         let guide = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md"));
         for needle in [
-            format!("@mark {CUP_MARK} <x> <y>"),
-            format!("@mark {TOWER_MARK} <x> <y>"),
+            format!("@mark {} <x> <y>", DeskProp::Cup.mark()),
+            format!("@mark {} <x> <y>", DeskProp::Tower.mark()),
             format!("palette key `{DESK_BULB_KEY}`"),
         ] {
             assert!(guide.contains(&needle), "the sprite format lost {needle:?}");
-        }
-    }
-
-    /// A creature's walk steps by the ground like a person's, so a pack's
-    /// without a stride slides its feet too.
-    #[test]
-    fn a_creature_walk_without_a_stride_is_flagged() {
-        for (walk, stride) in [("cat_walk", 2), ("lobster_walk", 6)] {
-            // its own table, header through stride: a build without
-            // `cutaway-assets` drops the density variant's after it
-            let line = format!("stride   = {stride}\n");
-            let from = BUNDLED_PACK_TOML
-                .find(&format!("[animations.{walk}]\n"))
-                .expect("the manifest declares the walk");
-            let to = from
-                + BUNDLED_PACK_TOML[from..]
-                    .find(&line)
-                    .expect("with its stride")
-                + line.len();
-            let table = &BUNDLED_PACK_TOML[from..to];
-            let pack = test_pack_declaring(table, &table.replacen(&line, "", 1));
-            assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
         }
     }
 
@@ -452,20 +780,20 @@ mod tests {
     /// mascots draw, so neither can gain a creature the other misses.
     #[test]
     fn the_creature_animations_are_the_pets_and_mascots() {
-        let drawn: std::collections::BTreeSet<&str> = crate::pet::PetKind::ALL
+        let drawn: std::collections::BTreeSet<Piece> = crate::pet::PetKind::ALL
             .iter()
-            .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()])
+            .flat_map(|k| [k.walk_anim().piece(), k.sit_anim(), k.sleep_anim()])
             .chain(
                 pixtuoid_core::source::registry::registered_source_names()
                     .filter_map(crate::creatures::gateway_mascot_def)
-                    .flat_map(|m| [m.walk, m.rest]),
+                    .flat_map(|m| [m.walk.piece(), m.rest]),
             )
             .collect();
-        let listed: std::collections::BTreeSet<&str> =
-            pixtuoid_core::sprite::format::CREATURE_ANIMATIONS
-                .iter()
-                .copied()
-                .collect();
+        let listed: std::collections::BTreeSet<Piece> = Piece::VARIANTS
+            .iter()
+            .copied()
+            .filter(|p| p.kind() == pixtuoid_core::sprite::format::PieceKind::Creature)
+            .collect();
         assert_eq!(drawn, listed);
     }
 
@@ -474,50 +802,38 @@ mod tests {
     #[test]
     fn every_bundled_furniture_frame_draws_its_bottom_row() {
         let pack = test_default_pack();
-        let floating: Vec<String> = pack
-            .animation_names()
-            .into_iter()
-            .filter(|name| {
-                let base = name.split('@').next().unwrap_or(name);
-                pixtuoid_core::sprite::format::FURNITURE_ANIMATIONS.contains(&base)
-                    && !pixtuoid_core::sprite::format::OVERLAY_PIECES
-                        .iter()
-                        .any(|&(overlay, _)| overlay == base)
+        let floating: Vec<String> = Piece::VARIANTS
+            .iter()
+            .copied()
+            .filter(|p| {
+                p.kind() == pixtuoid_core::sprite::format::PieceKind::Furniture
+                    && p.overlay_of().is_none()
             })
-            .filter(|name| {
-                pack.animation(name).is_some_and(|s| {
-                    s.frames().iter().any(|f| {
-                        let w = usize::from(f.width());
-                        f.as_slice()[f.as_slice().len() - w..]
-                            .iter()
-                            .all(Option::is_none)
-                    })
+            .flat_map(|p| {
+                let name = p.name();
+                std::iter::once((name.to_owned(), pack.piece(p))).chain(
+                    pack.variants_of(p)
+                        .iter()
+                        .map(move |(d, s)| (format!("{name}@{d}x"), s)),
+                )
+            })
+            .filter(|(_, s)| {
+                s.frames().iter().any(|f| {
+                    let w = usize::from(f.width());
+                    f.as_slice()[f.as_slice().len() - w..]
+                        .iter()
+                        .all(Option::is_none)
                 })
             })
+            .map(|(name, _)| name)
             .collect();
         assert!(floating.is_empty(), "{floating:?}");
     }
 
     #[test]
-    fn bundled_default_pack_animations_are_all_in_the_registry() {
-        // An animation the BUNDLED pack ships but the registry doesn't know is
-        // falsely reported "unused by renderer" by validation.
-        let pack = test_default_pack();
-        let report = validate_pack(&pack);
-        assert!(
-            report.unknown.is_empty(),
-            "bundled animation missing from the registry: {:?}",
-            report.unknown
-        );
-    }
-
-    #[test]
     fn character_sprite_size_matches_the_bundled_pack() {
         let pack = test_default_pack();
-        let frame = pack
-            .animation("standing")
-            .and_then(|a| a.frames().first())
-            .expect("bundled pack carries a standing pose");
+        let frame = pack.piece(Piece::Standing).first();
         let (w, h) = (frame.width(), frame.height());
         assert_eq!(
             w,
@@ -542,11 +858,12 @@ mod tests {
     #[test]
     fn every_character_pose_fits_the_half_block_sprite() {
         let pack = test_default_pack();
-        for &name in pixtuoid_core::sprite::format::CHARACTER_ANIMATIONS {
-            let anim = pack
-                .animation(name)
-                .expect("the bundled pack draws every pose");
-            for frame in anim.frames() {
+        for &piece in Piece::VARIANTS
+            .iter()
+            .filter(|p| p.kind() == pixtuoid_core::sprite::format::PieceKind::Character)
+        {
+            let name = piece.name();
+            for frame in pack.piece(piece).frames() {
                 assert!(
                     frame.width() <= crate::layout::CHARACTER_SPRITE_W
                         && frame.height() <= crate::layout::CHARACTER_SPRITE_H,
@@ -564,12 +881,10 @@ mod tests {
     #[test]
     fn both_desk_variants_are_the_same_desk_below_the_monitor() {
         let pack = test_default_pack();
-        let frame = |n: &str| {
-            pack.animation(n)
-                .and_then(|a| a.frames().first())
-                .unwrap_or_else(|| panic!("the bundled pack ships {n}"))
-        };
-        let (base, north) = (frame("desk"), frame("desk_north"));
+        let (base, north) = (
+            pack.piece(Piece::Desk).first(),
+            pack.piece(Piece::DeskNorth).first(),
+        );
         assert_eq!(base.width(), north.width(), "a facing never changes width");
         // Both blit so their BOTTOM rows coincide, so the taller one's extra rows are all above.
         let lift = north
@@ -634,11 +949,9 @@ mod tests {
         let pack = test_default_pack();
         let raise = crate::pack::DESK_BEZEL_RAISE;
         let base_h = raise + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS;
-        for name in ["desk", "desk_north"] {
-            let f = pack
-                .animation(name)
-                .and_then(|a| a.frames().first())
-                .unwrap_or_else(|| panic!("the bundled pack ships {name}"));
+        for piece in [Piece::Desk, Piece::DeskNorth] {
+            let name = piece.name();
+            let f = pack.piece(piece).first();
             let (w, h) = (f.width(), f.height());
             let opaque = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
             let lift = h
@@ -682,17 +995,95 @@ mod tests {
     #[test]
     fn desk_sprite_width_tracks_the_footprint_overhang() {
         let pack = test_default_pack();
-        let w = pack
-            .animation("desk")
-            .and_then(|a| a.frames().first())
-            .expect("bundled pack carries a desk sprite")
-            .width();
+        let w = pack.piece(Piece::Desk).first().width();
         assert_eq!(
             w,
             crate::layout::desk_furniture_def().visual.w,
             "bundled 'desk' sprite is {w}px wide but visual.w is {} — \
              a DESK_W edit moved visual.w but not scripts/gen-art.py's DESK_ART_W; render/mask/z-sort will drift",
             crate::layout::desk_furniture_def().visual.w
+        );
+    }
+
+    /// `src` with `key` drawn as the desk's body instead.
+    fn without_key(src: &str, key: char) -> &'static str {
+        src.lines()
+            .map(|line| {
+                if line.starts_with(['@', '#']) {
+                    line.to_owned()
+                } else {
+                    line.replace(key, "D")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .leak()
+    }
+
+    /// A desk that marks no `cup` leaves its cup nowhere to stand.
+    #[test]
+    fn a_desk_missing_a_prop_mark_does_not_parse() {
+        let desk: &'static str = include_str!("../../sprites/default/desk.sprite")
+            .lines()
+            .filter(|l| !l.starts_with("@mark cup"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .leak();
+        let err = OfficeArt::parse(test_pack_with(&[("desk.sprite", desk)])).expect_err("no cup");
+        assert!(
+            matches!(
+                err,
+                ArtError::DeskMark {
+                    desk: Desk::South,
+                    prop: DeskProp::Cup,
+                    ..
+                }
+            ),
+            "{err}"
+        );
+    }
+
+    /// A desk that draws no bulb hangs no lamp.
+    #[test]
+    fn a_desk_without_a_bulb_does_not_parse() {
+        let desk = without_key(
+            include_str!("../../sprites/default/desk_north.sprite"),
+            DESK_BULB_KEY,
+        );
+        let err =
+            OfficeArt::parse(test_pack_with(&[("desk_north.sprite", desk)])).expect_err("no bulb");
+        assert!(
+            matches!(
+                err,
+                ArtError::DeskBulb {
+                    desk: Desk::North,
+                    ..
+                }
+            ),
+            "{err}"
+        );
+    }
+
+    /// A clock that draws no face has no rim for the hands to stay inside.
+    #[test]
+    fn a_clock_without_a_face_does_not_parse() {
+        let clock = without_key(
+            include_str!("../../sprites/default/wall_clock.sprite"),
+            CLOCK_FACE_KEY,
+        );
+        let err =
+            OfficeArt::parse(test_pack_with(&[("wall_clock.sprite", clock)])).expect_err("no face");
+        assert!(matches!(err, ArtError::ClockFace { .. }), "{err}");
+    }
+
+    /// An icon the pack leaves out of `[icons]` has no art to draw.
+    #[test]
+    fn an_icon_missing_from_the_pack_does_not_parse() {
+        let err = OfficeArt::parse(test_pack_declaring("[icons.alert]", "[icons.alarm]"))
+            .expect_err("no alert icon");
+        assert!(
+            matches!(err, ArtError::IconArt { icon: Icon::Alert }),
+            "{err}"
         );
     }
 }

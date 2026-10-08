@@ -336,7 +336,7 @@ pub(crate) fn teardown_terminal(term: &mut Term) -> Result<()> {
 
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack: Arc<pixtuoid_core::sprite::format::Pack>,
+    pub pack: Arc<pixtuoid_scene::pack::OfficeArt>,
     /// What `boot_tui` planned to paint.
     pub plan: crate::graphics::Plan,
     /// How the office moves, which `boot_tui` resolved beside the plan.

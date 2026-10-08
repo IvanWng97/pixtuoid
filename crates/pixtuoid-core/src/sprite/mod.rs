@@ -499,12 +499,13 @@ impl HeadMark {
 /// What a head mark's name starts with, before its view.
 pub(crate) const HEAD_MARK: &str = "head.";
 
-/// An animation: its frames in order, the palette indices they were drawn
-/// with, each frame's marks, the per-frame hold time, and a walk's stride.
+/// An animation: its frames in order, at least one, the palette indices they
+/// were drawn with, each frame's marks, the per-frame hold time, and a walk's
+/// stride.
 #[derive(Debug, Clone)]
 pub struct Sprite {
     /// The frames in their own palette's colors.
-    frames: Vec<Frame>,
+    frames: vec1::Vec1<Frame>,
     /// The same frames as indices into `palette`, for a recolor to resolve again.
     indexed: Vec<IndexedFrame>,
     /// Each frame's `@mark`s.
@@ -517,14 +518,14 @@ pub struct Sprite {
 
 impl Sprite {
     fn new(
-        marked: Vec<(IndexedFrame, Vec<Mark>)>,
+        marked: vec1::Vec1<(IndexedFrame, Vec<Mark>)>,
         palette: Arc<Palette>,
         frame_ms: u32,
         stride: Option<std::num::NonZeroU16>,
     ) -> Self {
         let pixels = palette.resolved();
+        let frames = marked.mapped_ref(|(f, _)| f.resolve(&pixels));
         let (indexed, marks): (Vec<_>, Vec<_>) = marked.into_iter().unzip();
-        let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
         Sprite {
             frames,
             indexed,
@@ -549,7 +550,7 @@ impl Sprite {
     pub fn laid_on(&self, head: HeadMark) -> Option<(&Frame, i32, i32)> {
         let mark = self.head(0)?;
         Some((
-            self.frames.first()?,
+            self.first(),
             i32::from(head.x) - i32::from(mark.x),
             i32::from(head.y) - i32::from(mark.y),
         ))
@@ -558,6 +559,32 @@ impl Sprite {
     /// The frames, played in order.
     pub fn frames(&self) -> &[Frame] {
         &self.frames
+    }
+
+    /// The first frame.
+    pub fn first(&self) -> &Frame {
+        self.frames.first()
+    }
+
+    /// `idx`, or `0` once it runs past the last frame: an animation with fewer
+    /// frames than a shared cycle's index then shows its first rather than
+    /// vanishing.
+    pub fn wrap(&self, idx: usize) -> usize {
+        if idx < self.frames.len() { idx } else { 0 }
+    }
+
+    /// Frame [`wrap`](Self::wrap)`(idx)`.
+    pub fn frame_at(&self, idx: usize) -> &Frame {
+        &self.frames[self.wrap(idx)]
+    }
+
+    /// Frame [`wrap`](Self::wrap)`(idx)` as the palette indices a recolor
+    /// resolves.
+    pub fn recolorable_at(&self, idx: usize) -> RecolorableFrame<'_> {
+        RecolorableFrame {
+            indexed: &self.indexed[self.wrap(idx)],
+            palette: &self.palette,
+        }
     }
 
     /// How long each frame holds before advancing, in milliseconds: a walk

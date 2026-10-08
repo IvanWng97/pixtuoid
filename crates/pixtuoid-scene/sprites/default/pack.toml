@@ -1,7 +1,3 @@
-[pack]
-name    = "topdown"
-version = "1"
-
 [palette]
 "." = "transparent"
 "H" = "#2a1a0e"   # hair (per-agent recolor target)
