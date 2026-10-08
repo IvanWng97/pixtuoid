@@ -1,209 +1,131 @@
-//! Floating-window keyboard input — the winit KEY→action map for the window's
-//! controls and the footer hints that name them. The audio state TRANSITION is
-//! shared with the TUI in [`crate::audio::apply_audio_action`]; only this
-//! key-decoding half is painter-specific (winit here, crossterm in the TUI).
+//! Floating-window keyboard input: a winit key read as the crossterm key the
+//! TUI's [`dispatch_key`](crate::panels::dispatch_key) decodes, so both
+//! painters take one vocabulary and one precedence of panels.
 
-use crate::audio::AudioAction;
-use winit::keyboard::Key;
+use crossterm::event::{KeyCode, KeyModifiers};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-/// What a key does in the window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Action {
-    Audio(AudioAction),
-    Pause,
-    /// The next theme: the TUI's `t` opens a picker, which the window has no
-    /// panel for, so it takes the next one at once.
-    Theme,
-    Floor(FloorStep),
-}
-
-/// Which way a floor key moves, the TUI's floor keys: PageUp, Up or `k`
-/// climbs; PageDown, Down or `j` descends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FloorStep {
-    Up,
-    Down,
-}
-
-/// A character key the window binds.
-struct Binding {
-    key: &'static str,
-    action: Action,
-    /// Whether a held key fires it again: a volume or floor step may, a
-    /// toggle must not oscillate (winit flags repeats; the TUI's crossterm
-    /// path can't).
-    repeats: bool,
-    /// What the footer names it, if it names it.
-    hint: Option<&'static str>,
-}
-
-/// The window's character keys, the TUI's vocabulary (lowercase only, as the
-/// TUI's `KeyCode::Char`s are): the one table [`action`] decodes and
-/// [`footer_keys`] lists, so the footer names exactly what the window binds.
-const BINDINGS: [Binding; 9] = [
-    Binding {
-        key: "p",
-        action: Action::Pause,
-        repeats: false,
-        hint: Some("[p]ause"),
-    },
-    Binding {
-        key: "t",
-        action: Action::Theme,
-        repeats: false,
-        hint: Some("[t]heme"),
-    },
-    Binding {
-        key: "m",
-        action: Action::Audio(AudioAction::ToggleMute),
-        repeats: false,
-        hint: Some("[m]ute"),
-    },
-    Binding {
-        key: "+",
-        action: Action::Audio(AudioAction::Volume(true)),
-        repeats: true,
-        hint: Some("[+/-]vol"),
-    },
-    Binding {
-        key: "=",
-        action: Action::Audio(AudioAction::Volume(true)),
-        repeats: true,
-        hint: None,
-    },
-    Binding {
-        key: "-",
-        action: Action::Audio(AudioAction::Volume(false)),
-        repeats: true,
-        hint: None,
-    },
-    Binding {
-        key: "_",
-        action: Action::Audio(AudioAction::Volume(false)),
-        repeats: true,
-        hint: None,
-    },
-    Binding {
-        key: "k",
-        action: Action::Floor(FloorStep::Up),
-        repeats: true,
-        hint: None,
-    },
-    Binding {
-        key: "j",
-        action: Action::Floor(FloorStep::Down),
-        repeats: true,
-        hint: None,
-    },
-];
-
-/// What `key` does, `repeat` being winit's flag for a held key; `None` for a
-/// key the window doesn't bind.
-pub(crate) fn action(key: &Key, repeat: bool) -> Option<Action> {
-    use winit::keyboard::NamedKey;
-    match key {
-        Key::Named(NamedKey::PageUp | NamedKey::ArrowUp) => Some(Action::Floor(FloorStep::Up)),
-        Key::Named(NamedKey::PageDown | NamedKey::ArrowDown) => {
-            Some(Action::Floor(FloorStep::Down))
-        }
-        Key::Character(s) => BINDINGS
-            .iter()
-            .find(|b| b.key == s.as_str() && (b.repeats || !repeat))
-            .map(|b| b.action),
-        _ => None,
+/// `key` with `mods` held as the TUI reads it, `repeat` being winit's flag
+/// for a held key; `None` for a key it binds nothing to, a held toggle, or a
+/// Cmd chord, which a terminal keeps for itself and never hands the TUI.
+pub(crate) fn key(
+    key: &Key,
+    mods: ModifiersState,
+    repeat: bool,
+) -> Option<(KeyCode, KeyModifiers)> {
+    if mods.super_key() {
+        return None;
     }
+    let code = match key {
+        Key::Named(named) => match named {
+            NamedKey::Enter => KeyCode::Enter,
+            NamedKey::Escape => KeyCode::Esc,
+            NamedKey::Tab => KeyCode::Tab,
+            NamedKey::Space => KeyCode::Char(' '),
+            NamedKey::ArrowUp => KeyCode::Up,
+            NamedKey::ArrowDown => KeyCode::Down,
+            NamedKey::ArrowLeft => KeyCode::Left,
+            NamedKey::ArrowRight => KeyCode::Right,
+            NamedKey::PageUp => KeyCode::PageUp,
+            NamedKey::PageDown => KeyCode::PageDown,
+            _ => return None,
+        },
+        Key::Character(s) => {
+            let mut chars = s.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => KeyCode::Char(c),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    if repeat && !repeats(code) {
+        return None;
+    }
+    let mut held = KeyModifiers::NONE;
+    if mods.control_key() {
+        held |= KeyModifiers::CONTROL;
+    }
+    if mods.alt_key() {
+        held |= KeyModifiers::ALT;
+    }
+    Some((code, held))
 }
 
-/// The footer's keybind tail: every [`BINDINGS`] hint, in order.
-pub(crate) fn footer_keys() -> &'static str {
-    static KEYS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-        let hints: Vec<_> = BINDINGS.iter().filter_map(|b| b.hint).collect();
-        format!(" {} ", hints.join(" "))
-    });
-    &KEYS
-}
-
-/// The theme after `theme` in [`ALL_THEMES`](pixtuoid_scene::theme::ALL_THEMES),
-/// the first after the last.
-pub(crate) fn next_theme(
-    theme: &'static pixtuoid_scene::theme::Theme,
-) -> &'static pixtuoid_scene::theme::Theme {
-    use pixtuoid_scene::theme::ALL_THEMES;
-    let at = ALL_THEMES
-        .iter()
-        .position(|t| std::ptr::eq(*t, theme))
-        .unwrap_or(0);
-    ALL_THEMES[(at + 1) % ALL_THEMES.len()]
+/// Whether a held `code` fires again: a step through a list, a floor or the
+/// volume may, a toggle must not oscillate (winit flags repeats; a terminal
+/// delivers each as a fresh press).
+fn repeats(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Char('j' | 'k' | 'h' | 'l' | '+' | '=' | '-' | '_')
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn key(s: &str) -> Key {
-        Key::Character(s.into())
+    /// The window's keys reach the TUI's dispatch as its own: characters as
+    /// typed, the named keys it binds, and Ctrl held through.
+    #[test]
+    fn a_window_key_reads_as_the_tuis() {
+        let none = ModifiersState::empty();
+        assert_eq!(
+            key(&Key::Character("t".into()), none, false),
+            Some((KeyCode::Char('t'), KeyModifiers::NONE))
+        );
+        assert_eq!(
+            key(&Key::Character("c".into()), ModifiersState::CONTROL, false),
+            Some((KeyCode::Char('c'), KeyModifiers::CONTROL))
+        );
+        assert_eq!(
+            key(&Key::Character("q".into()), ModifiersState::ALT, false),
+            Some((KeyCode::Char('q'), KeyModifiers::ALT))
+        );
+        assert_eq!(
+            key(&Key::Named(NamedKey::Tab), none, false),
+            Some((KeyCode::Tab, KeyModifiers::NONE))
+        );
+        assert_eq!(
+            key(&Key::Named(NamedKey::Space), none, false),
+            Some((KeyCode::Char(' '), KeyModifiers::NONE))
+        );
+        assert_eq!(key(&Key::Named(NamedKey::F1), none, false), None);
+        assert_eq!(
+            key(&Key::Character("q".into()), ModifiersState::SUPER, false),
+            None,
+            "Cmd+Q is the platform's, never the TUI's q"
+        );
     }
 
-    /// The TUI's vocabulary: lowercase only, toggles swallow a held key's
-    /// repeats, and volume and floor steps take them.
+    /// A held toggle fires once; a held step keeps stepping.
     #[test]
-    fn the_keys_are_the_tuis_and_only_steps_repeat() {
-        use winit::keyboard::NamedKey;
-        let cases = [
-            ("m", Some(Action::Audio(AudioAction::ToggleMute)), false),
-            ("+", Some(Action::Audio(AudioAction::Volume(true))), true),
-            ("=", Some(Action::Audio(AudioAction::Volume(true))), true),
-            ("-", Some(Action::Audio(AudioAction::Volume(false))), true),
-            ("_", Some(Action::Audio(AudioAction::Volume(false))), true),
-            ("p", Some(Action::Pause), false),
-            ("t", Some(Action::Theme), false),
-            ("k", Some(Action::Floor(FloorStep::Up)), true),
-            ("j", Some(Action::Floor(FloorStep::Down)), true),
-            ("M", None, false),
-            ("P", None, false),
-            ("T", None, false),
-            ("q", None, false),
-        ];
-        for (k, want, repeats) in cases {
-            assert_eq!(action(&key(k), false), want, "{k}");
-            let held = if repeats { want } else { None };
-            assert_eq!(action(&key(k), true), held, "{k} held");
-        }
-        for (k, step) in [
-            (NamedKey::PageUp, FloorStep::Up),
-            (NamedKey::ArrowUp, FloorStep::Up),
-            (NamedKey::PageDown, FloorStep::Down),
-            (NamedKey::ArrowDown, FloorStep::Down),
+    fn only_steps_repeat() {
+        let none = ModifiersState::empty();
+        for k in [
+            Key::Character("j".into()),
+            Key::Named(NamedKey::ArrowDown),
+            Key::Character("+".into()),
         ] {
-            assert_eq!(action(&Key::Named(k), false), Some(Action::Floor(step)));
+            assert_eq!(key(&k, none, true), key(&k, none, false), "{k:?}");
+            assert!(key(&k, none, true).is_some(), "{k:?}");
         }
-        assert_eq!(action(&Key::Named(NamedKey::Enter), false), None);
-    }
-
-    /// The footer names a key only when the window binds it: every hint's
-    /// `[x]` keys decode, and the hints read in the table's order.
-    #[test]
-    fn the_footer_names_only_bound_keys() {
-        assert_eq!(footer_keys(), " [p]ause [t]heme [m]ute [+/-]vol ");
-        for hint in BINDINGS.iter().filter_map(|b| b.hint) {
-            let inside = &hint[1..hint.find(']').expect("a [key]")];
-            for k in inside.split('/') {
-                assert!(action(&key(k), false).is_some(), "{hint}: {k} unbound");
-            }
+        for k in [
+            Key::Character("p".into()),
+            Key::Character("m".into()),
+            Key::Character("t".into()),
+            Key::Named(NamedKey::Tab),
+            Key::Named(NamedKey::Enter),
+        ] {
+            assert!(key(&k, none, false).is_some(), "{k:?}");
+            assert_eq!(key(&k, none, true), None, "held {k:?}");
         }
-    }
-
-    #[test]
-    fn t_cycles_every_theme_once_round() {
-        use pixtuoid_scene::theme::ALL_THEMES;
-        let mut seen = vec![ALL_THEMES[0].name];
-        let mut theme = ALL_THEMES[0];
-        for _ in 1..ALL_THEMES.len() {
-            theme = next_theme(theme);
-            seen.push(theme.name);
-        }
-        let want: Vec<_> = ALL_THEMES.iter().map(|t| t.name).collect();
-        assert_eq!(seen, want, "in order");
-        assert!(std::ptr::eq(next_theme(theme), ALL_THEMES[0]), "wraps");
     }
 }

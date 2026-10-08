@@ -41,8 +41,12 @@ pub(crate) struct FloatingApp {
     theme: &'static Theme,
     pack: std::sync::Arc<Pack>,
     config_path: PathBuf,
-    /// The `[p]ause`, which holds the office's clock still.
-    pause: pixtuoid_scene::anim::PauseClock,
+    /// The panels, the `[p]ause` and the theme picker, as the TUI holds them.
+    ui: crate::panels::ui_state::UiState,
+    /// The Sources panel's mutation seam, as the TUI's.
+    connected: crate::runtime::ConnectedSources,
+    /// The modifier keys held, which a key is read with.
+    modifiers: winit::keyboard::ModifiersState,
     /// What the frame on screen shows beside the office.
     screen: super::offscreen::Screen,
     /// The frames' times and janks, reported as the TUI's are.
@@ -86,6 +90,16 @@ pub(crate) struct FloatingApp {
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 }
 
+/// What the run keeps beside the office: the config it persists to, its
+/// audio, the log the Sources panel's drift history comes from, and whether
+/// this is the first run, which opens the onboarding.
+pub(crate) struct Settings {
+    pub(crate) config_path: PathBuf,
+    pub(crate) audio: config::AudioConfig,
+    pub(crate) log: Option<crate::run_log::LogLocation>,
+    pub(crate) first_run: bool,
+}
+
 /// How the office looks and moves.
 pub(crate) struct Appearance {
     pub(crate) theme: &'static Theme,
@@ -97,10 +111,14 @@ impl FloatingApp {
         cfg: FloatingConfig,
         Appearance { theme, motion }: Appearance,
         pack: Pack,
-        config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,
+        Settings {
+            config_path,
+            audio,
+            log,
+            first_run,
+        }: Settings,
         boot: super::PipelineBoot,
-        audio: config::AudioConfig,
     ) -> Self {
         let audio_ctl = crate::audio::AudioController::new(audio, config_path.clone());
         let pack = std::sync::Arc::new(pack);
@@ -108,12 +126,23 @@ impl FloatingApp {
         renderer.set_audio(audio_ctl.handle().clone());
         renderer.set_pets(pets);
         let focus_roots = boot.focus_roots();
+        let ui = crate::panels::ui_state::UiState::boot(
+            theme,
+            first_run,
+            &config_path,
+            boot.socket_path.clone(),
+            log,
+            boot.drift.clone(),
+        );
+        let connected = boot.connected.clone();
         Self {
             cfg,
             theme,
             pack,
             config_path,
-            pause: pixtuoid_scene::anim::PauseClock::default(),
+            ui,
+            connected,
+            modifiers: winit::keyboard::ModifiersState::empty(),
             // Until `resumed` names the platform: presenting every frame is
             // safe on any.
             screen: super::offscreen::Screen::new(false),
@@ -178,20 +207,40 @@ impl FloatingApp {
         }
     }
 
-    /// A left press: resize from the corner, hand the pointer what the frame
-    /// on screen shows under it (a click or a drag follows), or drag the
-    /// frameless window. Errors are non-fatal — some platforms refuse a drag
-    /// outside a real press.
+    /// A left press: the open panels' first, as the TUI's ladder
+    /// ([`crate::panels::modal_mouse`]); then resize from the corner, hand the
+    /// pointer what the frame on screen shows under it (a click or a drag
+    /// follows), or drag the frameless window. Errors are non-fatal — some
+    /// platforms refuse a drag outside a real press.
     fn press(&mut self) {
         use super::offscreen::Press;
+        use crate::panels::ModalMouse;
         let Some(window) = &self.window else {
             return;
         };
         let size = window.inner_size();
-        let now = self.pause.now(SystemTime::now());
+        let cursor = (self.cursor.x, self.cursor.y);
+        match super::offscreen::modal_press(
+            &mut self.ui,
+            cursor,
+            (size.width, size.height),
+            self.shown,
+        ) {
+            ModalMouse::Office => {}
+            // A panel the press did nothing in leaves the window to drag.
+            ModalMouse::Inert => {
+                let _ = window.drag_window();
+                return;
+            }
+            ModalMouse::Took => {
+                window.request_redraw();
+                return;
+            }
+        }
+        let now = self.ui.now();
         let press = match self.shown {
             Some(at) => self.renderer.press_at(
-                (self.cursor.x, self.cursor.y),
+                cursor,
                 (size.width, size.height),
                 at,
                 super::offscreen::Pressing {
@@ -214,14 +263,16 @@ impl FloatingApp {
     }
 
     /// The left button released: carry out a click as the TUI's does, or set
-    /// a carried figure down.
+    /// a carried figure down, even one a panel opened over mid-carry.
     fn release(&mut self) {
         use pixtuoid_scene::hit::HitAction;
         let Some(at) = self.shown else {
             return;
         };
-        let action = self.renderer.release((self.cursor.x, self.cursor.y), at);
-        let now = self.pause.now(SystemTime::now());
+        let action =
+            self.renderer
+                .release_under((self.cursor.x, self.cursor.y), at, &self.ui.modal());
+        let now = self.ui.now();
         match action {
             Some(HitAction::Focus(id)) => {
                 let slot = self
@@ -247,6 +298,36 @@ impl FloatingApp {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+
+    /// A pressed key, through the TUI's dispatch and its panels; whether it
+    /// asked to quit.
+    fn key(&mut self, event: &winit::event::KeyEvent) -> bool {
+        let Some(key) = super::input::key(&event.logical_key, self.modifiers, event.repeat) else {
+            return false;
+        };
+        let Some(snapshot) = self.live.as_ref().map(|l| Arc::clone(&l.scene_rx.borrow())) else {
+            return false;
+        };
+        let now = self.ui.now();
+        super::offscreen::press_key(
+            key,
+            &mut crate::panels::KeyCtx {
+                ui: &mut self.ui,
+                host: &mut super::offscreen::WindowHost {
+                    renderer: &mut self.renderer,
+                    theme: &mut self.theme,
+                    screen: &mut self.screen,
+                },
+                audio_ctl: &mut self.audio_ctl,
+                config_path: &self.config_path,
+                connected: &self.connected,
+                snapshot: &snapshot,
+                focus_roots: &self.focus_roots,
+                now,
+                respawn: crate::audio::respawn,
+            },
+        )
     }
 
     fn redraw(&mut self) {
@@ -281,7 +362,7 @@ impl FloatingApp {
         // The office's weather and motion; the office picks each floor's own.
         let floor_meta = FloorMeta::ground().with_motion(self.motion);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
-        let now = self.pause.now(SystemTime::now());
+        let now = self.ui.now();
         let world = FloorInputs {
             scene: &scene,
             pack: &self.pack,
@@ -329,8 +410,9 @@ impl FloatingApp {
                     .and_then(super::LivePipeline::footer_warning)
                     .as_deref(),
             ),
-            // A figure in hand has no tooltip.
-            tooltip: (self.cursor_in && !self.renderer.carrying())
+            tooltip: self
+                .renderer
+                .tooltip_shows(self.cursor_in, &self.ui.modal())
                 .then(|| self.renderer.hit_at(cursor, at))
                 .flatten()
                 .and_then(|hit| {
@@ -346,6 +428,20 @@ impl FloatingApp {
                     pixtuoid_scene::tooltip::for_hit(hit, &shown)
                 })
                 .map(|tip| (tip, (cursor.0 as i32, cursor.1 as i32))),
+            panels: {
+                let health = self
+                    .live
+                    .as_ref()
+                    .map(super::LivePipeline::health)
+                    .unwrap_or_default();
+                let frames = self.ui.build_frames(now, &scene, &health);
+                super::offscreen::panels_grid(
+                    &frames,
+                    super::offscreen::panel_cells((win_w, win_h), Face::chrome(at)),
+                    now,
+                    self.theme,
+                )
+            },
         };
         let dirty = self.renderer.dirty();
         let painted = crate::jank::Painted::from(dirty);
@@ -377,6 +473,9 @@ impl FloatingApp {
         super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, look, at);
         if let Some((tip, _)) = &next.tooltip {
             super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, look, cell);
+        }
+        if let Some(panels) = &next.panels {
+            super::offscreen::paint_panels_into_surface(&mut surf, panels, look, cell);
         }
         window.pre_present_notify();
         let presenting = Instant::now();
@@ -518,38 +617,15 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
-                use super::input::{Action, FloorStep};
-                let Some(action) = super::input::action(&event.logical_key, event.repeat) else {
+                if self.key(&event) {
+                    self.persist_geometry();
+                    self.jank.finish();
+                    event_loop.exit();
                     return;
-                };
-                match action {
-                    Action::Audio(audio) => self.audio_ctl.apply(
-                        audio,
-                        self.pause.paused(),
-                        Instant::now(),
-                        crate::audio::respawn,
-                    ),
-                    Action::Theme => self.theme = cycle_theme(self.theme, &self.config_path),
-                    Action::Pause => {
-                        self.pause.toggle();
-                        // Unpause restores the user's own m-key state rather than clobbering it.
-                        self.audio_ctl.set_paused(self.pause.paused());
-                    }
-                    Action::Floor(step) => {
-                        let nav = self.renderer.nav();
-                        let target = match step {
-                            FloorStep::Up => nav.up(self.renderer.n_floors()),
-                            FloorStep::Down => nav.down(),
-                        };
-                        let Some(target) = target else {
-                            return;
-                        };
-                        let now = self.pause.now(SystemTime::now());
-                        self.renderer.navigate(target, now);
-                    }
                 }
                 self.request_redraw();
             }
+            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::Resized(_) => self.request_redraw(),
             WindowEvent::CursorMoved { position, .. } => {
@@ -613,36 +689,5 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if paint {
             self.request_redraw();
         }
-    }
-}
-
-/// The theme after `theme`, saved to the config at `path` so the next start
-/// opens on it.
-fn cycle_theme(theme: &'static Theme, path: &std::path::Path) -> &'static Theme {
-    let next = super::input::next_theme(theme);
-    if let Err(e) = crate::config::save(path, next.name) {
-        tracing::warn!(error = ?e, "failed to persist theme");
-    }
-    next
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `t` takes the next theme and the config keeps it, an unwritable
-    /// config costing only the save.
-    #[test]
-    fn a_theme_cycle_takes_the_next_theme_and_saves_it() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("config.toml");
-        let first = pixtuoid_scene::theme::ALL_THEMES[0];
-        let next = cycle_theme(first, &path);
-        assert!(std::ptr::eq(next, super::super::input::next_theme(first)));
-        let saved = crate::config::load(&path, &mut Vec::new()).theme;
-        assert_eq!(saved.as_deref(), Some(next.name));
-        let unwritable = dir.path().join("missing").join("config.toml");
-        std::fs::write(dir.path().join("missing"), "a file, not a dir").expect("write");
-        assert!(std::ptr::eq(cycle_theme(first, &unwritable), next));
     }
 }

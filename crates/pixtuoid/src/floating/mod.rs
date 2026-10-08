@@ -45,6 +45,8 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
         audio,
         motion,
         drift,
+        log,
+        first_run,
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
@@ -81,8 +83,13 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
             motion: motion.or(pixtuoid_scene::anim::Motion::Full),
         },
         pack,
-        config_path,
         pets,
+        window::Settings {
+            config_path,
+            audio,
+            log,
+            first_run,
+        },
         PipelineBoot {
             socket_path,
             projects_root,
@@ -92,7 +99,6 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
             rt: rt.handle().clone(),
             drift,
         },
-        audio,
     );
     event_loop
         .run_app(&mut app)
@@ -139,6 +145,11 @@ pub(crate) struct LivePipeline {
 }
 
 impl LivePipeline {
+    /// The sources that died, for the Sources panel and the footer.
+    pub(crate) fn health(&self) -> Vec<pixtuoid_core::source::manager::SourceDeath> {
+        self.health_rx.borrow().clone()
+    }
+
     /// The footer's warning now: [`crate::doctor::footer_warning`], as the
     /// TUI's.
     pub(crate) fn footer_warning(&self) -> Option<String> {
