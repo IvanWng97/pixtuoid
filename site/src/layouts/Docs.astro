@@ -310,6 +310,8 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   }
   .docs__pager {
     display: flex;
+    /* At 320px the longest neighbour pair outgrows one row. */
+    flex-wrap: wrap;
     justify-content: space-between;
     gap: 1rem;
     margin-top: 2.6rem;
