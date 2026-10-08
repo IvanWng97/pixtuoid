@@ -4,6 +4,8 @@
 
 use std::num::NonZeroU16;
 
+#[cfg(doc)]
+use pixtuoid_core::sprite::format::variant_redraws;
 use pixtuoid_core::sprite::format::{Density, Pack, density_variant_name_into};
 use pixtuoid_core::sprite::{Frame, RecolorableFrame};
 
@@ -17,8 +19,7 @@ pub(crate) struct DenseFrame<'a> {
     /// The same art as palette indices, for a per-agent recolor.
     pub(crate) recolorable: RecolorableFrame<'a>,
     /// The piece's size in layout units: its base frame's, since a variant
-    /// redraws that frame's box on a finer grid
-    /// ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws)).
+    /// redraws that frame's box on a finer grid ([`variant_redraws`]).
     pub(crate) logical: (u16, u16),
     /// The grid the art is authored on: 1 for the base, `N` for `<name>@<N>x`.
     pub(crate) density: Density,
@@ -38,9 +39,8 @@ pub(crate) struct DenseFrame<'a> {
 /// A variant is the same PIECE on an N-times grid — the base's logical box
 /// drawn finer — so it is taken only at a scale its density divides (4x art at
 /// 8x blits at 2 rather than being discarded for not matching). Validation
-/// holds each to redrawing its base whole
-/// ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws)), so an animation
-/// never mixes densities mid-cycle.
+/// holds each to redrawing its base whole ([`variant_redraws`]), so an
+/// animation never mixes densities mid-cycle.
 ///
 /// A piece with no variant renders exactly as it did before variants existed,
 /// so richer art lands one piece at a time rather than as a flag day.
@@ -142,7 +142,7 @@ mod tests {
     /// Two variants that both divide the scale: the DENSER one wins, and
     /// blits whatever upscale is left.
     #[test]
-    fn the_denser_of_two_honest_variants_wins() {
+    fn the_denser_of_two_dividing_variants_wins() {
         let pack = variant_pack();
         assert_eq!(at(&pack, "holding_coffee", 0, 4), (4, 4, 1));
         assert_eq!(at(&pack, "holding_coffee", 0, 8), (4, 4, 2));
