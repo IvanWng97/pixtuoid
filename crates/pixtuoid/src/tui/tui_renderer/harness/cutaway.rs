@@ -1,7 +1,7 @@
 //! The cutaway through the production render path: what reaches the
 //! terminal as escapes, and what the cells show.
 use super::*;
-use crate::graphics::{CellSize, Fit, ImageProtocol};
+use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
 use std::io::Write;
@@ -150,9 +150,9 @@ fn on_screen(
 }
 
 /// The plan's fit over a `cols`×`rows` terminal's scene.
-fn fit(cols: u16, rows: u16) -> Fit {
+fn fit(cols: u16, rows: u16) -> pixtuoid_scene::render_scale::PixelFit {
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    let fit = Fit::new(CELL, area, pack_arc().max_density_variant()).expect("fits");
+    let fit = cutaway_fit(CELL, area, pack_arc().max_density_variant()).expect("fits");
     assert_eq!(fit.upscale(), 1);
     assert_eq!(fit.density(), Density::new(4).expect("nonzero"));
     fit
@@ -590,7 +590,7 @@ fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
         h: CELL.h / 2,
     };
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    assert!(Fit::new(tiny, area, pack_arc().max_density_variant()).is_none());
+    assert!(cutaway_fit(tiny, area, pack_arc().max_density_variant()).is_none());
     r.terminal.backend_mut().zoom(tiny);
     r.render(&scene, pack(), t0() + cadence * 2)
         .expect("render");

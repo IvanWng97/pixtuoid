@@ -505,7 +505,7 @@ pub(crate) fn placeholders(id: u32, tile: Tile) -> Option<impl Iterator<Item = P
 mod tests {
     use super::*;
     use crate::graphics::tiles::Tiles;
-    use crate::graphics::{CellSize, Fit, ImageProtocol};
+    use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
     use pixtuoid_core::sprite::format::Density;
     use pixtuoid_core::sprite::{Rgb, RgbBuffer};
     use pixtuoid_scene::cutaway::canvas::Dirty;
@@ -772,7 +772,7 @@ mod tests {
             width: 80,
             height: 24,
         };
-        let fit = Fit::new(cell, area, Density::new(4).expect("nonzero")).expect("fits");
+        let fit = cutaway_fit(cell, area, Density::new(4).expect("nonzero")).expect("fits");
         let mut tiles = Tiles::new(ImageProtocol::Kitty, cell, fit);
         let buf = RgbBuffer::filled(64, 40, Rgb { r: 1, g: 2, b: 3 });
         let mut sent = |dirty: &Dirty| -> usize {
