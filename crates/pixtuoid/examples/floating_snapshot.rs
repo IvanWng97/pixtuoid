@@ -271,7 +271,7 @@ fn main() -> Result<()> {
     let cell = Face::chrome(at);
     let budget = pixtuoid::dev::footer_budget(ww, cell);
     let footer = renderer.footer(&scene, budget, true, None, None);
-    pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, (theme, &pack), cell);
+    pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, (theme, &pack), at);
     if let Some(cursor) = hover {
         let world = FloorInputs {
             scene: &scene,

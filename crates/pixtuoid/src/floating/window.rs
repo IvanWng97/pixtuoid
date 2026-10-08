@@ -374,7 +374,7 @@ impl FloatingApp {
         }
         let cell = Face::chrome(at);
         let look = (self.theme, &*self.pack);
-        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, look, cell);
+        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, look, at);
         if let Some((tip, _)) = &next.tooltip {
             super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, look, cell);
         }
@@ -518,33 +518,35 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
-                let key = &event.logical_key;
-                if let Some(action) = super::input::audio_action(key, event.repeat) {
-                    self.audio_ctl.apply(
-                        action,
+                use super::input::{Action, FloorStep};
+                let Some(action) = super::input::action(&event.logical_key, event.repeat) else {
+                    return;
+                };
+                match action {
+                    Action::Audio(audio) => self.audio_ctl.apply(
+                        audio,
                         self.pause.paused(),
                         Instant::now(),
                         crate::audio::respawn,
-                    );
-                } else if super::input::is_theme_cycle(key, event.repeat) {
-                    self.theme = cycle_theme(self.theme, &self.config_path);
-                } else if super::input::is_pause(key, event.repeat) {
-                    self.pause.toggle();
-                    // Unpause restores the user's own m-key state rather than clobbering it.
-                    self.audio_ctl.set_paused(self.pause.paused());
-                } else if let Some(step) = super::input::floor_step(key) {
-                    let nav = self.renderer.nav();
-                    let target = match step {
-                        super::input::FloorStep::Up => nav.up(self.renderer.n_floors()),
-                        super::input::FloorStep::Down => nav.down(),
-                    };
-                    let Some(target) = target else {
-                        return;
-                    };
-                    let now = self.pause.now(SystemTime::now());
-                    self.renderer.navigate(target, now);
-                } else {
-                    return;
+                    ),
+                    Action::Theme => self.theme = cycle_theme(self.theme, &self.config_path),
+                    Action::Pause => {
+                        self.pause.toggle();
+                        // Unpause restores the user's own m-key state rather than clobbering it.
+                        self.audio_ctl.set_paused(self.pause.paused());
+                    }
+                    Action::Floor(step) => {
+                        let nav = self.renderer.nav();
+                        let target = match step {
+                            FloorStep::Up => nav.up(self.renderer.n_floors()),
+                            FloorStep::Down => nav.down(),
+                        };
+                        let Some(target) = target else {
+                            return;
+                        };
+                        let now = self.pause.now(SystemTime::now());
+                        self.renderer.navigate(target, now);
+                    }
                 }
                 self.request_redraw();
             }
