@@ -102,6 +102,9 @@ pub(crate) struct TileCutaway {
     cores: usize,
     /// Whether an audio thread is up to synthesize tracks beside the encode.
     audio: bool,
+    /// The encode's pool and the thread count it was made for; rebuilt only
+    /// when that count moves.
+    pool: Option<(usize, Option<rayon::ThreadPool>)>,
 }
 
 /// A staged write: the tiles it sends and the flashes they show, so only a
@@ -166,8 +169,9 @@ impl TileCutaway {
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             landing: None,
             last: FrameSend::default(),
-            cores: pixtuoid_scene::par::cores(),
+            cores: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
             audio: false,
+            pool: None,
         }
     }
 
@@ -416,14 +420,18 @@ impl TileCutaway {
     }
 
     /// What encodes this frame's tiles, apart from the sink no thread shares.
-    fn encoder(&self) -> Encoder<'_> {
+    fn encoder(&mut self) -> Encoder<'_> {
+        let threads = encode_cores(self.cores, self.audio);
+        if self.pool.as_ref().map(|(n, _)| *n) != Some(threads) {
+            self.pool = Some((threads, encode_pool(threads)));
+        }
         Encoder {
             tiles: &self.tiles,
             image: &self.image,
             route: self.route,
             base: self.base,
             origin: self.origin,
-            threads: encode_cores(self.cores, self.audio),
+            pool: self.pool.as_ref().and_then(|(_, pool)| pool.as_ref()),
         }
     }
 
@@ -545,9 +553,8 @@ impl TileCutaway {
     }
 }
 
-/// A thread's least share of a frame's tiles: below it, its spawn outweighs
-/// their encode, which a frame after the TUI's sleep runs on cooled cores
-/// ([`pixtuoid_scene::par`]).
+/// A pool worker's least share of a frame's tiles: below it, handing tiles to
+/// another worker outweighs their encode.
 pub(crate) const TILES_PER_THREAD: usize = 2;
 
 /// The cores a frame's encode may take of `cores`: all but one while an
@@ -561,10 +568,18 @@ fn encode_cores(cores: usize, audio: bool) -> usize {
     }
 }
 
-/// The threads a frame of `tiles` splits across on `cores`: one a
-/// [`TILES_PER_THREAD`] share, never more than the cores.
-fn threads_for(tiles: usize, cores: usize) -> usize {
-    cores.min(tiles / TILES_PER_THREAD).max(1)
+/// The pool a frame's encode splits across, `threads` workers made once and
+/// kept ([rayon's](https://docs.rs/rayon-core/latest/rayon_core/)); `None`
+/// where the platform starts no thread, and the encode runs on the frame's.
+fn encode_pool(threads: usize) -> Option<rayon::ThreadPool> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("pixtuoid-encode-{i}"))
+        .build()
+        .inspect_err(
+            |e| tracing::warn!(error = %e, "no encode pool: tiles encode on the frame thread"),
+        )
+        .ok()
 }
 
 /// A frame's tiles to escapes, each independent of the others.
@@ -575,16 +590,24 @@ struct Encoder<'a> {
     route: crate::graphics::Route,
     base: u32,
     origin: Position,
-    threads: usize,
+    pool: Option<&'a rayon::ThreadPool>,
 }
 
 impl Encoder<'_> {
-    /// Each of `send`'s escapes, in its order, split across as many threads
-    /// as it has [`TILES_PER_THREAD`] shares, up to the cores.
+    /// Each of `send`'s escapes, in its order, split across the pool in
+    /// shares of at least [`TILES_PER_THREAD`].
     fn encode_all(self, send: &[Changed]) -> Vec<Option<Vec<u8>>> {
-        pixtuoid_scene::par::map(send, threads_for(send.len(), self.threads), |&c| {
-            self.encode(c)
-        })
+        use rayon::prelude::*;
+        let encode = |c: &Changed| self.encode(*c);
+        match self.pool {
+            Some(pool) => pool.install(|| {
+                send.par_iter()
+                    .with_min_len(TILES_PER_THREAD)
+                    .map(encode)
+                    .collect()
+            }),
+            None => send.iter().map(encode).collect(),
+        }
     }
 
     /// `c`'s tile in the protocol's escape; `None` where it has none.
@@ -626,7 +649,7 @@ fn image_cell(buf: &mut Buffer, scene: Rect, col: u16, row: u16) -> Option<&mut 
 
 #[cfg(test)]
 mod tests {
-    use super::{TILES_PER_THREAD, encode_cores, threads_for};
+    use super::{encode_cores, encode_pool};
 
     /// The encode leaves a core only to a live audio thread: a muted user,
     /// who has none, keeps every core, two of them on a 2-core host.
@@ -638,14 +661,15 @@ mod tests {
         assert_eq!(encode_cores(1, true), 1);
     }
 
-    /// A frame of two shares splits across two cores, one share short of
-    /// that stays on one thread, and one core never splits: a serial
-    /// regression fails here, where an instruction count can't see it.
+    /// The pool takes the encode's cores and no more: a serial regression
+    /// fails here, where an instruction count can't see it.
     #[test]
-    fn a_frame_of_two_shares_splits_across_the_cores() {
-        assert_eq!(threads_for(2 * TILES_PER_THREAD, 8), 2);
-        assert_eq!(threads_for(2 * TILES_PER_THREAD - 1, 8), 1);
-        assert_eq!(threads_for(100 * TILES_PER_THREAD, 8), 8);
-        assert_eq!(threads_for(100 * TILES_PER_THREAD, 1), 1);
+    fn the_encode_pool_takes_the_encode_cores() {
+        for threads in [1, 3] {
+            assert_eq!(
+                encode_pool(threads).map(|pool| pool.current_num_threads()),
+                Some(threads)
+            );
+        }
     }
 }

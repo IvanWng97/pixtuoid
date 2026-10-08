@@ -416,11 +416,15 @@ impl Outside {
     }
 
     /// Each of the wall's bays, and what its glass shows, the bays drawn
-    /// across the cores ([`crate::par`]).
+    /// across rayon's pool; in turn on wasm32, which has no threads.
     pub(crate) fn views(&self) -> Vec<(WindowBay, WindowView)> {
-        crate::par::map(&self.bays, crate::par::cores(), |&bay| {
-            (bay, self.through(bay))
-        })
+        #[cfg(not(target_arch = "wasm32"))]
+        use rayon::prelude::*;
+        #[cfg(not(target_arch = "wasm32"))]
+        let bays = self.bays.par_iter();
+        #[cfg(target_arch = "wasm32")]
+        let bays = self.bays.iter();
+        bays.map(|&bay| (bay, self.through(bay))).collect()
     }
 
     /// What `bay`'s glass shows: each part of the outside, back to front, in
