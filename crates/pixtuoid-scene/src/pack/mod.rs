@@ -1,8 +1,5 @@
-//! Sprite packs: the compiled-in default (`include_str!`, so the binary ships
-//! standalone), with at most one custom pack merged over it. A custom pack is a
-//! directory holding `pack.toml` + each `.sprite` file it references
-//! (`sprites/default/` is the canonical example); `PackSource` names where it
-//! comes from, and deciding that is the caller's job.
+//! The sprite pack: `sprites/default/`, compiled in (`include_str!`), so the
+//! binary ships standalone.
 
 mod density;
 mod lookup;
@@ -23,36 +20,10 @@ pub(crate) use lookup::{
 #[cfg(test)]
 pub(crate) use lookup::{MONITOR_KEYS, desk_sprite_name};
 
-#[cfg(feature = "native")]
-use std::path::{Path, PathBuf};
-
-#[cfg(feature = "native")]
-use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
-#[cfg(feature = "native")]
-use pixtuoid_core::sprite::format::{
-    DensityMismatch, FrameCountMismatch, MissingKey, MissingMark, OffBeatLoop, UnreadTiming,
-    load_pack,
-};
 use pixtuoid_core::sprite::format::{
     Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
-
-/// Where a sprite pack's custom half comes from. The source decides what a
-/// custom pack that fails to load means.
-#[cfg(feature = "native")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PackSource {
-    /// The compiled-in default alone.
-    Bundled,
-    /// A pack the user named (`--pack-dir`, config `pack-dir`): failing to load
-    /// it is an error, since they asked for it.
-    Explicit(PathBuf),
-    /// A pack found without being named, in the user's config directory:
-    /// failing to load it falls back to the default, so a broken file nobody
-    /// pointed at never stops the office starting.
-    Discovered(PathBuf),
-}
 
 /// The sets of pieces a pack should ship whole, each read from the authority its
 /// painter picks by: each row is the pantry counters
@@ -145,191 +116,6 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
             keys: &DESK_BULBS,
         },
     )
-}
-
-/// Log a custom pack's animation-validation gaps at load time: a pack missing a
-/// required pose LOADS fine and then renders it as NOTHING, so without this the
-/// only signal is agents silently vanishing. Warn, don't fail — a
-/// partially-authored pack still renders every pose it does carry.
-#[cfg(feature = "native")]
-fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
-    let report = validate_pack(pack);
-    // Destructured without `..`: a field added to the report does not compile
-    // until it is named here, so a new error category cannot bypass this
-    // load-time warning unnoticed.
-    let ValidationReport {
-        missing_required,
-        missing_optional: _,
-        insufficient_frames,
-        unknown: _,
-        mismatched_density,
-        orphan_variants,
-        mismatched_frame_counts,
-        // These still render: `validate-pack` reports them.
-        partial_sets: _,
-        orphan_derived: _,
-        unmarked_heads: _,
-        missing_hair_views: _,
-        overhanging_hair: _,
-        walks_without_stride,
-        missing_marks,
-        missing_keys,
-        orphan_hairstyles,
-        unread_variant_timing,
-        off_beat_loops,
-    } = &report;
-    for name in missing_required {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            "custom sprite pack is missing a REQUIRED character animation — \
-             agents will be invisible in that pose (run `pixtuoid validate-pack`)"
-        );
-    }
-    for (name, min, got) in insufficient_frames {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            min,
-            got,
-            "custom sprite pack animation has too few frames — it will render as nothing"
-        );
-    }
-    // Each finding destructured without `..`, for the reason the report is.
-    for DensityMismatch {
-        name,
-        frame,
-        claimed,
-        found,
-    } in mismatched_density
-    {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            frame,
-            claimed = ?claimed,
-            found = ?found,
-            "custom sprite pack density variant is not the size its name claims — \
-             renderers skip it for the densest art that fits"
-        );
-    }
-    for name in orphan_variants {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            "custom sprite pack ships a density variant whose base animation it does not — \
-             a furniture variant is checked against the default pack's art, not yours; \
-             a character variant never draws"
-        );
-    }
-    for FrameCountMismatch {
-        name,
-        base_frames,
-        variant_frames,
-    } in mismatched_frame_counts
-    {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            base_frames,
-            variant_frames,
-            "custom sprite pack density variant has a different frame count from its base — \
-             renderers skip it for the densest art that fits"
-        );
-    }
-    for name in walks_without_stride {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            "custom sprite pack walk has no stride — its feet slide as its pace changes"
-        );
-    }
-    for UnreadTiming { name, field } in unread_variant_timing {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            field = ?field,
-            "custom sprite pack density variant is timed apart from its base — \
-             renderers play the base's timing"
-        );
-    }
-    for OffBeatLoop { name, frame_ms } in off_beat_loops {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            frame_ms,
-            "custom sprite pack loop is not whole beats — the beat skips or stretches its frames"
-        );
-    }
-    // the classic stands its desk props only on the art's marks, as the cutaway does
-    for MissingMark { name, mark } in missing_marks {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            mark,
-            "custom sprite pack art leaves out a mark — nothing stands there, in either look"
-        );
-    }
-    for MissingKey { name, key } in missing_keys {
-        tracing::warn!(
-            origin,
-            animation = ?name,
-            key = %key,
-            "custom sprite pack art draws no pixel in a light's key — no light rises there"
-        );
-    }
-    for style in orphan_hairstyles {
-        tracing::warn!(
-            origin,
-            hairstyle = ?style,
-            "custom sprite pack ships a hairstyle at a density it draws no character at — \
-             nobody wears it"
-        );
-    }
-    report
-}
-
-/// Load the compiled-in default pack, with `source`'s custom pack merged over
-/// it. Reads nothing but the path `source` names, so a test, a benchmark or a
-/// committed snapshot draws the same art on every machine.
-///
-/// # Errors
-///
-/// If the bundled pack fails to load, or `source` is `Explicit` and its directory is not a loadable pack (`Discovered` falls back to the bundled pack instead).
-#[cfg(feature = "native")]
-pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
-    let base = load_bundled_pack()?;
-    match source {
-        PackSource::Bundled => Ok(base),
-        PackSource::Explicit(dir) => load_custom_over(&base, &dir, "explicit")
-            .with_context(|| format!("failed to load sprite pack from {dir:?}")),
-        PackSource::Discovered(dir) => match load_custom_over(&base, &dir, "discovered") {
-            Ok(pack) => Ok(pack),
-            Err(e) => {
-                let chain = format!("{e:#}");
-                tracing::warn!(
-                    path = ?dir,
-                    error = ?chain,
-                    "user sprite pack failed to load; falling back to bundled default"
-                );
-                Ok(base)
-            }
-        },
-    }
-}
-
-/// The custom pack in `dir`, with the furniture it leaves out, and the city if
-/// it draws none, inherited from `base`.
-#[cfg(feature = "native")]
-fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
-    let mut custom = load_pack(dir)?;
-    tracing::info!(origin, path = ?dir, "loaded custom sprite pack");
-    // Before the merge, so the report is about what the author shipped: after
-    // it, a furniture variant whose base the pack leaves out is checked against
-    // the default's art and never reported as an orphan.
-    warn_pack_validation_gaps(&custom, origin);
-    custom.merge_from(base);
-    Ok(custom)
 }
 
 /// The bundled pack, for unit tests: parsed once per process, since the parse
@@ -435,10 +221,6 @@ mod tests {
     use super::*;
     use crate::render_scale::RenderScale;
     use pixtuoid_core::sprite::format::Density;
-    #[cfg(feature = "native")]
-    use std::fs;
-    #[cfg(feature = "native")]
-    use std::path::Path;
 
     /// Every loop the beat plays from the bundled pack holds each frame whole
     /// Full beats, so the beat neither skips nor stretches one, and every
@@ -448,19 +230,8 @@ mod tests {
         loops_hold_whole_beats("default", &test_default_pack());
     }
 
-    /// The same of the binary's example packs: `init-pack` starts a pack from
-    /// the skeleton.
-    #[test]
-    #[cfg(feature = "native")]
-    fn every_example_pack_loop_holds_its_frames_whole_beats() {
-        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixtuoid/sprites");
-        for name in ["robot", "skeleton"] {
-            let pack = pixtuoid_core::sprite::format::load_pack(&examples.join(name))
-                .expect("an example pack");
-            loops_hold_whole_beats(name, &pack);
-        }
-    }
-
+    /// `pack`'s loops hold whole Full beats, and its variants their base's
+    /// timing.
     fn loops_hold_whole_beats(pack_name: &str, pack: &Pack) {
         let report = validate_pack(pack);
         assert_eq!(report.off_beat_loops, [], "{pack_name}");
@@ -505,61 +276,6 @@ mod tests {
 
     /// Copy this crate's char-only fixture into `dst`: no furniture, so the merge
     /// assertion bites; in-crate, so `cargo test` passes from an extracted .crate.
-    #[cfg(feature = "native")]
-    fn copy_skeleton_pack(dst: &Path) {
-        fs::create_dir_all(dst).expect("mkdir pack dir");
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-        for entry in fs::read_dir(&src).expect("read skeleton dir") {
-            let entry = entry.expect("dir entry");
-            let path = entry.path();
-            if path.is_file() {
-                let name = path.file_name().expect("file name");
-                fs::copy(&path, dst.join(name)).expect("copy pack file");
-            }
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "native")]
-    fn load_sprite_pack_from_custom_dir_merges_with_bundled() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let pack_dir = tmp.path().join("custom");
-        copy_skeleton_pack(&pack_dir);
-
-        let pack = load_sprite_pack(PackSource::Explicit(pack_dir)).expect("custom pack loads");
-        assert!(
-            pack.animation("seated").is_some(),
-            "custom pack must carry the seated character pose"
-        );
-        assert!(
-            pack.animation("desk").is_some(),
-            "furniture merged from the bundled default"
-        );
-    }
-
-    #[cfg(feature = "native")]
-    #[derive(Clone)]
-    struct WarnCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
-    #[cfg(feature = "native")]
-    impl tracing::Subscriber for WarnCounter {
-        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            metadata.level() == &tracing::Level::WARN
-        }
-        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-        fn event(&self, _: &tracing::Event<'_>) {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-        fn enter(&self, _: &tracing::span::Id) {}
-        fn exit(&self, _: &tracing::span::Id) {}
-    }
-
-    /// Every key the desk props take a theme colour in is one their art draws,
-    /// at every density: a key renamed in the pack would stop the theme
-    /// reaching the prop.
     #[test]
     fn the_desk_props_draw_the_keys_the_theme_recolours() {
         let pack = test_default_pack();
@@ -590,15 +306,13 @@ mod tests {
         }
     }
 
-    /// The bundled pack is the one no user validates: a mis-sized `@Nx` variant
-    /// in it silently falls back to the upscaled base.
+    /// A mis-sized `@Nx` variant in the bundled pack silently falls back to
+    /// the upscaled base, so this is where a break in its art shows.
     #[test]
     fn the_bundled_pack_passes_its_own_validation() {
         let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
-        // `StandIn::DefaultPack` promises the default draws what a custom pack
-        // leaves out.
         assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
@@ -704,22 +418,17 @@ mod tests {
     /// the painters read: a rename here fails until the guide follows.
     #[test]
     fn the_guide_names_the_desk_contract() {
-        // Read at runtime: `include_str!` of a path outside the crate fails
-        // `cargo test` on the extracted crate, which has no workspace to read
-        // the guide from.
-        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
-        if !root.join("Cargo.toml").exists() {
+        // Read at runtime: the extracted crate may ship without its guide.
+        let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md"));
+        let Ok(guide) = std::fs::read_to_string(path) else {
             return;
-        }
-        let path = root.join("docs/CONFIGURATION.md");
-        let guide = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        };
         for needle in [
             format!("@mark {CUP_MARK} <x> <y>"),
             format!("@mark {TOWER_MARK} <x> <y>"),
             format!("palette key `{DESK_BULB_KEY}`"),
         ] {
-            assert!(guide.contains(&needle), "CONFIGURATION.md lost {needle:?}");
+            assert!(guide.contains(&needle), "the sprite format lost {needle:?}");
         }
     }
 
@@ -879,156 +588,13 @@ mod tests {
     #[test]
     fn bundled_default_pack_animations_are_all_in_the_registry() {
         // An animation the BUNDLED pack ships but the registry doesn't know is
-        // falsely reported "unused by renderer" by validate-pack.
+        // falsely reported "unused by renderer" by validation.
         let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(
             report.unknown.is_empty(),
             "bundled animation missing from the registry: {:?}",
             report.unknown
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "native")]
-    fn custom_pack_missing_required_pose_loads_with_a_load_time_warning() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let pack_dir = tmp.path().join("gappy");
-        copy_skeleton_pack(&pack_dir);
-        // Strip the back_couch animation (the fixture's last section).
-        let toml_path = pack_dir.join("pack.toml");
-        let toml = fs::read_to_string(&toml_path).expect("read pack.toml");
-        let stripped = toml
-            .split("[animations.back_couch]")
-            .next()
-            .expect("split never yields zero pieces")
-            .to_string();
-        assert_ne!(stripped, toml, "fixture must carry back_couch to strip");
-        fs::write(&toml_path, stripped).expect("write stripped pack.toml");
-
-        let warns = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let pack = tracing::subscriber::with_default(WarnCounter(warns.clone()), || {
-            load_sprite_pack(PackSource::Explicit(pack_dir))
-        })
-        .expect("a pack missing a required pose must still LOAD (warn, not fail)");
-        assert!(
-            pack.animation("back_couch").is_none(),
-            "the stripped pose is really absent (never inherited: character \
-             animations don't merge from the bundled default)"
-        );
-        assert!(
-            warns.load(std::sync::atomic::Ordering::SeqCst) >= 1,
-            "load_sprite_pack must warn about the missing required pose at load time"
-        );
-        assert_eq!(
-            warn_pack_validation_gaps(&pack, "test").missing_required,
-            vec!["back_couch".to_string()]
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "native")]
-    fn load_sprite_pack_from_missing_custom_dir_errors() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let missing = tmp.path().join("does-not-exist");
-        assert!(
-            load_sprite_pack(PackSource::Explicit(missing)).is_err(),
-            "a nonexistent --pack-dir must surface a load error"
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "native")]
-    fn a_discovered_pack_loads_over_the_default_and_a_broken_one_falls_back() {
-        let seated = |p: &Pack| p.animation("seated").expect("seated").frames()[0].clone();
-        let bundled = seated(&test_default_pack());
-
-        let good = tempfile::TempDir::new().expect("tempdir");
-        copy_skeleton_pack(good.path());
-        let pack =
-            load_sprite_pack(PackSource::Discovered(good.path().into())).expect("user pack loads");
-        assert_ne!(
-            seated(&pack).as_slice(),
-            bundled.as_slice(),
-            "the user's own art"
-        );
-        assert!(
-            pack.animation("desk").is_some(),
-            "furniture merged from the default"
-        );
-
-        let bad = tempfile::TempDir::new().expect("tempdir");
-        fs::write(bad.path().join("pack.toml"), b"this is not valid toml {{{")
-            .expect("write malformed pack.toml");
-        let fallback = load_sprite_pack(PackSource::Discovered(bad.path().into()))
-            .expect("a broken discovered pack never errors");
-        assert_eq!(seated(&fallback).as_slice(), bundled.as_slice());
-        assert!(
-            load_sprite_pack(PackSource::Explicit(bad.path().into())).is_err(),
-            "the same pack, named, is an error"
-        );
-    }
-
-    /// A furniture variant whose base the pack leaves out is only an orphan
-    /// before the merge fills the base in from the default. Sized as a true 4x
-    /// of the default's desk, so a check after the merge finds nothing to warn
-    /// about.
-    #[test]
-    #[cfg(feature = "native")]
-    fn a_custom_variant_without_its_base_warns_at_load() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        copy_skeleton_pack(tmp.path());
-        let load_warns = || {
-            let warns = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            tracing::subscriber::with_default(WarnCounter(warns.clone()), || {
-                load_sprite_pack(PackSource::Explicit(tmp.path().into()))
-            })
-            .expect("pack loads");
-            warns.load(std::sync::atomic::Ordering::SeqCst)
-        };
-        // the fixture is the released skeleton: its typing is off the beat and
-        // its two walks have no stride
-        let own = load_warns();
-        assert_eq!(own, 3, "the fixture's own findings");
-
-        let desk = test_default_pack()
-            .animation("desk")
-            .expect("desk")
-            .frames()[0]
-            .clone();
-        let row = vec!["W"; usize::from(desk.width()) * 4].join(" ");
-        // lit and marked, so the orphan is its only finding
-        let rows = [format!("{DESK_BULB_KEY}{}", &row[1..])]
-            .into_iter()
-            .chain(vec![row; usize::from(desk.height()) * 4 - 1])
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(
-            tmp.path().join("desk4x.sprite"),
-            format!("@frame 0\n@mark {CUP_MARK} 0 0\n@mark {TOWER_MARK} 0 0\n{rows}\n"),
-        )
-        .expect("write desk4x.sprite");
-        let toml_path = tmp.path().join("pack.toml");
-        let mut toml = fs::read_to_string(&toml_path)
-            .expect("read pack.toml")
-            .replacen(
-                "[palette]\n",
-                &format!("[palette]\n\"{DESK_BULB_KEY}\" = \"#fff4c0\"\n"),
-                1,
-            );
-        toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
-        fs::write(&toml_path, toml).expect("write pack.toml");
-        assert_eq!(load_warns(), own + 1, "the orphan desk@4x warns");
-
-        fs::write(
-            tmp.path().join("desk4x.sprite"),
-            format!("@frame 0\n{rows}\n"),
-        )
-        .expect("write desk4x.sprite");
-        assert_eq!(
-            load_warns(),
-            own + 3,
-            "an unmarked desk@4x warns each mark it leaves out"
         );
     }
 

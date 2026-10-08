@@ -669,29 +669,6 @@ struct RootStatus {
     env: Option<(&'static str, bool)>,
 }
 
-/// The densest art of the pack `source` loads, or why that pack fails to
-/// load: `run` refuses to start on it, so doctor says so.
-fn pack_max_density(
-    source: pixtuoid_scene::pack::PackSource,
-) -> Result<pixtuoid_core::sprite::format::Density, String> {
-    use pixtuoid_core::sprite::error::PackError;
-    pixtuoid_scene::pack::load_sprite_pack(source)
-        .map(|pack| pack.max_density_variant())
-        .map_err(|e| {
-            let no_manifest = e.chain().any(|c| {
-                matches!(
-                    c.downcast_ref::<PackError>(),
-                    Some(PackError::NoManifest { .. })
-                )
-            });
-            if no_manifest {
-                format!("{e:#}: point pack-dir at a sprite pack, or drop it for the bundled art")
-            } else {
-                format!("{e:#}")
-            }
-        })
-}
-
 /// Everything `doctor` probed, separated from rendering, so `render` is
 /// drivable off a hand-built report (no env/fs/subprocess probing in the
 /// render path).
@@ -879,12 +856,9 @@ fn collect(log_at: &crate::run_log::LogLocation, graphics: crate::GraphicsMode) 
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    // The pack `run` draws, not the bundled art alone, which understates a user
-    // pack shipping density variants.
-    let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
-        .unwrap_or_else(|reason| {
-            config_warnings.push(reason);
-            pixtuoid_core::sprite::format::Density::ONE
+    let max_density = pixtuoid_scene::pack::load_bundled_pack()
+        .map_or(pixtuoid_core::sprite::format::Density::ONE, |pack| {
+            pack.max_density_variant()
         });
     let (truecolor_probe, graphics_plan) = probe_terminal_caps(probe_ok, graphics, max_density);
     let run_graphics = crate::config::resolve_graphics(&cfg, None, &mut config_warnings);
@@ -1580,58 +1554,6 @@ mod tests {
                 "{tag} is missing from the focus category:\n{s}"
             );
         }
-    }
-
-    #[test]
-    fn a_pack_dir_without_a_manifest_is_named_a_config_mistake() {
-        use pixtuoid_scene::pack::PackSource;
-        let base = tempfile::TempDir::new().expect("tempdir");
-        for dir in [base.path().join("gone"), base.path().to_path_buf()] {
-            let reason = pack_max_density(PackSource::Explicit(dir)).expect_err("no manifest");
-            assert!(
-                reason.contains("holds no pack.toml") && reason.contains("pack-dir"),
-                "{reason}"
-            );
-        }
-        assert!(pack_max_density(PackSource::Bundled).is_ok());
-    }
-
-    #[test]
-    fn a_config_pack_dir_that_fails_to_load_shows_in_the_report() {
-        let base = tempfile::TempDir::new().expect("tempdir");
-        let config_dir = base.path().join("pixtuoid");
-        std::fs::create_dir_all(&config_dir).expect("mkdir config");
-        // A pack whose frame name carries an ESC and a bidi override, so the
-        // load error quotes pack text the report must strip.
-        let pack = base.path().join("hostile");
-        std::fs::create_dir_all(&pack).expect("mkdir pack");
-        std::fs::write(
-            pack.join("pack.toml"),
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.seated]\nframes=[\"x\\u001B[31m\\u202E.sprite\"]\nframe_ms=100\n",
-        )
-        .expect("write pack.toml");
-        std::fs::write(
-            config_dir.join("config.toml"),
-            format!("pack-dir = {:?}\n", pack.to_string_lossy()),
-        )
-        .expect("write config.toml");
-        let out = temp_env::with_vars(
-            [
-                ("XDG_CONFIG_HOME", Some(base.path().as_os_str())),
-                ("CLICOLOR_FORCE", None),
-                ("NO_COLOR", None),
-            ],
-            || {
-                run(
-                    &crate::run_log::LogLocation::File("/nonexistent-pixtuoid-doctor-log".into()),
-                    crate::GraphicsMode::Auto,
-                )
-            },
-        );
-        let out = out.expect("doctor runs");
-        assert!(out.contains("failed to load sprite pack"), "{out}");
-        assert!(!out.contains(['\u{1b}', '\u{202e}']), "{out:?}");
     }
 
     #[test]
