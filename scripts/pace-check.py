@@ -9,9 +9,14 @@ minute each and one at exit, are what this reads, from the log it writes.
 whose writes meet a real terminal's parser; without it, a pseudo-terminal
 sized for `--scale` stands in, which catches our side alone.
 
+Only an idle machine gives a verdict: other work's load slows a frame woken
+from the TUI's sleep several times over. A run that starts with the 1-minute
+load average over IDLE_LOAD is INVALID (exit 2), neither pass nor fail.
+`--loaded` runs at any load and reports, with no verdict.
+
 Usage:
     just pace-check [--live] [--scale classic|4|16] [--graphics kitty|sixel|iterm2]
-                    [--run storm|dusk] [--secs N]
+                    [--run storm|dusk] [--secs N] [--loaded]
 """
 
 import argparse
@@ -37,6 +42,10 @@ P99_MS = 20.0
 SCALES = ["classic", "4", "16"]
 # The lead into the storm transition: a boot and some steady frames first.
 LEAD_S = 10
+# The most 1-minute load average a run may start under and still count as
+# idle: the highest start load whose runs matched the unloaded ones, on the
+# owner's M1 Max (8 performance cores), its own desktop background included.
+IDLE_LOAD = 4.5
 
 
 def pacing(*args):
@@ -124,9 +133,15 @@ def main():
     ap.add_argument("--graphics", choices=["kitty", "sixel", "iterm2"], default="kitty")
     ap.add_argument("--run", choices=["storm", "dusk"], default="storm")
     ap.add_argument("--secs", type=float, default=200.0)
+    ap.add_argument("--loaded", action="store_true")
     args = ap.parse_args()
     if not os.access(BIN, os.X_OK):
         sys.exit(f"pace-check: no {BIN}: run it as `just pace-check`, which builds it")
+    load = os.getloadavg()[0]
+    if not args.loaded and load > IDLE_LOAD:
+        print(f"pace-check: load {load:.2f} > IDLE_LOAD {IDLE_LOAD}: the machine isn't idle")
+        print("INVALID")
+        sys.exit(2)
 
     log = Path(tempfile.mkstemp(prefix="pace-check-", suffix=".log")[1])
     env = dict(
@@ -159,14 +174,19 @@ def main():
         sys.exit(f"pace-check: ran {w0.get('look')} x{w0.get('scale')}, not {wanted[0]} x{wanted[1]}: {log}")
     over = sum(int(w.get("over", 0)) for w in windows)
     p99 = max(float(w.get("p99", 0)) for w in windows)
+    worst = max(float(w.get("max", 0)) for w in windows)
     frames = sum(int(w.get("frames", 0)) for w in windows)
     terminal = w0.get("terminal") if args.live else "pty"
     print(
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
-        f"run={args.run}: {frames} frames, worst window p99 {p99:.1f} ms, over {over} | log {log}"
+        f"run={args.run} load={load:.2f}: {frames} frames, worst window p99 {p99:.1f} ms, "
+        f"worst frame {worst:.1f} ms, over {over} | log {log}"
     )
     for (dirty, *why), n in causes(log):
         print(f"  over-interval: {n:4} dirty={dirty} {' '.join(why)}")
+    if args.loaded:
+        print("LOADED: reported, no verdict")
+        sys.exit(0)
     failed = over > 0 or p99 > P99_MS
     print("FAIL" if failed else "PASS")
     sys.exit(1 if failed else 0)
