@@ -63,6 +63,11 @@ jobs:
       # broken build, not a perf trend.
       - name: Build instrumented benchmarks
         run: cargo codspeed build -p pixtuoid-scene -p pixtuoid-core
+      # Built on its own with `just bench`'s features, so no ALSA: a build
+      # clears only the packages it builds (cargo-codspeed 5.0.1
+      # `build.rs:324-331`), keeping the step above's.
+      - name: Build the binary's instrumented benchmark
+        run: cargo codspeed build -p pixtuoid --no-default-features --features graphics
       # Non-required is not enough: a red step still reaches mergeStateStatus
       # (#964 sat gated on a red simulation while memory was already forgiven).
       - uses: CodSpeedHQ/action@v5
