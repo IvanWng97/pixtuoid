@@ -437,7 +437,7 @@ pub(crate) enum PieceKind {
     },
     Desk {
         at: crate::layout::Point,
-        /// The facing's art ([`desk_art_name`](crate::pack::desk_art_name)).
+        /// The facing's art ([`desk_sprite_name`](crate::pack::desk_sprite_name)).
         art: &'static str,
         screen: Screen,
     },
@@ -549,12 +549,10 @@ impl Art {
     }
 }
 
-/// How a prop's art is turned: the back-view sofa top to bottom, the far
-/// meeting chair side to side.
+/// How a prop's art is turned: the far meeting chair side to side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Flip {
     None,
-    Vertical,
     Horizontal,
 }
 

@@ -148,31 +148,24 @@ pub(crate) fn desk_props_mirrored(art: &str) -> bool {
     art == DESK_NORTH_SPRITE
 }
 
-/// The pack's desk art for a seat facing `facing`: the facing's own when the
-/// pack ships it, else what [`Pack::piece_or_source`] draws in its place.
-pub(crate) fn desk_art_name(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
-    pack.piece_or_source(desk_sprite_name(facing))
-}
-
-/// The overlay drawn over the props on desk art `art`, when the pack ships
-/// one: what of that desk stands nearer the viewer than its sitter's props.
-pub(crate) fn desk_front(pack: &Pack, art: &str) -> Option<&'static str> {
+/// The overlay drawn over the props on desk art `art`, if it has one: what of
+/// that desk stands nearer the viewer than its sitter's props.
+pub(crate) fn desk_front(art: &str) -> Option<&'static str> {
     pixtuoid_core::sprite::format::OVERLAY_PIECES
         .iter()
         .find(|&&(_, under)| under == art)
         .map(|&(overlay, _)| overlay)
-        .filter(|overlay| pack.animation(overlay).is_some())
 }
 
 /// Where the 1x desk at `desk` facing `facing` stands the prop its `mark`
-/// names, on the art [`desk_art_name`] names there.
+/// names, on the art [`desk_sprite_name`] names there.
 pub(crate) fn desk_mark(
     pack: &Pack,
     desk: crate::layout::Point,
     facing: crate::layout::Facing,
     mark: &str,
 ) -> Option<PropMark> {
-    let name = desk_art_name(pack, facing)?;
+    let name = desk_sprite_name(facing);
     let art = pack.animation(name)?;
     let top = desk_art_top(pack, desk.y, art.frames().first()?.height());
     let m = art.marks(0).iter().find(|m| m.name() == mark)?;
@@ -187,10 +180,10 @@ pub(crate) fn desk_mark(
 
 /// Where the 1x desk facing `facing` hangs its lamp's bulb from the desk's
 /// point, the rows signed (a bulb may stand above the desk's row): the middle
-/// of its [`DESK_BULB_KEY`] cells on the art [`desk_art_name`] names there;
+/// of its [`DESK_BULB_KEY`] cells on the art [`desk_sprite_name`] names there;
 /// `None` for art that draws no bulb.
 pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, i16)> {
-    let name = desk_art_name(pack, facing)?;
+    let name = desk_sprite_name(facing);
     let art = super::densest_frame(pack, name, 0, crate::render_scale::RenderScale::ONE)?;
     let (x, y) = bulb_cell(&art)?;
     // the art's rows from the desk's: its top is `desk_art_top` off the desk
@@ -241,9 +234,7 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
 
 /// The art a desk seating its occupant toward `facing` draws.
 pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&Frame> {
-    pack.animation(desk_art_name(pack, facing)?)?
-        .frames()
-        .first()
+    pack.animation(desk_sprite_name(facing))?.frames().first()
 }
 
 /// The desk task chair's pack animation.

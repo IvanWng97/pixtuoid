@@ -1013,23 +1013,6 @@ impl Pack {
         self.animations.get(key)
     }
 
-    /// The animation registered under `key`, or, when the pack lacks a derived
-    /// piece (`desk_north`), the piece it is drawn to match.
-    pub fn animation_or_source(&self, key: &str) -> Option<&Sprite> {
-        self.animation(self.piece_or_source(key)?)
-    }
-
-    /// The name of the animation that draws `key`:
-    /// [`animation_or_source`](Self::animation_or_source)'s pick. A painter that
-    /// takes a piece's density variants looks them up under this name, since a
-    /// derived piece the pack lacks draws its source's.
-    pub fn piece_or_source<'k>(&self, key: &'k str) -> Option<&'k str> {
-        if self.animation(key).is_some() {
-            return Some(key);
-        }
-        derived_source(key).filter(|source| self.animation(source).is_some())
-    }
-
     /// The names of every animation in this pack.
     pub fn animation_names(&self) -> Vec<String> {
         self.animations.keys().cloned().collect()
@@ -1065,63 +1048,13 @@ impl Pack {
             .collect();
         self.densities = densities.into_iter().rev().collect();
     }
-
-    /// The piece of this pack's own that `name` redraws, if it ships one.
-    fn own_redrawn_piece<'n>(&self, name: &'n str) -> Option<&'n str> {
-        redrawn_pieces(name).find(|piece| self.animations.contains_key(*piece))
-    }
-
-    /// The piece of this pack's own that the overlay `name` (or one of its
-    /// density variants) draws over, at any density: the default's overlay at
-    /// any density would draw the default's art over it, since a painter falls
-    /// back from a density the pack lacks to one it has.
-    fn own_overlaid_piece(&self, name: &str) -> Option<&'static str> {
-        let base = split_density_variant(name).map_or(name, |(b, _)| b);
-        let piece = overlaid_piece(base)?;
-        self.animations
-            .keys()
-            .any(|own| split_density_variant(own).map_or(own.as_str(), |(b, _)| b) == piece)
-            .then_some(piece)
-    }
 }
-
-/// Furniture drawn to match another piece (`desk_north` is `desk` with its
-/// monitor raised, `meeting_sofa_north` is `meeting_sofa` from behind), as
-/// `(derived, source)`.
-const DERIVED_PIECES: &[(&str, &str)] = &[
-    ("desk_north", "desk"),
-    ("meeting_sofa_north", "meeting_sofa"),
-];
 
 /// Art drawn over another piece on that piece's canvas, as `(overlay, piece)`:
 /// `desk_front` is what of `desk` stands nearer the viewer than its sitter's
-/// props. An overlay comes only with its piece's art and never stands in, and
-/// keeps that piece's canvas rather than grounding on its own bottom row.
+/// props. An overlay keeps that piece's canvas rather than grounding on its own
+/// bottom row.
 pub const OVERLAY_PIECES: &[(&str, &str)] = &[("desk_front", "desk")];
-
-/// The piece `piece` draws over, if it is an overlay.
-fn overlaid_piece(piece: &str) -> Option<&'static str> {
-    OVERLAY_PIECES
-        .iter()
-        .find(|&&(overlay, _)| overlay == piece)
-        .map(|&(_, under)| under)
-}
-
-/// The piece `piece` is drawn to match, if it is a derived one.
-fn derived_source(piece: &str) -> Option<&'static str> {
-    DERIVED_PIECES
-        .iter()
-        .find(|&&(derived, _)| derived == piece)
-        .map(|&(_, source)| source)
-}
-
-/// The pieces whose art `name` redraws: a density variant's base, then the
-/// source that base is derived from.
-fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
-    let variant_base = split_density_variant(name).map(|(base, _)| base);
-    let source = derived_source(variant_base.unwrap_or(name));
-    variant_base.into_iter().chain(source)
-}
 
 fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
@@ -1540,8 +1473,8 @@ fn build_palette(
     Ok(palette)
 }
 
-/// Character animation names every pack MUST provide.
-pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
+/// The character poses: every one is drawn, so the pack ships each.
+pub const CHARACTER_ANIMATIONS: &[&str] = &[
     "seated",
     "typing",
     "standing",
@@ -1551,11 +1484,6 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
     "seated_sleeping_alt",
     "holding_coffee",
     "back_couch",
-];
-
-/// Character animation names a pack MAY omit — the renderer degrades
-/// gracefully (`side_seated`/`seated_back` fall back to the front `seated`).
-pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
     "walking_coffee",
     "side_seated",
     "seated_back",
@@ -1648,21 +1576,13 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
     Some((base, density))
 }
 
-/// Every registered animation: the required and optional character poses, then
-/// the [`optional_piece_names`].
+/// Every registered animation: the character poses, the furniture and the
+/// creatures. The pack ships each.
 fn registered_animation_names() -> impl Iterator<Item = &'static str> {
-    REQUIRED_CHARACTER_ANIMATIONS
+    CHARACTER_ANIMATIONS
         .iter()
-        .chain(OPTIONAL_CHARACTER_ANIMATIONS)
-        .copied()
-        .chain(optional_piece_names())
-}
-
-/// The optional furniture and the optional creatures.
-fn optional_piece_names() -> impl Iterator<Item = &'static str> {
-    OPTIONAL_FURNITURE_ANIMATIONS
-        .iter()
-        .chain(OPTIONAL_CREATURE_ANIMATIONS)
+        .chain(FURNITURE_ANIMATIONS)
+        .chain(CREATURE_ANIMATIONS)
         .copied()
 }
 
@@ -1691,8 +1611,8 @@ impl RegisteredKey {
     }
 }
 
-/// Environment/furniture animation names a pack MAY provide.
-pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
+/// The furniture and the room's fixtures.
+pub const FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "desk_north",
     "desk_front",
@@ -1734,10 +1654,9 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "meeting_chair",
 ];
 
-/// The pets' and the gateway mascots' animation names a pack MAY provide: they
-/// stand on their feet wherever their frame ends, so they are kept apart from
-/// the furniture.
-pub const OPTIONAL_CREATURE_ANIMATIONS: &[&str] = &[
+/// The pets' and the gateway mascots' animations: they stand on their feet
+/// wherever their frame ends, so they are kept apart from the furniture.
+pub const CREATURE_ANIMATIONS: &[&str] = &[
     "cat_walk",
     "cat_sit",
     "cat_sleep",
@@ -1819,49 +1738,6 @@ pub struct FrameCountMismatch {
     pub variant_frames: usize,
 }
 
-/// What draws an optional animation a pack leaves out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StandIn {
-    /// No stand-in: the piece is absent and nothing replaces it.
-    Absent,
-    /// The pack's own piece that this one redraws (`desk` for `desk_north`),
-    /// which a painter draws ([`Pack::animation_or_source`]).
-    OwnPiece(&'static str),
-    /// Another of the pack's own poses.
-    OwnPose,
-    /// The pack's own piece draws bare: an overlay is never stood in for, so
-    /// the piece it would cover (`desk` for `desk_front`) shows uncovered.
-    Bare(&'static str),
-}
-
-/// An optional animation absent from a pack.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingOptional {
-    /// The registry name.
-    pub name: &'static str,
-    /// What draws in its place.
-    pub stand_in: StandIn,
-}
-
-/// One of the caller's art sets that a pack ships only part of.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PartialSet {
-    /// The set's pieces the pack ships.
-    pub shipped: Vec<&'static str>,
-    /// The set's pieces it leaves to the default pack.
-    pub missing: Vec<&'static str>,
-}
-
-/// A derived piece (`desk_north`) shipped without the piece it is drawn to
-/// match.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OrphanDerived {
-    /// The derived piece the pack ships.
-    pub derived: &'static str,
-    /// The piece it is drawn to match, which the default pack then supplies.
-    pub source: &'static str,
-}
-
 /// A character frame a hairstyle would dress but for its missing head mark: it
 /// is drawn bare.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1900,12 +1776,8 @@ pub struct HairOverhang {
 /// Per-category tally of a pack's animation discrepancies.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
-    /// Required character-animation names absent from the pack — an error.
-    pub missing_required: Vec<String>,
-    /// Optional animations absent from the pack, except one a
-    /// [`partial_sets`](Self::partial_sets) or
-    /// [`orphan_derived`](Self::orphan_derived) finding already names.
-    pub missing_optional: Vec<MissingOptional>,
+    /// Registered animations absent from the pack — an error.
+    pub missing: Vec<String>,
     /// `(name, need, have)` — REQUIRED count first — for each animation with
     /// fewer frames than its minimum.
     pub insufficient_frames: Vec<(String, usize, usize)>,
@@ -1915,22 +1787,11 @@ pub struct ValidationReport {
     /// Each density variant with a frame whose size is not its base frame's
     /// times the density its NAME claims.
     pub mismatched_density: Vec<DensityMismatch>,
-    /// Each density variant whose BASE animation the pack does not ship.
-    ///
-    /// The size claim is unprovable without the base, so the variant would load
-    /// unchecked, or, for furniture, validated against whatever the default pack
-    /// supplies — an author who renamed `desk.sprite` to `desk@4x.sprite`
-    /// instead of adding it otherwise gets a clean bill of health from the one
-    /// tool whose job is to tell them.
+    /// Each density variant whose BASE animation the pack does not ship: its
+    /// size claim is unprovable without the base.
     pub orphan_variants: Vec<String>,
     /// Each density variant whose frame count is not its base's.
     pub mismatched_frame_counts: Vec<FrameCountMismatch>,
-    /// Each of the caller's art sets the pack ships only part of: the default
-    /// pack draws the rest, in its own style.
-    pub partial_sets: Vec<PartialSet>,
-    /// Each derived piece the pack ships without its source: the default pack
-    /// draws the source, in its own style.
-    pub orphan_derived: Vec<OrphanDerived>,
     /// One per character animation.
     pub unmarked_heads: Vec<UnmarkedHead>,
     /// One per hairstyle view.
@@ -2016,8 +1877,6 @@ pub struct MissingMark {
 /// What only the caller knows of a pack.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PackContract<'a> {
-    /// The sets of pieces a pack should ship whole.
-    pub art_sets: &'a [Vec<&'static str>],
     /// The animations the caller steps by [`Sprite::stride`].
     pub walks: &'a [&'static str],
     /// Each piece the caller stands props on, with the marks its first frame
@@ -2040,15 +1899,12 @@ impl ValidationReport {
         // No `..`: a new report field must be classed error-or-not here before
         // this compiles.
         let ValidationReport {
-            missing_required,
-            missing_optional: _,
+            missing,
             insufficient_frames,
             unknown: _,
             mismatched_density,
             orphan_variants,
             mismatched_frame_counts,
-            partial_sets: _,
-            orphan_derived: _,
             unmarked_heads: _,
             missing_hair_views: _,
             overhanging_hair: _,
@@ -2059,7 +1915,7 @@ impl ValidationReport {
             off_beat_loops: _,
             missing_keys: _,
         } = self;
-        missing_required.len()
+        missing.len()
             + insufficient_frames.len()
             + mismatched_density.len()
             + orphan_variants.len()
@@ -2072,15 +1928,12 @@ impl ValidationReport {
     pub fn warning_count(&self) -> usize {
         // No `..`, for the reason `error_count` gives.
         let ValidationReport {
-            missing_required: _,
-            missing_optional,
+            missing: _,
             insufficient_frames: _,
             unknown: _,
             mismatched_density: _,
             orphan_variants: _,
             mismatched_frame_counts: _,
-            partial_sets,
-            orphan_derived,
             unmarked_heads,
             missing_hair_views,
             overhanging_hair,
@@ -2091,10 +1944,7 @@ impl ValidationReport {
             off_beat_loops,
             missing_keys,
         } = self;
-        missing_optional.len()
-            + partial_sets.len()
-            + orphan_derived.len()
-            + unmarked_heads.len()
+        unmarked_heads.len()
             + missing_hair_views.len()
             + overhanging_hair.len()
             + walks_without_stride.len()
@@ -2110,16 +1960,14 @@ impl ValidationReport {
     }
 }
 
-/// Check a pack's animations against the required/optional/multi-frame
-/// registries, each density variant against its base, each derived piece
-/// against its source, and against what only the caller knows
-/// ([`PackContract`]).
+/// Check a pack's animations against the registry and its multi-frame
+/// minimums, each density variant against its base, and against what only the
+/// caller knows ([`PackContract`]).
 ///
 /// An unauthored variant is not reported missing: a pack that has not been
 /// redrawn at a density is the normal case, not a gap.
 pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> ValidationReport {
     let PackContract {
-        art_sets,
         walks,
         marks,
         loops,
@@ -2150,52 +1998,10 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         ..ValidationReport::default()
     };
 
-    for &name in REQUIRED_CHARACTER_ANIMATIONS {
-        if pack.animation(name).is_none() {
-            report.missing_required.push(name.to_string());
-        }
-    }
-
-    for set in art_sets {
-        let (shipped, missing): (Vec<&'static str>, Vec<&'static str>) = set
-            .iter()
-            .partition(|&&name| pack.animation(name).is_some());
-        if !shipped.is_empty() && !missing.is_empty() {
-            report.partial_sets.push(PartialSet { shipped, missing });
-        }
-    }
-
-    for &(derived, source) in DERIVED_PIECES {
-        if pack.animation(derived).is_some() && pack.animation(source).is_none() {
-            report
-                .orphan_derived
-                .push(OrphanDerived { derived, source });
-        }
-    }
-
-    let named_elsewhere = |name: &str| {
-        report
-            .partial_sets
-            .iter()
-            .any(|s| s.missing.contains(&name))
-            || report.orphan_derived.iter().any(|o| o.source == name)
-    };
-    let missing_optional: Vec<MissingOptional> = OPTIONAL_CHARACTER_ANIMATIONS
-        .iter()
-        .map(|&name| (name, StandIn::OwnPose))
-        .chain(optional_piece_names().map(|name| {
-            let stand_in = match pack.own_overlaid_piece(name) {
-                Some(piece) => StandIn::Bare(piece),
-                None => pack
-                    .own_redrawn_piece(name)
-                    .map_or(StandIn::Absent, StandIn::OwnPiece),
-            };
-            (name, stand_in)
-        }))
-        .filter(|&(name, _)| pack.animation(name).is_none() && !named_elsewhere(name))
-        .map(|(name, stand_in)| MissingOptional { name, stand_in })
+    report.missing = registered_animation_names()
+        .filter(|name| pack.animation(name).is_none())
+        .map(str::to_string)
         .collect();
-    report.missing_optional = missing_optional;
 
     let mut variants: Vec<(&str, &Sprite, &'static str, Density)> = pack
         .animations
@@ -2251,7 +2057,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             .iter()
             .find(|&&(n, _)| n == requirement_key)
             // Implicit min-1 floor: a `frames = []` entry deserializes and makes
-            // `animation()` return Some (dodging the missing-required check)
+            // `animation()` return Some (dodging the missing check)
             // while every render consumer guards with `.frames().first()` and
             // draws nothing.
             .map_or(1, |&(_, min)| min);
@@ -2322,10 +2128,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
 
     let mut characters: Vec<(&str, &Sprite, Density)> = variants
         .iter()
-        .filter(|(_, _, base, _)| {
-            REQUIRED_CHARACTER_ANIMATIONS.contains(base)
-                || OPTIONAL_CHARACTER_ANIMATIONS.contains(base)
-        })
+        .filter(|(_, _, base, _)| CHARACTER_ANIMATIONS.contains(base))
         .map(|&(name, sprite, _, density)| (name, sprite, density))
         .collect();
     characters.sort_unstable_by_key(|&(name, ..)| name);
@@ -2695,55 +2498,6 @@ mod validation_floor_tests {
         assert_eq!(split_density_variant("desk@-2x"), None);
     }
 
-    /// An overlay never stands in: a pack's own desk without its front draws
-    /// bare, and nothing draws the front in its place.
-    #[test]
-    fn a_missing_overlay_leaves_its_piece_bare() {
-        let desk = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert!(desk.animation_or_source("desk_front").is_none());
-        let report = validate_pack_animations(&desk, &PackContract::default());
-        let front = report
-            .missing_optional
-            .iter()
-            .find(|m| m.name == "desk_front")
-            .expect("desk_front is optional");
-        assert_eq!(front.stand_in, StandIn::Bare("desk"));
-    }
-
-    #[test]
-    fn every_derived_piece_and_its_source_are_registered_furniture() {
-        let furniture = |name| {
-            RegisteredKey::parse(name).is_some_and(|k| optional_piece_names().any(|n| n == k.base))
-        };
-        for &(derived, source) in DERIVED_PIECES {
-            assert!(furniture(derived), "{derived}");
-            assert!(furniture(source), "{source}");
-        }
-    }
-
-    #[test]
-    fn a_pack_without_a_derived_piece_draws_its_source() {
-        let desk_only = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert!(desk_only.animation_or_source("desk_north").is_some());
-        assert!(desk_only.animation_or_source("plant").is_none());
-    }
-
-    /// Pins [`Pack::piece_or_source`].
-    #[test]
-    fn a_pack_names_the_piece_that_draws_a_key() {
-        let desk_only = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert_eq!(desk_only.piece_or_source("desk_north"), Some("desk"));
-        assert_eq!(desk_only.piece_or_source("desk"), Some("desk"));
-        assert_eq!(desk_only.piece_or_source("plant"), None);
-        let both = pack_with(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.desk_north]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
-        );
-        assert_eq!(both.piece_or_source("desk_north"), Some("desk_north"));
-        let plant_only = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert_eq!(plant_only.piece_or_source("desk_north"), None);
-    }
-
     /// Pins [`Pack::density_variants`]: densest first, each density once, and
     /// only variants that redraw their base.
     #[test]
@@ -2905,115 +2659,23 @@ mod validation_floor_tests {
     }
 
     #[test]
-    fn an_unauthored_density_variant_is_not_reported_missing() {
+    fn every_registered_base_the_pack_lacks_is_missing_and_no_variant_is() {
         let report = validate("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert!(report.missing.contains(&"plant".to_string()));
+        assert!(!report.missing.contains(&"desk".to_string()));
         assert!(
             !report
-                .missing_optional
+                .missing
                 .iter()
-                .any(|m| m.name.contains(DENSITY_VARIANT_SEP)),
+                .any(|m| m.contains(DENSITY_VARIANT_SEP)),
             "unauthored variants must not read as missing: {:?}",
-            report.missing_optional
+            report.missing
         );
         assert!(!report.unknown.contains(&"desk".to_string()));
     }
 
-    /// Two sets a painter might draw as one look, for the tests that need the
-    /// mechanism, not the scene's real sets.
-    fn sets() -> Vec<Vec<&'static str>> {
-        vec![
-            vec!["pantry", "pantry_small"],
-            vec!["cat_walk", "cat_sit", "cat_sleep"],
-        ]
-    }
-
     fn validate(animations: &str) -> ValidationReport {
-        validate_pack_animations(
-            &pack_with(animations),
-            &PackContract {
-                art_sets: &sets(),
-                ..PackContract::default()
-            },
-        )
-    }
-
-    const ONE: &str = "frames=[\"f.sprite\"]\nframe_ms=100\n";
-    const TWO: &str = "frames=[\"f.sprite\", \"f.sprite\"]\nframe_ms=100\n";
-
-    /// Pins [`ValidationReport::partial_sets`].
-    #[test]
-    fn a_pack_that_ships_part_of_an_art_set_is_told_which_pieces_it_left_out() {
-        let report = validate(&format!(
-            "[animations.cat_walk]\n{TWO}[animations.pantry]\n{ONE}"
-        ));
-        assert_eq!(
-            report.partial_sets,
-            vec![
-                PartialSet {
-                    shipped: vec!["pantry"],
-                    missing: vec!["pantry_small"],
-                },
-                PartialSet {
-                    shipped: vec!["cat_walk"],
-                    missing: vec!["cat_sit", "cat_sleep"],
-                },
-            ]
-        );
-
-        let whole = validate(&format!(
-            "[animations.cat_walk]\n{TWO}[animations.cat_sit]\n{ONE}[animations.cat_sleep]\n{ONE}"
-        ));
-        assert!(whole.partial_sets.is_empty(), "{:?}", whole.partial_sets);
-
-        let untouched = validate(&format!("[animations.plant]\n{ONE}"));
-        assert!(
-            untouched.partial_sets.is_empty(),
-            "a set the pack leaves out whole is the default's art throughout: {:?}",
-            untouched.partial_sets
-        );
-    }
-
-    /// Pins [`ValidationReport::orphan_derived`].
-    #[test]
-    fn a_derived_piece_shipped_without_its_source_is_reported() {
-        let orphan = validate(&format!("[animations.desk_north]\n{ONE}"));
-        assert_eq!(
-            orphan.orphan_derived,
-            vec![OrphanDerived {
-                derived: "desk_north",
-                source: "desk",
-            }]
-        );
-
-        for animations in [
-            format!("[animations.desk]\n{ONE}[animations.desk_north]\n{ONE}"),
-            format!("[animations.desk]\n{ONE}"),
-        ] {
-            assert!(
-                validate(&animations).orphan_derived.is_empty(),
-                "{animations}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_gap_another_finding_names_is_not_also_reported_missing() {
-        let report = validate(&format!("[animations.cat_walk]\n{TWO}"));
-        let named = |n: &str| report.missing_optional.iter().any(|m| m.name == n);
-        assert!(
-            !named("cat_sit") && !named("cat_sleep"),
-            "{:?}",
-            report.missing_optional
-        );
-        assert_eq!(report.partial_sets.len(), 1);
-
-        let report = validate(&format!("[animations.desk_north]\n{ONE}"));
-        assert!(
-            !report.missing_optional.iter().any(|m| m.name == "desk"),
-            "{:?}",
-            report.missing_optional
-        );
-        assert_eq!(report.orphan_derived.len(), 1);
+        validate_pack_animations(&pack_with(animations), &PackContract::default())
     }
 
     /// Pins [`ValidationReport::warning_count`] and
@@ -3021,11 +2683,7 @@ mod validation_floor_tests {
     #[test]
     fn every_finding_is_counted_once_as_an_error_or_a_warning_or_reported_only() {
         let report = ValidationReport {
-            missing_required: vec!["seated".to_string()],
-            missing_optional: vec![MissingOptional {
-                name: "plant",
-                stand_in: StandIn::Absent,
-            }],
+            missing: vec!["seated".to_string()],
             insufficient_frames: vec![("typing".to_string(), 2, 1)],
             unknown: vec!["foo".to_string()],
             mismatched_density: vec![DensityMismatch {
@@ -3039,14 +2697,6 @@ mod validation_floor_tests {
                 name: "seated@2x".to_string(),
                 base_frames: 2,
                 variant_frames: 1,
-            }],
-            partial_sets: vec![PartialSet {
-                shipped: vec!["cat_walk"],
-                missing: vec!["cat_sit"],
-            }],
-            orphan_derived: vec![OrphanDerived {
-                derived: "desk_north",
-                source: "desk",
             }],
             unmarked_heads: vec![UnmarkedHead {
                 name: "standing@4x".to_string(),
@@ -3086,7 +2736,7 @@ mod validation_floor_tests {
             }],
         };
         assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 11);
+        assert_eq!(report.warning_count(), 8);
     }
 
     /// A piece the caller lights, at any of its densities, draws no pixel in
@@ -3287,34 +2937,19 @@ mod validation_floor_tests {
     }
 
     #[test]
-    fn empty_frames_on_a_required_animation_fails_validation() {
-        let pack = pack_with_animation("seated", "[]");
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert!(
-            report
-                .insufficient_frames
-                .contains(&("seated".to_string(), 1, 0)),
-            "empty seated must report (seated, 1, 0); got {:?}",
-            report.insufficient_frames
-        );
-        let (name, need, have) = &report.insufficient_frames[0];
-        assert_eq!((name.as_str(), *need, *have), ("seated", 1, 0));
-        assert!(report.has_errors());
-        assert!(!report.missing_required.contains(&"seated".to_string()));
-    }
-
-    #[test]
-    fn empty_frames_on_an_optional_furniture_animation_fails_validation() {
-        let pack = pack_with_animation("desk", "[]");
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert!(
-            report
-                .insufficient_frames
-                .contains(&("desk".to_string(), 1, 0)),
-            "empty desk must report (desk, 1, 0); got {:?}",
-            report.insufficient_frames
-        );
-        assert!(report.has_errors());
+    fn empty_frames_on_a_registered_animation_fails_validation() {
+        // One name from each registry: the min-1 floor holds for all three.
+        for name in ["seated", "desk", "cat_sit"] {
+            let pack = pack_with_animation(name, "[]");
+            let report = validate_pack_animations(&pack, &PackContract::default());
+            assert_eq!(
+                report.insufficient_frames,
+                [(name.to_string(), 1, 0)],
+                "{name}"
+            );
+            assert!(report.has_errors(), "{name}");
+            assert!(!report.missing.contains(&name.to_string()), "{name}");
+        }
     }
 
     #[test]
