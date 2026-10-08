@@ -58,6 +58,12 @@ struct BaseFillKey {
 #[derive(Debug, Default)]
 pub(crate) struct BaseFillCache(crate::cached_layer::CachedLayer<BaseFillKey>);
 
+/// The carpet's speckle hash: two linear mixes of a pixel's x and y, xored.
+const SPECKLE_MIX: [(u32, u32); 2] = [(73, 151), (11, 37)];
+/// The speckle's cycle: the hash modulo it picks the tone, two of its
+/// values each speckle tone and the rest the carpet's base.
+const SPECKLE_PERIOD: u32 = 17;
+
 impl BaseFillCache {
     /// Empty cache — no fill retained yet.
     pub(crate) fn new() -> Self {
@@ -76,12 +82,13 @@ impl BaseFillCache {
             filled.resize_fill(buf_w, buf_h, wall);
             for y in band_h..buf_h {
                 for x in 0..buf_w {
+                    let [(ax, ay), (bx, by)] = SPECKLE_MIX;
                     let hash = u32::from(x)
-                        .wrapping_mul(73)
-                        .wrapping_add(u32::from(y).wrapping_mul(151))
-                        ^ (u32::from(x).wrapping_mul(11) ^ u32::from(y).wrapping_mul(37));
+                        .wrapping_mul(ax)
+                        .wrapping_add(u32::from(y).wrapping_mul(ay))
+                        ^ (u32::from(x).wrapping_mul(bx) ^ u32::from(y).wrapping_mul(by));
                     let carpet = carpet.at(x, y);
-                    let color = match hash % 17 {
+                    let color = match hash % SPECKLE_PERIOD {
                         0 | 1 => carpet[0],
                         2 | 3 => carpet[1],
                         _ => carpet[2],

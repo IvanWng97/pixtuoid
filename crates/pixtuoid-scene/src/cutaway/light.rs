@@ -186,7 +186,7 @@ pub(crate) fn net_pass(
 /// every frame.
 #[derive(Debug, Default)]
 pub(crate) struct NetMemo {
-    colours: std::collections::HashMap<NetKey, Rgb, std::hash::BuildHasherDefault<SplitMix>>,
+    colours: std::collections::HashMap<NetKey, Rgb, foldhash::fast::FixedState>,
     /// Neighbouring pixels mostly ask the last question again.
     last: Option<(NetKey, Rgb)>,
 }
@@ -226,21 +226,6 @@ impl NetMemo {
         });
         self.last = Some((key, c));
         c
-    }
-}
-
-/// A small fixed key needs mixing, not SipHash.
-#[derive(Default)]
-pub(crate) struct SplitMix(u64);
-
-impl std::hash::Hasher for SplitMix {
-    fn finish(&self) -> u64 {
-        pixtuoid_core::id::splitmix64(self.0)
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = self.0.rotate_left(8) ^ u64::from(b);
-        }
     }
 }
 
