@@ -57,7 +57,7 @@ pub const SOURCE_NAME: &str = "cursor";
 ///
 /// # Errors
 ///
-/// If the payload is not an object, lacks `hook_event_name`, carries none of `session_id`, `cwd` or `workspace_roots`, or names an unregistered event.
+/// If the payload is not an object, lacks `hook_event_name` or `session_id`, or names an unregistered event.
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -81,14 +81,12 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         });
     // Key on `session_id` — present and CONSISTENT across every CLI hook event,
     // so it distinguishes concurrent sessions in one project AND coalesces all of
-    // a session's events. Fall back to the workspace path only if a future event
-    // ever omits it, rather than dropping it.
+    // a session's events.
     let key = obj
         .get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .or(workspace)
-        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id|cwd|workspace_roots"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd = workspace.unwrap_or("");
 
@@ -269,16 +267,6 @@ mod tests {
     }
 
     #[test]
-    fn key_falls_back_to_workspace_when_session_id_absent() {
-        let ev = decode(json!({
-            "hook_event_name": "sessionStart",
-            "workspace_roots": ["/Users/dev/proj", "/other"]
-        }));
-        assert!(matches!(ev, AgentEvent::SessionStart { agent_id, .. }
-            if agent_id == AgentId::from_parts(SOURCE_NAME, "/Users/dev/proj")));
-    }
-
-    #[test]
     fn pre_tool_use_is_activity_start_with_no_tool_id() {
         // Real CLI tool shape: PascalCase tool_name, file_path input, empty cwd.
         let ev = decode(json!({
@@ -366,7 +354,7 @@ mod tests {
     #[test]
     fn tool_target_uses_cursor_arg_vocabulary() {
         let shell = decode(json!({
-            "hook_event_name": "preToolUse", "cwd": "/r",
+            "hook_event_name": "preToolUse", "session_id": "s", "cwd": "/r",
             "tool_name": "shell", "tool_input": {"command": "cargo test"}
         }));
         assert!(
@@ -374,7 +362,7 @@ mod tests {
             if d.display() == "shell: cargo test")
         );
         let edit = decode(json!({
-            "hook_event_name": "preToolUse", "cwd": "/r",
+            "hook_event_name": "preToolUse", "session_id": "s", "cwd": "/r",
             "tool_name": "edit", "tool_input": {"file_path": "src/lib.rs"}
         }));
         assert!(
@@ -387,7 +375,7 @@ mod tests {
     fn long_targets_are_truncated() {
         let long = "x".repeat(60);
         let ev = decode(json!({
-            "hook_event_name": "preToolUse", "cwd": "/r",
+            "hook_event_name": "preToolUse", "session_id": "s", "cwd": "/r",
             "tool_name": "shell", "tool_input": {"command": long}
         }));
         match ev {
@@ -407,7 +395,7 @@ mod tests {
     fn long_tool_name_is_truncated_at_the_decode_boundary() {
         let long = "T".repeat(MAX_DECODED_FIELD_CHARS * 3);
         let ev = decode(json!({
-            "hook_event_name": "preToolUse", "cwd": "/r",
+            "hook_event_name": "preToolUse", "session_id": "s", "cwd": "/r",
             "tool_name": long, "tool_input": {}
         }));
         match ev {
@@ -428,7 +416,7 @@ mod tests {
     #[test]
     fn post_tool_use_and_stop_are_activity_end() {
         for event in ["postToolUse", "postToolUseFailure", "stop"] {
-            let ev = decode(json!({"hook_event_name": event, "cwd": "/r"}));
+            let ev = decode(json!({"hook_event_name": event, "session_id": "s", "cwd": "/r"}));
             assert!(
                 matches!(
                     &ev,
@@ -444,7 +432,7 @@ mod tests {
 
     #[test]
     fn session_end_maps_to_session_end() {
-        let ev = decode(json!({"hook_event_name": "sessionEnd", "cwd": "/r"}));
+        let ev = decode(json!({"hook_event_name": "sessionEnd", "session_id": "s", "cwd": "/r"}));
         assert!(matches!(
             ev,
             AgentEvent::SessionEnd {
@@ -510,9 +498,9 @@ mod tests {
     #[test]
     fn stop_session_events_and_session_end_carry_no_identity() {
         for payload in [
-            json!({"hook_event_name": "stop", "cwd": "/r"}),
-            json!({"hook_event_name": "sessionStart", "cwd": "/r"}),
-            json!({"hook_event_name": "sessionEnd", "cwd": "/r"}),
+            json!({"hook_event_name": "stop", "session_id": "s", "cwd": "/r"}),
+            json!({"hook_event_name": "sessionStart", "session_id": "s", "cwd": "/r"}),
+            json!({"hook_event_name": "sessionEnd", "session_id": "s", "cwd": "/r"}),
         ] {
             let name = payload["hook_event_name"].clone();
             let events = decode_all(payload);
@@ -525,13 +513,14 @@ mod tests {
     }
 
     #[test]
-    fn no_session_id_cwd_or_workspace_is_malformed_but_session_id_alone_is_ok() {
+    fn no_session_id_is_malformed_but_session_id_alone_is_ok() {
         assert!(decode_cursor_hook_payload(&json!({"hook_event_name": "stop"})).is_err());
         assert!(
             decode_cursor_hook_payload(
-                &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
+                &json!({"hook_event_name": "sessionStart", "workspace_roots": ["/repo"]})
             )
-            .is_err()
+            .is_err(),
+            "a workspace is a label, never a session's key"
         );
         assert!(
             decode_cursor_hook_payload(&json!({"hook_event_name": "stop", "session_id": "s"}))
@@ -563,7 +552,7 @@ mod tests {
 
     #[test]
     fn pre_tool_use_without_tool_name_displays_question_mark() {
-        let ev = decode(json!({"hook_event_name": "preToolUse", "cwd": "/r"}));
+        let ev = decode(json!({"hook_event_name": "preToolUse", "session_id": "s", "cwd": "/r"}));
         assert!(
             matches!(ev, AgentEvent::ActivityStart { detail: Some(d), .. }
             if d.display() == "?")

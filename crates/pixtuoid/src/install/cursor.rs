@@ -375,6 +375,7 @@ mod tests {
         for ev in CURSOR_EVENTS {
             let payload = serde_json::json!({
                 "hook_event_name": ev,
+                "session_id": "s",
                 "cwd": "/repo",
                 "_pixtuoid_source": "cursor",
             });

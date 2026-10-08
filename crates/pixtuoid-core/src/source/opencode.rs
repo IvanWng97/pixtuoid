@@ -237,10 +237,8 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
     }
 }
 
-/// `permission.asked` / `permission.v2.asked` → `Waiting`. The request fields
-/// vary by opencode version, so the key order follows the REAL upstream shapes:
-/// `action` is the `permission.v2.asked` verb, `permission` the v1
-/// `PermissionRequest` name; the rest are tolerated fallbacks.
+/// `permission.asked` / `permission.v2.asked` → `Waiting`, labelled by the
+/// v2 shape's `action` or the v1 shape's `permission`.
 fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
     let session_id = props
         .get("sessionID")
@@ -248,7 +246,7 @@ fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "permission", "sessionID"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
-    const KEYS: &[&str] = &["action", "permission", "title", "pattern", "type", "tool"];
+    const KEYS: &[&str] = &["action", "permission"];
     let reason = crate::source::decoder::first_present_str(props, KEYS)
         .filter(|s| !s.is_empty())
         .map(|s| ellipsize(s, MAX_DECODED_FIELD_CHARS))
@@ -579,6 +577,22 @@ mod tests {
         assert!(matches!(ev, AgentEvent::Waiting { reason, .. } if reason == "permission"));
     }
 
+    /// Neither permission shape opencode v1.18.35 declares carries a string
+    /// under these keys (`packages/schema/src/v1/permission.ts`,
+    /// `packages/schema/src/permission.ts`), so none labels the wait.
+    #[test]
+    fn a_key_no_permission_shape_declares_labels_nothing() {
+        for key in ["title", "pattern", "type", "tool"] {
+            let ev = decode(
+                json!({"type": "permission.asked", "properties": {"sessionID": "ses_x", key: "x"}}),
+            );
+            assert!(
+                matches!(&ev, AgentEvent::Waiting { reason, .. } if reason == "permission"),
+                "{key}: {ev:?}"
+            );
+        }
+    }
+
     #[test]
     fn session_deleted_root_is_a_top_level_end() {
         let ev = decode(json!({"type": "session.deleted",
@@ -614,7 +628,7 @@ mod tests {
                 "state": {"status": "running", "input": {"filePath": "x.rs"}}}}}),
             json!({"type": "message.part.updated", "properties": {"sessionID": "ses_1", "part": {
                 "type": "tool", "callID": "c1", "tool": "read", "state": {"status": "completed"}}}}),
-            json!({"type": "permission.asked", "properties": {"sessionID": "ses_1", "title": "x"}}),
+            json!({"type": "permission.asked", "properties": {"sessionID": "ses_1", "permission": "x"}}),
             json!({"type": "session.deleted", "properties": {"info": {"id": "ses_1", "directory": "/p"}}}),
         ];
         let ids: std::collections::BTreeSet<_> = events
