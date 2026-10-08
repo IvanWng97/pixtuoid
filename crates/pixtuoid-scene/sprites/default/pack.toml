@@ -471,7 +471,8 @@ frame_ms = 600
 [animations.meeting_sofa_north]
 # The meeting sofa seen from behind (the south sofa of a meeting trio and the
 # lounge couch, both facing north), drawn only by the cutaway, which sorts its
-# top rows under the sitter and the rest over their lap.
+# top rows under the sitter and the rest over their lap. OPTIONAL: a pack
+# without it gets its own `meeting_sofa`, flipped.
 frames   = ["meeting_sofa_north.sprite"]
 frame_ms = 600
 
