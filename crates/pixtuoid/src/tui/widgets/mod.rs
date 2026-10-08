@@ -129,9 +129,9 @@ fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
     }
 }
 
-/// Paint the shared backing for a borderless card over `area`: drop shadow, `Clear`, then
-/// a solid `tooltip_bg` fill. Both `panel::borderless_panel` (modals) and the framed
-/// tooltips delegate here, so the "block board" look can't drift between popup kinds.
+/// Paint the shared backing for a borderless modal card over `area`: drop shadow, `Clear`,
+/// then a solid `tooltip_bg` fill. Tooltips fill themselves in `Tooltip::card` and cast the
+/// same [`cast_drop_shadow`].
 fn paint_card_backing(f: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
     cast_drop_shadow(f, area);
     f.render_widget(Clear, area);

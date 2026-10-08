@@ -253,7 +253,7 @@ pub struct GridInk {
 }
 
 /// Paint `grid` in `face` with its top-left at pixel `at`, each cell `cell`
-/// big: a cell's fill, then its glyph centred at [`Face::scale`], or
+/// big: every cell's fill, then each glyph centred at [`Face::scale`], or
 /// stretched to the whole cell for box-drawing lines and block elements so
 /// they join; a bold one struck twice a pixel apart, as a terminal without a
 /// bold face does (xterm(1): "the bold font will be produced by
@@ -277,27 +277,35 @@ pub fn paint_grid(
             }
         }
     }
-    for gy in 0..grid.height() {
-        for gx in 0..grid.width() {
-            let Some(c) = grid.get(gx, gy) else { continue };
-            let (x, y) = (at.0 + i32::from(gx) * cw, at.1 + i32::from(gy) * ch);
-            if let Some(bg) = c.bg {
-                for py in y..y + ch {
-                    for px in x..x + cw {
-                        canvas.set(px, py, bg);
-                    }
+    let cells = || {
+        (0..grid.height()).flat_map(move |gy| {
+            (0..grid.width()).filter_map(move |gx| {
+                let c = grid.get(gx, gy)?;
+                Some((c, (at.0 + i32::from(gx) * cw, at.1 + i32::from(gy) * ch)))
+            })
+        })
+    };
+    // Every fill before any glyph: a wide glyph, a halo and a bold strike
+    // reach into the next cell, whose fill would cover them.
+    for (c, (x, y)) in cells() {
+        if let Some(bg) = c.bg {
+            for py in y..y + ch {
+                for px in x..x + cw {
+                    canvas.set(px, py, bg);
                 }
             }
-            let strikes: &[i32] = if c.bold { &[0, 1] } else { &[0] };
-            if let Some(halo) = ink.halo {
-                for &dx in strikes {
-                    paint_cell_glyph(canvas, &c.symbol, (x + dx + 1, y + 1), cell, face, halo);
-                }
-            }
+        }
+    }
+    for (c, (x, y)) in cells() {
+        let strikes: &[i32] = if c.bold { &[0, 1] } else { &[0] };
+        if let Some(halo) = ink.halo {
             for &dx in strikes {
-                let fg = c.fg.unwrap_or(ink.text);
-                paint_cell_glyph(canvas, &c.symbol, (x + dx, y), cell, face, fg);
+                paint_cell_glyph(canvas, &c.symbol, (x + dx + 1, y + 1), cell, face, halo);
             }
+        }
+        for &dx in strikes {
+            let fg = c.fg.unwrap_or(ink.text);
+            paint_cell_glyph(canvas, &c.symbol, (x + dx, y), cell, face, fg);
         }
     }
 }
@@ -472,6 +480,22 @@ mod tests {
         for (x, y) in inked(&buf, halo) {
             assert!(glyph.contains(&(x - 1, y - 1)), "({x}, {y}) shadows no ink");
         }
+    }
+
+    /// A wide glyph on a filled card keeps its right half: the second cell's
+    /// fill lands before it.
+    #[test]
+    fn a_wide_glyph_on_a_card_keeps_its_second_cell() {
+        let mut grid = CellGrid::new(2, 1);
+        grid.fill(BG);
+        grid.put((0, 0), "\u{65e5}", None, false);
+        let cell = Face::Screen.cell(1);
+        let mut buf = RgbBuffer::filled(2 * cell.w, cell.h, BG);
+        paint_grid(&mut buf, &grid, (0, 0), cell, Face::Screen, INK);
+        assert!(
+            inked(&buf, FG).iter().any(|&(x, _)| x >= cell.w),
+            "the second cell lost its ink"
+        );
     }
 
     /// A card darkens what is a cell right and half a cell down of it,
