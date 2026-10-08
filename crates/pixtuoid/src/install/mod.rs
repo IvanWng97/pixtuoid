@@ -336,15 +336,14 @@ fn resolve_hook_binary_from(
 }
 
 #[derive(Debug)]
-pub enum InstallOutcome {
+pub(crate) enum InstallOutcome {
     Installed,
     AlreadyUpToDate,
 }
 
 #[derive(Debug)]
-pub struct InstallReport {
+pub(crate) struct InstallReport {
     pub outcome: InstallOutcome,
-    pub config_path: PathBuf,
     /// True when the bare `pixtuoid-hook` isn't on PATH (Claude/Unix, no explicit
     /// hook).
     pub path_warning: bool,
@@ -398,7 +397,6 @@ pub(crate) fn install_target(
         } else {
             InstallOutcome::AlreadyUpToDate
         },
-        config_path: path,
         path_warning,
         post_install_hint: t.post_install_hint,
     })
@@ -457,15 +455,14 @@ fn write_extra_artifacts(t: &Target, binary: &std::path::Path) -> Result<()> {
 }
 
 #[derive(Debug)]
-pub enum UninstallOutcome {
+pub(crate) enum UninstallOutcome {
     Removed,
     NothingToRemove,
 }
 
 #[derive(Debug)]
-pub struct UninstallReport {
+pub(crate) struct UninstallReport {
     pub outcome: UninstallOutcome,
-    pub config_path: PathBuf,
     /// The CLI couldn't be reached to deregister a host target's plugin, which
     /// stays registered with no hooks.
     pub plugin_left_registered: bool,
@@ -497,7 +494,6 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         } else {
             UninstallOutcome::NothingToRemove
         },
-        config_path: path,
         plugin_left_registered,
     })
 }

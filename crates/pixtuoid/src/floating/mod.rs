@@ -12,7 +12,7 @@
 mod cadence;
 mod geometry;
 mod input;
-pub mod offscreen;
+pub(crate) mod offscreen;
 mod window;
 
 use anyhow::{Context, Result};
@@ -33,7 +33,7 @@ use window::{FloatingApp, FloatingEvent};
 /// # Errors
 ///
 /// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, or the event loop exits with an error.
-pub fn run(cfg: RunConfig) -> Result<()> {
+pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     let RunConfig {
         socket,
         projects_root,

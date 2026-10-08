@@ -10,7 +10,7 @@ macro_rules! make_draw_ctx {
     ($name:ident, $scene:expr, $pack:expr, $now:expr) => {
         let mut _floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone($pack));
         let mut _office = pixtuoid_scene::floor::PerOffice::new();
-        let mut $name = pixtuoid::tui::renderer::DrawCtx::offscreen(
+        let mut $name = pixtuoid::dev::DrawCtx::offscreen(
             &mut _floor,
             _office.stores(),
             &pixtuoid_scene::theme::NORMAL,
@@ -95,7 +95,7 @@ pub(crate) fn render_hash(
     make_draw_ctx!(draw_ctx, scene, &pack, now);
     draw_ctx.theme = theme;
     draw_ctx.world.floor = floor;
-    pixtuoid::tui::renderer::draw_scene(&mut term, &mut draw_ctx).unwrap();
+    pixtuoid::dev::draw_scene(&mut term, &mut draw_ctx).unwrap();
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for px in draw_ctx.floor.raster.pixels().expect("a frame").as_slice() {

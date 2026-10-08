@@ -10,11 +10,11 @@ use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 
 /// Roots with more than this many direct subagents render collapsed by default,
 /// so a large workflow doesn't flood the board.
-pub const AUTO_COLLAPSE_THRESHOLD: usize = 5;
+pub(crate) const AUTO_COLLAPSE_THRESHOLD: usize = 5;
 
 /// Inner visible-row count, shared by `clamp_scroll` and the painter so the
 /// scroll math and the painted window can't disagree.
-pub const DASHBOARD_VIEWPORT_ROWS: usize = 16;
+pub(crate) const DASHBOARD_VIEWPORT_ROWS: usize = 16;
 
 #[derive(Debug, Clone, Default)]
 pub struct DashboardFrame {
@@ -168,7 +168,7 @@ fn row_state(state: &ActivityState) -> RowState {
 
 /// Move the selection one visible row up (`dir = -1`) or down (`dir = +1`),
 /// clamped at the ends.
-pub fn move_selection(
+pub(crate) fn move_selection(
     rows: &[DashboardRow],
     current: Option<AgentId>,
     dir: i32,
@@ -183,20 +183,23 @@ pub fn move_selection(
     Some(rows[new_idx].agent_id)
 }
 
-pub fn reanchor_selection(rows: &[DashboardRow], current: Option<AgentId>) -> Option<AgentId> {
+pub(crate) fn reanchor_selection(
+    rows: &[DashboardRow],
+    current: Option<AgentId>,
+) -> Option<AgentId> {
     match current {
         Some(c) if rows.iter().any(|r| r.agent_id == c) => Some(c),
         _ => rows.first().map(|r| r.agent_id),
     }
 }
 
-pub fn resolve_floor(rows: &[DashboardRow], selected: AgentId) -> Option<usize> {
+pub(crate) fn resolve_floor(rows: &[DashboardRow], selected: AgentId) -> Option<usize> {
     rows.iter()
         .find(|r| r.agent_id == selected)
         .map(|r| r.floor_idx)
 }
 
-pub fn clamp_scroll(
+pub(crate) fn clamp_scroll(
     rows: &[DashboardRow],
     selected: Option<AgentId>,
     scroll: usize,
@@ -235,7 +238,7 @@ pub(crate) fn clamp_scroll_idx(
 /// Only `open` flips on close, so folds + selection survive close/reopen for
 /// the session.
 #[derive(Debug, Default)]
-pub struct DashboardUi {
+pub(crate) struct DashboardUi {
     pub open: bool,
     pub selected: Option<AgentId>,
     pub scroll: usize,

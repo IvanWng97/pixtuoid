@@ -398,7 +398,7 @@ fn unit_bounds(unit: pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::B
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 /// One floor's frame for the window: a [`RenderInputs`] whose office extent
-/// the window's [`WindowGeometry`] owns.
+/// the window's `WindowGeometry` owns.
 #[derive(Debug, Clone, Copy)]
 pub struct WindowFrame<'a> {
     pub world: FloorInputs<'a>,

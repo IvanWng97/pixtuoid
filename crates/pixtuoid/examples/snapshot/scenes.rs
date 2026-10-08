@@ -359,7 +359,7 @@ pub(crate) fn meeting_scene(
 
     // The renderer's own buffer and `None` desk fill: any other layout shifts the
     // waypoint indices and the staging silently misses.
-    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+    let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(cols, rows);
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .ok_or_else(|| anyhow::anyhow!("--meeting: scene too small to compute a layout"))?;
     let nw = l.waypoints.len();
@@ -656,7 +656,7 @@ pub(crate) fn anim_scene(
 
     // The renderer's own buffer: a 2px mismatch shifts the waypoint set and the
     // agent targets the wrong furniture.
-    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+    let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(cols, rows);
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .expect("anim layout computes");
     let n = l.waypoints.len();
@@ -816,7 +816,7 @@ mod tests {
         let (scene, warmup_ms) = meeting_scene(now, 3, cols, rows, 0, max_desks, 12).unwrap();
         assert_eq!(scene.agents.len(), 12, "staged 3 + 9 archetype fillers");
 
-        let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+        let (buf_w, buf_h) = pixtuoid::dev::scene_buf_size(cols, rows);
         let layout = SceneLayout::compute_with_seed(buf_w, buf_h, Some(max_desks), 0).unwrap();
         let staged: Vec<_> = scene
             .agents

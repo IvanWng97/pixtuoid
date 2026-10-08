@@ -139,7 +139,9 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
 /// what their process logged). History stays with `doctor`, which reads the
 /// retained runs' logs.
 #[derive(Debug, Clone, Default)]
-pub struct DriftSeen(std::sync::Arc<std::sync::Mutex<Vec<&'static registry::SourceDescriptor>>>);
+pub(crate) struct DriftSeen(
+    std::sync::Arc<std::sync::Mutex<Vec<&'static registry::SourceDescriptor>>>,
+);
 
 impl DriftSeen {
     /// The label prefixes (e.g. `"cc"`) of the sources seen.
@@ -154,7 +156,7 @@ impl DriftSeen {
 
     /// The layer that records into this, filtered to the breadcrumbs alone so
     /// it never sees, or slows, any other event.
-    pub fn layer<S>(&self) -> impl tracing_subscriber::Layer<S>
+    pub(crate) fn layer<S>(&self) -> impl tracing_subscriber::Layer<S>
     where
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
     {
@@ -271,7 +273,7 @@ fn win_path_eq(a: &str, b: &str) -> bool {
 /// signals only — version skew stays report-only, because the `<cli> --version`
 /// probe is too costly for an interactive panel-open across N sources.
 #[derive(Debug, Default)]
-pub struct SourceDiagnostics {
+pub(crate) struct SourceDiagnostics {
     /// `Some` only when hooks are installed in the target's config; `None` = not
     /// checked (no target / not installed).
     pub install: Option<crate::install::verify::SchemaVerifyResult>,
@@ -281,7 +283,7 @@ pub struct SourceDiagnostics {
 impl SourceDiagnostics {
     /// A HARD install problem ⇒ the source is broken (zero sprites despite a
     /// claimed connection). Soft notes and drift do NOT count as broken.
-    pub fn is_broken(&self) -> bool {
+    pub(crate) fn is_broken(&self) -> bool {
         self.install.as_ref().is_some_and(|i| !i.is_sound())
     }
 
@@ -306,7 +308,11 @@ impl SourceDiagnostics {
 /// broken install even on a disconnected source. `config` injects a config root
 /// (`None` in prod) so an install-broken verdict is exercisable through the SAME
 /// root both the `has_hooks` gate and `verify_target` read.
-pub fn diagnose(source: &str, log: &str, config: Option<std::path::PathBuf>) -> SourceDiagnostics {
+pub(crate) fn diagnose(
+    source: &str,
+    log: &str,
+    config: Option<std::path::PathBuf>,
+) -> SourceDiagnostics {
     let install = crate::install::target::by_source(source)
         .filter(|t| crate::install::has_hooks(t, config.clone()))
         .map(|t| crate::install::verify_target(t, config.clone()));

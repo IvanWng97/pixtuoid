@@ -32,7 +32,7 @@ pub(crate) const FALLBACK_DESKS: usize = 16;
 /// (`config::resolve_theme` validates CLI + config in one place), so an unknown theme
 /// can't reach the runtime by construction.
 #[derive(Debug)]
-pub struct RunConfig {
+pub(crate) struct RunConfig {
     pub(crate) socket: Option<PathBuf>,
     pub(crate) projects_root: Option<PathBuf>,
     pub(crate) codex_sessions_root: Option<PathBuf>,

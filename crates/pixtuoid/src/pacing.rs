@@ -190,6 +190,10 @@ impl Backend for PacedBackend {
 /// A renderer drawing the office over `protocol` into a `cols`×`rows`
 /// terminal of `cell_px` cells, with `pets`, encoding as beside a live audio
 /// thread when `audio`, and the wire every byte it writes crosses.
+///
+/// # Errors
+///
+/// The renderer's, when its terminal can't be built over the backend.
 pub fn renderer(
     protocol: Protocol,
     cols: u16,

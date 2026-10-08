@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use criterion::{Criterion, criterion_main};
-use pixtuoid::pacing::{Protocol, forget_frame, renderer, warm};
+use pixtuoid::dev::{Protocol, forget_frame, renderer, warm};
 use pixtuoid_core::SceneState;
 
 /// The owner's terminal: 202x50 cells of 17x41 px, a 214x125 office at 16x.

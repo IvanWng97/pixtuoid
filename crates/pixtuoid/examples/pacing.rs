@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
-use pixtuoid::pacing::{Protocol, renderer};
+use pixtuoid::dev::{Protocol, renderer};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::anim::{Motion, PAINT_FPS};
@@ -446,7 +446,7 @@ fn owner_terminal(
     (1..=1000u16)
         .flat_map(|c| (1..=400u16).map(move |r| (c, r)))
         .find(|&(c, r)| {
-            pixtuoid::pacing::cutaway_office(c, r, cell, pack)
+            pixtuoid::dev::cutaway_office(c, r, cell, pack)
                 .is_some_and(|(w, h, _)| w >= OWNER_OFFICE.0 && h >= OWNER_OFFICE.1)
         })
         .context("no terminal fits the owner's office")
@@ -490,7 +490,7 @@ fn hitch(path: &Path) -> Result<()> {
     let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     let (cols, rows) = owner_terminal(&pack, OWNER_CELL)?;
     anyhow::ensure!(
-        pixtuoid::pacing::cutaway_office(cols, rows, OWNER_CELL, &pack)
+        pixtuoid::dev::cutaway_office(cols, rows, OWNER_CELL, &pack)
             .is_some_and(|(w, h, _)| (w, h) == OWNER_OFFICE),
         "the owner's terminal no longer gives the owner's office exactly: its runs stop being comparable"
     );
@@ -625,7 +625,7 @@ fn hitch(path: &Path) -> Result<()> {
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
     let mut stdout = std::io::stdout().lock();
     for t in &terms {
-        let office_of = pixtuoid::pacing::cutaway_office(t.cols, t.rows, t.cell, &pack);
+        let office_of = pixtuoid::dev::cutaway_office(t.cols, t.rows, t.cell, &pack);
         let _ = writeln!(
             stdout,
             "{}: {}x{} cells of {:?} px, cutaway office/scale {office_of:?}",
@@ -683,7 +683,7 @@ fn hitch(path: &Path) -> Result<()> {
         let wall = Instant::now();
         let start = run.start.unwrap_or_else(SystemTime::now);
         let scene = office(start);
-        pixtuoid::pacing::warm(&mut r, &scene, &pack, start);
+        pixtuoid::dev::warm(&mut r, &scene, &pack, start);
         let mut totals = Vec::new();
         let mut n = 0u64;
         loop {
@@ -696,7 +696,7 @@ fn hitch(path: &Path) -> Result<()> {
             }
             let now = start + offset;
             if run.whole {
-                pixtuoid::pacing::forget_frame(&mut r);
+                pixtuoid::dev::forget_frame(&mut r);
             }
             wire.take();
             probe.take();
