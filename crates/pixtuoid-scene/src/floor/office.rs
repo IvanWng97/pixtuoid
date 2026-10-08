@@ -520,6 +520,12 @@ impl OfficeSession {
         }
     }
 
+    /// The waypoints the floor showing's audio reads as occupied.
+    #[cfg(test)]
+    pub(super) fn heard_occupied(&self) -> &HashSet<usize> {
+        &self.views[self.nav.current()].last_occupied
+    }
+
     /// What each of the last frame's two sides flashes: a slide's leaving and
     /// arriving floors, else the floor showing's twice.
     pub fn flashes(&self) -> crate::flash::Flashes {
