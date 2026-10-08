@@ -7,9 +7,8 @@
 //!   text would (<https://sw.kovidgoyal.net/kitty/graphics-protocol/>,
 //!   "Unicode placeholders").
 //! - SIXEL and iTerm2 draw pixels at the cursor. Their cells are left out of
-//!   ratatui's diff, and a tile under any text cell is withheld: text and
-//!   image never share a cell. The withheld tile's other cells show the
-//!   frame as half-blocks meanwhile.
+//!   ratatui's diff, and a tile under text is sent without its text cells:
+//!   text and image never share a cell.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,11 +22,10 @@ use pixtuoid_scene::layout::Size;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
 
-use crate::graphics::tiles::{Changed, Tile, Tiles};
+use crate::graphics::tiles::{Carve, Changed, Tile, Tiles};
 use crate::graphics::{CellSize, ImageProtocol, cutaway_fit, iterm2, kitty, sixel};
 use crate::jank::FrameSend;
 use crate::tui::geometry::SceneGeometry;
-use crate::tui::renderer::set_half_block;
 use pixtuoid_scene::render_scale::PixelFit;
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
@@ -47,6 +45,12 @@ pub(crate) struct Fitted {
 }
 
 impl Fitted {
+    /// The look the office renders in: the cutaway, its world text left to
+    /// the terminal, which sets it in its own font.
+    pub(crate) fn look(self) -> pixtuoid_scene::look::Look {
+        self.fit.look(pixtuoid_scene::look::WorldText::Host)
+    }
+
     /// The image's cells, its top-left on the scene's.
     pub(crate) fn geometry(self) -> SceneGeometry {
         SceneGeometry::Cutaway {
@@ -83,8 +87,8 @@ pub(crate) struct TileCutaway {
     /// The image's top-left cell.
     origin: Position,
     out: Sink,
-    /// This frame's write, once staged; its tiles encoded only if no text
-    /// covers them.
+    /// This frame's write, once staged; its tiles carved around the frame's
+    /// text once that is drawn.
     pending: Option<Pending>,
     /// Set once SIXEL or iTerm2 pixels are written, for the unwind
     /// ([`crate::graphics::grid_unwind`]).
@@ -108,6 +112,8 @@ pub(crate) struct TileCutaway {
 struct Pending {
     tiles: Vec<Changed>,
     flashes: Flashes,
+    /// Whether the protocol's cadence lets it send now.
+    due: bool,
 }
 
 /// Transmits written into the frame, and the flashes they show; the cadence
@@ -215,8 +221,8 @@ impl TileCutaway {
     /// Show `floor`'s `frame`, which flashes `flash`, as `fitted`; it may
     /// differ from that floor's last only within `dirty`. Queue the tiles it
     /// changed once the protocol's cadence allows; until then they stay owed.
-    /// A frame the flash hold keeps back is not sent, so the terminal, and the
-    /// half-blocks of the tiles under text, keep the last.
+    /// A frame the flash hold keeps back is not sent, so the terminal keeps
+    /// the last.
     pub(crate) fn paint(
         &mut self,
         fitted: Fitted,
@@ -308,6 +314,7 @@ impl TileCutaway {
         self.pending = Some(Pending {
             tiles: if due { changed } else { Vec::new() },
             flashes,
+            due,
         });
     }
 
@@ -315,35 +322,36 @@ impl TileCutaway {
     /// writes find their images there.
     pub(crate) fn before_flush(&mut self, now: SystemTime) {
         if self.route.protocol() == ImageProtocol::Kitty {
-            self.send(&[], now);
+            self.send(now);
         }
     }
 
-    /// Send SIXEL's or iTerm2's tiles but the `covered` ones after ratatui's
-    /// flush: only then are the text cells they must avoid known. A covered
-    /// tile is owed again, so it is re-sent once uncovered.
-    pub(crate) fn after_flush(&mut self, covered: &[u32], now: SystemTime) {
+    /// Send SIXEL's or iTerm2's tiles after ratatui's flush, each carved
+    /// around the text cells `carves` marks: only then are they known. A tile
+    /// whose text moved is sent again, to give the cells text left back to
+    /// the image.
+    pub(crate) fn after_flush(&mut self, carves: &[Carve], now: SystemTime) {
         if self.route.protocol() == ImageProtocol::Kitty {
             return;
         }
-        for &index in covered {
-            self.tiles.forget_tile(index);
+        if let Some(pending) = self.pending.as_mut().filter(|p| p.due) {
+            pending.tiles = self.tiles.carved(&pending.tiles, carves);
         }
-        self.send(covered, now);
+        self.send(now);
     }
 
-    /// Encode and write the queued tiles but the `covered` ones, to land with
-    /// the frame. A write the sink refuses is logged and leaves its tiles
-    /// owed, and its flashes unshown.
-    fn send(&mut self, covered: &[u32], now: SystemTime) {
+    /// Encode and write the queued tiles, to land with the frame. A write
+    /// the sink refuses is logged and leaves its tiles owed, and its flashes
+    /// unshown.
+    fn send(&mut self, now: SystemTime) {
         let Some(Pending {
-            tiles: mut send,
+            tiles: send,
             flashes,
+            ..
         }) = self.pending.take()
         else {
             return;
         };
-        send.retain(|c| !covered.contains(&c.tile.index));
         if send.is_empty() {
             self.landing = Some(Landing {
                 sent: send,
@@ -482,43 +490,28 @@ impl TileCutaway {
         }
     }
 
-    /// The tiles under text drawn since [`Self::place`], all of whose cells
-    /// it hands back to ratatui's diff: the text, and the rest as
-    /// half-blocks. Kitty's text needs no room made.
-    pub(crate) fn cover(&self, buf: &mut Buffer, scene: Rect) -> Vec<u32> {
+    /// Per tile, its cells text was drawn in since [`Self::place`], each
+    /// handed back to ratatui's diff. Kitty's text needs no room made.
+    pub(crate) fn carve(&self, buf: &mut Buffer, scene: Rect) -> Vec<Carve> {
         if self.route.protocol() == ImageProtocol::Kitty {
             return Vec::new();
         }
         let sentinel = sentinel();
-        let mut covered = Vec::new();
-        let mut halves = None;
-        for tile in self.tiles.all() {
-            let under_text = cells(tile).any(|(col, row)| {
-                image_cell(buf, scene, col, row).is_some_and(|cell| *cell != sentinel)
-            });
-            if !under_text {
-                continue;
-            }
-            covered.push(tile.index);
-            let halves: &RgbBuffer =
-                halves.get_or_insert_with(|| self.tiles.half_blocks(&self.image));
-            for (col, row) in cells(tile) {
-                let Some(cell) = image_cell(buf, scene, col, row) else {
-                    continue;
-                };
-                if *cell == sentinel {
-                    let (top, bottom) = (row * 2, row * 2 + 1);
-                    if col < halves.width() && bottom < halves.height() {
-                        cell.reset();
-                        let half = |y| halves.get(col, y);
-                        set_half_block(cell, half(top), half(bottom));
+        self.tiles
+            .all()
+            .map(|tile| {
+                let mut carve = 0;
+                for (col, row) in cells(tile) {
+                    if let Some(cell) = image_cell(buf, scene, col, row)
+                        && *cell != sentinel
+                    {
+                        cell.set_diff_option(CellDiffOption::None);
+                        carve |= tile.bit(col - tile.col, row - tile.row);
                     }
-                } else {
-                    cell.set_diff_option(CellDiffOption::None);
                 }
-            }
-        }
-        covered
+                carve
+            })
+            .collect()
     }
 
     /// What the last frame's transmits did.
@@ -563,16 +556,30 @@ impl Encoder<'_> {
         })
     }
 
-    /// `c`'s tile in the protocol's escape; `None` where it has none.
+    /// `c`'s tile in the protocol's escape, carved: one image a
+    /// [piece](Tile::pieces); `None` where it has none.
     fn encode(self, c: Changed) -> Option<Vec<u8>> {
         let _encode = tracing::trace_span!("tile.encode").entered();
-        let image =
-            tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(self.image, c.tile));
+        let cut =
+            |tile| tracing::trace_span!("tile.cut").in_scope(|| self.tiles.image(self.image, tile));
         match self.route.protocol() {
-            ImageProtocol::Kitty => kitty::image_id(self.base, c.tile)
-                .map(|id| kitty::transmit(id, &image, self.route.tmux(), self.route.medium())),
-            ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
-            ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
+            ImageProtocol::Kitty => kitty::image_id(self.base, c.tile).map(|id| {
+                kitty::transmit(id, &cut(c.tile), self.route.tmux(), self.route.medium())
+            }),
+            ImageProtocol::Sixel => Some(
+                c.tile
+                    .pieces(c.carve)
+                    .into_iter()
+                    .flat_map(|piece| sixel::transmit(&cut(piece), self.origin))
+                    .collect(),
+            ),
+            ImageProtocol::Iterm2 => c
+                .tile
+                .pieces(c.carve)
+                .into_iter()
+                .map(|piece| iterm2::transmit(&cut(piece), self.origin))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|pieces| pieces.concat())
                 .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
                 .ok(),
         }

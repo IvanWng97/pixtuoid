@@ -120,7 +120,7 @@ impl OfficeRenderer {
         } = world;
         let gap = theme.surface.bg_fallback;
         self.session.render(
-            at.look(),
+            at.look(pixtuoid_scene::look::WorldText::Baked),
             RenderInputs {
                 world,
                 theme,

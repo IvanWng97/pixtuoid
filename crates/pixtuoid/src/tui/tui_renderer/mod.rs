@@ -306,7 +306,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .ok()
             .and_then(crate::graphics::CellSize::of_window);
         let fitted = self.cutaway.as_mut()?.fit_to(scene_area, window)?;
-        Some((fitted.fit.look(), fitted.fit.logical()))
+        Some((fitted.look(), fitted.fit.logical()))
     }
 
     /// Report the frames since the last pacing summary, at exit.
@@ -947,9 +947,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 #[cfg(feature = "graphics")]
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// [`Self::render`] under the cutaway: the session's frame (the floor
-    /// showing, or a slide's two floors composed) as the image in place of
-    /// the half-blocks, its badges, wall board and floor indicator painted in
-    /// it, and only the footer, tooltips and modals as terminal text.
+    /// showing, or a slide's two floors composed with their text baked) as
+    /// the image in place of the half-blocks, and the floor showing's badges,
+    /// bubbles, wall board and floor indicator over it as terminal text, as
+    /// the footer, tooltips and modals are.
     fn render_cutaway(
         &mut self,
         cutaway: &mut crate::tui::cutaway::TileCutaway,
@@ -959,18 +960,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         now: SystemTime,
     ) -> Result<()> {
         use crate::panels::paint_overlays;
+        use crate::panels::widgets::{paint_world, star_area};
+        use crate::tui::hit_test::SceneHit;
         use crate::tui::renderer::{DrawOut, TooltipAt, paint_footer, scene_hit, scene_rect};
+        use pixtuoid_scene::display::HoverTarget;
         if crate::tui::renderer::scene_too_small(fitted.scene) {
             return self.draw_too_small(scene, now);
         }
-        let layout = self.render_office(
-            scene,
-            pack,
-            now,
-            fitted.fit.look(),
-            fitted.fit.logical(),
-            false,
-        );
+        let layout =
+            self.render_office(scene, pack, now, fitted.look(), fitted.fit.logical(), false);
         let sliding = self.session.nav().transition().is_some();
         if sliding {
             self.forget_drawn();
@@ -994,6 +992,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
         let overlays = self.chrome.overlays(popup_scale);
+        /// What a frame sets over its image: the world's text, with the agent
+        /// the pointer is on, and the tooltip by the pointer.
+        struct Over<'w> {
+            text: Option<(
+                pixtuoid_scene::display::World<'w>,
+                Option<pixtuoid_core::AgentId>,
+            )>,
+            tooltip: Option<(u16, u16, pixtuoid_scene::tooltip::Tooltip)>,
+        }
         let shown = if sliding {
             None
         } else {
@@ -1010,25 +1017,46 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             );
             let raster = self.session.floor(current).map(|floor| &floor.raster);
             let hovers = raster.and_then(|r| r.hovers().cloned()).unwrap_or_default();
-            let star = raster.and_then(|r| r.star());
             let geometry = fitted.geometry();
+            let text = raster.and_then(pixtuoid_scene::look::Raster::world);
+            let star = text.and_then(|text| star_area(text.signs, geometry.map()));
             let mouse = self.tooltip_pos().and_then(|(mx, my)| {
                 let hit = scene_hit(&hovers, star, &layout, geometry.area_at(mx, my)?)?;
                 Some((mx, my, hit))
             });
+            let hovered = match mouse {
+                Some((_, _, SceneHit::Figure(HoverTarget::Agent(id)))) => Some(*id),
+                _ => None,
+            };
             let tooltip = mouse.and_then(|(mx, my, hit)| {
                 pixtuoid_scene::tooltip::for_hit(hit, &world).map(|tip| (mx, my, tip))
             });
-            Some((layout, hovers, star, geometry, tooltip))
+            let drawn = DrawOut {
+                layout: Some(layout),
+                hovers,
+                star,
+                geometry: Some(geometry),
+                // The cutaway holds its own tiles; the terminal's text draws.
+                held: false,
+            };
+            let over = Over {
+                text: text.map(|t| (t, hovered)),
+                tooltip,
+            };
+            Some((drawn, over))
         };
         cutaway.before_flush(now);
-        let mut covered = Vec::new();
+        let mut carves = Vec::new();
         self.terminal.draw(|f| {
             let full = f.area();
             let scene_area = scene_rect(full);
             paint_footer(f, &footer, full, theme);
             cutaway.place(f.buffer_mut(), scene_area);
-            if let Some((_, _, _, _, Some((mx, my, tip)))) = &shown {
+            let over = shown.as_ref().map(|(_, over)| over);
+            if let Some((text, hovered)) = over.and_then(|o| o.text) {
+                paint_world(f, text, (scene_area, fitted.geometry().map()), hovered);
+            }
+            if let Some((mx, my, tip)) = over.and_then(|o| o.tooltip.as_ref()) {
                 let at = TooltipAt {
                     mx: *mx,
                     my: *my,
@@ -1037,23 +1065,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 crate::tui::renderer::paint_tooltip(f, tip, at, theme);
             }
             paint_overlays(f, &overlays, now, full, theme);
-            covered = cutaway.cover(f.buffer_mut(), scene_area);
+            carves = cutaway.carve(f.buffer_mut(), scene_area);
         })?;
-        cutaway.after_flush(&covered, now);
+        cutaway.after_flush(&carves, now);
         match shown {
-            Some((layout, hovers, star, geometry, _)) => self.record_drawn(
-                scene,
-                DrawOut {
-                    layout: Some(layout),
-                    hovers,
-                    star,
-                    geometry: Some(geometry),
-                    // The cutaway holds its own tiles; the terminal's text draws.
-                    held: false,
-                },
-                popup_scale,
-                now,
-            ),
+            Some((drawn, _)) => self.record_drawn(scene, drawn, popup_scale, now),
             None => self.chrome.popup.last_scale = popup_scale,
         }
         Ok(())

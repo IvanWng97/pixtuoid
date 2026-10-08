@@ -1636,7 +1636,10 @@ fn looks() -> [crate::look::Look; 2] {
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
     [
         crate::look::Look::Classic,
-        crate::look::Look::Cutaway { scale },
+        crate::look::Look::Cutaway {
+            scale,
+            text: crate::look::WorldText::Baked,
+        },
     ]
 }
 
@@ -1811,6 +1814,7 @@ fn a_floor_still_off_the_beat_paints_one_frame_until_the_beat_turns() {
         crate::look::Look::Classic,
         crate::look::Look::Cutaway {
             scale: crate::render_scale::RenderScale::new(1).expect("nonzero"),
+            text: crate::look::WorldText::Baked,
         },
     ];
     let pack = Arc::new(crate::pack::test_office());
@@ -2070,6 +2074,68 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
         crate::pet::select_pet_for_floor(FloorMeta::for_floor(1, 2).floor_seed, &pets)
             .map(|p| p.name.as_str()),
         "the floor showing's pet"
+    );
+}
+
+/// A cutaway slide bakes both floors' text whoever sets it on a floor
+/// showing, so the text moves with its floor: it starts on the leaving
+/// floor's own frame, its board and badges included.
+#[test]
+fn a_cutaway_slide_bakes_its_floors_text() {
+    use crate::look::{Look, WorldText};
+    let pack = Arc::new(crate::pack::test_office());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let scene = make_scene(3, 2);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    // The slide `after` its start, or the floor showing.
+    let frame = |text, after: Option<u64>| {
+        let mut office = OfficeSession::new(Arc::clone(&pack));
+        let look = Look::Cutaway {
+            scale: crate::render_scale::RenderScale::new(4).expect("nonzero"),
+            text,
+        };
+        let render = |office: &mut OfficeSession, now| {
+            office.render(
+                look,
+                crate::look::RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w: 160, h: 96 },
+                    place: crate::look::Place::default(),
+                    debug_walkable: false,
+                },
+                &[],
+                theme.surface.bg_fallback,
+            )
+        };
+        render(&mut office, t0);
+        if let Some(after) = after {
+            assert!(office.navigate(1, t0));
+            render(&mut office, t0 + Duration::from_millis(after));
+        }
+        office.buf().expect("composed").as_slice().to_vec()
+    };
+    let baked = frame(WorldText::Baked, None);
+    assert_ne!(
+        frame(WorldText::Host, None),
+        baked,
+        "a floor showing leaves its text to the host"
+    );
+    assert_eq!(
+        frame(WorldText::Host, Some(0)),
+        baked,
+        "a slide starts on it"
+    );
+    assert_eq!(
+        frame(WorldText::Host, Some(400)),
+        frame(WorldText::Baked, Some(400)),
+        "a slide bakes it"
     );
 }
 

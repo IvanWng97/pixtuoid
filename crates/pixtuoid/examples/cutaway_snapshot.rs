@@ -181,7 +181,10 @@ fn main() -> Result<()> {
     let mut session = FloorSession::new(Arc::clone(&pack));
     let layout = session
         .render(
-            Look::Cutaway { scale },
+            Look::Cutaway {
+                scale,
+                text: pixtuoid_scene::look::WorldText::Baked,
+            },
             RenderInputs {
                 world: pixtuoid_scene::floor::FloorInputs {
                     scene: &scene,

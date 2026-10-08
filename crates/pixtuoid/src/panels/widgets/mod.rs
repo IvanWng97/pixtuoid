@@ -17,7 +17,7 @@ pub(crate) use footer::paint_footer;
 pub(crate) use help::paint_help_overlay;
 pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(crate) use theme_picker::paint_theme_picker;
-pub(crate) use tooltip::{TooltipAt, paint_badges, paint_text_runs, paint_tooltip};
+pub(crate) use tooltip::{TooltipAt, paint_tooltip, paint_world, star_area};
 pub(crate) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(crate) use welcome::paint_welcome;
 
