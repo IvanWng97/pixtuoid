@@ -942,10 +942,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 #[cfg(feature = "graphics")]
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// [`Self::render`] under the cutaway: the session's frame (the floor
-    /// showing, or a slide's two floors composed) as the image in place of
-    /// the half-blocks, and its badges, bubbles, wall board and floor
-    /// indicator over it as terminal text, as the footer, tooltips and
-    /// modals are.
+    /// showing, or a slide's two floors composed with their text baked) as
+    /// the image in place of the half-blocks, and the floor showing's badges,
+    /// bubbles, wall board and floor indicator over it as terminal text, as
+    /// the footer, tooltips and modals are.
     fn render_cutaway(
         &mut self,
         cutaway: &mut crate::tui::cutaway::TileCutaway,

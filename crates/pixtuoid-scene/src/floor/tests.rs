@@ -2077,6 +2077,60 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
     );
 }
 
+/// A cutaway slide bakes both floors' text whoever sets it on a floor
+/// showing, so the text moves with its floor.
+#[test]
+fn a_cutaway_slide_bakes_its_floors_text() {
+    use crate::look::{Look, WorldText};
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let scene = make_scene(3, 2);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let frame = |text, slide: bool| {
+        let mut office = OfficeSession::new(Arc::clone(&pack));
+        let look = Look::Cutaway {
+            scale: crate::render_scale::RenderScale::new(4).expect("nonzero"),
+            text,
+        };
+        let render = |office: &mut OfficeSession, now| {
+            office.render(
+                look,
+                crate::look::RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w: 160, h: 96 },
+                    place: crate::look::Place::default(),
+                    debug_walkable: false,
+                },
+                &[],
+                theme.surface.bg_fallback,
+            )
+        };
+        render(&mut office, t0);
+        if slide {
+            assert!(office.navigate(1, t0));
+            render(&mut office, t0 + Duration::from_millis(400));
+        }
+        office.buf().expect("composed").as_slice().to_vec()
+    };
+    assert_ne!(
+        frame(WorldText::Host, false),
+        frame(WorldText::Baked, false),
+        "a floor showing leaves its text to the host"
+    );
+    assert_eq!(
+        frame(WorldText::Host, true),
+        frame(WorldText::Baked, true),
+        "a slide bakes it"
+    );
+}
+
 /// A frame that drew no office keeps nothing of the last: a pointer hits
 /// nothing and the audio hears no one at the floor's waypoints.
 #[test]
