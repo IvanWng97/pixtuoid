@@ -523,6 +523,11 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                         Instant::now(),
                         crate::audio::respawn,
                     );
+                } else if super::input::is_theme_cycle(key, event.repeat) {
+                    self.theme = super::input::next_theme(self.theme);
+                    if let Err(e) = crate::config::save(&self.config_path, self.theme.name) {
+                        tracing::warn!(error = %e, "failed to persist theme");
+                    }
                 } else if super::input::is_pause(key, event.repeat) {
                     self.pause.toggle();
                     // Unpause restores the user's own m-key state rather than clobbering it.
