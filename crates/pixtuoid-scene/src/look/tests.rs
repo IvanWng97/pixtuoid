@@ -231,7 +231,7 @@ fn a_refused_classic_frame_names_no_one() {
 /// sees sessions come and go holds none of the gone ones' art.
 #[test]
 fn the_cutaways_figures_leave_with_their_agents() {
-    let pack = Arc::new(crate::pack::test_default_pack());
+    let pack = Arc::new(crate::pack::test_office());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
     let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
