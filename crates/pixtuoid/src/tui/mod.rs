@@ -663,7 +663,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     if decision.should_persist
         && let Err(e) = crate::config::save_version(config_path, current_ver)
     {
-        tracing::warn!(error = %e, "failed to persist version");
+        tracing::warn!(error = ?e, "failed to persist version");
     }
     decision.should_show_popup
 }
@@ -751,7 +751,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             cx.ui.commit_theme(i);
             let name = theme::ALL_THEMES[i].name;
             if let Err(e) = crate::config::save(cx.config_path, name) {
-                tracing::warn!(error = %e, "failed to persist theme");
+                tracing::warn!(error = ?e, "failed to persist theme");
             }
         }
         KeyAction::ThemeCancel => {
