@@ -667,9 +667,11 @@ pub(crate) const MAX_TOOL_TARGET_CHARS: usize = 40;
 /// crafted ~1 MiB hook/transcript line: every TUI display site is individually
 /// bounded, but the headless summary line is not, and the uncapped value would
 /// sit in `AgentSlot` for the session's lifetime either way.
+#[doc(hidden)]
 pub const MAX_DECODED_FIELD_CHARS: usize = 80;
 
 /// What `ellipsize` ends a capped value with.
+#[doc(hidden)]
 pub const ELLIPSIS: char = '\u{2026}';
 
 /// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap

@@ -471,8 +471,7 @@ frame_ms = 600
 [animations.meeting_sofa_north]
 # The meeting sofa seen from behind (the south sofa of a meeting trio and the
 # lounge couch, both facing north), drawn only by the cutaway, which sorts its
-# top rows under the sitter and the rest over their lap. OPTIONAL: a pack
-# without it gets its own `meeting_sofa`, flipped.
+# top rows under the sitter and the rest over their lap.
 frames   = ["meeting_sofa_north.sprite"]
 frame_ms = 600
 
@@ -688,10 +687,6 @@ frame_ms = 600
 frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
 
-# Hairstyles and the line round every marked @Nx character:
-# crates/pixtuoid-scene/AGENTS.md#the-sprite-format. The layers are scripts/gen-art.py's
-# HAIRSTYLES, registered here by hand (`every_bundled_sprite_is_a_frame_the_pack_loads`
-# fails on one left out).
 # The symbols text shows as art, by the name `display::Icon::art` gives:
 # `world` is one cell of the office's own text, `screen` of screen text, a
 # cell wide per cell its terminal glyph takes.
@@ -781,6 +776,10 @@ screen = "icon_warning_screen.sprite"
 [icons.check]
 screen = "icon_check_screen.sprite"
 
+# Hairstyles and the line round every marked @Nx character:
+# crates/pixtuoid-scene/AGENTS.md#the-sprite-format. The layers are scripts/gen-art.py's
+# HAIRSTYLES, registered here by hand (`every_bundled_sprite_is_a_frame_the_pack_loads`
+# fails on one left out).
 [characters]
 outline = "κ"
 

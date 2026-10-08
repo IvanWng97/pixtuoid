@@ -23,7 +23,7 @@ const LEFTMOST: u16 = 1 << (u16::BITS - 1);
 /// The screen face's cell, in its pixels.
 const SCREEN_CELL_W: u16 = 6;
 const SCREEN_LINE_H: u16 = 12;
-/// Its capitals' top row and height: the box a hand-drawn symbol centres in.
+/// Its capitals' top row and height.
 const SCREEN_CAP_TOP: u16 = 2;
 const SCREEN_CAP_H: u16 = 8;
 
@@ -101,7 +101,7 @@ impl Face {
         if self != Self::Screen {
             return None;
         }
-        Icon::ALL
+        <Icon as strum::VariantArray>::VARIANTS
             .iter()
             .filter(|i| i.terminal() == symbol)
             .find_map(|i| pack.icon(i.art())?.screen())
@@ -555,7 +555,7 @@ mod tests {
         let pack = crate::pack::test_default_pack();
         let cell = Face::Screen.cell(1);
         let mut seen = std::collections::HashMap::new();
-        for icon in crate::display::Icon::ALL {
+        for icon in <crate::display::Icon as strum::VariantArray>::VARIANTS {
             let Some(art) = pack
                 .icon(icon.art())
                 .and_then(|a| a.screen())
