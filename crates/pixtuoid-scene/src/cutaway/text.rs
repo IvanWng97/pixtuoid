@@ -2,12 +2,10 @@
 //! art pixel, never anti-aliased, in the cells [`display::text`](crate::display::text)
 //! lays it out by.
 //!
-//! ASCII and the symbols the office writes are [`HAND_DRAWN`], box-drawing
-//! lines and block elements are [`ruled`], and every other character comes
-//! from the [`fallback`] font, two open bitmap fonts
-//! `scripts/gen-fallback-font.py` aligns to the same lines. The workspace's
-//! other face (the binary's `aa_text`) is an anti-aliased OTF this wasm-clean
-//! crate must not embed.
+//! Box-drawing lines and block elements are [`ruled`], every character Fusion
+//! Pixel 8px draws as a terminal's cells comes from it (`scripts/gen-fonts.py`),
+//! and the symbols it draws only full-width are [`HAND_DRAWN`] on its lines.
+//! It is [`grid`](super::grid)'s world face.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
@@ -17,20 +15,20 @@ use crate::display::text::{
 };
 
 /// A glyph: each line row's ink, the high bit its leftmost pixel.
-type Rows = [u8; LINE_H as usize];
-const LEFTMOST_PIXEL: u8 = 1 << (u8::BITS - 1);
+pub(crate) type Rows = [u8; LINE_H as usize];
+pub(crate) const LEFTMOST_PIXEL: u8 = 1 << (u8::BITS - 1);
 
-/// The fallback font, written by `scripts/gen-fallback-font.py` (its format);
+/// Fusion Pixel 8px, written by `scripts/gen-fonts.py` (its format);
 /// license and sources in `fonts/`.
 #[cfg(feature = "cutaway-assets")]
-static FALLBACK: &[u8] = include_bytes!("../../fonts/fallback.bin");
+static FUSION: &[u8] = include_bytes!("../../fonts/world.bin");
 #[cfg(not(feature = "cutaway-assets"))]
-static FALLBACK: &[u8] = &[];
+static FUSION: &[u8] = &[];
 
-/// The fallback font's code points, ascending, and their glyphs; `None` when
-/// it was generated for another [`LINE_H`].
-fn fallback_font() -> Option<(&'static [[u8; 2]], &'static [Rows])> {
-    let (&[rows, n_lo, n_hi], rest) = FALLBACK.split_first_chunk::<3>()?;
+/// Fusion Pixel's code points, ascending, and their glyphs; `None` when it
+/// was generated for another [`LINE_H`].
+fn fusion_font() -> Option<(&'static [[u8; 2]], &'static [Rows])> {
+    let (&[rows, n_lo, n_hi], rest) = FUSION.split_first_chunk::<3>()?;
     if u16::from(rows) != LINE_H {
         return None;
     }
@@ -39,9 +37,10 @@ fn fallback_font() -> Option<(&'static [[u8; 2]], &'static [Rows])> {
     Some((points.as_chunks().0, glyphs.as_chunks().0))
 }
 
-/// `c`'s glyph in the fallback font, if it has one.
-fn fallback(c: char) -> Option<Rows> {
-    let (points, glyphs) = fallback_font()?;
+/// `c`'s glyph in Fusion Pixel, if it draws one in the cells a terminal
+/// gives it.
+fn fusion(c: char) -> Option<Rows> {
+    let (points, glyphs) = fusion_font()?;
     let point = u16::try_from(u32::from(c)).ok()?;
     let i = points
         .binary_search_by_key(&point, |b| u16::from_le_bytes(*b))
@@ -49,17 +48,11 @@ fn fallback(c: char) -> Option<Rows> {
     glyphs.get(i).copied()
 }
 
-/// `c`'s glyph, `None` when neither font draws it.
-fn glyph(c: char) -> Option<Rows> {
-    hand_drawn(c)
-        .map(rows_of)
-        .or_else(|| ruled(c))
-        .or_else(|| fallback(c))
-}
-
-/// Whether the font draws `c`, rather than tofu.
-pub fn draws(c: char) -> bool {
-    glyph(c).is_some()
+/// `c`'s glyph, `None` when the face lacks it.
+pub(crate) fn glyph(c: char) -> Option<Rows> {
+    ruled(c)
+        .or_else(|| fusion(c))
+        .or_else(|| hand_drawn(c).map(rows_of))
 }
 
 /// What `cluster`'s `n` cells show, each glyph with the cells it takes. When
@@ -67,6 +60,17 @@ pub fn draws(c: char) -> bool {
 /// under a combining accent, or a letter and a halfwidth sound mark. Otherwise,
 /// as with a VS16 heart or a ZWJ sequence, it is one box `n` cells wide.
 fn glyphs(cluster: &str, n: u16) -> impl Iterator<Item = (Rows, u16)> + '_ {
+    glyphs_by(cluster, n, glyph, tofu)
+}
+
+/// [`glyphs`] in any face: its `glyph` for a character, else its `tofu` box
+/// as wide as the cells given.
+pub(crate) fn glyphs_by<'a, G: 'a>(
+    cluster: &'a str,
+    n: u16,
+    glyph: impl Fn(char) -> Option<G> + Copy + 'a,
+    tofu: impl Fn(u16) -> G + Copy + 'a,
+) -> impl Iterator<Item = (G, u16)> + 'a {
     let own = |c: char| cells(c.encode_utf8(&mut [0; 4]));
     let fits = cluster.chars().map(own).sum::<u16>() == n;
     let each = cluster
@@ -74,7 +78,7 @@ fn glyphs(cluster: &str, n: u16) -> impl Iterator<Item = (Rows, u16)> + '_ {
         .filter(move |_| fits)
         .map(move |c| (c, own(c)))
         .filter(|&(_, k)| k > 0)
-        .map(|(c, k)| (glyph(c).unwrap_or_else(|| tofu(k)), k));
+        .map(move |(c, k)| (glyph(c).unwrap_or_else(|| tofu(k)), k));
     each.chain((!fits).then(|| (tofu(n), n)))
 }
 
@@ -106,136 +110,19 @@ fn tofu(n: u16) -> Rows {
     rows
 }
 
-/// Each character's rows from the capital line down, by code point: a row is
-/// its cells' width less the gap of `#` (ink) or `.`, [`GLYPH_W`](crate::display::text::GLYPH_W)
+/// The symbols world text writes that Fusion Pixel draws only full-width, by
+/// code point: each row's from the capital line down, its cells' width less
+/// the gap of `#` (ink) or `.`, [`GLYPH_W`](crate::display::text::GLYPH_W)
 /// for one cell; rows are separated by spaces and those not given are blank.
-/// Lowercase stands four rows tall under a one-row ascender.
 const HAND_DRAWN: &[(char, &str)] = &[
-    (' ', ""),
-    ('!', ".#. .#. .#. ... .#."),
-    ('"', "#.# #.#"),
-    ('#', "#.# ### #.# ### #.#"),
-    ('$', ".## ##. .#. .## ##."),
-    ('%', "#.. ..# .#. #.. ..#"),
-    ('&', ".#. #.# .#. #.# .##"),
-    ('\'', ".#. .#."),
-    ('(', "..# .#. .#. .#. ..#"),
-    (')', "#.. .#. .#. .#. #.."),
-    ('*', "... #.# .#. #.#"),
-    ('+', "... .#. ### .#."),
-    (',', "... ... ... .#. #.."),
-    ('-', "... ... ###"),
-    ('.', "... ... ... ... .#."),
-    ('/', "..# ..# .#. #.. #.."),
-    ('0', "### #.# #.# #.# ###"),
-    ('1', ".#. ##. .#. .#. ###"),
-    ('2', "##. ..# .#. #.. ###"),
-    ('3', "##. ..# .#. ..# ##."),
-    ('4', "#.# #.# ### ..# ..#"),
-    ('5', "### #.. ##. ..# ##."),
-    ('6', ".## #.. ### #.# ###"),
-    ('7', "### ..# .#. .#. .#."),
-    ('8', "### #.# ### #.# ###"),
-    ('9', "### #.# ### ..# ##."),
-    (':', "... .#. ... .#."),
-    (';', "... .#. ... .#. #.."),
-    ('<', "..# .#. #.. .#. ..#"),
-    ('=', "... ### ... ###"),
-    ('>', "#.. .#. ..# .#. #.."),
-    ('?', "##. ..# .#. ... .#."),
-    ('@', ".#. #.# ### #.. .##"),
-    ('A', ".#. #.# ### #.# #.#"),
-    ('B', "##. #.# ##. #.# ##."),
-    ('C', ".## #.. #.. #.. .##"),
-    ('D', "##. #.# #.# #.# ##."),
-    ('E', "### #.. ##. #.. ###"),
-    ('F', "### #.. ##. #.. #.."),
-    ('G', ".## #.. #.# #.# .##"),
-    ('H', "#.# #.# ### #.# #.#"),
-    ('I', "### .#. .#. .#. ###"),
-    ('J', "..# ..# ..# #.# .#."),
-    ('K', "#.# #.# ##. #.# #.#"),
-    ('L', "#.. #.. #.. #.. ###"),
-    ('M', "#.# ### ### #.# #.#"),
-    ('N', "##. #.# #.# #.# #.#"),
-    ('O', ".#. #.# #.# #.# .#."),
-    ('P', "##. #.# ##. #.. #.."),
-    ('Q', ".#. #.# #.# ##. .##"),
-    ('R', "##. #.# ##. #.# #.#"),
-    ('S', ".## #.. .#. ..# ##."),
-    ('T', "### .#. .#. .#. .#."),
-    ('U', "#.# #.# #.# #.# ###"),
-    ('V', "#.# #.# #.# #.# .#."),
-    ('W', "#.# #.# ### ### #.#"),
-    ('X', "#.# #.# .#. #.# #.#"),
-    ('Y', "#.# #.# .#. .#. .#."),
-    ('Z', "### ..# .#. #.. ###"),
-    ('[', "##. #.. #.. #.. ##."),
-    ('\\', "#.. #.. .#. ..# ..#"),
-    (']', ".## ..# ..# ..# .##"),
-    ('^', ".#. #.#"),
-    ('_', "... ... ... ... ###"),
-    ('`', "#.. .#."),
-    ('a', "... .## #.# #.# .##"),
-    ('b', "#.. ##. #.# #.# ##."),
-    ('c', "... .## #.. #.. .##"),
-    ('d', "..# .## #.# #.# .##"),
-    ('e', "... .#. ### #.. .##"),
-    ('f', ".## .#. ### .#. .#."),
-    ('g', "... .## #.# .## ..# ##."),
-    ('h', "#.. ##. #.# #.# #.#"),
-    ('i', ".#. ... .#. .#. .#."),
-    ('j', "..# ... ..# ..# ..# ##."),
-    ('k', "#.. #.# ##. #.# #.#"),
-    ('l', "##. .#. .#. .#. .##"),
-    ('m', "... ##. ### #.# #.#"),
-    ('n', "... ##. #.# #.# #.#"),
-    ('o', "... .#. #.# #.# .#."),
-    ('p', "... ##. #.# #.# ##. #.."),
-    ('q', "... .## #.# #.# .## ..#"),
-    ('r', "... #.# ##. #.. #.."),
-    ('s', "... .## ##. ..# ##."),
-    ('t', ".#. ### .#. .#. .##"),
-    ('u', "... #.# #.# #.# .##"),
-    ('v', "... #.# #.# #.# .#."),
-    ('w', "... #.# #.# ### ###"),
-    ('x', "... #.# .#. #.# #.#"),
-    ('y', "... #.# #.# .## ..# ##."),
-    ('z', "... ### .#. #.. ###"),
-    ('{', ".## .#. ##. .#. .##"),
-    ('|', ".#. .#. .#. .#. .#."),
-    ('}', "##. .#. .## .#. ##."),
-    ('~', "... ##. .##"),
-    ('\u{b7}', "... ... .#."),
-    ('\u{2014}', "... ... ###"),
-    ('\u{2190}', "..# .#. ### .#. ..#"),
+    ('\u{2026}', "... ... ... ... #.#"),
     ('\u{2191}', ".#. #.# .#. .#. .#."),
-    ('\u{2192}', "#.. .#. ### .#. #.."),
-    ('\u{2193}', ".#. .#. .#. #.# .#."),
-    ('\u{2197}', ".## ..# .#. #.."),
-    ('\u{21b3}', "#.. #.. #.# ### ..#"),
-    ('\u{22ee}', ".#. ... .#. ... .#."),
-    ('\u{23ce}', "..# ..# #.# ### #.."),
-    ('\u{25a4}', "### ... ### ... ###"),
-    ('\u{25ae}', "### ### ### ###"),
-    ('\u{25af}', "### #.# #.# ###"),
     ('\u{25b2}', "... .#. ### ###"),
-    ('\u{25b8}', "... #.. ##. #.."),
     ('\u{25bc}', "... ### ### .#."),
-    ('\u{25be}', "... ### .#."),
     ('\u{25cb}', "... ### #.# ###"),
-    ('\u{25cc}', "... .#. #.# .#."),
     ('\u{25cf}', "... ### ### ###"),
-    ('\u{25d0}', "... ### ##. ###"),
-    ('\u{25f7}', "... ### #.# ##. ###"),
     ('\u{2605}', ".#. ### .#. #.#"),
-    ('\u{2615}', ".#.#... ######. #####.# ######. .####.."),
-    ('\u{2669}', "..# ..# ..# ### ##."),
-    ('\u{26a0}', ".#. .#. #.# #.# ###"),
-    ('\u{2713}', "... ... ..# #.# .#."),
     ('\u{2b22}', "... .#. ### ### .#."),
-    ('\u{ff9e}', "#.# #.# #.#"),
-    ('\u{ff9f}', "### #.# ###"),
 ];
 
 /// `c`'s [`HAND_DRAWN`] drawing.
@@ -256,7 +143,7 @@ const RULE_COL: u16 = GLYPH_W / 2;
 /// taken from a font, to fill the whole cell so neighbours join. The idea is
 /// WezTerm's for the same blocks (wezterm/wezterm `docs/config/lua/config/custom_block_glyphs.md`:
 /// "its own idea of what the glyphs … should be"); the geometry is ours.
-fn ruled(c: char) -> Option<Rows> {
+pub(crate) fn ruled(c: char) -> Option<Rows> {
     const FULL: std::ops::Range<u16> = 0..ADVANCE;
     const TALL: std::ops::Range<u16> = 0..LINE_H;
     // Unicode's partial blocks come in eighths of the cell.
@@ -314,6 +201,9 @@ fn ruled(c: char) -> Option<Rows> {
                 ink(col, RULE_ROW..LINE_H, solid);
             }
         }
+        // An em dash, which Fusion Pixel draws only full-width, as a rule
+        // that keeps its cell's gap: it ends a run as often as it joins one.
+        '\u{2014}' => ink(0..GLYPH_W, RULE_ROW..RULE_ROW + 1, solid),
         '\u{2580}' => ink(FULL, 0..half_h, solid),
         // Lower one to eight eighths.
         '\u{2581}'..='\u{2588}' => {
@@ -455,6 +345,7 @@ mod tests {
     }
 
     /// The font draws everything the signs write: no sign shows a tofu box.
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn the_font_draws_every_character_the_signs_write() {
         let missing: Vec<char> = signs()
@@ -494,17 +385,30 @@ mod tests {
         }
     }
 
-    /// Each hand-drawn character draws its own shape: a label never reads
-    /// as another. Three pixels draw an em dash as a hyphen.
+    /// Each hand-drawn symbol draws its own shape: a sign never reads as
+    /// another.
     #[test]
-    fn no_two_characters_share_a_glyph() {
+    fn no_two_symbols_share_a_glyph() {
         let mut seen = std::collections::HashMap::new();
-        for &(c, drawing) in HAND_DRAWN.iter().filter(|&&(c, _)| c != ' ') {
+        for &(c, drawing) in HAND_DRAWN {
             let shape = drawing.trim_end_matches([' ', '.']);
             if let Some(other) = seen.insert(shape, c) {
-                assert_eq!((other, c), ('-', '\u{2014}'), "{c:?} draws as {other:?}");
+                panic!("{c:?} draws as {other:?}");
             }
         }
+    }
+
+    /// A symbol is drawn by hand only where Fusion Pixel draws none in its
+    /// cells: one it does is a drawing nothing paints.
+    #[cfg(feature = "cutaway-assets")]
+    #[test]
+    fn a_symbol_is_drawn_by_hand_only_where_fusion_pixel_lacks_it() {
+        let shadowed: Vec<char> = HAND_DRAWN
+            .iter()
+            .map(|&(c, _)| c)
+            .filter(|&c| fusion(c).is_some() || ruled(c).is_some())
+            .collect();
+        assert_eq!(shadowed, []);
     }
 
     /// Lines join their neighbours: a rule runs through every column of its
@@ -576,25 +480,21 @@ mod tests {
     #[test]
     fn a_glyph_pixel_is_one_art_pixel() {
         let bg = Rgb { r: 0, g: 0, b: 0 };
-        let ink = Rgb { r: 255, g: 1, b: 2 };
+        let fg = Rgb { r: 9, g: 9, b: 9 };
+        let unit = ink(crate::badge::BADGE_MARKER.encode_utf8(&mut [0; 4]));
         for (s, d) in [(4u16, 4u16), (8, 4)] {
             let pen = Pen::new(crate::render_scale::RenderScale::new(s).expect("s"), d)
                 .expect("d divides s");
             let k = s / d;
             let side = 1 + LINE_H;
             let mut buf = RgbBuffer::filled(side * k, side * k, bg);
-            paint(pen, &mut buf, (ArtPx(1), ArtPx(1)), "I", ink);
-            // The I's top bar is art (1..4, top), so buffer (k..4k, top*k..(top+1)*k).
-            let top = 1 + ACCENT_ROWS;
-            let foot = top + CAP_H - 1;
-            let rows = |from: u16, to: u16| from * k..(to + 1) * k;
+            let marker = crate::badge::BADGE_MARKER.to_string();
+            paint(pen, &mut buf, (ArtPx(1), ArtPx(1)), &marker, fg);
             for y in 0..side * k {
                 for x in 0..side * k {
-                    let top_bar = (k..4 * k).contains(&x) && rows(top, top).contains(&y);
-                    let stem = (2 * k..3 * k).contains(&x) && rows(top, foot).contains(&y);
-                    let bottom_bar = (k..4 * k).contains(&x) && rows(foot, foot).contains(&y);
-                    let want = if top_bar || stem || bottom_bar {
-                        ink
+                    let art = (x / k).checked_sub(1).zip((y / k).checked_sub(1));
+                    let want = if art.is_some_and(|p| unit.contains(&p)) {
+                        fg
                     } else {
                         bg
                     };
@@ -611,19 +511,6 @@ mod tests {
         assert!(hand_drawn(crate::badge::BADGE_MARKER).is_some());
     }
 
-    /// A lowercase `w` closes its foot where `H` stands on open legs: the
-    /// board's "wait" read "Hait" with an open one.
-    #[test]
-    fn a_lowercase_w_closes_its_foot_unlike_an_h() {
-        let foot = |c| {
-            hand_drawn(c)
-                .and_then(|g| g.split(' ').nth(4))
-                .expect("five rows")
-        };
-        assert_eq!(foot('w'), "###");
-        assert_ne!(foot('H'), "###");
-    }
-
     /// Where `text` painted from the origin leaves ink, as `(x, y)` art pixels.
     fn ink(text: &str) -> std::collections::BTreeSet<(u16, u16)> {
         let (bg, fg) = (Rgb { r: 0, g: 0, b: 0 }, Rgb { r: 9, g: 9, b: 9 });
@@ -636,7 +523,7 @@ mod tests {
             .collect()
     }
 
-    /// Project names in CJK, Cyrillic and accented Latin draw real glyphs,
+    /// Project names in CJK and accented Latin draw real glyphs,
     /// each as wide as its [`cells`](crate::display::text::cells).
     #[cfg(feature = "cutaway-assets")]
     #[test]
@@ -644,7 +531,6 @@ mod tests {
         for (name, n) in [
             ("日本語", 6),
             ("项目", 4),
-            ("проект", 6),
             ("café-api", 8),
             ("ñandú", 5),
             ("한글", 4),
@@ -662,8 +548,9 @@ mod tests {
         );
         assert_eq!(advance("日I"), columns(3));
         let after = ink("日I");
+        let top = ink("I").iter().map(|&(_, y)| y).min().expect("an I draws");
         assert!(
-            after.contains(&(columns(2).0, ACCENT_ROWS)),
+            after.contains(&(columns(2).0, top)),
             "the I's top bar opens its third cell"
         );
     }
@@ -679,10 +566,12 @@ mod tests {
                 !alone.is_empty() && alone.iter().all(|&(x, _)| x < columns(2).0),
                 "{cluster:?} inks {alone:?}"
             );
-            assert!(
-                ink(&format!("{cluster}I")).contains(&(columns(2).0, ACCENT_ROWS)),
-                "{cluster:?}: the I's top bar opens the third cell"
-            );
+            let after: std::collections::BTreeSet<_> = ink(&format!("{cluster}I"))
+                .into_iter()
+                .filter(|&(x, _)| x >= columns(2).0)
+                .map(|(x, y)| (x - columns(2).0, y))
+                .collect();
+            assert_eq!(after, ink("I"), "{cluster:?}: the I opens the third cell");
         }
     }
 
@@ -706,11 +595,11 @@ mod tests {
         }
     }
 
-    /// The one fallback: a character neither font draws is a solid box,
+    /// A character the face lacks is a solid box,
     /// capital-high and its cells wide, so a run never collapses.
     #[test]
     fn a_character_no_font_draws_is_a_box_its_cells_wide() {
-        // Thai, and CJK Extension A: in neither pinned font's subset.
+        // Thai, and CJK Extension A: not in Fusion Pixel's subset.
         for (c, n) in [('\u{0e01}', 1), ('\u{3400}', 2)] {
             assert_eq!(glyph(c), None, "{c:?}");
             assert_eq!(cells(c.encode_utf8(&mut [0; 4])), n, "{c:?}");
@@ -722,32 +611,33 @@ mod tests {
         }
     }
 
-    /// Without `cutaway-assets` a character only the fallback font draws is
-    /// the no-font box.
+    /// Without `cutaway-assets` a character only Fusion Pixel draws is the
+    /// box.
     #[test]
-    fn the_fallback_font_ships_with_cutaway_assets() {
-        assert_eq!(fallback('é').is_some(), cfg!(feature = "cutaway-assets"));
+    fn fusion_pixel_ships_with_cutaway_assets() {
+        assert_eq!(fusion('e').is_some(), cfg!(feature = "cutaway-assets"));
     }
 
-    /// A fallback glyph stands on the hand-drawn baseline and under its
-    /// capital line, so a mixed name reads as one line.
+    /// A hand-drawn symbol stands on Fusion Pixel's baseline, so a sign
+    /// mixing them reads as one line.
     #[cfg(feature = "cutaway-assets")]
     #[test]
-    fn fallback_glyphs_share_the_hand_drawn_lines() {
+    fn the_hand_drawn_symbols_stand_on_fusion_pixels_baseline() {
         let bottom = |c| glyph(c).and_then(|g| g.iter().rposition(|&row| row != 0));
-        let top = |c| glyph(c).and_then(|g| g.iter().position(|&row| row != 0));
-        assert_eq!(bottom('é'), bottom('e'), "Latin from Fusion Pixel");
-        assert_eq!(top('П'), top('H'), "Cyrillic from 4x6");
-        assert_eq!(bottom('П'), bottom('H'));
-        assert_eq!(bottom('日'), bottom('g'), "CJK reaches the descender row");
+        assert_eq!(bottom('\u{2191}'), bottom('H'));
+        assert_eq!(
+            bottom('\u{65e5}'),
+            bottom('g'),
+            "CJK reaches the descender row"
+        );
     }
 
-    /// The fallback font is well formed, and every glyph in it fits the
-    /// cells its character takes.
+    /// Fusion Pixel's glyphs are well formed, and every one fits the cells its
+    /// character takes.
     #[cfg(feature = "cutaway-assets")]
     #[test]
-    fn every_fallback_glyph_fits_its_characters_cells() {
-        let (points, glyphs) = fallback_font().expect("the header matches LINE_H");
+    fn every_fusion_glyph_fits_its_characters_cells() {
+        let (points, glyphs) = fusion_font().expect("the header matches LINE_H");
         assert_eq!(points.len(), glyphs.len());
         let points: Vec<u16> = points.iter().map(|&b| u16::from_le_bytes(b)).collect();
         assert!(
@@ -767,8 +657,8 @@ mod tests {
     }
 
     /// Whether `rows` fit `n` cells: ink no further right than their advance.
-    /// The gap column may take ink, as misc-fixed's widest letters do: a
-    /// legible `ж` touching its neighbour beats a tofu box.
+    /// The gap column may take ink, as Fusion Pixel's widest glyphs (`–`,
+    /// `ȵ`) do: a legible glyph touching its neighbour beats a tofu box.
     fn fits(rows: &Rows, n: u16) -> bool {
         let ink = rows
             .iter()

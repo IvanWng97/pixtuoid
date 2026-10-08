@@ -320,7 +320,7 @@ impl FloatingApp {
             window: (win_w, win_h),
             footer: self.renderer.footer(
                 &scene,
-                super::offscreen::footer_budget(win_w as usize),
+                super::offscreen::footer_budget(win_w as usize, at.chrome_cell()),
                 audio_audible,
                 volume_flash,
                 self.live
@@ -371,9 +371,10 @@ impl FloatingApp {
         if let Some(office) = self.renderer.buf() {
             surf.fill_upscaled(office, usize::from(at.upscale));
         }
-        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme);
+        let cell = at.chrome_cell();
+        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme, cell);
         if let Some((tip, _)) = &next.tooltip {
-            super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, self.theme);
+            super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, self.theme, cell);
         }
         window.pre_present_notify();
         let presenting = Instant::now();

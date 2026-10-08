@@ -3,6 +3,7 @@
 //! rasterizer to draw.
 
 mod backdrop;
+pub mod cells;
 pub(crate) mod compose;
 pub(crate) mod effects;
 mod hover;

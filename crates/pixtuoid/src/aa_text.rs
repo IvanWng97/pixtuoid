@@ -1,7 +1,6 @@
-//! Shared anti-aliased text rasterizer (Monaspace Neon) for the binary's pixel
-//! surfaces — the floating window's footer and tooltips, and the examples'
-//! cell text and `--proof` panel. The cutaway paints its own pixel font
-//! (`pixtuoid_scene`'s `cutaway::text`).
+//! Anti-aliased text rasterizer (Monaspace Neon) for the examples' cell text
+//! and `--proof` panel. The office's painters draw text in the scene's pixel
+//! faces (`pixtuoid_scene::cutaway::Face`) or the terminal's.
 //!
 //! Kept BINARY-side on purpose: `pixtuoid-scene` also compiles to wasm for the
 //! web hero, so it stays font-dep-free — no font parser, no embedded font, no

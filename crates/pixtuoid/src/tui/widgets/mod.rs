@@ -28,25 +28,52 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Clear};
 
+use pixtuoid_scene::display::cells::{CARD_SHADOW, CellGrid};
 use pixtuoid_scene::theme::Theme;
 
 fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
-/// Display columns a string occupies in the terminal:
-/// [`cells`](pixtuoid_scene::display::text::cells), the one width rule.
-pub(crate) fn display_width(s: &str) -> usize {
-    usize::from(pixtuoid_scene::display::text::cells(s))
-}
-
 #[cfg(test)]
 pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
 
-/// The drop shadow's single uniform darkening factor (0 = black, 1 = unchanged).
-/// Uniform is an OWNER PREFERENCE, not an unfinished gradient. Pinned by
-/// `borderless_panel_casts_a_flat_offset_shadow`.
-const SHADOW_FACTOR: f32 = 0.42;
+/// Write `grid` into `buf` with its top-left at `at`, only where it falls in
+/// `clip`: screen text as terminal cells. The cells a wide cluster covers are
+/// reset, as ratatui's own `Buffer::set_stringn` leaves them.
+pub(crate) fn put_grid(
+    buf: &mut ratatui::buffer::Buffer,
+    grid: &CellGrid,
+    at: (u16, u16),
+    clip: Rect,
+) {
+    let clip = clip.intersection(buf.area);
+    for gy in 0..grid.height() {
+        for gx in 0..grid.width() {
+            let (x, y) = (at.0.saturating_add(gx), at.1.saturating_add(gy));
+            let Some(c) = grid.get(gx, gy) else { continue };
+            if x < clip.x || y < clip.y || x >= clip.right() || y >= clip.bottom() {
+                continue;
+            }
+            let cell = &mut buf[(x, y)];
+            cell.reset();
+            if c.symbol.is_empty() {
+                continue;
+            }
+            cell.set_symbol(&c.symbol);
+            if let Some(fg) = c.fg {
+                cell.fg = to_color(fg);
+            }
+            if let Some(bg) = c.bg {
+                cell.bg = to_color(bg);
+            }
+            if c.bold {
+                cell.modifier.insert(ratatui::style::Modifier::BOLD);
+            }
+        }
+    }
+}
+
 /// How far the shadow silhouette is offset down-and-right of the card, in cells — what
 /// makes it read as a cast box-shadow (the card floats above it) rather than an outline.
 const SHADOW_OFFSET: u16 = 1;
@@ -65,7 +92,7 @@ fn dim_rgb(c: Color, f: f32) -> Color {
     }
 }
 
-/// Darken the cell at `(x, y)` by the uniform `SHADOW_FACTOR`, if it is a real `Rgb` and
+/// Darken the cell at `(x, y)` by the uniform [`CARD_SHADOW`], if it is a real `Rgb` and
 /// inside `bounds`. With `top_half_only`, darkens only the upper half-block sub-pixel
 /// (`fg`) and leaves the lower one lit — a 1px-tall line.
 fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_only: bool) {
@@ -73,14 +100,14 @@ fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_o
         return;
     }
     let cell = &mut f.buffer_mut()[(x, y)];
-    cell.fg = dim_rgb(cell.fg, SHADOW_FACTOR);
+    cell.fg = dim_rgb(cell.fg, CARD_SHADOW);
     if !top_half_only {
-        cell.bg = dim_rgb(cell.bg, SHADOW_FACTOR);
+        cell.bg = dim_rgb(cell.bg, CARD_SHADOW);
     }
 }
 
 /// Cast a flat, single-color drop shadow: the card's own silhouette darkened by one
-/// uniform `SHADOW_FACTOR` and offset `SHADOW_OFFSET` cells down-and-right. The
+/// uniform [`CARD_SHADOW`] and offset `SHADOW_OFFSET` cells down-and-right. The
 /// bottom-most row of the silhouette is rendered TOP-HALF only, so the bottom shadow
 /// reads as a 1px contact line instead of a full 2px cell.
 ///

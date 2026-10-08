@@ -1,10 +1,12 @@
-//! Every character the office can write is one the scene's pixel font draws.
-//! Read from the literals of everything that renders text, parsed so a
-//! comment, a doc, a pattern or a test never counts.
+//! Every character the office can write is one the window's faces draw: the
+//! screen face all of it, the world face what the office's own signs and
+//! names write. Read from the literals of everything that renders text,
+//! parsed so a comment, a doc, a pattern or a test never counts.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use pixtuoid_scene::cutaway::Face;
 use syn::visit::Visit;
 
 /// The source trees whose literals reach the screen, core's decoded labels
@@ -14,6 +16,17 @@ const RENDERERS: [&str; 4] = [
     "../pixtuoid-scene/src",
     "src/tui",
     "src/floating",
+];
+
+/// What world text (the badges, the board, the bubbles, the floor sign) is
+/// written by: core's labels and the scene's signs.
+const WORLD_WRITERS: [&str; 6] = [
+    "../pixtuoid-core/src",
+    "../pixtuoid-scene/src/neon_sign.rs",
+    "../pixtuoid-scene/src/chitchat.rs",
+    "../pixtuoid-scene/src/badge.rs",
+    "../pixtuoid-scene/src/display/text.rs",
+    "../pixtuoid-scene/src/layout",
 ];
 
 /// The characters of a file's string and char literals outside tests,
@@ -151,14 +164,15 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-#[test]
-fn the_pixel_font_draws_every_character_the_office_writes() {
+/// Each source file under [`RENDERERS`] outside its crate's tests, with the
+/// characters its literals write.
+fn written() -> Vec<(PathBuf, Vec<char>)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     for tree in RENDERERS {
         rust_files(&root.join(tree), &mut files);
     }
-    let written: Vec<(PathBuf, Written)> = files
+    let parsed: Vec<(PathBuf, Written)> = files
         .into_iter()
         .map(|file| {
             let source = std::fs::read_to_string(&file).expect("source reads");
@@ -166,42 +180,72 @@ fn the_pixel_font_draws_every_character_the_office_writes() {
             (file, found)
         })
         .collect();
-    let tests: Vec<PathBuf> = written
+    let tests: Vec<PathBuf> = parsed
         .iter()
         .flat_map(|(file, found)| {
             let dir = module_dir(file);
             found.test_mods.iter().map(move |name| dir.join(name))
         })
         .collect();
-    let in_tests = |file: &Path| {
-        tests
-            .iter()
-            .any(|t| file.with_extension("") == *t || file.starts_with(t))
-    };
-    let mut tofu = BTreeMap::<char, Vec<String>>::new();
-    for (file, found) in &written {
-        if in_tests(file) {
-            continue;
-        }
-        for &c in &found.chars {
-            if drawn(c) && !pixtuoid_scene::cutaway::draws(c) {
+    parsed
+        .into_iter()
+        .filter(|(file, _)| {
+            !tests
+                .iter()
+                .any(|t| file.with_extension("") == *t || file.starts_with(t))
+        })
+        .map(|(file, found)| (file, found.chars))
+        .collect()
+}
+
+/// The characters of `files` that `face` draws as tofu, with where each is
+/// written.
+fn tofu<'a>(
+    files: impl IntoIterator<Item = &'a (PathBuf, Vec<char>)>,
+    face: Face,
+) -> BTreeMap<String, Vec<String>> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut tofu = BTreeMap::<String, Vec<String>>::new();
+    for (file, chars) in files {
+        for &c in chars {
+            if drawn(c) && !face.draws(c) {
                 let at = file
                     .strip_prefix(root)
                     .unwrap_or(file)
                     .display()
                     .to_string();
-                let seen = tofu.entry(c).or_default();
+                let seen = tofu
+                    .entry(format!("{c} U+{:04X}", u32::from(c)))
+                    .or_default();
                 if !seen.contains(&at) {
                     seen.push(at);
                 }
             }
         }
     }
+    tofu
+}
+
+#[test]
+fn the_screen_face_draws_every_character_the_office_writes() {
+    let missing = tofu(&written(), Face::Screen);
     assert!(
-        tofu.is_empty(),
-        "the pixel font draws these as tofu: {:#?}",
-        tofu.iter()
-            .map(|(c, at)| (format!("{c} U+{:04X}", u32::from(*c)), at))
-            .collect::<Vec<_>>()
+        missing.is_empty(),
+        "the screen face draws these as tofu: {missing:#?}"
+    );
+}
+
+#[test]
+fn the_world_face_draws_every_character_the_signs_and_names_write() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let writers: Vec<PathBuf> = WORLD_WRITERS.iter().map(|w| root.join(w)).collect();
+    let all = written();
+    let world = all
+        .iter()
+        .filter(|(file, _)| writers.iter().any(|w| file.starts_with(w)));
+    let missing = tofu(world, Face::World);
+    assert!(
+        missing.is_empty(),
+        "the world face draws these as tofu: {missing:#?}"
     );
 }
