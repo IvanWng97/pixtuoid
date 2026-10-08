@@ -74,6 +74,76 @@ pub(crate) fn put_grid(
     }
 }
 
+/// `area`'s cells of `buf` as a [`CellGrid`], [`put_grid`]'s inverse: what a
+/// painter with no terminal draws the same cells from. A colour the terminal
+/// picks (`Reset`, `Indexed`) reads as the painter's own, and a cell a wide
+/// cluster covers, which ratatui resets, as [`CellGrid::put`] writes it: empty,
+/// in the cluster's colours.
+pub fn grid_of(buf: &ratatui::buffer::Buffer, area: Rect) -> CellGrid {
+    use pixtuoid_scene::display::cells::GridCell;
+    let area = area.intersection(buf.area);
+    let mut grid = CellGrid::new(area.width, area.height);
+    for y in 0..area.height {
+        let mut wide: Option<(GridCell, u16)> = None;
+        for x in 0..area.width {
+            let cell = match wide.take() {
+                Some((covering, left)) => {
+                    let covered = GridCell {
+                        symbol: String::new(),
+                        ..covering.clone()
+                    };
+                    if left > 1 {
+                        wide = Some((covering, left - 1));
+                    }
+                    covered
+                }
+                None => {
+                    let at = &buf[(area.x + x, area.y + y)];
+                    let read = GridCell {
+                        symbol: at.symbol().to_owned(),
+                        fg: rgb_of(at.fg),
+                        bg: rgb_of(at.bg),
+                        bold: at.modifier.contains(ratatui::style::Modifier::BOLD),
+                    };
+                    let extra = pixtuoid_scene::display::text::cells(at.symbol()).saturating_sub(1);
+                    if extra > 0 {
+                        wide = Some((read.clone(), extra));
+                    }
+                    read
+                }
+            };
+            grid.set((x, y), cell);
+        }
+    }
+    grid
+}
+
+/// The colour a cell's `c` names, `None` where the terminal picks it.
+fn rgb_of(c: Color) -> Option<Rgb> {
+    let rgb = |r, g, b| Some(Rgb { r, g, b });
+    match c {
+        Color::Rgb(r, g, b) => rgb(r, g, b),
+        // The named colours at xterm's defaults (`XTerm-col.ad`, color0-15).
+        Color::Black => rgb(0, 0, 0),
+        Color::Red => rgb(205, 0, 0),
+        Color::Green => rgb(0, 205, 0),
+        Color::Yellow => rgb(205, 205, 0),
+        Color::Blue => rgb(0, 0, 238),
+        Color::Magenta => rgb(205, 0, 205),
+        Color::Cyan => rgb(0, 205, 205),
+        Color::Gray => rgb(229, 229, 229),
+        Color::DarkGray => rgb(127, 127, 127),
+        Color::LightRed => rgb(255, 0, 0),
+        Color::LightGreen => rgb(0, 255, 0),
+        Color::LightYellow => rgb(255, 255, 0),
+        Color::LightBlue => rgb(92, 92, 255),
+        Color::LightMagenta => rgb(255, 0, 255),
+        Color::LightCyan => rgb(0, 255, 255),
+        Color::White => rgb(255, 255, 255),
+        Color::Reset | Color::Indexed(_) => None,
+    }
+}
+
 /// How far the shadow silhouette is offset down-and-right of the card, in cells — what
 /// makes it read as a cast box-shadow (the card floats above it) rather than an outline.
 const SHADOW_OFFSET: u16 = 1;
