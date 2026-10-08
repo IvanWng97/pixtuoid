@@ -125,6 +125,8 @@ version = "1"
 "з" = "#141419"   # its hands, ticks and centre pin
 # Un-themed (pack::COOLER_WATER).
 "χ" = "#64b4e6"   # the water cooler's bottle
+# An icon's ink, which the text's colour replaces (pack::ICON_INK_KEY).
+"ι" = "#f0f0f0"
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
 # (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
@@ -138,6 +140,7 @@ version = "1"
 "v" = { of = "B", level = -2 }   # shirt, shaded
 "W" = { of = "B", level = 2 }    # shirt, lit shoulder
 "U" = { of = "B", level = -5 }   # shirt, deepest shade: a sleeve's crease
+"ϊ" = { of = "ι", level = 4 }    # icon ink, lit: a lamp's glint
 "p" = { of = "P", level = -2 }   # pants, shaded
 "(" = { of = "P", level = 2 }    # pants, lit thigh
 "Ъ" = { of = "Б", level = 2 }    # vending machine body, lit top
@@ -683,6 +686,95 @@ frame_ms = 600
 [animations."holding_coffee@4x"]
 frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
+
+# The symbols text shows as art, by the name `display::Icon::art` gives:
+# `world` is one cell of the office's own text, `screen` of screen text, a
+# cell wide per cell its terminal glyph takes.
+[icons.alert]
+world  = "icon_lamp.sprite"
+screen = "icon_alert_screen.sprite"
+
+[icons.active]
+world  = "icon_lamp.sprite"
+screen = "icon_active_screen.sprite"
+
+[icons.idle]
+world  = "icon_lamp.sprite"
+screen = "icon_idle_screen.sprite"
+
+[icons.star]
+world  = "icon_star.sprite"
+screen = "icon_star_screen.sprite"
+
+[icons.gateway]
+world  = "icon_gateway.sprite"
+screen = "icon_gateway_screen.sprite"
+
+[icons.floor_up]
+world = "icon_floor_up.sprite"
+
+[icons.floor_down]
+world = "icon_floor_down.sprite"
+
+[icons.waiting]
+screen = "icon_waiting_screen.sprite"
+
+[icons.exiting]
+screen = "icon_exiting_screen.sprite"
+
+[icons.arrow_left]
+screen = "icon_arrow_left_screen.sprite"
+
+[icons.arrow_up]
+screen = "icon_arrow_up_screen.sprite"
+
+[icons.arrow_right]
+screen = "icon_arrow_right_screen.sprite"
+
+[icons.arrow_down]
+screen = "icon_arrow_down_screen.sprite"
+
+[icons.link]
+screen = "icon_link_screen.sprite"
+
+[icons.child]
+screen = "icon_child_screen.sprite"
+
+[icons.more]
+screen = "icon_more_screen.sprite"
+
+[icons.enter]
+screen = "icon_enter_screen.sprite"
+
+[icons.folder]
+screen = "icon_folder_screen.sprite"
+
+[icons.meter_on]
+screen = "icon_meter_on_screen.sprite"
+
+[icons.meter_off]
+screen = "icon_meter_off_screen.sprite"
+
+[icons.pointer]
+screen = "icon_pointer_screen.sprite"
+
+[icons.fold]
+screen = "icon_fold_screen.sprite"
+
+[icons.clock]
+screen = "icon_clock_screen.sprite"
+
+[icons.coffee]
+screen = "icon_coffee_screen.sprite"
+
+[icons.sound]
+screen = "icon_sound_screen.sprite"
+
+[icons.warning]
+screen = "icon_warning_screen.sprite"
+
+[icons.check]
+screen = "icon_check_screen.sprite"
 
 # Hairstyles and the line round every marked @Nx character:
 # crates/pixtuoid-scene/AGENTS.md#the-sprite-format. The layers are scripts/gen-art.py's

@@ -9,6 +9,7 @@ use pixtuoid_core::{AgentId, AgentSlot};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::display::Icon;
 use crate::display::pen::ArtPx;
 use crate::layout::Point;
 use crate::theme::Theme;
@@ -19,8 +20,7 @@ pub(crate) const GLYPH_W: u16 = 3;
 pub(crate) const ADVANCE: u16 = GLYPH_W + 1;
 /// The rows above the capitals, which only accents and CJK ink.
 pub(crate) const ACCENT_ROWS: u16 = 2;
-/// A hand-drawn symbol's capital height in art pixels, on Fusion Pixel's
-/// baseline.
+/// Fusion Pixel 8px's capital height in art pixels.
 pub(crate) const CAP_H: u16 = 5;
 /// A line's height in art pixels: the accent rows, the capitals, and a row for
 /// descenders, Fusion Pixel 8px's own box. Pinned to `world.bin`'s header.
@@ -99,19 +99,6 @@ pub fn cells(text: &str) -> u16 {
     clusters(text).fold(0, |sum, (_, n)| sum.saturating_add(n))
 }
 
-/// The longest start of `text` that fits `budget` cells, its clusters whole.
-pub(crate) fn take(text: &str, budget: u16) -> &str {
-    let mut used = 0u16;
-    let end = text
-        .grapheme_indices(true)
-        .find(|&(_, cluster)| {
-            used = used.saturating_add(cluster_cells(cluster));
-            used > budget
-        })
-        .map_or(text.len(), |(i, _)| i);
-    &text[..end]
-}
-
 /// [`columns`] past all of `text`: where the run after it starts.
 pub(crate) fn advance(text: &str) -> ArtPx {
     columns(cells(text))
@@ -136,6 +123,8 @@ pub struct TextRun {
     pub spans: Vec<TextSpan>,
     /// The fill behind it, if any.
     pub plate: Option<Rgb>,
+    /// A bar down its plate's left edge, in this ink.
+    pub strip: Option<Rgb>,
     /// What it labels.
     pub role: TextRole,
 }
@@ -143,16 +132,50 @@ pub struct TextRun {
 /// A stretch of a [`TextRun`] in one ink.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextSpan {
-    /// What it reads.
-    pub text: String,
+    /// What it shows.
+    pub content: Content,
     /// Its colour.
     pub ink: Rgb,
 }
 
-/// An agent's name badge: [`BADGE_MARKER`](crate::badge::BADGE_MARKER) in
-/// the source's hue, then its name in its tone, on the badge plate, centred
-/// `LABEL_GAP` rows over `at`. Its parts are fields, so a painter reads them
-/// instead of a run's spans by position.
+impl TextSpan {
+    /// `text` in `ink`.
+    pub fn new(text: impl Into<String>, ink: Rgb) -> Self {
+        Self {
+            content: Content::Text(text.into()),
+            ink,
+        }
+    }
+
+    /// It as a terminal writes it: [`Content::text`].
+    pub fn text(&self) -> &str {
+        self.content.text()
+    }
+}
+
+/// What a stretch of text shows: characters, or an icon, which takes the
+/// cells its terminal glyph does.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Content {
+    Text(String),
+    Icon(super::Icon),
+}
+
+impl Content {
+    /// It as a terminal writes it: an icon as its glyph.
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Text(text) => text,
+            Self::Icon(icon) => icon.terminal(),
+        }
+    }
+}
+
+/// An agent's name badge: its name in its tone on the badge plate, marked in
+/// the source's hue, centred `LABEL_GAP` rows over `at`. A terminal marks it
+/// with a [`BADGE_MARKER`](crate::badge::BADGE_MARKER) before the name, a
+/// pixel painter with a bar down the plate's left edge. Its parts are fields,
+/// so a painter reads them instead of a run's spans by position.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Badge {
     /// Whose badge it is.
@@ -181,27 +204,20 @@ impl Badge {
             agent: agent.agent_id,
             at: anchor,
             marker: ink.marker,
-            name: TextSpan {
-                text,
-                ink: ink.name,
-            },
+            name: TextSpan::new(text, ink.name),
             plate: crate::badge::badge_plate(theme),
         }
     }
 
-    /// It as a run, for a painter that draws every run alike.
+    /// It as a pixel painter's run: the name on the plate, the marker its
+    /// [`strip`](TextRun::strip).
     pub(crate) fn run(&self) -> TextRun {
         TextRun {
             at: self.at,
             align: Align::Over,
-            spans: vec![
-                TextSpan {
-                    text: crate::badge::BADGE_MARKER.to_string(),
-                    ink: self.marker,
-                },
-                self.name.clone(),
-            ],
+            spans: vec![self.name.clone()],
             plate: Some(self.plate),
+            strip: Some(self.marker),
             role: TextRole::Badge(self.agent),
         }
     }
@@ -244,20 +260,28 @@ pub enum TextRole {
 }
 
 impl TextRun {
-    /// The floor indicator naming floor `floor` (one-based) over the elevator
-    /// at `door`: centred on the door, in the cell over it, on the badge plate.
-    pub(crate) fn indicator(door: Point, floor: usize, theme: &Theme) -> Self {
+    /// The floor indicator naming `floor` over the elevator at `door`:
+    /// centred on the door, in the cell over it, on the badge plate, an arrow
+    /// with no floor its way dim.
+    pub(crate) fn indicator(door: Point, floor: crate::floor::FloorMeta, theme: &Theme) -> Self {
         Self {
             at: Point {
                 x: door.x + crate::layout::ELEVATOR_W / 2,
                 y: crate::layout::floor_indicator_rows(door.y).start,
             },
             align: Align::Centre,
-            spans: vec![TextSpan {
-                text: crate::layout::floor_indicator_text(floor),
-                ink: theme.ui.neon_brand,
-            }],
+            spans: crate::layout::floor_indicator(floor)
+                .into_iter()
+                .map(|content| TextSpan {
+                    ink: match content {
+                        Content::Icon(Icon::NoUp | Icon::NoDown) => theme.ui.tooltip_dim,
+                        _ => theme.ui.neon_brand,
+                    },
+                    content,
+                })
+                .collect(),
             plate: Some(crate::badge::badge_plate(theme)),
+            strip: None,
             role: TextRole::Indicator,
         }
     }
@@ -275,18 +299,16 @@ impl TextRun {
                 y: badge_at.y.saturating_sub(BUBBLE_LIFT),
             },
             align: Align::Over,
-            spans: vec![TextSpan {
-                text: bubble.text.into(),
-                ink: theme.ui.tooltip_text,
-            }],
+            spans: vec![TextSpan::new(bubble.text, theme.ui.tooltip_text)],
             plate: Some(theme.ui.tooltip_bg),
+            strip: None,
             role: TextRole::Bubble(bubble.speaker),
         }
     }
 
     /// Its spans' text, end to end.
     pub(crate) fn text(&self) -> String {
-        self.spans.iter().map(|s| s.text.as_str()).collect()
+        self.spans.iter().map(TextSpan::text).collect()
     }
 
     /// The star's hit area: the logical cells its line covers on the
@@ -330,15 +352,28 @@ fn place(at: Point, align: Align, w: u16) -> crate::layout::Bounds {
 mod tests {
     use super::*;
 
-    /// A budget never splits a grapheme cluster: a ZWJ sequence is kept whole
-    /// or dropped whole.
+    /// The indicator's arrow is hollow and dim where no floor is its way:
+    /// both lit between floors, the down arrow out on the ground floor, the up
+    /// one on the top.
     #[test]
-    fn a_take_keeps_clusters_whole() {
-        let coder = "\u{1f469}\u{200d}\u{1f4bb}";
-        let text = format!("a{coder}b");
-        assert_eq!(take(&text, 3), format!("a{coder}"));
-        assert_eq!(take(&text, 2), "a");
-        assert_eq!(take(&text, u16::MAX), text);
+    fn an_arrow_with_no_floor_its_way_is_dim() {
+        let theme = &crate::theme::NORMAL;
+        let arrows = |floor, floors| -> Vec<(Icon, Rgb)> {
+            let meta = crate::floor::FloorMeta::for_floor(floor, floors);
+            TextRun::indicator(Point { x: 0, y: 0 }, meta, theme)
+                .spans
+                .into_iter()
+                .filter_map(|s| match s.content {
+                    Content::Icon(icon) => Some((icon, s.ink)),
+                    Content::Text(_) => None,
+                })
+                .collect()
+        };
+        let (lit, dim) = (theme.ui.neon_brand, theme.ui.tooltip_dim);
+        assert_eq!(arrows(1, 3), [(Icon::Up, lit), (Icon::Down, lit)]);
+        assert_eq!(arrows(0, 3), [(Icon::Up, lit), (Icon::NoDown, dim)]);
+        assert_eq!(arrows(2, 3), [(Icon::NoUp, dim), (Icon::Down, lit)]);
+        assert_eq!(arrows(0, 1), [(Icon::NoUp, dim), (Icon::NoDown, dim)]);
     }
 
     #[test]

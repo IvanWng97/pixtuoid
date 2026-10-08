@@ -75,6 +75,8 @@ pub(crate) fn floor_capacity_scaled(
 pub struct FloorMeta {
     /// Zero-based floor index.
     pub floor_idx: usize,
+    /// How many floors the building has.
+    pub floors: usize,
     /// Height fraction: 0.0 (ground) → 1.0 (top floor); drives skyline depth in the windows.
     pub altitude: f32,
     /// This floor's layout seed (`floor_seed(floor_idx)`).
@@ -97,6 +99,7 @@ impl FloorMeta {
         // drives only skyline depth in the windows, never a lighting offset.
         Self {
             floor_idx,
+            floors: total_floors,
             altitude,
             floor_seed: floor_seed(floor_idx),
             weather: crate::sky::WeatherPolicy::Clock,

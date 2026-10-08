@@ -10,8 +10,9 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, BufferPx, Pen};
 use crate::display::{
-    Align, Art, Backdrop, Covering, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind,
-    Recolours, Screen, Showing, StoodProp, TextRun, compose, desk_span, face_rows, run_rect,
+    Align, Art, Backdrop, Content, Covering, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD,
+    PieceKind, Recolours, Screen, Showing, StoodProp, TextRun, compose, desk_span, face_rows,
+    run_rect,
 };
 use crate::dither::Dithered;
 use crate::layout::{Bounds, Point};
@@ -69,12 +70,23 @@ impl Screen {
     }
 }
 
-/// Paint `run`: its plate, if it has one, then its spans end to end from its
-/// line's start, inside the plate's pad where it sits on one.
-fn paint_run(run: &TextRun, pen: Pen, buf: &mut RgbBuffer) {
+/// Paint `run`: its plate, if it has one, and the strip down the plate's
+/// left edge, then its spans end to end from its line's start, inside the
+/// plate's pad where it sits on one, each icon in `pack`'s art.
+fn paint_run(run: &TextRun, (pack, pen): (&Pack, Pen), buf: &mut RgbBuffer) {
     let rect = run_rect(run, pen);
     if let Some(ground) = run.plate {
         pen.fill(buf, rect, ground);
+    }
+    if let Some(strip) = run.strip {
+        pen.fill(
+            buf,
+            ArtRect {
+                w: ArtPx(PLATE_PAD),
+                ..rect
+            },
+            strip,
+        );
     }
     let inset = match run.align {
         Align::Over | Align::Centre => PLATE_PAD,
@@ -82,8 +94,14 @@ fn paint_run(run: &TextRun, pen: Pen, buf: &mut RgbBuffer) {
     };
     let mut x = rect.x.0 + inset;
     for span in &run.spans {
-        crate::cutaway::text::paint(pen, buf, (ArtPx(x), rect.y), &span.text, span.ink);
-        x += crate::display::text::advance(&span.text).0;
+        let at = (ArtPx(x), rect.y);
+        match &span.content {
+            Content::Text(text) => crate::cutaway::text::paint(pen, buf, at, text, span.ink),
+            Content::Icon(icon) => {
+                crate::cutaway::text::paint_icon(pen, buf, at, (pack, *icon), span.ink)
+            }
+        }
+        x += crate::display::text::advance(span.text()).0;
     }
 }
 
@@ -639,7 +657,7 @@ fn paint_piece(
             paint_window(view, frame, Pen::for_pack(scale, pack), buf);
         }
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
-        PieceKind::Text { ref run } => paint_run(run, Pen::for_pack(scale, pack), buf),
+        PieceKind::Text { ref run } => paint_run(run, (pack, Pen::for_pack(scale, pack)), buf),
     }
 }
 
@@ -1894,21 +1912,13 @@ mod tests {
             let run = TextRun {
                 at: Point { x: 8, y: 0 },
                 align,
-                spans: vec![
-                    TextSpan {
-                        text: first.into(),
-                        ink: a,
-                    },
-                    TextSpan {
-                        text: second.into(),
-                        ink: b,
-                    },
-                ],
+                spans: vec![TextSpan::new(first, a), TextSpan::new(second, b)],
                 plate,
+                strip: None,
                 role,
             };
             let mut buf = RgbBuffer::filled(96, 16, Rgb { r: 0, g: 0, b: 0 });
-            paint_run(&run, pen, &mut buf);
+            paint_run(&run, (&test_default_pack(), pen), &mut buf);
             // An `I`'s top bar spans its whole cell, so its first ink is its span's start.
             let left =
                 |ink| (0..buf.width()).find(|&x| (0..buf.height()).any(|y| buf.get(x, y) == ink));

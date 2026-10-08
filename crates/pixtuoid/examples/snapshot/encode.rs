@@ -287,9 +287,8 @@ fn rasterize_cells<I: image::GenericImage>(
     paint_grid(
         &mut ImageCanvas(img),
         &pixtuoid::dev::grid_of(term_buf, area),
-        (0, 0),
-        cell,
-        Face::Screen,
+        ((0, 0), cell),
+        (Face::Screen, crate::icons()),
         GridInk {
             text: TERMINAL_FG,
             halo: None,

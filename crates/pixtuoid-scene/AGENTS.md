@@ -67,6 +67,14 @@ bottom-left. `desk_front` is drawn over a `desk`'s props on the desk's own
 canvas: whatever of the desk stands between the viewer and its sitter's props,
 its monitor.
 
+A symbol in text is an icon, `[icons.<name>]` under the name
+`display::Icon::art` gives it, drawn in one frame per place text is: `world`
+in a cell of the office's own text (a glyph's width, a line's height), and
+`screen` in a screen cell less its gap. Either is as many cells wide as its
+terminal glyph takes. Its pixels in key `ι` (`pack::ICON_INK_KEY`), and that
+key's ramps, take the text's ink; every other key keeps the pack's colour.
+The icon tests pin both sizes and that every icon draws in the ink.
+
 A walk (a person's `walking`, `walking_back` and `walking_coffee`, a pet's
 `cat_walk` and `dog_walk`, the gateway mascot's `lobster_walk`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full

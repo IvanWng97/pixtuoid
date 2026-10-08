@@ -366,7 +366,7 @@ pub fn render<'r>(
             classic.signs.extend(board.runs(theme));
             classic.signs.push(crate::display::TextRun::indicator(
                 stepped.layout.door,
-                world.floor.floor_idx + 1,
+                world.floor,
                 theme,
             ));
             (&classic.buf, Dirty::All, flash)

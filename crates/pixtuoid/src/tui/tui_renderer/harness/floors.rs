@@ -565,7 +565,7 @@ fn every_painter_shows_the_one_board_of_a_floor() {
     assert_eq!(tui(&one_floor, 0), floating, "the floating window's place");
 
     let upper = tui(&with_gateway(two_floor_scene()), 1);
-    let context: Vec<_> = upper.context.iter().map(|s| s.text.trim()).collect();
+    let context: Vec<_> = upper.context.iter().map(|s| s.text().trim()).collect();
     assert!(context.contains(&"F2/2"), "{context:?}");
     assert!(
         context.iter().any(|t| t.contains("gw")),
