@@ -45,21 +45,14 @@ pub(crate) fn star_area(signs: &[TextRun], map: CellMap) -> Option<Bounds> {
         .find_map(|(run, at)| (run.role == TextRole::Star).then(|| map.area_of(at)))
 }
 
-/// Each of `signs` that is set, with its cells on `map`. A sign yields to one
-/// before it on its line: on a grid whose cells are wider than the classic's,
-/// the star would write over the brand.
+/// Each of `signs` that is set ([`TextRun::set_first`]), with its cells on
+/// `map`: a sign meets another in a cell of its row.
 fn set_signs(signs: &[TextRun], map: CellMap) -> Vec<(&TextRun, CellRect)> {
-    let mut set: Vec<(&TextRun, CellRect)> = Vec::new();
-    for run in signs {
-        let at = run.line_at(line_width(&run_line(run)), map);
-        if !set
-            .iter()
-            .any(|(_, s)| s.y == at.y && s.x < at.x + at.w && at.x < s.x + s.w)
-        {
-            set.push((run, at));
-        }
-    }
-    set
+    TextRun::set_first(
+        signs,
+        |run| run.line_at(line_width(&run_line(run)), map),
+        |s, at| s.y == at.y && s.x < at.x + at.w && at.x < s.x + s.w,
+    )
 }
 
 /// Paint `badges` as terminal text on their plates, each a ● in its marker's

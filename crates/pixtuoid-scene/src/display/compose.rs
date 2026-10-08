@@ -494,23 +494,20 @@ pub(crate) fn ground_shadow(
 /// The room's signs, `runs`, as the pixel font sets them.
 fn signs(office: Office<'_>, runs: &[TextRun]) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let mut drawn: Vec<(u16, ArtRect)> = Vec::new();
-    runs.iter()
-        .filter_map(|run| {
-            let rect = run_rect(run, pen);
-            // A run yields to one before it on its line: on the base art's grid
-            // the pixel font is too wide for the sign, and the star would write
-            // over the brand (`no_run_overprints_another_on_its_line`).
-            if drawn.iter().any(|&(y, r)| y == run.at.y && meets(r, rect)) {
-                return None;
-            }
-            drawn.push((run.at.y, rect));
-            Some((
-                topmost_span(rect, pen),
-                PieceKind::Text { run: run.clone() },
-            ))
-        })
-        .collect()
+    // On the base art's grid the pixel font is too wide for the sign.
+    TextRun::set_first(
+        runs,
+        |run| (run.at.y, run_rect(run, pen)),
+        |&(y, r), &(line, rect)| y == line && meets(r, rect),
+    )
+    .into_iter()
+    .map(|(run, (_, rect))| {
+        (
+            topmost_span(rect, pen),
+            PieceKind::Text { run: run.clone() },
+        )
+    })
+    .collect()
 }
 
 /// The logical cells `run`'s line takes on `pen`'s grid ([`run_rect`]): where

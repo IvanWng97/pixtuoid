@@ -291,6 +291,26 @@ pub enum TextRole {
 }
 
 impl TextRun {
+    /// Each of `runs` that is set, with where `place` sets it: a run yields
+    /// to one before it that it `meets` there, since on a grid wider than the
+    /// one the runs were laid out on the star would write over the brand
+    /// (`no_run_overprints_another_on_its_line`). Each painter's grid brings
+    /// its own `place` and `meets`.
+    pub fn set_first<P>(
+        runs: &[TextRun],
+        place: impl Fn(&TextRun) -> P,
+        meets: impl Fn(&P, &P) -> bool,
+    ) -> Vec<(&TextRun, P)> {
+        let mut set: Vec<(&TextRun, P)> = Vec::new();
+        for run in runs {
+            let at = place(run);
+            if !set.iter().any(|(_, s)| meets(s, &at)) {
+                set.push((run, at));
+            }
+        }
+        set
+    }
+
     /// The floor indicator naming `floor` over the elevator at `door`:
     /// centred on the door, in the cell over it, on the badge plate, an arrow
     /// with no floor its way dim.
