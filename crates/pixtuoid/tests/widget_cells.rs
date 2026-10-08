@@ -5,7 +5,7 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use common::fixture_scene;
-use pixtuoid::tui::renderer::draw_scene;
+use pixtuoid::dev::draw_scene;
 use pixtuoid_scene::pack::load_bundled_pack;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;

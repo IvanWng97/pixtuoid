@@ -12,7 +12,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::tui::renderer::{DrawCtx, DrawOut, draw_scene};
+use pixtuoid::dev::{DrawCtx, DrawOut, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
@@ -556,7 +556,7 @@ fn main() -> Result<()> {
                 .collect()
         })
         .unwrap_or_default();
-    let warning_text = pixtuoid::doctor::footer_warning(&deaths, &drifted);
+    let warning_text = pixtuoid::dev::footer_warning(&deaths, &drifted);
     let mut office = pixtuoid_scene::floor::PerOffice::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
@@ -564,8 +564,8 @@ fn main() -> Result<()> {
         floor.ctx.vacancy_dim.snap_to_empty();
     }
     let (dash_rows, dash_selected) = if args.dashboard {
-        let folds = pixtuoid::tui::dashboard::DashboardFolds::default();
-        let rows = pixtuoid::tui::dashboard::build_dashboard_rows(&scene, &folds);
+        let folds = pixtuoid::dev::DashboardFolds::default();
+        let rows = pixtuoid::dev::build_dashboard_rows(&scene, &folds);
         let sel = rows.first().map(|r| r.agent_id);
         (rows, sel)
     } else {
@@ -575,9 +575,7 @@ fn main() -> Result<()> {
     // Deterministic — no FS probes — so the demo image is reproducible across
     // machines.
     let (connection_rows, connection_live, connection_socket_line) = if args.connection {
-        use pixtuoid::tui::connection::{
-            ConnState, ConnectionRow, DaemonRollup, LiveFacet, LiveInfo,
-        };
+        use pixtuoid::dev::{ConnState, ConnectionRow, DaemonRollup, LiveFacet, LiveInfo};
         use std::path::PathBuf;
         use std::time::Duration;
         let mk = |source_id, label_prefix, display_name, state, cfg: Option<&str>| ConnectionRow {
@@ -676,14 +674,14 @@ fn main() -> Result<()> {
         (Vec::new(), Vec::new(), String::new())
     };
     let onboarding_frame = if args.onboarding {
-        use pixtuoid::tui::welcome::WelcomeRow;
+        use pixtuoid::dev::WelcomeRow;
         let mk = |source_id, label_prefix, display_name: &str, checked| WelcomeRow {
             source_id,
             label_prefix,
             display_name: display_name.to_string(),
             checked,
         };
-        pixtuoid::tui::welcome::OnboardingFrame {
+        pixtuoid::dev::OnboardingFrame {
             open: true,
             rows: vec![
                 mk("claude-code", "cc", "Claude Code", true),
@@ -692,18 +690,18 @@ fn main() -> Result<()> {
             ],
             selected: 0,
             elapsed_ms: 100_000,
-            dim: pixtuoid::tui::welcome::dim_opening(100_000),
+            dim: pixtuoid::dev::dim_opening(100_000),
         }
     } else {
-        pixtuoid::tui::welcome::OnboardingFrame::default()
+        pixtuoid::dev::OnboardingFrame::default()
     };
-    let dashboard_frame = pixtuoid::tui::dashboard::DashboardFrame {
+    let dashboard_frame = pixtuoid::dev::DashboardFrame {
         open: args.dashboard,
         rows: dash_rows,
         selected: dash_selected,
         scroll: 0,
     };
-    let connection_frame = pixtuoid::tui::connection::ConnectionFrame {
+    let connection_frame = pixtuoid::dev::ConnectionFrame {
         open: args.connection,
         rows: connection_rows,
         live: connection_live,
@@ -719,13 +717,7 @@ fn main() -> Result<()> {
         }),
         debug_walkable: args.debug_walkable,
         theme_picker: args.theme_picker,
-        footer: pixtuoid::tui::widgets::footer_context(
-            &scene,
-            None,
-            false,
-            None,
-            warning_text.as_deref(),
-        ),
+        footer: pixtuoid::dev::footer_context(&scene, None, false, None, warning_text.as_deref()),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
         dashboard: &dashboard_frame,

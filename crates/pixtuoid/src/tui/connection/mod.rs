@@ -17,9 +17,7 @@ use crate::install::{InstallOutcome, InstallReport, UninstallOutcome, UninstallR
 
 // Re-exported so this module, the painter and the harness keep their
 // `connection::…` paths; the model itself lives in `crate::sources`.
-pub use crate::sources::{
-    ConnState, ConnectionRow, RowFacts, RowInput, build_rows, build_rows_from,
-};
+pub(crate) use crate::sources::{ConnState, ConnectionRow, build_rows};
 
 /// WHAT is live for one row — a TYPED split, because the two source classes have
 /// nothing to count in common. An `Agent` source's liveness is its `AgentSlot`s; a
@@ -90,7 +88,7 @@ pub struct ConnectionFrame {
 /// Only `open` flips on close, so the cached rows + selection survive
 /// close/reopen.
 #[derive(Debug, Default)]
-pub struct ConnectionUi {
+pub(crate) struct ConnectionUi {
     pub open: bool,
     /// Index into the registry-stable `rows` — a plain `usize` is sound precisely
     /// because the row set doesn't churn frame-to-frame (unlike the dashboard,
@@ -106,7 +104,7 @@ pub struct ConnectionUi {
 
 /// `now` is the frame's clock (not `SystemTime::now()`) so the age is
 /// deterministic and honors the paused-clock path.
-pub fn live_for(
+pub(crate) fn live_for(
     now: SystemTime,
     source_id: &str,
     scene: &SceneState,
@@ -151,7 +149,7 @@ pub fn live_for(
     }
 }
 
-pub fn live_view(
+pub(crate) fn live_view(
     now: SystemTime,
     rows: &[ConnectionRow],
     scene: &SceneState,
@@ -162,21 +160,21 @@ pub fn live_view(
         .collect()
 }
 
-pub fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
+pub(crate) fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
     if rows.is_empty() {
         return 0;
     }
     (sel as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize
 }
 
-pub fn no_action_hint(row: &ConnectionRow) -> String {
+pub(crate) fn no_action_hint(row: &ConnectionRow) -> String {
     match row.state {
         ConnState::NoCli { .. } => format!("{} not detected on this machine", row.display_name),
         _ => format!("nothing to do for {}", row.display_name),
     }
 }
 
-pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
+pub(crate) fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
     let mut s = match r.outcome {
         InstallOutcome::AlreadyUpToDate | InstallOutcome::Installed => {
             format!("\u{2713} {display_name} connected")
@@ -195,7 +193,7 @@ pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
     s
 }
 
-pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> String {
+pub(crate) fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> String {
     let mut s = match r.outcome {
         UninstallOutcome::NothingToRemove | UninstallOutcome::Removed => {
             format!("\u{2713} {display_name} disconnected")
@@ -212,7 +210,7 @@ pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> Stri
 /// failed disconnect: the flag IS persisted false and only the hook removal
 /// didn't land, so it words the residual rather than the operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailedOp {
+pub(crate) enum FailedOp {
     /// A connect that left the source disconnected (the core rolled the flag back).
     Connect,
     /// A disconnect that wrote nothing (the persist itself aborted).
@@ -227,7 +225,7 @@ pub enum FailedOp {
 /// toggle and the onboarding apply's surfacing, which routes its failures onto
 /// this very panel — so a retry on the row reads the sentence the failure first
 /// gave.
-pub fn format_failure(op: FailedOp, display_name: &str, reason: &str) -> String {
+pub(crate) fn format_failure(op: FailedOp, display_name: &str, reason: &str) -> String {
     let what = match op {
         FailedOp::Connect => "connect failed",
         FailedOp::Disconnect => "disconnect failed",

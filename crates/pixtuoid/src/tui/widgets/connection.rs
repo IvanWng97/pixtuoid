@@ -252,7 +252,8 @@ mod tests {
         )
     }
     use super::*;
-    use crate::tui::connection::{DaemonRollup, RowFacts, RowInput};
+    use crate::sources::{RowFacts, RowInput};
+    use crate::tui::connection::DaemonRollup;
     use pixtuoid_core::state::DaemonState;
     use pixtuoid_scene::theme::NORMAL;
 
@@ -499,7 +500,7 @@ mod tests {
 
     #[test]
     fn every_registry_source_has_a_non_fallback_badge_color() {
-        use crate::tui::connection::build_rows_from;
+        use crate::sources::build_rows_from;
         use pixtuoid_core::source::registry::REGISTRY;
         let fallback = to_color(NORMAL.ui.label_idle);
         // Build through the real builder so the prefixes come from the registry.

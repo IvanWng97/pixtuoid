@@ -62,7 +62,7 @@ impl SchemaParse {
 /// plus the shim-on-disk check, and any SOFT `notes` — environment-dependent,
 /// never a "broken" verdict on their own.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct SchemaVerifyResult {
+pub(crate) struct SchemaVerifyResult {
     pub issues: Vec<String>,
     /// Shown by `doctor`, never the boot warning.
     pub notes: Vec<String>,
@@ -70,7 +70,7 @@ pub struct SchemaVerifyResult {
 
 impl SchemaVerifyResult {
     /// Sound iff there are no HARD issues (soft notes don't count).
-    pub fn is_sound(&self) -> bool {
+    pub(crate) fn is_sound(&self) -> bool {
         self.issues.is_empty()
     }
 }

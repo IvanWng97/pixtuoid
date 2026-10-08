@@ -6,34 +6,59 @@
 // output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
-pub mod aa_text;
+pub(crate) mod aa_text;
 mod app;
 pub use app::run;
 pub(crate) mod audio;
 pub(crate) mod cli;
-pub mod config;
-pub mod doctor;
+pub(crate) mod config;
+pub(crate) mod doctor;
 
 #[cfg(test)]
 mod drift_surface;
-pub mod floating;
+pub(crate) mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;
 pub(crate) use graphics::GraphicsMode;
-pub mod init_pack;
+pub(crate) mod init_pack;
 pub(crate) mod install;
 pub(crate) mod jank;
 #[cfg(feature = "graphics")]
-#[doc(hidden)]
-pub mod pacing;
+pub(crate) mod pacing;
 pub(crate) mod run_log;
 pub(crate) mod runtime;
 pub(crate) mod setup;
 pub(crate) mod sources;
 pub(crate) mod term;
-pub mod tui;
-pub mod validate;
+pub(crate) mod tui;
+pub(crate) mod validate;
 pub(crate) mod version;
+
+/// What the examples, the integration tests and the benches reach: each is a
+/// separate crate, and this is the only path they have into the lib, so a
+/// `pub` item anywhere else that none of them names is one `unreachable_pub`
+/// reports. Not an API: it moves with them.
+#[doc(hidden)]
+pub mod dev {
+    pub use crate::aa_text::{blend_channel, draw_text_at, has_glyph, line_height, text_width};
+    pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
+    pub use crate::doctor::footer_warning;
+    pub use crate::floating::offscreen::{
+        OfficeRenderer, Pressing, WindowFrame, XrgbSurface, footer_budget,
+        paint_footer_into_surface, paint_tooltip_into_surface, window_geometry,
+    };
+    pub use crate::init_pack::init_pack;
+    #[cfg(feature = "graphics")]
+    pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
+    pub use crate::sources::{ConnState, ConnectionRow};
+    pub use crate::tui::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
+    pub use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
+    pub use crate::tui::renderer::{DrawCtx, DrawOut, PetState, draw_scene, scene_buf_size};
+    pub use crate::tui::tui_renderer::TuiRenderer;
+    pub use crate::tui::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
+    pub use crate::tui::widgets::footer_context;
+    pub use crate::validate::validate_pack;
+}
 
 /// Strip control characters (Cc) and bidi controls from an untrusted string
 /// before it reaches a terminal: such a value can carry control bytes that
