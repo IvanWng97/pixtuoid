@@ -1336,10 +1336,8 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
 }
 
 /// Queue one sofa body, sorted with its sitters at `tie`: the front view, or
-/// the `back_view`. A pack that draws [`MEETING_SOFA_NORTH_SPRITE`] gets it as two
-/// bands, the seat under its sitter and the backrest over their lap
-/// ([`NORTH_SOFA_SEAT_ROWS`]); one that draws only its own `meeting_sofa` gets
-/// that flipped top-to-bottom, as the classic painter draws it.
+/// the `back_view` ([`MEETING_SOFA_NORTH_SPRITE`]) as two bands, the seat under
+/// its sitter and the backrest over their lap ([`NORTH_SOFA_SEAT_ROWS`]).
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
