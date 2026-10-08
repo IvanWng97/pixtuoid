@@ -4839,7 +4839,7 @@ def manifest_drift(pack):
         return None
     toml = tomllib.loads(manifest.read_text(encoding=ENCODING))
     named = toml.get("city")
-    if named is not None and named != CITY:
+    if named != CITY:
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
     outline = toml.get("characters", {}).get("outline")
     if outline != SILHOUETTE:
@@ -4908,14 +4908,16 @@ def selftest(sprites):
             f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING
         )
         require(check(pack, sprites) is None, "hand art quoting the provenance is not an orphan")
-        (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
+        city = "[city]\n" + "".join(f'{k} = "{v}"\n' for k, v in CITY.items())
+        outline = f'[characters]\noutline = "{SILHOUETTE}"\n'
+        (pack / "pack.toml").write_text(city + '[characters]\noutline = "n"\n', encoding=ENCODING)
         require(check(pack, sprites) is not None, "an outline the art does not draw must fail")
-        (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
+        (pack / "pack.toml").write_text(city, encoding=ENCODING)
         require(check(pack, sprites) is not None, "a pack naming no outline must fail")
-        (pack / "pack.toml").write_text(
-            f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING
-        )
-        require(check(pack, sprites) is None, "the art's own outline passes")
+        (pack / "pack.toml").write_text(outline, encoding=ENCODING)
+        require(check(pack, sprites) is not None, "a pack naming no city must fail")
+        (pack / "pack.toml").write_text(city + outline, encoding=ENCODING)
+        require(check(pack, sprites) is None, "the art's own city and outline pass")
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 

@@ -23,33 +23,92 @@ enum Terminal {
     Warp,
     WezTerm,
     Konsole,
-    /// A terminal that speaks iTerm2's images and isn't iTerm2
+    /// Built on xterm.js, which draws images only through its image addon,
+    /// loaded where the user turns it on: VS Code's `enableImages`
+    /// (microsoft/vscode `src/vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts:1025`),
+    /// Tabby's `terminal.sixel` (Eugeny/tabby
+    /// `tabby-terminal/src/frontends/xtermFrontend.ts:210`), Hyper's
+    /// `imageSupport` (vercel/hyper `lib/components/term.tsx:243`).
+    XtermJs,
+    /// Another terminal that speaks iTerm2's images and isn't iTerm2
     /// (`picker.rs:372-390`).
     SpeaksIterm2,
     /// Any other, kitty, Ghostty and Alacritty among them.
     Other,
 }
 
-impl Terminal {
-    /// The protocols the cutaway animates with in it, best first. iTerm2's
-    /// images count as answered, since the query never asks about them
+/// A protocol in a terminal's row, by what shows the terminal draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// kitty's, by its answer to kitty's query.
+    Kitty,
+    /// SIXEL, listed in its DA1.
+    Sixel,
+    /// iTerm2's images, which the query never asks about
     /// (`cap_parser.rs:132-133`).
-    fn animates(self) -> &'static [ImageProtocol] {
-        use ImageProtocol::{Iterm2, Kitty, Sixel};
+    Iterm2(Iterm2Sign),
+}
+
+/// What stands in for an answer about iTerm2's images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Iterm2Sign {
+    /// The terminal's name: it always draws them.
+    Name,
+    /// SIXEL in its DA1, which xterm.js's image addon lists only once loaded
+    /// (xtermjs/xterm.js@c58ea36 `addons/addon-image/src/ImageAddon.ts:284-296`;
+    /// without it, `src/common/InputHandler.ts:1706-1716`).
+    Sixel,
+}
+
+impl Pick {
+    fn protocol(self) -> ImageProtocol {
+        match self {
+            Self::Kitty => ImageProtocol::Kitty,
+            Self::Sixel => ImageProtocol::Sixel,
+            Self::Iterm2(_) => ImageProtocol::Iterm2,
+        }
+    }
+
+    /// The query part whose answer shows it, if any.
+    fn asks(self) -> Option<ProtocolType> {
+        match self {
+            Self::Kitty => Some(ProtocolType::Kitty),
+            Self::Sixel | Self::Iterm2(Iterm2Sign::Sixel) => Some(ProtocolType::Sixel),
+            Self::Iterm2(Iterm2Sign::Name) => None,
+        }
+    }
+
+    fn shown_by(self, responses: &[Response]) -> bool {
+        match self {
+            Self::Kitty => responses.contains(&Response::Kitty),
+            Self::Sixel | Self::Iterm2(Iterm2Sign::Sixel) => responses.contains(&Response::Sixel),
+            Self::Iterm2(Iterm2Sign::Name) => true,
+        }
+    }
+}
+
+impl Terminal {
+    /// What the cutaway animates with in it, best first.
+    fn animates(self) -> &'static [Pick] {
+        use Pick::{Iterm2, Kitty, Sixel};
         match self {
             // Its kitty, "except animation" (iterm2.com/downloads.html
             // changelog), is far too slow for 16x frames, and its inline
             // images nearly so; its SIXEL keeps up.
-            Self::Iterm2 => &[Sixel, Kitty, Iterm2],
+            Self::Iterm2 => &[Sixel, Kitty, Iterm2(Iterm2Sign::Name)],
             Self::Warp => &[],
             // Neither implements kitty's placeholders, Konsole's SIXEL is
             // buggy, and WezTerm draws better through iTerm2
             // (`picker.rs:119-128`).
-            Self::WezTerm => &[Iterm2],
+            Self::WezTerm => &[Iterm2(Iterm2Sign::Name)],
             Self::Konsole => &[],
+            // Its kitty answers but parses no Unicode placeholder (no `U` key,
+            // xtermjs/xterm.js@c58ea36
+            // `addons/addon-image/src/kitty/KittyGraphicsTypes.ts:39-81`).
+            Self::XtermJs => &[Iterm2(Iterm2Sign::Sixel)],
             // Kitty over SIXEL where both answer (`picker.rs:544-554`), then
             // the iTerm2 guess (`picker.rs:136-140`).
-            Self::SpeaksIterm2 => &[Kitty, Sixel, Iterm2],
+            Self::SpeaksIterm2 => &[Kitty, Sixel, Iterm2(Iterm2Sign::Name)],
             Self::Other => &[Kitty, Sixel],
         }
     }
@@ -95,14 +154,10 @@ impl EnvHints {
         Parser::query(
             self.env.tmux(),
             QueryStdioOptions {
-                blacklist_protocols: [
-                    (ImageProtocol::Kitty, ProtocolType::Kitty),
-                    (ImageProtocol::Sixel, ProtocolType::Sixel),
-                ]
-                .into_iter()
-                .filter(|(p, _)| !animates.contains(p))
-                .map(|(_, t)| t)
-                .collect(),
+                blacklist_protocols: [ProtocolType::Kitty, ProtocolType::Sixel]
+                    .into_iter()
+                    .filter(|t| !animates.iter().any(|p| p.asks() == Some(*t)))
+                    .collect(),
                 ..QueryStdioOptions::default()
             },
         )
@@ -117,7 +172,8 @@ impl EnvHints {
         // ghostty-org/ghostty `src/config/Config.zig:3928`,
         // alacritty/alacritty `alacritty_terminal/src/tty/mod.rs:104`.
         const OWN_TERMS: [&str; 3] = ["xterm-kitty", "xterm-ghostty", "alacritty"];
-        const SPEAKS_ITERM2: [&str; 6] = ["mintty", "vscode", "Tabby", "Hyper", "rio", "Bobcat"];
+        const XTERM_JS: [&str; 3] = ["vscode", "Tabby", "Hyper"];
+        const SPEAKS_ITERM2: [&str; 3] = ["mintty", "rio", "Bobcat"];
         if self
             .env
             .term
@@ -136,6 +192,9 @@ impl EnvHints {
         }
         if named(&["WezTerm"]) {
             return Terminal::WezTerm;
+        }
+        if named(&XTERM_JS) {
+            return Terminal::XtermJs;
         }
         if named(&SPEAKS_ITERM2) {
             return Terminal::SpeaksIterm2;
@@ -164,21 +223,18 @@ impl EnvHints {
 }
 
 /// What the terminal's answer and the environment together say: the first
-/// protocol the terminal [animates](Terminal::animates) with that it
-/// answered; the cell from its answer, else from the kernel's window size.
+/// protocol the terminal [animates](Terminal::animates) with that its answer
+/// shows; the cell from its answer, else from the kernel's window size.
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     let animates = hints.terminal().animates();
-    let protocol = animates.iter().copied().find(|p| match p {
-        ImageProtocol::Kitty => responses.contains(&Response::Kitty),
-        ImageProtocol::Sixel => responses.contains(&Response::Sixel),
-        ImageProtocol::Iterm2 => true,
-    });
+    let pick = animates.iter().copied().find(|p| p.shown_by(responses));
     let answered_cell = responses.iter().find_map(|r| match r {
         Response::CellSize(Some((w, h))) => Some(CellSize { w: *w, h: *h }),
         _ => None,
     });
     Detected {
-        protocol,
+        protocol: pick.map(Pick::protocol),
+        named: pick == Some(Pick::Iterm2(Iterm2Sign::Name)),
         cell: answered_cell.or(window_cell),
         tmux: hints.env.tmux(),
         unanimated: animates.is_empty(),
@@ -422,11 +478,11 @@ mod tests {
             Some(ImageProtocol::Iterm2)
         );
         assert_eq!(
-            detected(&[Response::Kitty], &hints("xterm-256color", "vscode"), None).protocol,
+            detected(&[Response::Kitty], &hints("xterm-256color", "mintty"), None).protocol,
             Some(ImageProtocol::Kitty)
         );
         assert_eq!(
-            detected(&[], &hints("xterm-256color", "vscode"), None).protocol,
+            detected(&[], &hints("xterm-256color", "mintty"), None).protocol,
             Some(ImageProtocol::Iterm2)
         );
         let lc = EnvHints {
@@ -447,6 +503,35 @@ mod tests {
             Terminal::Other,
             "started from iTerm2's shell"
         );
+    }
+
+    /// An xterm.js terminal draws images only with its image addon loaded,
+    /// which its user turns on, and the addon's DA1 then lists SIXEL: its name
+    /// alone picks nothing, and its kitty, without Unicode placeholders, never.
+    #[test]
+    fn an_xterm_js_terminal_draws_iterm2_only_with_its_image_addon_loaded() {
+        for program in ["vscode", "Tabby", "Hyper"] {
+            let hints = hints("xterm-256color", program);
+            assert_eq!(detected(&[], &hints, None).protocol, None, "{program}");
+            assert_eq!(unanswered(&hints, None), Probe::NoAnswer, "{program}");
+            let kitty_only = detected(&[Response::Kitty], &hints, None).protocol;
+            assert_eq!(kitty_only, None, "{program}: no placeholders");
+            let sixel_only = detected(&[Response::Sixel], &hints, None).protocol;
+            assert_eq!(sixel_only, Some(ImageProtocol::Iterm2), "{program}");
+            let loaded = detected(&[Response::Kitty, Response::Sixel], &hints, None);
+            assert_eq!(loaded.protocol, Some(ImageProtocol::Iterm2), "{program}");
+            assert!(!loaded.named, "{program}: answered");
+        }
+    }
+
+    /// A protocol picked on the terminal's name alone says so, for the
+    /// doctor; one it answered does not.
+    #[test]
+    fn a_protocol_the_name_alone_picks_is_marked_named() {
+        let iterm2 = hints("xterm-256color", "iTerm.app");
+        assert!(detected(&[], &iterm2, None).named);
+        assert!(!detected(&[Response::Sixel], &iterm2, None).named);
+        assert!(!detected(&[Response::Kitty], &EnvHints::default(), None).named);
     }
 
     /// iTerm2 answers kitty's query and lists SIXEL in its DA1 (3.7.3, live:
@@ -588,6 +673,7 @@ mod tests {
                 cell: window,
                 tmux: false,
                 unanimated: false,
+                named: true,
                 shm: false,
             })
         );

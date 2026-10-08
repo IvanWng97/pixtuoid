@@ -5,7 +5,7 @@
 
 use std::num::NonZeroU16;
 
-use pixtuoid_core::sprite::format::Pack;
+use crate::pack::OfficeArt;
 
 use crate::render_scale::RenderScale;
 
@@ -62,7 +62,7 @@ impl Pen {
     /// applies the same rule per piece, so the room shares every piece's grid
     /// only while the pack draws its variants at one density
     /// (`the_bundled_pack_draws_every_variant_at_one_density`).
-    pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
+    pub(crate) fn for_pack(scale: RenderScale, pack: &OfficeArt) -> Self {
         pack.density_variants()
             .iter()
             .find_map(|d| Self::new(scale, d.get()))
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         assert_eq!(
             pack.density_variants().len(),
             1,
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn a_pens_density_is_the_densest_the_pack_draws_at_that_scale() {
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let d = pack.max_density_variant().get();
         let at = |s: u16| Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
         assert_eq!(at(d * 2), pen(d * 2, d), "the variant's grid");

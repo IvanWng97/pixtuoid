@@ -55,27 +55,30 @@ impl PetKind {
         }
     }
 
-    /// Sprite name for the walking pose.
-    pub fn walk_anim(self) -> &'static str {
+    /// Its walk.
+    pub fn walk_anim(self) -> pixtuoid_core::sprite::format::Walk {
+        use pixtuoid_core::sprite::format::Walk;
         match self {
-            PetKind::Cat => "cat_walk",
-            PetKind::Dog => "dog_walk",
+            PetKind::Cat => Walk::CatWalk,
+            PetKind::Dog => Walk::DogWalk,
         }
     }
 
-    /// Sprite name for the sitting/resting pose.
-    pub fn sit_anim(self) -> &'static str {
+    /// Its sitting/resting pose.
+    pub fn sit_anim(self) -> pixtuoid_core::sprite::format::Piece {
+        use pixtuoid_core::sprite::format::Piece;
         match self {
-            PetKind::Cat => "cat_sit",
-            PetKind::Dog => "dog_sit",
+            PetKind::Cat => Piece::CatSit,
+            PetKind::Dog => Piece::DogSit,
         }
     }
 
-    /// Sprite name for the sleeping pose.
-    pub fn sleep_anim(self) -> &'static str {
+    /// Its sleeping pose.
+    pub fn sleep_anim(self) -> pixtuoid_core::sprite::format::Piece {
+        use pixtuoid_core::sprite::format::Piece;
         match self {
-            PetKind::Cat => "cat_sleep",
-            PetKind::Dog => "dog_sleep",
+            PetKind::Cat => Piece::CatSleep,
+            PetKind::Dog => Piece::DogSleep,
         }
     }
 
@@ -195,15 +198,24 @@ mod tests {
 
     #[test]
     fn anim_names_match_kind() {
-        assert!(PetKind::Cat.walk_anim().starts_with("cat_"));
-        assert!(PetKind::Dog.walk_anim().starts_with("dog_"));
+        assert!(PetKind::Cat.walk_anim().piece().name().starts_with("cat_"));
+        assert!(PetKind::Dog.walk_anim().piece().name().starts_with("dog_"));
     }
 
     #[test]
     fn dog_anim_methods() {
-        assert_eq!(PetKind::Dog.walk_anim(), "dog_walk");
-        assert_eq!(PetKind::Dog.sit_anim(), "dog_sit");
-        assert_eq!(PetKind::Dog.sleep_anim(), "dog_sleep");
+        assert_eq!(
+            PetKind::Dog.walk_anim(),
+            pixtuoid_core::sprite::format::Walk::DogWalk
+        );
+        assert_eq!(
+            PetKind::Dog.sit_anim(),
+            pixtuoid_core::sprite::format::Piece::DogSit
+        );
+        assert_eq!(
+            PetKind::Dog.sleep_anim(),
+            pixtuoid_core::sprite::format::Piece::DogSleep
+        );
     }
 
     #[test]

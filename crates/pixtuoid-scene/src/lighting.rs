@@ -27,25 +27,25 @@ const DESK_LAMP_MAX: f32 = 0.42;
 /// pool washes out the back-turned desk's east half, its lamp's side.
 pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
 /// Where each facing's desk lamp bulb hangs from its desk's point, as the 1x
-/// art the pack draws there marks it ([`crate::pack::desk_bulb_offset`]);
-/// `None` for art that draws no lamp.
+/// art the pack draws there marks it ([`crate::pack::OfficeArt::bulb_offset`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DeskBulbs {
-    facing_viewer: Option<(u16, i16)>,
-    back_turned: Option<(u16, i16)>,
+    facing_viewer: (u16, i16),
+    back_turned: (u16, i16),
 }
 
 impl DeskBulbs {
     /// `pack`'s.
-    pub(crate) fn of(pack: &pixtuoid_core::sprite::format::Pack) -> Self {
+    pub(crate) fn of(pack: &crate::pack::OfficeArt) -> Self {
+        use crate::pack::Desk;
         Self {
-            facing_viewer: crate::pack::desk_bulb_offset(pack, Facing::South),
-            back_turned: crate::pack::desk_bulb_offset(pack, Facing::North),
+            facing_viewer: pack.bulb_offset(Desk::South),
+            back_turned: pack.bulb_offset(Desk::North),
         }
     }
 
     /// A desk facing `facing`'s.
-    pub(crate) fn at(self, facing: Facing) -> Option<(u16, i16)> {
+    pub(crate) fn at(self, facing: Facing) -> (u16, i16) {
         match facing {
             Facing::North => self.back_turned,
             _ => self.facing_viewer,
@@ -389,7 +389,7 @@ impl Lights {
 fn desk_lights(
     desk: Point,
     facing: Facing,
-    bulb: Option<(u16, i16)>,
+    bulb: (u16, i16),
     darkness: f32,
     indoor: f32,
 ) -> DeskLights {
@@ -414,11 +414,10 @@ pub(crate) fn screen_idle(facing: Facing, darkness: f32, indoor: f32) -> f32 {
 
 impl DeskLights {
     /// The lights of a desk at `desk` whose lamp hangs its bulb `bulb` from
-    /// it: its lamp lit to `level` (dark without a bulb), its pool at most
-    /// [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
-    pub(crate) fn new(desk: Point, bulb: Option<(u16, i16)>, level: f32, screen_idle: f32) -> Self {
-        let level = if bulb.is_some() { level } else { 0.0 };
-        let (dx, dy) = bulb.unwrap_or_default();
+    /// it: its lamp lit to `level`, its pool at most [`DESK_LAMP_MAX`], and
+    /// its standby screen at `screen_idle`.
+    pub(crate) fn new(desk: Point, bulb: (u16, i16), level: f32, screen_idle: f32) -> Self {
+        let (dx, dy) = bulb;
         let bulb = Point {
             x: desk.x + dx,
             y: desk.y.saturating_add_signed(dy),

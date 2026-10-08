@@ -219,7 +219,7 @@ fn start_for(motion: Motion) -> Result<SystemTime> {
 fn run(
     case: &Case,
     clock: &SpanClock,
-    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+    pack: &Arc<pixtuoid_scene::pack::OfficeArt>,
     pace: Pace,
 ) -> Result<Vec<Frame>> {
     let tick = Duration::from_secs(1) / PAINT_FPS;
@@ -287,7 +287,7 @@ fn run(
 /// The production loop's shape on the wall clock: render, then wait a paint
 /// interval for input that never comes. Each frame's interval, observed.
 fn real_clock(
-    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+    pack: &Arc<pixtuoid_scene::pack::OfficeArt>,
 ) -> Result<(Vec<Duration>, Vec<Duration>, &'static str)> {
     let tick = Duration::from_secs(1) / PAINT_FPS;
     let (mut r, _wire) = renderer(
@@ -487,10 +487,7 @@ const FOUR_X_CELL: (u16, u16) = (4, 8);
 
 /// The smallest terminal whose office on `cell` holds the owner's: exactly
 /// it at 16x, a row taller at 4x, whose cell halves the rows.
-fn owner_terminal(
-    pack: &pixtuoid_core::sprite::format::Pack,
-    cell: (u16, u16),
-) -> Result<(u16, u16)> {
+fn owner_terminal(pack: &pixtuoid_scene::pack::OfficeArt, cell: (u16, u16)) -> Result<(u16, u16)> {
     (1..=1000u16)
         .flat_map(|c| (1..=400u16).map(move |r| (c, r)))
         .find(|&(c, r)| {

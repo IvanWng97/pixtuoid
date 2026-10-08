@@ -8,8 +8,8 @@ use anyhow::Result;
 #[cfg(test)]
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::SceneState;
+use pixtuoid_scene::pack::OfficeArt;
 
 use ratatui::Terminal;
 use ratatui::backend::Backend;
@@ -43,7 +43,7 @@ struct PopupState {
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     /// The pack every floor's raster draws with, which each frame's must be.
-    pack: Arc<Pack>,
+    pack: Arc<OfficeArt>,
     /// The frames' times and janks.
     jank: crate::jank::Jank,
     /// When the loop's clock scheduled the frame being drawn ([`Self::due_at`]).
@@ -132,7 +132,7 @@ impl Chrome {
         &'a self,
         session: &OfficeSession,
         floor_scene: &'a SceneState,
-        pack: &'a Pack,
+        pack: &'a OfficeArt,
         now: SystemTime,
         floor: usize,
     ) -> FloorInputs<'a> {
@@ -150,7 +150,7 @@ impl Chrome {
     fn office_world<'a>(
         &'a self,
         scene: &'a SceneState,
-        pack: &'a Pack,
+        pack: &'a OfficeArt,
         now: SystemTime,
     ) -> FloorInputs<'a> {
         FloorInputs {
@@ -200,7 +200,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         terminal: Terminal<B>,
         theme: &'static pixtuoid_scene::theme::Theme,
         pets: Vec<pixtuoid_scene::pet::Pet>,
-        pack: Arc<Pack>,
+        pack: Arc<OfficeArt>,
     ) -> Self {
         Self {
             terminal,
@@ -250,7 +250,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Draw the first frame of `scene` unseen, in the look the first frame
     /// shown will take, so the caches it fills (the cloud rasters above all)
     /// are warm when it is shown; what it shows is unchanged.
-    pub(crate) fn warm(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) {
+    pub(crate) fn warm(&mut self, scene: &SceneState, pack: &OfficeArt, now: SystemTime) {
         let Ok(size) = self.terminal.size() else {
             return;
         };
@@ -275,7 +275,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     fn render_office(
         &mut self,
         scene: &SceneState,
-        pack: &Pack,
+        pack: &OfficeArt,
         now: SystemTime,
         look: Look,
         size: Size,
@@ -796,7 +796,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// If querying the terminal size, drawing the frame to the backend, or
     /// writing the held frame fails; a full terminal (`WouldBlock`) drops the
     /// frame instead.
-    pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+    pub fn render(&mut self, scene: &SceneState, pack: &OfficeArt, now: SystemTime) -> Result<()> {
         let begun = std::time::Instant::now();
         if let Some(out) = &self.frame_out {
             out.begin();
@@ -858,7 +858,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         Ok(())
     }
 
-    fn draw_frame(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+    fn draw_frame(&mut self, scene: &SceneState, pack: &OfficeArt, now: SystemTime) -> Result<()> {
         if self
             .chrome
             .active_pet
@@ -958,7 +958,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         cutaway: &mut crate::tui::cutaway::TileCutaway,
         fitted: crate::tui::cutaway::Fitted,
         scene: &SceneState,
-        pack: &Pack,
+        pack: &OfficeArt,
         now: SystemTime,
     ) -> Result<()> {
         use crate::panels::paint_overlays;

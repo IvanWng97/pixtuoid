@@ -1,7 +1,3 @@
-[pack]
-name    = "topdown"
-version = "1"
-
 [palette]
 "." = "transparent"
 "H" = "#2a1a0e"   # hair (per-agent recolor target)
@@ -242,8 +238,7 @@ stride   = 24
 frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite", "walking_coffee_2@4x.sprite", "walking_coffee_3@4x.sprite", "walking_coffee_4@4x.sprite", "walking_coffee_5@4x.sprite", "walking_coffee_6@4x.sprite", "walking_coffee_7@4x.sprite"]
 frame_ms = 220
 
-# BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
-# still `seated_back`.
+# BACK view of the typing pose.
 [animations.typing_back]
 frames   = ["typing_back_0.sprite", "typing_back_1.sprite"]
 frame_ms = 125
@@ -260,8 +255,7 @@ frame_ms = 600
 frames   = ["desk@4x.sprite"]
 frame_ms = 600
 
-# The desk of a NORTH-facing seat. OPTIONAL — a pack without it renders every
-# desk as `desk`.
+# The desk of a NORTH-facing seat.
 [animations.desk_north]
 frames   = ["desk_north.sprite"]
 frame_ms = 600
@@ -271,8 +265,7 @@ frames   = ["desk_north@4x.sprite"]
 frame_ms = 600
 
 # What of `desk` stands nearer the viewer than its sitter's props, drawn over
-# them on the desk's own canvas: its monitor. OPTIONAL — it comes only with the
-# desk it covers, and a desk without it draws its props on top.
+# them on the desk's own canvas: its monitor.
 [animations.desk_front]
 frames   = ["desk_front.sprite"]
 frame_ms = 600

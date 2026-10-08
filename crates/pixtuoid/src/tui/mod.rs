@@ -25,7 +25,7 @@ use tokio::time::MissedTickBehavior;
 
 use tui_renderer::TuiRenderer;
 
-use crate::panels::{FloorNav, KeyCtx, apply_key_action, dispatch_key, ui_state, welcome, widgets};
+use crate::panels::{FloorNav, KeyCtx, apply_key_action, dispatch_key, ui_state};
 use crate::runtime::SceneRx;
 use pixtuoid_scene::hit::HitAction;
 use pixtuoid_scene::{pet, theme};
@@ -334,24 +334,9 @@ pub(crate) fn teardown_terminal(term: &mut Term) -> Result<()> {
     Ok(())
 }
 
-/// Persists the current version so the popup shows at most once per upgrade regardless
-/// of how the run exits. Re-loads the config for `last_seen_version` only — any config
-/// warning was already surfaced by `main`'s pre-altscreen pass.
-fn resolve_version_popup(config_path: &std::path::Path) -> bool {
-    let current_ver = env!("CARGO_PKG_VERSION");
-    let cfg = crate::config::load(config_path, &mut Vec::new());
-    let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
-    if decision.should_persist
-        && let Err(e) = crate::config::save_version(config_path, current_ver)
-    {
-        tracing::warn!(error = ?e, "failed to persist version");
-    }
-    decision.should_show_popup
-}
-
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack: Arc<pixtuoid_core::sprite::format::Pack>,
+    pub pack: Arc<pixtuoid_scene::pack::OfficeArt>,
     /// What `boot_tui` planned to paint.
     pub plan: crate::graphics::Plan,
     /// How the office moves, which `boot_tui` resolved beside the plan.
@@ -379,20 +364,8 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
-/// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
-/// against the full terminal bounds, not the scene rect. `scale` is
-/// the popup's last painted scale.
-fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
-    let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-    widgets::version_popup_url_rect(bounds, scale)
-        .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
-}
-
-/// The mouse hit-test LADDER, in order: modals swallow first — a click must never leak to the
-/// scene behind them, where a coffee-machine or branding hit launches a browser — then the
-/// version popup's URL, then the scene. Help is tested before the popup guard so it wins even
-/// mid popup-dismiss animation. The picker/dashboard/connection overlays are inert BY DESIGN:
-/// they close only by key (see [`dispatch_key`]), so a click never dismisses them.
+/// The mouse hit-test LADDER: the panels' half first ([`crate::panels::modal_mouse`]), then
+/// the scene.
 fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     m: crossterm::event::MouseEvent,
     ui: &mut ui_state::UiState,
@@ -401,28 +374,12 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
     focus: impl FnOnce(&pixtuoid_core::AgentSlot),
     now: SystemTime,
 ) {
-    let left_down = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
-    if ui.onboarding_open() {
-        return;
-    }
-    if ui.help_open() {
-        if left_down {
-            ui.close_help();
-        }
-        return;
-    }
-    if renderer.last_popup_scale() > 0.0 {
-        // While the popup is up, only its URL is clickable.
-        if left_down
-            && crossterm::terminal::size().is_ok_and(|t| {
-                version_popup_url_clicked(m.column, m.row, renderer.last_popup_scale(), t)
-            })
-        {
-            let _ = open::that(widgets::release_url(env!("CARGO_PKG_VERSION")));
-        }
-        return;
-    }
-    if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open {
+    let left_down =
+        matches!(m.kind, MouseEventKind::Down(MouseButton::Left)).then_some((m.column, m.row));
+    if crate::panels::modal_mouse(ui, renderer.last_popup_scale(), left_down, || {
+        crossterm::terminal::size().ok()
+    }) != crate::panels::ModalMouse::Office
+    {
         return;
     }
     match m.kind {
@@ -617,24 +574,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
-    // With no agent CLIs detected there is nothing to connect: the overlay stays closed.
-    let detected_clis = if first_run {
-        crate::sources::detect()
-    } else {
-        Vec::new()
-    };
-    let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
-
-    // Yields to onboarding but still STAMPS `last_seen_version`. Gated on the overlay
-    // SHOWING, not on `first_run`, which a no-CLI user carries forever.
-    let version_popup = if !onboarding_ui.is_empty() {
-        let _ = resolve_version_popup(&config_path);
-        false
-    } else {
-        resolve_version_popup(&config_path)
-    };
-    let mut ui =
-        ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log, drift);
+    let mut ui = ui_state::UiState::boot(theme, first_run, &config_path, socket_path, log, drift);
     renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 
@@ -1115,7 +1055,7 @@ mod apply_key_action_tests {
             Self {
                 ui: super::ui_state::UiState::new(
                     &theme::NORMAL,
-                    super::welcome::WelcomeUi::from_detected(&[]),
+                    crate::panels::welcome::WelcomeUi::from_detected(&[]),
                     false,
                     tmp.path().join("sock"),
                     None,
@@ -1255,29 +1195,6 @@ mod apply_key_action_tests {
         );
         h.apply(KeyAction::ToggleWalkableDebug);
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
-    }
-
-    /// Ignoring `scale` would launch a browser where the popup is still animating.
-    #[test]
-    fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
-        use crate::panels::widgets::version_popup_url_rect;
-        let term = (120u16, 44u16);
-        let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-        let rect = version_popup_url_rect(bounds, 1.0)
-            .expect("a URL rect at scale 1.0, or the misses below pass vacuously");
-
-        assert!(
-            super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),
-            "a click inside the URL rect at full scale must hit"
-        );
-        assert!(
-            !super::version_popup_url_clicked(rect.x, rect.y.saturating_sub(1), 1.0, term),
-            "a click one row above the URL must miss"
-        );
-        assert!(
-            !super::version_popup_url_clicked(rect.x, rect.y, 0.5, term),
-            "mid-animation (below the clickable scale) there is no rect, so no hit"
-        );
     }
 
     /// `delete -` on either `-1` makes Up behave as Down. The panels are

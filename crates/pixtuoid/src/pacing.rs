@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::SceneState;
+use pixtuoid_scene::pack::OfficeArt;
 use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
 use ratatui::layout::{Position, Rect, Size};
@@ -200,7 +200,7 @@ pub fn renderer(
     rows: u16,
     cell_px: (u16, u16),
     pets: Vec<pixtuoid_scene::pet::Pet>,
-    pack: Arc<Pack>,
+    pack: Arc<OfficeArt>,
     audio: bool,
 ) -> Result<(TuiRenderer<PacedBackend>, Wire)> {
     let wire = Wire::default();
@@ -250,7 +250,7 @@ pub fn cutaway_office(
     cols: u16,
     rows: u16,
     cell_px: (u16, u16),
-    pack: &Pack,
+    pack: &OfficeArt,
 ) -> Option<(u16, u16, u16)> {
     let cell = CellSize {
         w: cell_px.0,
@@ -265,7 +265,7 @@ pub fn cutaway_office(
 pub fn warm(
     r: &mut TuiRenderer<PacedBackend>,
     scene: &SceneState,
-    pack: &Pack,
+    pack: &OfficeArt,
     now: std::time::SystemTime,
 ) {
     r.warm(scene, pack, now);

@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::num::NonZeroU16;
 use std::sync::Arc;
 
+use enum_map::EnumMap;
 use serde::Deserialize;
+use strum::VariantArray;
+use vec1::Vec1;
 
 use crate::grid::Grid;
 use crate::sprite::error::{ColorError, KeySite, LineError, PackError, SpriteError};
@@ -168,19 +171,17 @@ mod tests {
         );
     }
 
-    /// A pack of one animation plus `extra` tables, over a palette of the seven
-    /// material keys and a stray `x`; `files` holds the buildings' sprites.
+    /// A pack of `extra` tables over a palette of the seven material keys and
+    /// a stray `x`; `files` holds the buildings' sprites.
     fn city_pack(extra: &str, files: &[(&str, &str)]) -> Result<Pack> {
-        let mut all = vec![("f.sprite", "@frame 0\nF\n")];
-        all.extend_from_slice(files);
-        load_pack_from_strings(
+        load_filled_pack(
             &format!(
-                "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
+                "[palette]\n\".\"=\"transparent\"\n\
                  \"F\"=\"#202020\"\n\"f\"=\"#181818\"\n\"R\"=\"#303030\"\n\"W\"=\"#404040\"\n\
                  \"M\"=\"#101010\"\n\"D\"=\"#282828\"\n\"L\"=\"#d08050\"\n\"x\"=\"#ffffff\"\n\
-                 [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n{extra}"
+                 {extra}"
             ),
-            &all,
+            files,
         )
     }
 
@@ -219,8 +220,7 @@ mod tests {
             "each density finds its own windows: the mullion splits this one"
         );
         assert!(tower.variant(d(4)).is_none());
-        let materials = pack.city_materials().expect("[city]");
-        assert_eq!(materials.key(Material::Glass), 'W');
+        assert_eq!(pack.city_materials().key(Material::Glass), 'W');
     }
 
     #[test]
@@ -244,7 +244,6 @@ mod tests {
                 "@frame 0\nF x\n",
                 "a key no material names",
             ),
-            (base.to_owned(), TOWER, "no [city] to name the materials"),
             (
                 format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[\"far\"]\n"),
                 TOWER,
@@ -320,17 +319,16 @@ mod tests {
         }
     }
 
-    /// A pack whose one animation, `seated`, draws `f.sprite`, plus `extra`
-    /// tables; `frames` holds every file by name.
-    /// As a caller sees the failure: through `anyhow`, whose `{:#}` walks the
-    /// chain.
+    /// A pack whose `seated` draws `f.sprite`, plus `extra` tables; `frames`
+    /// holds every file by name. As a caller sees the failure: through
+    /// `anyhow`, whose `{:#}` walks the chain.
     fn hair_pack(extra: &str, frames: &[(&str, &str)]) -> anyhow::Result<Pack> {
         let toml = format!(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
+            "[palette]\n\".\"=\"transparent\"\n\
              \"H\"=\"#28140a\"\n\"k\"=\"#101010\"\n\
              [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n{extra}"
         );
-        Ok(load_pack_from_strings(&toml, frames)?)
+        Ok(load_filled_pack(&toml, frames)?)
     }
 
     #[test]
@@ -343,7 +341,7 @@ mod tests {
             )],
         )
         .expect("loads");
-        let seated = pack.animation("seated").expect("the animation");
+        let seated = pack.piece(Piece::Seated);
         let head = seated.head(0).expect("frame 0's head");
         assert_eq!((head.view, head.x, head.y), (HeadView::Front, 1, 0));
         let names: Vec<_> = seated.marks(0).iter().map(Mark::name).collect();
@@ -396,11 +394,11 @@ mod tests {
         assert!(mop.layers(HeadView::Side).is_none());
         assert_eq!(
             pack.character_outline(),
-            Some(Rgb {
+            Rgb {
                 r: 16,
                 g: 16,
                 b: 16
-            })
+            }
         );
     }
 
@@ -453,11 +451,11 @@ mod tests {
 
     fn ramp_pack(palette: &str, ramps: &str, sprite: &str) -> anyhow::Result<Pack> {
         let toml = format!(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n{palette}\n\
+            "[palette]\n{palette}\n\
              [ramps]\n{ramps}\n\
              [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
         );
-        Ok(load_pack_from_strings(&toml, &[("f.sprite", sprite)])?)
+        Ok(load_filled_pack(&toml, &[("f.sprite", sprite)])?)
     }
 
     const HAIR: Rgb = Rgb {
@@ -474,7 +472,7 @@ mod tests {
             "@frame 0\nH h",
         )
         .expect("pack builds");
-        let frame = &pack.animation("seated").expect("anim").frames()[0];
+        let frame = pack.piece(Piece::Seated).first();
         assert_eq!(frame.get(0, 0).copied().flatten(), Some(HAIR));
         assert_eq!(frame.get(1, 0).copied().flatten(), Some(HAIR.ramp(-1)));
     }
@@ -489,7 +487,7 @@ mod tests {
             "@frame 0\nB X h .",
         )
         .expect("pack builds");
-        let seated = pack.animation("seated").expect("anim");
+        let seated = pack.piece(Piece::Seated);
         let (red, blond) = (
             Rgb { r: 200, g: 0, b: 0 },
             Rgb {
@@ -575,7 +573,10 @@ mod tests {
 
     #[test]
     fn a_palette_past_what_a_frame_can_index_is_rejected() {
-        let keys: String = ('\u{100}'..)
+        // the filler's own keys count toward the capacity
+        let keys: String = FILLER_KEYS
+            .into_iter()
+            .chain('\u{100}'..)
             .take(PALETTE_CAPACITY + 1)
             .map(|k| format!("\"{k}\"=\"#010203\"\n"))
             .collect();
@@ -653,20 +654,18 @@ fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame, LineError
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PackToml {
-    pack: PackMeta,
     /// Ordered, like `ramps`, so a pack loads the same way every time: the same
     /// indices, and the same key reported first when several are bad.
     palette: BTreeMap<String, String>,
     #[serde(default)]
     ramps: BTreeMap<String, RampToml>,
     animations: HashMap<String, AnimationToml>,
-    #[serde(default)]
-    city: Option<BTreeMap<String, String>>,
+    city: BTreeMap<String, String>,
     #[serde(default)]
     buildings: BTreeMap<String, BuildingToml>,
-    #[serde(default)]
-    characters: Option<CharactersToml>,
+    characters: CharactersToml,
     #[serde(default)]
     hairstyles: BTreeMap<String, HairstyleToml>,
     #[serde(default)]
@@ -725,12 +724,6 @@ struct RampToml {
 }
 
 #[derive(Debug, Deserialize)]
-struct PackMeta {
-    name: String,
-    version: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct AnimationToml {
     frames: Vec<String>,
     frame_ms: u32,
@@ -738,23 +731,26 @@ struct AnimationToml {
     stride: Option<std::num::NonZeroU16>,
 }
 
-/// A loaded sprite pack: a named, versioned palette, its animations, the
-/// hairstyles that dress them, and the city behind the windows.
+/// A loaded sprite pack: a palette, every [`Piece`] and the density variants
+/// that redraw them, the hairstyles that dress the characters, and the city
+/// behind the windows.
 #[derive(Debug, Clone)]
 pub struct Pack {
-    /// Pack name from the `[pack]` table in `pack.toml`.
-    pub name: String,
-    /// Pack version string from the `[pack]` table in `pack.toml`.
-    pub version: String,
     palette: Arc<Palette>,
-    animations: HashMap<String, Sprite>,
+    /// A pack that lacks a piece does not load.
+    pieces: EnumMap<Piece, Sprite>,
+    /// Each piece's density variants, each of which redraws it
+    /// ([`variant_redraws`]): one that does not, does not load.
+    variants: EnumMap<Piece, BTreeMap<Density, Sprite>>,
+    /// A walk without one does not load.
+    strides: EnumMap<Walk, NonZeroU16>,
     buildings: BTreeMap<String, Building>,
-    city_materials: Option<CityMaterials>,
+    city_materials: CityMaterials,
     hairstyles: BTreeMap<String, Hairstyle>,
-    character_outline: Option<Rgb>,
+    character_outline: Rgb,
     icons: BTreeMap<String, IconArt>,
-    /// [`Pack::density_variants`], counted whenever `animations` changes: a
-    /// painter asks for it every frame.
+    /// [`Pack::density_variants`], counted once at load: a painter asks for it
+    /// every frame.
     densities: Vec<Density>,
 }
 
@@ -971,8 +967,8 @@ impl Pack {
     }
 
     /// The keys the buildings are drawn in, from `[city]`.
-    pub fn city_materials(&self) -> Option<&CityMaterials> {
-        self.city_materials.as_ref()
+    pub fn city_materials(&self) -> &CityMaterials {
+        &self.city_materials
     }
 
     /// The pack's hairstyles, every density of each, in name order.
@@ -987,7 +983,7 @@ impl Pack {
 
     /// The colour of the one line round every marked character frame at a
     /// density of 2 and up, dressed or bare, from `[characters]`.
-    pub fn character_outline(&self) -> Option<Rgb> {
+    pub fn character_outline(&self) -> Rgb {
         self.character_outline
     }
 
@@ -1008,14 +1004,28 @@ impl Pack {
         &self.palette
     }
 
-    /// The animation registered under `key`, if the pack defines one.
-    pub fn animation(&self, key: &str) -> Option<&Sprite> {
-        self.animations.get(key)
+    /// The art of `piece`.
+    pub fn piece(&self, piece: Piece) -> &Sprite {
+        &self.pieces[piece]
     }
 
-    /// The names of every animation in this pack.
-    pub fn animation_names(&self) -> Vec<String> {
-        self.animations.keys().cloned().collect()
+    /// `piece` redrawn at each density the pack draws it at, above its
+    /// [`piece`](Self::piece) art.
+    pub fn variants_of(&self, piece: Piece) -> &BTreeMap<Density, Sprite> {
+        &self.variants[piece]
+    }
+
+    /// Every density variant, in piece then density order.
+    pub fn variants(&self) -> impl Iterator<Item = (Piece, Density, &Sprite)> {
+        self.variants
+            .iter()
+            .flat_map(|(p, by)| by.iter().map(move |(&d, s)| (p, d, s)))
+    }
+
+    /// The base-grid pixels `walk` covers in one full cycle of its frames:
+    /// every walk declares one, or the pack does not load.
+    pub fn stride(&self, walk: Walk) -> NonZeroU16 {
+        self.strides[walk]
     }
 
     /// The densest of [`Pack::density_variants`], or [`Density::ONE`] when the
@@ -1037,76 +1047,50 @@ impl Pack {
     }
 
     fn count_densities(&mut self) {
-        let densities: BTreeSet<Density> = self
-            .animations
-            .iter()
-            .filter_map(|(name, variant)| {
-                let RegisteredKey { base, density } = RegisteredKey::parse(name)?;
-                let density = density?;
-                variant_redraws(self.animation(base)?, density, variant).then_some(density)
-            })
-            .collect();
+        let densities: BTreeSet<Density> = self.variants().map(|(_, d, _)| d).collect();
         self.densities = densities.into_iter().rev().collect();
     }
 }
 
-/// Art drawn over another piece on that piece's canvas, as `(overlay, piece)`:
-/// `desk_front` is what of `desk` stands nearer the viewer than its sitter's
-/// props. An overlay keeps that piece's canvas rather than grounding on its own
-/// bottom row.
-pub const OVERLAY_PIECES: &[(&str, &str)] = &[("desk_front", "desk")];
-
 fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
-    let mut animations = HashMap::new();
-    for (anim_name, anim) in parsed.animations {
-        let mut frames = Vec::new();
-        for fname in &anim.frames {
-            let src = get_src(fname)?;
-            let mut decoded = decode(fname, &src, &palette)?;
-            frames.append(&mut decoded);
-        }
-        animations.insert(
-            anim_name,
-            Sprite::new(frames, Arc::clone(&palette), anim.frame_ms, anim.stride),
-        );
-    }
+    let Pieces {
+        pieces,
+        variants,
+        strides,
+    } = build_pieces(parsed.animations, &palette, get_src)?;
 
-    let city_materials = parsed
-        .city
-        .map(|c| -> Result<CityMaterials> {
-            if let Some(other) = c.keys().find(|k| Material::from_name(k).is_none()) {
-                return Err(PackError::CityUnknownMaterial {
-                    name: other.clone(),
-                });
+    let city_materials = {
+        let c = parsed.city;
+        if let Some(other) = c.keys().find(|k| Material::from_name(k).is_none()) {
+            return Err(PackError::CityUnknownMaterial {
+                name: other.clone(),
+            });
+        }
+        let mut keys = [' '; Material::ALL.len()];
+        for material in Material::ALL {
+            let Some(key) = c.get(material.name()) else {
+                return Err(PackError::CityMissingMaterial { material });
+            };
+            let what = KeySite::CityMaterial;
+            let key = single_char(key, what)?;
+            if !matches!(palette.get(key), Some(Some(_))) {
+                return Err(PackError::NotOpaque { what, key });
             }
-            let mut keys = [' '; Material::ALL.len()];
-            for material in Material::ALL {
-                let Some(key) = c.get(material.name()) else {
-                    return Err(PackError::CityMissingMaterial { material });
-                };
-                let what = KeySite::CityMaterial;
-                let key = single_char(key, what)?;
-                if !matches!(palette.get(key), Some(Some(_))) {
-                    return Err(PackError::NotOpaque { what, key });
-                }
-                if keys[..material.index()].contains(&key) {
-                    return Err(PackError::CityKeyShared { key });
-                }
-                keys[material.index()] = key;
+            if keys[..material.index()].contains(&key) {
+                return Err(PackError::CityKeyShared { key });
             }
-            Ok(CityMaterials(keys))
-        })
-        .transpose()?;
+            keys[material.index()] = key;
+        }
+        CityMaterials(keys)
+    };
     let mut buildings: BTreeMap<String, Building> = BTreeMap::new();
-    let (variants, bases): (Vec<_>, Vec<_>) = parsed
+    let (building_variants, bases): (Vec<_>, Vec<_>) = parsed
         .buildings
         .into_iter()
         .partition(|(key, _)| split_density_variant(key).is_some());
-    for (key, building) in bases.into_iter().chain(variants) {
-        let Some(materials) = city_materials.as_ref() else {
-            return Err(PackError::BuildingWithoutCity { key });
-        };
+    for (key, building) in bases.into_iter().chain(building_variants) {
+        let materials = &city_materials;
         let (name, density) = split_density_variant(&key).unwrap_or((&key, Density::ONE));
         if density == Density::ONE && key.contains(DENSITY_VARIANT_SEP) {
             return Err(PackError::BuildingDensity { key });
@@ -1157,17 +1141,14 @@ fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>)
         }
     }
 
-    let character_outline = parsed
-        .characters
-        .map(|c| -> Result<Rgb> {
-            let what = KeySite::CharacterOutline;
-            let key = single_char(&c.outline, what)?;
-            match palette.get(key) {
-                Some(Some(rgb)) => Ok(rgb),
-                _ => Err(PackError::NotOpaque { what, key }),
-            }
-        })
-        .transpose()?;
+    let character_outline = {
+        let what = KeySite::CharacterOutline;
+        let key = single_char(&parsed.characters.outline, what)?;
+        match palette.get(key) {
+            Some(Some(rgb)) => rgb,
+            _ => return Err(PackError::NotOpaque { what, key }),
+        }
+    };
     let mut hairstyles = BTreeMap::new();
     for (key, style) in parsed.hairstyles {
         let Some((name, density)) = split_density_variant(&key) else {
@@ -1175,19 +1156,18 @@ fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>)
         };
         let mut layer = |view: HeadView, fname: &str| -> Result<Sprite> {
             let src = get_src(fname)?;
-            let marked = decode(fname, &src, &palette)?;
-            let [(_, marks)] = marked.as_slice() else {
+            let Some(frame) = one_frame(decode(fname, &src, &palette)?) else {
                 return Err(PackError::HairLayerFrames {
                     file: fname.to_owned(),
                 });
             };
-            if marks.iter().find_map(HeadMark::of).map(|h| h.view) != Some(view) {
+            if frame.1.iter().find_map(HeadMark::of).map(|h| h.view) != Some(view) {
                 return Err(PackError::HairLayerHead {
                     file: fname.to_owned(),
                     view,
                 });
             }
-            Ok(Sprite::new(marked, Arc::clone(&palette), 0, None))
+            Ok(Sprite::new(Vec1::new(frame), Arc::clone(&palette), 0, None))
         };
         let mut views: [Option<HairLayers>; HeadView::ALL.len()] = Default::default();
         for (view, layers) in [
@@ -1235,11 +1215,15 @@ fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>)
         let mut art = |fname: Option<String>| -> Result<Option<Sprite>> {
             let Some(fname) = fname else { return Ok(None) };
             let src = get_src(&fname)?;
-            let frames = decode(&fname, &src, &palette)?;
-            if frames.len() != 1 {
+            let Some(frame) = one_frame(decode(&fname, &src, &palette)?) else {
                 return Err(PackError::IconFrames { file: fname });
-            }
-            Ok(Some(Sprite::new(frames, Arc::clone(&palette), 0, None)))
+            };
+            Ok(Some(Sprite::new(
+                Vec1::new(frame),
+                Arc::clone(&palette),
+                0,
+                None,
+            )))
         };
         let art = IconArt {
             world: art(icon.world)?,
@@ -1249,10 +1233,10 @@ fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>)
     }
 
     let mut pack = Pack {
-        name: parsed.pack.name,
-        version: parsed.pack.version,
         palette,
-        animations,
+        pieces,
+        variants,
+        strides,
         buildings,
         city_materials,
         hairstyles,
@@ -1262,6 +1246,78 @@ fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>)
     };
     pack.count_densities();
     Ok(pack)
+}
+
+/// The manifest's `[animations]`: every [`Piece`], each [`Walk`]'s stride,
+/// and the density variants, each of which redraws its piece.
+struct Pieces {
+    pieces: EnumMap<Piece, Sprite>,
+    variants: EnumMap<Piece, BTreeMap<Density, Sprite>>,
+    strides: EnumMap<Walk, NonZeroU16>,
+}
+
+fn build_pieces(
+    animations: HashMap<String, AnimationToml>,
+    palette: &Arc<Palette>,
+    get_src: &mut dyn FnMut(&str) -> Result<String>,
+) -> Result<Pieces> {
+    let mut bases: BTreeMap<Piece, Sprite> = BTreeMap::new();
+    let mut variants = BTreeMap::new();
+    // by key, so a pack reports the same bad key first every load
+    let animations: BTreeMap<String, AnimationToml> = animations.into_iter().collect();
+    for (key, anim) in animations {
+        let Some((piece, density)) = parse_key(&key) else {
+            return Err(PackError::UnknownAnimation { key });
+        };
+        let mut frames = Vec::new();
+        for fname in &anim.frames {
+            let src = get_src(fname)?;
+            let mut decoded = decode(fname, &src, palette)?;
+            frames.append(&mut decoded);
+        }
+        let need = density.map_or(piece.min_frames(), |_| 1);
+        let have = frames.len();
+        let frames = match Vec1::try_from_vec(frames) {
+            Ok(frames) if have >= need => frames,
+            _ => return Err(PackError::TooFewFrames { key, need, have }),
+        };
+        let sprite = Sprite::new(frames, Arc::clone(palette), anim.frame_ms, anim.stride);
+        match density {
+            None => {
+                bases.insert(piece, sprite);
+            }
+            Some(density) => {
+                variants.insert((piece, density), (key, sprite));
+            }
+        }
+    }
+    let pieces = EnumMap::try_from_fn(|piece| {
+        bases
+            .remove(&piece)
+            .ok_or(PackError::MissingPiece { piece })
+    })?;
+    let strides = EnumMap::try_from_fn(|walk: Walk| {
+        pieces[walk.piece()]
+            .stride()
+            .ok_or(PackError::WalkWithoutStride { walk: walk.piece() })
+    })?;
+    let mut redrawn: EnumMap<Piece, BTreeMap<Density, Sprite>> = EnumMap::default();
+    for ((piece, density), (key, variant)) in variants {
+        let base = &pieces[piece];
+        if !variant_redraws(base, density, &variant) {
+            return Err(PackError::VariantDoesNotRedraw {
+                key,
+                base_frames: base.frames().len(),
+                variant_frames: variant.frames().len(),
+            });
+        }
+        redrawn[piece].insert(density, variant);
+    }
+    Ok(Pieces {
+        pieces,
+        variants: redrawn,
+        strides,
+    })
 }
 
 /// An icon's art: the one frame it is drawn as in each place text is.
@@ -1292,12 +1348,12 @@ fn building_art(
     get_src: &mut dyn FnMut(&str) -> Result<String>,
 ) -> Result<BuildingArt> {
     let src = get_src(fname)?;
-    let marked = decode(fname, &src, palette)?;
-    let [(frame, _)] = marked.as_slice() else {
+    let Some(one) = one_frame(decode(fname, &src, palette)?) else {
         return Err(PackError::BuildingFrames {
             file: fname.to_owned(),
         });
     };
+    let frame = &one.0;
     let pixels = palette.resolved();
     let index = |m: Material| palette.index_of(materials.key(m));
     let drawn: Vec<_> = Material::ALL.into_iter().filter_map(index).collect();
@@ -1316,9 +1372,18 @@ fn building_art(
     let glass = index(Material::Glass).and_then(|i| PaletteIndex::try_from(i).ok());
     let windows = glass.map_or_else(Vec::new, |g| runs_of(grid, g));
     Ok(BuildingArt {
-        sprite: Sprite::new(marked, Arc::clone(palette), 0, None),
+        sprite: Sprite::new(Vec1::new(one), Arc::clone(palette), 0, None),
         windows,
     })
+}
+
+/// The one frame of `marked`, if it holds exactly one.
+fn one_frame(marked: Vec<(IndexedFrame, Vec<Mark>)>) -> Option<(IndexedFrame, Vec<Mark>)> {
+    let mut frames = marked.into_iter();
+    match (frames.next(), frames.next()) {
+        (Some(one), None) => Some(one),
+        _ => None,
+    }
 }
 
 /// Each 4-connected run of `index` in `grid`, as its pixels.
@@ -1373,6 +1438,81 @@ pub const PACK_MANIFEST: &str = "pack.toml";
 /// If `pack_toml` does not parse, a frame it names is absent from `frames`, or the pack fails validation.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     load_from_strings(pack_toml, frames, &mut |_| {})
+}
+
+/// The one-frame sprite [`fill_pack_manifest`] draws every piece it adds in.
+#[doc(hidden)]
+pub const FILLER_SPRITE: (&str, &str) = ("filler.sprite", "@frame 0\n~");
+
+/// The palette keys [`fill_pack_manifest`] adds: the filler's, then one per
+/// [`Material`] and the character outline's.
+const FILLER_KEYS: [char; 9] = ['~', '^', '`', '|', '{', '}', '<', '>', '='];
+
+/// `pack_toml` with every piece it leaves out drawn in [`FILLER_SPRITE`],
+/// each walk given a stride, and `[city]` and `[characters]` added where it
+/// has none: a test's pack names only what it tests and still loads.
+///
+/// # Errors
+///
+/// If `pack_toml` is not TOML.
+#[doc(hidden)]
+pub fn fill_pack_manifest(pack_toml: &str) -> Result<String> {
+    use toml::{Table, Value};
+    let mut manifest: Table = pack_toml
+        .parse()
+        .map_err(|source| PackError::Manifest { source })?;
+    // Taken out and put back: a key that holds no table is a test's mistake
+    // the load reports.
+    let mut take = |key: &str| match manifest.remove(key) {
+        Some(Value::Table(t)) => t,
+        _ => Table::new(),
+    };
+    let (mut palette, mut animations) = (take("palette"), take("animations"));
+    for (i, key) in FILLER_KEYS.into_iter().enumerate() {
+        palette
+            .entry(key.to_string())
+            .or_insert_with(|| Value::String(format!("#0000{i:02x}")));
+    }
+    for &piece in Piece::VARIANTS {
+        animations.entry(piece.name()).or_insert_with(|| {
+            let mut anim = Table::new();
+            let frames = vec![Value::String(FILLER_SPRITE.0.to_owned()); piece.min_frames()];
+            anim.insert("frames".into(), Value::Array(frames));
+            anim.insert("frame_ms".into(), Value::Integer(100));
+            if piece.walk().is_some() {
+                anim.insert("stride".into(), Value::Integer(1));
+            }
+            Value::Table(anim)
+        });
+    }
+    manifest.insert("palette".into(), Value::Table(palette));
+    manifest.insert("animations".into(), Value::Table(animations));
+    if !manifest.contains_key("city") {
+        let city = Material::ALL
+            .iter()
+            .zip(&FILLER_KEYS[1..])
+            .map(|(m, k)| (m.name().to_owned(), Value::String(k.to_string())))
+            .collect();
+        manifest.insert("city".into(), Value::Table(city));
+    }
+    if !manifest.contains_key("characters") {
+        let mut characters = Table::new();
+        characters.insert("outline".into(), Value::String(FILLER_KEYS[8].to_string()));
+        manifest.insert("characters".into(), Value::Table(characters));
+    }
+    Ok(manifest.to_string())
+}
+
+/// [`load_pack_from_strings`] of [`fill_pack_manifest`]`(pack_toml)`, with
+/// [`FILLER_SPRITE`] among `frames`.
+///
+/// # Errors
+///
+/// As [`load_pack_from_strings`].
+#[doc(hidden)]
+pub fn load_filled_pack(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
+    let frames: Vec<_> = frames.iter().copied().chain([FILLER_SPRITE]).collect();
+    load_pack_from_strings(&fill_pack_manifest(pack_toml)?, &frames)
 }
 
 /// The frame files [`load_pack_from_strings`] reads, in the order it reads
@@ -1473,22 +1613,193 @@ fn build_palette(
     Ok(palette)
 }
 
-/// The character poses: every one is drawn, so the pack ships each.
-pub const CHARACTER_ANIMATIONS: &[&str] = &[
-    "seated",
-    "typing",
-    "standing",
-    "walking",
-    "walking_back",
-    "seated_sleeping",
-    "seated_sleeping_alt",
-    "holding_coffee",
-    "back_couch",
-    "walking_coffee",
-    "side_seated",
-    "seated_back",
-    "typing_back",
-];
+/// Every piece a pack draws: the character poses, the furniture and the
+/// room's fixtures, and the creatures. A pack ships each, so a loaded
+/// [`Pack`] hands out any of them ([`Pack::piece`]); the manifest keys it
+/// by its [`name`](Self::name).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    enum_map::Enum,
+    strum::VariantArray,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[strum(serialize_all = "snake_case")]
+#[expect(missing_docs, reason = "a variant is its manifest key, `Piece::name`")]
+pub enum Piece {
+    Seated,
+    Typing,
+    Standing,
+    Walking,
+    WalkingBack,
+    SeatedSleeping,
+    SeatedSleepingAlt,
+    HoldingCoffee,
+    BackCouch,
+    WalkingCoffee,
+    SideSeated,
+    SeatedBack,
+    TypingBack,
+    Desk,
+    DeskNorth,
+    DeskFront,
+    FilingCabinet,
+    Plant,
+    PlantTall,
+    PlantFlower,
+    PlantSucculent,
+    FloorLamp,
+    Door,
+    MeetingSofa,
+    MeetingSofaNorth,
+    MeetingScreen,
+    Pantry,
+    PantrySmall,
+    Whiteboard,
+    Bookshelf,
+    SnackShelf,
+    TvStand,
+    PhoneBooth,
+    StandingDesk,
+    BulletinBoard,
+    ExitSign,
+    DeskChair,
+    DeskCup,
+    TokenTower,
+    TokenSheet,
+    VendingMachine,
+    Printer,
+    MeetingTable,
+    KitchenIsland,
+    SideTable,
+    WaterCooler,
+    PantryBin,
+    FishTank,
+    CoatRack,
+    NoticeBoard,
+    WallClock,
+    MeetingChair,
+    CatWalk,
+    CatSit,
+    CatSleep,
+    DogWalk,
+    DogSit,
+    DogSleep,
+    LobsterWalk,
+    LobsterRest,
+}
+
+/// What a [`Piece`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PieceKind {
+    /// A character pose, which a hairstyle dresses.
+    Character,
+    /// Furniture or a fixture of the room.
+    Furniture,
+    /// A pet or a gateway mascot: it stands on its feet wherever its frame
+    /// ends, so it is kept apart from the furniture.
+    Creature,
+}
+
+impl Piece {
+    /// Its key in the manifest's `[animations]`.
+    pub fn name(self) -> &'static str {
+        self.into()
+    }
+
+    /// The piece `name` keys, if it keys one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        name.parse().ok()
+    }
+
+    /// What it is.
+    pub fn kind(self) -> PieceKind {
+        use Piece::*;
+        match self {
+            Seated | Typing | Standing | Walking | WalkingBack | SeatedSleeping
+            | SeatedSleepingAlt | HoldingCoffee | BackCouch | WalkingCoffee | SideSeated
+            | SeatedBack | TypingBack => PieceKind::Character,
+            CatWalk | CatSit | CatSleep | DogWalk | DogSit | DogSleep | LobsterWalk
+            | LobsterRest => PieceKind::Creature,
+            _ => PieceKind::Furniture,
+        }
+    }
+
+    /// The walk it is, if a walker steps it by the ground it covers.
+    pub fn walk(self) -> Option<Walk> {
+        Walk::VARIANTS.iter().copied().find(|w| w.piece() == self)
+    }
+
+    /// The fewest frames it is drawn in: an animation that never moves is
+    /// not one.
+    pub fn min_frames(self) -> usize {
+        match self {
+            Piece::Door => 3,
+            Piece::Typing
+            | Piece::Walking
+            | Piece::WalkingBack
+            | Piece::CatWalk
+            | Piece::DogWalk
+            | Piece::LobsterWalk => 2,
+            _ => 1,
+        }
+    }
+
+    /// The piece it is drawn over, on that piece's canvas: `desk_front` is
+    /// what of `desk` stands nearer the viewer than its sitter's props. An
+    /// overlay keeps that piece's canvas rather than grounding on its own
+    /// bottom row.
+    pub fn overlay_of(self) -> Option<Piece> {
+        match self {
+            Piece::DeskFront => Some(Piece::Desk),
+            _ => None,
+        }
+    }
+}
+
+/// A piece a walker steps by the ground it covers: its frames advance by
+/// distance, so a planted foot stays planted at any speed ([`Pack::stride`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, enum_map::Enum, strum::VariantArray)]
+#[expect(missing_docs, reason = "a variant is its piece, `Walk::piece`")]
+pub enum Walk {
+    Walking,
+    WalkingBack,
+    WalkingCoffee,
+    CatWalk,
+    DogWalk,
+    LobsterWalk,
+}
+
+impl Walk {
+    /// Its piece.
+    pub fn piece(self) -> Piece {
+        match self {
+            Walk::Walking => Piece::Walking,
+            Walk::WalkingBack => Piece::WalkingBack,
+            Walk::WalkingCoffee => Piece::WalkingCoffee,
+            Walk::CatWalk => Piece::CatWalk,
+            Walk::DogWalk => Piece::DogWalk,
+            Walk::LobsterWalk => Piece::LobsterWalk,
+        }
+    }
+}
+
+/// A manifest key: a piece, or a density variant of one (`desk@4x`).
+/// Variants are legal BY DERIVATION rather than by their own registry rows: a
+/// second list would have to be kept in step with the first.
+fn parse_key(name: &str) -> Option<(Piece, Option<Density>)> {
+    match split_density_variant(name) {
+        Some((base, density)) => Some((Piece::from_name(base)?, Some(density))),
+        None => Some((Piece::from_name(name)?, None)),
+    }
+}
 
 /// Separator joining an animation to the density it is drawn at: `desk@4x` is
 /// the `desk` piece drawn on a 4x grid, for a painter rendering at a scale
@@ -1576,107 +1887,6 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
     Some((base, density))
 }
 
-/// Every registered animation: the character poses, the furniture and the
-/// creatures. The pack ships each.
-fn registered_animation_names() -> impl Iterator<Item = &'static str> {
-    CHARACTER_ANIMATIONS
-        .iter()
-        .chain(FURNITURE_ANIMATIONS)
-        .chain(CREATURE_ANIMATIONS)
-        .copied()
-}
-
-/// A pack key that names a registered animation: the animation itself, or a
-/// density variant of it (`desk@4x`). Any registered animation takes variants,
-/// since a character is redrawn at density like furniture.
-///
-/// Variants are legal BY DERIVATION rather than by their own registry rows: a
-/// second list would have to be kept in step with the first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RegisteredKey {
-    /// The registered animation the key names or redraws.
-    base: &'static str,
-    /// The density a variant is drawn at; `None` for the animation itself.
-    density: Option<Density>,
-}
-
-impl RegisteredKey {
-    /// `name` as a registered key, or `None` when it names nothing registered.
-    fn parse(name: &str) -> Option<Self> {
-        let (base, density) =
-            split_density_variant(name).map_or((name, None), |(base, d)| (base, Some(d)));
-        registered_animation_names()
-            .find(|&known| known == base)
-            .map(|base| Self { base, density })
-    }
-}
-
-/// The furniture and the room's fixtures.
-pub const FURNITURE_ANIMATIONS: &[&str] = &[
-    "desk",
-    "desk_north",
-    "desk_front",
-    "filing_cabinet",
-    "plant",
-    "plant_tall",
-    "plant_flower",
-    "plant_succulent",
-    "floor_lamp",
-    "door",
-    "meeting_sofa",
-    "meeting_sofa_north",
-    "meeting_screen",
-    "pantry",
-    "pantry_small",
-    "whiteboard",
-    "bookshelf",
-    "snack_shelf",
-    "tv_stand",
-    "phone_booth",
-    "standing_desk",
-    "bulletin_board",
-    "exit_sign",
-    "desk_chair",
-    "desk_cup",
-    "token_tower",
-    "token_sheet",
-    "vending_machine",
-    "printer",
-    "meeting_table",
-    "kitchen_island",
-    "side_table",
-    "water_cooler",
-    "pantry_bin",
-    "fish_tank",
-    "coat_rack",
-    "notice_board",
-    "wall_clock",
-    "meeting_chair",
-];
-
-/// The pets' and the gateway mascots' animations: they stand on their feet
-/// wherever their frame ends, so they are kept apart from the furniture.
-pub const CREATURE_ANIMATIONS: &[&str] = &[
-    "cat_walk",
-    "cat_sit",
-    "cat_sleep",
-    "dog_walk",
-    "dog_sit",
-    "dog_sleep",
-    "lobster_walk",
-    "lobster_rest",
-];
-
-const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
-    ("typing", 2),
-    ("walking", 2),
-    ("walking_back", 2),
-    ("door", 3),
-    ("cat_walk", 2),
-    ("dog_walk", 2),
-    ("lobster_walk", 2),
-];
-
 /// The size a `<base>@<N>x` variant must be: `base`'s times `density`, exactly.
 ///
 /// Wider than a frame dimension: a claim past `u16::MAX` stays a size no frame
@@ -1708,43 +1918,14 @@ pub fn variant_redraws(base: &Sprite, density: Density, variant: &Sprite) -> boo
             .all(|(base, variant)| variant_fits(base, density, variant))
 }
 
-/// A density variant with a frame whose size is not what its name claims over
-/// the matching base frame.
-///
-/// [`validate_pack_animations`] calls it an error: a renderer skips such a
-/// variant, so the art the author shipped never shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DensityMismatch {
-    /// The variant's animation name, e.g. `desk@4x`.
-    pub name: String,
-    /// Its first frame that misses the claim, counted from 0 in the order the
-    /// pack loads them: every `@frame` block of each file its `frames` lists.
-    pub frame: usize,
-    /// The size the name claims: [`claimed_variant_size`].
-    pub claimed: (u32, u32),
-    /// The size that frame actually is.
-    pub found: (u16, u16),
-}
-
-/// A density variant whose frame count is not its base's, so it cannot redraw
-/// it ([`variant_redraws`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FrameCountMismatch {
-    /// The variant's animation name, e.g. `typing@2x`.
-    pub name: String,
-    /// How many frames its base animation has.
-    pub base_frames: usize,
-    /// How many frames the variant has.
-    pub variant_frames: usize,
-}
-
 /// A character frame a hairstyle would dress but for its missing head mark: it
 /// is drawn bare.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnmarkedHead {
     /// The animation, e.g. `standing@4x`.
     pub name: String,
-    /// Its first unmarked frame, counted as [`DensityMismatch::frame`] is.
+    /// Its first unmarked frame, counted from 0 in the order the
+    /// pack loads them: every `@frame` block of each file its `frames` lists.
     pub frame: usize,
 }
 
@@ -1773,25 +1954,10 @@ pub struct HairOverhang {
     pub frame: usize,
 }
 
-/// Per-category tally of a pack's animation discrepancies.
+/// What a loaded pack draws as its author may not have meant: a pack that
+/// can't draw at all does not load ([`PackError`]).
 #[derive(Debug, Default)]
 pub struct ValidationReport {
-    /// Registered animations absent from the pack — an error.
-    pub missing: Vec<String>,
-    /// `(name, need, have)` — REQUIRED count first — for each animation with
-    /// fewer frames than its minimum.
-    pub insufficient_frames: Vec<(String, usize, usize)>,
-    /// Animation names present in the pack that are neither registered nor a
-    /// density variant of a registered animation.
-    pub unknown: Vec<String>,
-    /// Each density variant with a frame whose size is not its base frame's
-    /// times the density its NAME claims.
-    pub mismatched_density: Vec<DensityMismatch>,
-    /// Each density variant whose BASE animation the pack does not ship: its
-    /// size claim is unprovable without the base.
-    pub orphan_variants: Vec<String>,
-    /// Each density variant whose frame count is not its base's.
-    pub mismatched_frame_counts: Vec<FrameCountMismatch>,
     /// One per character animation.
     pub unmarked_heads: Vec<UnmarkedHead>,
     /// One per hairstyle view.
@@ -1800,21 +1966,12 @@ pub struct ValidationReport {
     pub overhanging_hair: Vec<HairOverhang>,
     /// Each hairstyle key at a density the pack draws no character at.
     pub orphan_hairstyles: Vec<String>,
-    /// Each of the caller's walks the pack ships without a `stride`: it steps
-    /// on its clock, so its feet slide whenever its pace changes.
-    pub walks_without_stride: Vec<String>,
-    /// Each mark a piece the caller stands props on leaves out: nothing stands
-    /// there, in either look.
-    pub missing_marks: Vec<MissingMark>,
     /// Each density variant timed apart from its base: a renderer times a
     /// variant by its base, so the variant's own timing never plays.
     pub unread_variant_timing: Vec<UnreadTiming>,
     /// Each of the caller's loops whose frames don't hold whole beats: the
     /// beat skips or stretches one.
     pub off_beat_loops: Vec<OffBeatLoop>,
-    /// Each palette key a piece the caller lights leaves undrawn: no light
-    /// rises there, in either look.
-    pub missing_keys: Vec<MissingKey>,
 }
 
 /// A density variant's timing that differs from its base's, which is the
@@ -1855,42 +2012,14 @@ pub struct OffBeatLoop {
     pub frame_ms: u32,
 }
 
-/// A palette key a piece's first frame draws no pixel in, at one of its
-/// densities.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingKey {
-    /// The animation, e.g. `desk@4x`.
-    pub name: String,
-    /// The key it leaves undrawn.
-    pub key: char,
-}
-
-/// A mark a piece's first frame leaves out, at one of its densities.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MissingMark {
-    /// The animation, e.g. `desk@4x`.
-    pub name: String,
-    /// The mark it leaves out, e.g. `cup`.
-    pub mark: &'static str,
-}
-
 /// What only the caller knows of a pack.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PackContract<'a> {
-    /// The animations the caller steps by [`Sprite::stride`].
-    pub walks: &'a [&'static str],
-    /// Each piece the caller stands props on, with the marks its first frame
-    /// carries at every density.
-    pub marks: &'a [(&'static str, &'static [&'static str])],
-    /// The animations the caller loops on its beat, unless they carry a
-    /// [`stride`](Sprite::stride), each with the frame its loop starts at:
-    /// the frames before it stand still.
-    pub loops: &'a [(&'static str, usize)],
+    /// The pieces the caller loops on its beat, unless they are walks, each
+    /// with the frame its loop starts at: the frames before it stand still.
+    pub loops: &'a [(Piece, usize)],
     /// The beat `loops` step on, in ms; 0 checks none.
     pub beat_ms: u64,
-    /// Each piece the caller lights, with the palette key its first frame
-    /// draws the light's source in at every density.
-    pub keys: &'a [(&'static str, char)],
 }
 
 impl ValidationReport {
@@ -1899,28 +2028,14 @@ impl ValidationReport {
         // No `..`: a new report field must be classed error-or-not here before
         // this compiles.
         let ValidationReport {
-            missing,
-            insufficient_frames,
-            unknown: _,
-            mismatched_density,
-            orphan_variants,
-            mismatched_frame_counts,
             unmarked_heads: _,
             missing_hair_views: _,
             overhanging_hair: _,
             orphan_hairstyles,
-            walks_without_stride: _,
-            missing_marks: _,
             unread_variant_timing: _,
             off_beat_loops: _,
-            missing_keys: _,
         } = self;
-        missing.len()
-            + insufficient_frames.len()
-            + mismatched_density.len()
-            + orphan_variants.len()
-            + mismatched_frame_counts.len()
-            + orphan_hairstyles.len()
+        orphan_hairstyles.len()
     }
 
     /// How many findings leave the pack usable but not as authored: the fields
@@ -1928,30 +2043,18 @@ impl ValidationReport {
     pub fn warning_count(&self) -> usize {
         // No `..`, for the reason `error_count` gives.
         let ValidationReport {
-            missing: _,
-            insufficient_frames: _,
-            unknown: _,
-            mismatched_density: _,
-            orphan_variants: _,
-            mismatched_frame_counts: _,
             unmarked_heads,
             missing_hair_views,
             overhanging_hair,
             orphan_hairstyles: _,
-            walks_without_stride,
-            missing_marks,
             unread_variant_timing,
             off_beat_loops,
-            missing_keys,
         } = self;
         unmarked_heads.len()
             + missing_hair_views.len()
             + overhanging_hair.len()
-            + walks_without_stride.len()
-            + missing_marks.len()
             + unread_variant_timing.len()
             + off_beat_loops.len()
-            + missing_keys.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -1960,128 +2063,36 @@ impl ValidationReport {
     }
 }
 
-/// Check a pack's animations against the registry and its multi-frame
-/// minimums, each density variant against its base, and against what only the
-/// caller knows ([`PackContract`]).
-///
-/// An unauthored variant is not reported missing: a pack that has not been
-/// redrawn at a density is the normal case, not a gap.
+/// Check a loaded pack's variants' timing, its hairstyles against the
+/// characters they dress, and its loops against what only the caller knows
+/// ([`PackContract`]).
 pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> ValidationReport {
-    let PackContract {
-        walks,
-        marks,
-        loops,
-        beat_ms,
-        keys,
-    } = *contract;
+    let PackContract { loops, beat_ms } = *contract;
     let mut report = ValidationReport {
-        walks_without_stride: walks
-            .iter()
-            .filter(|&&name| pack.animation(name).is_some_and(|a| a.stride().is_none()))
-            .map(|&name| name.to_string())
-            .collect(),
         off_beat_loops: loops
             .iter()
-            .filter_map(|&(name, start)| Some((name, start, pack.animation(name)?)))
-            .filter(|(_, start, a)| a.frames().len() > start + 1 && a.stride().is_none())
-            .map(|(name, _, a)| (name, a))
-            .filter(|(_, a)| {
+            .map(|&(piece, start)| (piece, start, pack.piece(piece)))
+            .filter(|(piece, start, a)| a.frames().len() > start + 1 && piece.walk().is_none())
+            .filter(|(_, _, a)| {
                 u64::from(a.frame_ms())
                     .checked_rem(beat_ms)
                     .is_some_and(|r| r != 0)
             })
-            .map(|(name, a)| OffBeatLoop {
-                name: name.to_string(),
+            .map(|(piece, _, a)| OffBeatLoop {
+                name: piece.name().to_string(),
                 frame_ms: a.frame_ms(),
             })
             .collect(),
         ..ValidationReport::default()
     };
 
-    report.missing = registered_animation_names()
-        .filter(|name| pack.animation(name).is_none())
-        .map(str::to_string)
-        .collect();
-
-    let mut variants: Vec<(&str, &Sprite, &'static str, Density)> = pack
-        .animations
-        .iter()
-        .filter_map(|(name, variant)| {
-            let RegisteredKey { base, density } = RegisteredKey::parse(name)?;
-            Some((name.as_str(), variant, base, density?))
-        })
-        .collect();
-    // by name, so a report lists a pack's findings in one order every run
-    variants.sort_unstable_by_key(|v| v.0);
-
-    // A piece's art at its base and at each of its density variants.
-    let at_each_density = |piece: &'static str| {
-        let densities = variants
-            .iter()
-            .filter(move |v| v.2 == piece)
-            .map(|v| (v.0, v.1));
-        pack.animation(piece)
-            .map(|s| (piece, s))
-            .into_iter()
-            .chain(densities)
-    };
-    for &(piece, wanted) in marks {
-        for (name, sprite) in at_each_density(piece) {
-            for &mark in wanted {
-                if !sprite.marks(0).iter().any(|m| m.name() == mark) {
-                    report.missing_marks.push(MissingMark {
-                        name: name.to_owned(),
-                        mark,
-                    });
-                }
-            }
-        }
-    }
-
-    for &(piece, key) in keys {
-        for (name, sprite) in at_each_density(piece) {
-            let draws = sprite
-                .recolorable(0)
-                .is_some_and(|f| f.drawn_in(&[key]).contains(&true));
-            if !draws {
-                report.missing_keys.push(MissingKey {
-                    name: name.to_owned(),
-                    key,
-                });
-            }
-        }
-    }
-
-    let mut check_frames = |name: &str, requirement_key: &str| {
-        let min_frames = MULTI_FRAME_REQUIREMENTS
-            .iter()
-            .find(|&&(n, _)| n == requirement_key)
-            // Implicit min-1 floor: a `frames = []` entry deserializes and makes
-            // `animation()` return Some (dodging the missing check)
-            // while every render consumer guards with `.frames().first()` and
-            // draws nothing.
-            .map_or(1, |&(_, min)| min);
-        if let Some(anim) = pack.animation(name)
-            && anim.frames().len() < min_frames
-        {
-            report
-                .insufficient_frames
-                .push((name.to_string(), min_frames, anim.frames().len()));
-        }
-    };
-    for name in registered_animation_names() {
-        check_frames(name, name);
-    }
-
-    for &(name, variant, base, density) in &variants {
-        let Some(base) = pack.animation(base).filter(|a| !a.frames().is_empty()) else {
-            report.orphan_variants.push(name.to_string());
-            continue;
-        };
+    for (piece, density, variant) in pack.variants() {
+        let base = pack.piece(piece);
+        let name = density_variant_name(piece.name(), density);
         // a single-frame base never steps, so no painter reads its `frame_ms`
         if base.frames().len() > 1 && variant.frame_ms() != base.frame_ms() {
             report.unread_variant_timing.push(UnreadTiming {
-                name: name.to_string(),
+                name: name.clone(),
                 field: UnreadField::FrameMs {
                     base: base.frame_ms(),
                     variant: variant.frame_ms(),
@@ -2090,56 +2101,31 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         }
         if let Some(stride) = variant.stride().filter(|&s| Some(s) != base.stride()) {
             report.unread_variant_timing.push(UnreadTiming {
-                name: name.to_string(),
+                name,
                 field: UnreadField::Stride {
                     base: base.stride(),
                     variant: stride,
                 },
             });
         }
-        if variant_redraws(base, density, variant) {
-            continue;
-        }
-        // Each defect is its own finding, so a short AND mis-sized variant
-        // reports both.
-        let (base_frames, variant_frames) = (base.frames(), variant.frames());
-        // An empty variant lands here too, as a count of 0: it redraws nothing.
-        if variant_frames.len() != base_frames.len() {
-            report.mismatched_frame_counts.push(FrameCountMismatch {
-                name: name.to_string(),
-                base_frames: base_frames.len(),
-                variant_frames: variant_frames.len(),
-            });
-        }
-        let first_miss = base_frames
-            .iter()
-            .zip(variant_frames)
-            .enumerate()
-            .find(|(_, (base_art, art))| !variant_fits(base_art, density, art));
-        if let Some((frame, (base_art, art))) = first_miss {
-            report.mismatched_density.push(DensityMismatch {
-                name: name.to_string(),
-                frame,
-                claimed: claimed_variant_size(base_art, density),
-                found: (art.width(), art.height()),
-            });
-        }
     }
 
-    let mut characters: Vec<(&str, &Sprite, Density)> = variants
-        .iter()
-        .filter(|(_, _, base, _)| CHARACTER_ANIMATIONS.contains(base))
-        .map(|&(name, sprite, _, density)| (name, sprite, density))
+    let characters: Vec<(String, &Sprite, Density)> = pack
+        .variants()
+        .filter(|(piece, ..)| piece.kind() == PieceKind::Character)
+        .map(|(piece, density, sprite)| {
+            (density_variant_name(piece.name(), density), sprite, density)
+        })
         .collect();
-    characters.sort_unstable_by_key(|&(name, ..)| name);
     let dressed_densities: BTreeSet<Density> = pack.hairstyles().map(Hairstyle::density).collect();
-    for &(name, sprite, density) in &characters {
+    for (name, sprite, density) in &characters {
+        let (sprite, density) = (*sprite, *density);
         if !dressed_densities.contains(&density) {
             continue;
         }
         if let Some(frame) = (0..sprite.frames().len()).find(|&i| sprite.head(i).is_none()) {
             report.unmarked_heads.push(UnmarkedHead {
-                name: name.to_owned(),
+                name: name.clone(),
                 frame,
             });
         }
@@ -2153,7 +2139,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             continue;
         }
         let (mut missing, mut overhung) = (Vec::new(), Vec::new());
-        for &(name, sprite, _) in dressed {
+        for (name, sprite, _) in dressed {
             for (frame, body) in sprite.frames().iter().enumerate() {
                 let Some(head) = sprite.head(frame) else {
                     continue;
@@ -2164,7 +2150,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
                         report.missing_hair_views.push(MissingHairView {
                             style: key.clone(),
                             view: head.view,
-                            name: name.to_owned(),
+                            name: name.clone(),
                         });
                     }
                     continue;
@@ -2178,17 +2164,11 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
                     report.overhanging_hair.push(HairOverhang {
                         style: key.clone(),
                         view: head.view,
-                        name: name.to_owned(),
+                        name: name.clone(),
                         frame,
                     });
                 }
             }
-        }
-    }
-
-    for name in pack.animation_names() {
-        if RegisteredKey::parse(&name).is_none() {
-            report.unknown.push(name);
         }
     }
 
@@ -2218,50 +2198,258 @@ mod validation_floor_tests {
         Density::new(n).expect("nonzero")
     }
 
-    /// Each frame [`frames_read_by`] reports is one the pack fails to load
-    /// without, and each other is one it loads without: the read set is the
-    /// needed set a leave-one-out load would find.
-    #[test]
-    fn the_frames_read_are_the_frames_needed() {
-        let toml = "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-                    [animations.idle]\nframes=[\"a.sprite\", \"b.sprite\"]\nframe_ms=100\n";
-        let frames = [
-            ("a.sprite", "@frame 0\nA"),
-            ("b.sprite", "@frame 0\nA"),
-            ("stray.sprite", "@frame 0\nA"),
-        ];
-        let read = frames_read_by(toml, &frames).expect("the whole set loads");
-        assert_eq!(read, ["a.sprite", "b.sprite"]);
-        for (name, _) in frames {
-            let without: Vec<_> = frames.iter().copied().filter(|&(n, _)| n != name).collect();
-            assert_eq!(
-                read.iter().any(|r| r == name),
-                load_pack_from_strings(toml, &without).is_err(),
-                "{name}"
-            );
-        }
+    /// A pack of `animations` over the filler, whose frame files are `frames`.
+    fn try_pack_with_frames(animations: &str, frames: &[(&str, &str)]) -> Result<Pack> {
+        load_filled_pack(
+            &format!("[palette]\n\"A\"=\"#010203\"\n{animations}"),
+            frames,
+        )
     }
 
-    /// A pack of `animations` whose frame files are `frames`.
     fn pack_with_frames(animations: &str, frames: &[(&str, &str)]) -> Pack {
-        let toml = format!(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n{animations}"
-        );
-        load_pack_from_strings(&toml, frames).expect("pack builds")
+        try_pack_with_frames(animations, frames).expect("pack builds")
     }
 
     fn pack_with(animations: &str) -> Pack {
         pack_with_frames(animations, &[("f.sprite", "@frame 0\nA")])
     }
 
+    /// `animations` as a manifest `try_pack_with_frames` refuses.
+    fn refused(animations: &str, frames: &[(&str, &str)]) -> PackError {
+        try_pack_with_frames(animations, frames).expect_err("the pack does not load")
+    }
+
+    /// `[animations.<key>]` of `files`, 100 ms a frame.
+    fn anim(key: &str, files: &[&str]) -> String {
+        let files: Vec<_> = files.iter().map(|f| format!("\"{f}\"")).collect();
+        format!(
+            "[animations.\"{key}\"]\nframes=[{}]\nframe_ms=100\n",
+            files.join(", ")
+        )
+    }
+
+    /// Each frame [`frames_read_by`] reports is one the pack fails to load
+    /// without, and each other is one it loads without: the read set is the
+    /// needed set a leave-one-out load would find.
+    #[test]
+    fn the_frames_read_are_the_frames_needed() {
+        let toml = fill_pack_manifest(
+            "[palette]\n\"A\"=\"#010203\"\n\
+             [animations.typing]\nframes=[\"a.sprite\", \"b.sprite\"]\nframe_ms=100\n",
+        )
+        .expect("a manifest");
+        let frames = [
+            ("a.sprite", "@frame 0\nA"),
+            ("b.sprite", "@frame 0\nA"),
+            ("stray.sprite", "@frame 0\nA"),
+            FILLER_SPRITE,
+        ];
+        let read = frames_read_by(&toml, &frames).expect("the whole set loads");
+        assert!(!read.iter().any(|r| r == "stray.sprite"));
+        for (name, _) in frames {
+            let without: Vec<_> = frames.iter().copied().filter(|&(n, _)| n != name).collect();
+            assert_eq!(
+                read.iter().any(|r| r == name),
+                load_pack_from_strings(&toml, &without).is_err(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_filler_loads_an_empty_manifest() {
+        let pack = load_filled_pack("[palette]\n", &[]).expect("every piece is filled in");
+        for &piece in Piece::VARIANTS {
+            assert!(
+                pack.piece(piece).frames().len() >= piece.min_frames(),
+                "{piece:?}"
+            );
+            assert!(pack.variants_of(piece).is_empty(), "{piece:?}");
+        }
+        for &walk in Walk::VARIANTS {
+            assert_eq!(pack.stride(walk).get(), 1, "{walk:?}");
+        }
+    }
+
+    #[test]
+    fn every_piece_round_trips_its_name() {
+        for &piece in Piece::VARIANTS {
+            assert_eq!(Piece::from_name(piece.name()), Some(piece), "{piece:?}");
+        }
+        assert_eq!(Piece::from_name("idle"), None);
+        assert_eq!(Piece::from_name("desk@4x"), None);
+    }
+
+    /// Pins [`Piece::min_frames`] and [`Piece::walk`].
+    #[test]
+    fn a_piece_moves_through_the_frames_its_animation_needs() {
+        let moving: Vec<_> = Piece::VARIANTS
+            .iter()
+            .filter(|p| p.min_frames() > 1)
+            .map(|p| (p.name(), p.min_frames()))
+            .collect();
+        assert_eq!(
+            moving,
+            [
+                ("typing", 2),
+                ("walking", 2),
+                ("walking_back", 2),
+                ("door", 3),
+                ("cat_walk", 2),
+                ("dog_walk", 2),
+                ("lobster_walk", 2),
+            ]
+        );
+        for &walk in Walk::VARIANTS {
+            assert_eq!(walk.piece().walk(), Some(walk));
+        }
+        assert_eq!(
+            Piece::VARIANTS
+                .iter()
+                .filter(|p| p.walk().is_some())
+                .count(),
+            Walk::VARIANTS.len()
+        );
+    }
+
+    #[test]
+    fn sprite_first_is_its_first_frame() {
+        let pack = pack_with_frames(&anim("typing", &["one.sprite", "two.sprite"]), SIZED_FRAMES);
+        let typing = pack.piece(Piece::Typing);
+        assert!(std::ptr::eq(typing.first(), &typing.frames()[0]));
+        assert_eq!(typing.first().width(), 1);
+        assert_eq!(typing.frames()[1].width(), 2);
+    }
+
+    #[test]
+    fn a_pack_lacking_a_piece_does_not_load() {
+        use toml::{Table, Value};
+        let full: Table = fill_pack_manifest("[palette]\n")
+            .expect("a manifest")
+            .parse()
+            .expect("toml");
+        for &piece in Piece::VARIANTS {
+            let mut manifest = full.clone();
+            let Some(Value::Table(animations)) = manifest.get_mut("animations") else {
+                panic!("the filled manifest has animations");
+            };
+            animations.remove(piece.name());
+            let err = load_pack_from_strings(&manifest.to_string(), &[FILLER_SPRITE])
+                .expect_err("a piece is missing");
+            assert!(
+                matches!(err, PackError::MissingPiece { piece: p } if p == piece),
+                "{piece:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_animation_does_not_load() {
+        for key in ["idle", "dsek@4x", "desk@1x", "typo@64x", "desk@60000x"] {
+            let err = refused(&anim(key, &["f.sprite"]), &[("f.sprite", "@frame 0\nA")]);
+            assert!(
+                matches!(&err, PackError::UnknownAnimation { key: k } if k == key),
+                "{key}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pack_without_city_or_characters_does_not_load() {
+        for table in ["city", "characters"] {
+            let mut manifest: toml::Table = fill_pack_manifest("[palette]\n")
+                .expect("a manifest")
+                .parse()
+                .expect("toml");
+            manifest.remove(table);
+            let err = load_pack_from_strings(&manifest.to_string(), &[FILLER_SPRITE])
+                .expect_err("a required table is missing");
+            assert!(
+                matches!(&err, PackError::Manifest { source } if source.message().contains(table)),
+                "{table}: {err:?}"
+            );
+        }
+    }
+
+    /// A walk's frames advance by its stride, so one without it does not load.
+    #[test]
+    fn a_walk_without_a_stride_does_not_load() {
+        for &walk in Walk::VARIANTS {
+            let piece = walk.piece();
+            let files = vec!["f.sprite"; piece.min_frames()];
+            let err = refused(&anim(piece.name(), &files), &[("f.sprite", "@frame 0\nA")]);
+            assert!(
+                matches!(err, PackError::WalkWithoutStride { walk: p } if p == piece),
+                "{piece:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_animation_does_not_load() {
+        let frame = [("f.sprite", "@frame 0\nA")];
+        for &piece in Piece::VARIANTS {
+            let stride = if piece.walk().is_some() {
+                "stride=1\n"
+            } else {
+                ""
+            };
+            let load = |n: usize| {
+                let files = vec!["f.sprite"; n];
+                try_pack_with_frames(&format!("{}{stride}", anim(piece.name(), &files)), &frame)
+            };
+            assert!(load(piece.min_frames()).is_ok(), "{piece:?}");
+            let err = load(piece.min_frames() - 1).expect_err("one frame short");
+            assert!(
+                matches!(
+                    &err,
+                    PackError::TooFewFrames { key, need, have }
+                        if key == piece.name()
+                            && *need == piece.min_frames()
+                            && *have == piece.min_frames() - 1
+                ),
+                "{piece:?}: {err:?}"
+            );
+        }
+    }
+
+    /// A piece of `door`, `typing` and `seated` is each the fewest frames that
+    /// registry row names.
+    #[test]
+    fn a_door_needs_three_frames_a_typist_two_and_any_other_piece_one() {
+        for (name, need) in [("door", 3), ("typing", 2), ("seated", 1)] {
+            let have = need - 1;
+            let err = refused(
+                &anim(name, &vec!["f.sprite"; have]),
+                &[("f.sprite", "@frame 0\nA")],
+            );
+            assert!(
+                matches!(&err, PackError::TooFewFrames { key, need: n, have: h }
+                    if key == name && *n == need && *h == have),
+                "{name}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_animation_with_no_frames_does_not_load() {
+        for name in ["seated", "desk", "cat_sit"] {
+            let err = refused(
+                &format!("[animations.{name}]\nframes=[]\nframe_ms=100\n"),
+                &[],
+            );
+            assert!(
+                matches!(&err, PackError::TooFewFrames { key, need: 1, have: 0 } if key == name),
+                "{name}: {err:?}"
+            );
+        }
+    }
+
     /// Pins [`Pack::icon`]: each art an `[icons]` table names loads, at
     /// whichever of the two places it names.
     #[test]
     fn an_icon_loads_the_art_it_names() {
-        let pack = pack_with(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [icons.star]\nworld=\"f.sprite\"\n",
-        );
+        let pack = pack_with("[icons.star]\nworld=\"f.sprite\"\n");
         let star = pack.icon("star").expect("the star loads");
         assert_eq!(star.world().map(|s| s.frames().len()), Some(1));
         assert!(star.screen().is_none());
@@ -2270,24 +2458,11 @@ mod validation_floor_tests {
 
     #[test]
     fn an_icon_of_two_frames_is_refused() {
-        let toml = "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-                    [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-                    [icons.star]\nscreen=\"two.sprite\"\n";
-        let err = load_pack_from_strings(
-            toml,
-            &[
-                ("f.sprite", "@frame 0\nA"),
-                ("two.sprite", "@frame 0\nA\n@frame 1\nA"),
-            ],
-        )
-        .expect_err("two frames");
+        let err = refused(
+            "[icons.star]\nscreen=\"two.sprite\"\n",
+            &[("two.sprite", "@frame 0\nA\n@frame 1\nA")],
+        );
         assert!(matches!(err, PackError::IconFrames { file } if file == "two.sprite"));
-    }
-
-    fn pack_with_animation(name: &str, frames_toml: &str) -> Pack {
-        pack_with(&format!(
-            "[animations.{name}]\nframes={frames_toml}\nframe_ms=100\n"
-        ))
     }
 
     /// A variant timed apart from its base is reported, each field its own
@@ -2295,14 +2470,15 @@ mod validation_floor_tests {
     /// is not, and nor is a single-frame base's `frame_ms`, which nothing steps.
     #[test]
     fn a_variant_timed_apart_from_its_base_is_reported() {
-        let pack = pack_with(
-            "[animations.walking]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=100\nstride=2\n\
-             [animations.\"walking@2x\"]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=200\nstride=3\n\
-             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=600\n\
-             [animations.\"desk@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.typing]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n",
+        let pack = pack_with_frames(
+            "[animations.walking]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\nstride=2\n\
+             [animations.\"walking@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=200\nstride=3\n\
+             [animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=600\n\
+             [animations.\"desk@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
+             [animations.typing]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@4x\"]\nframes=[\"four.sprite\", \"four.sprite\"]\nframe_ms=100\nstride=2\n",
+            SIZED_FRAMES,
         );
         let report = validate_pack_animations(&pack, &PackContract::default());
         let (errors, warnings) = (report.error_count(), report.warning_count());
@@ -2355,21 +2531,19 @@ mod validation_floor_tests {
              [animations.typing_back]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=250\n\
              [animations.fish_tank]\nframes=[\"f.sprite\"]\nframe_ms=300\n\
              [animations.cat_walk]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\nstride=2\n\
-             [animations.printer]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\n\
              [animations.vending_machine]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\n",
         );
         let report = validate_pack_animations(
             &pack,
             &PackContract {
                 loops: &[
-                    ("typing", 0),
-                    ("typing_back", 0),
-                    ("fish_tank", 0),
-                    ("cat_walk", 0),
-                    ("vending_machine", 1),
+                    (Piece::Typing, 0),
+                    (Piece::TypingBack, 0),
+                    (Piece::FishTank, 0),
+                    (Piece::CatWalk, 0),
+                    (Piece::VendingMachine, 1),
                 ],
                 beat_ms: 125,
-                ..PackContract::default()
             },
         );
         assert_eq!(
@@ -2386,48 +2560,22 @@ mod validation_floor_tests {
         );
     }
 
-    /// Each of the caller's walks shipped without a stride is reported, a
-    /// warning; one with a stride, or one the pack leaves out, is not.
-    #[test]
-    fn a_walk_without_a_stride_is_reported() {
-        let pack = pack_with(
-            "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.cat_walk]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n",
-        );
-        let report = validate_pack_animations(
-            &pack,
-            &PackContract {
-                walks: &["walking", "cat_walk", "dog_walk"],
-                ..PackContract::default()
-            },
-        );
-        assert_eq!(report.walks_without_stride, vec!["walking".to_string()]);
-        assert_eq!(
-            report.error_count(),
-            validate_pack_animations(&pack, &PackContract::default()).error_count(),
-            "a clock walk still renders: no error"
-        );
-    }
-
     /// A walk carries its stride; a stride of nothing is no walk and the pack
     /// refuses it.
     #[test]
     fn a_walk_carries_its_stride_and_refuses_a_zero_one() {
         let pack = pack_with(
-            "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=12\n\
+            "[animations.walking]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=100\nstride=12\n\
              [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
         );
-        let stride = |name| {
-            pack.animation(name)
-                .expect("loaded")
-                .stride()
-                .map(|s| s.get())
-        };
-        assert_eq!(stride("walking"), Some(12));
-        assert_eq!(stride("seated"), None);
-        let zero = load_pack_from_strings(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=0\n",
+        assert_eq!(pack.stride(Walk::Walking).get(), 12);
+        assert_eq!(
+            pack.piece(Piece::Walking).stride().map(|s| s.get()),
+            Some(12)
+        );
+        assert_eq!(pack.piece(Piece::Seated).stride(), None);
+        let zero = try_pack_with_frames(
+            "[animations.walking]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=100\nstride=0\n",
             &[("f.sprite", "@frame 0\nA")],
         );
         assert!(zero.is_err(), "a zero stride loaded");
@@ -2446,40 +2594,41 @@ mod validation_floor_tests {
         ),
     ];
 
-    /// Pins [`RegisteredKey::parse`].
+    /// Pins [`parse_key`].
     #[test]
     fn a_key_names_a_registered_animation_or_a_density_variant_of_one() {
-        let key = |base, density| Some(RegisteredKey { base, density });
-        assert_eq!(RegisteredKey::parse("desk"), key("desk", None));
-        assert_eq!(RegisteredKey::parse("desk@4x"), key("desk", Some(d(4))));
+        assert_eq!(parse_key("desk"), Some((Piece::Desk, None)));
+        assert_eq!(parse_key("desk@4x"), Some((Piece::Desk, Some(d(4)))));
         assert_eq!(
-            RegisteredKey::parse("standing@2x"),
-            key("standing", Some(d(2)))
+            parse_key("standing@2x"),
+            Some((Piece::Standing, Some(d(2))))
         );
         assert_eq!(
-            RegisteredKey::parse("walking_coffee@8x"),
-            key("walking_coffee", Some(d(8)))
+            parse_key("walking_coffee@8x"),
+            Some((Piece::WalkingCoffee, Some(d(8))))
         );
         // The BASE must be registered, or a typo'd `dsek@4x` would validate.
-        assert_eq!(RegisteredKey::parse("dsek@4x"), None);
-        assert_eq!(RegisteredKey::parse("typo"), None);
-        assert_eq!(RegisteredKey::parse("desk@1x"), None);
+        assert_eq!(parse_key("dsek@4x"), None);
+        assert_eq!(parse_key("typo"), None);
+        assert_eq!(parse_key("desk@1x"), None);
     }
 
     /// Pins [`split_density_variant`]'s one spelling per density.
     #[test]
     fn a_density_with_a_leading_zero_is_not_a_variant() {
         assert_eq!(split_density_variant("desk@04x"), None);
-        let pack = pack_with_frames(
-            "[animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@02x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
+        let err = refused(
+            &format!(
+                "{}{}",
+                anim("desk", &["one.sprite"]),
+                anim("desk@02x", &["two.sprite"])
+            ),
             SIZED_FRAMES,
         );
-        assert_eq!(
-            validate_pack_animations(&pack, &PackContract::default()).unknown,
-            vec!["desk@02x".to_string()]
+        assert!(
+            matches!(&err, PackError::UnknownAnimation { key } if key == "desk@02x"),
+            "{err:?}"
         );
-        assert_eq!(pack.max_density_variant(), Density::ONE);
     }
 
     #[test]
@@ -2498,368 +2647,87 @@ mod validation_floor_tests {
         assert_eq!(split_density_variant("desk@-2x"), None);
     }
 
-    /// Pins [`Pack::density_variants`]: densest first, each density once, and
-    /// only variants that redraw their base.
+    /// Pins [`Pack::density_variants`]: densest first, each density once.
     #[test]
-    fn density_variants_are_the_redrawing_densities_densest_first() {
-        let pack = pack_with_frames(
-            "[animations.typing]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n\
-             [animations.walking]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"walking@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
-             [animations.\"walking@3x\"]\nframes=[\"three.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        assert_eq!(
-            pack.density_variants(),
-            vec![d(4), d(2)],
-            "3x does not redraw its base"
-        );
-        assert_eq!(pack.max_density_variant(), d(4));
-        let plain = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert!(plain.density_variants().is_empty());
-    }
-
-    /// Pins [`variant_redraws`]' every-frame proof.
-    #[test]
-    fn every_frame_of_a_variant_is_proved_against_its_base_frame() {
-        let pack = pack_with_frames(
-            "[animations.typing]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@2x\"]\nframes=[\"two.sprite\", \"three.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert_eq!(
-            report.mismatched_density,
-            vec![DensityMismatch {
-                name: "typing@2x".to_string(),
-                frame: 1,
-                claimed: (2, 2),
-                found: (3, 1),
-            }]
-        );
-    }
-
-    /// Pins [`ValidationReport::mismatched_frame_counts`], the one finding a
-    /// short variant of a multi-frame base makes.
-    #[test]
-    fn a_short_variant_is_one_frame_count_error() {
-        let pack = pack_with_frames(
-            "[animations.typing]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert_eq!(
-            report.mismatched_frame_counts,
-            vec![FrameCountMismatch {
-                name: "typing@2x".to_string(),
-                base_frames: 2,
-                variant_frames: 1,
-            }]
-        );
-        assert!(
-            report.insufficient_frames.is_empty(),
-            "{:?}",
-            report.insufficient_frames
-        );
-        assert!(report.has_errors());
-    }
-
-    /// Pins that the count and the size are each their own finding.
-    #[test]
-    fn a_short_and_mis_sized_variant_reports_both() {
-        let pack = pack_with_frames(
-            "[animations.typing]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing@2x\"]\nframes=[\"three.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert_eq!(report.mismatched_frame_counts.len(), 1, "{report:?}");
-        assert_eq!(
-            report.mismatched_density,
-            vec![DensityMismatch {
-                name: "typing@2x".to_string(),
-                frame: 0,
-                claimed: (2, 2),
-                found: (3, 1),
-            }]
-        );
-    }
-
-    /// Pins the MATCHING base frame, in [`variant_redraws`] and in the
-    /// validator's diagnosis of a variant that fails it.
-    #[test]
-    fn each_variant_frame_is_proved_against_the_matching_base_frame() {
-        let pack = pack_with_frames(
-            "[animations.walking]\nframes=[\"one.sprite\", \"three.sprite\"]\nframe_ms=100\n\
-             [animations.\"walking@2x\"]\nframes=[\"two.sprite\", \"six.sprite\"]\nframe_ms=100\n\
-             [animations.typing_back]\nframes=[\"one.sprite\", \"three.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"typing_back@2x\"]\nframes=[\"two.sprite\", \"six.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        let anim = |n| pack.animation(n).expect("in the pack");
-        assert!(variant_redraws(anim("walking"), d(2), anim("walking@2x")));
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert!(report.mismatched_density.is_empty(), "{report:?}");
-        assert_eq!(
-            report.mismatched_frame_counts,
-            vec![FrameCountMismatch {
-                name: "typing_back@2x".to_string(),
-                base_frames: 3,
-                variant_frames: 2,
-            }],
-            "the short variant's frames each fit their own base frame"
-        );
-    }
-
-    /// Pins [`variant_redraws`] as the validator's verdict.
-    #[test]
-    fn variant_redraws_is_the_validators_verdict() {
+    fn density_variants_are_the_densities_the_pack_redraws_densest_first() {
         let pack = pack_with_frames(
             "[animations.typing]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
              [animations.\"typing@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=100\n\
-             [animations.walking]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"walking@2x\"]\nframes=[\"two.sprite\", \"three.sprite\"]\nframe_ms=100\n\
-             [animations.walking_back]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"walking_back@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
-             [animations.standing]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"standing@2x\"]\nframes=[]\nframe_ms=100\n",
+             [animations.\"typing@4x\"]\nframes=[\"four.sprite\", \"four.sprite\"]\nframe_ms=100\n\
+             [animations.walking]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\nstride=1\n\
+             [animations.\"walking@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        for (name, base, redraws) in [
-            ("typing@2x", "typing", true),
-            ("walking@2x", "walking", false),
-            ("walking_back@2x", "walking_back", false),
-            ("standing@2x", "standing", false),
-        ] {
-            let anim = |n| pack.animation(n).expect("in the pack");
-            let verdict = variant_redraws(anim(base), d(2), anim(name));
-            let found = report.mismatched_density.iter().any(|m| m.name == name)
-                || report
-                    .mismatched_frame_counts
-                    .iter()
-                    .any(|m| m.name == name);
-            assert_eq!(verdict, redraws, "{name}");
-            assert_eq!(verdict, !found, "{name}: {report:?}");
-        }
+        assert_eq!(pack.density_variants(), vec![d(4), d(2)]);
+        assert_eq!(pack.max_density_variant(), d(4));
+        assert!(pack_with("").density_variants().is_empty());
     }
 
+    /// Frame count and size are both part of redrawing a piece; either one
+    /// wrong refuses the pack.
     #[test]
-    fn a_character_variant_without_its_base_is_an_orphan() {
-        let pack = pack_with_frames(
-            "[animations.\"typing_back@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
-            SIZED_FRAMES,
-        );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert_eq!(report.orphan_variants, vec!["typing_back@2x".to_string()]);
-        assert!(report.unknown.is_empty(), "{:?}", report.unknown);
-    }
-
-    #[test]
-    fn every_registered_base_the_pack_lacks_is_missing_and_no_variant_is() {
-        let report = validate("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert!(report.missing.contains(&"plant".to_string()));
-        assert!(!report.missing.contains(&"desk".to_string()));
-        assert!(
-            !report
-                .missing
-                .iter()
-                .any(|m| m.contains(DENSITY_VARIANT_SEP)),
-            "unauthored variants must not read as missing: {:?}",
-            report.missing
-        );
-        assert!(!report.unknown.contains(&"desk".to_string()));
-    }
-
-    fn validate(animations: &str) -> ValidationReport {
-        validate_pack_animations(&pack_with(animations), &PackContract::default())
-    }
-
-    /// Pins [`ValidationReport::warning_count`] and
-    /// [`ValidationReport::error_count`]: one finding in every field.
-    #[test]
-    fn every_finding_is_counted_once_as_an_error_or_a_warning_or_reported_only() {
-        let report = ValidationReport {
-            missing: vec!["seated".to_string()],
-            insufficient_frames: vec![("typing".to_string(), 2, 1)],
-            unknown: vec!["foo".to_string()],
-            mismatched_density: vec![DensityMismatch {
-                name: "desk@4x".to_string(),
-                frame: 0,
-                claimed: (8, 4),
-                found: (4, 1),
-            }],
-            orphan_variants: vec!["plant@2x".to_string()],
-            mismatched_frame_counts: vec![FrameCountMismatch {
-                name: "seated@2x".to_string(),
-                base_frames: 2,
-                variant_frames: 1,
-            }],
-            unmarked_heads: vec![UnmarkedHead {
-                name: "standing@4x".to_string(),
-                frame: 0,
-            }],
-            missing_hair_views: vec![MissingHairView {
-                style: "mop@4x".to_string(),
-                view: HeadView::Back,
-                name: "walking_back@4x".to_string(),
-            }],
-            overhanging_hair: vec![HairOverhang {
-                style: "mop@4x".to_string(),
-                view: HeadView::Front,
-                name: "standing@4x".to_string(),
-                frame: 0,
-            }],
-            orphan_hairstyles: vec!["mop@2x".to_string()],
-            walks_without_stride: vec!["walking".to_string()],
-            missing_marks: vec![MissingMark {
-                name: "desk@4x".to_string(),
-                mark: "cup",
-            }],
-            unread_variant_timing: vec![UnreadTiming {
-                name: "typing@4x".to_string(),
-                field: UnreadField::FrameMs {
-                    base: 125,
-                    variant: 250,
-                },
-            }],
-            off_beat_loops: vec![OffBeatLoop {
-                name: "typing".to_string(),
-                frame_ms: 400,
-            }],
-            missing_keys: vec![MissingKey {
-                name: "desk".to_string(),
-                key: '9',
-            }],
-        };
-        assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 8);
-    }
-
-    /// A piece the caller lights, at any of its densities, draws no pixel in
-    /// its light's key: no light would rise there.
-    #[test]
-    fn a_lit_piece_without_its_key_is_flagged_at_each_density() {
-        let pack = pack_with_frames(
-            "\"9\"=\"#fff000\"\n\
-             [animations.desk]\nframes=[\"lit.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@2x\"]\nframes=[\"dark.sprite\"]\nframe_ms=100\n",
-            &[
-                ("lit.sprite", "@frame 0\n9"),
-                ("dark.sprite", "@frame 0\nA A\nA A"),
-            ],
-        );
-        let report = validate_pack_animations(
-            &pack,
-            &PackContract {
-                keys: &[("desk", '9')],
-                ..PackContract::default()
-            },
-        );
-        assert_eq!(
-            report.missing_keys,
-            vec![MissingKey {
-                name: "desk@2x".to_string(),
-                key: '9',
-            }]
-        );
-    }
-
-    /// A piece the caller stands props on, at any of its densities, leaves out
-    /// a mark: nothing would stand there.
-    #[test]
-    fn a_desk_without_its_prop_marks_is_flagged_at_each_density() {
-        let pack = pack_with_frames(
-            "[animations.desk]\nframes=[\"m.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@2x\"]\nframes=[\"b.sprite\"]\nframe_ms=100\n",
-            &[
-                ("m.sprite", "@frame 0\n@mark cup 0 0\n@mark tower 0 0\nA"),
-                ("b.sprite", "@frame 0\n@mark tower 0 0\nA A\nA A"),
-            ],
-        );
-        let report = validate_pack_animations(
-            &pack,
-            &PackContract {
-                marks: &[("desk", &["cup", "tower"])],
-                ..PackContract::default()
-            },
-        );
-        assert_eq!(
-            report.missing_marks,
-            [MissingMark {
-                name: "desk@2x".to_string(),
-                mark: "cup",
-            }]
-        );
-    }
-
-    /// Pins the frame-count check's empty case.
-    #[test]
-    fn an_empty_density_variant_is_a_frame_count_mismatch() {
-        let report = validate(
-            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@4x\"]\nframes=[]\nframe_ms=100\n",
-        );
-        assert_eq!(
-            report.mismatched_frame_counts,
-            vec![FrameCountMismatch {
-                name: "desk@4x".to_string(),
-                base_frames: 1,
-                variant_frames: 0,
-            }]
-        );
-        assert!(
-            report.insufficient_frames.is_empty(),
-            "{:?}",
-            report.insufficient_frames
-        );
-    }
-
-    /// Pins [`Pack::max_density_variant`].
-    #[test]
-    fn the_packs_max_density_is_the_scale_a_painter_has_to_round_to() {
-        let pack = |extra: &str| {
-            pack_with_frames(
-                &format!(
-                    "[animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-                     [animations.\"desk@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
-                     [animations.plant]\nframes=[\"one.sprite\"]\nframe_ms=100\n{extra}"
-                ),
-                SIZED_FRAMES,
+    fn a_variant_that_does_not_redraw_its_piece_does_not_load() {
+        let typing = |variant: &[&str]| {
+            format!(
+                "{}{}",
+                anim("typing", &["one.sprite", "one.sprite"]),
+                anim("typing@2x", variant)
             )
         };
-        let plain = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
-        assert_eq!(
-            plain.max_density_variant(),
-            Density::ONE,
-            "a pack with no variants must not push a painter off the cell's own scale"
-        );
-        assert_eq!(
-            pack("[animations.\"plant@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n")
-                .max_density_variant(),
-            d(4)
-        );
-        assert_eq!(
-            pack("[animations.\"typo@64x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n")
-                .max_density_variant(),
+        for (variant, variant_frames, why) in [
+            (
+                &["two.sprite", "three.sprite"][..],
+                2,
+                "a frame the wrong size",
+            ),
+            (&["two.sprite"], 1, "a frame short"),
+            (&["three.sprite"], 1, "a frame short and the wrong size"),
+            (
+                &["two.sprite", "two.sprite", "two.sprite"],
+                3,
+                "a frame over",
+            ),
+        ] {
+            let err = refused(&typing(variant), SIZED_FRAMES);
+            assert!(
+                matches!(&err, PackError::VariantDoesNotRedraw {
+                    key, base_frames: 2, variant_frames: v
+                } if key == "typing@2x" && *v == variant_frames),
+                "{why}: {err:?}"
+            );
+        }
+        assert!(try_pack_with_frames(&typing(&["two.sprite", "two.sprite"]), SIZED_FRAMES).is_ok());
+    }
+
+    /// Pins the MATCHING base frame, in [`variant_redraws`] and in load's
+    /// refusal of a variant that fails it.
+    #[test]
+    fn each_variant_frame_is_proved_against_the_matching_base_frame() {
+        let walking = |variant: &[&str]| {
+            format!(
+                "{}stride=1\n{}",
+                anim("walking", &["one.sprite", "three.sprite"]),
+                anim("walking@2x", variant)
+            )
+        };
+        let pack = pack_with_frames(&walking(&["two.sprite", "six.sprite"]), SIZED_FRAMES);
+        assert!(variant_redraws(
+            pack.piece(Piece::Walking),
             d(2),
-            "a variant of an unregistered base must not inflate the pack's density"
-        );
-        assert_eq!(
-            pack("[animations.\"plant@8x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n")
-                .max_density_variant(),
-            d(2),
-            "a variant every renderer skips must not round a painter's scale to it"
+            &pack.variants_of(Piece::Walking)[&d(2)]
+        ));
+        // each frame fits a base frame, but not the matching one
+        let err = refused(&walking(&["six.sprite", "two.sprite"]), SIZED_FRAMES);
+        assert!(
+            matches!(err, PackError::VariantDoesNotRedraw { .. }),
+            "{err:?}"
         );
     }
 
-    /// Pins [`DensityMismatch`].
+    /// Pins [`DENSITY_VARIANT_SEP`]'s claim: `@4x` of a 2-wide base is 8 wide.
     #[test]
-    fn a_variant_that_lies_about_its_density_is_a_hard_error() {
-        let pack = pack_with_frames(
+    fn a_variant_that_lies_about_its_density_does_not_load() {
+        let err = refused(
             "[animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
              [animations.\"desk@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n",
             &[
@@ -2868,19 +2736,58 @@ mod validation_floor_tests {
                 ("four.sprite", "@frame 0\nA A A A"),
             ],
         );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert_eq!(
-            report.mismatched_density,
-            vec![DensityMismatch {
-                name: "desk@4x".to_string(),
-                frame: 0,
-                claimed: (8, 4),
-                found: (4, 1),
-            }],
+        assert!(
+            matches!(&err, PackError::VariantDoesNotRedraw { key, .. } if key == "desk@4x"),
+            "{err:?}"
+        );
+    }
+
+    /// Pins the empty case of the variant's frame count.
+    #[test]
+    fn an_empty_density_variant_does_not_load() {
+        let err = refused(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@4x\"]\nframes=[]\nframe_ms=100\n",
+            &[("f.sprite", "@frame 0\nA")],
         );
         assert!(
-            report.has_errors(),
-            "a lying variant must fail validation, not merely be noted"
+            matches!(&err, PackError::TooFewFrames { key, need: 1, have: 0 } if key == "desk@4x"),
+            "{err:?}"
+        );
+    }
+
+    /// Pins [`Pack::max_density_variant`].
+    #[test]
+    fn the_packs_max_density_is_the_scale_a_painter_has_to_round_to() {
+        let pack = |extra: &str| {
+            try_pack_with_frames(
+                &format!(
+                    "[animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+                     [animations.\"desk@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
+                     [animations.plant]\nframes=[\"one.sprite\"]\nframe_ms=100\n{extra}"
+                ),
+                SIZED_FRAMES,
+            )
+        };
+        let plain = pack_with("");
+        assert_eq!(
+            plain.max_density_variant(),
+            Density::ONE,
+            "a pack with no variants must not push a painter off the cell's own scale"
+        );
+        assert_eq!(
+            pack("[animations.\"plant@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n")
+                .expect("loads")
+                .max_density_variant(),
+            d(4)
+        );
+        assert!(
+            pack("[animations.\"typo@64x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n").is_err(),
+            "a variant of an unregistered base must not inflate the pack's density"
+        );
+        assert!(
+            pack("[animations.\"plant@8x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n").is_err(),
+            "a variant no renderer could draw must not round a painter's scale to it"
         );
     }
 
@@ -2897,80 +2804,70 @@ mod validation_floor_tests {
         assert_eq!(split_density_variant("desk@65x"), None);
         // An out-of-range density is not a variant, so the name is simply
         // unknown — never a piece whose base the pack must supply.
-        assert_eq!(RegisteredKey::parse("desk@60000x"), None);
+        assert_eq!(parse_key("desk@60000x"), None);
     }
 
     /// Pins [`claimed_variant_size`].
     #[test]
-    fn a_claim_no_frame_can_meet_is_a_mismatch() {
+    fn a_claim_no_frame_can_meet_does_not_load() {
         let row = |w: usize| format!("{}\n", "A ".repeat(w).trim_end());
         let base = format!("@frame 0\n{}", row(40_000));
         let variant = format!("@frame 0\n{0}{0}", row(u16::MAX as usize));
-        let pack = pack_with_frames(
+        let err = refused(
             "[animations.desk]\nframes=[\"base.sprite\"]\nframe_ms=100\n\
              [animations.\"desk@2x\"]\nframes=[\"variant.sprite\"]\nframe_ms=100\n",
             &[("base.sprite", &base), ("variant.sprite", &variant)],
         );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        let m = report
-            .mismatched_density
-            .first()
-            .expect("80_000 wide is claimed, 65_535 is found");
-        assert_eq!(m.claimed, (80_000, 2));
-        assert_eq!(m.found, (u16::MAX, 2));
-    }
-
-    /// Pins `ValidationReport::orphan_variants`.
-    #[test]
-    fn a_variant_whose_base_the_pack_does_not_ship_is_an_error() {
-        let pack = pack_with_frames(
-            "[animations.\"desk@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n",
-            &[("four.sprite", "@frame 0\nA A A A")],
-        );
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert_eq!(report.orphan_variants, vec!["desk@4x".to_string()]);
         assert!(
-            report.mismatched_density.is_empty(),
-            "with no base there is no size claim to contradict"
+            matches!(&err, PackError::VariantDoesNotRedraw { key, .. } if key == "desk@2x"),
+            "80_000 wide is claimed, 65_535 is found: {err:?}"
         );
-        assert!(report.has_errors(), "the author must be told, not passed");
     }
 
+    /// Pins [`ValidationReport::warning_count`] and
+    /// [`ValidationReport::error_count`]: one finding in every field.
     #[test]
-    fn empty_frames_on_a_registered_animation_fails_validation() {
-        // One name from each registry: the min-1 floor holds for all three.
-        for name in ["seated", "desk", "cat_sit"] {
-            let pack = pack_with_animation(name, "[]");
-            let report = validate_pack_animations(&pack, &PackContract::default());
-            assert_eq!(
-                report.insufficient_frames,
-                [(name.to_string(), 1, 0)],
-                "{name}"
-            );
-            assert!(report.has_errors(), "{name}");
-            assert!(!report.missing.contains(&name.to_string()), "{name}");
-        }
-    }
-
-    #[test]
-    fn one_frame_on_a_plain_known_animation_passes_validation() {
-        let pack = pack_with_animation("seated", "[\"f.sprite\"]");
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert!(
-            report.insufficient_frames.is_empty(),
-            "a 1-frame seated must not be flagged; got {:?}",
-            report.insufficient_frames
-        );
+    fn every_finding_is_counted_once_as_an_error_or_a_warning() {
+        let report = ValidationReport {
+            unmarked_heads: vec![UnmarkedHead {
+                name: "standing@4x".to_string(),
+                frame: 0,
+            }],
+            missing_hair_views: vec![MissingHairView {
+                style: "mop@4x".to_string(),
+                view: HeadView::Back,
+                name: "walking_back@4x".to_string(),
+            }],
+            overhanging_hair: vec![HairOverhang {
+                style: "mop@4x".to_string(),
+                view: HeadView::Front,
+                name: "standing@4x".to_string(),
+                frame: 0,
+            }],
+            orphan_hairstyles: vec!["mop@2x".to_string()],
+            unread_variant_timing: vec![UnreadTiming {
+                name: "typing@4x".to_string(),
+                field: UnreadField::FrameMs {
+                    base: 125,
+                    variant: 250,
+                },
+            }],
+            off_beat_loops: vec![OffBeatLoop {
+                name: "typing".to_string(),
+                frame_ms: 400,
+            }],
+        };
+        assert_eq!(report.error_count(), 1);
+        assert_eq!(report.warning_count(), 5);
     }
 
     /// A 1x `standing` and its 2x redraw `body`, dressed by `hairstyles`.
     fn dressed_pack(body: &str, hairstyles: &str, hair: &[(&str, &str)]) -> Pack {
         let mut frames = vec![("one.sprite", "@frame 0\nA"), ("body.sprite", body)];
         frames.extend_from_slice(hair);
-        load_pack_from_strings(
+        load_filled_pack(
             &format!(
-                "[pack]\nname=\"t\"\nversion=\"1\"\n\
-                 [palette]\n\"A\"=\"#010203\"\n\".\"=\"transparent\"\n\
+                "[palette]\n\"A\"=\"#010203\"\n\".\"=\"transparent\"\n\
                  [animations.standing]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
                  [animations.\"standing@2x\"]\nframes=[\"body.sprite\"]\nframe_ms=100\n\
                  {hairstyles}"
@@ -2984,9 +2881,7 @@ mod validation_floor_tests {
     const MOP: &str = "[hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n";
 
     fn hair_findings(pack: &Pack) -> ValidationReport {
-        let report = validate_pack_animations(pack, &PackContract::default());
-        assert!(report.orphan_variants.is_empty() && report.mismatched_density.is_empty());
-        report
+        validate_pack_animations(pack, &PackContract::default())
     }
 
     /// `report`'s errors and warnings past those of the same pack undressed.
@@ -3081,17 +2976,6 @@ mod validation_floor_tests {
         let report = hair_findings(&dressed_pack(FRONT_BODY, four, &[hair]));
         assert_eq!(report.orphan_hairstyles, vec!["mop@4x".to_string()]);
         assert_eq!(hair_counts(&report), (1, 0));
-    }
-
-    #[test]
-    fn multi_frame_requirements_all_name_known_animations() {
-        let known: std::collections::HashSet<&str> = registered_animation_names().collect();
-        for (name, _) in MULTI_FRAME_REQUIREMENTS {
-            assert!(
-                known.contains(name),
-                "MULTI_FRAME_REQUIREMENTS names unknown animation {name}"
-            );
-        }
     }
 }
 

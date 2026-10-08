@@ -4,7 +4,7 @@
 )]
 
 /// Binds `$name` to a `DrawCtx::offscreen` of `$scene`; a macro so the stores it
-/// borrows live in the caller's scope. `$pack` is the `Arc<Pack>` its floor draws with.
+/// borrows live in the caller's scope. `$pack` is the `Arc<OfficeArt>` its floor draws with.
 #[macro_export]
 macro_rules! make_draw_ctx {
     ($name:ident, $scene:expr, $pack:expr, $now:expr) => {

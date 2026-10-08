@@ -5,8 +5,9 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::sprite::format::{Density, Pack};
+use pixtuoid_core::sprite::format::Density;
 
 use crate::atmosphere::Moment;
 use crate::celestial::SkyView;
@@ -304,7 +305,7 @@ impl OutsideCache {
     pub(crate) fn views(
         &mut self,
         moment: &Moment,
-        pack: &Pack,
+        pack: &OfficeArt,
         theme: &Theme,
         wall: Wall,
         density: Density,
@@ -368,7 +369,7 @@ impl Outside {
     /// frames, and an empty one draws them afresh.
     pub(crate) fn of(
         key: &OutsideKey,
-        pack: &Pack,
+        pack: &OfficeArt,
         theme: &Theme,
         clouds: &mut crate::clouds::CloudCache,
     ) -> Self {
@@ -644,7 +645,7 @@ pub(crate) mod tests {
     #[test]
     fn nothing_outside_reaches_the_joinery() {
         let theme = &crate::theme::NORMAL;
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let wall = (crate::layout::WINDOW_W * 3, 32);
         for s in every_sky() {
             let moment =
@@ -693,7 +694,7 @@ pub(crate) mod tests {
     #[test]
     fn the_outside_cache_draws_what_a_fresh_frame_draws() {
         use crate::sky::WeatherMix;
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let wall = (crate::layout::WINDOW_W * 3, 32);
         struct Frame {
             moment: Moment,
@@ -924,7 +925,7 @@ pub(crate) mod tests {
                 Density::ONE,
                 GlassWeather::of(&moment),
             ),
-            &crate::pack::test_default_pack(),
+            &crate::pack::test_office(),
             theme,
             &mut crate::clouds::CloudCache::default(),
         );
@@ -955,7 +956,7 @@ pub(crate) mod tests {
     #[test]
     fn a_bolt_lands_under_its_trunk_and_behind_the_city() {
         let theme = &crate::theme::NORMAL;
-        let pack = crate::pack::test_default_pack();
+        let pack = crate::pack::test_office();
         let wall = (crate::layout::WINDOW_W * 3, 32);
         let bays = slots(wall.0);
         for d in [Density::ONE, pack.max_density_variant()] {

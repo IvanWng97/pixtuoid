@@ -42,6 +42,8 @@ unicode-segmentation = { workspace = true }
 chrono        = { workspace = true, features = ["clock"] }
 foldhash      = { workspace = true }
 strum         = { workspace = true }
+enum-map      = { workspace = true }
+thiserror     = { workspace = true }
 
 [build-dependencies]
 toml_edit = { workspace = true }

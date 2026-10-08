@@ -29,8 +29,10 @@ row" vocabulary across the crate for zero behavior change.)
 
 ## The sprite format
 
-The rules the bundled pack (`sprites/default/`) is drawn to. `pack::validate_pack`
-checks them, and `the_bundled_pack_passes_its_own_validation` fails on a break.
+The rules the bundled pack (`sprites/default/`) is drawn to. A pack that breaks
+one does not load (`PackError`, and `pack::ArtError` for what the office reads
+off its art); `pack::validate_pack` warns of art that loads but is not as
+authored, and `the_bundled_pack_passes_its_own_validation` fails on a warning.
 
 Characters are recolored per agent by palette key: whatever a pack draws with `B`
 (shirt), `H` (hair), `S` (skin) or `P` (pants) takes each agent's colors, and
@@ -42,9 +44,8 @@ follows whatever color replaces `H`. `of` must name a key with an opaque color i
 
 A pack can also redraw an animation on a denser grid, registered as
 `<name>@<N>x` (`desk@4x` is `desk` drawn on a 4x grid). Each frame is exactly
-`N` times the size of the matching base frame, and the frame counts match;
-validation reports a variant that breaks either rule, and it is never
-drawn. The classic renderers — the half-block terminal office and the site's
+`N` times the size of the matching base frame, and the frame counts match,
+or the pack does not load. The classic renderers — the half-block terminal office and the site's
 live office — draw the base art. Variants are for the pixel-graphics cutaway,
 which the `floating` window paints, and `run --graphics` over kitty's
 graphics protocol, SIXEL or iTerm2's inline images: it takes the
@@ -59,7 +60,7 @@ steps, excepted); it also warns on a looping animation whose
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
-A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, and draws its lamp's bulb in palette key `9`, at every density: the lamp's pool centres on those pixels. Without the marks neither look stands the props, without the bulb neither look lights the lamp, and validation warns of each.
+A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, and draws its lamp's bulb in palette key `9`, at every density: the lamp's pool centres on those pixels. Without either, the pack does not load.
 
 `desk_north` is `desk` seen from its sitter's side, so it stands its props
 mirrored, each mark naming the prop's bottom-right cell instead of its
@@ -79,8 +80,7 @@ A walk (a person's `walking`, `walking_back` and `walking_coffee`, a pet's
 `cat_walk` and `dog_walk`, the gateway mascot's `lobster_walk`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full
 cycle of its frames. Its frames, and its `@Nx` variants', then step by the
-ground covered, not by `frame_ms`. A walk without one steps on its `frame_ms`,
-and validation warns that its feet slide.
+ground covered, not by `frame_ms`. A walk without one does not load.
 
 A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
 its `@frame` block, at column `x` and row `y` from the frame's top-left. A
@@ -99,12 +99,12 @@ the frame's sides is cut off: validation warns of each, and fails a style
 at a density the pack draws no character at.
 
 `[characters] outline = "<key>"` draws one line round every marked variant
-frame, bare or dressed: a pack that sets it draws its bodies and layers
+frame, bare or dressed: a pack draws its bodies and layers
 unoutlined, so no line runs between hair and face. A dressed frame may rise
 above its body's box, by the hair and the line over it. Base art is never
 dressed or outlined.
 
-A pack can also ship the city seen through the office's windows. `[city]` names
+A pack also ships the city seen through the office's windows. `[city]` names
 the palette key of each of its seven materials — `facade`, `shade`, `roof`,
 `glass`, `mullion`, `detail` and `sign` — and a building is drawn in those keys
 alone, since its colours come from its depth and the sky rather than the pack.

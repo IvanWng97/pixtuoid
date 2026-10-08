@@ -153,11 +153,8 @@ fn drawn(r: &TuiRenderer<TestBackend>, scene: &SceneState, id: AgentId, now: Sys
         .iter()
         .find(|c| frame.agents[c.agent_idx].agent_id == id)
         .expect("the agent is drawn");
-    let art = pack()
-        .animation(c.anim_name)
-        .and_then(|a| a.frames().get(c.frame_idx))
-        .map(|f| (f.width(), f.height()))
-        .expect("the pack draws the placement");
+    let art = pack().piece(c.anim_name).frame_at(c.frame_idx);
+    let art = (art.width(), art.height());
     Sprite {
         top_left: c.top_left,
         w: art.0,

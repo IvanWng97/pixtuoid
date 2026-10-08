@@ -64,6 +64,27 @@ pub(crate) struct OverlayFrame<'a> {
     pub(crate) onboarding: &'a crate::panels::welcome::OnboardingFrame,
 }
 
+impl OverlayFrame<'_> {
+    /// Whether any panel shows. Destructured whole, so a new panel can't
+    /// paint without counting here.
+    pub(crate) fn any_open(&self) -> bool {
+        let &Self {
+            theme_picker,
+            dashboard,
+            connection,
+            popup_scale,
+            help_open,
+            onboarding,
+        } = self;
+        theme_picker.is_some()
+            || dashboard.open
+            || connection.open
+            || popup_scale > 0.0
+            || help_open
+            || onboarding.open
+    }
+}
+
 /// The modal-overlay dispatch, centralized so the draw paths can't drift in
 /// ordering or args. `bounds` is the FULL terminal area — a modal is centered over
 /// the whole frame, and `PanelGeometry` keeps it off the footer row itself.
@@ -125,6 +146,90 @@ pub(crate) struct ModalState {
     /// A disconnect is armed on the Sources panel, awaiting y/n.
     pub(crate) connection_confirm: bool,
     pub(crate) n_themes: usize,
+}
+
+impl ModalState {
+    /// Whether any panel owns input, so the office behind takes no click.
+    /// Destructured whole, so a new panel can't take keys without counting
+    /// here.
+    pub(crate) fn any_open(&self) -> bool {
+        let &Self {
+            onboarding_open,
+            help_open,
+            version_popup,
+            theme_picker,
+            dashboard_open,
+            connection_open,
+            connection_confirm: _,
+            n_themes: _,
+        } = self;
+        onboarding_open
+            || help_open
+            || version_popup
+            || theme_picker.is_some()
+            || dashboard_open
+            || connection_open
+    }
+}
+
+/// What the open panels make of a pointer event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModalMouse {
+    /// No panel is open: the office takes it.
+    Office,
+    /// A panel acted on it: the help closed, or the popup's link opened.
+    Took,
+    /// A panel swallowed it and did nothing.
+    Inert,
+}
+
+/// The modal half of the mouse ladder, in order: the onboarding swallows
+/// everything, a left press closes the help (tested before the popup so it
+/// wins mid popup-dismiss), the version popup takes only its URL, and the
+/// picker, dashboard and Sources panel are inert BY DESIGN, closing only by
+/// key ([`dispatch_key`]). A click never leaks to the office behind a panel,
+/// where a coffee-machine or branding hit launches a browser. `left_down` is
+/// the cell a left press landed on; `popup_scale` the popup's painted scale;
+/// `screen` the surface's size in cells, read only for a press on the popup.
+pub(crate) fn modal_mouse(
+    ui: &mut ui_state::UiState,
+    popup_scale: f32,
+    left_down: Option<(u16, u16)>,
+    screen: impl FnOnce() -> Option<(u16, u16)>,
+) -> ModalMouse {
+    if ui.onboarding_open() {
+        return ModalMouse::Inert;
+    }
+    if ui.help_open() {
+        if left_down.is_none() {
+            return ModalMouse::Inert;
+        }
+        ui.close_help();
+        return ModalMouse::Took;
+    }
+    if popup_scale > 0.0 {
+        let on_url = left_down.is_some_and(|(col, row)| {
+            screen().is_some_and(|size| version_popup_url_clicked(col, row, popup_scale, size))
+        });
+        if !on_url {
+            return ModalMouse::Inert;
+        }
+        let _ = open::that(widgets::release_url(env!("CARGO_PKG_VERSION")));
+        return ModalMouse::Took;
+    }
+    if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open {
+        return ModalMouse::Inert;
+    }
+    ModalMouse::Office
+}
+
+/// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
+/// against the full surface, not the scene rect. `scale` is the popup's last painted
+/// scale.
+fn version_popup_url_clicked(col: u16, row: u16, scale: f32, screen: (u16, u16)) -> bool {
+    let bounds = Rect::new(0, 0, screen.0, screen.1);
+    widgets::version_popup_url_rect(bounds, scale)
+        .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
 #[derive(Clone, Copy)]
@@ -1524,6 +1629,93 @@ mod dispatch_tests {
         assert!(
             connected.is_connected("antigravity"),
             "skip must open the live gate for a frozen-connected source"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mouse_tests {
+    use super::{ModalMouse, modal_mouse, ui_state::UiState, welcome::WelcomeUi};
+
+    fn ui() -> UiState {
+        UiState::new(
+            &pixtuoid_scene::theme::NORMAL,
+            WelcomeUi::from_detected(&[]),
+            false,
+            std::path::PathBuf::new(),
+            None,
+            crate::doctor::DriftSeen::default(),
+        )
+    }
+
+    fn no_screen() -> Option<(u16, u16)> {
+        None
+    }
+
+    /// With nothing open the office takes the pointer; an inert panel
+    /// swallows it whole.
+    #[test]
+    fn only_a_closed_ladder_reaches_the_office() {
+        let mut ui = ui();
+        assert_eq!(
+            modal_mouse(&mut ui, 0.0, Some((0, 0)), no_screen),
+            ModalMouse::Office
+        );
+        ui.open_theme_picker();
+        assert_eq!(
+            modal_mouse(&mut ui, 0.0, Some((0, 0)), no_screen),
+            ModalMouse::Inert
+        );
+        assert!(ui.theme_picker.is_some(), "a click never closes the picker");
+    }
+
+    /// A left press closes the help; a move over it does not.
+    #[test]
+    fn a_press_closes_the_help_and_a_move_does_not() {
+        let mut ui = ui();
+        ui.toggle_help();
+        assert_eq!(
+            modal_mouse(&mut ui, 0.0, None, no_screen),
+            ModalMouse::Inert
+        );
+        assert!(ui.help_open());
+        assert_eq!(
+            modal_mouse(&mut ui, 1.0, Some((0, 0)), no_screen),
+            ModalMouse::Took
+        );
+        assert!(!ui.help_open(), "the help wins over the popup");
+    }
+
+    /// The popup swallows a press off its URL.
+    #[test]
+    fn the_popup_swallows_a_press_off_its_url() {
+        let mut ui = ui();
+        assert_eq!(
+            modal_mouse(&mut ui, 1.0, Some((0, 0)), || Some((120, 44))),
+            ModalMouse::Inert
+        );
+    }
+
+    /// Ignoring `scale` would launch a browser where the popup is still animating.
+    #[test]
+    fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
+        use crate::panels::widgets::version_popup_url_rect;
+        let term = (120u16, 44u16);
+        let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
+        let rect = version_popup_url_rect(bounds, 1.0)
+            .expect("a URL rect at scale 1.0, or the misses below pass vacuously");
+
+        assert!(
+            super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),
+            "a click inside the URL rect at full scale must hit"
+        );
+        assert!(
+            !super::version_popup_url_clicked(rect.x, rect.y.saturating_sub(1), 1.0, term),
+            "a click one row above the URL must miss"
+        );
+        assert!(
+            !super::version_popup_url_clicked(rect.x, rect.y, 0.5, term),
+            "mid-animation (below the clickable scale) there is no rect, so no hit"
         );
     }
 }

@@ -2,7 +2,7 @@ use super::*;
 use crate::anim::Motion;
 use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
-use crate::pack::test_default_pack;
+use crate::pack::test_office;
 use crate::sky::{Weather, hour_is_day};
 use std::time::SystemTime;
 
@@ -16,7 +16,7 @@ fn paint_band(buf: &mut RgbBuffer, top_wall_h: u16, moment: &Moment, theme: &cra
         top_wall_h,
         bays,
         moment,
-        &test_default_pack(),
+        &test_office(),
         theme,
         &mut crate::outside::OutsideCache::default(),
     );

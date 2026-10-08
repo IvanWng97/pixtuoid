@@ -243,7 +243,7 @@ fn pet_walks_routed_ground_and_rests_on_walkable_floor() {
         else {
             continue;
         };
-        if anim == PetKind::Cat.walk_anim() {
+        if anim == PetKind::Cat.walk_anim().piece() {
             // Coarse-cell walkable is the predicate A* itself guarantees;
             // per-pixel `is_walkable` is stricter than the router delivers
             // and would hold the pet to a higher bar than the agents.
