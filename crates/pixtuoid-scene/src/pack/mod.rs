@@ -622,6 +622,35 @@ mod tests {
         );
     }
 
+    /// Every character pose fits the half-block's 8x12 sprite
+    /// ([`CHARACTER_SPRITE_W`](crate::layout::CHARACTER_SPRITE_W) by
+    /// [`CHARACTER_SPRITE_H`](crate::layout::CHARACTER_SPRITE_H)): a taller one
+    /// breaks on terminals whose cells are taller than 1:2.
+    #[test]
+    fn every_character_pose_fits_the_half_block_sprite() {
+        use pixtuoid_core::sprite::format::{
+            OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
+        };
+        let pack = test_default_pack();
+        for &name in REQUIRED_CHARACTER_ANIMATIONS
+            .iter()
+            .chain(OPTIONAL_CHARACTER_ANIMATIONS)
+        {
+            let anim = pack
+                .animation(name)
+                .expect("the bundled pack draws every pose");
+            for frame in anim.frames() {
+                assert!(
+                    frame.width() <= crate::layout::CHARACTER_SPRITE_W
+                        && frame.height() <= crate::layout::CHARACTER_SPRITE_H,
+                    "{name} is {}x{}",
+                    frame.width(),
+                    frame.height()
+                );
+            }
+        }
+    }
+
     /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`,
     /// and below it the same desk mirrored, as its arrangement mirrors the lamp. Checked on the
     /// edge COLUMNS the monitor never covers — the middle legitimately differs.

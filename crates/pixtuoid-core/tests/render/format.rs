@@ -221,6 +221,15 @@ fn mini_pack_reports_missing_required() {
 }
 
 #[test]
+fn validation_detects_unknown_animations() {
+    let report = validate_pack_animations(&mini_pack(), &PackContract::default());
+    assert!(
+        report.unknown.contains(&"idle".to_string()),
+        "mini pack's 'idle' animation should be flagged as unknown"
+    );
+}
+
+#[test]
 fn frame_wider_than_u16_max_errors_instead_of_truncating() {
     // The width half of `push_row`'s u16 guard.
     let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
