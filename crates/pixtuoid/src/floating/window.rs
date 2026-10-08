@@ -25,6 +25,7 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::{OfficeRenderer, WindowFrame};
 use crate::config::{self, FloatingConfig};
+use pixtuoid_scene::cutaway::Face;
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
 use pixtuoid_scene::look::Place;
 use pixtuoid_scene::theme::Theme;
@@ -65,7 +66,7 @@ pub(crate) struct FloatingApp {
     /// Latest cursor position (physical px) — for the corner resize hit-test on click.
     cursor: PhysicalPosition<f64>,
     /// The geometry of the frame on screen, which a press maps back through.
-    shown: Option<super::offscreen::WindowGeometry>,
+    shown: Option<pixtuoid_scene::render_scale::PixelFit>,
     /// Whether the pointer is over the window, where a hover shows its tooltip.
     cursor_in: bool,
     /// Whether the pointer last hovered something, so a move off it redraws
@@ -274,8 +275,8 @@ impl FloatingApp {
         super::offscreen::sync_floor_caps(
             &mut self.last_caps_size,
             &floor_caps,
-            at.office.w,
-            at.office.h,
+            at.logical().w,
+            at.logical().h,
         );
         // The office's weather and motion; the office picks each floor's own.
         let floor_meta = FloorMeta::ground().with_motion(self.motion);
@@ -320,7 +321,7 @@ impl FloatingApp {
             window: (win_w, win_h),
             footer: self.renderer.footer(
                 &scene,
-                super::offscreen::footer_budget(win_w as usize, at.chrome_cell()),
+                super::offscreen::footer_budget(win_w as usize, Face::chrome(at)),
                 audio_audible,
                 volume_flash,
                 self.live
@@ -369,9 +370,9 @@ impl FloatingApp {
             return;
         };
         if let Some(office) = self.renderer.buf() {
-            surf.fill_upscaled(office, usize::from(at.upscale));
+            surf.fill_upscaled(office, usize::from(at.upscale()));
         }
-        let cell = at.chrome_cell();
+        let cell = Face::chrome(at);
         super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme, cell);
         if let Some((tip, _)) = &next.tooltip {
             super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, self.theme, cell);
@@ -385,7 +386,7 @@ impl FloatingApp {
         let now = Instant::now();
         self.jank.painted_by(crate::jank::Painter {
             look: "floating",
-            scale: at.unit_px,
+            scale: at.scale().get(),
             ..crate::jank::Painter::default()
         });
         self.jank.record(

@@ -80,6 +80,13 @@ impl Face {
         (w / self.unit().w).max(1)
     }
 
+    /// The cell the window's footer and tooltips draw in over `fit`, in
+    /// [`Face::Screen`]: a glyph pixel the badges' (a layout unit holds a
+    /// world cell).
+    pub fn chrome(fit: crate::render_scale::PixelFit) -> CellPx {
+        Self::Screen.cell(Self::World.scale_across(fit.scale().get()))
+    }
+
     /// Whether it draws `c`, rather than tofu.
     pub fn draws(self, c: char) -> bool {
         self.glyph(c).is_some()

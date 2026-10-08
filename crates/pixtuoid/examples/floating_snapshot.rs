@@ -19,6 +19,7 @@ use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid::dev::{OfficeRenderer, WindowFrame, XrgbSurface, window_geometry};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
+use pixtuoid_scene::cutaway::Face;
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -264,10 +265,10 @@ fn main() -> Result<()> {
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
-    surf.fill_upscaled(buf, usize::from(at.upscale));
+    surf.fill_upscaled(buf, usize::from(at.upscale()));
     let (bw, bh) = (buf.width(), buf.height());
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
-    let cell = at.chrome_cell();
+    let cell = Face::chrome(at);
     let budget = pixtuoid::dev::footer_budget(ww, cell);
     let footer = renderer.footer(&scene, budget, true, None, None);
     pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, theme, cell);
@@ -301,7 +302,7 @@ fn main() -> Result<()> {
     img.save(&out).with_context(|| format!("writing {out}"))?;
     eprintln!(
         "wrote {out} ({win_w}x{win_h}, office buffer {bw}x{bh} upscaled {}x, {n_agents} agents)",
-        at.upscale
+        at.upscale()
     );
     Ok(())
 }
