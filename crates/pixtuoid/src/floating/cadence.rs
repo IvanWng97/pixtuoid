@@ -56,27 +56,28 @@ impl FrameClock {
     }
 
     /// One `about_to_wait` pass at `now`, `wall` on the wall clock:
-    /// `(paint, deadline)` — whether to request a redraw NOW, and the instant
-    /// the loop should wait until.
+    /// `(paint, deadline)` — the instant the frame to redraw NOW was due, if
+    /// one is, and the instant the loop should wait until.
     pub(crate) fn poll(
         &mut self,
         now: Instant,
         wall: SystemTime,
         office_idle: bool,
-    ) -> (bool, Instant) {
+    ) -> (Option<Instant>, Instant) {
         let wait = if office_idle {
             until_beat(wall, self.motion)
         } else {
             frame()
         };
         if now >= self.next {
+            let due = self.next;
             self.next = now + wait;
-            return (true, self.next);
+            return (Some(due), self.next);
         }
         // A cadence SPEED-UP (an agent arriving mid-beat) must not sit out the
         // slow deadline already armed.
         self.next = self.next.min(now + wait);
-        (false, self.next)
+        (None, self.next)
     }
 }
 
@@ -102,7 +103,11 @@ mod tests {
         let mut painted = Vec::new();
         let mut elapsed = Duration::ZERO;
         while elapsed <= span {
-            if clock.poll(t0 + elapsed, wall0 + elapsed, office_idle).0 {
+            if clock
+                .poll(t0 + elapsed, wall0 + elapsed, office_idle)
+                .0
+                .is_some()
+            {
                 painted.push(wall0 + elapsed);
             }
             elapsed += step;
@@ -114,7 +119,7 @@ mod tests {
     fn the_first_pass_paints_so_the_window_is_never_blank() {
         let t0 = Instant::now();
         let mut clock = FrameClock::new(t0, Motion::Full);
-        assert_eq!(clock.poll(t0, wall_at(0), false), (true, t0 + frame()));
+        assert_eq!(clock.poll(t0, wall_at(0), false), (Some(t0), t0 + frame()));
     }
 
     #[test]
@@ -173,10 +178,13 @@ mod tests {
     fn an_idle_to_active_transition_does_not_wait_out_the_slow_deadline() {
         let t0 = Instant::now();
         let mut clock = FrameClock::new(t0, Motion::Still);
-        assert!(clock.poll(t0, wall_at(0), true).0); // a rest paint, armed a second out
+        assert!(clock.poll(t0, wall_at(0), true).0.is_some()); // a rest paint, armed a second out
         let soon = Duration::from_millis(10);
         let (paint, deadline) = clock.poll(t0 + soon, wall_at(10), false);
-        assert!(!paint, "10ms after a paint there is nothing to draw yet");
+        assert!(
+            paint.is_none(),
+            "10ms after a paint there is nothing to draw yet"
+        );
         assert_eq!(
             deadline,
             t0 + soon + frame(),
@@ -192,10 +200,15 @@ mod tests {
         let (_, deadline) = clock.poll(t0, wall_at(0), false);
         let wall = wall_at(0) + (deadline - t0);
         assert!(
-            !clock
+            clock
                 .poll(deadline - Duration::from_nanos(1), wall, false)
                 .0
+                .is_none()
         );
-        assert!(clock.poll(deadline, wall, false).0);
+        assert_eq!(
+            clock.poll(deadline, wall, false).0,
+            Some(deadline),
+            "due when armed"
+        );
     }
 }

@@ -730,18 +730,12 @@ fn no_route_on_a_short_floor_passes_through_a_wall() {
         }));
         v
     };
-    // the floors are independent: one chunk a core, which nextest reserves
-    // for it (`threads-required` in .config/nextest.toml)
-    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-    let v: Vec<String> = std::thread::scope(|s| {
-        floors
-            .chunks(floors.len().div_ceil(cores).max(1))
-            .map(|chunk| s.spawn(move || chunk.iter().flat_map(check).collect::<Vec<_>>()))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .flat_map(|h| h.join().expect("a sweep thread panicked"))
-            .collect()
-    });
+    // the floors are independent: across the cores nextest reserves for it
+    // (`threads-required` in .config/nextest.toml)
+    let v: Vec<String> = crate::par::map(&floors, crate::par::cores(), check)
+        .into_iter()
+        .flatten()
+        .collect();
     assert_no_violations("short-floor-route-through-wall", v);
 }
 

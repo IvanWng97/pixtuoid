@@ -11,15 +11,10 @@ use crate::source::{Source, TaggedSender};
 /// already ended carries that marker — the first-sight gate uses it to avoid
 /// resurrecting a finished session. Anchored on the structural top-level
 /// `type`: copilot persists tool `arguments` verbatim in events.jsonl, so a
-/// substring scan would let a grep for `session_end` end a live session.
-/// `session_end` itself is a defensive alias for the real marker.
+/// substring scan would let a grep for `session.shutdown` end a live session.
 fn copilot_session_ended(tail: &[u8]) -> bool {
-    parsed_tail_lines(tail).any(|v| {
-        matches!(
-            v.get("type").and_then(|t| t.as_str()),
-            Some("session.shutdown" | "session_end")
-        )
-    })
+    parsed_tail_lines(tail)
+        .any(|v| v.get("type").and_then(|t| t.as_str()) == Some("session.shutdown"))
 }
 
 /// Source that watches the Copilot session-state directory.
@@ -69,6 +64,15 @@ mod tests {
         ));
         assert!(!copilot_session_ended(
             br#"{"type":"tool.execution_start"}"#
+        ));
+    }
+
+    /// Copilot's event schema names no `session_end` (the release asset's
+    /// `schemas/session-events.schema.json`), so a line typed so is not its end.
+    #[test]
+    fn a_session_end_type_copilot_never_writes_does_not_end_it() {
+        assert!(!copilot_session_ended(
+            br#"{"type":"session_end","data":{}}"#
         ));
     }
 

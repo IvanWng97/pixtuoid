@@ -588,7 +588,7 @@ const DSH: SourceDescriptor = SourceDescriptor {
 const CODEWHALE: SourceDescriptor = SourceDescriptor {
     name: codewhale::SOURCE_NAME,
     label_prefix: "cw",
-    verified_version: "0.9.7",
+    verified_version: "0.10.1",
     version_probe: Some(&["codewhale", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -604,9 +604,8 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
             // message_submit re-emits SessionStart, so a swept-but-live session
             // walks back in on the next prompt.
             resurrects_on_prompt: true,
-            // The fixture holds a real dispatch but only its BOUNDARIES
-            // (`subagent_spawn`/`subagent_complete`) — nothing says whether the child
-            // fires anything BETWEEN them, and `true` can only over-retain a dead slot.
+            // The recorded dispatch fires nothing of the child's own between
+            // `subagent_spawn` and `subagent_complete`.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
