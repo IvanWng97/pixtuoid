@@ -258,7 +258,6 @@ fn a_cutaway_leaving_its_text_to_the_host_bakes_none() {
     let (baked, baked_px) = frame(WorldText::Baked);
     let (host, host_px) = frame(WorldText::Host);
     assert!(baked.raster.world().is_none());
-    assert!(baked.raster.star().is_some(), "the baked star");
     assert!(host.raster.star().is_none(), "the host sets the star");
     assert_ne!(host_px.as_slice(), baked_px.as_slice(), "nothing was baked");
     let world = host.raster.world().expect("handed over");

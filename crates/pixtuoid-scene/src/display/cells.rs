@@ -89,9 +89,7 @@ impl CellMap {
             height,
         }
     }
-}
 
-impl CellMap {
     /// The logical units the cells of `r` show any part of.
     pub fn area_of(self, r: CellRect) -> crate::layout::Bounds {
         let (first, last) = (

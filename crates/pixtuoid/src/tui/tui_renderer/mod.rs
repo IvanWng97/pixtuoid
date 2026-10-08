@@ -987,6 +987,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
         let overlays = self.chrome.overlays(popup_scale);
+        /// What a frame sets over its image: the world's text, with the agent
+        /// the pointer is on, and the tooltip by the pointer.
+        struct Over<'w> {
+            text: Option<(
+                pixtuoid_scene::display::World<'w>,
+                Option<pixtuoid_core::AgentId>,
+            )>,
+            tooltip: Option<(u16, u16, pixtuoid_scene::tooltip::Tooltip)>,
+        }
         let shown = if sliding {
             None
         } else {
@@ -1017,14 +1026,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let tooltip = mouse.and_then(|(mx, my, hit)| {
                 pixtuoid_scene::tooltip::for_hit(hit, &world).map(|tip| (mx, my, tip))
             });
-            Some((
-                layout,
+            let drawn = DrawOut {
+                layout: Some(layout),
                 hovers,
                 star,
-                geometry,
+                geometry: Some(geometry),
+                // The cutaway holds its own tiles; the terminal's text draws.
+                held: false,
+            };
+            let over = Over {
+                text: text.map(|t| (t, hovered)),
                 tooltip,
-                text.map(|t| (t, hovered)),
-            ))
+            };
+            Some((drawn, over))
         };
         cutaway.before_flush(now);
         let mut carves = Vec::new();
@@ -1033,10 +1047,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let scene_area = scene_rect(full);
             paint_footer(f, &footer, full, theme);
             cutaway.place(f.buffer_mut(), scene_area);
-            if let Some((_, _, _, geometry, _, Some((text, hovered)))) = &shown {
-                paint_world(f, *text, (scene_area, geometry.map()), *hovered);
+            let over = shown.as_ref().map(|(_, over)| over);
+            if let Some((text, hovered)) = over.and_then(|o| o.text) {
+                paint_world(f, text, (scene_area, fitted.geometry().map()), hovered);
             }
-            if let Some((_, _, _, _, Some((mx, my, tip)), _)) = &shown {
+            if let Some((mx, my, tip)) = over.and_then(|o| o.tooltip.as_ref()) {
                 let at = TooltipAt {
                     mx: *mx,
                     my: *my,
@@ -1049,19 +1064,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         })?;
         cutaway.after_flush(&carves, now);
         match shown {
-            Some((layout, hovers, star, geometry, _, _)) => self.record_drawn(
-                scene,
-                DrawOut {
-                    layout: Some(layout),
-                    hovers,
-                    star,
-                    geometry: Some(geometry),
-                    // The cutaway holds its own tiles; the terminal's text draws.
-                    held: false,
-                },
-                popup_scale,
-                now,
-            ),
+            Some((drawn, _)) => self.record_drawn(scene, drawn, popup_scale, now),
             None => self.chrome.popup.last_scale = popup_scale,
         }
         Ok(())
