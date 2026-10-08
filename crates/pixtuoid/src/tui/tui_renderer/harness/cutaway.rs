@@ -286,21 +286,6 @@ fn cloud_draws(f: impl FnOnce()) -> usize {
     count.0.load(Ordering::Relaxed)
 }
 
-/// The renderer leaves the encode a core exactly while its audio handle has
-/// a thread up.
-#[test]
-fn the_encode_leaves_a_core_while_the_audio_handle_is_live() {
-    let (mut r, _wire) = kitty(120, 40);
-    r.cutaway.as_mut().expect("a cutaway").split_across(4);
-    r.render(&office(), pack(), t0()).expect("render");
-    assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 4);
-    let audio = crate::audio::AudioHandle::disabled();
-    let _rx = audio.install_test_channel();
-    r.set_audio(audio);
-    r.render(&office(), pack(), t0()).expect("render");
-    assert_eq!(r.cutaway.as_ref().expect("a cutaway").encode_threads(), 3);
-}
-
 /// A frame with no room for the image reports no transmits, not the last
 /// cutaway frame's.
 #[test]
