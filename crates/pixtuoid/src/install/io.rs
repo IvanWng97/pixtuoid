@@ -15,9 +15,8 @@ pub(crate) fn nonempty_abs_env(name: &str) -> Option<PathBuf> {
 
 /// Normalize a config-location env override: TRIM it, and — when `home` is
 /// `Some` — expand a leading `~`, `~/`, or `~\` against `home` (OpenClaw's
-/// `^~(?=$|[/\\])` anchor: `~foo` is NOT a home prefix). Pass `home: None` for
-/// CLIs that only TRIM and never `~`-expand (CodeWhale, Reasonix) — expanding
-/// there would DIVERGE from a CLI that takes the value verbatim.
+/// `^~(?=$|[/\\])` anchor: `~foo` is NOT a home prefix). With `home: None` (no
+/// home resolved) a `~` stays literal, for the caller to refuse as relative.
 ///
 /// Returns a [`PathBuf`], NOT a `String`: comparisons stay STRUCTURAL
 /// (component-wise), never byte-wise on a `/`-vs-`\` string.
