@@ -48,8 +48,8 @@ pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 /// `.codewhale/config.toml` would make CodeWhale PREFER our near-empty file and
 /// drop the user's provider/key config.
 ///
-/// The OS home comes from `home_first_dir` (`HOME` FIRST), NOT pixtuoid's generic
-/// `USERPROFILE`-first resolver: CodeWhale reads `$HOME ?? dirs::home_dir()`, so a
+/// The OS home comes from [`cw_home`] (`HOME` FIRST), NOT pixtuoid's generic
+/// `USERPROFILE`-first resolver: CodeWhale reads a set `$HOME` first, so a
 /// Windows user who exports `HOME` (Git Bash / MSYS2 / Cygwin) would otherwise get
 /// the hooks written to a file CodeWhale never loads (installed, but no sprite).
 ///
@@ -58,7 +58,7 @@ pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 /// If an override is still relative once its `~` is expanded, as CodeWhale
 /// refuses it, or no home resolves.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    let home = pixtuoid_core::platform::home_first_dir();
+    let home = cw_home();
     resolve_config_path(
         cw_env("CODEWHALE_CONFIG_PATH", home.as_deref())?,
         cw_env("DEEPSEEK_CONFIG_PATH", home.as_deref())?,
@@ -68,6 +68,24 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
     )
 }
 
+/// The OS home as CodeWhale resolves it (`crates/paths/src/lib.rs` `user_home`):
+/// a set `HOME` decides alone and must be absolute, else `USERPROFILE`, else
+/// Windows' `HOMEDRIVE` + `HOMEPATH`, each absolute. Not mirrored: its last
+/// `dirs::home_dir` passwd lookup.
+fn cw_home() -> Option<PathBuf> {
+    use pixtuoid_core::platform::path_env_trimmed;
+    if let Some(home) = path_env_trimmed("HOME") {
+        return home.is_absolute().then_some(home);
+    }
+    path_env_trimmed("USERPROFILE")
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            let mut p = path_env_trimmed("HOMEDRIVE").filter(|_| cfg!(windows))?;
+            p.push(path_env_trimmed("HOMEPATH")?);
+            Some(p).filter(|p| p.is_absolute())
+        })
+}
+
 /// A CodeWhale path variable as CodeWhale reads it (`crates/paths/src/lib.rs`
 /// `absolute_path_env`): blank is unset, text is trimmed, a leading `~`
 /// expands against the OS home, and a path still relative is refused.
@@ -75,7 +93,8 @@ fn cw_env(name: &str, home: Option<&Path>) -> Result<Option<PathBuf>> {
     let Some(raw) = pixtuoid_core::platform::path_env_trimmed(name) else {
         return Ok(None);
     };
-    let path = io::expand_tilde(&raw, home);
+    // Upstream expands only text; other bytes stay verbatim, and so relative.
+    let path = io::expand_tilde(&raw, home.filter(|_| raw.to_str().is_some()));
     anyhow::ensure!(
         path.is_absolute(),
         "{name} must be an absolute path, got {}",
@@ -126,7 +145,7 @@ fn resolve_config_path(
 /// layout puts config elsewhere — so probe the state dirs (created by CodeWhale on
 /// first launch) rather than the file we write.
 pub(crate) fn detect_installed() -> bool {
-    let home = pixtuoid_core::platform::home_first_dir();
+    let home = cw_home();
     // An explicit CODEWHALE_HOME suppresses the legacy dir (`legacy_deepseek_home`);
     // one CodeWhale refuses is no install.
     match cw_env("CODEWHALE_HOME", home.as_deref()) {
@@ -357,6 +376,49 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[test]
+    fn a_set_home_decides_alone_and_must_be_absolute() {
+        let profile = tempfile::tempdir().unwrap();
+        temp_env::with_vars(
+            [
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", None),
+                ("HOME", Some("rel/home")),
+                ("USERPROFILE", Some(profile.path().to_str().unwrap())),
+            ],
+            || {
+                assert!(
+                    cw_home().is_none(),
+                    "a relative HOME is no home, not a fallback"
+                );
+                assert!(default_config_path().is_err());
+            },
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_override_is_not_tilde_expanded() {
+        use std::os::unix::ffi::OsStrExt;
+        let home = tempfile::tempdir().unwrap();
+        let raw = std::ffi::OsStr::from_bytes(b"~/cw\xff");
+        temp_env::with_vars(
+            [
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", Some(raw)),
+                ("HOME", Some(home.path().as_os_str())),
+            ],
+            || {
+                assert!(
+                    default_config_path().is_err(),
+                    "verbatim, so relative, so refused"
+                )
+            },
+        );
     }
 
     #[test]
