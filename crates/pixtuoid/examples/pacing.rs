@@ -6,10 +6,14 @@
 //! frame writes. Advisory, local: `just bench-pacing`.
 //!
 //! The scene advances a VIRTUAL clock one paint interval per frame, so every
-//! case paints the same frames; the interval columns are therefore computed
-//! from the measured render times under each loop model, not observed. The
-//! one `real-clock` case runs the production loop's shape on the wall clock
-//! to check that model once.
+//! case paints the same frames, and each frame waits for its tick on the wall
+//! clock as the TUI's does (`Pace::Paced`): the CPU idles between frames
+//! and each wakes on a cooled core, which a frame run back to back never
+//! sees. Each case's `hot p99` runs the same frames back to back
+//! (`Pace::Hot`). The interval columns are computed from the measured
+//! render times under each loop model, not observed; the one `real-clock`
+//! case runs the production loop's shape on the wall clock to check that
+//! model once.
 //!
 //! `pacing next-storm` and `pacing dusk` print the Unix second the clock's
 //! next transition into a storm and today's nightfall start, and `pacing
@@ -24,7 +28,8 @@
 //! overcast and a stormy noon, dusk a second a frame, the first clock-weather
 //! transition, and a storm whose every frame paints and sends whole, with and
 //! without lofi track beds synthesizing beside it. `HITCH_ONLY=a|b` keeps the
-//! runs whose terminal or name holds every part.
+//! runs whose terminal or name holds every part; every run is paced, but
+//! back to back under `HITCH_HOT`.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -215,6 +220,7 @@ fn run(
     case: &Case,
     clock: &SpanClock,
     pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+    pace: Pace,
 ) -> Result<Vec<Frame>> {
     let tick = Duration::from_secs(1) / PAINT_FPS;
     let pets = vec![Pet::defaulted(PetKind::Cat), Pet::defaulted(PetKind::Dog)];
@@ -237,8 +243,10 @@ fn run(
     let frames = frame_at(SCENARIO);
     let (mut slid, mut resized) = (false, false);
     let mut out = Vec::new();
+    let pacer = Pacer::new(pace, tick);
     for n in 0..frames {
         let now = start + tick * u32::try_from(n)?;
+        pacer.wait();
         if n == frame_at(SLIDE_AT) {
             r.navigate_floor(1, now);
             slid = r.transition().is_some();
@@ -317,6 +325,46 @@ fn real_clock(
         }
     }
     Ok((renders, intervals, if polls { "poll" } else { "sleep" }))
+}
+
+/// How a run spaces its frames on the wall clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pace {
+    /// Each frame on its own tick, as the TUI's frame interval runs them
+    /// (`tokio::time::interval`, `MissedTickBehavior::Skip`).
+    Paced,
+    /// Back to back, which keeps the CPU hot as no running TUI does.
+    Hot,
+}
+
+/// Holds each frame of a run to its tick under a [`Pace`].
+struct Pacer {
+    pace: Pace,
+    tick: Duration,
+    origin: Instant,
+}
+
+impl Pacer {
+    fn new(pace: Pace, tick: Duration) -> Self {
+        Self {
+            pace,
+            tick,
+            origin: Instant::now(),
+        }
+    }
+
+    /// Wait for the next tick not yet past, as `Skip` does after an overrun.
+    fn wait(&self) {
+        if self.pace == Pace::Hot {
+            return;
+        }
+        let since = self.origin.elapsed();
+        let ticks = since.as_nanos().div_ceil(self.tick.as_nanos());
+        let at = self
+            .tick
+            .saturating_mul(u32::try_from(ticks).unwrap_or(u32::MAX));
+        std::thread::sleep(at.saturating_sub(since));
+    }
 }
 
 /// The `p`th percentile of `xs`, nearest rank.
@@ -686,7 +734,14 @@ fn hitch(path: &Path) -> Result<()> {
         pixtuoid::dev::warm(&mut r, &scene, &pack, start);
         let mut totals = Vec::new();
         let mut n = 0u64;
+        let pace = if pixtuoid_core::platform::text_env("HITCH_HOT").is_some() {
+            Pace::Hot
+        } else {
+            Pace::Paced
+        };
+        let pacer = Pacer::new(pace, tick);
         loop {
+            pacer.wait();
             let offset = match run.start {
                 None => wall.elapsed(),
                 Some(_) => run.step * u32::try_from(n)?,
@@ -756,12 +811,6 @@ fn hitch(path: &Path) -> Result<()> {
             writeln!(out)?;
             totals.push(total);
             n += 1;
-            if run.start.is_none() {
-                let next = begun + tick;
-                if let Some(wait) = next.checked_duration_since(Instant::now()) {
-                    std::thread::sleep(wait);
-                }
-            }
         }
         lofi_stop.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some(builds) = lofi.and_then(|h| h.join().ok()) {
@@ -838,17 +887,18 @@ fn main() -> Result<()> {
     let mut stdout = std::io::stdout().lock();
     let _ = writeln!(
         stdout,
-        "paint interval {:.1} ms (1 s / PAINT_FPS); intervals and jitter are COMPUTED from render times\n",
+        "paint interval {:.1} ms (1 s / PAINT_FPS); frames paced on its ticks, hot p99 back to back; intervals and jitter are COMPUTED from render times\n",
         ms(tick)
     );
     let _ = writeln!(
         stdout,
-        "{:<38} {:>7} {:>7} {:>7} {:>7} | {:>6} {:>6} {:>6} {:>6} | {:>5} | {:>13} {:>13} | {:>9} {:>9}",
+        "{:<38} {:>7} {:>7} {:>7} {:>7} {:>7} | {:>6} {:>6} {:>6} {:>6} | {:>5} | {:>13} {:>13} | {:>9} {:>9}",
         "case",
         "p50",
         "p95",
         "p99",
         "max",
+        "hot p99",
         "comp",
         "rast",
         "enc",
@@ -861,7 +911,11 @@ fn main() -> Result<()> {
     );
     let mut report = Vec::new();
     for case in cases() {
-        let frames = run(&case, &clock, &pack)?;
+        let frames = run(&case, &clock, &pack, Pace::Paced)?;
+        let hot: Vec<Duration> = run(&case, &clock, &pack, Pace::Hot)?
+            .iter()
+            .map(|f| f.total)
+            .collect();
         let col = |f: fn(&Frame) -> Duration| frames.iter().map(f).collect::<Vec<_>>();
         let total = col(|f| f.total);
         let over = total.iter().filter(|&&t| t > tick).count() as f64 * 100.0 / total.len() as f64;
@@ -876,12 +930,13 @@ fn main() -> Result<()> {
         };
         let _ = writeln!(
             stdout,
-            "{:<38} {:>7.2} {:>7.2} {:>7.2} {:>7.2} | {:>6.2} {:>6.2} {:>6.2} {:>6.2} | {:>5.1} | {:>6.1}/{:>6.2} {:>6.1}/{:>6.2} | {:>9} {:>9}",
+            "{:<38} {:>7.2} {:>7.2} {:>7.2} {:>7.2} {:>7.2} | {:>6.2} {:>6.2} {:>6.2} {:>6.2} | {:>5.1} | {:>6.1}/{:>6.2} {:>6.1}/{:>6.2} | {:>9} {:>9}",
             case.name,
             ms(pct(&total, 50.0)),
             ms(pct(&total, 95.0)),
             ms(pct(&total, 99.0)),
             ms(total.iter().copied().max().unwrap_or_default()),
+            ms(pct(&hot, 99.0)),
             ms(pct(&col(|f| f.compose), 50.0)),
             ms(pct(&col(|f| f.rasterize), 50.0)),
             ms(pct(&col(|f| f.encode), 50.0)),
@@ -898,6 +953,7 @@ fn main() -> Result<()> {
             "case": case.name,
             "frames": frames.len(),
             "frame": stats(&total),
+            "frame_hot": stats(&hot),
             "compose": stats(&col(|f| f.compose)),
             "rasterize": stats(&col(|f| f.rasterize)),
             "encode": stats(&col(|f| f.encode)),
@@ -943,6 +999,7 @@ fn main() -> Result<()> {
             "paint_interval_ms": ms(tick),
             "scenario_s": SCENARIO.as_secs_f64(),
             "intervals_are": "computed from render times, but for the real-clock case",
+            "frames_are": "paced on the wall clock as the TUI's; frame_hot back to back",
             "cases": report,
         }))?,
     )?;
