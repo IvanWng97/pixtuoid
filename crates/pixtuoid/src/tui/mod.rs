@@ -1125,6 +1125,42 @@ mod apply_key_action_tests {
         }
     }
 
+    impl Harness {
+        /// Onboarding open on `detected`, as a first run shows it.
+        fn onboarding(detected: &[&'static str]) -> Self {
+            let mut h = Self::new();
+            h.ui = super::ui_state::UiState::new(
+                &theme::NORMAL,
+                crate::panels::welcome::WelcomeUi::from_detected(detected),
+                false,
+                h._tmp.path().join("sock"),
+                None,
+                crate::doctor::DriftSeen::default(),
+            );
+            h
+        }
+    }
+
+    #[test]
+    fn skipping_onboarding_writes_nothing() {
+        let mut h = Harness::onboarding(&["antigravity"]);
+        assert!(h.ui.onboarding_open());
+        h.apply(KeyAction::OnboardingSkip);
+        assert!(!h.ui.onboarding_open());
+        assert!(!h.config_path.exists(), "skip must not touch the config");
+        assert!(!h.connected.is_connected("antigravity"));
+    }
+
+    #[test]
+    fn confirming_onboarding_connects_the_checked_rows_and_opens_their_gate() {
+        let mut h = Harness::onboarding(&["antigravity"]);
+        h.apply(KeyAction::OnboardingConfirm);
+        assert!(!h.ui.onboarding_open());
+        assert!(h.connected.is_connected("antigravity"));
+        let cfg = crate::config::load(&h.config_path, &mut Vec::new());
+        assert_eq!(cfg.sources, [("antigravity".to_string(), true)].into());
+    }
+
     /// The highest-blast-radius pair: `Quit` must be the ONLY action that ends
     /// the loop. A mutant returning a constant makes every keypress quit (or
     /// makes `q` inert), and nothing else in the suite would notice.

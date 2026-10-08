@@ -6,8 +6,8 @@
 //! Determinism: the goldens are a function of the REGISTRY, not of what's
 //! installed on the test machine — SO LONG AS the environment is fully isolated,
 //! which is why every arm clears the env and points HOME at an empty tempdir.
-//! Every row is then `connected: false` (a source is connected only on an
-//! explicit `[sources]` `true`), so `cli_present` is the only field that varies,
+//! Every row is then `connected: false` (no hooks installed, no flag set), so
+//! `cli_present` is the only field that varies,
 //! and it splits on registry shape: a target-bearing source probes absent in the
 //! empty HOME → `false`, a no-target one has no target to probe → `true`.
 //! Unix-only: the Windows home-var isolation differs and can't be verified here.
@@ -118,10 +118,11 @@ impl Drop for Reaped {
 }
 
 /// Run a headless pixtuoid against an isolated everything and drip a real Codex
-/// rollout into its sessions root. `sources_toml` is the ONLY difference between
-/// the two arms below, so any behavioural difference is attributable to it alone
-/// — which is why the log level is fixed here rather than varied per arm.
-fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
+/// rollout into its sessions root. The ids `pixtuoid connect` installs first are
+/// the ONLY difference between the two arms below, so any behavioural difference
+/// is attributable to them alone — which is why the log level is fixed here rather
+/// than varied per arm.
+fn headless_replay(connect: &[&str], budget: std::time::Duration) -> Replay {
     use std::io::Write;
 
     // Read the fixture BEFORE spawning, so a read panic stays on the near side
@@ -138,12 +139,20 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
     let out = tempfile::NamedTempFile::new().expect("stdout file");
     let err = tempfile::NamedTempFile::new().expect("stderr file");
 
-    std::fs::create_dir_all(cfg.path().join("pixtuoid")).unwrap();
-    std::fs::write(
-        cfg.path().join("pixtuoid/config.toml"),
-        format!("[sources]\n{sources_toml}"),
-    )
-    .unwrap();
+    for id in connect {
+        // The rollout rides the transcript, so the shim the hooks name never runs.
+        let done = common::isolated(&["connect", id], home.path())
+            .env("XDG_CONFIG_HOME", cfg.path())
+            .env("PIXTUOID_HOOK", "/usr/bin/true")
+            .output()
+            .expect("run pixtuoid connect");
+        assert!(
+            done.status.success(),
+            "connect {id}: {}{}",
+            String::from_utf8_lossy(&done.stdout),
+            String::from_utf8_lossy(&done.stderr)
+        );
+    }
 
     // Isolate the SOCKET too, and not merely for hygiene: on the default socket
     // a live CC session's hook traffic on the developer's machine lands in this
@@ -214,7 +223,7 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
 
 #[test]
 fn connected_codex_rollout_becomes_a_sprite() {
-    let r = headless_replay("codex = true\n", std::time::Duration::from_secs(20));
+    let r = headless_replay(&["codex"], std::time::Duration::from_secs(20));
     assert!(
         r.fixture_landed,
         "the fixture must reach the watched sessions root\nstderr:\n{}",
@@ -233,13 +242,13 @@ fn connected_codex_rollout_becomes_a_sprite() {
     );
 }
 
-/// The same rollout with the flag absent renders nothing — and, crucially, for
+/// The same rollout with codex unconnected renders nothing — and, crucially, for
 /// the RIGHT reason. Asserting only the absence would be satisfied by any
 /// breakage that stopped the rollout reaching the watcher at all, so what this
 /// pins is the gate's own announcement plus the fixture-landed check.
 #[test]
 fn disconnected_codex_rollout_is_dropped_by_the_gate() {
-    let r = headless_replay("claude-code = true\n", std::time::Duration::from_secs(20));
+    let r = headless_replay(&[], std::time::Duration::from_secs(20));
     assert!(
         r.fixture_landed,
         "the fixture must reach the watched sessions root\nstderr:\n{}",

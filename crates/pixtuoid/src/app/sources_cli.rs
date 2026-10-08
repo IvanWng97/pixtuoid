@@ -34,9 +34,8 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
         return Ok(());
     }
     let cfg = config::config_path();
-    let choices: Vec<(&'static str, bool)> = detected.iter().map(|&s| (s, true)).collect();
     let mut any_failed = false;
-    for (id, oc) in sources::apply_choices(&cfg, &choices) {
+    for (id, oc) in sources::connect_each(&cfg, &detected) {
         let oc = sources::ChangeOutcome::from(oc);
         if matches!(oc, sources::ChangeOutcome::Failed(_)) {
             any_failed = true;

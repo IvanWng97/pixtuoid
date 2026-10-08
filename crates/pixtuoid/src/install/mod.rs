@@ -30,9 +30,10 @@ use target::{BinaryStrategy, Target};
 /// carries none.
 pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 
-/// Whether `t`'s config currently bears pixtuoid hooks — the load-bearing gate for
-/// `verify_target`, which would report an uninstalled config as "broken". Errs toward
-/// INCLUDED wherever it cannot tell: an UNREADABLE config counts as installed, because
+/// Whether `t`'s config currently bears pixtuoid hooks — whether its source is
+/// connected (`sources::connected`), and the gate for `verify_target`, which would
+/// report an uninstalled config as "broken". Errs toward INCLUDED wherever it
+/// cannot tell: an UNREADABLE config counts as installed, because
 /// we cannot look and so must not claim otherwise, and one that reads but cannot be
 /// PARSED falls back to the marker probe (`config_mentions_us`).
 pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
@@ -373,6 +374,7 @@ pub(crate) fn install_target(
     // read(A)→write(B)→write(A), and A's rename clobbers B's change.
     let lock = io::lock_config(&path)?;
     let content = lock.read()?;
+    let prior = target::config_present(&path).then(|| content.clone());
     // Merge FIRST so a present-but-malformed config bails BEFORE we touch the filesystem —
     // else the extra artifacts land on disk as orphans registered nowhere (partial install).
     let outcome = (t.merge_install)(&content, &hook_cmd)
@@ -386,10 +388,19 @@ pub(crate) fn install_target(
     if outcome.changed {
         lock.write_atomic(&outcome.content)?;
     }
-    drop(lock);
-    // After the hooks file is written, so the plugin never registers empty.
-    if let Some(host) = t.host {
-        (host.register)(&path)?;
+    // After the hooks file is written, so the plugin never registers empty, and
+    // still under its lock, so a failed registration puts back exactly what this
+    // call changed: the hooks ARE the connected fact (`has_hooks`), and a plugin
+    // that never registered fires none of the new ones.
+    if let Some(host) = t.host
+        && let Err(e) = (host.register)(&path)
+    {
+        if outcome.changed
+            && let Err(undo) = restore(&lock, prior.as_deref())
+        {
+            return Err(e.context(format!("the hooks it wrote stay in place: {undo:#}")));
+        }
+        return Err(e);
     }
     Ok(InstallReport {
         outcome: if outcome.changed {
@@ -400,6 +411,14 @@ pub(crate) fn install_target(
         path_warning,
         post_install_hint: t.post_install_hint,
     })
+}
+
+/// Put the locked file back as an install found it: `prior`, or no file at all.
+fn restore(lock: &io::ConfigLock, prior: Option<&str>) -> Result<()> {
+    match prior {
+        Some(content) => lock.write_atomic(content),
+        None => Ok(std::fs::remove_file(lock.target())?),
+    }
 }
 
 /// Remove the entries `uninstall` recognizes from `path` under its lock; whether
