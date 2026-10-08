@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::DaemonLiveness;
+use pixtuoid_scene::pack::OfficeArt;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -39,7 +39,7 @@ pub(crate) enum FloatingEvent {
 pub(crate) struct FloatingApp {
     cfg: FloatingConfig,
     theme: &'static Theme,
-    pack: std::sync::Arc<Pack>,
+    pack: std::sync::Arc<OfficeArt>,
     config_path: PathBuf,
     /// The panels, the `[p]ause` and the theme picker, as the TUI holds them.
     ui: crate::panels::ui_state::UiState,
@@ -110,7 +110,7 @@ impl FloatingApp {
     pub(crate) fn new(
         cfg: FloatingConfig,
         Appearance { theme, motion }: Appearance,
-        pack: Pack,
+        pack: OfficeArt,
         pets: Vec<pixtuoid_scene::pet::Pet>,
         Settings {
             config_path,

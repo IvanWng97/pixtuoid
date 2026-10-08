@@ -7,13 +7,14 @@
 //! `floor::FloorSession::step` to observe poses/positions without buying a
 //! pixel pass.
 
+use pixtuoid_core::sprite::format::{Piece, Walk};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::time::{Duration, SystemTime};
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::source::daemon::DaemonInstanceKey;
-use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, DaemonLiveness, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
@@ -83,7 +84,7 @@ pub struct CharacterPlacement {
     /// The row it sorts on (breath-independent).
     pub sort_row: u16,
     /// The sprite animation to blit (e.g. `"seated"`, `"walking"`).
-    pub anim_name: &'static str,
+    pub anim_name: Piece,
     /// The frame within `anim_name` to draw this tick.
     pub frame_idx: usize,
     /// Top-left screen position to blit the sprite at.
@@ -120,7 +121,7 @@ pub(crate) struct PetPlacement {
     /// Whether to mirror the sprite horizontally.
     pub(crate) flip: bool,
     /// The sprite animation to draw.
-    pub(crate) anim_name: &'static str,
+    pub(crate) anim_name: Piece,
     /// The frame within `anim_name`.
     pub(crate) frame_idx: usize,
     /// What rides on it this tick, in paint order.
@@ -146,7 +147,7 @@ pub(crate) struct MascotPlacement {
     /// The frame `pos` was fitted for.
     pub(crate) size: Size,
     /// The sprite animation to draw.
-    pub(crate) anim_name: &'static str,
+    pub(crate) anim_name: Piece,
     /// The frame within `anim_name`.
     pub(crate) frame_idx: usize,
     /// Which gateway instance it is.
@@ -427,14 +428,13 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     }
 }
 
-/// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
-pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
-    pack.animation(anim)
-        .and_then(|a| crate::pack::frame_at(a, frame_idx))
-        .map(|f| Size {
-            w: f.width(),
-            h: f.height(),
-        })
+/// The size of `anim`'s frame `frame_idx`, [wrapped](pixtuoid_core::sprite::Sprite::wrap).
+pub(crate) fn pack_frame_size(pack: &OfficeArt, anim: Piece, frame_idx: usize) -> Size {
+    let f = pack.piece(anim).frame_at(frame_idx);
+    Size {
+        w: f.width(),
+        h: f.height(),
+    }
 }
 
 /// Carry out the floor's grip before anything steps: a creature held follows
@@ -480,7 +480,7 @@ fn take_grip(
 /// desk.
 fn pet_placement(
     agents: &[AgentSlot],
-    pack: &Pack,
+    pack: &OfficeArt,
     pets: PetInputs<'_>,
     floor: FloorMeta,
     timing: Timing,
@@ -492,7 +492,8 @@ fn pet_placement(
     let kind = pets.pet.map(|p| p.kind);
     creatures.retain(|key, _| !matches!(key, CreatureKey::Pet(k) if Some(*k) != kind));
     let kind = kind?;
-    let walk_anim = pack.animation(kind.walk_anim())?;
+    let walk_anim = kind.walk_anim();
+    let stride = pack.stride(walk_anim);
     layout.corridor?;
     let walk = creatures
         .entry(CreatureKey::Pet(kind))
@@ -503,12 +504,12 @@ fn pet_placement(
     if petted.is_some() {
         walk.hold(now);
     }
-    let Stance { at, walking } = walk.step(Roam::pet(Some(walk_anim)), ground, timing)?;
+    let Stance { at, walking } = walk.step(Roam::pet(stride), ground, timing)?;
     // a petted pet sits for it, even held mid-leg
     let (anim_name, frame_idx, flip) = match walking.filter(|_| petted.is_none()) {
         Some(leg) => (
-            kind.walk_anim(),
-            pose::walk_frame(leg.travelled, walk_anim, now),
+            walk_anim.piece(),
+            pose::walk_frame(leg.travelled, pack.piece(walk_anim.piece()), stride),
             // its walk faces east
             leg.to.x < leg.from.x,
         ),
@@ -525,7 +526,7 @@ fn pet_placement(
             };
             (
                 anim,
-                crate::pack::animation_frame_at(pack, anim, beat),
+                crate::pack::looping_frame_index(pack.piece(anim), beat),
                 false,
             )
         }
@@ -534,7 +535,7 @@ fn pet_placement(
         layout,
         Pivot::Center,
         at,
-        pack_frame_size(pack, anim_name, frame_idx)?,
+        pack_frame_size(pack, anim_name, frame_idx),
     );
     Some(PetPlacement {
         kind,
@@ -560,7 +561,7 @@ const PET_SLEEP_Z_SEED: u64 = 0xCAFE;
 pub(crate) fn pet_effects(
     kind: PetKind,
     pos: Point,
-    anim_name: &str,
+    anim_name: Piece,
     petted_ms: Option<u64>,
     beat: Beat,
 ) -> Vec<Effect> {
@@ -592,7 +593,7 @@ struct DrawnMascot {
 /// each mascot shows once.
 fn mascot_placements(
     scene: &SceneState,
-    pack: &Pack,
+    pack: &OfficeArt,
     timing: Timing,
     ground: &mut Ground<'_>,
     creatures: &mut HashMap<CreatureKey, CreatureWalk>,
@@ -608,7 +609,7 @@ fn mascot_placements(
             continue;
         };
         let state = presence.display_state();
-        let roam = Roam::mascot(pack.animation(def.walk), state);
+        let roam = Roam::mascot(pack.stride(def.walk), state);
         let key = DaemonInstanceKey::new(source, instance.clone());
         let creature = CreatureKey::Mascot(key.clone());
         if presence.liveness != DaemonLiveness::Down
@@ -667,7 +668,7 @@ fn mascot_placements(
             creatures.remove(&creature);
             continue;
         };
-        let roam = Roam::mascot(pack.animation(def.walk), DaemonState::Down);
+        let roam = Roam::mascot(pack.stride(def.walk), DaemonState::Down);
         if !walk.leaving() {
             walk.leave(elevator, roam, ground, now);
         }
@@ -695,16 +696,19 @@ fn mascot_placements(
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
                     Some(leg) => (
-                        def.walk,
-                        pack.animation(def.walk)
-                            .map_or(0, |anim| pose::walk_frame(leg.travelled, anim, now)),
+                        def.walk.piece(),
+                        pose::walk_frame(
+                            leg.travelled,
+                            pack.piece(def.walk.piece()),
+                            pack.stride(def.walk),
+                        ),
                     ),
                     None => (
                         def.rest,
-                        crate::pack::animation_frame_at(pack, def.rest, beat),
+                        crate::pack::looping_frame_index(pack.piece(def.rest), beat),
                     ),
                 };
-                let size = pack_frame_size(pack, anim_name, frame_idx)?;
+                let size = pack_frame_size(pack, anim_name, frame_idx);
                 let pos = on_canvas(ground.layout, Pivot::Center, at, size);
                 Some(MascotPlacement {
                     pos,
@@ -732,7 +736,7 @@ fn mascot_placements(
 fn desk_props(
     agents: &[AgentSlot],
     layout: &SceneLayout,
-    pack: &Pack,
+    pack: &OfficeArt,
     coffee: &HashMap<AgentId, SystemTime>,
     timing: Timing,
 ) -> Vec<DeskProps> {
@@ -816,22 +820,20 @@ pub(crate) fn character_effects(
 
 /// The upright seated pose. Each seated pose is a base
 /// [`Seat::sprite_for`](seat::Seat::sprite_for) turns to its seat's view.
-const SEATED: &str = "seated";
+const SEATED: Piece = Piece::Seated;
 /// The typing pose.
-const TYPING: &str = "typing";
+const TYPING: Piece = Piece::Typing;
 /// The sleeping poses, picked by agent id so a row of sleepers isn't one pose.
-const SLEEPING_POSES: [&str; 2] = ["seated_sleeping", "seated_sleeping_alt"];
-/// Every pose a seat resolves.
-#[cfg(test)]
-pub(crate) const SEATED_POSES: [&str; 4] = [SEATED, TYPING, SLEEPING_POSES[0], SLEEPING_POSES[1]];
+const SLEEPING_POSES: [Piece; 2] = [Piece::SeatedSleeping, Piece::SeatedSleepingAlt];
 
 /// A person's walks, the sim's pick by the leg: facing the camera, walking
 /// away, carrying a coffee.
-const WALK: &str = "walking";
-const WALK_BACK: &str = "walking_back";
-const WALK_COFFEE: &str = "walking_coffee";
-/// Every walk [`resolve_characters`] steps by the ground covered.
-pub(crate) const WALKS: [&str; 3] = [WALK, WALK_BACK, WALK_COFFEE];
+const WALK: Walk = Walk::Walking;
+const WALK_BACK: Walk = Walk::WalkingBack;
+const WALK_COFFEE: Walk = Walk::WalkingCoffee;
+/// Every walk a person has.
+#[cfg(test)]
+pub(crate) const WALKS: [Walk; 3] = [WALK, WALK_BACK, WALK_COFFEE];
 
 /// Resolve every character's placement for this tick from the routed poses
 /// `sim_step` already derived. Returns the placements (paint maps them 1:1 to
@@ -841,7 +843,7 @@ pub(crate) fn resolve_characters(
     agents: &[AgentSlot],
     poses: &HashMap<AgentId, Option<Pose>>,
     layout: &SceneLayout,
-    pack: &Pack,
+    pack: &OfficeArt,
     coffee: &HashMap<AgentId, SystemTime>,
     timing: Timing,
 ) -> (
@@ -863,7 +865,7 @@ pub(crate) fn resolve_characters(
             continue;
         };
         let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
-        let seated = |base: &'static str, glow: CharacterGlow, sleep_seed: Option<u64>| {
+        let seated = |base: Piece, glow: CharacterGlow, sleep_seed: Option<u64>| {
             let facing = layout.desk_facing(agent.desk_index.single_floor_local());
             let seat = Seat::at_desk(desk, facing);
             let top_left = seat.render_top_left(CHARACTER_SPRITE_W);
@@ -913,9 +915,8 @@ pub(crate) fn resolve_characters(
             Pose::SeatedTyping => {
                 let (mut placement, cues) = seated(TYPING, CharacterGlow::Tool, None);
                 // the art the seat resolved to, a back view's own loop included
-                placement.frame_idx = pack
-                    .animation(placement.anim_name)
-                    .map_or(0, |anim| pose::typing_frame(agent, beat, anim));
+                placement.frame_idx =
+                    pose::typing_frame(agent, beat, pack.piece(placement.anim_name));
                 placements.push((placement, cues));
             }
             Pose::AtWaypoint { wp, kind } => {
@@ -974,7 +975,7 @@ pub(crate) fn resolve_characters(
                         } else {
                             top_left.y + WALKING_Y_OFF
                         },
-                        anim_name: "standing",
+                        anim_name: Piece::Standing,
                         frame_idx: 0,
                         top_left,
                         label_anchor: top_left,
@@ -1022,16 +1023,15 @@ pub(crate) fn resolve_characters(
                     ),
                 };
                 // walking_back always wins (no back-facing coffee sprite).
-                let anim_name: &'static str = if going_back {
+                let walk: Walk = if going_back {
                     WALK_BACK
                 } else if carrying_coffee {
                     WALK_COFFEE
                 } else {
                     WALK
                 };
-                let frame = pack
-                    .animation(anim_name)
-                    .map_or(0, |anim| pose::walk_frame(travelled, anim, timing.now));
+                let anim_name = walk.piece();
+                let frame = pose::walk_frame(travelled, pack.piece(anim_name), pack.stride(walk));
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
@@ -1053,7 +1053,7 @@ pub(crate) fn resolve_characters(
                     Cues {
                         planted_foot: Some(effects::planted_foot(
                             frame,
-                            pack.animation(anim_name).map_or(1, |a| a.frames().len()),
+                            pack.piece(anim_name).frames().len(),
                             flip,
                         )),
                         ..Cues::default()
@@ -1065,16 +1065,13 @@ pub(crate) fn resolve_characters(
     // ONE fit for every pose arm, on the frame each placement will blit, read by
     // both the sprite and its badge. The sort row keeps pre-fit geometry.
     for (p, cues) in &mut placements {
-        let Some(size) = pack_frame_size(pack, p.anim_name, p.frame_idx) else {
-            continue;
-        };
+        let size = pack_frame_size(pack, p.anim_name, p.frame_idx);
         let fitted = on_canvas(layout, Pivot::TopLeft, p.top_left, size);
         // The painter's own desk art: whatever it raises behind the sitter's
         // head, the badge clears.
-        let ceiling = p.seat_desk.and_then(|d| {
-            desk_art(pack, layout.desk_facing_at(d))
-                .map(|art| desk_art_top(pack, d.y, art.height()))
-        });
+        let ceiling = p
+            .seat_desk
+            .map(|d| desk_art_top(pack, d.y, desk_art(pack, layout.desk_facing_at(d)).height()));
         p.label_anchor = badge_anchor(fitted, size, ceiling);
         // Breath after the fit, so it never moves the badge.
         let agent = &agents[p.agent_idx];
@@ -1097,10 +1094,11 @@ pub(crate) fn resolve_characters(
 }
 
 /// Where the cup stands on the 1x desk at `desk` facing `facing`: its top-left
-/// cell, at the desk art's cup mark; `None` where the pack marks none.
-pub(crate) fn desk_cup_at(pack: &Pack, desk: Point, facing: Facing) -> Option<Point> {
-    let mark = crate::pack::desk_mark(pack, desk, facing, crate::pack::CUP_MARK)?;
-    let cup = pack_frame_size(pack, crate::pack::DESK_CUP_SPRITE, 0)?;
+/// cell, at the desk art's cup mark; `None` where the cup would hang off the
+/// buffer.
+pub(crate) fn desk_cup_at(pack: &OfficeArt, desk: Point, facing: Facing) -> Option<Point> {
+    let mark = crate::pack::desk_mark(pack, desk, facing, crate::pack::DeskProp::Cup);
+    let cup = pack_frame_size(pack, Piece::DeskCup, 0);
     Some(Point {
         x: mark.left(cup.w)?,
         y: mark.at.y.checked_sub(cup.h)?,

@@ -12,7 +12,8 @@
 
 use std::ops::RangeInclusive;
 
-use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material, Pack};
+use crate::pack::OfficeArt;
+use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
 use crate::atmosphere::SkyTones;
@@ -172,7 +173,7 @@ fn carries_beacon(plane: Plane, stand: &Stand<'_>, tallest: u16) -> bool {
 }
 
 /// The tallest building `pack` stands in the near plane.
-fn tallest_near(pack: &Pack) -> u16 {
+fn tallest_near(pack: &OfficeArt) -> u16 {
     pack.buildings()
         .filter(|b| b.stands_in(CityPlane::Near))
         .map(|b| b.size().1)
@@ -259,7 +260,7 @@ impl<'p> Skyline<'p> {
     /// `pack`'s city across a run of glass `run_w` wide and `glass_h` tall, seen
     /// from `altitude` (0 at the ground floor, 1 at the top). A plane the pack
     /// stands no building in gets plain blocks, so every depth reads.
-    pub(crate) fn of(pack: &'p Pack, run_w: u16, glass_h: u16, altitude: f32) -> Self {
+    pub(crate) fn of(pack: &'p OfficeArt, run_w: u16, glass_h: u16, altitude: f32) -> Self {
         let kits = Plane::ALL.map(|plane| -> Vec<&'p Building> {
             plane.pack_plane().map_or_else(Vec::new, |p| {
                 pack.buildings().filter(|b| b.stands_in(p)).collect()
@@ -444,7 +445,7 @@ impl CityStrip {
     /// `moment`, at `density`. A building the pack draws no art for at
     /// `density` is its base, each pixel grown to fill its cell.
     pub(crate) fn draw(
-        pack: &Pack,
+        pack: &OfficeArt,
         (run_w, glass_h): (u16, u16),
         outlook: &crate::atmosphere::Outlook,
         theme: &Theme,
@@ -489,9 +490,7 @@ impl CityStrip {
                 Stand::Kit {
                     building, x, top, ..
                 } => {
-                    let Some(materials) = pack.city_materials() else {
-                        continue;
-                    };
+                    let materials = pack.city_materials();
                     let (art, grow) = building
                         .variant(density)
                         .map_or((building.base(), d), |a| (a, 1));
@@ -501,13 +500,10 @@ impl CityStrip {
                     {
                         Some(i) => &recoloured[i].2,
                         None => {
-                            let Some(f) = art
+                            let f = art
                                 .sprite()
-                                .recolorable(0)
-                                .map(|f| f.recolored(&c.overrides(materials)))
-                            else {
-                                continue;
-                            };
+                                .recolorable_at(0)
+                                .recolored(&c.overrides(materials));
                             recoloured.push((building.name(), plane, f));
                             &recoloured[recoloured.len() - 1].2
                         }
@@ -614,8 +610,8 @@ mod tests {
         }
     }
 
-    fn pack() -> Pack {
-        crate::pack::test_default_pack()
+    fn pack() -> OfficeArt {
+        crate::pack::test_office()
     }
 
     /// A window shows the strip read from the run's west end and the glass's
@@ -909,7 +905,7 @@ mod tests {
             assert_eq!(shown(&a), shown(&b), "{d}: no light in the sky");
             let city = Skyline::of(&pack, run_w, glass_h, 0.0);
             let tallest = tallest_near(&pack);
-            let materials = pack.city_materials().expect("a city");
+            let materials = pack.city_materials();
             for &(x, y) in on_a.iter().chain(&on_b) {
                 let (x, y) = (i32::from(x), i32::from(y));
                 let on_a_roof = city.stands().any(|(plane, s)| {
@@ -927,8 +923,7 @@ mod tests {
                         .map_or((building.base(), d), |a| (a, 1));
                     let frame = art
                         .sprite()
-                        .recolorable(0)
-                        .expect("a frame")
+                        .recolorable_at(0)
                         .recolored(&near.overrides(materials));
                     // Its art's first drawn row: its roof, or its spire's tip.
                     let first = (0..frame.height())
@@ -956,7 +951,7 @@ mod tests {
     fn a_light_leaves_a_neighbours_pixels_alone() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let materials = pack.city_materials().expect("a city");
+        let materials = pack.city_materials();
         let near = PlaneColours::of(
             Plane::Near,
             &SkyTones::resolve(
@@ -978,8 +973,7 @@ mod tests {
                     .map_or((tower.base(), d), |a| (a, 1));
                 let frame = art
                     .sprite()
-                    .recolorable(0)
-                    .expect("a frame")
+                    .recolorable_at(0)
                     .recolored(&near.overrides(materials));
                 let side = if grow > 1 { grow } else { (d / 2).max(1) };
                 let (w, h) = (frame.width() * grow + side, frame.height() * grow + side);

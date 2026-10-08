@@ -5,9 +5,10 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pixtuoid_core::sprite::format::{Density, Pack};
+use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
+use pixtuoid_scene::pack::OfficeArt;
 
 use pixtuoid_scene::cutaway::{CellPx, Face, GridInk, paint_grid};
 use pixtuoid_scene::display::cells::{CARD_SHADOW, CellGrid, CellRect};
@@ -52,7 +53,7 @@ pub struct OfficeRenderer {
 
 impl OfficeRenderer {
     /// A renderer drawing with `pack`, which every frame's `world.pack` must be.
-    pub fn new(pack: std::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self {
+    pub fn new(pack: std::sync::Arc<pixtuoid_scene::pack::OfficeArt>) -> Self {
         Self {
             session: OfficeSession::new(pack),
             pets: Vec::new(),
@@ -716,7 +717,7 @@ pub fn paint_tooltip_into_surface(
     sb: &mut XrgbSurface<'_>,
     tip: &pixtuoid_scene::tooltip::Tooltip,
     cursor: (f64, f64),
-    (theme, pack): (&Theme, &Pack),
+    (theme, pack): (&Theme, &OfficeArt),
     cell: CellPx,
 ) {
     let card = tip.card(theme);
@@ -787,7 +788,7 @@ pub fn panel_preview(
 pub fn paint_panels_into_surface(
     sb: &mut XrgbSurface<'_>,
     panels: &CellGrid,
-    (theme, pack): (&Theme, &Pack),
+    (theme, pack): (&Theme, &OfficeArt),
     cell: CellPx,
 ) {
     let ink = GridInk {
@@ -812,7 +813,7 @@ pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
 pub fn paint_footer_into_surface(
     sb: &mut XrgbSurface<'_>,
     model: &FooterModel,
-    (theme, pack): (&Theme, &Pack),
+    (theme, pack): (&Theme, &OfficeArt),
     at: PixelFit,
 ) {
     let cell = Face::chrome(at);

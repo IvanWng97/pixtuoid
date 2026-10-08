@@ -47,7 +47,7 @@ pub(super) fn slot(
 pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     r: &mut TuiRenderer<B>,
     scene: &SceneState,
-    pack: &Pack,
+    pack: &OfficeArt,
     now: &mut SystemTime,
     target_floor: usize,
 ) {

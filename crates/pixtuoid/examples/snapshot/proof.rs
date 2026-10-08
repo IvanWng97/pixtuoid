@@ -561,7 +561,7 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) timeline: Timeline,
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
-    pub(crate) pack: &'a std::sync::Arc<pixtuoid_core::sprite::format::Pack>,
+    pub(crate) pack: &'a std::sync::Arc<pixtuoid_scene::pack::OfficeArt>,
     pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }
 

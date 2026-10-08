@@ -1,12 +1,8 @@
-[pack]
-name    = "mini"
-version = "1"
-
 [palette]
 "." = "transparent"
 "A" = "#010203"
 "B" = "#040506"
 
-[animations.idle]
-frames   = ["idle.sprite"]
+[animations.seated]
+frames   = ["seated.sprite"]
 frame_ms = 500

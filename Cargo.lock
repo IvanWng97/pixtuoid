@@ -1056,6 +1056,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-map"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4532960034c15ba2f55e9eee631040ecc473c32e6c4b200828c759840f13a06"
+dependencies = [
+ "enum-map-derive",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7127272f64b3e098f7d81f350d672081b879bff896d219c42370dc858b1af9ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2696,6 +2716,7 @@ version = "0.19.0"
 dependencies = [
  "anyhow",
  "codspeed-criterion-compat",
+ "enum-map",
  "filetime",
  "insta",
  "libc",
@@ -2715,6 +2736,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "vec1",
  "windows-sys 0.61.2",
 ]
 
@@ -2736,6 +2758,7 @@ version = "0.19.0"
 dependencies = [
  "chrono",
  "codspeed-criterion-compat",
+ "enum-map",
  "foldhash",
  "lru",
  "pixtuoid-core",
@@ -2746,6 +2769,7 @@ dependencies = [
  "strum",
  "syn 3.0.6",
  "tempfile",
+ "thiserror 2.0.21",
  "toml_edit",
  "tracing",
  "unicode-segmentation",
@@ -4189,6 +4213,12 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "vec1"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab68b56840f69efb0fefbe3ab6661499217ffdc58e2eef7c3f6f69835386322"
 
 [[package]]
 name = "version_check"

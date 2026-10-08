@@ -3,6 +3,7 @@
 //! variant (composing against a `Router` and a `PoseHistory` cache) is the
 //! sibling `pose/mod.rs` (`derive_with_routing`).
 
+use std::num::NonZeroU16;
 use std::time::{Duration, SystemTime};
 
 use crate::layout::{
@@ -41,26 +42,18 @@ pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat, anim: &Spr
     if beat.is_rest() {
         return 0;
     }
-    let frames = anim.frames().len().max(1);
+    let frames = anim.frames().len();
     let phase = crate::anim::epoch_ms(slot.state_started_at) / u64::from(anim.frame_ms().max(1));
     let phase = usize::try_from(phase % frames as u64).unwrap_or(0);
     (crate::pack::looping_frame_index(anim, beat) + phase) % frames
 }
 
 /// The frame walk `anim` shows [`travelled`](Pose::Walking::travelled) along
-/// its leg: a full cycle each [`stride`](Sprite::stride). A walk without one
-/// steps on its `frame_ms` from the clock at `now`.
-pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, now: SystemTime) -> usize {
-    let frames = anim.frames().len().max(1) as u64;
-    match anim.stride() {
-        Some(stride) => {
-            let per_cycle =
-                u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
-            ((u64::from(travelled) * frames / per_cycle) % frames) as usize
-        }
-        // a walk is the agent's doing, not ambient life: the clock, not a beat
-        None => (crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1)) % frames) as usize,
-    }
+/// its leg: a full cycle each `stride`.
+pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, stride: NonZeroU16) -> usize {
+    let frames = anim.frames().len() as u64;
+    let per_cycle = u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
+    ((u64::from(travelled) * frames / per_cycle) % frames) as usize
 }
 
 /// The distance `t_x1000` along a leg `length` long is, both in

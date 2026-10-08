@@ -14,7 +14,7 @@ pub(super) use lighting::{
     paint_clock, paint_corridor_runner, paint_light, paint_neon_panel, paint_shadows,
 };
 
-use pixtuoid_core::sprite::format::Pack;
+use crate::pack::OfficeArt;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::palette::{RgbLut, WHITE, blend_rgb};
@@ -142,7 +142,7 @@ pub(super) fn paint_windows(
     top_wall_h: u16,
     bays: impl IntoIterator<Item = WindowBay>,
     moment: &Moment,
-    pack: &Pack,
+    pack: &OfficeArt,
     theme: &Theme,
     outside: &mut crate::outside::OutsideCache,
 ) {

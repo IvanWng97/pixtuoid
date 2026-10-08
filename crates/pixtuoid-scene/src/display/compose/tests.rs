@@ -1,6 +1,6 @@
 use super::*;
 use crate::anim::Motion;
-use crate::pack::test_default_pack;
+use crate::pack::test_office;
 
 /// The wall board of an empty office, which no clock moves: for frames
 /// whose board a test does not read.
@@ -43,12 +43,9 @@ fn sort_row(pivot: crate::layout::Pivot, pos: crate::layout::Point, h: u16, belo
 /// over the surface" reading needs no special case.
 #[test]
 fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let desk = crate::layout::Point { x: 0, y: 10 };
-    let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
-    let desk_z = desk_span(&pack, art, desk, RenderScale::ONE)
-        .expect("desk")
-        .depth;
+    let desk_z = desk_span(&pack, Desk::North, desk, RenderScale::ONE).depth;
     let seated_z = seated_back_span(&pack, desk).depth;
     assert!(
         seated_z > desk_z,
@@ -62,15 +59,15 @@ fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
 #[test]
 #[cfg(feature = "cutaway-assets")]
 fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let scale = RenderScale::from(pack.max_density_variant());
     let desk = crate::layout::Point { x: 0, y: 20 };
-    let art = crate::pack::desk_sprite_name(crate::layout::Facing::South);
-    let desk_box = desk_span(&pack, art, desk, scale).expect("desk");
-    let (_, art_h) = art_size(&pack, art).expect("desk");
+    let art = PackPiece::Desk;
+    let desk_box = desk_span(&pack, Desk::South, desk, scale);
+    let (_, art_h) = art_size(&pack, art);
     // The first row south of the ART, measured from its placement.
     let feet = crate::pack::desk_art_top(&pack, desk.y, art_h) + art_h;
-    let (w, h) = base_size(&pack, "standing");
+    let (w, h) = base_size(&pack, PackPiece::Standing);
     let person = piece_span(
         crate::layout::Pivot::TopLeft,
         crate::layout::Point {
@@ -90,9 +87,9 @@ fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
 
 /// A back-turned sitter's depth box, built the way `push_characters` builds
 /// it, at the sort row the sim seats an occupant at (their seat's walk anchor).
-fn seated_back_span(pack: &Pack, desk: crate::layout::Point) -> Span {
+fn seated_back_span(pack: &OfficeArt, desk: crate::layout::Point) -> Span {
     use crate::layout::Facing;
-    let (w, h) = base_size(pack, "seated_back");
+    let (w, h) = base_size(pack, PackPiece::SeatedBack);
     let chair = chair_span(pack, Facing::North, desk).map(|(s, _)| s);
     occupant_span(
         piece_span(crate::layout::Pivot::TopLeft, near_seat(desk), w, h, 0),
@@ -105,14 +102,11 @@ fn seated_back_span(pack: &Pack, desk: crate::layout::Point) -> Span {
 /// what gives the office depth rather than a flat plan.
 #[test]
 fn a_character_north_of_the_desk_sorts_behind_it() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let desk = crate::layout::Point { x: 0, y: 20 };
-    let (_, body_h) = base_size(&pack, "standing");
+    let (_, body_h) = base_size(&pack, PackPiece::Standing);
 
-    let plain = crate::pack::desk_sprite_name(crate::layout::Facing::South);
-    let desk_z = desk_span(&pack, plain, desk, RenderScale::ONE)
-        .expect("desk")
-        .depth;
+    let desk_z = desk_span(&pack, Desk::South, desk, RenderScale::ONE).depth;
     // Standing at the desk's north approach, feet on the row just north of
     // its anchor.
     let behind_z = sort_row(
@@ -133,12 +127,11 @@ fn a_character_north_of_the_desk_sorts_behind_it() {
 /// standing behind them.
 #[test]
 fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let desk = crate::layout::Point { x: 0, y: 10 };
-    let art = crate::pack::desk_sprite_name(crate::layout::Facing::North);
-    let desk_box = desk_span(&pack, art, desk, RenderScale::ONE).expect("desk");
+    let desk_box = desk_span(&pack, Desk::North, desk, RenderScale::ONE);
     let seated = seated_back_span(&pack, desk);
-    let (plant_w, plant_h) = base_size(&pack, "plant");
+    let (plant_w, plant_h) = base_size(&pack, PackPiece::Plant);
     // A plant whose BASE sits just south of the desk's front face.
     let plant_base = desk_box.depth + 1;
     let plant_centre = crate::layout::Point {
@@ -171,7 +164,7 @@ fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
 /// sitter's box covers the chair's at either phase of the breathing bob.
 #[test]
 fn a_back_turned_sitter_carries_their_own_chair() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
     let north: Vec<crate::layout::Point> = layout
         .home_desks
@@ -196,7 +189,7 @@ fn a_back_turned_sitter_carries_their_own_chair() {
 
     let desk = north[0];
     let (chair, _) = chair_span(&pack, crate::layout::Facing::North, desk).expect("a north chair");
-    for anim in ["typing_back", "seated_back"] {
+    for anim in [PackPiece::TypingBack, PackPiece::SeatedBack] {
         let (w, h) = base_size(&pack, anim);
         for bob in [0, 1] {
             let seat = near_seat(desk);
@@ -220,7 +213,8 @@ fn a_back_turned_sitter_carries_their_own_chair() {
                     && piece.x1 >= chair.x1.max(body.x1)
                     && piece.y0 <= chair.y0.min(body.y0)
                     && piece.y1 >= chair.y1.max(body.y1),
-                "{anim}, bob {bob}: {piece:?} must cover {body:?} and {chair:?}"
+                "{}, bob {bob}: {piece:?} must cover {body:?} and {chair:?}",
+                anim.name()
             );
         }
     }
@@ -242,7 +236,7 @@ fn a_back_turned_sitter_carries_their_own_chair() {
 /// A standing chair sorts on the classic painter's own chair key.
 #[test]
 fn a_chair_sorts_on_the_classic_chair_key() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let desk = crate::layout::Point { x: 20, y: 30 };
     let (span, _) = chair_span(&pack, crate::layout::Facing::North, desk)
         .expect("a back-turned desk stands a chair");
@@ -300,27 +294,27 @@ fn an_occupant_span_bounds_a_chair_taller_than_its_sitter() {
 pub(crate) fn sit_down(
     facing: crate::layout::Facing,
     seated_ticks: usize,
-) -> (SceneLayout, Pack, Vec<SimFrame>, crate::layout::Point) {
-    sit_down_in(test_default_pack(), facing, seated_ticks)
+) -> (SceneLayout, OfficeArt, Vec<SimFrame>, crate::layout::Point) {
+    sit_down_in(test_office(), facing, seated_ticks)
 }
 
 /// [`sit_down`] with `pack` drawing the office.
 pub(crate) fn sit_down_in(
-    pack: Pack,
+    pack: OfficeArt,
     facing: crate::layout::Facing,
     seated_ticks: usize,
-) -> (SceneLayout, Pack, Vec<SimFrame>, crate::layout::Point) {
+) -> (SceneLayout, OfficeArt, Vec<SimFrame>, crate::layout::Point) {
     let id = pixtuoid_core::AgentId::from_transcript_path("/cutaway/sit.jsonl");
     sit_down_as(pack, facing, seated_ticks, id)
 }
 
 /// [`sit_down_in`] with `id` doing the walking.
 pub(crate) fn sit_down_as(
-    pack: Pack,
+    pack: OfficeArt,
     facing: crate::layout::Facing,
     seated_ticks: usize,
     id: pixtuoid_core::AgentId,
-) -> (SceneLayout, Pack, Vec<SimFrame>, crate::layout::Point) {
+) -> (SceneLayout, OfficeArt, Vec<SimFrame>, crate::layout::Point) {
     use crate::floor::{FloorMeta, FloorSession};
     use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, ToolKind};
     use std::time::{Duration, SystemTime};
@@ -430,7 +424,7 @@ fn a_seated_sitter_carries_their_chair() {
 fn chair_over_person(
     frame: &SimFrame,
     layout: &SceneLayout,
-    pack: &Pack,
+    pack: &OfficeArt,
     desk: crate::layout::Point,
 ) -> Option<bool> {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -592,7 +586,7 @@ fn a_badge_sits_above_the_head_and_centred_on_the_sprite() {
 #[cfg(feature = "cutaway-assets")]
 fn the_floor_indicator_stays_in_its_cell() {
     use crate::display::text::LINE_H;
-    let pack = crate::pack::test_default_pack();
+    let pack = crate::pack::test_office();
     let door = SceneLayout::compute_with_seed(160, 96, None, 0)
         .expect("lays out")
         .door;
@@ -623,7 +617,7 @@ fn the_floor_indicator_stays_in_its_cell() {
 #[test]
 fn the_star_sits_flush_with_the_interior_at_every_scale() {
     use crate::layout::{NEON_PANEL_INNER_W, NEON_PANEL_INNER_X};
-    let pack = test_default_pack();
+    let pack = test_office();
     for s in [1, pack.max_density_variant().get()] {
         let pen = Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
         let star = quiet_board()
@@ -644,7 +638,7 @@ fn the_star_sits_flush_with_the_interior_at_every_scale() {
 /// star yields to the brand rather than writing over it.
 #[test]
 fn no_run_overprints_another_on_its_line() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
     let d = pack.max_density_variant().get();
     for s in [1, d, 2 * d] {
@@ -697,7 +691,7 @@ fn the_board_writes_inside_the_signs_interior() {
     use crate::layout::{
         NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
     };
-    let pack = test_default_pack();
+    let pack = test_office();
     let scale = RenderScale::from(pack.max_density_variant());
     let counts = crate::tally::StateCounts {
         waiting: 12,
@@ -793,7 +787,7 @@ fn a_sitters_chair_casts_the_shadow_they_do_not() {
             } else {
                 sitting = true;
                 let at = chair.expect("a desk sitter carries their chair");
-                let (w, h) = art_size(&pack, crate::pack::DESK_CHAIR_SPRITE).expect("chair art");
+                let (w, h) = art_size(&pack, PackPiece::DeskChair);
                 let empty = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0);
                 assert_eq!(
                     Some(cast),
@@ -831,7 +825,7 @@ pub(crate) fn empty_frame(layout: &SceneLayout) -> SimFrame {
 /// empty office.
 pub(crate) fn queued(
     layout: &SceneLayout,
-    pack: &Pack,
+    pack: &OfficeArt,
     scale: RenderScale,
     carried: &[crate::layout::Point],
     keep: impl Fn(FixtureKind) -> bool,
@@ -843,7 +837,7 @@ pub(crate) fn queued(
 /// [`queued`] on `timing`.
 fn queued_at(
     layout: &SceneLayout,
-    pack: &Pack,
+    pack: &OfficeArt,
     scale: RenderScale,
     carried: &[crate::layout::Point],
     keep: impl Fn(FixtureKind) -> bool,
@@ -877,11 +871,8 @@ fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
     )
 }
 
-pub(crate) fn base_size(pack: &Pack, name: &str) -> (u16, u16) {
-    let f = pack
-        .animation(name)
-        .and_then(|a| a.frames().first())
-        .expect("the bundled pack has this piece");
+pub(crate) fn base_size(pack: &OfficeArt, piece: PackPiece) -> (u16, u16) {
+    let f = pack.piece(piece).first();
     (f.width(), f.height())
 }
 
@@ -889,7 +880,7 @@ pub(crate) fn base_size(pack: &Pack, name: &str) -> (u16, u16) {
 /// behind" fact its own geometry states.
 #[test]
 fn a_real_offices_display_list_satisfies_every_ordering_constraint() {
-    let pack = test_default_pack();
+    let pack = test_office();
     for (w, h) in [(160u16, 96u16), (240, 144), (100, 60)] {
         let layout = SceneLayout::compute_with_seed(w, h, None, 0).expect("lays out");
         let mut order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
@@ -957,8 +948,8 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
 /// is whole on one row, which a figure is wholly north or south of.
 #[test]
 fn no_wall_segment_is_taller_than_the_cast() {
-    let pack = test_default_pack();
-    let (_, body_h) = base_size(&pack, "standing");
+    let pack = test_office();
+    let (_, body_h) = base_size(&pack, PackPiece::Standing);
     let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     wall_segments(
@@ -990,7 +981,7 @@ fn no_wall_segment_is_taller_than_the_cast() {
 /// them, the backrest, nearest the viewer, over their lap.
 #[test]
 fn a_back_view_sofa_seats_its_sitter_between_its_seat_and_its_backrest() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let sofa = crate::layout::Point { x: 40, y: 30 };
     let mut order = Vec::new();
     push_sofa(&mut order, &pack, sofa, true, Tie::FixtureOver);
@@ -1008,7 +999,7 @@ fn a_back_view_sofa_seats_its_sitter_between_its_seat_and_its_backrest() {
         seat.depth,
         back.depth
     );
-    let (_, h) = base_size(&pack, MEETING_SOFA_NORTH_SPRITE);
+    let (_, h) = base_size(&pack, PackPiece::MeetingSofaNorth);
     assert_eq!((under.0, under.1, over.0, over.1), (0, over.0, under.1, h));
 }
 
@@ -1017,7 +1008,7 @@ fn a_back_view_sofa_seats_its_sitter_between_its_seat_and_its_backrest() {
 /// table there, and the table, pushed after it, painted over its cushions.
 #[test]
 fn the_table_sorts_behind_the_back_view_sofas_seat_in_the_tightest_room() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let mut checked = 0;
     for (w, h) in [(110, 66), (130, 90)] {
         for seed in 0..4 {
@@ -1069,7 +1060,7 @@ pub(crate) fn lively_office() -> SceneLayout {
 /// south of it draws over it, one row north draws under it.
 #[test]
 fn a_walker_just_south_of_a_desk_front_draws_over_it() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
     let desk = layout
         .fixtures()
@@ -1104,7 +1095,7 @@ fn a_walker_just_south_of_a_desk_front_draws_over_it() {
 /// sofa's seat, which its sitter sits on, stays under.
 #[test]
 fn a_fixture_ties_a_figure_as_the_roster_says() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let scale = RenderScale::from(pack.max_density_variant());
     let mut over = std::collections::BTreeSet::new();
     for layout in many_layouts() {
@@ -1189,7 +1180,7 @@ fn a_wall_band_draws_over_a_figure_at_its_row() {
 /// The lounge couch faces the window, so the cutaway draws its back.
 #[test]
 fn the_lounge_couch_is_drawn_from_behind() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let scale = RenderScale::from(pack.max_density_variant());
     let layout = many_layouts()
         .find(|l| l.lounge.is_some())
@@ -1201,7 +1192,7 @@ fn the_lounge_couch_is_drawn_from_behind() {
         !pieces.is_empty()
             && pieces.iter().all(|(_, k)| matches!(
                 k,
-                PieceKind::PropBand { sprite, .. } if *sprite == MEETING_SOFA_NORTH_SPRITE
+                PieceKind::PropBand { sprite, .. } if *sprite == PackPiece::MeetingSofaNorth
             )),
         "{pieces:?}"
     );
@@ -1213,8 +1204,7 @@ fn the_lounge_couch_is_drawn_from_behind() {
 #[test]
 fn a_looping_fixture_plays_on_the_floors_beat() {
     use crate::anim::{CALM_TICK_MS, FULL_TICK_MS};
-    use crate::pack::{FISH_TANK_SPRITE, WATER_COOLER_SPRITE};
-    let pack = test_default_pack();
+    let pack = test_office();
     let looping = |k| matches!(k, FixtureKind::FishTank | FixtureKind::WaterCooler);
     let layout = many_layouts()
         .find(|l| {
@@ -1223,8 +1213,11 @@ fn a_looping_fixture_plays_on_the_floors_beat() {
                 .all(|&k| l.fixtures().any(|f| f.kind == k))
         })
         .expect("a layout with a fish tank and a water cooler");
-    let frame_ms = |sprite| u64::from(pack.animation(sprite).expect("in the pack").frame_ms());
-    let (a, b) = (frame_ms(FISH_TANK_SPRITE), frame_ms(WATER_COOLER_SPRITE));
+    let frame_ms = |sprite| u64::from(pack.piece(sprite).frame_ms());
+    let (a, b) = (
+        frame_ms(PackPiece::FishTank),
+        frame_ms(PackPiece::WaterCooler),
+    );
     let gcd = |mut x: u64, mut y: u64| {
         while y != 0 {
             (x, y) = (y, x % y);
@@ -1234,7 +1227,7 @@ fn a_looping_fixture_plays_on_the_floors_beat() {
     // Whole Calm repaints of both loops' frame_ms, so every tier ends on a step.
     let span_ms = 2 * a / gcd(a, b) * b * (CALM_TICK_MS / FULL_TICK_MS);
     let steps = |motion: Motion| {
-        let mut steps = std::collections::BTreeMap::<&str, u64>::new();
+        let mut steps = std::collections::BTreeMap::<PackPiece, u64>::new();
         let mut last = std::collections::BTreeMap::new();
         for ms in (0..=span_ms).step_by(FULL_TICK_MS as usize) {
             let timing =
@@ -1261,7 +1254,8 @@ fn a_looping_fixture_plays_on_the_floors_beat() {
         assert_eq!(
             calm.get(sprite).copied().unwrap_or(0) * (CALM_TICK_MS / FULL_TICK_MS),
             *n,
-            "{sprite} on Calm steps a quarter as often as on Full"
+            "{} on Calm steps a quarter as often as on Full",
+            sprite.name()
         );
     }
     assert!(still.is_empty(), "Still moves no loop: {still:?}");
@@ -1295,7 +1289,7 @@ pub(crate) fn many_layouts() -> impl Iterator<Item = SceneLayout> {
 /// it.
 #[test]
 fn a_front_view_sofa_ties_its_sitters() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let sofa = crate::layout::Point { x: 40, y: 30 };
     let mut order = Vec::new();
     push_sofa(&mut order, &pack, sofa, false, Tie::FigureOver);
@@ -1396,7 +1390,7 @@ fn walls_leave_every_doorway_open_and_frame_it() {
 /// waypoint the mask blocks and the visitor faces.
 #[test]
 fn the_pantry_counter_stands_on_its_waypoint() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let mut checked = 0;
     for layout in many_layouts() {
         let Some(wp) = layout
@@ -1429,7 +1423,7 @@ fn the_pantry_counter_stands_on_its_waypoint() {
 /// visitor stands.
 #[test]
 fn no_piece_is_queued_twice() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let mut booths = 0;
     for layout in many_layouts() {
         let order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
@@ -1446,7 +1440,7 @@ fn no_piece_is_queued_twice() {
                 .iter()
                 .filter(|(_, k)| {
                     matches!(k, PieceKind::Prop { at, art }
-                        if *at == d.pos && art.sprite == d.kind.sprite_name())
+                        if *at == d.pos && art.sprite == d.kind.piece())
                 })
                 .count();
             assert_eq!(queued, 1, "{:?} at {:?}", d.kind, d.pos);
@@ -1461,7 +1455,7 @@ fn no_piece_is_queued_twice() {
 /// only hangs on the band is left to the backdrop.
 #[test]
 fn ground_standing_wall_decor_sorts_with_the_ground() {
-    let pack = test_default_pack();
+    let pack = test_office();
     let mut standing = 0;
     for layout in many_layouts() {
         let order = queued(&layout, &pack, RenderScale::ONE, &[], |k| {
@@ -1469,7 +1463,7 @@ fn ground_standing_wall_decor_sorts_with_the_ground() {
         });
         for item in &layout.wall_decor {
             let queued = order.iter().any(|(_, k)| {
-                matches!(k, PieceKind::Prop { art, .. } if art.sprite == item.kind.sprite_name())
+                matches!(k, PieceKind::Prop { art, .. } if art.sprite == item.kind.piece())
             });
             assert_eq!(queued, item.kind.stands_on_floor(), "{:?}", item.kind);
             standing += usize::from(queued);
@@ -1483,30 +1477,25 @@ fn ground_standing_wall_decor_sorts_with_the_ground() {
 /// the densest art, in either facing. The rows are each density's own.
 #[test]
 fn every_desk_follows_the_one_arrangement() {
-    use crate::layout::{Facing, Point};
-    let pack = test_default_pack();
+    use crate::layout::Point;
+    let pack = test_office();
     let dense = RenderScale::from(pack.max_density_variant());
     let desk = Point { x: 40, y: 30 };
-    for facing in [Facing::North, Facing::South] {
-        let art = crate::pack::desk_sprite_name(facing);
-        let column = |scale: RenderScale, mark: &str| {
-            let f = crate::pack::densest_frame(&pack, art, 0, scale).expect("the desk");
-            let m = f.marks.iter().find(|m| m.name() == mark).expect("the mark");
-            m.x() / f.density.get()
+    for which in [Desk::North, Desk::South] {
+        let art = which.piece().name();
+        let column = |scale: RenderScale, prop: DeskProp| {
+            let (art, density, _) = pack.desk(which).at(scale);
+            art.props[prop].0 / density.get()
         };
-        for mark in [crate::pack::CUP_MARK, crate::pack::TOWER_MARK] {
+        for prop in [DeskProp::Cup, DeskProp::Tower] {
             assert_eq!(
-                column(dense, mark),
-                column(RenderScale::ONE, mark),
-                "{art}'s {mark} stands in another column at {dense:?}"
+                column(dense, prop),
+                column(RenderScale::ONE, prop),
+                "{art}'s {} stands in another column at {dense:?}",
+                prop.mark()
             );
         }
-        let bulb = |scale| {
-            DeskBulbCells::default()
-                .at(desk, art, &pack, scale)
-                .expect("a bulb")
-                .x
-        };
+        let bulb = |scale| bulb_at(desk, which, &pack, scale).x;
         assert_eq!(
             bulb(dense),
             bulb(RenderScale::ONE),
@@ -1515,31 +1504,19 @@ fn every_desk_follows_the_one_arrangement() {
     }
     // The back-turned desk is the viewer-facing one turned round: each of its
     // columns is the other's mirrored, its marks on their props' east cells.
-    let cols = |facing| {
-        let art = crate::pack::desk_sprite_name(facing);
-        let f = crate::pack::densest_frame(&pack, art, 0, RenderScale::ONE).expect("the desk");
-        let mark = |name: &str| {
-            f.marks
-                .iter()
-                .find(|m| m.name() == name)
-                .expect("a mark")
-                .x()
-        };
-        let bulb = DeskBulbCells::default()
-            .at(desk, art, &pack, RenderScale::ONE)
-            .expect("a bulb")
-            .x
-            - desk.x;
+    let cols = |which: Desk| {
+        let art = pack.desk(which).base();
+        let bulb = bulb_at(desk, which, &pack, RenderScale::ONE).x - desk.x;
         (
-            f.frame.width(),
+            art.sprite.first().width(),
             [
-                mark(crate::pack::CUP_MARK),
-                mark(crate::pack::TOWER_MARK),
+                art.props[DeskProp::Cup].0,
+                art.props[DeskProp::Tower].0,
                 bulb,
             ],
         )
     };
-    let ((w, south), (_, north)) = (cols(Facing::South), cols(Facing::North));
+    let ((w, south), (_, north)) = (cols(Desk::South), cols(Desk::North));
     for (s, n) in south.into_iter().zip(north) {
         assert_eq!(
             s + n,
@@ -1553,58 +1530,34 @@ fn every_desk_follows_the_one_arrangement() {
 /// face the viewer, before it once they turn their back.
 #[test]
 fn the_cup_stands_on_the_sitters_side() {
-    use crate::layout::Facing;
-    let pack = test_default_pack();
+    let pack = test_office();
     for scale in [
         RenderScale::ONE,
         RenderScale::from(pack.max_density_variant()),
     ] {
-        for facing in [Facing::North, Facing::South] {
-            let art = crate::pack::desk_sprite_name(facing);
-            let f = crate::pack::densest_frame(&pack, art, 0, scale).expect("the desk");
+        for which in [Desk::North, Desk::South] {
+            let (desk, density, blit_at) = pack.desk(which).at(scale);
+            let f = crate::pack::DenseFrame::of(
+                pack.piece(which.piece()),
+                &desk.sprite,
+                0,
+                (density, blit_at),
+            );
             let w = usize::from(f.frame.width());
             let monitor_foot = crate::pack::drawn_in(&f, &crate::pack::MONITOR_KEYS)
                 .iter()
                 .rposition(|&m| m)
                 .map(|i| i / w)
                 .expect("a monitor") as u16;
-            let cup = f
-                .marks
-                .iter()
-                .find(|m| m.name() == crate::pack::CUP_MARK)
-                .expect("a cup mark")
-                .y();
-            let behind = facing == Facing::South;
+            let cup = desk.props[DeskProp::Cup].1;
+            let behind = which == Desk::South;
             assert_eq!(
                 cup < monitor_foot,
                 behind,
-                "{art} at {scale:?}: its cup's foot row {cup}, the monitor's {monitor_foot}"
+                "{} at {scale:?}: its cup's foot row {cup}, the monitor's {monitor_foot}",
+                which.piece().name()
             );
         }
-    }
-}
-
-/// One frame's bulbs, asked art after art and back again, are each art's
-/// own: the scan a frame keeps is keyed by the art it scanned.
-#[test]
-fn a_frames_bulbs_are_each_desk_arts_own() {
-    use crate::layout::{Facing, Point};
-    let pack = test_default_pack();
-    let scale = RenderScale::from(pack.max_density_variant());
-    let desk = Point { x: 40, y: 30 };
-    let arts = [Facing::South, Facing::North].map(crate::pack::desk_sprite_name);
-    let fresh = arts.map(|art| DeskBulbCells::default().at(desk, art, &pack, scale));
-    assert_ne!(
-        fresh[0], fresh[1],
-        "the premise: the two arts' bulbs differ"
-    );
-    let mut kept = DeskBulbCells::default();
-    for (art, want) in arts
-        .into_iter()
-        .zip(fresh)
-        .chain(arts.into_iter().zip(fresh))
-    {
-        assert_eq!(kept.at(desk, art, &pack, scale), want, "{art}");
     }
 }
 
@@ -1613,19 +1566,18 @@ fn a_frames_bulbs_are_each_desk_arts_own() {
 #[test]
 fn the_classic_lamp_pool_centres_on_the_1x_bulb() {
     use crate::layout::{Facing, Point};
-    let pack = test_default_pack();
+    let pack = test_office();
     let desk = Point { x: 40, y: 30 };
     for facing in [Facing::North, Facing::South] {
-        let art = crate::pack::desk_sprite_name(facing);
         let bulb = crate::lighting::DeskBulbs::of(&pack).at(facing);
         let lights = crate::lighting::DeskLights::new(desk, bulb, 1.0, 0.0);
         let crate::lighting::Light::Halo { centre, .. } = lights.lamp.light else {
             panic!("a desk lamp throws a halo");
         };
         assert_eq!(
-            Some(centre),
-            DeskBulbCells::default().at(desk, art, &pack, RenderScale::ONE),
-            "{art}'s pool is off its bulb"
+            centre,
+            bulb_at(desk, Desk::facing(facing), &pack, RenderScale::ONE),
+            "{facing:?}'s pool is off its bulb"
         );
     }
 }
@@ -1636,7 +1588,7 @@ fn the_classic_lamp_pool_centres_on_the_1x_bulb() {
 #[test]
 fn a_frame_on_unchanged_inputs_reuses_the_last_frames_windows_and_lights() {
     use std::sync::Arc;
-    let pack = test_default_pack();
+    let pack = test_office();
     let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
     let office = Office {
         layout: &layout,

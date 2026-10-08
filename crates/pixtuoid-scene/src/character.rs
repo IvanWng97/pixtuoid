@@ -2,8 +2,9 @@
 
 use std::time::SystemTime;
 
+use crate::pack::OfficeArt;
 use pixtuoid_core::AgentSlot;
-use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::sprite::format::Piece;
 use pixtuoid_core::sprite::{Frame, Rgb};
 
 use crate::frame_cache::FrameCache;
@@ -27,7 +28,7 @@ pub(crate) use hair::{Dress, dress_for};
 /// the cache's key, which is published and keys the image it made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SpritePose {
-    pub(crate) anim_name: &'static str,
+    pub(crate) anim_name: Piece,
     pub(crate) frame_idx: usize,
     /// Which way the character FACES: the art mirrored horizontally.
     pub(crate) flip_x: bool,
@@ -75,31 +76,31 @@ impl SpritePose {
 pub(crate) fn character_frame<'c>(
     pose: SpritePose,
     agent: &AgentSlot,
-    pack: &Pack,
+    pack: &OfficeArt,
     scale: crate::render_scale::RenderScale,
     cache: &'c mut FrameCache,
     now: SystemTime,
-) -> Option<CharacterFrame<'c>> {
-    let dense = crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+) -> CharacterFrame<'c> {
+    let dense = crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale);
     let key = character_key_at(&dense, pack, pose, agent, now);
-    Some(recolor(dense, &key, pack, cache))
+    recolor(dense, &key, pack, cache)
 }
 
 /// [`character_frame`] for a [`CharacterKey`] resolved at `scale`.
 pub(crate) fn keyed_character_frame<'c>(
     key: &CharacterKey,
-    pack: &Pack,
+    pack: &OfficeArt,
     scale: crate::render_scale::RenderScale,
     cache: &'c mut FrameCache,
-) -> Option<CharacterFrame<'c>> {
-    let dense = crate::pack::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
-    Some(recolor(dense, key, pack, cache))
+) -> CharacterFrame<'c> {
+    let dense = crate::pack::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale);
+    recolor(dense, key, pack, cache)
 }
 
 fn recolor<'c>(
     dense: crate::pack::DenseFrame<'_>,
     key: &CharacterKey,
-    pack: &Pack,
+    pack: &OfficeArt,
     cache: &'c mut FrameCache,
 ) -> CharacterFrame<'c> {
     let flip_x = key.frame.flip_x;
@@ -153,22 +154,21 @@ pub(crate) struct CharacterKey {
     pub(crate) dress: Option<Dress>,
 }
 
-/// [`character_frame`]'s [`CharacterKey`], without the recolor; `None` where it
-/// draws nothing.
+/// [`character_frame`]'s [`CharacterKey`], without the recolor.
 pub(crate) fn character_key(
     pose: SpritePose,
     agent: &AgentSlot,
-    pack: &Pack,
+    pack: &OfficeArt,
     scale: crate::render_scale::RenderScale,
     now: SystemTime,
-) -> Option<CharacterKey> {
-    let dense = crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
-    Some(character_key_at(&dense, pack, pose, agent, now))
+) -> CharacterKey {
+    let dense = crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale);
+    character_key_at(&dense, pack, pose, agent, now)
 }
 
 fn character_key_at(
     dense: &crate::pack::DenseFrame<'_>,
-    pack: &Pack,
+    pack: &OfficeArt,
     pose: SpritePose,
     agent: &AgentSlot,
     now: SystemTime,
