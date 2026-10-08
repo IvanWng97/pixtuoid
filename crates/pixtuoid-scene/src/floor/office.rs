@@ -23,7 +23,7 @@ use crate::footer::FooterFloor;
 /// just drew.
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct FloorView {
+pub(crate) struct FloorView {
     pub(super) floor: PerFloor,
     last_layout: Option<Arc<crate::layout::SceneLayout>>,
     /// REPLACED each frame, never extended: the cue tracker fires on edges, so
@@ -127,6 +127,11 @@ impl FloorNav {
     /// The floor showing, or the one a slide leaves.
     pub fn current(&self) -> usize {
         self.current
+    }
+
+    /// The one floor on screen: none during a slide.
+    pub fn showing(&self) -> Option<usize> {
+        self.transition.is_none().then_some(self.current)
     }
 
     /// The slide under way, if any.
@@ -284,6 +289,7 @@ pub struct OfficeSession {
     /// not the one on screen.
     shown: Option<usize>,
     shown_changed: bool,
+    gripped: crate::interact::GripFloor,
 }
 
 impl OfficeSession {
@@ -298,6 +304,7 @@ impl OfficeSession {
             slide: None,
             shown: None,
             shown_changed: true,
+            gripped: crate::interact::GripFloor::default(),
         }
     }
 
@@ -309,6 +316,16 @@ impl OfficeSession {
     /// Slide to floor `target`: [`FloorNav::navigate`].
     pub fn navigate(&mut self, target: usize, now: SystemTime) -> bool {
         self.nav.navigate(target, now)
+    }
+
+    /// Hand a pointer's lift to the floor showing, and its carry and drop to
+    /// the floor it lifted on, whatever shows since: [`PerFloor::grip`]. A
+    /// lift during a slide, which shows no one floor, lifts nothing.
+    pub fn grip(&mut self, gesture: &crate::interact::Gesture) {
+        let floor = self.gripped.of(gesture, &self.nav);
+        if let Some(view) = floor.and_then(|f| self.views.get_mut(f)) {
+            view.floor.grip(gesture);
+        }
     }
 
     /// The floors the last frame's scene filled.

@@ -231,6 +231,11 @@ enum Phase {
     Walking(Walk),
     /// Walking out, gone on arrival.
     Leaving(Walk),
+    /// Lifted by a pointer, at `at`: off the floor, so it neither rests nor
+    /// roams until set down.
+    Carried {
+        at: Point,
+    },
     Gone,
 }
 
@@ -339,15 +344,40 @@ impl CreatureWalk {
                 *walked_ms = 0;
             }
             Phase::Walking(w) | Phase::Leaving(w) => w.started_at += held,
-            Phase::Gone => {}
+            Phase::Carried { .. } | Phase::Gone => {}
         }
+        self.advanced_at = now;
+    }
+
+    /// Lifted, at `at`.
+    pub(crate) fn carry(&mut self, at: Point) {
+        if !self.leaving() {
+            self.phase = Phase::Carried { at };
+        }
+    }
+
+    /// Set down near `at`, from `now`: on the walkable floor its legs reach,
+    /// else at its latest draw, where a roam would have taken it; it rests
+    /// there, and roams on from it.
+    pub(crate) fn set_down(&mut self, at: Point, layout: &SceneLayout, now: SystemTime) {
+        if !matches!(self.phase, Phase::Carried { .. }) {
+            return;
+        }
+        let at = crate::pathfind::snap_point_to_walkable(&layout.walkable, at)
+            .filter(|&p| layout.reachable.reaches(p))
+            .unwrap_or_else(|| walkable_target(layout, self.seed, self.roams));
+        self.phase = Phase::Resting {
+            at,
+            since: now,
+            walked_ms: 0,
+        };
         self.advanced_at = now;
     }
 
     /// Where it is at `now`, without advancing it; `None` once gone.
     fn stance(&self, now: SystemTime) -> Option<Stance> {
         let walk = match &self.phase {
-            Phase::Resting { at, .. } => {
+            Phase::Resting { at, .. } | Phase::Carried { at } => {
                 return Some(Stance {
                     at: *at,
                     walking: None,
@@ -389,6 +419,8 @@ impl CreatureWalk {
             self.ground_size = size;
             self.phase = match self.phase {
                 Phase::Leaving(_) | Phase::Gone => Phase::Gone,
+                // the pointer still holds it
+                Phase::Carried { at } => Phase::Carried { at },
                 _ => Phase::Resting {
                     at: walkable_target(ground.layout, self.seed, self.roams),
                     since: now,
@@ -562,6 +594,25 @@ mod tests {
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
 
     use super::*;
+
+    /// One set down where no leg reaches rests at its latest draw, on the
+    /// floor it roams, not off it.
+    #[test]
+    fn a_creature_set_down_out_of_reach_rests_where_it_can_roam() {
+        let layout = SceneLayout::compute(160, 96, None).expect("layout fits");
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut walk = CreatureWalk::at_home(&layout, 7, now);
+        let off = Point {
+            x: u16::MAX,
+            y: u16::MAX,
+        };
+        walk.carry(off);
+        assert_eq!(walk.stance(now).map(|s| s.at), Some(off), "carried");
+        walk.set_down(off, &layout, now);
+        let at = walk.stance(now).expect("rests").at;
+        assert!(layout.reachable.reaches(at), "{at:?}");
+        assert_eq!(at, walkable_target(&layout, 7, 0));
+    }
     use crate::anim::{Motion, PAINT_FPS};
     use crate::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
     use crate::layout::Size;

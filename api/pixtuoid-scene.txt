@@ -1407,6 +1407,8 @@ pub pixtuoid_scene::pose::Pose::AimlessAt::dest: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pose::Pose::AtWaypoint
 pub pixtuoid_scene::pose::Pose::AtWaypoint::kind: pixtuoid_scene::layout::WaypointKind
 pub pixtuoid_scene::pose::Pose::AtWaypoint::wp: usize
+pub pixtuoid_scene::pose::Pose::Held
+pub pixtuoid_scene::pose::Pose::Held::at: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pose::Pose::SeatedIdle
 pub pixtuoid_scene::pose::Pose::SeatedThinking
 pub pixtuoid_scene::pose::Pose::SeatedTyping
@@ -1472,6 +1474,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::pose::PoseHistory
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pose::PoseHistory
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pose::PoseHistory
 pub struct pixtuoid_scene::pose::RouteCtx<'a>
+pub pixtuoid_scene::pose::RouteCtx::held: core::option::Option<(pixtuoid_core::id::AgentId, pixtuoid_scene::layout::Point)>
 pub pixtuoid_scene::pose::RouteCtx::history: &'a mut pixtuoid_scene::pose::PoseHistory
 pub pixtuoid_scene::pose::RouteCtx::overlay: &'a pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::pose::RouteCtx::router: &'a mut dyn pixtuoid_scene::pathfind::Router

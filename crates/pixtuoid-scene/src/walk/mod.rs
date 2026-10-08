@@ -175,6 +175,19 @@ pub struct WalkState {
     /// Re-snapshotted when the leg's `(from, to)` change. See
     /// [`WalkPathSnapshot`].
     pub(crate) walk_path: Option<WalkPathSnapshot>,
+
+    /// Set down by a pointer, and walking home from there: overrides the
+    /// wander and the state's pose until it arrives.
+    pub(crate) dropped: Option<Dropped>,
+}
+
+/// An agent set down by a pointer.
+#[derive(Debug, Clone)]
+pub(crate) enum Dropped {
+    /// Where, until the next derivation arms the walk home from it.
+    At(Point),
+    /// The walk home.
+    Home(WalkLeg),
 }
 
 impl Default for WalkState {
@@ -197,6 +210,7 @@ impl Default for WalkState {
                 last_advanced_at: SystemTime::UNIX_EPOCH,
             },
             walk_path: None,
+            dropped: None,
         }
     }
 }

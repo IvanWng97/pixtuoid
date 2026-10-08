@@ -204,6 +204,11 @@ pub enum Pose {
         /// Layout-pixel point the agent ambled to.
         dest: Point,
     },
+    /// Lifted by a pointer, off the floor.
+    Held {
+        /// Layout-pixel point its feet hang at.
+        at: Point,
+    },
 }
 
 impl Pose {
