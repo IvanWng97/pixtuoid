@@ -1896,19 +1896,27 @@ fn floor_nav_slides_lands_and_clamps() {
     assert!(nav.navigate(1, t0));
     assert!(!nav.navigate(2, t0), "no slide begins during one");
     assert_eq!((nav.up(3), nav.down()), (None, None));
-    assert!(!nav.settle(3, t0));
-    assert_eq!(nav.current(), 0, "a slide shows its floor until it lands");
-    assert!(!nav.settle(3, done));
+    nav.settle(3, t0);
+    assert_eq!(
+        (nav.current(), nav.transition().is_some()),
+        (0, true),
+        "a slide shows its floor until it lands"
+    );
+    nav.settle(3, done);
     assert_eq!((nav.current(), nav.transition().is_none()), (1, true));
     assert!(nav.navigate(2, done));
-    assert!(nav.settle(2, done), "a slide to a floor gone is dropped");
-    assert_eq!(nav.current(), 1);
+    nav.settle(2, done);
+    assert_eq!(
+        (nav.current(), nav.transition().is_none()),
+        (1, true),
+        "a slide to a floor gone is dropped"
+    );
     assert!(nav.navigate(0, done));
     nav.cancel(3);
     assert_eq!((nav.current(), nav.transition().is_none()), (0, true));
     assert!(nav.navigate(2, done));
     nav.cancel(3);
-    assert!(!nav.settle(1, done));
+    nav.settle(1, done);
     assert_eq!(nav.current(), 0, "the floor showing stays in the building");
 }
 
@@ -1984,7 +1992,7 @@ fn a_grip_stays_on_the_floor_it_lifted_on() {
     assert_eq!(gripped.of(&lift, &nav), Some(0));
     assert!(nav.navigate(1, t0));
     assert_eq!(gripped.of(&Gesture::Carry(at), &nav), Some(0));
-    assert!(!nav.settle(2, t0 + Duration::from_secs(2)));
+    nav.settle(2, t0 + Duration::from_secs(2));
     assert_eq!(nav.current(), 1);
     assert_eq!(gripped.of(&Gesture::Drop(at), &nav), Some(0));
     assert_eq!(
