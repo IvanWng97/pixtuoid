@@ -114,6 +114,13 @@ pub(crate) struct Jank {
     janks: u32,
     /// Frames past their interval.
     over: u32,
+    /// How late frames showed past their interval this window
+    /// ([`Self::due_at`]).
+    hitch: Duration,
+    /// The frames this window that a schedule asked for.
+    scheduled: u32,
+    /// When the schedule asked for the next frame recorded.
+    due: Option<Instant>,
     since: Instant,
     painter: Painter,
     /// The interval the loop schedules frames at.
@@ -143,6 +150,9 @@ impl Jank {
             next: 0,
             janks: 0,
             over: 0,
+            hitch: Duration::ZERO,
+            scheduled: 0,
+            due: None,
             since: now,
             painter: Painter::default(),
             interval: Duration::from_millis(PAINT_FRAME_MS),
@@ -153,6 +163,17 @@ impl Jank {
     /// slow past and janks at twice.
     pub(crate) fn scheduled_every(&mut self, interval: Duration) {
         self.interval = interval;
+    }
+
+    /// The next frame recorded is the one the schedule asked for at `at`: it
+    /// counts toward the hitch time by how far it showed past its interval,
+    /// when the frame after it is due. That is the hitch duration, "the
+    /// difference between the actual frame lifetime and the expected frame
+    /// lifetime", each from the frame's begin
+    /// (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
+    /// A redraw no schedule asked for has no due, so it can't count.
+    pub(crate) fn due_at(&mut self, at: Instant) {
+        self.due = Some(at);
     }
 
     /// Name what draws the frames from now on.
@@ -173,6 +194,10 @@ impl Jank {
         note: Option<FrameNote>,
         now: Instant,
     ) {
+        if let Some(due) = self.due.take() {
+            self.hitch += now.saturating_duration_since(due + self.interval);
+            self.scheduled += 1;
+        }
         self.micros[self.next] = u32::try_from(total.as_micros()).unwrap_or(u32::MAX);
         self.next = (self.next + 1) % RING;
         self.len = (self.len + 1).min(RING);
@@ -195,6 +220,8 @@ impl Jank {
             self.next = 0;
             self.janks = 0;
             self.over = 0;
+            self.hitch = Duration::ZERO;
+            self.scheduled = 0;
             self.since = now;
         }
     }
@@ -218,6 +245,9 @@ impl Jank {
         let frames = self.len;
         let janks = self.janks;
         let over = self.over;
+        let hitch_ms = self.hitch.as_secs_f64() * 1000.0;
+        let scheduled = self.scheduled;
+        let interval_ms = self.interval.as_secs_f64() * 1000.0;
         let Painter {
             look,
             scale,
@@ -226,9 +256,9 @@ impl Jank {
             sync,
         } = &self.painter;
         if janks > 0 {
-            tracing::warn!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::warn!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, scheduled, hitch_ms, interval_ms, p50, p99, max, "frame pacing");
         } else {
-            tracing::info!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::info!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, scheduled, hitch_ms, interval_ms, p50, p99, max, "frame pacing");
         }
     }
 }
@@ -313,6 +343,39 @@ mod tests {
         assert_eq!(logged.matches("frame jank").count(), 0, "{logged}");
         assert!(logged.contains("over=1"), "{logged}");
         assert!(logged.contains("janks=0"), "{logged}");
+    }
+
+    /// A frame hitches by how far it showed past its interval, and one
+    /// shown within it never does, however late in it. Every 33 ms, due at 0,
+    /// 33, 66 and 132 ms and shown at 5, 60, 110 and 133: only the third is
+    /// past its 99 ms, by 11. A redraw with no due counts neither way.
+    #[test]
+    fn a_frame_hitches_by_how_far_it_showed_past_its_interval() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = Jank::new(t0);
+            jank.scheduled_every(ms(33));
+            for (due, at) in [(0, 5), (33, 60), (66, 110), (132, 133)] {
+                jank.due_at(t0 + ms(due));
+                jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(at));
+            }
+            // A redraw no schedule asked for, however late.
+            jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(900));
+            jank.finish();
+        });
+        let line = logged
+            .lines()
+            .find(|l| l.contains("frame pacing"))
+            .unwrap_or_default();
+        let late = ms(11).as_secs_f64() * 1000.0;
+        assert!(line.contains(&format!("hitch_ms={late:?} ")), "{line}");
+        assert!(line.contains("scheduled=4 "), "{line}");
+        let interval = ms(33).as_secs_f64() * 1000.0;
+        assert!(
+            line.contains(&format!("interval_ms={interval:?}")),
+            "{line}"
+        );
     }
 
     /// A window that closes reports its frames' spread and janks, then starts
