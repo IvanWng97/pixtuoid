@@ -36,13 +36,6 @@ pub const SOURCE_NAME: &str = "openclaw";
 /// (many per gateway).
 const GATEWAY_PORT_FIELD: &str = "gatewayPort";
 
-/// Instance id for an envelope carrying NO [`GATEWAY_PORT_FIELD`] — a plugin file
-/// written by a pre-multi-gateway pixtuoid still on disk (installing is a one-shot
-/// `connect`; upgrading the binary does NOT re-render it). Folding such gateways into
-/// ONE instance keeps their mascot behaving as before instead of vanishing on upgrade;
-/// the paired `missing_field` breadcrumb is what tells the user to reconnect.
-const LEGACY_INSTANCE_ID: &str = "legacy";
-
 /// The busy pairing key: a non-empty `runId`, else `sessionId`, else `"_"`. The
 /// `!is_empty` filter sits AFTER the pick, so a present-but-EMPTY `runId`
 /// short-circuits to `"_"` rather than falling through to `sessionId`. Coarse BY
@@ -57,15 +50,12 @@ fn run_key(obj: &serde_json::Map<String, Value>) -> String {
         .to_string()
 }
 
-/// Narrow the wire `gatewayPort` to this gateway's stable instance id. An ABSENT
-/// field is a stale installed plugin → [`LEGACY_INSTANCE_ID`]; a PRESENT-but-unusable
-/// value is a bug or a hostile sender, so the whole envelope is REJECTED rather than
-/// silently bucketed — the case the compatibility fallback must never swallow.
+/// Narrow the wire `gatewayPort` to this gateway's stable instance id; an envelope
+/// without a usable one is REJECTED rather than bucketed with another gateway's.
 fn gateway_instance(obj: &serde_json::Map<String, Value>, event: &str) -> Result<DaemonInstanceId> {
-    let Some(raw) = obj.get(GATEWAY_PORT_FIELD) else {
-        crate::source::drift::missing_field(SOURCE_NAME, event, GATEWAY_PORT_FIELD);
-        return instance_id(LEGACY_INSTANCE_ID.to_string());
-    };
+    let raw = obj
+        .get(GATEWAY_PORT_FIELD)
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, GATEWAY_PORT_FIELD))?;
     let port = raw
         .as_u64()
         .and_then(|n| u16::try_from(n).ok())
@@ -472,30 +462,12 @@ mod tests {
     }
 
     #[test]
-    fn a_port_less_envelope_falls_back_to_the_one_legacy_instance() {
-        let mut decoded = Vec::new();
-        let logs = crate::test_capture::capture_logs(|| {
-            decoded.push(
-                decode_openclaw_hook_payload(&json!({"type": "gateway_start", "_pid": 7}))
-                    .expect("decodes"),
-            );
-            decoded.push(
-                decode_openclaw_hook_payload(&json!({"type": "session_start", "sessionId": "s"}))
-                    .expect("decodes"),
-            );
-        });
-        let (a, b) = (&decoded[0], &decoded[1]);
-        assert_eq!(a.instance.as_str(), LEGACY_INSTANCE_ID);
-        assert_eq!(a.instance, b.instance);
-        assert_eq!(
-            a.updates,
-            vec![DaemonPresenceUpdate::GatewayUp { pid: Some(7) }],
-            "the fallback changes identity only — never the deltas"
-        );
+    fn a_port_less_envelope_is_rejected() {
+        let err = decode_openclaw_hook_payload(&json!({"type": "gateway_start", "_pid": 7}))
+            .expect_err("no gateway to key it on");
         assert!(
-            logs.contains("missing_field") && logs.contains(GATEWAY_PORT_FIELD),
-            "a port-less envelope must breadcrumb the MISSING FIELD class naming \
-             `{GATEWAY_PORT_FIELD}`, got:\n{logs}"
+            matches!(err, DecodeError::Missing { field, .. } if field == GATEWAY_PORT_FIELD),
+            "got: {err:?}"
         );
     }
 

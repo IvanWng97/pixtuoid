@@ -62,9 +62,7 @@ echo "pixtuoid headless up (pid $PIXPID), HookRouter owns $SOCK"
 PORT_A=18789
 PORT_B=19789
 
-# Every envelope must carry a gatewayPort. A port-LESS one is not rejected — it
-# falls back to the single legacy instance (the stale-plugin compatibility arm),
-# which would make the multi-gateway steps below vacuous.
+# Every envelope must carry a gatewayPort; a port-less one is rejected.
 send() { printf '%s\n' "$1" | PIXTUOID_SOCKET="$SOCK" "$HOOK" --source openclaw; }
 send_a() { send "$(printf '%s' "$1" | sed "s/}\$/,\"gatewayPort\":$PORT_A}/")"; }
 

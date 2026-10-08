@@ -375,9 +375,7 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
 }) => {
   await page.addInitScript(() => {
     (window as unknown as { __acCount: number }).__acCount = 0;
-    const Real =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const Real = window.AudioContext;
     if (!Real) return;
     const Wrapped = function (this: unknown, ...args: unknown[]) {
       (window as unknown as { __acCount: number }).__acCount++;
@@ -385,7 +383,6 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
     } as unknown as typeof AudioContext;
     Wrapped.prototype = Real.prototype;
     window.AudioContext = Wrapped;
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext = Wrapped;
   });
   const errors = watchErrors(page);
   await gotoLive(page);
@@ -500,9 +497,7 @@ test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode doe
     // 'playback' yet still plays on the ambient channel — a bare end-state check would pass that broken reorder.
     const w = window as unknown as { __acTypeAtCtor: string | null };
     w.__acTypeAtCtor = null;
-    const Real =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const Real = window.AudioContext;
     if (!Real) return;
     const Wrapped = function (this: unknown, ...args: unknown[]) {
       w.__acTypeAtCtor = (
@@ -512,7 +507,6 @@ test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode doe
     } as unknown as typeof AudioContext;
     Wrapped.prototype = Real.prototype;
     window.AudioContext = Wrapped;
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext = Wrapped;
   });
   const errors = watchErrors(page);
   await gotoLive(page);
@@ -2673,8 +2667,6 @@ test('audit C5: ♩ hides and never persists a silent "playing" when the AudioCo
       throw new Error('WebAudio disabled');
     } as unknown as typeof AudioContext;
     window.AudioContext = Throwing;
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext =
-      Throwing;
   });
   await gotoLive(page);
   const btn = page.locator('#office-audio');

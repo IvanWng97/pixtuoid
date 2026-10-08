@@ -60,10 +60,6 @@ pub(crate) fn home_relative_checked(rel: &str) -> Result<PathBuf> {
 /// race-free half, because the mode binds at creation and leaves no window in
 /// which a co-located user can `open()` the artifact. Inert on Windows, where
 /// ACLs inherit from the directory.
-///
-/// Deliberately kept separately callable from [`tighten_to_owner_only`]: folded
-/// into one opener, reverting either half was invisible to every test, because
-/// the fchmod repaired what the create mode failed to set.
 pub(crate) fn owner_only_create(opts: &mut OpenOptions) -> &mut OpenOptions {
     #[cfg(unix)]
     {
@@ -71,21 +67,6 @@ pub(crate) fn owner_only_create(opts: &mut OpenOptions) -> &mut OpenOptions {
         opts.mode(0o600);
     }
     opts
-}
-
-/// Restate owner-only on an ALREADY-OPEN handle — the UPGRADE half of
-/// [`owner_only_create`], for an artifact an older version created 0644. These
-/// files are deliberately never unlinked, so without this the hole would never
-/// close for an upgrader. Through the fd (fchmod), never the path: a path chmod
-/// would re-race whatever `O_NOFOLLOW` guarantee the open established.
-pub(crate) fn tighten_to_owner_only(f: &File) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
-    }
-    #[cfg(not(unix))]
-    let _ = f;
 }
 
 fn checked_home_join(home: Option<PathBuf>, rel: &str) -> Result<PathBuf> {
@@ -314,9 +295,6 @@ pub(crate) fn lock_config(path: &Path) -> Result<ConfigLock> {
     }
     let lock_path = sibling(&target, "lock");
     let file = open_lock_sidecar(&lock_path)?;
-    // The sidecar is never unlinked, so an older version's 0644 one is still on
-    // disk — the create mode above cannot bind to it.
-    tighten_to_owner_only(&file);
     file.try_lock()
         .map_err(|e| anyhow!("could not lock {}: {e}", lock_path.display()))?;
     Ok(ConfigLock { target, file })
@@ -505,9 +483,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fresh_lock_sidecar_is_created_owner_only() {
-        // Drives `open_lock_sidecar`, NOT `lock_config`: the latter's follow-up
-        // fchmod would repair a dropped create mode, leaving the race-free half
-        // unpinned.
         let dir = TempDir::new().unwrap();
         let lock_path = dir.path().join("settings.json.lock");
         drop(open_lock_sidecar(&lock_path).unwrap());
@@ -515,25 +490,6 @@ mod tests {
             mode_of(&lock_path),
             0o600,
             "a fresh lock sidecar must be owner-only from the open itself"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn lock_config_tightens_a_pre_existing_world_readable_sidecar() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = TempDir::new().unwrap();
-        let target = dir.path().join("settings.json");
-        std::fs::write(&target, "{}").unwrap();
-        let lock_path = sibling(&target, "lock");
-        std::fs::write(&lock_path, "").unwrap();
-        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644)).unwrap();
-
-        drop(lock_config(&target).unwrap());
-        assert_eq!(
-            mode_of(&lock_path),
-            0o600,
-            "a pre-existing sidecar is tightened"
         );
     }
 

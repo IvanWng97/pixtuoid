@@ -6,9 +6,6 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// The runs directory under `base`, inside pixtuoid's own directory on every
-/// arm, so the single log [`adopt_single_log`] moves in beside it is only ever
-/// pixtuoid's.
 fn runs_under(base: &Path) -> LogLocation {
     LogLocation::Runs(base.join("pixtuoid").join("logs"))
 }
@@ -38,21 +35,6 @@ fn live_run_options() -> OpenOptions {
 fn run_file_name(start: SystemTime, tag: impl std::fmt::Display) -> String {
     let start: chrono::DateTime<chrono::Utc> = start.into();
     format!("{}-{tag}.{}", start.format("%Y%m%dT%H%M%SZ"), RUN_LOG_EXT)
-}
-
-/// Move the single log an older pixtuoid kept beside `dir` (`log`, rotated to
-/// `log.old`) into it as runs named for their last write, so it ages out like
-/// any run instead of staying behind.
-fn adopt_single_log(dir: &Path) {
-    for (name, tag) in [("log.old", "single-old"), ("log", "single")] {
-        let old = dir.with_file_name(name);
-        let Ok(meta) = std::fs::metadata(&old) else {
-            continue;
-        };
-        if let (true, Ok(written)) = (meta.is_file(), meta.modified()) {
-            let _ = std::fs::rename(&old, dir.join(run_file_name(written, tag)));
-        }
-    }
 }
 
 /// Remove the runs in `dir` last written over [`RUN_LOG_RETAIN`] before `now`,
@@ -95,29 +77,17 @@ fn prune_runs(dir: &Path, now: SystemTime) {
 /// workspace cwd; `--log-level debug` dumps the agent's own shell commands and
 /// edited file paths).
 ///
-/// TWO mechanisms, kept separately callable because they cover different cases:
-/// `create_owner_only_append` binds the mode AT CREATION — race-free, no window
-/// in which a co-located user can open the sink — and
-/// [`crate::install::tighten_to_owner_only`] restates it on a sink an older
-/// version created 0644, which the create mode cannot bind to. An already-existing
-/// DIRECTORY keeps its mode: silently re-moding a user's `~/.cache` is not ours.
+/// The mode binds AT CREATION — race-free, no window in which a co-located user
+/// can open the sink. An already-existing DIRECTORY keeps its mode: silently
+/// re-moding a user's `~/.cache` is not ours.
 ///
 /// # Errors
 ///
 /// If the directory can't be created or the file can't be opened.
 pub(crate) fn open_private_append(
     path: &Path,
-    opts: OpenOptions,
+    mut opts: OpenOptions,
 ) -> std::io::Result<std::fs::File> {
-    let f = create_owner_only_append(path, opts)?;
-    crate::install::tighten_to_owner_only(&f);
-    Ok(f)
-}
-
-/// The CREATE half of [`open_private_append`]. Deliberately does NOT fchmod — a
-/// test asserting the mode off THIS fn is asserting what the open established, not
-/// what a follow-up chmod repaired.
-fn create_owner_only_append(path: &Path, mut opts: OpenOptions) -> std::io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
         #[cfg(unix)]
         {
@@ -217,7 +187,7 @@ const RUN_LOG_EXT: &str = "log";
 const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
 /// The most one [`LogLocation::read`] takes of the retained runs, newest first: what
-/// the single log held at most across its two generations, so a week of
+/// the named file holds at most across its two generations, so a week of
 /// verbose runs costs a reader no more than it did.
 const LOG_READ_BYTES: u64 = 2 * LOG_ROTATE_BYTES;
 
@@ -247,8 +217,7 @@ impl LogLocation {
 
     /// Open this run's sink here, or the path that failed and why: the named
     /// file after its size rotation, or a fresh file of its own in the runs
-    /// directory, which, once held, the single log is adopted into and old runs
-    /// are pruned from.
+    /// directory, which, once held, old runs are pruned from.
     ///
     /// # Errors
     ///
@@ -273,7 +242,6 @@ impl LogLocation {
             // Unix, where removing an open file succeeds.
             #[cfg(unix)]
             let _ = sink.try_lock();
-            adopt_single_log(dir);
             prune_runs(dir, now);
         }
         Ok(sink)
@@ -345,32 +313,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fresh_diagnostic_sink_is_created_owner_only() {
-        // Drives `create_owner_only_append`, NOT `open_private_append`: the latter's
-        // follow-up fchmod would repair a dropped create mode.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state").join("pixtuoid").join("log");
-        drop(create_owner_only_append(&path, OpenOptions::new()).expect("opens"));
+        drop(open_private_append(&path, OpenOptions::new()).expect("opens"));
         assert_eq!(mode_of(&path), 0o600, "the sink must not inherit the umask");
         assert_eq!(
             mode_of(&dir.path().join("state").join("pixtuoid")),
             0o700,
             "nor the directory it is created in"
         );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_older_versions_world_readable_sink_is_tightened_on_reopen() {
-        // The create mode does not bind on a file that already exists, and these
-        // sinks are never unlinked, so an upgrader's 0644 log stays exposed unless
-        // `open_private_append` tightens it.
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("log");
-        std::fs::write(&path, "old\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        drop(open_private_append(&path, OpenOptions::new()).expect("reopens"));
-        assert_eq!(mode_of(&path), 0o600, "a pre-existing sink is tightened");
     }
 
     #[test]
@@ -439,9 +390,8 @@ mod tests {
     }
 
     /// A run opens a file of its own, owner-only, named so name order is start
-    /// order; the old single log moves in beside it, and runs past
-    /// [`RUN_LOG_RETAIN`] go, the new one, a recent one and a quiet live one
-    /// staying.
+    /// order, and runs past [`RUN_LOG_RETAIN`] go, the new one, a recent one and
+    /// a quiet live one staying.
     #[test]
     fn a_run_logs_to_its_own_file_and_tidies_the_runs_before_it() {
         let root = tempfile::tempdir().unwrap();
@@ -482,9 +432,6 @@ mod tests {
         };
         #[cfg(unix)]
         quiet_run.try_lock().unwrap();
-        let single = dir.with_file_name("log");
-        std::fs::write(&single, "the old single log\n").unwrap();
-
         let at = LogLocation::Runs(dir.clone());
         drop(at.open_sink(now).expect("opens"));
         let this_run = dir.join(run_file_name(now, std::process::id()));
@@ -492,18 +439,13 @@ mod tests {
         assert!(!stale.exists(), "a run past the retention goes");
         assert!(quiet.exists(), "a quiet run still running keeps its file");
         drop(quiet_run);
-        assert!(!single.exists(), "the single log moves into the runs");
         #[cfg(unix)]
         assert_eq!(mode_of(&this_run), 0o600);
 
         let (text, warning) = at.read();
         assert_eq!(warning, None);
         let order: Vec<&str> = text.lines().collect();
-        assert_eq!(
-            order,
-            ["x", "x", "the old single log"],
-            "runs read oldest first"
-        );
+        assert_eq!(order, ["x", "x"], "runs read oldest first");
     }
 
     #[test]

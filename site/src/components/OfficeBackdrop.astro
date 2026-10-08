@@ -914,7 +914,7 @@ const officeDriverUrl = asset('office-driver.js');
       try {
         // iOS mutes default WebAudio on the Ring/Silent switch; 'playback' routes to the media channel so the deliberate ♩ tap plays even on silent.
         if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx = new AudioContext();
       } catch (e) {
         // WebAudio unavailable (Tor / hardened Firefox / enterprise lockdown): HIDE the ♩ too, not just a flag-set —
         // a visible button lets the click handler flip to a silent "playing" state and persist AUDIO_PREF=1.
