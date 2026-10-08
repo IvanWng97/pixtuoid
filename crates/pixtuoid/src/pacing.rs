@@ -188,8 +188,8 @@ impl Backend for PacedBackend {
 }
 
 /// A renderer drawing the office over `protocol` into a `cols`×`rows`
-/// terminal of `cell_px` cells, with `pets`, encoding as beside a live audio
-/// thread when `audio`, and the wire every byte it writes crosses.
+/// terminal of `cell_px` cells, with `pets`, and the wire every byte it
+/// writes crosses.
 ///
 /// # Errors
 ///
@@ -201,7 +201,6 @@ pub fn renderer(
     cell_px: (u16, u16),
     pets: Vec<pixtuoid_scene::pet::Pet>,
     pack: Arc<OfficeArt>,
-    audio: bool,
 ) -> Result<(TuiRenderer<PacedBackend>, Wire)> {
     let wire = Wire::default();
     // As the TUI does: each frame's text and images held and written whole.
@@ -226,21 +225,12 @@ pub fn renderer(
         let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
         let fit = cutaway_fit(cell, area, pack.max_density_variant())
             .context("the cell is too small for the cutaway")?;
-        let mut cutaway = crate::tui::cutaway::TileCutaway::new(
+        r.set_cutaway(crate::tui::cutaway::TileCutaway::new(
             fit,
             cell,
             crate::graphics::Route::direct(image, false),
             Box::new(out.clone()),
-        );
-        // A live audio thread's spare core, which a renderer reads off its
-        // audio handle: the bench synthesizes with no device to open one.
-        if audio {
-            cutaway.split_across(crate::tui::cutaway::encode_cores(
-                pixtuoid_scene::par::cores(),
-                true,
-            ));
-        }
-        r.set_cutaway(cutaway);
+        ));
     }
     r.present_through(out);
     Ok((r, wire))
@@ -295,7 +285,6 @@ mod tests {
             (8, 16),
             vec![],
             std::sync::Arc::clone(&pack),
-            false,
         )
         .expect("a cutaway");
         let scene = pixtuoid_core::SceneState::uniform(8);
@@ -321,7 +310,6 @@ mod tests {
             (8, 16),
             vec![],
             std::sync::Arc::clone(&pack),
-            false,
         )
         .expect("a cutaway");
         let scene = pixtuoid_core::SceneState::uniform(8);
@@ -355,7 +343,6 @@ mod tests {
             (8, 16),
             vec![],
             std::sync::Arc::clone(&pack),
-            false,
         )
         .expect("a cutaway");
         let scene = pixtuoid_core::SceneState::uniform(8);

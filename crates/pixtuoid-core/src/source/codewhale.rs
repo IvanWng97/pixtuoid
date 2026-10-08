@@ -42,11 +42,34 @@ use crate::source::{AgentEvent, ToolDetail};
 /// The CodeWhale CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codewhale";
 
-/// CodeWhale tools that dispatch a sub-agent (`spawn_agent` is the deprecated
-/// alias). Mapped to `ToolDetail::Task` so the PARENT slot reads "Delegating"
-/// while the dispatch runs; the CHILD gets its own sprite from the
+/// CodeWhale's one sub-agent tool; its `action` picks the verb
+/// (Hmbown/CodeWhale `crates/tui/src/tools/subagent/mod.rs`
+/// `parse_agent_tool_action`). The CHILD gets its own sprite from the
 /// `subagent_spawn`/`subagent_complete` observer hooks.
-const SUBAGENT_TOOLS: &[&str] = &["agent_spawn", "spawn_agent"];
+pub(crate) const SUBAGENT_TOOL: &str = "agent";
+
+/// The [`SUBAGENT_TOOL`] actions that hand the turn to a child, so the PARENT
+/// reads "Delegating": upstream's `Start` aliases dispatch one and its `Wait`
+/// aliases block on it, while the other actions only read or steer one.
+pub(crate) const DELEGATING_ACTIONS: &[&str] =
+    &["start", "spawn", "run", "wait", "join", "await", "block"];
+
+/// Whether an [`SUBAGENT_TOOL`] call is one of the [`DELEGATING_ACTIONS`].
+/// Mirrors upstream's resolver: the first non-null, non-blank `action`/`op`,
+/// case-folded, and start when absent.
+fn agent_call_delegates(args: Option<&Value>) -> bool {
+    let action = ["action", "op"]
+        .into_iter()
+        .find_map(|k| match args?.get(k)? {
+            Value::Null => None,
+            Value::String(s) if s.trim().is_empty() => None,
+            v => Some(v),
+        });
+    action.is_none_or(|v| {
+        v.as_str()
+            .is_some_and(|a| DELEGATING_ACTIONS.contains(&a.trim().to_ascii_lowercase().as_str()))
+    })
+}
 
 /// Decode one CodeWhale hook envelope (already identified by
 /// `_pixtuoid_source == "codewhale"`), keyed on `cwd`. An unhandled event
@@ -180,17 +203,17 @@ fn decode_cw_subagent(
     }]))
 }
 
-/// CodeWhale-side tool detail: the dispatch family is name-keyed, because
-/// CodeWhale args carry no `subagent_type` for the shared semantic detection to
-/// see. `tool_args` arrives as the raw `DEEPSEEK_TOOL_ARGS` JSON STRING, so it
-/// is parsed here before the target key lookup.
+/// CodeWhale-side tool detail: the dispatch is keyed on tool name and action,
+/// because CodeWhale args carry no `subagent_type` for the shared semantic
+/// detection to see. `tool_args` arrives as the raw `DEEPSEEK_TOOL_ARGS` JSON
+/// STRING, so it is parsed first.
 fn cw_tool_detail(tool: &str, raw_args: Option<&Value>) -> ToolDetail {
-    if SUBAGENT_TOOLS.contains(&tool) {
-        return ToolDetail::Task;
-    }
     let parsed: Option<Value> = raw_args
         .and_then(Value::as_str)
         .and_then(|s| serde_json::from_str(s).ok());
+    if tool == SUBAGENT_TOOL && agent_call_delegates(parsed.as_ref()) {
+        return ToolDetail::Task;
+    }
     const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url"];
     crate::source::decoder::generic_keyed_detail(tool, parsed.as_ref(), KEYS)
 }
@@ -266,22 +289,37 @@ mod tests {
     }
 
     #[test]
-    fn subagent_dispatch_family_maps_to_task() {
-        for tool in ["agent_spawn", "spawn_agent"] {
-            let ev = decode(json!({
-                "event": "tool_call_before", "cwd": "/r",
-                "tool": tool, "tool_args": "{\"prompt\":\"do a thing\"}"
-            }));
-            assert!(
-                matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()),
-                "{tool} must map to ToolDetail::Task"
-            );
+    fn only_an_agent_call_that_hands_off_the_turn_is_a_task() {
+        let is_task = |tool: &str, args: Value| {
+            matches!(
+                decode(json!({
+                    "event": "tool_call_before", "cwd": "/r",
+                    "tool": tool, "tool_args": args.to_string()
+                })),
+                AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()
+            )
+        };
+        for args in [
+            json!({"prompt": "x"}),
+            json!({"action": "start"}),
+            json!({"action": " Wait "}),
+            json!({"action": "", "op": "join"}),
+            json!({"action": null, "op": "spawn"}),
+        ] {
+            assert!(is_task("agent", args.clone()), "{args}");
         }
-        let ev = decode(json!({
-            "event": "tool_call_before", "cwd": "/r",
-            "tool": "read_file", "tool_args": "{\"path\":\"x.rs\"}"
-        }));
-        assert!(matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()));
+        for args in [
+            json!({"action": "status"}),
+            json!({"action": "peek"}),
+            json!({"action": "cancel"}),
+            json!({"op": "roster"}),
+            json!({"action": 1}),
+        ] {
+            assert!(!is_task("agent", args.clone()), "{args}");
+        }
+        for tool in ["agent_spawn", "spawn_agent", "read_file"] {
+            assert!(!is_task(tool, json!({"prompt": "x"})), "{tool}");
+        }
     }
 
     #[test]

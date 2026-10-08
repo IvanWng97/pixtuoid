@@ -8,11 +8,14 @@ VANISH row is stated only in `crates/pixtuoid-core/src/source/drift.rs`'s header
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import http.client
+import io
 import json
 import pathlib
 import re
 import sys
+import tarfile
 import traceback
 import typing
 import urllib.error
@@ -26,6 +29,13 @@ REASONIX_HOOK_URL = (
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
     "crates/tui/src/hooks/config.rs"
+)
+
+# The `agent` tool and the actions it resolves; a delegation the decoder
+# names wrong reads as an ordinary tool call, with no breadcrumb.
+CODEWHALE_SUBAGENT_URL = (
+    "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
+    "crates/tui/src/tools/subagent/mod.rs"
 )
 
 # The codex escalation pair is a BOOLEAN check with no breadcrumb possible: a
@@ -179,16 +189,13 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
-# `permission.asked` is decoded DEFENSIVELY (a V1/alias spelling); only
-# `permission.v2.asked` is a guaranteed standalone upstream EventV2 definition,
-# so don't alarm if the bare form isn't found as a `type:` literal.
-OPENCODE_TOLERATED = {"permission.asked"}
-
-# The inventory is SPLIT (`permission.v2.asked` lives in permission.ts), so the
-# union is the document and one fetch failure must not read as a vanish. No
+# The inventory is SPLIT (the CLI publishes v1 `permission.asked`, declared in
+# v1/permission.ts; core's v2 tools `permission.v2.asked`, in permission.ts), so
+# the union is the document and one fetch failure must not read as a vanish. No
 # appearing sweep: the plugin forwards exactly what the decoder reads, by test.
 OPENCODE_EVENT_URLS = (
     "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/session.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/permission.ts",
     "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/permission.ts",
 )
 
@@ -258,10 +265,16 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 }
 
 
-# Deliberately UNPINNED: the bare unpkg path 302-redirects to the latest shape,
-# which is what a drift watch wants. `@github/copilot` is now a loader stub, and
-# every platform package carries an identical schema; linux-x64 matches CI.
-COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
+# Since 1.0.85 the npm packages carry no schema; the latest release's platform
+# tarball does, and github/copilot-sdk's codegen reads it there
+# (java/scripts/codegen/fetch-schemas.mjs). `fetch` resolves this name through
+# `fetch_copilot_schema`; linux-x64 matches CI.
+COPILOT_RELEASE_URL = "https://api.github.com/repos/github/copilot-cli/releases/latest"
+COPILOT_SCHEMA_MEMBER = "package/schemas/session-events.schema.json"
+COPILOT_SCHEMA_SOURCE = (
+    "https://github.com/github/copilot-cli/releases/latest "
+    f"(github-copilot-<v>-linux-x64.tgz: {COPILOT_SCHEMA_MEMBER})"
+)
 
 
 # Cursor is a closed binary, so the docs are the only watchable surface.
@@ -305,11 +318,12 @@ class Anchor(typing.NamedTuple):
     also: str | None = None
 
 
-# The three JSON Schemas are parsed STRUCTURALLY, so a text anchor would add
-# nothing a failed parse does not already say. Every OTHER swept document is prose
+# The three JSON Schemas, and the release record the Copilot one is found
+# through, are parsed STRUCTURALLY, so a text anchor would add nothing a failed
+# parse does not already say. Every OTHER swept document is prose
 # and must declare one — `every_swept_url_declares_an_anchor` is that gate.
 UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
-    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL}
+    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_SOURCE, COPILOT_RELEASE_URL}
 )
 
 # The value must be read from upstream's DECLARATION, never scanned for as a
@@ -321,6 +335,9 @@ GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: the anchor IS the declaration the checked names live inside.
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
+    CODEWHALE_SUBAGENT_URL: Anchor(
+        r"fn parse_agent_tool_action\b", "`parse_agent_tool_action`"
+    ),
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
@@ -351,6 +368,7 @@ ANCHORS: dict[str, Anchor] = {
     OPENCLAW_PATHS_URL: Anchor(r"DEFAULT_GATEWAY_PORT\s*=", "`DEFAULT_GATEWAY_PORT`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
+    OPENCODE_EVENT_URLS[2]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     # identity-grade: co-located only — a name moved out still matches, so phantom
     # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
     OMP_AI_TYPES_URL: Anchor(r"(?m)^export type Message\s*=", "the `Message` union"),
@@ -488,10 +506,49 @@ class Report:
         return 0
 
 
-def fetch(url: str) -> str:
+# One stalled host must not hold the ~60-document sweep; only the Copilot
+# release tarball (~72 MB) earns the long bound.
+FETCH_TIMEOUT_S = 30
+COPILOT_ASSET_TIMEOUT_S = 120
+
+
+def fetch_raw(url: str, timeout: float = FETCH_TIMEOUT_S) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (trusted hosts)
-        return resp.read().decode("utf-8", "replace")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (trusted hosts)
+        return resp.read()
+
+
+def fetch(url: str) -> str:
+    if url == COPILOT_SCHEMA_SOURCE:
+        return fetch_copilot_schema()
+    return fetch_raw(url).decode("utf-8", "replace")
+
+
+def fetch_copilot_schema() -> str:
+    """The latest Copilot release's session-events schema, out of its linux-x64
+    tarball once the release's own SHA256SUMS.txt vouches for it.
+
+    A release with no such tarball or member raises a 404 `HTTPError`, which
+    `try_fetch` reports as our pin going dark; a checksum miss raises `OSError`,
+    reported as an error to retry, as is a release reply naming no tag."""
+    tag = json.loads(fetch_raw(COPILOT_RELEASE_URL)).get("tag_name")
+    if not tag:
+        raise OSError(f"{COPILOT_RELEASE_URL} named no release tag")
+    base = f"https://github.com/github/copilot-cli/releases/download/{tag}/"
+    name = f"github-copilot-{tag.removeprefix('v')}-linux-x64.tgz"
+    asset = fetch_raw(base + name, COPILOT_ASSET_TIMEOUT_S)
+    sums = fetch_raw(base + "SHA256SUMS.txt").decode("utf-8", "replace").splitlines()
+    vouched = {line.split()[0] for line in sums if line.split()[1:] == [name]}
+    if hashlib.sha256(asset).hexdigest() not in vouched:
+        raise OSError(f"{name} does not match {tag}'s SHA256SUMS.txt")
+    with tarfile.open(fileobj=io.BytesIO(asset), mode="r:gz") as tf:
+        member = next((m for m in tf if m.name == COPILOT_SCHEMA_MEMBER), None)
+        body = tf.extractfile(member) if member is not None else None
+        if body is None:
+            raise urllib.error.HTTPError(
+                base + name, 404, f"no {COPILOT_SCHEMA_MEMBER}", http.client.HTTPMessage(), None
+            )
+        return body.read().decode("utf-8", "replace")
 
 
 def try_fetch(url: str, label: str, report: Report) -> str | None:
@@ -616,6 +673,9 @@ GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
     "subagent_progress": "cumulative per-child totals (turns, tool calls); "
     "summing a running total into the delta-accumulating reducer double-counts "
     "(codex's `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
+    "turn_usage": "declared in `SessionUpdate` (extensions/notification.rs) but "
+    "nothing constructs it, so it never reaches updates.jsonl; a prompt's usage "
+    "rides `turn_completed.usage`",
     "hook_run_started": "never in the transcript: upstream emits it through "
     "`send_xai_notification_transient` (session/acp_session_impl/hook_dispatch.rs), "
     "which only forwards to the live client and never appends to updates.jsonl, "
@@ -796,6 +856,8 @@ class OurNames:
     dispatch_names: set[str] | None = None
     codex: set[str] | None = None
     codewhale: set[str] | None = None
+    codewhale_subagent_tool: set[str] | None = None
+    codewhale_delegating_actions: set[str] | None = None
     hermes: set[str] | None = None
     grok: set[str] | None = None
     grok_xai_method: set[str] | None = None
@@ -867,6 +929,9 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("kimi", CORE_BIN_FRAGMENT, "registered", "kimi"),
     ("codex", CORE_BIN_FRAGMENT, "registered", "codex"),
     ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
+    ("codewhale_subagent_tool", CORE_LIB_FRAGMENT, "decoded", "codewhale.subagent_tool"),
+    ("codewhale_delegating_actions", CORE_LIB_FRAGMENT, "decoded",
+     "codewhale.delegating_actions"),
     ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
     ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
     ("grok_xai_method", CORE_LIB_FRAGMENT, "decoded", "grok.xai_method"),
@@ -1175,10 +1240,16 @@ def _enum_body(text: str, enum_name: str) -> str | None:
     variant truncates the enum into a phantom rename per variant, and `(.*?)\\n\\}`
     demands a column-0 brace, so an INDENTED enum runs on into the next `impl`.
     Comments go first; string literals stay, so callers still read `rename = "…"`."""
-    text = strip_rust_comments(text)
     # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
     # `HookEvent` must not bind to `enum HookEventName {`.
-    m = re.search(rf"enum\s+{enum_name}\s*\{{", text)
+    return _braced_body(text, rf"enum\s+{enum_name}\s*\{{")
+
+
+def _braced_body(text: str, opener: str) -> str | None:
+    """The brace-balanced body after `opener`, which ends at its `{`, with
+    comments stripped — `_enum_body`'s reasons hold for a fn too."""
+    text = strip_rust_comments(text)
+    m = re.search(opener, text)
     if not m:
         return None
     start = m.end() - 1
@@ -1258,6 +1329,26 @@ def upstream_codewhale_hooks(text: str) -> set[str] | None:
     return snake or None
 
 
+def upstream_codewhale_agent(text: str) -> tuple[set[str] | None, set[str] | None]:
+    """The `agent` tool's name, and the action aliases `parse_agent_tool_action`
+    resolves to `Start` or `Wait` — the ones that hand the turn to a child."""
+    m = sole_match(
+        r'impl\s+ToolSpec\s+for\s+AgentTool\s*\{\s*fn\s+name\(&self\)\s*->\s*'
+        r'&\'static\s+str\s*\{\s*"([^"]+)"',
+        strip_rust_comments(text),
+    )
+    tool = {m.group(1)} if m else None
+    body = _braced_body(text, r"fn\s+parse_agent_tool_action\b[^{]*\{")
+    if body is None:
+        return tool, None
+    arms = re.findall(
+        r'((?:"[^"]*"\s*\|\s*)*"[^"]*")\s*=>\s*Ok\(\s*AgentToolAction::(?:Start|Wait)\s*\)',
+        body,
+    )
+    actions = {a for arm in arms for a in re.findall(r'"([^"]*)"', arm) if a}
+    return tool, actions or None
+
+
 def upstream_codex_hooks(text: str) -> set[str] | None:
     body = _enum_body(text, "HookEventName")
     if body is None:
@@ -1281,7 +1372,7 @@ def sole_match(pattern: str, text: str) -> re.Match[str] | None:
 
 
 def python_set_literal(src: str, decl: str) -> set[str] | None:
-    """The string members of a `NAME: Set[str] = { … }` block.
+    """The string members of a `NAME: set[str] = { … }` block.
 
     Comments go BEFORE the brace scan: upstream interleaves prose here, and one
     comment quoting `{"action": "continue"}` truncated the set SILENTLY at the
@@ -1385,12 +1476,12 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 )
 
     if ours.copilot is not None:
-        text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
+        text = try_fetch(COPILOT_SCHEMA_SOURCE, "Copilot schema", report)
         up_ns = upstream_copilot_namespaces(text) if text is not None else None
         if text is not None and up_ns is None:
             report.add_blind(
                 "the Copilot `SessionEvent` anyOf union",
-                COPILOT_SCHEMA_URL,
+                COPILOT_SCHEMA_SOURCE,
                 "EVERY Copilot check (event types, payload fields) was SKIPPED — "
                 "an unproven schema cannot tell a rename from a restructure.",
             )
@@ -1399,7 +1490,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             if upstream is None:
                 report.add_blind(
                     "any parseable `type` const in the Copilot session-events schema",
-                    COPILOT_SCHEMA_URL,
+                    COPILOT_SCHEMA_SOURCE,
                     "The Copilot event watch was SKIPPED.",
                 )
             else:
@@ -1415,7 +1506,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             if fields_up is None:
                 report.add_blind(
                     "the Copilot schema `properties` keys",
-                    COPILOT_SCHEMA_URL,
+                    COPILOT_SCHEMA_SOURCE,
                     "The Copilot payload-field watch was SKIPPED.",
                 )
             else:
@@ -1544,6 +1635,47 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"never fires, so the decoder is never reached (no sprite)."
                     )
 
+    if ours.codewhale_subagent_tool is not None or ours.codewhale_delegating_actions is not None:
+        text = fetch_anchored(CODEWHALE_SUBAGENT_URL, "CodeWhale agent tool source", report)
+        if text is not None:
+            tool, actions = upstream_codewhale_agent(text)
+            if ours.codewhale_subagent_tool is not None:
+                if tool is None:
+                    report.add_blind(
+                        "CodeWhale's `agent` tool name",
+                        CODEWHALE_SUBAGENT_URL,
+                        "No sole `impl ToolSpec for AgentTool` name was found, so the "
+                        "tool-name check was SKIPPED.",
+                    )
+                else:
+                    for name in sorted(ours.codewhale_subagent_tool - tool):
+                        report.add_breaking(
+                            f"CodeWhale's sub-agent tool `{name}` (SUBAGENT_TOOL in "
+                            f"source/codewhale.rs) is `{min(tool)}` upstream — no call "
+                            f"reads as a delegation."
+                        )
+            if ours.codewhale_delegating_actions is not None:
+                if actions is None:
+                    report.add_blind(
+                        "CodeWhale's delegating `agent` actions",
+                        CODEWHALE_SUBAGENT_URL,
+                        "`parse_agent_tool_action` yielded no Start/Wait arm, so the "
+                        "action check was SKIPPED.",
+                    )
+                else:
+                    for a in sorted(ours.codewhale_delegating_actions - actions):
+                        report.add_breaking(
+                            f"CodeWhale `agent` action `{a}` (DELEGATING_ACTIONS in "
+                            f"source/codewhale.rs) no longer starts or waits on a "
+                            f"sub-agent upstream — the parent reads Delegating wrongly."
+                        )
+                    for a in sorted(actions - ours.codewhale_delegating_actions):
+                        report.add_review(
+                            f"CodeWhale `agent` action `{a}` starts or waits on a "
+                            f"sub-agent upstream but is missing from DELEGATING_ACTIONS "
+                            f"in source/codewhale.rs."
+                        )
+
     if ours.codex is not None:
         text = fetch_anchored(CODEX_PROTOCOL_URL, "Codex protocol source", report)
         if text is not None:
@@ -1566,7 +1698,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     if ours.hermes is not None:
         text = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if text is not None:
-            valid = python_set_literal(text, "VALID_HOOKS: Set[str] = {")
+            valid = python_set_literal(text, "VALID_HOOKS: set[str] = {")
             if valid is None:
                 report.add_blind(
                     "the hermes hook names upstream declares",
@@ -1586,7 +1718,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if plugins is not None:
             unsupported = python_set_literal(
-                plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
+                plugins, "SHELL_UNSUPPORTED_HOOKS: set[str] = {"
             )
             if unsupported is None:
                 report.add_blind(
@@ -1926,7 +2058,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             [(u, "opencode event inventory") for u in OPENCODE_EVENT_URLS], report
         )
         if joined is not None:
-            for ev in sorted(ours.opencode - OPENCODE_TOLERATED):
+            for ev in sorted(ours.opencode):
                 if f'"{ev}"' not in joined:
                     report.add_breaking(
                         f"opencode event `{ev}` (forwarded by our plugin, decoded in "

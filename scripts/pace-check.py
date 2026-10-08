@@ -14,7 +14,7 @@ interval and the 1-minute load average the run started under: other work's
 load slows a frame woken from the TUI's sleep, and the load says how much
 of a rate is the machine's.
 
-`--hover` sweeps the pointer to and fro along the scene's middle row, so a
+`--hover` sweeps the pointer to and fro along the terminal's middle row, across the scene, so a
 tooltip opens over each figure and fixture it crosses and moves with it; the
 pty alone takes it, a live run's pointer being the user's.
 
@@ -73,7 +73,7 @@ def start_at(run):
 
 
 def sweep(fd, cols, rows, stop):
-    """Move the pointer a cell at a time along the scene's middle row, to and
+    """Move the pointer a cell at a time along the terminal's middle row, to and
     fro, until `stop`: SGR reports of motion, 32, with no button, 3
     (https://invisible-island.net/xterm/ctlseqs/ctlseqs.html, "Button-event
     tracking" and "Extended coordinates")."""

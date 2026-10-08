@@ -137,10 +137,10 @@ pub(crate) const DECODED_ESCALATION: &[&str] = &[REQUIRE_ESCALATED, SANDBOX_PERM
 /// The rollout inners, grouped BY BEHAVIOUR — each group is both the matcher
 /// (the arms below guard on `contains`) and the export source, so there is one
 /// declaration per name and no second copy to drift.
-pub(crate) const EM_TURN_START: &[&str] = &["task_started", "turn_started"];
+pub(crate) const EM_TURN_START: &[&str] = &["task_started"];
 pub(crate) const EM_RESUME: &[&str] = &["exec_command_end", "patch_apply_end"];
 pub(crate) const EM_SEARCH: &[&str] = &["web_search_begin", "web_search_end"];
-pub(crate) const EM_TURN_END: &[&str] = &["task_complete", "turn_complete", "turn_aborted"];
+pub(crate) const EM_TURN_END: &[&str] = &["task_complete", "turn_aborted"];
 pub(crate) const EM_TOKENS: &[&str] = &["token_count"];
 
 pub(crate) const RI_TOOL_START: &[&str] = &["function_call", "custom_tool_call"];
@@ -177,9 +177,6 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
     };
 
     let out = match (outer, inner) {
-        // `task_started` is what codex serializes today; `turn_started` is
-        // upstream's own serde alias, accepted so a future serializer flip to
-        // the alias form still drives Active/Idle.
         (EVENT_MSG, i) if EM_TURN_START.contains(&i) => vec![start()],
         // `custom_tool_call` is the SAME item under codex's custom-tool API and is
         // what a modern session serializes — `a_custom_tool_call_is_a_tool_call`.
@@ -468,12 +465,18 @@ mod tests {
 
     #[test]
     fn task_started_is_activity_start() {
-        for t in ["task_started", "turn_started"] {
+        let out = ev(json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"t"}}));
+        assert!(matches!(out.as_slice(), [AgentEvent::ActivityStart { .. }]));
+    }
+
+    /// codex's serde aliases are read-only (`codex-rs/protocol/src/protocol.rs`
+    /// at rust-v0.161.0: `rename = "task_started", alias = "turn_started"`), so
+    /// a rollout never carries them.
+    #[test]
+    fn a_turn_alias_codex_never_writes_decodes_to_nothing() {
+        for t in ["turn_started", "turn_complete"] {
             let out = ev(json!({"type":"event_msg","payload":{"type":t,"turn_id":"t"}}));
-            assert!(
-                matches!(out.as_slice(), [AgentEvent::ActivityStart { .. }]),
-                "{t}"
-            );
+            assert!(out.is_empty(), "{t}");
         }
     }
 
@@ -587,7 +590,7 @@ mod tests {
 
     #[test]
     fn task_complete_and_abort_end_activity() {
-        for t in ["task_complete", "turn_complete", "turn_aborted"] {
+        for t in ["task_complete", "turn_aborted"] {
             let out = ev(json!({"type":"event_msg","payload":{"type":t,"turn_id":"t"}}));
             assert!(
                 matches!(out.as_slice(), [AgentEvent::ActivityEnd { .. }]),

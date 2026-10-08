@@ -623,8 +623,15 @@ impl AudioHandle {
             let vol_for_loop = std::sync::Arc::clone(&self.volume);
             match std::thread::Builder::new()
                 .name("pixtuoid-audio".into())
-                .spawn(move || run_loop(rx, Box::new(device), muted_for_loop, vol_for_loop))
-            {
+                .spawn(move || {
+                    // Its synthesis runs for seconds at a launch and a track
+                    // swap: utility work, "work that may take some time to
+                    // complete and doesn't require an immediate result"
+                    // (<https://developer.apple.com/library/archive/documentation/Performance/Conceptual/EnergyGuide-iOS/PrioritizeWorkWithQoS.html>).
+                    // The device plays on its output callback's own thread.
+                    demote_to_utility();
+                    run_loop(rx, Box::new(device), muted_for_loop, vol_for_loop)
+                }) {
                 Ok(join) => {
                     // Replacing the sole sender CLOSES a prior thread's channel — retire that
                     // thread rather than leak one still holding the output.
@@ -744,6 +751,102 @@ fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Du
 /// The production spawn every caller injects — a named fn so they can't drift.
 pub(crate) fn respawn(handle: &AudioHandle, volume: f32) {
     handle.respawn_in_place(volume);
+}
+
+/// Lower the calling thread to its platform's utility class, below a frame's
+/// threads, as Chromium maps its `kUtility` thread type
+/// (`base/threading/platform_thread_{apple.mm,linux.cc,win.cc}`). Best
+/// effort: a refusal leaves the thread as it was.
+pub fn demote_to_utility() {
+    #[cfg(target_os = "macos")]
+    // SAFETY: sets the calling thread's own QoS class; nothing is borrowed.
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+    }
+    // Linux's nice value is per thread, so the thread's own id lowers this
+    // thread alone (setpriority(2), "the nice value is a per-thread
+    // attribute"); where it isn't, no process has that id and the call fails.
+    #[cfg(target_os = "linux")]
+    // SAFETY: plain syscalls on this thread's id; nothing is borrowed.
+    unsafe {
+        let tid = libc::gettid();
+        if let Ok(tid) = libc::id_t::try_from(tid) {
+            libc::setpriority(libc::PRIO_PROCESS, tid, UTILITY_NICE);
+        }
+    }
+    #[cfg(windows)]
+    // SAFETY: the pseudo-handle names the calling thread and needs no close
+    // (SetThreadPriority, GetCurrentThread).
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+        };
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    }
+}
+
+/// Chromium's nice value for `kUtility` (`ThreadTypeToNiceValue`,
+/// `platform_thread_linux.cc`).
+#[cfg(target_os = "linux")]
+const UTILITY_NICE: libc::c_int = 2;
+
+// The platforms whose class it reads back; elsewhere it yields nothing.
+#[cfg(all(test, any(target_os = "macos", target_os = "linux", windows)))]
+mod utility_tests {
+    /// A demoted thread reads back its platform's utility class, and the
+    /// thread that spawned it keeps its own.
+    #[test]
+    fn a_demoted_thread_reads_back_the_utility_class() {
+        let before = class_of_this_thread();
+        assert_ne!(before, utility(), "premise: the test runs above utility");
+        let after = std::thread::spawn(|| {
+            super::demote_to_utility();
+            class_of_this_thread()
+        })
+        .join()
+        .expect("the thread ran");
+        assert_eq!(after, utility(), "the demoted thread");
+        assert_eq!(class_of_this_thread(), before, "only that thread");
+    }
+
+    #[cfg(target_os = "macos")]
+    fn class_of_this_thread() -> i64 {
+        let (mut class, mut relative) = (libc::qos_class_t::QOS_CLASS_UNSPECIFIED, 0);
+        // SAFETY: reads the calling thread's QoS into two locals.
+        let ok = unsafe {
+            libc::pthread_get_qos_class_np(libc::pthread_self(), &mut class, &mut relative)
+        };
+        assert_eq!(ok, 0);
+        class as i64
+    }
+    #[cfg(target_os = "macos")]
+    fn utility() -> i64 {
+        libc::qos_class_t::QOS_CLASS_UTILITY as i64
+    }
+
+    #[cfg(target_os = "linux")]
+    fn class_of_this_thread() -> i64 {
+        // SAFETY: plain syscalls on this thread's id.
+        unsafe {
+            let tid = libc::id_t::try_from(libc::gettid()).expect("a thread id");
+            i64::from(libc::getpriority(libc::PRIO_PROCESS, tid))
+        }
+    }
+    #[cfg(target_os = "linux")]
+    fn utility() -> i64 {
+        i64::from(super::UTILITY_NICE)
+    }
+
+    #[cfg(windows)]
+    fn class_of_this_thread() -> i64 {
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadPriority};
+        // SAFETY: the pseudo-handle names the calling thread.
+        i64::from(unsafe { GetThreadPriority(GetCurrentThread()) })
+    }
+    #[cfg(windows)]
+    fn utility() -> i64 {
+        i64::from(windows_sys::Win32::System::Threading::THREAD_PRIORITY_BELOW_NORMAL)
+    }
 }
 
 /// After the first-frame `TrackBeds::build` the channel holds a backlog. Adopt

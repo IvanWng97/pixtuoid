@@ -296,13 +296,13 @@ fn child_key(obj: &serde_json::Map<String, Value>) -> Option<String> {
 }
 
 /// The TRANSCRIPT lane's twin of [`child_key`]: the same id under
-/// `child_session_id`, with `subagent_id` as the older spelling. Shared by both
-/// subagent arms so the non-empty guard cannot be applied to one and forgotten
-/// on the other — an `""` mints a phantom child parented to the real session.
+/// `child_session_id`. Shared by both subagent arms so the non-empty guard
+/// cannot be applied to one and forgotten on the other — an `""` mints a
+/// phantom child parented to the real session.
 fn transcript_child_key(update: &serde_json::Map<String, Value>) -> Option<&str> {
-    ["child_session_id", "subagent_id"]
-        .into_iter()
-        .find_map(|k| update.get(k).and_then(|s| s.as_str()))
+    update
+        .get("child_session_id")
+        .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
 }
 
@@ -1374,16 +1374,28 @@ mod tests {
     #[test]
     fn transcript_subagent_arms_reject_an_empty_child_id_like_the_hook_twin() {
         for tag in ["subagent_spawned", "subagent_finished"] {
-            for id_field in ["child_session_id", "subagent_id"] {
-                let evs = decode_line(xai_line(json!({
-                    "sessionUpdate": tag,
-                    id_field: "",
-                })));
-                assert!(
-                    evs.is_empty(),
-                    "{tag} with an empty {id_field} must decode to nothing, got {evs:?}"
-                );
-            }
+            let evs = decode_line(xai_line(json!({
+                "sessionUpdate": tag,
+                "child_session_id": "",
+            })));
+            assert!(
+                evs.is_empty(),
+                "{tag} with an empty child_session_id must decode to nothing, got {evs:?}"
+            );
+        }
+    }
+
+    /// `child_session_id` is required on every subagent update
+    /// (`xai-grok-shell/src/extensions/notification.rs`), so it alone keys the
+    /// child: a line without it is not one grok writes.
+    #[test]
+    fn a_subagent_update_keys_its_child_by_child_session_id_alone() {
+        for tag in ["subagent_spawned", "subagent_finished"] {
+            let evs = decode_line(xai_line(json!({
+                "sessionUpdate": tag,
+                "subagent_id": "0197fa31-child",
+            })));
+            assert!(evs.is_empty(), "{tag}: {evs:?}");
         }
     }
 
