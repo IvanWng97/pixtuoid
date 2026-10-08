@@ -29,8 +29,9 @@ const WORLD_WRITERS: [&str; 6] = [
     "../pixtuoid-scene/src/layout",
 ];
 
-/// The icons' terminal glyphs, which no face draws: a pixel painter draws an
-/// icon's art (`Icon::art`) in their place.
+/// The icons' terminal glyphs: the screen face draws an icon's art by its
+/// glyph, and the world names its icons, so nothing writes this file's
+/// glyphs as text the gate could check.
 const TERMINAL_ONLY: &str = "../pixtuoid-scene/src/display/icon.rs";
 
 /// What world text writes that no badge reaches: core's cap mark, which ends
@@ -214,10 +215,11 @@ fn tofu<'a>(
     face: Face,
 ) -> BTreeMap<String, Vec<String>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("the bundled pack loads");
     let mut tofu = BTreeMap::<String, Vec<String>>::new();
     for (file, chars) in files {
         for &c in chars {
-            if drawn(c) && !face.draws(c) {
+            if drawn(c) && !face.draws(c, &pack) {
                 let at = file
                     .strip_prefix(root)
                     .unwrap_or(file)

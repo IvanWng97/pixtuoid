@@ -149,7 +149,7 @@ fn lamp_lit(now_ms: u64) -> bool {
 /// The lamp for agents in `tone`, the waiting one dark while it blinks off.
 fn lamp(tone: BoardTone, lit: bool) -> BoardSegment {
     let icon = match tone {
-        BoardTone::Waiting => Icon::Waiting,
+        BoardTone::Waiting => Icon::Alert,
         BoardTone::Active => Icon::Active,
         _ => Icon::Idle,
     };

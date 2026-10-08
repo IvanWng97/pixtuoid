@@ -10,7 +10,7 @@ mod sources_cli;
 use std::io::Write;
 
 use crate::cli::{Cli, Cmd, SourceArgs, SourcesAction};
-use crate::{config, doctor, floating, init_pack, install, runtime, setup, sources, validate};
+use crate::{config, doctor, floating, install, runtime, setup, sources};
 use anyhow::Result;
 use clap::Parser;
 
@@ -120,8 +120,6 @@ pub fn run() -> Result<()> {
             let rc = build_run_config(cli_theme.as_deref(), source, None, false, None, drift)?;
             floating::run(rc)
         }
-        Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
-        Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor { graphics } => {
             let report = doctor::run(&crate::run_log::LogLocation::from_env(), graphics)?;
             write!(crate::cli_stdout(), "{report}")?;
@@ -189,7 +187,6 @@ fn build_run_config(
         socket,
         projects_root,
         codex_sessions_root,
-        pack_dir,
     } = source;
     let cfg_path = config::config_path();
     let mut cfg_warnings = Vec::new();
@@ -201,7 +198,6 @@ fn build_run_config(
     let first_run = setup::is_first_run(&cfg, &cfg_path, load_degraded);
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
     let desk_cap = config::resolve_desk_cap(&cfg, cli_max_desks, &mut cfg_warnings);
-    let pack = config::resolve_pack_source(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
     let graphics = config::resolve_graphics(&cfg, cli_graphics, &mut cfg_warnings);
     let motion = config::resolve_motion(&cfg, &mut cfg_warnings);
@@ -219,7 +215,6 @@ fn build_run_config(
         socket,
         projects_root,
         codex_sessions_root,
-        pack,
         desk_cap,
         headless,
         config_path: cfg_path,

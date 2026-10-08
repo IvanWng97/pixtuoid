@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pixtuoid_core::sprite::format::Density;
+use pixtuoid_core::sprite::format::{Density, Pack};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
@@ -593,7 +593,7 @@ pub fn paint_tooltip_into_surface(
     sb: &mut XrgbSurface<'_>,
     tip: &pixtuoid_scene::tooltip::Tooltip,
     cursor: (f64, f64),
-    theme: &Theme,
+    (theme, pack): (&Theme, &Pack),
     cell: CellPx,
 ) {
     let card = tip.card(theme);
@@ -619,7 +619,7 @@ pub fn paint_tooltip_into_surface(
         halo: None,
         shadow: Some(CARD_SHADOW),
     };
-    paint_grid(sb, &card, at, cell, Face::Screen, ink);
+    paint_grid(sb, &card, (at, cell), (Face::Screen, pack), ink);
 }
 
 /// How many screen cells of `cell` fit across a `win_w`-pixel window
@@ -636,7 +636,7 @@ pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
 pub fn paint_footer_into_surface(
     sb: &mut XrgbSurface<'_>,
     model: &FooterModel,
-    theme: &Theme,
+    (theme, pack): (&Theme, &Pack),
     at: PixelFit,
 ) {
     let cell = Face::chrome(at);
@@ -650,7 +650,13 @@ pub fn paint_footer_into_surface(
         halo: None,
         shadow: None,
     };
-    paint_grid(sb, &model.line(theme), (margin, y), cell, Face::Screen, ink);
+    paint_grid(
+        sb,
+        &model.line(theme),
+        ((margin, y), cell),
+        (Face::Screen, pack),
+        ink,
+    );
 }
 
 #[cfg(test)]
@@ -662,9 +668,7 @@ mod tests {
 
     /// The bundled pack's densest art, which the window draws at.
     fn density() -> Density {
-        pixtuoid_scene::pack::load_bundled_pack()
-            .expect("bundled pack loads")
-            .max_density_variant()
+        crate::test_flash::pack().max_density_variant()
     }
 
     /// The window's geometry for an office `size` units big, at the test
@@ -1424,10 +1428,12 @@ mod tests {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let bg = pack_xrgb(theme.ui.tooltip_bg);
         let (w, h) = (320usize, 200usize);
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let painted = |tip: &pixtuoid_scene::tooltip::Tooltip, cursor: (f64, f64)| {
             let mut px = vec![0u32; w * h];
             let mut sb = XrgbSurface::new(&mut px, w, h).expect("sized");
-            paint_tooltip_into_surface(&mut sb, tip, cursor, theme, Face::Screen.cell(1));
+            let look = (theme, &pack);
+            paint_tooltip_into_surface(&mut sb, tip, cursor, look, Face::Screen.cell(1));
             let rows: Vec<usize> = (0..h)
                 .filter(|&y| px[y * w..(y + 1) * w].contains(&bg))
                 .collect();
@@ -1674,13 +1680,14 @@ mod tests {
         let (w, h) = (640usize, 400usize);
         let at = window_geometry(PhysicalSize::new(w as u32, h as u32), density());
         let model = build_footer(&inputs, footer_budget(w, Face::chrome(at)));
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         // The office as the window draws it, then the footer over it.
         const OFFICE: u32 = 0x0012_3456;
         let mut sb = vec![OFFICE; w * h];
         paint_footer_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
             &model,
-            theme,
+            (theme, &pack),
             at,
         );
         let top = h - usize::from(footer_band(at));

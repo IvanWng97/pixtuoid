@@ -669,7 +669,7 @@ pub(crate) const MAX_TOOL_TARGET_CHARS: usize = 40;
 /// sit in `AgentSlot` for the session's lifetime either way.
 pub const MAX_DECODED_FIELD_CHARS: usize = 80;
 
-/// What [`ellipsize`] ends a capped value with.
+/// What `ellipsize` ends a capped value with.
 pub const ELLIPSIS: char = '\u{2026}';
 
 /// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap

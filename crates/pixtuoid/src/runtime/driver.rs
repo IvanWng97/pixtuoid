@@ -62,7 +62,7 @@ type Boot = (
 /// Load the pack, whose densest art the plan fits, plan, and pick the motion
 /// the plan affords unless the config names one.
 fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
-    let pack = Arc::new(pixtuoid_scene::pack::load_sprite_pack(cfg.pack.clone())?);
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     let plan = crate::graphics::plan_this_terminal(cfg.graphics, pack.max_density_variant(), true);
     tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
     let motion = cfg.motion.or(plan.motion(crate::graphics::Link::of_env()));
@@ -75,7 +75,6 @@ async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
         socket,
         projects_root,
         codex_sessions_root,
-        pack: _,
         desk_cap,
         headless: _,
         config_path,
