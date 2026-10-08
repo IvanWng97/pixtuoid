@@ -114,11 +114,9 @@ pub(crate) struct Jank {
     janks: u32,
     /// Frames past their interval.
     over: u32,
-    /// How long frames stayed on screen past their schedule this window
+    /// How late frames showed past their interval this window
     /// ([`Self::shown`]).
     hitch: Duration,
-    /// The last scheduled frame shown: when it was due, and when it showed.
-    last_shown: Option<(Instant, Instant)>,
     since: Instant,
     painter: Painter,
     /// The interval the loop schedules frames at.
@@ -149,7 +147,6 @@ impl Jank {
             janks: 0,
             over: 0,
             hitch: Duration::ZERO,
-            last_shown: None,
             since: now,
             painter: Painter::default(),
             interval: Duration::from_millis(PAINT_FRAME_MS),
@@ -162,19 +159,14 @@ impl Jank {
         self.interval = interval;
     }
 
-    /// Count the frame due at `due` and shown at `at` toward the hitch time:
-    /// the frame before it stayed on screen from its showing until `at`, past
-    /// the spacing their two dues ask for by the hitch duration, "the
-    /// difference between the actual frame lifetime and the expected frame
-    /// lifetime" (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
+    /// Count the frame due at `due` and shown at `at` toward the hitch time
+    /// by how far it showed past its interval, when the next frame is due:
+    /// the hitch duration, "the difference between the actual frame lifetime
+    /// and the expected frame lifetime", each from the frame's begin
+    /// (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
     /// A redraw no schedule asked for never comes here, so it can't count.
     pub(crate) fn shown(&mut self, due: Instant, at: Instant) {
-        if let Some((was_due, was_shown)) = self.last_shown {
-            let held = at.saturating_duration_since(was_shown);
-            let meant = due.saturating_duration_since(was_due);
-            self.hitch += held.saturating_sub(meant);
-        }
-        self.last_shown = Some((due, at));
+        self.hitch += at.saturating_duration_since(due + self.interval);
     }
 
     /// Name what draws the frames from now on.
@@ -340,18 +332,18 @@ mod tests {
         assert!(logged.contains("janks=0"), "{logged}");
     }
 
-    /// A late frame holds the one before it past their schedule by its
-    /// lateness alone, and a slower schedule is no hitch. Due at 0, 33, 66
-    /// and 191 ms, shown at 5, 48, 71 and 192: the second shows 43 ms after
-    /// the first against 33 due, 10 ms late; the third 23 against 33; the
-    /// fourth 121 against a beat's 125.
+    /// A frame hitches by how far it showed past its interval, and one
+    /// shown within it never does, however late in it. Every 33 ms, due at 0,
+    /// 33, 66 and 132 ms and shown at 5, 60, 110 and 133: only the third is
+    /// past its 99 ms, by 11.
     #[test]
-    fn a_late_frame_holds_the_last_by_its_lateness() {
+    fn a_frame_hitches_by_how_far_it_showed_past_its_interval() {
         let t0 = Instant::now();
         let ms = Duration::from_millis;
         let logged = crate::test_capture::capture(|| {
             let mut jank = Jank::new(t0);
-            for (due, at) in [(0, 5), (33, 48), (66, 71), (191, 192)] {
+            jank.scheduled_every(ms(33));
+            for (due, at) in [(0, 5), (33, 60), (66, 110), (132, 133)] {
                 jank.record(ms(1), Duration::ZERO, None, None, t0);
                 jank.shown(t0 + ms(due), t0 + ms(at));
             }
@@ -361,10 +353,13 @@ mod tests {
             .lines()
             .find(|l| l.contains("frame pacing"))
             .unwrap_or_default();
-        let late = ms(10).as_secs_f64() * 1000.0;
+        let late = ms(11).as_secs_f64() * 1000.0;
         assert!(line.contains(&format!("hitch_ms={late:?} ")), "{line}");
-        let interval = Duration::from_millis(PAINT_FRAME_MS).as_secs_f64() * 1000.0;
-        assert!(line.contains(&format!("interval_ms={interval}")), "{line}");
+        let interval = ms(33).as_secs_f64() * 1000.0;
+        assert!(
+            line.contains(&format!("interval_ms={interval:?}")),
+            "{line}"
+        );
     }
 
     /// A window that closes reports its frames' spread and janks, then starts

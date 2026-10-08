@@ -336,7 +336,7 @@ bench-pacing:
 
 # Local only, never CI: a shared runner's wall clock is too noisy for a frame
 # budget. `--live` runs in this terminal, the only run a real parser sees.
-[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail when frames held past their interval pass 10 ms a second')]
+[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail when frames shown past their interval pass 10 ms a second')]
 [group('rust')]
 pace-check *args:
     cargo build --release -p pixtuoid --bins --example pacing

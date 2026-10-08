@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The fluency gate: run the release binary through a weather transition into
-a storm, or across dusk, and fail when its hitch rate, the time the screen
-held a frame past its interval per second run, passes HITCH_RATE_MS_PER_S.
+a storm, or across dusk, and fail when its hitch rate, how late frames
+showed past their interval per second run, passes HITCH_RATE_MS_PER_S.
 
 The binary measures itself: its `frame pacing` summaries (`jank.rs`), a
 minute each and one at exit, are what this reads, from the log it writes.
@@ -175,7 +175,7 @@ def main():
     print(
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
         f"run={args.run} load={load:.2f}: {frames} frames, hitch rate {rate:.2f} ms/s "
-        f"({hitch_ms:.0f} ms held over {ran_s:.0f} s), worst window p99 {p99:.1f} ms, "
+        f"({hitch_ms:.0f} ms late over {ran_s:.0f} s), worst window p99 {p99:.1f} ms, "
         f"worst frame {worst:.1f} ms, over {over} | log {log}"
     )
     for (dirty, *why), n in causes(log):
