@@ -395,7 +395,7 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
         == frozenset({
             d.ACP_V1_SCHEMA_URL,
             d.ACP_V1_SCHEMA_UNSTABLE_URL,
-            d.COPILOT_SCHEMA_URL,
+            d.COPILOT_SCHEMA_SOURCE,
             d.COPILOT_RELEASE_URL,
         }),
         f"the anchor requirement is waived only for the JSON Schemas, got "
@@ -1724,9 +1724,9 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "declare module '@deepseek-ai/cordis' {\n  interface Context {\n  }\n"
                     "  interface Events {\n"}),
             ("copilot", str, lambda ns: {
-                d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
+                d.COPILOT_SCHEMA_SOURCE: copilot_schema(ns, full["copilot_fields"])}),
             ("copilot_fields", str, lambda ns: {
-                d.COPILOT_SCHEMA_URL: copilot_schema(full["copilot"], ns)}),
+                d.COPILOT_SCHEMA_SOURCE: copilot_schema(full["copilot"], ns)}),
         ]
         covered = {c[0] for c in cases}
         rows = {f for f, *_ in d.SURFACE_ROWS}
@@ -1806,34 +1806,68 @@ def test_copilot_schema_is_read_from_the_verified_release_asset() -> None:
     real = d.fetch_raw
     try:
         served = _copilot_release(b'{"ok": 1}', d.COPILOT_SCHEMA_MEMBER)
-        d.fetch_raw = served.__getitem__
-        check(d.fetch(d.COPILOT_SCHEMA_URL) == '{"ok": 1}', "the asset's schema is read")
+        d.fetch_raw = lambda u, *_t, _m=served: _m[u]
+        check(d.fetch(d.COPILOT_SCHEMA_SOURCE) == '{"ok": 1}', "the asset's schema is read")
 
         bad = dict(served)
         sums = next(u for u in bad if u.endswith("SHA256SUMS.txt"))
         bad[sums] = b"0" * 64 + b"  github-copilot-9.9.9-linux-x64.tgz\n"
-        d.fetch_raw = bad.__getitem__
+        d.fetch_raw = lambda u, *_t, _m=bad: _m[u]
         rep = d.Report()
-        check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
+        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
               "a tarball its release's SHA256SUMS does not vouch for is not read")
         check(bool(rep.errors) and not rep.blind, "a checksum miss is an error, not a pin move")
 
         moved = _copilot_release(b"{}", "package/elsewhere.json")
-        d.fetch_raw = moved.__getitem__
+        d.fetch_raw = lambda u, *_t, _m=moved: _m[u]
         rep = d.Report()
-        check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
+        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
               "a tarball without the schema member yields nothing")
         check(bool(rep.blind), "a moved schema member is our pin going dark")
 
         tagless = dict(served)
         tagless[d.COPILOT_RELEASE_URL] = b"{}"
-        d.fetch_raw = tagless.__getitem__
+        d.fetch_raw = lambda u, *_t, _m=tagless: _m[u]
         rep = d.Report()
-        check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
+        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
               "a release reply naming no tag yields nothing")
         check(bool(rep.errors) and not rep.blind, "a tagless reply is an error, not a pin move")
     finally:
         d.fetch_raw = real
+
+
+def test_only_the_copilot_tarball_gets_the_long_timeout() -> None:
+    """One stalled host must not hold a ~60-document sweep at the tarball's bound."""
+    real = d.urllib.request.urlopen
+    seen: dict[str, float] = {}
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    def stub(req, timeout):
+        seen[req.full_url] = timeout
+        body = b"x"
+        if req.full_url == d.COPILOT_RELEASE_URL:
+            body = json.dumps({"tag_name": "v9.9.9"}).encode()
+        return Resp(body)
+
+    try:
+        d.urllib.request.urlopen = stub
+        d.fetch_raw("https://example.invalid/doc.md")
+        try:
+            d.fetch_copilot_schema()
+        except OSError:
+            pass  # the stub serves no real tarball; only the bounds matter here
+        asset = next(u for u in seen if u.endswith("-linux-x64.tgz"))
+        check(seen["https://example.invalid/doc.md"] == d.FETCH_TIMEOUT_S, f"a document: {seen}")
+        check(seen[asset] == d.COPILOT_ASSET_TIMEOUT_S, f"the tarball: {seen}")
+        check(d.FETCH_TIMEOUT_S < d.COPILOT_ASSET_TIMEOUT_S, "the tarball's bound is the long one")
+    finally:
+        d.urllib.request.urlopen = real
 
 
 def test_opencode_watches_the_live_v1_permission_declaration() -> None:

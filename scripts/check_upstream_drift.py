@@ -271,7 +271,7 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 # `fetch_copilot_schema`; linux-x64 matches CI.
 COPILOT_RELEASE_URL = "https://api.github.com/repos/github/copilot-cli/releases/latest"
 COPILOT_SCHEMA_MEMBER = "package/schemas/session-events.schema.json"
-COPILOT_SCHEMA_URL = (
+COPILOT_SCHEMA_SOURCE = (
     "https://github.com/github/copilot-cli/releases/latest "
     f"(github-copilot-<v>-linux-x64.tgz: {COPILOT_SCHEMA_MEMBER})"
 )
@@ -323,7 +323,7 @@ class Anchor(typing.NamedTuple):
 # parse does not already say. Every OTHER swept document is prose
 # and must declare one — `every_swept_url_declares_an_anchor` is that gate.
 UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
-    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL, COPILOT_RELEASE_URL}
+    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_SOURCE, COPILOT_RELEASE_URL}
 )
 
 # The value must be read from upstream's DECLARATION, never scanned for as a
@@ -506,14 +506,20 @@ class Report:
         return 0
 
 
-def fetch_raw(url: str) -> bytes:
+# One stalled host must not hold the ~60-document sweep; only the Copilot
+# release tarball (~72 MB) earns the long bound.
+FETCH_TIMEOUT_S = 30
+COPILOT_ASSET_TIMEOUT_S = 120
+
+
+def fetch_raw(url: str, timeout: float = FETCH_TIMEOUT_S) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
-    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (trusted hosts)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (trusted hosts)
         return resp.read()
 
 
 def fetch(url: str) -> str:
-    if url == COPILOT_SCHEMA_URL:
+    if url == COPILOT_SCHEMA_SOURCE:
         return fetch_copilot_schema()
     return fetch_raw(url).decode("utf-8", "replace")
 
@@ -530,7 +536,7 @@ def fetch_copilot_schema() -> str:
         raise OSError(f"{COPILOT_RELEASE_URL} named no release tag")
     base = f"https://github.com/github/copilot-cli/releases/download/{tag}/"
     name = f"github-copilot-{tag.removeprefix('v')}-linux-x64.tgz"
-    asset = fetch_raw(base + name)
+    asset = fetch_raw(base + name, COPILOT_ASSET_TIMEOUT_S)
     sums = fetch_raw(base + "SHA256SUMS.txt").decode("utf-8", "replace").splitlines()
     vouched = {line.split()[0] for line in sums if line.split()[1:] == [name]}
     if hashlib.sha256(asset).hexdigest() not in vouched:
@@ -1470,12 +1476,12 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 )
 
     if ours.copilot is not None:
-        text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
+        text = try_fetch(COPILOT_SCHEMA_SOURCE, "Copilot schema", report)
         up_ns = upstream_copilot_namespaces(text) if text is not None else None
         if text is not None and up_ns is None:
             report.add_blind(
                 "the Copilot `SessionEvent` anyOf union",
-                COPILOT_SCHEMA_URL,
+                COPILOT_SCHEMA_SOURCE,
                 "EVERY Copilot check (event types, payload fields) was SKIPPED — "
                 "an unproven schema cannot tell a rename from a restructure.",
             )
@@ -1484,7 +1490,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             if upstream is None:
                 report.add_blind(
                     "any parseable `type` const in the Copilot session-events schema",
-                    COPILOT_SCHEMA_URL,
+                    COPILOT_SCHEMA_SOURCE,
                     "The Copilot event watch was SKIPPED.",
                 )
             else:
@@ -1500,7 +1506,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             if fields_up is None:
                 report.add_blind(
                     "the Copilot schema `properties` keys",
-                    COPILOT_SCHEMA_URL,
+                    COPILOT_SCHEMA_SOURCE,
                     "The Copilot payload-field watch was SKIPPED.",
                 )
             else:
