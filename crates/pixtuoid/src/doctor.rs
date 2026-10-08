@@ -1849,7 +1849,7 @@ mod tests {
             fit: Fit::new(cell, area, density).expect("fits"),
             route: crate::graphics::Route::direct(ImageProtocol::Kitty, false),
             cell,
-            forced: false,
+            chosen: crate::graphics::Chosen::Answer,
         };
         assert_eq!(
             terminal_category(&r).details[0],
