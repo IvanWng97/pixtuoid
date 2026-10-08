@@ -46,7 +46,7 @@ jobs:
     # tree; a fork has no secret.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'IvanWng97/pixtuoid'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     concurrency:
@@ -62,6 +62,29 @@ jobs:
       # cargo-semver-checks builds the baseline and the current tree, and the
       # default `audio` feature reaches alsa-sys — hence the ALSA step above.
       - uses: ./.github/actions/setup-cargo-just
+      # homebrew-core's `test do` runs against every release on its autobump
+      # and changes only by a PR there, so a subcommand it still calls that
+      # this tree dropped breaks a CI we never see. Checked before a release
+      # PR exists, so that PR waits for homebrew-core's (CONTRIBUTING.md#releasing).
+      - name: homebrew-core's test calls only subcommands this tree has
+        run: |
+          set -euo pipefail
+          formula="$(curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/p/pixtuoid.rb)"
+          subs="$(sed -n '/^  test do/,/^  end/p' <<<"$formula" \
+            | grep -oE 'pixtuoid("?, "| )[a-z][a-z0-9-]*' \
+            | sed -E 's/^pixtuoid("?, "| )//' | sort -u)"
+          if [ -z "$subs" ]; then
+            echo "::error::found no pixtuoid subcommand in homebrew-core's test block; its shape changed"
+            exit 1
+          fi
+          cargo build --locked -q -p pixtuoid --bin pixtuoid
+          for sub in $subs; do
+            if ! ./target/debug/pixtuoid "$sub" --help >/dev/null 2>&1; then
+              echo "::error::homebrew-core's test calls \`pixtuoid $sub\`, which this tree dropped: change the formula there first"
+              exit 1
+            fi
+          done
       # SHA-pinned, unlike this repo's floating majors: the step sees the PAT
       # (release-plz's security.md), and the SHA also pins the release-plz
       # binary the action installs. Dependabot's minor/patch ignore never

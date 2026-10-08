@@ -163,7 +163,9 @@ our release never builds. Two consequences:
   `crates/pixtuoid/src/app/sources_cli.rs`,
   `crates/pixtuoid-core/src/source/codex.rs`. Change homebrew-core's `test do`
   first, against the released version, so the next autobump stays green; the
-  packaging-build action replays the block, so it changes in the same PR.
+  packaging-build action replays the block, so it changes in the same PR. A
+  `release-plz.yml` dispatch opens no release PR while their block still calls
+  a subcommand this tree dropped.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
