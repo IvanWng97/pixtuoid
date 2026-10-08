@@ -814,17 +814,16 @@ pub(crate) fn character_effects(
     out
 }
 
-/// A sitter upright: a base [`Seat::sprite_for`](seat::Seat::sprite_for)
-/// turns to its seat's view, as it does each of these poses.
+/// The upright seated pose. Each seated pose is a base
+/// [`Seat::sprite_for`](seat::Seat::sprite_for) turns to its seat's view.
 const SEATED: &str = "seated";
-/// A sitter typing.
+/// The typing pose.
 const TYPING: &str = "typing";
-/// A sitter asleep, split between by agent id so a row of sleepers isn't one
-/// pose.
-const SLEEPS: [&str; 2] = ["seated_sleeping", "seated_sleeping_alt"];
+/// The sleeping poses, picked by agent id so a row of sleepers isn't one pose.
+const SLEEPING_POSES: [&str; 2] = ["seated_sleeping", "seated_sleeping_alt"];
 /// Every pose a seat resolves.
 #[cfg(test)]
-pub(crate) const SEATED_POSES: [&str; 4] = [SEATED, TYPING, SLEEPS[0], SLEEPS[1]];
+pub(crate) const SEATED_POSES: [&str; 4] = [SEATED, TYPING, SLEEPING_POSES[0], SLEEPING_POSES[1]];
 
 /// A person's walks, the sim's pick by the leg: facing the camera, walking
 /// away, carrying a coffee.
@@ -900,7 +899,8 @@ pub(crate) fn resolve_characters(
                 placements.push(seated(SEATED, CharacterGlow::None, None));
             }
             Pose::SeatedIdle => {
-                let sleep_variant = SLEEPS[usize::from(agent.agent_id.raw() % 2 != 0)];
+                let sleep_variant =
+                    SLEEPING_POSES[(agent.agent_id.raw() % SLEEPING_POSES.len() as u64) as usize];
                 placements.push(seated(
                     sleep_variant,
                     CharacterGlow::None,

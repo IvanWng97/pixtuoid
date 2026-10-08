@@ -2846,19 +2846,18 @@ mod validation_floor_tests {
 
     #[test]
     fn empty_frames_on_a_registered_animation_fails_validation() {
-        let pack = pack_with_animation("seated", "[]");
-        let report = validate_pack_animations(&pack, &PackContract::default());
-        assert!(
-            report
-                .insufficient_frames
-                .contains(&("seated".to_string(), 1, 0)),
-            "empty seated must report (seated, 1, 0); got {:?}",
-            report.insufficient_frames
-        );
-        let (name, need, have) = &report.insufficient_frames[0];
-        assert_eq!((name.as_str(), *need, *have), ("seated", 1, 0));
-        assert!(report.has_errors());
-        assert!(!report.missing.contains(&"seated".to_string()));
+        // One name from each registry: the min-1 floor holds for all three.
+        for name in ["seated", "desk", "cat_sit"] {
+            let pack = pack_with_animation(name, "[]");
+            let report = validate_pack_animations(&pack, &PackContract::default());
+            assert_eq!(
+                report.insufficient_frames,
+                [(name.to_string(), 1, 0)],
+                "{name}"
+            );
+            assert!(report.has_errors(), "{name}");
+            assert!(!report.missing.contains(&name.to_string()), "{name}");
+        }
     }
 
     #[test]
