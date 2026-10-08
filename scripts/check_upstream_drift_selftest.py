@@ -1824,6 +1824,14 @@ def test_copilot_schema_is_read_from_the_verified_release_asset() -> None:
         check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
               "a tarball without the schema member yields nothing")
         check(bool(rep.blind), "a moved schema member is our pin going dark")
+
+        tagless = dict(served)
+        tagless[d.COPILOT_RELEASE_URL] = b"{}"
+        d.fetch_raw = tagless.__getitem__
+        rep = d.Report()
+        check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
+              "a release reply naming no tag yields nothing")
+        check(bool(rep.errors) and not rep.blind, "a tagless reply is an error, not a pin move")
     finally:
         d.fetch_raw = real
 

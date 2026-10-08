@@ -524,8 +524,10 @@ def fetch_copilot_schema() -> str:
 
     A release with no such tarball or member raises a 404 `HTTPError`, which
     `try_fetch` reports as our pin going dark; a checksum miss raises `OSError`,
-    reported as an error to retry."""
-    tag = json.loads(fetch_raw(COPILOT_RELEASE_URL)).get("tag_name", "")
+    reported as an error to retry, as is a release reply naming no tag."""
+    tag = json.loads(fetch_raw(COPILOT_RELEASE_URL)).get("tag_name")
+    if not tag:
+        raise OSError(f"{COPILOT_RELEASE_URL} named no release tag")
     base = f"https://github.com/github/copilot-cli/releases/download/{tag}/"
     name = f"github-copilot-{tag.removeprefix('v')}-linux-x64.tgz"
     asset = fetch_raw(base + name)
