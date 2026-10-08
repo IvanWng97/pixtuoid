@@ -514,6 +514,10 @@ mod tests {
             let hints = hints("xterm-256color", program);
             assert_eq!(detected(&[], &hints, None).protocol, None, "{program}");
             assert_eq!(unanswered(&hints, None), Probe::NoAnswer, "{program}");
+            let kitty_only = detected(&[Response::Kitty], &hints, None).protocol;
+            assert_eq!(kitty_only, None, "{program}: no placeholders");
+            let sixel_only = detected(&[Response::Sixel], &hints, None).protocol;
+            assert_eq!(sixel_only, Some(ImageProtocol::Iterm2), "{program}");
             let loaded = detected(&[Response::Kitty, Response::Sixel], &hints, None);
             assert_eq!(loaded.protocol, Some(ImageProtocol::Iterm2), "{program}");
             assert!(!loaded.named, "{program}: answered");
