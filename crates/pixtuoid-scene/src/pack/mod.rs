@@ -7,42 +7,23 @@ mod lookup;
 pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
+#[cfg(test)]
+pub(crate) use lookup::MONITOR_KEYS;
 pub(crate) use lookup::{
     CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
     DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, ICON_INK_KEY, MEETING_SOFA_NORTH_SPRITE,
     MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, PropMark, SCREEN_GLASS_KEY,
     SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
     WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
-    appliance_sprite, bulb_cell, desk_art, desk_art_name, desk_art_top, desk_bulb_offset,
-    desk_front, desk_mark, desk_prop_overrides, desk_props_mirrored, drawn_in, fixture_overrides,
+    appliance_sprite, bulb_cell, desk_art, desk_art_top, desk_bulb_offset, desk_front, desk_mark,
+    desk_prop_overrides, desk_props_mirrored, desk_sprite_name, drawn_in, fixture_overrides,
     frame_at, looping_frame_index, prop_left,
 };
-#[cfg(test)]
-pub(crate) use lookup::{MONITOR_KEYS, desk_sprite_name};
 
 use pixtuoid_core::sprite::error::PackError;
 use pixtuoid_core::sprite::format::{
     Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
-
-/// The sets of pieces a pack should ship whole, each read from the authority its
-/// painter picks by: each row is the pantry counters
-/// (`layout::pantry_counter_anim` picks one by room width), a pet kind's
-/// poses, or a gateway mascot's poses.
-fn art_sets() -> Vec<Vec<&'static str>> {
-    let mut sets = vec![crate::layout::PANTRY_COUNTER_ANIMS.to_vec()];
-    sets.extend(
-        crate::pet::PetKind::ALL
-            .iter()
-            .map(|k| vec![k.walk_anim(), k.sit_anim(), k.sleep_anim()]),
-    );
-    sets.extend(
-        pixtuoid_core::source::registry::registered_source_names()
-            .filter_map(crate::creatures::gateway_mascot_def)
-            .map(|d| vec![d.walk, d.rest]),
-    );
-    sets
-}
 
 /// Every walk a walker steps by the ground it covers: a person's, each pet's
 /// and each gateway mascot's.
@@ -102,13 +83,12 @@ const DESK_BULBS: [(&str, char); 2] = [
     (lookup::DESK_NORTH_SPRITE, DESK_BULB_KEY),
 ];
 
-/// [`validate_pack_animations`], against this crate's painters' art sets,
-/// walks, desk marks, desk bulbs and loops on the Full beat.
+/// [`validate_pack_animations`], against this crate's painters' walks, desk
+/// marks, desk bulbs and loops on the Full beat.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
     validate_pack_animations(
         pack,
         &PackContract {
-            art_sets: &art_sets(),
             walks: &walks(),
             marks: &DESK_MARKS,
             loops: &looped_animations(),
@@ -148,49 +128,33 @@ fn bundled_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     SPRITES.to_vec()
 }
 
-/// The default pack with a wider `standing` frame (`WIDE_STANDING`), so the
-/// pack-resolved `char_w` differs from the bundled `CHARACTER_SPRITE_W`: the
-/// only way to drive `sim_step`/`resolve_characters` occupancy and anchors end
-/// to end at a non-default width.
-#[cfg(test)]
-pub(crate) fn test_wide_pack() -> Pack {
-    // The bundled standing pose padded to 10 wide with transparent columns
-    // (same palette keys).
-    const WIDE_STANDING: &str = "\
-@frame 0
-. . n H H H H n . .
-. n H H H H H H n .
-. H H S S S S H H .
-. H S e S S e S H .
-. . S S S m S S . .
-. . n S S S S n . .
-. . B B B B B B . .
-. B B B B B B B B .
-. S B B B B B B S .
-. . P P P P P P . .
-. . P P P P P P . .
-. . P . . . . P . .
-";
-    test_pack_with(&[("standing.sprite", WIDE_STANDING)])
-}
-
-/// The default pack with each `(file, source)` in `overrides` swapped in.
-///
-/// An override orphans any density variant that redraws its file: a denser
-/// scale skips that variant
-/// ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws)) and
-/// draws the swapped base.
+/// The bundled pack without its density art, with each `(file, source)` in
+/// `overrides` swapped in: a swapped base would orphan the variants drawn over
+/// it.
 #[cfg(test)]
 pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
-    let mut srcs = bundled_sprite_srcs();
+    let (toml, mut srcs) = base_pack_srcs();
     for &(file, source) in overrides {
         let entry = srcs
             .iter_mut()
             .find(|(name, _)| *name == file)
-            .expect("an override names a bundled sprite");
+            .expect("an override names a base sprite");
         entry.1 = source;
     }
-    load_pack_from_strings(BUNDLED_PACK_TOML, &srcs).expect("the test pack loads")
+    load_pack_from_strings(&toml, &srcs).expect("the test pack loads")
+}
+
+/// The bundled manifest without its density art, and the sprites it still
+/// draws: the web hero's pack.
+#[cfg(test)]
+fn base_pack_srcs() -> (String, Vec<(&'static str, &'static str)>) {
+    let (toml, dropped) =
+        density_art::bundled_without_density_art(include_str!("../../sprites/default/pack.toml"));
+    let srcs = bundled_sprite_srcs()
+        .into_iter()
+        .filter(|(name, _)| !dropped.contains(*name))
+        .collect();
+    (toml, srcs)
 }
 
 /// The bundled pack with its manifest's `old` text read as `new`, for a test
@@ -254,26 +218,6 @@ mod tests {
         assert_eq!(off, ["typing"]);
     }
 
-    #[test]
-    fn every_art_set_member_is_registered_inherited_art_in_one_set_only() {
-        let sets = art_sets();
-        assert!(!sets.is_empty());
-        let mut seen = std::collections::HashSet::new();
-        for set in &sets {
-            assert!(set.len() >= 2, "a one-piece set can't be partial: {set:?}");
-            for &name in set {
-                assert!(
-                    pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS
-                        .iter()
-                        .chain(pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS)
-                        .any(|&n| n == name),
-                    "{name}"
-                );
-                assert!(seen.insert(name), "{name} is in two sets");
-            }
-        }
-    }
-
     /// Every key the desk props take a theme colour in is one their art draws,
     /// at every density: a key renamed in the pack would stop the theme
     /// reaching the prop.
@@ -317,38 +261,13 @@ mod tests {
         assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
-    /// A pack that ships no back-turned desk draws its back-turned desks from
-    /// `desk`: it stands their props at `desk`'s marks and lights `desk`'s lamp.
-    #[test]
-    fn a_pack_without_desk_north_stands_its_props_on_desk() {
-        use crate::layout::{Facing, Point};
-        // the base table alone, whichever density variants a build ships
-        let north = "[animations.desk_north]\nframes   = [\"desk_north.sprite\"]\nframe_ms = 600\n";
-        let pack = test_pack_declaring(north, "");
-        let desk = Point { x: 20, y: 30 };
-        for mark in [CUP_MARK, TOWER_MARK] {
-            let at = |facing| desk_mark(&pack, desk, facing, mark);
-            assert!(
-                at(Facing::North).is_some(),
-                "the back-turned {mark} vanished"
-            );
-            assert_eq!(at(Facing::North), at(Facing::South), "{mark}");
-        }
-        let bulb = |facing| desk_bulb_offset(&pack, facing);
-        assert!(
-            bulb(Facing::North).is_some(),
-            "the back-turned lamp went dark"
-        );
-        assert_eq!(bulb(Facing::North), bulb(Facing::South));
-    }
-
     /// A desk's front is its own art, cut down: on the desk's canvas, every
     /// pixel it draws the desk's, so a desk with no props in front of its
     /// front paints as it always did.
     #[test]
     fn a_desk_front_is_its_desk_cut_down() {
         let pack = test_default_pack();
-        let front = desk_front(&pack, lookup::DESK_SPRITE).expect("the bundled desk has a front");
+        let front = desk_front(lookup::DESK_SPRITE).expect("the bundled desk has a front");
         for scale in [
             RenderScale::ONE,
             RenderScale::from(pack.max_density_variant()),
@@ -376,7 +295,7 @@ mod tests {
             assert!(drawn > 0, "at {scale:?}, the front draws something");
         }
         assert_eq!(
-            desk_front(&pack, lookup::DESK_NORTH_SPRITE),
+            desk_front(lookup::DESK_NORTH_SPRITE),
             None,
             "nothing stands before a back-turned sitter's props"
         );
@@ -481,14 +400,11 @@ mod tests {
     /// (`just hack` builds no tests), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
-        let (toml, dropped) = density_art::bundled_without_density_art(include_str!(
+        let (_, dropped) = density_art::bundled_without_density_art(include_str!(
             "../../sprites/default/pack.toml"
         ));
         assert!(!dropped.is_empty(), "the bundled pack ships density art");
-        let srcs: Vec<_> = bundled_sprite_srcs()
-            .into_iter()
-            .filter(|(name, _)| !dropped.contains(*name))
-            .collect();
+        let (toml, srcs) = base_pack_srcs();
         let pack = load_pack_from_strings(&toml, &srcs).expect("loads without density art");
         assert_eq!(pack.max_density_variant(), Density::ONE);
         assert!(
@@ -546,7 +462,7 @@ mod tests {
             )
             .collect();
         let listed: std::collections::BTreeSet<&str> =
-            pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS
+            pixtuoid_core::sprite::format::CREATURE_ANIMATIONS
                 .iter()
                 .copied()
                 .collect();
@@ -563,7 +479,7 @@ mod tests {
             .into_iter()
             .filter(|name| {
                 let base = name.split('@').next().unwrap_or(name);
-                pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+                pixtuoid_core::sprite::format::FURNITURE_ANIMATIONS.contains(&base)
                     && !pixtuoid_core::sprite::format::OVERLAY_PIECES
                         .iter()
                         .any(|&(overlay, _)| overlay == base)
@@ -625,14 +541,8 @@ mod tests {
     /// breaks on terminals whose cells are taller than 1:2.
     #[test]
     fn every_character_pose_fits_the_half_block_sprite() {
-        use pixtuoid_core::sprite::format::{
-            OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
-        };
         let pack = test_default_pack();
-        for &name in REQUIRED_CHARACTER_ANIMATIONS
-            .iter()
-            .chain(OPTIONAL_CHARACTER_ANIMATIONS)
-        {
+        for &name in pixtuoid_core::sprite::format::CHARACTER_ANIMATIONS {
             let anim = pack
                 .animation(name)
                 .expect("the bundled pack draws every pose");

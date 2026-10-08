@@ -102,6 +102,12 @@ impl Icon {
         }
     }
 
+    /// Whether it is one of the board's status lamps, which a page draws as a
+    /// lamp rather than its glyph.
+    pub fn is_lamp(self) -> bool {
+        matches!(self, Self::Alert | Self::Active | Self::Idle)
+    }
+
     /// What a terminal writes for it: an arrow with no floor its way is
     /// hollow.
     pub fn terminal(self) -> &'static str {

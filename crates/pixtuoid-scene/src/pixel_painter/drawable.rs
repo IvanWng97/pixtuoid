@@ -268,8 +268,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
             paint_desk_props(buf, (*desk, *facing), props, pack, theme);
-            if let Some(front) = crate::pack::desk_art_name(pack, *facing)
-                .and_then(|art| crate::pack::desk_front(pack, art))
+            if let Some(front) = crate::pack::desk_front(crate::pack::desk_sprite_name(*facing))
                 .and_then(|front| pack.animation(front)?.frames().first())
             {
                 blit_frame(front, desk.x, sprite_top, buf);
@@ -799,7 +798,7 @@ mod tests {
                 );
                 buf
             };
-            let name = crate::pack::desk_art_name(&pack, facing).expect("a desk");
+            let name = crate::pack::desk_sprite_name(facing);
             let art = crate::pack::densest_frame(&pack, name, 0, RenderScale::ONE).expect("art");
             let w = usize::from(art.frame.width());
             let top = crate::pack::desk_art_top(&pack, desk.y, art.frame.height());
@@ -875,13 +874,13 @@ mod tests {
                 theme: th,
             },
         );
-        let name = crate::pack::desk_art_name(&pack, Facing::South).expect("a desk");
+        let name = crate::pack::desk_sprite_name(Facing::South);
         let art = crate::pack::densest_frame(&pack, name, 0, RenderScale::ONE).expect("art");
         let top = crate::pack::desk_art_top(&pack, desk.y, art.frame.height());
         let mut lit = RgbBuffer::filled(120, 80, fill);
         blit_frame(art.frame, desk.x, top, &mut lit);
         paint_desk_lamp_pool(&mut lit, &lights, th);
-        let front_name = crate::pack::desk_front(&pack, name).expect("a front");
+        let front_name = crate::pack::desk_front(name).expect("a front");
         let front = &pack.animation(front_name).expect("the front").frames()[0];
         let mut pooled = 0;
         for y in 0..front.height() {
@@ -1122,42 +1121,6 @@ mod tests {
     }
 
     #[test]
-    fn pet_drawable_missing_anim_is_a_noop() {
-        let pack = test_pack();
-        let mut cache = FrameCache::new();
-        let now = SystemTime::UNIX_EPOCH;
-        let bg = Rgb { r: 7, g: 8, b: 9 };
-        let mut buf = RgbBuffer::filled(60, 60, bg);
-        let d = Drawable {
-            sort_row: 30,
-            layer: Layer::Figure,
-            hover: None,
-            kind: DrawableKind::Pet {
-                pos: Point { x: 30, y: 30 },
-                flip: false,
-                anim_name: "nonexistent_anim",
-                frame_idx: 0,
-                effects: &[],
-            },
-        };
-        paint_drawable(
-            &d.kind,
-            &mut DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                timing: Motion::Full.timing(now),
-                theme: theme(),
-            },
-        );
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(buf.get(x, y), bg, "missing pet anim must paint nothing");
-            }
-        }
-    }
-
-    #[test]
     fn pet_drawable_sleep_anim_paints_sleep_z() {
         let pack = test_pack();
         let mut cache = FrameCache::new();
@@ -1296,42 +1259,6 @@ mod tests {
         assert_eq!(buf.get(11, 10), marker, "bottom-right at (9+2, 9+1)");
         assert_eq!(buf.get(8, 9), bg, "one column west of the frame stays bg");
         assert_eq!(buf.get(9, 8), bg, "one row north of the frame stays bg");
-    }
-
-    #[test]
-    fn gateway_mascot_missing_anim_is_a_noop() {
-        let pack = test_pack();
-        let mut cache = FrameCache::new();
-        let now = SystemTime::UNIX_EPOCH;
-        let bg = Rgb { r: 7, g: 8, b: 9 };
-        let mut buf = RgbBuffer::filled(60, 60, bg);
-        let d = Drawable {
-            sort_row: 30,
-            layer: Layer::Figure,
-            hover: None,
-            kind: DrawableKind::GatewayMascot {
-                pos: Point { x: 30, y: 30 },
-                anim_name: "nonexistent_anim",
-                frame_idx: 0,
-                effects: &[],
-                degraded: false,
-            },
-        };
-        paint_drawable(
-            &d.kind,
-            &mut DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                timing: Motion::Full.timing(now),
-                theme: theme(),
-            },
-        );
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(buf.get(x, y), bg, "missing mascot anim must paint nothing");
-            }
-        }
     }
 
     #[test]
