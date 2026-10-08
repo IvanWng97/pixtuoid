@@ -22,6 +22,7 @@ use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
 
 pub(crate) use crate::panels::widgets::{TooltipAt, paint_tooltip};
 pub(super) use crate::panels::widgets::{paint_badges, paint_footer, paint_text_runs};
+pub(crate) use crate::panels::{FOOTER_ROWS, scene_rect};
 use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 
@@ -115,31 +116,6 @@ pub struct DrawOut {
     pub held: bool,
 }
 
-/// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
-/// Prevents ratatui's "index outside of buffer" panic when label/notice widgets
-/// land near the right or bottom edge.
-pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
-    if rect.x >= bounds.x + bounds.width || rect.y >= bounds.y + bounds.height {
-        return None;
-    }
-    if rect.x + rect.width <= bounds.x || rect.y + rect.height <= bounds.y {
-        return None;
-    }
-    let x = rect.x.max(bounds.x);
-    let y = rect.y.max(bounds.y);
-    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
-    let bot = (rect.y + rect.height).min(bounds.y + bounds.height);
-    if right <= x || bot <= y {
-        return None;
-    }
-    Some(Rect {
-        x,
-        y,
-        width: right - x,
-        height: bot - y,
-    })
-}
-
 /// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
@@ -147,18 +123,6 @@ pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 /// Whether `scene` is too small to render the world, for a footer-only draw.
 pub(crate) fn scene_too_small(scene: Rect) -> bool {
     scene.width < MIN_SCENE_WIDTH || scene.height < MIN_SCENE_HEIGHT
-}
-
-/// How many rows at the bottom of the terminal the status footer owns.
-pub(crate) const FOOTER_ROWS: u16 = 1;
-
-pub(crate) fn scene_rect(full: Rect) -> Rect {
-    Rect {
-        x: 0,
-        y: 0,
-        width: full.width,
-        height: full.height.saturating_sub(FOOTER_ROWS),
-    }
 }
 
 /// The pixel buffer a `cols`×`rows` terminal's scene paints, two half-block pixels a row.
@@ -529,6 +493,7 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panels::clip_widget_rect;
     use crate::tui::geometry::CellArea;
 
     #[test]
