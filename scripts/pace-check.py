@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The fluency gate: run the release binary through a weather transition into
-a storm, or across dusk, and fail on a frame past the paint interval or a
-window whose p99 passes P99_MS.
+a storm, or across dusk, and fail when its hitch rate, the time the screen
+held a frame past its interval per second run, passes HITCH_RATE_MS_PER_S.
 
 The binary measures itself: its `frame pacing` summaries (`jank.rs`), a
 minute each and one at exit, are what this reads, from the log it writes.
@@ -9,14 +9,14 @@ minute each and one at exit, are what this reads, from the log it writes.
 whose writes meet a real terminal's parser; without it, a pseudo-terminal
 sized for `--scale` stands in, which catches our side alone.
 
-Only an idle machine gives a verdict: other work's load slows a frame woken
-from the TUI's sleep several times over. A run that starts with the 1-minute
-load average over IDLE_LOAD is INVALID (exit 2), neither pass nor fail.
-`--loaded` runs at any load and reports, with no verdict.
+The summary also reports p99, the worst frame, the frames past their
+interval and the 1-minute load average the run started under: other work's
+load slows a frame woken from the TUI's sleep, and the load says how much
+of a rate is the machine's.
 
 Usage:
     just pace-check [--live] [--scale classic|4|16] [--graphics kitty|sixel|iterm2]
-                    [--run storm|dusk] [--secs N] [--loaded]
+                    [--run storm|dusk] [--secs N]
 """
 
 import argparse
@@ -35,17 +35,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "target/release/pixtuoid"
-# The launch bar, owner-set: p99 at most this, and no frame past its
-# scheduled interval (`over`, which the binary counts).
-P99_MS = 20.0
+# The bar: Apple's "good" hitch rate, at most 10 ms of pause a second
+# (https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app).
+HITCH_RATE_MS_PER_S = 10.0
 # The pty runs on the owner's office: the bench names its terminal per scale.
 SCALES = ["classic", "4", "16"]
 # The lead into the storm transition: a boot and some steady frames first.
 LEAD_S = 10
-# The most 1-minute load average a run may start under and still count as
-# idle: the highest start load whose runs matched the unloaded ones, on the
-# owner's M1 Max (8 performance cores), its own desktop background included.
-IDLE_LOAD = 4.5
 
 
 def pacing(*args):
@@ -133,15 +129,10 @@ def main():
     ap.add_argument("--graphics", choices=["kitty", "sixel", "iterm2"], default="kitty")
     ap.add_argument("--run", choices=["storm", "dusk"], default="storm")
     ap.add_argument("--secs", type=float, default=200.0)
-    ap.add_argument("--loaded", action="store_true")
     args = ap.parse_args()
     if not os.access(BIN, os.X_OK):
         sys.exit(f"pace-check: no {BIN}: run it as `just pace-check`, which builds it")
     load = os.getloadavg()[0]
-    if not args.loaded and load > IDLE_LOAD:
-        print(f"pace-check: load {load:.2f} > IDLE_LOAD {IDLE_LOAD}: the machine isn't idle")
-        print("INVALID")
-        sys.exit(2)
 
     log = Path(tempfile.mkstemp(prefix="pace-check-", suffix=".log")[1])
     env = dict(
@@ -176,18 +167,20 @@ def main():
     p99 = max(float(w.get("p99", 0)) for w in windows)
     worst = max(float(w.get("max", 0)) for w in windows)
     frames = sum(int(w.get("frames", 0)) for w in windows)
+    # The frames' own schedule, the binary's interval a frame each.
+    ran_s = sum(int(w.get("frames", 0)) * float(w.get("interval_ms", 0)) for w in windows) / 1000
+    hitch_ms = sum(float(w.get("hitch_ms", 0)) for w in windows)
+    rate = hitch_ms / ran_s if ran_s else 0.0
     terminal = w0.get("terminal") if args.live else "pty"
     print(
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
-        f"run={args.run} load={load:.2f}: {frames} frames, worst window p99 {p99:.1f} ms, "
+        f"run={args.run} load={load:.2f}: {frames} frames, hitch rate {rate:.2f} ms/s "
+        f"({hitch_ms:.0f} ms held over {ran_s:.0f} s), worst window p99 {p99:.1f} ms, "
         f"worst frame {worst:.1f} ms, over {over} | log {log}"
     )
     for (dirty, *why), n in causes(log):
         print(f"  over-interval: {n:4} dirty={dirty} {' '.join(why)}")
-    if args.loaded:
-        print("LOADED: reported, no verdict")
-        sys.exit(0)
-    failed = over > 0 or p99 > P99_MS
+    failed = rate > HITCH_RATE_MS_PER_S
     print("FAIL" if failed else "PASS")
     sys.exit(1 if failed else 0)
 

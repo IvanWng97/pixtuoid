@@ -114,6 +114,11 @@ pub(crate) struct Jank {
     janks: u32,
     /// Frames past their interval.
     over: u32,
+    /// How long the screen held a frame past its interval: a frame that
+    /// overruns skips each tick it missed (`MissedTickBehavior::Skip`), so
+    /// the last frame stays a whole interval longer for each. Apple's hitch
+    /// duration (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
+    hitch: Duration,
     since: Instant,
     painter: Painter,
     /// The interval the loop schedules frames at.
@@ -143,6 +148,7 @@ impl Jank {
             next: 0,
             janks: 0,
             over: 0,
+            hitch: Duration::ZERO,
             since: now,
             painter: Painter::default(),
             interval: Duration::from_millis(PAINT_FRAME_MS),
@@ -178,6 +184,8 @@ impl Jank {
         self.len = (self.len + 1).min(RING);
         if total > self.interval {
             self.over += 1;
+            let missed = total.as_nanos().div_ceil(self.interval.as_nanos().max(1)) - 1;
+            self.hitch += self.interval * u32::try_from(missed).unwrap_or(u32::MAX);
             let send = send.unwrap_or(FrameSend {
                 dirty: Painted::Classic,
                 ..FrameSend::default()
@@ -195,6 +203,7 @@ impl Jank {
             self.next = 0;
             self.janks = 0;
             self.over = 0;
+            self.hitch = Duration::ZERO;
             self.since = now;
         }
     }
@@ -218,6 +227,8 @@ impl Jank {
         let frames = self.len;
         let janks = self.janks;
         let over = self.over;
+        let hitch_ms = self.hitch.as_secs_f64() * 1000.0;
+        let interval_ms = self.interval.as_secs_f64() * 1000.0;
         let Painter {
             look,
             scale,
@@ -226,9 +237,9 @@ impl Jank {
             sync,
         } = &self.painter;
         if janks > 0 {
-            tracing::warn!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::warn!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, hitch_ms, interval_ms, p50, p99, max, "frame pacing");
         } else {
-            tracing::info!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, p50, p99, max, "frame pacing");
+            tracing::info!(target: TARGET, look, scale, tmux, terminal = ?terminal, sync, frames, over, janks, hitch_ms, interval_ms, p50, p99, max, "frame pacing");
         }
     }
 }
@@ -313,6 +324,30 @@ mod tests {
         assert_eq!(logged.matches("frame jank").count(), 0, "{logged}");
         assert!(logged.contains("over=1"), "{logged}");
         assert!(logged.contains("janks=0"), "{logged}");
+    }
+
+    /// An overrun holds the last frame a whole interval for each tick it
+    /// missed: a frame of one and a half intervals one, of just over two
+    /// intervals two; a frame within its interval none.
+    #[test]
+    fn an_overrun_holds_the_screen_whole_intervals() {
+        let t0 = Instant::now();
+        let tick = Duration::from_millis(PAINT_FRAME_MS);
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = Jank::new(t0);
+            for total in [tick, tick * 3 / 2, slow()] {
+                jank.record(total, Duration::ZERO, None, None, t0);
+            }
+            jank.finish();
+        });
+        let line = logged
+            .lines()
+            .find(|l| l.contains("frame pacing"))
+            .unwrap_or_default();
+        let held = (tick * 3).as_secs_f64() * 1000.0;
+        assert!(line.contains(&format!("hitch_ms={held}")), "{line}");
+        let interval = tick.as_secs_f64() * 1000.0;
+        assert!(line.contains(&format!("interval_ms={interval}")), "{line}");
     }
 
     /// A window that closes reports its frames' spread and janks, then starts
