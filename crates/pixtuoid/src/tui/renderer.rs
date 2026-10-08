@@ -111,7 +111,6 @@ pub struct DrawOut {
     pub hovers: Hovers,
     /// The board's star, a link the pointer finds.
     pub star: Option<pixtuoid_scene::layout::Bounds>,
-    pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
     /// The flash hold kept the frame off the terminal, which still shows the
@@ -367,13 +366,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             debug_walkable: ctx.debug_walkable,
         },
     );
-    let Some(Rendered {
-        layout,
-        occupied_waypoints,
-        flash,
-        ..
-    }) = rendered
-    else {
+    let Some(Rendered { layout, flash, .. }) = rendered else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
@@ -388,20 +381,69 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             ..DrawOut::default()
         });
     }
-    let star = ctx.floor.raster.star();
+    let frame = ClassicFrame {
+        footer: &footer,
+        overlays: &overlays,
+        theme,
+        world: &world,
+        mouse_pos: ctx.mouse_pos,
+        dim: ctx.onboarding.dim,
+    };
+    let out = flush_classic(term, &frame, layout, ctx.floor)?;
+    if let Some(flash) = ctx.flash.as_deref_mut() {
+        flash.shown(flashes, term_size);
+    }
+    Ok(out)
+}
+
+/// What a classic frame flushes beside the floor's own drawing: whichever
+/// painter rendered it.
+pub(crate) struct ClassicFrame<'f> {
+    pub(crate) footer: &'f FooterInputs<'f>,
+    pub(crate) overlays: &'f OverlayFrame<'f>,
+    pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
+    /// The floor's inputs, which a tooltip reads.
+    pub(crate) world: &'f FloorInputs<'f>,
+    pub(crate) mouse_pos: Option<(u16, u16)>,
+    /// The modal backdrop's dim, from the onboarding card.
+    pub(crate) dim: f32,
+}
+
+/// Flush `floor`'s classic drawing of `layout` to `term` with `frame`'s
+/// footer, text and overlays, and report what it painted for hit-testing.
+///
+/// # Errors
+///
+/// If querying the terminal size or drawing to the backend fails.
+pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
+    term: &mut Terminal<B>,
+    frame: &ClassicFrame<'_>,
+    layout: Arc<SceneLayout>,
+    floor: &mut PerFloor,
+) -> Result<DrawOut> {
+    let &ClassicFrame {
+        footer,
+        overlays,
+        theme,
+        world,
+        mouse_pos,
+        dim,
+    } = frame;
+    let now = world.now;
+    let star = floor.raster.star();
     let Some(ClassicDrawn {
         pixels,
         badges,
         bubbles,
         signs,
         hovers,
-    }) = ctx.floor.raster.classic_drawn()
+    }) = floor.raster.classic_drawn()
     else {
-        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
+        draw_footer_only_frame(term, footer, theme, overlays, now)?;
         return Ok(DrawOut::default());
     };
-
-    let mouse_pos = ctx.mouse_pos;
+    let size = term.size()?;
+    let scene_rect = scene_rect(Rect::new(0, 0, size.width, size.height));
     let geometry = SceneGeometry::half_block(scene_rect);
     let hit =
         mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
@@ -412,7 +454,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
-    apply_dim(pixels, ctx.onboarding.dim);
+    apply_dim(pixels, dim);
 
     let buf = &*pixels;
     term.draw(|f| {
@@ -420,7 +462,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-        paint_footer(f, &footer, actual_full, theme);
+        paint_footer(f, footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
         // Badges first, then a bubble over them, then the signs, which a
         // bubble must not cover.
@@ -433,18 +475,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             scene_rect: actual_scene,
         });
         if let (Some(hit), Some(at)) = (&hit, at) {
-            paint_scene_tooltip(f, hit, &world, at, theme);
+            paint_scene_tooltip(f, hit, world, at, theme);
         }
-        paint_overlays(f, &overlays, now, actual_full, theme);
+        paint_overlays(f, overlays, now, actual_full, theme);
     })?;
-    if let Some(flash) = ctx.flash.as_deref_mut() {
-        flash.shown(flashes, term_size);
-    }
     Ok(DrawOut {
         layout: Some(layout),
         hovers: hovers.clone(),
         star,
-        occupied_waypoints,
         geometry: Some(geometry),
         held: false,
     })
@@ -488,24 +526,16 @@ pub(super) fn paint_overlays(
     }
 }
 
-pub(super) fn flush_buffer_to_term_at_offset(
-    f: &mut ratatui::Frame<'_>,
-    buf: &RgbBuffer,
-    scene_rect: Rect,
-    y_offset: i32,
-) {
+/// `buf`'s pixels into `scene_rect`'s cells, two rows a half-block.
+pub(crate) fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect: Rect) {
     let term_buf = f.buffer_mut();
     let term_area = term_buf.area;
     let w = buf.width() as usize;
-    let cell_rows = (buf.height() / 2) as usize;
+    let cell_rows = usize::from(buf.height() / 2).min(usize::from(scene_rect.height));
     for cy in 0..cell_rows {
-        let target_y = cy as i32 + y_offset;
-        if target_y < 0 || target_y >= i32::from(scene_rect.height) {
-            continue;
-        }
         for cx in 0..(buf.width() as usize) {
             let x = scene_rect.x + cx as u16;
-            let y = scene_rect.y + target_y as u16;
+            let y = scene_rect.y + cy as u16;
             if x >= scene_rect.x + scene_rect.width {
                 continue;
             }
@@ -531,10 +561,6 @@ pub(crate) fn set_half_block(
     cell.set_symbol("\u{2580}");
     cell.fg = Color::Rgb(top.r, top.g, top.b);
     cell.bg = Color::Rgb(bottom.r, bottom.g, bottom.b);
-}
-
-fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect: Rect) {
-    flush_buffer_to_term_at_offset(f, buf, scene_rect, 0);
 }
 
 /// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim.
@@ -723,7 +749,7 @@ mod tests {
             width: w,
             height: h / 2,
         };
-        term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
+        term.draw(|f| flush_buffer_to_term(f, &buf, rect))
             .expect("draw");
         let shows = |area: CellArea, x: u16, y: u16| area.overlaps(Point { x, y }, 1, 1);
         for row in 0..h / 2 {
@@ -760,7 +786,7 @@ mod tests {
             width: 4,
             height: 2,
         };
-        term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
+        term.draw(|f| flush_buffer_to_term(f, &buf, rect))
             .expect("draw");
         let term_buf = term.backend().buffer();
         for x in 0..4u16 {
@@ -791,7 +817,7 @@ mod tests {
             width: 8,
             height: 6,
         };
-        term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
+        term.draw(|f| flush_buffer_to_term(f, &buf, rect))
             .expect("draw must not panic on an oversized rect");
         let term_buf = term.backend().buffer();
         for y in 0..3u16 {

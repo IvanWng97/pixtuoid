@@ -30,6 +30,12 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-site-node
         id: site-node
+      # The one rust-cache for gen-demos and gen-wasm
+      # (`site-build-composites-leave-rust-cache-to-the-job`).
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: wasm32-unknown-unknown
+          shared-key: site
       # Before `check`: astro.config.mjs asserts each demo exists.
       - uses: ./.github/actions/gen-demos
       - name: Audit site dependencies

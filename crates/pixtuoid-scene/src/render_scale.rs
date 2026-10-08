@@ -206,9 +206,12 @@ impl PixelFit {
         self.density
     }
 
-    /// [`Self::density`] as the scale the office renders at.
-    pub fn render_scale(self) -> RenderScale {
-        RenderScale::from(self.density)
+    /// The look a floor renders in under this fit: the cutaway at
+    /// [`Self::density`].
+    pub fn look(self) -> crate::look::Look {
+        crate::look::Look::Cutaway {
+            scale: RenderScale::from(self.density),
+        }
     }
 
     /// The whole factor the density render is upscaled by.

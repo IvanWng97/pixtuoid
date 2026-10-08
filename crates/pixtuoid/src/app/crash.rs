@@ -119,7 +119,7 @@ fn build_issue_url(
 
     format!(
         "{}/issues/new?labels=crash-report&title={}&body={}",
-        crate::tui::widgets::REPO_URL,
+        pixtuoid_scene::hit::REPO_URL,
         percent_encode(&title),
         percent_encode(&body),
     )

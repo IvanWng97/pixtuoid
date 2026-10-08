@@ -10,7 +10,7 @@ use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::layout::Bounds;
 use ratatui::layout::Position;
 
-use super::{CellSize, Fit, ImageProtocol, TileShape};
+use super::{CellSize, ImageProtocol, PixelFit, TileShape};
 
 /// One tile, in cells from the image's top-left cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +84,7 @@ pub(crate) struct Tiles {
 
 impl Tiles {
     /// The grid `protocol` re-sends in, over an image `fit` lays on `cell`.
-    pub(crate) fn new(protocol: ImageProtocol, cell: CellSize, fit: Fit) -> Self {
+    pub(crate) fn new(protocol: ImageProtocol, cell: CellSize, fit: PixelFit) -> Self {
         Self {
             protocol,
             shape: protocol.tile(),
@@ -272,7 +272,7 @@ impl Tiles {
             index % across * u32::from(self.shape.cols),
             index / across * u32::from(self.shape.rows),
         );
-        // The image is at most `u16::MAX` px a side (`Fit::new`), so its
+        // The image is at most `u16::MAX` px a side (`cutaway_fit`), so its
         // cells are too.
         let cells = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
         Tile {
@@ -340,7 +340,8 @@ mod tests {
     /// on 2x art, so each art pixel is 3 image pixels.
     fn misaligned() -> Tiles {
         let cell = CellSize { w: 5, h: 10 };
-        let fit = Fit::new(cell, AREA, Density::new(2).expect("nonzero")).expect("fits");
+        let fit = crate::graphics::cutaway_fit(cell, AREA, Density::new(2).expect("nonzero"))
+            .expect("fits");
         assert_eq!(fit.upscale(), 3);
         Tiles::new(ImageProtocol::Kitty, cell, fit)
     }
@@ -367,7 +368,8 @@ mod tests {
             width: 4,
             height: 3,
         };
-        let fit = Fit::new(cell, area, Density::new(2).expect("nonzero")).expect("fits");
+        let fit = crate::graphics::cutaway_fit(cell, area, Density::new(2).expect("nonzero"))
+            .expect("fits");
         assert_eq!(fit.upscale(), 3);
         let mut t = Tiles::new(ImageProtocol::Sixel, cell, fit);
         let (w, h) = (8, 12);
@@ -445,7 +447,8 @@ mod tests {
     /// The owner's 17x41 cell over 4x art, upscaled 4x, as a 16x office.
     fn owner_kitty(protocol: ImageProtocol) -> Tiles {
         let cell = CellSize { w: 17, h: 41 };
-        let fit = Fit::new(cell, AREA, Density::new(4).expect("nonzero")).expect("fits");
+        let fit = crate::graphics::cutaway_fit(cell, AREA, Density::new(4).expect("nonzero"))
+            .expect("fits");
         Tiles::new(protocol, cell, fit)
     }
 

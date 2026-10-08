@@ -1857,6 +1857,8 @@ pub pixtuoid_scene::theme::Theme::source: pixtuoid_scene::theme::SourceColors
 pub pixtuoid_scene::theme::Theme::surface: pixtuoid_scene::theme::SurfaceColors
 pub pixtuoid_scene::theme::Theme::tool_glow: pixtuoid_scene::theme::ToolGlowColors
 pub pixtuoid_scene::theme::Theme::ui: pixtuoid_scene::theme::UiColors
+impl pixtuoid_scene::theme::Theme
+pub fn pixtuoid_scene::theme::Theme::source_hue(&self, &str) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::theme::Theme
 pub fn pixtuoid_scene::theme::Theme::clone(&self) -> pixtuoid_scene::theme::Theme
 impl core::fmt::Debug for pixtuoid_scene::theme::Theme

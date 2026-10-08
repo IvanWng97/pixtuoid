@@ -20,26 +20,15 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::flash::{FlashHold, FlashPhase, Flashes};
 use pixtuoid_scene::layout::Size;
-use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
 
 use crate::graphics::tiles::{Changed, Tile, Tiles};
-use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
+use crate::graphics::{CellSize, ImageProtocol, cutaway_fit, iterm2, kitty, sixel};
 use crate::jank::FrameSend;
 use crate::tui::geometry::SceneGeometry;
 use crate::tui::renderer::set_half_block;
-
-/// A floor slide's two floors' frames at progress `t` of a
-/// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
-pub(crate) struct Slide<'a> {
-    pub(crate) leaving: &'a RgbBuffer,
-    pub(crate) arriving: &'a RgbBuffer,
-    /// What of each flashes, the leaving floor's first.
-    pub(crate) flashes: Flashes,
-    pub(crate) t: f32,
-    pub(crate) going_down: bool,
-}
+use pixtuoid_scene::render_scale::PixelFit;
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
 pub(crate) type Sink = Box<dyn Write + Send>;
@@ -54,7 +43,7 @@ const SENTINEL: &str = "\u{F8FF}";
 pub(crate) struct Fitted {
     pub(crate) scene: Rect,
     pub(crate) cell: CellSize,
-    pub(crate) fit: Fit,
+    pub(crate) fit: PixelFit,
 }
 
 impl Fitted {
@@ -152,7 +141,12 @@ enum Shown {
 
 impl TileCutaway {
     /// [`crate::graphics::Plan::Cutaway`]'s parts, transmitting into `out`.
-    pub(crate) fn new(fit: Fit, cell: CellSize, route: crate::graphics::Route, out: Sink) -> Self {
+    pub(crate) fn new(
+        fit: PixelFit,
+        cell: CellSize,
+        route: crate::graphics::Route,
+        out: Sink,
+    ) -> Self {
         Self {
             planned: cell,
             first_window: None,
@@ -178,13 +172,13 @@ impl TileCutaway {
     }
 
     /// Fit the office over `scene`'s cells under a window whose cell reads
-    /// `window`; `None` while the cell has no [`Fit`], when classic paints.
+    /// `window`; `None` while the cell has no [`cutaway_fit`], when classic paints.
     /// Every frame fits, a refused one too: any change re-sends every tile,
     /// since a resize clears the screen ratatui redraws, a new cell cuts a new
     /// grid, and classic paints over the image.
     pub(crate) fn fit_to(&mut self, scene: Rect, window: Option<CellSize>) -> Option<Fitted> {
         let cell = self.cell_under(window);
-        let Some(fit) = Fit::new(cell, scene.as_size(), self.density) else {
+        let Some(fit) = cutaway_fit(cell, scene.as_size(), self.density) else {
             self.fitted = None;
             // The classic paints this frame: it transmits nothing.
             self.last = FrameSend {
@@ -250,29 +244,22 @@ impl TileCutaway {
         self.stage(&dirty, fresh, flashes, now, fitted.scene.as_position());
     }
 
-    /// Show both floors of `slide`, composed as it places them, and queue the
-    /// tiles that changed as [`Self::paint`] does.
+    /// Show a slide's `composed` frame, whose two floors show `flashes`, and
+    /// queue the tiles that changed as [`Self::paint`] does.
     pub(crate) fn paint_slide(
         &mut self,
         fitted: Fitted,
-        slide: Slide<'_>,
-        theme: &'static Theme,
+        composed: &RgbBuffer,
+        flashes: Flashes,
         now: SystemTime,
     ) {
-        let flashes = slide.flashes;
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&Dirty::All);
             self.image_behind = true;
             self.pending = None;
             return;
         }
-        pixtuoid_scene::floor::compose_slide(
-            &mut self.image,
-            (slide.leaving, slide.arriving),
-            slide.t,
-            slide.going_down,
-            theme.surface.bg_fallback,
-        );
+        self.image.clone_from(composed);
         self.shown = Some(Shown::Slide);
         self.stage(&Dirty::All, true, flashes, now, fitted.scene.as_position());
     }

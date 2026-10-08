@@ -15,7 +15,7 @@
 
 use pixtuoid_core::sprite::format::Density;
 use pixtuoid_scene::layout::Size;
-use pixtuoid_scene::render_scale::RenderScale;
+use pixtuoid_scene::render_scale::PixelFit;
 use ratatui::layout::Size as TermSize;
 
 /// String Terminator: ends any APC or DCS a cut-short write left open.
@@ -292,7 +292,7 @@ pub(crate) enum ClassicReason {
     /// without it. kitty's Unicode placeholders are ordinary cells tmux stores
     /// and redraws.
     TmuxNeedsKitty(ImageProtocol),
-    /// The terminal has a protocol, but its cell has no [`Fit`].
+    /// The terminal has a protocol, but its cell has no [`cutaway_fit`].
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
@@ -312,7 +312,7 @@ pub(crate) enum Plan {
     /// The orthographic cutaway, handed to the terminal as an image.
     Cutaway {
         /// Its geometry on this terminal.
-        fit: Fit,
+        fit: PixelFit,
         /// How the image reaches the terminal.
         route: Route,
         /// The cell the scale was fitted to.
@@ -508,62 +508,20 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
     cell.w.min(cell.h / 2)
 }
 
-/// The cutaway's geometry on one terminal: [`PixelFit`] over the pixels of
-/// the cells the image covers.
-///
-/// [`PixelFit`]: pixtuoid_scene::render_scale::PixelFit
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Fit(pixtuoid_scene::render_scale::PixelFit);
-
-impl Fit {
-    /// `cell`'s natural scale fitted to `max_density` (the pack's
-    /// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
-    /// over an image `area` cells big. `None` when no multiple of it lies within
-    /// the fit's bound, or the scale is 1.
-    pub(crate) fn new(cell: CellSize, area: TermSize, max_density: Density) -> Option<Self> {
-        pixtuoid_scene::render_scale::PixelFit::new(
-            raw_scale_for_cell(cell),
-            max_density,
-            image_px(cell, area),
-        )
+/// The cutaway's geometry on one terminal: `cell`'s natural scale fitted to
+/// `max_density` (the pack's
+/// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
+/// over an image `area` cells big. `None` when no multiple of it lies within
+/// the fit's bound, or the scale is 1.
+pub(crate) fn cutaway_fit(
+    cell: CellSize,
+    area: TermSize,
+    max_density: Density,
+) -> Option<PixelFit> {
+    PixelFit::new(raw_scale_for_cell(cell), max_density, image_px(cell, area))
         // Scale 1 IS the classic density: an encode per frame that draws the
         // identical picture.
         .filter(|fit| fit.scale().get() > 1)
-        .map(Self)
-    }
-
-    /// This fit over an image `area` cells big: the scale stays, and the office
-    /// takes the area's shape.
-    pub(crate) fn over(self, cell: CellSize, area: TermSize) -> Self {
-        Self(self.0.over(image_px(cell, area)))
-    }
-
-    /// Real pixels per logical office unit.
-    pub(crate) fn scale(self) -> RenderScale {
-        self.0.scale()
-    }
-
-    /// The density the office renders at before the upscale.
-    pub(crate) fn density(self) -> Density {
-        self.0.density()
-    }
-
-    /// [`Fit::density`] as the scale the office renders at.
-    #[cfg(feature = "graphics")]
-    pub(crate) fn render_scale(self) -> RenderScale {
-        self.0.render_scale()
-    }
-
-    /// The whole factor the density render is upscaled by.
-    pub(crate) fn upscale(self) -> u16 {
-        self.0.upscale()
-    }
-
-    /// The office's extent in logical units: as many as the area's pixels hold
-    /// on each axis, so the office takes the terminal's shape — no letterbox.
-    pub(crate) fn logical(self) -> Size {
-        self.0.logical()
-    }
 }
 
 /// The image's pixels over `area` cells: the cells', never a window size that
@@ -611,7 +569,7 @@ pub(crate) fn resolve(
     };
     // The cell before tmux: a user told to switch to kitty should not then
     // find the cell was too small all along.
-    let Some(fit) = Fit::new(cell, area, max_density) else {
+    let Some(fit) = cutaway_fit(cell, area, max_density) else {
         return classic(ClassicReason::CellTooSmall { cell, max_density });
     };
     if d.tmux && protocol != ImageProtocol::Kitty {
@@ -731,7 +689,7 @@ impl Plan {
     /// plan's painter lays out there.
     pub(crate) fn office_extent(self, term: TermSize) -> Size {
         match self {
-            Plan::Cutaway { fit, cell, .. } => fit.over(cell, image_area(term)).logical(),
+            Plan::Cutaway { fit, cell, .. } => fit.over(image_px(cell, image_area(term))).logical(),
             Plan::Classic { .. } => {
                 let (w, h) = crate::tui::renderer::scene_buf_size(term.width, term.height);
                 Size { w, h }
@@ -746,15 +704,11 @@ impl Plan {
         match self {
             Plan::Cutaway {
                 fit,
-                route:
-                    Route {
-                        protocol,
-                        tmux,
-                        medium,
-                    },
+                route,
                 cell,
                 chosen,
             } => {
+                let (protocol, tmux, medium) = (route.protocol(), route.tmux(), route.medium());
                 let shape = protocol.tile();
                 let budget = protocol
                     .image_budget()
@@ -967,7 +921,7 @@ mod tests {
     }
 
     fn scale(cell: CellSize, max_density: Density) -> Option<u16> {
-        Fit::new(cell, AREA, max_density).map(|f| f.scale().get())
+        cutaway_fit(cell, AREA, max_density).map(|f| f.scale().get())
     }
 
     fn plan(probe: Probe, max_density: Density) -> Plan {
@@ -1016,7 +970,7 @@ mod tests {
     fn a_cell_on_an_exact_multiple_renders_at_it() {
         let d = BUNDLED.get();
         for k in 1..=8 {
-            let fit = Fit::new(cell(d * k, 2 * d * k), AREA, BUNDLED).expect("lands");
+            let fit = cutaway_fit(cell(d * k, 2 * d * k), AREA, BUNDLED).expect("lands");
             assert_eq!(fit.scale().get(), d * k, "k={k}");
             assert_eq!(fit.density(), BUNDLED, "k={k}");
             assert_eq!(fit.upscale(), k, "k={k}");
@@ -1065,7 +1019,7 @@ mod tests {
     fn the_office_fills_the_terminal_without_a_letterbox() {
         let c = cell(17, 41);
         for (cols, rows) in [(120, 40), (80, 24), (240, 30), (40, 60)] {
-            let fit = Fit::new(
+            let fit = cutaway_fit(
                 c,
                 TermSize {
                     width: cols,
@@ -1093,7 +1047,7 @@ mod tests {
             width: u16::MAX,
             height: 1,
         };
-        let fit = Fit::new(cell(17, 41), huge, BUNDLED).expect("lands");
+        let fit = cutaway_fit(cell(17, 41), huge, BUNDLED).expect("lands");
         assert_eq!(fit.logical().w, fit.scale().logical(u16::MAX));
     }
 
@@ -1179,7 +1133,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { route, chosen: Chosen::Forced, .. } if route.protocol == want),
+                    matches!(got, Plan::Cutaway { route, chosen: Chosen::Forced, .. } if route.protocol() == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -1583,7 +1537,7 @@ mod tests {
             })
         };
         let medium = |mode, probe| match resolve(mode, probe, BUNDLED, AREA) {
-            Plan::Cutaway { route, .. } => route.medium,
+            Plan::Cutaway { route, .. } => route.medium(),
             plan => panic!("no cutaway: {plan:?}"),
         };
         for mode in [GraphicsMode::Auto, GraphicsMode::Kitty] {

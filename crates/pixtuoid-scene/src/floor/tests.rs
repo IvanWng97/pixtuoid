@@ -1896,19 +1896,27 @@ fn floor_nav_slides_lands_and_clamps() {
     assert!(nav.navigate(1, t0));
     assert!(!nav.navigate(2, t0), "no slide begins during one");
     assert_eq!((nav.up(3), nav.down()), (None, None));
-    assert!(!nav.settle(3, t0));
-    assert_eq!(nav.current(), 0, "a slide shows its floor until it lands");
-    assert!(!nav.settle(3, done));
+    nav.settle(3, t0);
+    assert_eq!(
+        (nav.current(), nav.transition().is_some()),
+        (0, true),
+        "a slide shows its floor until it lands"
+    );
+    nav.settle(3, done);
     assert_eq!((nav.current(), nav.transition().is_none()), (1, true));
     assert!(nav.navigate(2, done));
-    assert!(nav.settle(2, done), "a slide to a floor gone is dropped");
-    assert_eq!(nav.current(), 1);
+    nav.settle(2, done);
+    assert_eq!(
+        (nav.current(), nav.transition().is_none()),
+        (1, true),
+        "a slide to a floor gone is dropped"
+    );
     assert!(nav.navigate(0, done));
     nav.cancel(3);
     assert_eq!((nav.current(), nav.transition().is_none()), (0, true));
     assert!(nav.navigate(2, done));
     nav.cancel(3);
-    assert!(!nav.settle(1, done));
+    nav.settle(1, done);
     assert_eq!(nav.current(), 0, "the floor showing stays in the building");
 }
 
@@ -1984,7 +1992,7 @@ fn a_grip_stays_on_the_floor_it_lifted_on() {
     assert_eq!(gripped.of(&lift, &nav), Some(0));
     assert!(nav.navigate(1, t0));
     assert_eq!(gripped.of(&Gesture::Carry(at), &nav), Some(0));
-    assert!(!nav.settle(2, t0 + Duration::from_secs(2)));
+    nav.settle(2, t0 + Duration::from_secs(2));
     assert_eq!(nav.current(), 1);
     assert_eq!(gripped.of(&Gesture::Drop(at), &nav), Some(0));
     assert_eq!(
@@ -2063,6 +2071,59 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
             .map(|p| p.name.as_str()),
         "the floor showing's pet"
     );
+}
+
+/// A frame that drew no office keeps nothing of the last: a pointer hits
+/// nothing and the audio hears no one at the floor's waypoints.
+#[test]
+fn a_frame_without_the_office_forgets_the_last() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut scene = make_scene(1, 8);
+    for slot in scene.agents.values_mut() {
+        slot.created_at = now0;
+        slot.state_started_at = now0;
+        slot.last_event_at = now0;
+    }
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    // A BUDGET for the wander to bring someone to a waypoint, not part of
+    // the assertion.
+    let occupied = (0..600u64).any(|step| {
+        let drawn = office.render(
+            crate::look::Look::Classic,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0 + Duration::from_secs(3 * step),
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+            },
+            &[],
+            theme.surface.bg_fallback,
+        );
+        drawn.is_some() && !office.heard_occupied().is_empty()
+    });
+    assert!(occupied, "someone reaches a waypoint the audio hears");
+    let whole = crate::layout::Bounds {
+        x: 0,
+        y: 0,
+        width: 160,
+        height: 96,
+    };
+    assert!(
+        office.hit_at(whole).is_some(),
+        "the frame drawn shows its agents"
+    );
+    office.drew_no_office();
+    assert!(office.hit_at(whole).is_none());
+    assert!(office.heard_occupied().is_empty());
 }
 
 /// An office whose upper floor empties shows one floor: the count, the
