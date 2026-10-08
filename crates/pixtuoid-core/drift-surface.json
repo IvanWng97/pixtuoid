@@ -14,13 +14,11 @@
     ],
     "codex.event_msg": [
       "task_started",
-      "turn_started",
       "exec_command_end",
       "patch_apply_end",
       "web_search_begin",
       "web_search_end",
       "task_complete",
-      "turn_complete",
       "turn_aborted",
       "token_count"
     ],

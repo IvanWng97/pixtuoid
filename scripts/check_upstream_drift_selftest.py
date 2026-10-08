@@ -8,11 +8,13 @@ dependency on purpose — the repo has no Python test harness."""
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
 import json
 import pathlib
 import re
 import sys
+import tarfile
 import traceback
 import urllib.error
 
@@ -148,7 +150,8 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
     d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
-    d.OPENCODE_EVENT_URLS[1]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
+    d.OPENCODE_EVENT_URLS[1]: 'export const Event = { Asked, Replied }\n',
+    d.OPENCODE_EVENT_URLS[2]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
 }
 
 # A document that satisfies NO anchor — the "upstream reorganized this file"
@@ -383,11 +386,17 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
     """Two one-line edits reopen the gate with every other test still green:
     dropping `also=` makes the half-anchor check SKIP rather than fail, and
     `UNANCHORED_BY_DESIGN` membership IS the exemption."""
-    # The three schemas are parsed STRUCTURALLY, so a failed parse already says
-    # what a text anchor would; nothing else may join them without saying why.
+    # The three schemas, and the Copilot release record, are parsed
+    # STRUCTURALLY, so a failed parse already says what a text anchor would;
+    # nothing else may join them without saying why.
     check(
         d.UNANCHORED_BY_DESIGN
-        == frozenset({d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL, d.COPILOT_SCHEMA_URL}),
+        == frozenset({
+            d.ACP_V1_SCHEMA_URL,
+            d.ACP_V1_SCHEMA_UNSTABLE_URL,
+            d.COPILOT_SCHEMA_URL,
+            d.COPILOT_RELEASE_URL,
+        }),
         f"the anchor requirement is waived only for the JSON Schemas, got "
         f"{sorted(d.UNANCHORED_BY_DESIGN)}",
     )
@@ -1723,8 +1732,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         for field, spell, build in cases:
             names = full[field]
             check(bool(names), f"{field}: the fragment supplies a set")
-            pool = [n for n in names
-                    if field != "opencode" or n not in d.OPENCODE_TOLERATED]
+            pool = list(names)
             # `dispatch_names` is an ANY-of check — one surviving documented name
             # clears it — so its vanish arm has to take them all.
             victims = pool if field == "dispatch_names" else pool[:1]
@@ -1754,6 +1762,64 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                   f"(skipped as probe health? {rep.blind})")
     finally:
         d.fetch = real
+
+
+def _copilot_release(schema: bytes, member: str) -> dict[str, bytes]:
+    """The three documents a Copilot release serves the watcher, its tarball
+    holding `schema` at `member`."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, body in [("package/README.md", b"readme"), (member, schema)]:
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tf.addfile(info, io.BytesIO(body))
+    asset = buf.getvalue()
+    base = "https://github.com/github/copilot-cli/releases/download/v9.9.9/"
+    name = "github-copilot-9.9.9-linux-x64.tgz"
+    return {
+        d.COPILOT_RELEASE_URL: json.dumps({"tag_name": "v9.9.9"}).encode(),
+        base + name: asset,
+        base + "SHA256SUMS.txt": f"{hashlib.sha256(asset).hexdigest()}  {name}\n".encode(),
+    }
+
+
+def test_copilot_schema_is_read_from_the_verified_release_asset() -> None:
+    """Since 1.0.85 the schema ships only in the release's platform tarball."""
+    real = d.fetch_raw
+    try:
+        served = _copilot_release(b'{"ok": 1}', d.COPILOT_SCHEMA_MEMBER)
+        d.fetch_raw = served.__getitem__
+        check(d.fetch(d.COPILOT_SCHEMA_URL) == '{"ok": 1}', "the asset's schema is read")
+
+        bad = dict(served)
+        sums = next(u for u in bad if u.endswith("SHA256SUMS.txt"))
+        bad[sums] = b"0" * 64 + b"  github-copilot-9.9.9-linux-x64.tgz\n"
+        d.fetch_raw = bad.__getitem__
+        rep = d.Report()
+        check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
+              "a tarball its release's SHA256SUMS does not vouch for is not read")
+        check(bool(rep.errors) and not rep.blind, "a checksum miss is an error, not a pin move")
+
+        moved = _copilot_release(b"{}", "package/elsewhere.json")
+        d.fetch_raw = moved.__getitem__
+        rep = d.Report()
+        check(d.try_fetch(d.COPILOT_SCHEMA_URL, "Copilot schema", rep) is None,
+              "a tarball without the schema member yields nothing")
+        check(bool(rep.blind), "a moved schema member is our pin going dark")
+    finally:
+        d.fetch_raw = real
+
+
+def test_opencode_watches_the_live_v1_permission_declaration() -> None:
+    """The CLI publishes v1 `permission.asked` (packages/opencode/src/permission),
+    so its declaring file is watched and nothing is tolerated unseen."""
+    check(any(u.endswith("/packages/schema/src/v1/permission.ts")
+              for u in d.OPENCODE_EVENT_URLS), "the v1 permission file is watched")
+    check(not hasattr(d, "OPENCODE_TOLERATED"), "no opencode name is exempt from the watch")
+
+
+def test_grok_turn_usage_is_a_known_omission() -> None:
+    check("turn_usage" in d.GROK_XAI_KNOWN_OMITTED, "turn_usage has its reason")
 
 
 def main() -> int:

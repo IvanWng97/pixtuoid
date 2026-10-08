@@ -8,11 +8,14 @@ VANISH row is stated only in `crates/pixtuoid-core/src/source/drift.rs`'s header
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import http.client
+import io
 import json
 import pathlib
 import re
 import sys
+import tarfile
 import traceback
 import typing
 import urllib.error
@@ -179,16 +182,13 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
-# `permission.asked` is decoded DEFENSIVELY (a V1/alias spelling); only
-# `permission.v2.asked` is a guaranteed standalone upstream EventV2 definition,
-# so don't alarm if the bare form isn't found as a `type:` literal.
-OPENCODE_TOLERATED = {"permission.asked"}
-
-# The inventory is SPLIT (`permission.v2.asked` lives in permission.ts), so the
-# union is the document and one fetch failure must not read as a vanish. No
+# The inventory is SPLIT (the CLI publishes v1 `permission.asked`, declared in
+# v1/permission.ts; core's v2 tools `permission.v2.asked`, in permission.ts), so
+# the union is the document and one fetch failure must not read as a vanish. No
 # appearing sweep: the plugin forwards exactly what the decoder reads, by test.
 OPENCODE_EVENT_URLS = (
     "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/session.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/permission.ts",
     "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/permission.ts",
 )
 
@@ -258,10 +258,16 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 }
 
 
-# Deliberately UNPINNED: the bare unpkg path 302-redirects to the latest shape,
-# which is what a drift watch wants. `@github/copilot` is now a loader stub, and
-# every platform package carries an identical schema; linux-x64 matches CI.
-COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
+# Since 1.0.85 the npm packages carry no schema; the latest release's platform
+# tarball does, and github/copilot-sdk's codegen reads it there
+# (java/scripts/codegen/fetch-schemas.mjs). `fetch` resolves this name through
+# `fetch_copilot_schema`; linux-x64 matches CI.
+COPILOT_RELEASE_URL = "https://api.github.com/repos/github/copilot-cli/releases/latest"
+COPILOT_SCHEMA_MEMBER = "package/schemas/session-events.schema.json"
+COPILOT_SCHEMA_URL = (
+    "https://github.com/github/copilot-cli/releases/latest "
+    f"(github-copilot-<v>-linux-x64.tgz: {COPILOT_SCHEMA_MEMBER})"
+)
 
 
 # Cursor is a closed binary, so the docs are the only watchable surface.
@@ -305,11 +311,12 @@ class Anchor(typing.NamedTuple):
     also: str | None = None
 
 
-# The three JSON Schemas are parsed STRUCTURALLY, so a text anchor would add
-# nothing a failed parse does not already say. Every OTHER swept document is prose
+# The three JSON Schemas, and the release record the Copilot one is found
+# through, are parsed STRUCTURALLY, so a text anchor would add nothing a failed
+# parse does not already say. Every OTHER swept document is prose
 # and must declare one — `every_swept_url_declares_an_anchor` is that gate.
 UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
-    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL}
+    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL, COPILOT_RELEASE_URL}
 )
 
 # The value must be read from upstream's DECLARATION, never scanned for as a
@@ -351,6 +358,7 @@ ANCHORS: dict[str, Anchor] = {
     OPENCLAW_PATHS_URL: Anchor(r"DEFAULT_GATEWAY_PORT\s*=", "`DEFAULT_GATEWAY_PORT`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
+    OPENCODE_EVENT_URLS[2]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     # identity-grade: co-located only — a name moved out still matches, so phantom
     # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
     OMP_AI_TYPES_URL: Anchor(r"(?m)^export type Message\s*=", "the `Message` union"),
@@ -488,10 +496,41 @@ class Report:
         return 0
 
 
-def fetch(url: str) -> str:
+def fetch_raw(url: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "pixtuoid-drift-watch"})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (trusted hosts)
-        return resp.read().decode("utf-8", "replace")
+    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 (trusted hosts)
+        return resp.read()
+
+
+def fetch(url: str) -> str:
+    if url == COPILOT_SCHEMA_URL:
+        return fetch_copilot_schema()
+    return fetch_raw(url).decode("utf-8", "replace")
+
+
+def fetch_copilot_schema() -> str:
+    """The latest Copilot release's session-events schema, out of its linux-x64
+    tarball once the release's own SHA256SUMS.txt vouches for it.
+
+    A release with no such tarball or member raises a 404 `HTTPError`, which
+    `try_fetch` reports as our pin going dark; a checksum miss raises `OSError`,
+    reported as an error to retry."""
+    tag = json.loads(fetch_raw(COPILOT_RELEASE_URL)).get("tag_name", "")
+    base = f"https://github.com/github/copilot-cli/releases/download/{tag}/"
+    name = f"github-copilot-{tag.removeprefix('v')}-linux-x64.tgz"
+    asset = fetch_raw(base + name)
+    sums = fetch_raw(base + "SHA256SUMS.txt").decode("utf-8", "replace").splitlines()
+    vouched = {line.split()[0] for line in sums if line.split()[1:] == [name]}
+    if hashlib.sha256(asset).hexdigest() not in vouched:
+        raise OSError(f"{name} does not match {tag}'s SHA256SUMS.txt")
+    with tarfile.open(fileobj=io.BytesIO(asset), mode="r:gz") as tf:
+        member = next((m for m in tf if m.name == COPILOT_SCHEMA_MEMBER), None)
+        body = tf.extractfile(member) if member is not None else None
+        if body is None:
+            raise urllib.error.HTTPError(
+                base + name, 404, f"no {COPILOT_SCHEMA_MEMBER}", http.client.HTTPMessage(), None
+            )
+        return body.read().decode("utf-8", "replace")
 
 
 def try_fetch(url: str, label: str, report: Report) -> str | None:
@@ -616,6 +655,9 @@ GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
     "subagent_progress": "cumulative per-child totals (turns, tool calls); "
     "summing a running total into the delta-accumulating reducer double-counts "
     "(codex's `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
+    "turn_usage": "declared in `SessionUpdate` (extensions/notification.rs) but "
+    "nothing constructs it, so it never reaches updates.jsonl; a prompt's usage "
+    "rides `turn_completed.usage`",
     "hook_run_started": "never in the transcript: upstream emits it through "
     "`send_xai_notification_transient` (session/acp_session_impl/hook_dispatch.rs), "
     "which only forwards to the live client and never appends to updates.jsonl, "
@@ -1926,7 +1968,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             [(u, "opencode event inventory") for u in OPENCODE_EVENT_URLS], report
         )
         if joined is not None:
-            for ev in sorted(ours.opencode - OPENCODE_TOLERATED):
+            for ev in sorted(ours.opencode):
                 if f'"{ev}"' not in joined:
                     report.add_breaking(
                         f"opencode event `{ev}` (forwarded by our plugin, decoded in "
