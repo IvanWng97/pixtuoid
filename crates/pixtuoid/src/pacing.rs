@@ -15,7 +15,7 @@ use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
 use ratatui::layout::{Position, Rect, Size};
 
-use crate::graphics::{CellSize, Fit, ImageProtocol};
+use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
 use crate::tui::tui_renderer::TuiRenderer;
 
 /// How the bench's office reaches the terminal.
@@ -224,7 +224,7 @@ pub fn renderer(
     );
     if let Some(image) = protocol.image() {
         let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-        let fit = Fit::new(cell, area, pack.max_density_variant())
+        let fit = cutaway_fit(cell, area, pack.max_density_variant())
             .context("the cell is too small for the cutaway")?;
         let mut cutaway = crate::tui::cutaway::TileCutaway::new(
             fit,
@@ -257,7 +257,7 @@ pub fn cutaway_office(
         h: cell_px.1,
     };
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    let fit = Fit::new(cell, area, pack.max_density_variant())?;
+    let fit = cutaway_fit(cell, area, pack.max_density_variant())?;
     Some((fit.logical().w, fit.logical().h, fit.scale().get()))
 }
 

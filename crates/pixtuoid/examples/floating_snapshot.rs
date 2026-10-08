@@ -264,7 +264,7 @@ fn main() -> Result<()> {
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
-    surf.fill_upscaled(buf, usize::from(at.upscale));
+    surf.fill_upscaled(buf, usize::from(at.upscale()));
     let (bw, bh) = (buf.width(), buf.height());
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::dev::footer_budget(ww);
@@ -300,7 +300,7 @@ fn main() -> Result<()> {
     img.save(&out).with_context(|| format!("writing {out}"))?;
     eprintln!(
         "wrote {out} ({win_w}x{win_h}, office buffer {bw}x{bh} upscaled {}x, {n_agents} agents)",
-        at.upscale
+        at.upscale()
     );
     Ok(())
 }

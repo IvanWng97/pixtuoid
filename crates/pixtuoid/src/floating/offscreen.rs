@@ -14,7 +14,7 @@ use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
 use pixtuoid_scene::layout::Size;
-use pixtuoid_scene::look::{Look, RenderInputs};
+use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::render_scale::PixelFit;
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -98,7 +98,7 @@ impl OfficeRenderer {
     /// footer row subtracted. `frame.world.scene` is the FULL scene, which the
     /// office projects onto each floor. A too-small layout leaves the buffer
     /// filled with the theme's `bg_fallback`.
-    pub fn render(&mut self, at: WindowGeometry, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
+    pub fn render(&mut self, at: PixelFit, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
         let WindowFrame {
             world,
             theme,
@@ -109,11 +109,11 @@ impl OfficeRenderer {
         } = world;
         let gap = theme.surface.bg_fallback;
         self.session.render(
-            at.look,
+            at.look(),
             RenderInputs {
                 world,
                 theme,
-                size: at.office,
+                size: at.logical(),
                 place,
                 debug_walkable: false,
             },
@@ -132,7 +132,7 @@ impl OfficeRenderer {
     /// frame shown is [`presented`](Self::presented) once it shows.
     pub fn render_live(
         &mut self,
-        at: WindowGeometry,
+        at: PixelFit,
         frame: WindowFrame<'_>,
         window: (u32, u32),
     ) -> bool {
@@ -165,7 +165,7 @@ impl OfficeRenderer {
         &mut self,
         cursor: (f64, f64),
         window: (u32, u32),
-        at: WindowGeometry,
+        at: PixelFit,
         pressing: Pressing<'_>,
     ) -> Press {
         if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
@@ -177,7 +177,9 @@ impl OfficeRenderer {
         let hit = self.session.hit_at(unit_bounds(unit));
         // The slop in this window's units, at least one.
         let slop_px = DRAG_SLOP_DIP * pressing.scale_factor;
-        let units = (slop_px / f64::from(at.unit_px.max(1))).ceil().max(1.0) as u16;
+        let units = (slop_px / f64::from(at.scale().get().max(1)))
+            .ceil()
+            .max(1.0) as u16;
         let slop = pixtuoid_scene::interact::Slop { x: units, y: units };
         let down = self
             .pointer
@@ -203,7 +205,7 @@ impl OfficeRenderer {
 
     /// The pointer moved to `cursor` over a frame drawn at `at`; whether a
     /// figure it carries moved, which the window redraws.
-    pub fn pointer_moved(&mut self, cursor: (f64, f64), at: WindowGeometry) -> bool {
+    pub fn pointer_moved(&mut self, cursor: (f64, f64), at: PixelFit) -> bool {
         let gesture = self.pointer.moved(unit_at(cursor, at));
         if let Some(gesture) = &gesture {
             self.session.grip(gesture);
@@ -216,7 +218,7 @@ impl OfficeRenderer {
     pub fn release(
         &mut self,
         cursor: (f64, f64),
-        at: WindowGeometry,
+        at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::HitAction> {
         match self.pointer.up(unit_in(cursor, at))? {
             Gesture::Click(action) => Some(action),
@@ -237,7 +239,7 @@ impl OfficeRenderer {
     pub fn hit_at(
         &self,
         cursor: (f64, f64),
-        at: WindowGeometry,
+        at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
         self.session.hit_at(unit_bounds(unit_at(cursor, at)))
     }
@@ -368,16 +370,16 @@ pub struct Pressing<'a> {
 
 /// The layout unit a frame drawn at `at` shows at `cursor`, or `None` off
 /// the office.
-fn unit_in(cursor: (f64, f64), at: WindowGeometry) -> Option<pixtuoid_scene::layout::Point> {
+fn unit_in(cursor: (f64, f64), at: PixelFit) -> Option<pixtuoid_scene::layout::Point> {
     let unit = unit_at(cursor, at);
-    (cursor.0 >= 0.0 && cursor.1 >= 0.0 && unit.x < at.office.w && unit.y < at.office.h)
+    (cursor.0 >= 0.0 && cursor.1 >= 0.0 && unit.x < at.logical().w && unit.y < at.logical().h)
         .then_some(unit)
 }
 
 /// The layout unit a frame drawn at `at` shows at `cursor` (physical px).
-fn unit_at(cursor: (f64, f64), at: WindowGeometry) -> pixtuoid_scene::layout::Point {
+fn unit_at(cursor: (f64, f64), at: PixelFit) -> pixtuoid_scene::layout::Point {
     let unit = |px: f64| {
-        (px.max(0.0) as u32 / u32::from(at.unit_px.max(1))).min(u32::from(u16::MAX)) as u16
+        (px.max(0.0) as u32 / u32::from(at.scale().get().max(1))).min(u32::from(u16::MAX)) as u16
     };
     pixtuoid_scene::layout::Point {
         x: unit(cursor.0),
@@ -398,7 +400,7 @@ fn unit_bounds(unit: pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::B
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 /// One floor's frame for the window: a [`RenderInputs`] whose office extent
-/// the window's `WindowGeometry` owns.
+/// the window's [`window_geometry`] owns.
 #[derive(Debug, Clone, Copy)]
 pub struct WindowFrame<'a> {
     pub world: FloorInputs<'a>,
@@ -416,19 +418,6 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
         .max(1.0) as u32
 }
 
-/// What a window draws its office as: the look, the office's logical extent
-/// (which the desk capacity is derived from), and the whole factor the
-/// rendered buffer is upscaled by to the window. Everything the window paints
-/// reads it, so another look is another [`window_geometry`] arm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WindowGeometry {
-    pub look: Look,
-    pub office: Size,
-    pub upscale: u16,
-    /// Window pixels per layout unit, which a pointer maps back through.
-    pub unit_px: u16,
-}
-
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
 /// `density`, `office_scale` fitted to it and never below it, so the window
 /// never falls back to the classic. The ONE place this geometry lives, so the
@@ -437,24 +426,16 @@ pub struct WindowGeometry {
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI mis-seed (#803).
-pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> WindowGeometry {
+pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> PixelFit {
     let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
-    let fit = PixelFit::at_least_density(
+    PixelFit::at_least_density(
         px(office_scale(size.height)),
         density,
         Size {
             w: px(size.width),
             h: px(size.height),
         },
-    );
-    WindowGeometry {
-        look: Look::Cutaway {
-            scale: fit.render_scale(),
-        },
-        office: fit.logical(),
-        upscale: fit.upscale(),
-        unit_px: fit.scale().get(),
-    }
+    )
 }
 
 /// The smallest window, in logical px, whose office lays out:
@@ -489,7 +470,7 @@ pub(crate) fn boot_capacities_for_window(
     size: PhysicalSize<u32>,
     density: Density,
 ) -> [usize; MAX_FLOORS] {
-    let office = window_geometry(size, density).office;
+    let office = window_geometry(size, density).logical();
     floor_caps_for_buffer(office.w, office.h)
 }
 
@@ -736,16 +717,17 @@ mod tests {
 
     /// The window's geometry for an office `size` units big, at the test
     /// pack's densest art and no upscale.
-    fn cutaway(size: Size) -> WindowGeometry {
+    fn cutaway(size: Size) -> PixelFit {
         let density = density();
-        WindowGeometry {
-            look: Look::Cutaway {
-                scale: pixtuoid_scene::render_scale::RenderScale::from(density),
+        let px = |units: u16| units * density.get();
+        PixelFit::at_least_density(
+            density.get(),
+            density,
+            Size {
+                w: px(size.w),
+                h: px(size.h),
             },
-            office: size,
-            upscale: 1,
-            unit_px: density.get(),
-        }
+        )
     }
 
     use pixtuoid_scene::layout::Size;
@@ -1060,7 +1042,7 @@ mod tests {
     #[test]
     fn boot_capacities_for_window_match_the_first_redraw_geometry_not_the_tui_overseed() {
         let (w, h) = (1280u32, 720u32);
-        let office = window_geometry(PhysicalSize::new(w, h), density()).office;
+        let office = window_geometry(PhysicalSize::new(w, h), density()).logical();
         let boot = boot_capacities_for_window(PhysicalSize::new(w, h), density());
         for (i, &got) in boot.iter().enumerate() {
             let want = pixtuoid_scene::floor::floor_capacity(
@@ -1115,7 +1097,7 @@ mod tests {
         ];
         for (sf, want_buf, want_floor0) in measured {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
-            let office = window_geometry(physical, density()).office;
+            let office = window_geometry(physical, density()).logical();
             assert_eq!(
                 (u32::from(office.w), u32::from(office.h)),
                 want_buf,
@@ -1142,7 +1124,7 @@ mod tests {
         // assert below went red. Derive so the next move can't reach it.
         let min = pixtuoid_scene::layout::min_layout_size();
         let tiny = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
-        let office = window_geometry(tiny, density()).office;
+        let office = window_geometry(tiny, density()).logical();
         assert_eq!(
             pixtuoid_scene::floor::floor_capacity(
                 office.w,
@@ -1210,7 +1192,7 @@ mod tests {
         ] {
             let seed = boot_capacities_for_window(window, density());
             let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
-            let office = window_geometry(window, density()).office;
+            let office = window_geometry(window, density()).logical();
             sync_floor_caps(&mut None, &caps, office.w, office.h);
             let published: [usize; MAX_FLOORS] =
                 std::array::from_fn(|i| caps[i].load(Ordering::Relaxed));
@@ -1328,12 +1310,13 @@ mod tests {
                 },
             )
             .expect("a frame");
-        let centre = |u: u16| f64::from(u) * f64::from(at.unit_px) + f64::from(at.unit_px) / 2.0;
+        let centre =
+            |u: u16| f64::from(u) * f64::from(at.scale().get()) + f64::from(at.scale().get()) / 2.0;
         let size = (window.width, window.height);
         let (mut hit_agent, mut dragged, mut fixture_drags, mut on_agent) =
             (false, false, false, None);
-        for y in 0..at.office.h {
-            for x in 0..at.office.w {
+        for y in 0..at.logical().h {
+            for x in 0..at.logical().w {
                 let cursor = (centre(x), centre(y));
                 match renderer.press_at(
                     cursor,
@@ -1410,7 +1393,7 @@ mod tests {
             ),
             Press::Pointer
         );
-        let away = (on_agent.0 + 10.0 * f64::from(at.unit_px), on_agent.1);
+        let away = (on_agent.0 + 10.0 * f64::from(at.scale().get()), on_agent.1);
         assert!(renderer.pointer_moved(away, at), "the move lifts it");
         assert!(renderer.carrying());
         assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");

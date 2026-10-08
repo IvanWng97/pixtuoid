@@ -65,7 +65,7 @@ pub(crate) struct FloatingApp {
     /// Latest cursor position (physical px) — for the corner resize hit-test on click.
     cursor: PhysicalPosition<f64>,
     /// The geometry of the frame on screen, which a press maps back through.
-    shown: Option<super::offscreen::WindowGeometry>,
+    shown: Option<pixtuoid_scene::render_scale::PixelFit>,
     /// Whether the pointer is over the window, where a hover shows its tooltip.
     cursor_in: bool,
     /// Whether the pointer last hovered something, so a move off it redraws
@@ -274,8 +274,8 @@ impl FloatingApp {
         super::offscreen::sync_floor_caps(
             &mut self.last_caps_size,
             &floor_caps,
-            at.office.w,
-            at.office.h,
+            at.logical().w,
+            at.logical().h,
         );
         // The office's weather and motion; the office picks each floor's own.
         let floor_meta = FloorMeta::ground().with_motion(self.motion);
@@ -369,7 +369,7 @@ impl FloatingApp {
             return;
         };
         if let Some(office) = self.renderer.buf() {
-            surf.fill_upscaled(office, usize::from(at.upscale));
+            surf.fill_upscaled(office, usize::from(at.upscale()));
         }
         super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, self.theme);
         if let Some((tip, _)) = &next.tooltip {
@@ -384,7 +384,7 @@ impl FloatingApp {
         let now = Instant::now();
         self.jank.painted_by(crate::jank::Painter {
             look: "floating",
-            scale: at.unit_px,
+            scale: at.scale().get(),
             ..crate::jank::Painter::default()
         });
         self.jank.record(

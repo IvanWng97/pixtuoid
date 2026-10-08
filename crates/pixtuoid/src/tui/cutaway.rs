@@ -24,10 +24,11 @@ use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
 
 use crate::graphics::tiles::{Changed, Tile, Tiles};
-use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
+use crate::graphics::{CellSize, ImageProtocol, cutaway_fit, iterm2, kitty, sixel};
 use crate::jank::FrameSend;
 use crate::tui::geometry::SceneGeometry;
 use crate::tui::renderer::set_half_block;
+use pixtuoid_scene::render_scale::PixelFit;
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
 pub(crate) type Sink = Box<dyn Write + Send>;
@@ -42,7 +43,7 @@ const SENTINEL: &str = "\u{F8FF}";
 pub(crate) struct Fitted {
     pub(crate) scene: Rect,
     pub(crate) cell: CellSize,
-    pub(crate) fit: Fit,
+    pub(crate) fit: PixelFit,
 }
 
 impl Fitted {
@@ -140,7 +141,12 @@ enum Shown {
 
 impl TileCutaway {
     /// [`crate::graphics::Plan::Cutaway`]'s parts, transmitting into `out`.
-    pub(crate) fn new(fit: Fit, cell: CellSize, route: crate::graphics::Route, out: Sink) -> Self {
+    pub(crate) fn new(
+        fit: PixelFit,
+        cell: CellSize,
+        route: crate::graphics::Route,
+        out: Sink,
+    ) -> Self {
         Self {
             planned: cell,
             first_window: None,
@@ -166,13 +172,13 @@ impl TileCutaway {
     }
 
     /// Fit the office over `scene`'s cells under a window whose cell reads
-    /// `window`; `None` while the cell has no [`Fit`], when classic paints.
+    /// `window`; `None` while the cell has no [`cutaway_fit`], when classic paints.
     /// Every frame fits, a refused one too: any change re-sends every tile,
     /// since a resize clears the screen ratatui redraws, a new cell cuts a new
     /// grid, and classic paints over the image.
     pub(crate) fn fit_to(&mut self, scene: Rect, window: Option<CellSize>) -> Option<Fitted> {
         let cell = self.cell_under(window);
-        let Some(fit) = Fit::new(cell, scene.as_size(), self.density) else {
+        let Some(fit) = cutaway_fit(cell, scene.as_size(), self.density) else {
             self.fitted = None;
             // The classic paints this frame: it transmits nothing.
             self.last = FrameSend {
