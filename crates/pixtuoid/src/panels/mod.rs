@@ -474,7 +474,7 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
             cx.ui.commit_theme(i);
             let name = theme::ALL_THEMES[i].name;
             if let Err(e) = crate::config::save(cx.config_path, name) {
-                tracing::warn!(error = %e, "failed to persist theme");
+                tracing::warn!(error = ?e, "failed to persist theme");
             }
         }
         KeyAction::ThemeCancel => {

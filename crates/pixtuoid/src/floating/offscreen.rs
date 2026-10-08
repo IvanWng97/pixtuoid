@@ -271,8 +271,8 @@ impl OfficeRenderer {
                 audio_audible,
                 volume_flash,
                 warning,
-                FOOTER_KEYS,
-                FOOTER_KEYS,
+                super::input::footer_keys(),
+                super::input::footer_keys(),
             ),
         );
         build_footer(&inputs, budget)
@@ -422,32 +422,45 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
 
 /// How a PHYSICAL-px window draws its office: the cutaway at the pack's
 /// `density`, `office_scale` fitted to it and never below it, so the window
-/// never falls back to the classic. The ONE place this geometry lives, so the
-/// desk capacity derived from it can't drift from the office drawn.
+/// never falls back to the classic, over the window above its
+/// [`footer_band`]. The ONE place this geometry lives, so the desk capacity
+/// derived from it can't drift from the office drawn.
 ///
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI mis-seed (#803).
 pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> PixelFit {
     let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
-    PixelFit::at_least_density(
-        px(office_scale(size.height)),
-        density,
-        Size {
-            w: px(size.width),
-            h: px(size.height),
-        },
-    )
+    let (w, h) = (px(size.width), px(size.height));
+    let fit = PixelFit::at_least_density(px(office_scale(size.height)), density, Size { w, h });
+    // The band's cell is the fit's, and `over` keeps the fit's scale, so the
+    // band measured here is the band painted.
+    fit.over(Size {
+        w,
+        h: h.saturating_sub(footer_band(fit)),
+    })
+}
+
+/// The footer's own row at the window's foot, in physical px: one screen
+/// cell of `fit`'s chrome and a margin over and under it, as the terminal
+/// gives its footer a row of its own.
+pub(crate) fn footer_band(fit: PixelFit) -> u16 {
+    Face::chrome(fit).h + 2 * FOOTER_MARGIN_PX
 }
 
 /// The smallest window, in logical px, whose office lays out:
 /// [`min_layout_size`](pixtuoid_scene::layout::min_layout_size) at the pack's
-/// `density`, which [`window_geometry`] never draws below, on a display that
-/// gives a logical px one physical px.
+/// `density`, which [`window_geometry`] never draws below, and its
+/// [`footer_band`], on a display that gives a logical px one physical px.
 pub(crate) fn min_window(density: Density) -> LogicalSize<u32> {
     let min = pixtuoid_scene::layout::min_layout_size();
-    let px = |units: u16| u32::from(units) * u32::from(density.get());
-    LogicalSize::new(px(min.w), px(min.h))
+    let px = |units: u16| units.saturating_mul(density.get());
+    let office = Size {
+        w: px(min.w),
+        h: px(min.h),
+    };
+    let band = footer_band(PixelFit::at_least_density(density.get(), density, office));
+    LogicalSize::new(u32::from(office.w), u32::from(office.h) + u32::from(band))
 }
 
 /// Per-floor desk capacities for an office buffer of `buf_w`×`buf_h`. THE one
@@ -507,17 +520,10 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// The footer text's drop shadow: it draws straight over the office, so a
-/// one-pixel shadow keeps it legible over bright windows and plants.
-const TEXT_SHADOW: Rgb = Rgb { r: 0, g: 0, b: 0 };
-
-/// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
-/// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
-/// footer model; everything else is TUI-identical.
-const FOOTER_KEYS: &str = " [p]ause [m]ute [+/-]vol ";
-/// Breathing room from the window edges for the footer band — both the paint and the
-/// [`footer_budget`] column math read it, so they can't drift.
-const FOOTER_MARGIN_PX: usize = 6;
+/// Breathing room around the footer's text in its band — the band's height,
+/// its paint and the [`footer_budget`] column math all read it, so they can't
+/// drift.
+const FOOTER_MARGIN_PX: u16 = 6;
 
 /// The window's row-major `0x00RRGGBB` pixel surface, `w`×`h`, that the text
 /// overlays composite into.
@@ -619,25 +625,29 @@ pub fn paint_tooltip_into_surface(
 /// How many screen cells of `cell` fit across a `win_w`-pixel window
 /// between the footer's margins: its column budget.
 pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
-    let room = win_w.saturating_sub(2 * FOOTER_MARGIN_PX);
+    let room = win_w.saturating_sub(2 * usize::from(FOOTER_MARGIN_PX));
     u16::try_from(room / usize::from(cell.w.max(1))).unwrap_or(u16::MAX)
 }
 
-/// Paint the shared status footer as a band over the office's bottom rows, in
-/// screen cells of `cell` on a one-pixel shadow: the window's twin of the
-/// TUI's status row, from the same [`build_footer`] model. An overlay, so it
-/// never insets the buffer the desk capacity is derived from.
+/// Paint the shared status footer in `at`'s [`footer_band`] at the window's
+/// foot: the theme's ground, the TUI footer row's terminal background, and
+/// the line in `at`'s screen cells over it — the window's twin of the TUI's
+/// status row, from the same [`build_footer`] model.
 pub fn paint_footer_into_surface(
     sb: &mut XrgbSurface<'_>,
     model: &FooterModel,
     (theme, pack): (&Theme, &Pack),
-    cell: CellPx,
+    at: PixelFit,
 ) {
-    let margin = i32::try_from(FOOTER_MARGIN_PX).unwrap_or(0);
-    let y = (i32::try_from(sb.h).unwrap_or(i32::MAX) - i32::from(cell.h) - margin).max(0);
+    let cell = Face::chrome(at);
+    let top = sb.h.saturating_sub(usize::from(footer_band(at)));
+    let ground = pack_xrgb(theme.surface.bg_fallback);
+    sb.px[top * sb.w..].fill(ground);
+    let margin = i32::from(FOOTER_MARGIN_PX);
+    let y = i32::try_from(top).unwrap_or(i32::MAX) + margin;
     let ink = GridInk {
         text: theme.ui.label_idle,
-        halo: Some(TEXT_SHADOW),
+        halo: None,
         shadow: None,
     };
     paint_grid(
@@ -964,6 +974,30 @@ mod tests {
 
     /// A saved size below the pack's minimum opens, and is placed, at the
     /// minimum: an office that seats every floor.
+    /// The footer's band holds no office: the fit stops above it, a pointer
+    /// in it finds no unit, and the capacity is the office's.
+    #[test]
+    fn the_footer_band_is_below_the_office_not_over_it() {
+        for (w, h) in [(480u32, 320u32), (960, 640), (1280, 720)] {
+            let at = window_geometry(PhysicalSize::new(w, h), density());
+            let band = u32::from(footer_band(at));
+            let office_px = u32::from(at.logical().h) * u32::from(at.scale().get());
+            assert!(office_px <= h - band, "{w}x{h}: office reaches the band");
+            let in_band = (f64::from(w) / 2.0, f64::from(h - band / 2));
+            assert_eq!(unit_in(in_band, at), None, "{w}x{h}: the band hits a unit");
+            let above = (f64::from(w) / 2.0, f64::from(office_px - 1));
+            assert!(
+                unit_in(above, at).is_some(),
+                "{w}x{h}: the office's last row"
+            );
+            let office = at.logical();
+            assert_eq!(
+                boot_capacities_for_window(PhysicalSize::new(w, h), density()),
+                floor_caps_for_buffer(office.w, office.h),
+            );
+        }
+    }
+
     #[test]
     fn a_saved_size_below_the_minimum_opens_where_every_floor_seats() {
         let min = min_window(density());
@@ -1030,16 +1064,16 @@ mod tests {
             density(),
         );
 
-        // MEASURED offices for the default 480×320 logical window. `office_scale`
-        // ROUNDS before the density fit, so the office is NOT monotone in sf (at
-        // 4× it shrinks to 240×160) — no logical-side seed is sound.
+        // MEASURED offices for the default 480×320 logical window, above its
+        // footer band. `office_scale` ROUNDS before the density fit, so the
+        // office is NOT monotone in sf — no logical-side seed is sound.
         let measured = [
-            (1.00_f64, (120u32, 80u32), 6usize),
-            (1.25, (150, 100), 12),
-            (1.50, (180, 120), 20),
-            (1.75, (210, 140), 24),
-            (2.00, (240, 160), 30),
-            (3.00, (360, 240), 80),
+            (1.00_f64, (120u32, 74u32), 6usize),
+            (1.25, (150, 94), 12),
+            (1.50, (180, 114), 20),
+            (1.75, (210, 134), 24),
+            (2.00, (240, 154), 30),
+            (3.00, (360, 234), 80),
         ];
         for (sf, want_buf, want_floor0) in measured {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
@@ -1633,28 +1667,38 @@ mod tests {
         scene.agents.insert(slot.agent_id, slot);
         let inputs = FooterInputs::new(
             &scene,
-            FooterContext::new(&scene, None, true, None, None, FOOTER_KEYS, FOOTER_KEYS),
+            FooterContext::new(
+                &scene,
+                None,
+                true,
+                None,
+                None,
+                crate::floating::input::footer_keys(),
+                crate::floating::input::footer_keys(),
+            ),
         );
-        let (w, h) = (400usize, 160usize);
-        let model = build_footer(&inputs, footer_budget(w, Face::Screen.cell(1)));
-        let mut sb = vec![0u32; w * h];
+        let (w, h) = (640usize, 400usize);
+        let at = window_geometry(PhysicalSize::new(w as u32, h as u32), density());
+        let model = build_footer(&inputs, footer_budget(w, Face::chrome(at)));
         let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        // The office as the window draws it, then the footer over it.
+        const OFFICE: u32 = 0x0012_3456;
+        let mut sb = vec![OFFICE; w * h];
         paint_footer_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
             &model,
             (theme, &pack),
-            Face::Screen.cell(1),
+            at,
         );
-        let changed: Vec<usize> = sb
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| **p != 0)
-            .map(|(i, _)| i)
-            .collect();
-        assert!(!changed.is_empty(), "the footer painted something");
+        let top = h - usize::from(footer_band(at));
+        assert!(sb[..top * w].iter().all(|&p| p == OFFICE), "above the band");
         assert!(
-            changed.iter().all(|&i| i / w >= h / 2),
-            "the footer stays in the bottom band"
+            sb[top * w..].iter().all(|&p| p != OFFICE),
+            "no office pixel under the band"
+        );
+        assert!(
+            sb[top * w..].contains(&pack_xrgb(theme.surface.bg_fallback)),
+            "the band's ground"
         );
         assert!(
             sb.contains(&pack_xrgb(FooterTone::Rung(RungKind::Active).rgb(theme))),

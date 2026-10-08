@@ -153,7 +153,7 @@ impl AudioController {
         if persist.muted
             && let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted)
         {
-            tracing::warn!(error = %e, "failed to persist audio mute");
+            tracing::warn!(error = ?e, "failed to persist audio mute");
         }
         if persist.volume_nudged {
             self.volume_dirty = true;
@@ -188,7 +188,7 @@ impl AudioController {
     fn save_volume(&mut self) {
         self.volume_dirty = false;
         if let Err(e) = crate::config::save_audio_volume(&self.config_path, self.ui.volume) {
-            tracing::warn!(error = %e, "failed to persist audio volume");
+            tracing::warn!(error = ?e, "failed to persist audio volume");
         }
     }
 
