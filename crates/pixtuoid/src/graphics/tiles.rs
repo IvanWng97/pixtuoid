@@ -1,7 +1,7 @@
 //! The cutaway image cut into a grid of cell-aligned tiles, and which of them a
 //! frame changed: an encoder re-sends only those.
 use std::collections::BTreeSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::Range;
 
 use crossterm::{Command, cursor::MoveTo};
@@ -385,7 +385,9 @@ impl Tiles {
         let (iw, ih) = self.image_px();
         let xs = self.source(tile.col, tile.cols, self.cell.w, iw);
         let pixels = buf.as_slice();
-        let mut h = DefaultHasher::new();
+        // A collision would hold a changed tile back: the display list's
+        // fingerprints take the quality hasher for the same reason.
+        let mut h = foldhash::quality::FixedState::with_seed(0).build_hasher();
         for y in self.source(tile.row, tile.rows, self.cell.h, ih) {
             let row = y * usize::from(buf.width());
             Hash::hash_slice(&pixels[row + xs.start..row + xs.end], &mut h);

@@ -298,8 +298,8 @@ fn a_whole_frame_transmits_every_tile_once_in_order() {
         .collect();
     let first = *ids.first().expect("a transmit");
     assert!(
-        ids.len() > 2 * crate::tui::cutaway::TILES_PER_THREAD,
-        "more than one thread's share"
+        ids.len() >= 4 * crate::tui::cutaway::TILES_PER_THREAD,
+        "a share for each of the four threads"
     );
     assert_eq!(ids, (first..first + ids.len() as u32).collect::<Vec<_>>());
 }

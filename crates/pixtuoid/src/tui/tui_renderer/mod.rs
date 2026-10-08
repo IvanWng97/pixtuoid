@@ -320,6 +320,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.jank.scheduled_every(interval);
     }
 
+    /// The next frame is the one the loop's clock scheduled for `at`
+    /// ([`crate::jank::Jank::due_at`]).
+    pub(crate) fn due_at(&mut self, at: std::time::Instant) {
+        self.jank.due_at(at);
+    }
+
     /// Hold each frame's output in `out` and present it whole.
     pub(crate) fn present_through(&mut self, out: crate::tui::FrameOut) {
         self.frame_out = Some(out);

@@ -235,8 +235,10 @@ pub fn renderer(
         // A live audio thread's spare core, which a renderer reads off its
         // audio handle: the bench synthesizes with no device to open one.
         if audio {
-            let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-            cutaway.split_across(cores.saturating_sub(1).max(1));
+            cutaway.split_across(crate::tui::cutaway::encode_cores(
+                pixtuoid_scene::par::cores(),
+                true,
+            ));
         }
         r.set_cutaway(cutaway);
     }

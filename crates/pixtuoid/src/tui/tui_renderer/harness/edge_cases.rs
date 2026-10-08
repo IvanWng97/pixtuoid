@@ -445,3 +445,24 @@ fn a_refused_classic_frame_keeps_the_doors_clamp_on_time() {
         "the walk long arrived"
     );
 }
+
+/// A frame the loop scheduled reaches the hitch count through the renderer:
+/// shown a second after its due, it hitches; a redraw with no due doesn't.
+#[test]
+fn a_scheduled_frame_shown_late_hitches() {
+    let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
+    let summary = |late: Option<std::time::Duration>| {
+        crate::test_capture::capture(|| {
+            let mut r = build(120, 40, vec![]);
+            if let Some(late) = late {
+                r.due_at(std::time::Instant::now() - late);
+            }
+            r.render(&scene, pack(), t0()).expect("render");
+            r.finish_pacing();
+        })
+    };
+    assert!(summary(None).contains("scheduled=0 "));
+    let late = summary(Some(std::time::Duration::from_secs(1)));
+    assert!(late.contains("scheduled=1 "), "{late}");
+    assert!(!late.contains("hitch_ms=0.0 "), "{late}");
+}

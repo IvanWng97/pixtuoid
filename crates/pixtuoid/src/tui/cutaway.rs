@@ -172,7 +172,7 @@ impl TileCutaway {
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             landing: None,
             last: FrameSend::default(),
-            cores: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+            cores: pixtuoid_scene::par::cores(),
             audio: false,
         }
     }
@@ -539,13 +539,14 @@ impl TileCutaway {
 }
 
 /// A thread's least share of a frame's tiles: below it, its spawn outweighs
-/// their encode.
-pub(crate) const TILES_PER_THREAD: usize = 32;
+/// their encode, which a frame after the TUI's sleep runs on cooled cores
+/// ([`pixtuoid_scene::par`]).
+pub(crate) const TILES_PER_THREAD: usize = 2;
 
 /// The cores a frame's encode may take of `cores`: all but one while an
 /// `audio` thread is up, which synthesizes a track for seconds at its start
 /// and at a swap.
-fn encode_cores(cores: usize, audio: bool) -> usize {
+pub(crate) fn encode_cores(cores: usize, audio: bool) -> usize {
     if audio {
         cores.saturating_sub(1).max(1)
     } else {
@@ -574,25 +575,8 @@ impl Encoder<'_> {
     /// Each of `send`'s escapes, in its order, split across as many threads
     /// as it has [`TILES_PER_THREAD`] shares, up to the cores.
     fn encode_all(self, send: &[Changed]) -> Vec<Option<Vec<u8>>> {
-        let threads = threads_for(send.len(), self.threads);
-        if threads == 1 {
-            return send.iter().map(|&c| self.encode(c)).collect();
-        }
-        std::thread::scope(|s| {
-            let shares: Vec<_> = send
-                .chunks(send.len().div_ceil(threads))
-                .map(|share| {
-                    s.spawn(move || share.iter().map(|&c| self.encode(c)).collect::<Vec<_>>())
-                })
-                .collect();
-            shares
-                .into_iter()
-                .flat_map(|share| {
-                    share
-                        .join()
-                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-                })
-                .collect()
+        pixtuoid_scene::par::map(send, threads_for(send.len(), self.threads), |&c| {
+            self.encode(c)
         })
     }
 
