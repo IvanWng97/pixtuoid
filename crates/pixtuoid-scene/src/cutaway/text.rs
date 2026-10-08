@@ -531,6 +531,14 @@ mod tests {
     /// its neighbour reaches its cell's gap, and the width counts it.
     #[test]
     fn no_glyph_inks_past_its_width() {
+        for c in '\u{2500}'..='\u{259f}' {
+            let filled = crate::display::text::fills_cell(c);
+            assert_eq!(
+                filled,
+                ruled(c).is_some(),
+                "{c:?}: measured as filling its cell"
+            );
+        }
         let ruled_chars = ('\u{2500}'..='\u{259f}').filter(|&c| ruled(c).is_some());
         for c in ruled_chars.chain(['I', '\u{25cf}']) {
             let text = c.to_string();

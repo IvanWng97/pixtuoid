@@ -40,11 +40,27 @@ pub(crate) fn width(text: &str) -> ArtPx {
     })
 }
 
-/// Whether `c` is a box-drawing line or a block element, which a terminal
-/// draws to its cell's edges so neighbours join; every other glyph leaves its
-/// cell's last column as the gap.
+/// Whether `c` is one of the light box-drawing lines or block elements the
+/// cutaway draws to its cell's edges so neighbours join; every other glyph
+/// leaves its cell's last column as the gap.
 pub(crate) fn fills_cell(c: char) -> bool {
-    matches!(c, '\u{2500}'..='\u{259f}')
+    matches!(
+        c,
+        '\u{2500}'
+            | '\u{2502}'
+            | '\u{250c}'
+            | '\u{2510}'
+            | '\u{2514}'
+            | '\u{2518}'
+            | '\u{251c}'
+            | '\u{2524}'
+            | '\u{252c}'
+            | '\u{2534}'
+            | '\u{253c}'
+            | '\u{256d}'..='\u{2570}'
+            | '\u{2574}'..='\u{2577}'
+            | '\u{2580}'..='\u{259f}'
+    )
 }
 
 /// Art pixels from a run's left edge to where a run `n` cells on starts.
