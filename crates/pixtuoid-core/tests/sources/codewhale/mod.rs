@@ -11,7 +11,7 @@ use pixtuoid_core::state::SceneState;
 use pixtuoid_core::state::reducer::Reducer;
 
 const WORKSPACE: &str = "/private/tmp/pixtuoid-capture/proj";
-const CHILD: &str = "agent_95b721a7";
+const CHILD: &str = "agent_d50b1b7e";
 
 fn hook_events() -> Vec<AgentEvent> {
     super::captures::fixture_lines(
@@ -67,8 +67,10 @@ fn codewhale_subagent_spawn_links_child_and_complete_ends_it() {
     assert!(completed, "the recorded run must complete its subagent");
 }
 
+/// The recorder blanks the start and wait args (no action reads as start), so
+/// telling wait apart is the unit test's job.
 #[test]
-fn the_parent_delegates_on_start_and_wait_but_not_on_status() {
+fn of_the_recorded_agent_calls_only_status_is_not_a_delegation() {
     let delegating: Vec<bool> = hook_events()
         .iter()
         .filter_map(|e| match e {

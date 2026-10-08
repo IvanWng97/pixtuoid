@@ -3,7 +3,7 @@
   "cli": "codewhale",
   "version": "0.10.1 (fead51eeea0f)",
   "captured": "2026-10-08",
-  "command": "codewhale --skip-onboarding --fresh --approval-policy never --sandbox-mode workspace-write {prompt} — the interactive TUI driven in a pty and quit with `/exit` (`exec` fires no hooks)",
+  "command": "codewhale --skip-onboarding --fresh {prompt} — the interactive TUI under its default approval policy, driven in a pty and quit with `/exit` (`exec` fires no hooks); the explore sub-agent's start is auto-approved upstream",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 18
