@@ -1069,14 +1069,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
         let scene_area = fitted.scene;
-        // The destination floor's footer for the whole slide, as classic's.
-        let Frame {
-            footer, overlays, ..
-        } = self
-            .chrome
-            .frame(&self.session, scene, &to_scene, pack, now, to_floor);
-        let popup_scale = overlays.popup_scale;
-        let footer = pixtuoid_scene::footer::FooterInputs::new(&to_scene, footer);
+        let footer_scene = self.session.footer_scene(scene);
+        let footer = pixtuoid_scene::footer::FooterInputs::new(
+            &footer_scene,
+            crate::tui::widgets::footer_context(
+                scene,
+                self.session.footer_floor(scene),
+                self.chrome.audio.is_audible(),
+                self.chrome.volume_flash,
+                self.chrome.source_warning.as_deref(),
+            ),
+        );
+        let popup_scale = self.version_popup_scale(now);
+        let overlays = self.chrome.overlays(popup_scale);
         let theme = self.chrome.theme;
         let too_small = crate::tui::renderer::scene_too_small(scene_area);
         // Each floor shows its own board; only the footer is the destination's.

@@ -358,8 +358,8 @@ impl OfficeSession {
 
     /// Ready the office for a frame of `scene` (the FULL live scene) at
     /// `now`: every floor and the office drop the agents gone, a floor the
-    /// scene fills gets its view, and the navigation settles. Whether a slide
-    /// was dropped ([`FloorNav::settle`]). [`Self::render`] does this itself;
+    /// scene fills gets its view, and the navigation settles. Returns whether
+    /// the navigation dropped a slide ([`FloorNav::settle`]). [`Self::render`] does this itself;
     /// a painter drawing the floors on its own calls it first.
     pub fn prepare(&mut self, scene: &SceneState, now: SystemTime) -> bool {
         self.evict_missing(scene);
