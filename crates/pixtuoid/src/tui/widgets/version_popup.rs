@@ -5,9 +5,7 @@ use ratatui::widgets::Paragraph;
 
 use super::{PanelGeometry, borderless_panel, to_color, truncate};
 
-/// The project repository: the crash reporter derives its issue-report URL
-/// from this same authority.
-pub(crate) const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
+use pixtuoid_scene::hit::REPO_URL;
 
 /// The scheme this popup's body row drops. A terminal that cannot click still
 /// has to be able to COPY the destination, and the scheme is the one part of it
