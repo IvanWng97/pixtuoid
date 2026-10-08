@@ -281,12 +281,13 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anim::Motion;
     use crate::display::text::{advance, width};
 
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
+    #[cfg(feature = "cutaway-assets")]
     fn signs() -> std::collections::BTreeSet<char> {
+        use crate::anim::Motion;
         use crate::neon_sign::build_board;
         use crate::tally::StateCounts;
         use pixtuoid_core::state::DaemonState;
