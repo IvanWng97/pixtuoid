@@ -42,6 +42,9 @@ trap cleanup EXIT
 # every delta for a source whose hooks are not installed, so a clean dev box
 # would time out. The envelopes below go straight to the shim, so the plugin is
 # never loaded.
+# Both outrank OPENCLAW_HOME (install/openclaw.rs), so one exported in the dev's
+# shell would send this `connect` to their real config.
+unset OPENCLAW_STATE_DIR OPENCLAW_CONFIG_PATH
 export OPENCLAW_HOME="$SB/openclaw"
 mkdir -p "$OPENCLAW_HOME/.openclaw"
 XDG_CONFIG_HOME="$CFGDIR" "$PIX" connect openclaw --json >/dev/null || {
