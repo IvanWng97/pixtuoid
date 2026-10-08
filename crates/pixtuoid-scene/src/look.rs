@@ -118,6 +118,11 @@ impl OfficeRaster {
         self.outside.clouds.warm();
     }
 
+    /// Drop the art of agents no longer in `scene`.
+    pub(crate) fn evict_missing(&mut self, scene: &pixtuoid_core::SceneState) {
+        self.cutaway.evict_missing(scene);
+    }
+
     /// Draw `pack` in `theme` from now on: every cache holds one pack's art
     /// in one theme's colours, so a frame of another empties them first.
     fn serve(&mut self, pack: &Arc<Pack>, theme: &'static Theme) {
