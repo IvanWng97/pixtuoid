@@ -274,8 +274,9 @@ mod tests {
         }
     }
 
-    /// Copy this crate's char-only fixture into `dst`: no furniture, so the merge
-    /// assertion bites; in-crate, so `cargo test` passes from an extracted .crate.
+    /// Every key the desk props take a theme colour in is one their art draws,
+    /// at every density: a key renamed in the pack would stop the theme
+    /// reaching the prop.
     #[test]
     fn the_desk_props_draw_the_keys_the_theme_recolours() {
         let pack = test_default_pack();
@@ -418,11 +419,7 @@ mod tests {
     /// the painters read: a rename here fails until the guide follows.
     #[test]
     fn the_guide_names_the_desk_contract() {
-        // Read at runtime: the extracted crate may ship without its guide.
-        let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md"));
-        let Ok(guide) = std::fs::read_to_string(path) else {
-            return;
-        };
+        let guide = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md"));
         for needle in [
             format!("@mark {CUP_MARK} <x> <y>"),
             format!("@mark {TOWER_MARK} <x> <y>"),

@@ -1102,8 +1102,8 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Material
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Material
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Material
 pub enum pixtuoid_core::sprite::format::StandIn
+pub pixtuoid_core::sprite::format::StandIn::Absent
 pub pixtuoid_core::sprite::format::StandIn::Bare(&'static str)
-pub pixtuoid_core::sprite::format::StandIn::Nothing
 pub pixtuoid_core::sprite::format::StandIn::OwnPiece(&'static str)
 pub pixtuoid_core::sprite::format::StandIn::OwnPose
 impl core::clone::Clone for pixtuoid_core::sprite::format::StandIn

@@ -129,8 +129,7 @@ live-preview picker across six built-in palettes; your pick persists across sess
 </p>
 
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the full key reference
-(defaults, system-managed keys), the custom sprite-pack workflow, and **logging /
-troubleshooting** (diagnostics go to `~/.cache/pixtuoid/logs/`) — or browse it live
+(defaults, system-managed keys) and **logging / troubleshooting** (diagnostics go to `~/.cache/pixtuoid/logs/`) — or browse it live
 at **[/config](https://pixtuoid.dev/config)**.
 
 ## How It Works

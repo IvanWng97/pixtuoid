@@ -1760,15 +1760,15 @@ pub struct FrameCountMismatch {
 /// What draws an optional animation a pack leaves out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandIn {
-    /// Nothing: no piece of the pack's own draws in its place.
-    Nothing,
+    /// No stand-in: the piece is absent and nothing replaces it.
+    Absent,
     /// The pack's own piece that this one redraws (`desk` for `desk_north`),
     /// which a painter draws ([`Pack::animation_or_source`]).
     OwnPiece(&'static str),
     /// Another of the pack's own poses.
     OwnPose,
-    /// Nothing: an overlay is never stood in for, so the pack's own piece it
-    /// would cover (`desk` for `desk_front`) draws bare.
+    /// The pack's own piece draws bare: an overlay is never stood in for, so
+    /// the piece it would cover (`desk` for `desk_front`) shows uncovered.
     Bare(&'static str),
 }
 
@@ -2126,7 +2126,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
                 Some(piece) => StandIn::Bare(piece),
                 None => pack
                     .own_redrawn_piece(name)
-                    .map_or(StandIn::Nothing, StandIn::OwnPiece),
+                    .map_or(StandIn::Absent, StandIn::OwnPiece),
             };
             (name, stand_in)
         }))
@@ -2932,7 +2932,7 @@ mod validation_floor_tests {
             missing_required: vec!["seated".to_string()],
             missing_optional: vec![MissingOptional {
                 name: "plant",
-                stand_in: StandIn::Nothing,
+                stand_in: StandIn::Absent,
             }],
             insufficient_frames: vec![("typing".to_string(), 2, 1)],
             unknown: vec!["foo".to_string()],
