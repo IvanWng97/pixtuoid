@@ -20,7 +20,8 @@ pub(crate) fn bundled_without_density_art(pack_toml: &str) -> (String, BTreeSet<
 ///
 /// Every `@` key in the bundled manifest's `[animations]` and `[buildings]` is a
 /// density variant: core's load refuses an animation key that names no
-/// `Piece`, and a building base named with one. So core's `DENSITY_VARIANT_SEP` alone identifies them here, where its
+/// `Piece`, and a building base named with one. So core's
+/// `DENSITY_VARIANT_SEP` alone identifies them here, where its
 /// `split_density_variant` is crate-private and core is no build-dependency.
 fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
     let mut doc: toml_edit::DocumentMut = pack_toml.parse().expect("the bundled pack.toml parses");

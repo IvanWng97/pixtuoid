@@ -602,8 +602,8 @@ mod tests {
         }
     }
 
-    /// A mis-sized `@Nx` variant in the bundled pack silently falls back to
-    /// the upscaled base, so this is where a break in its art shows.
+    /// Art that loads but warns draws other than its author meant, so the
+    /// bundled pack warns of nothing.
     #[test]
     fn the_bundled_pack_passes_its_own_validation() {
         let pack = test_default_pack();
@@ -1038,6 +1038,41 @@ mod tests {
                     prop: DeskProp::Cup,
                     ..
                 }
+            ),
+            "{err}"
+        );
+    }
+
+    /// A variant desk is parsed as its base is: at 4x, too, a desk that marks
+    /// no `cup` does not parse.
+    #[cfg(feature = "cutaway-assets")]
+    #[test]
+    fn a_variant_desk_missing_a_prop_mark_does_not_parse() {
+        let srcs: Vec<(&str, &str)> = bundled_sprite_srcs()
+            .into_iter()
+            .map(|(name, src)| {
+                if name != "desk@4x.sprite" {
+                    return (name, src);
+                }
+                let src: &'static str = src
+                    .lines()
+                    .filter(|l| !l.starts_with("@mark cup"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .leak();
+                (name, src)
+            })
+            .collect();
+        let pack = load_pack_from_strings(BUNDLED_PACK_TOML, &srcs).expect("the pack loads");
+        let err = OfficeArt::parse(pack).expect_err("no cup at 4x");
+        assert!(
+            matches!(
+                err,
+                ArtError::DeskMark {
+                    desk: Desk::South,
+                    prop: DeskProp::Cup,
+                    density,
+                } if density.get() == 4
             ),
             "{err}"
         );
