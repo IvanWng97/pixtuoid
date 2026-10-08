@@ -2,8 +2,9 @@
 //! art pixel, never anti-aliased, in the cells [`display::text`](crate::display::text)
 //! lays it out by.
 //!
-//! ASCII and the signs' symbols are [`hand_drawn`]; every other character
-//! comes from the [`fallback`] font, two open bitmap fonts
+//! ASCII and the symbols the office writes are [`HAND_DRAWN`], box-drawing
+//! lines and block elements are [`ruled`], and every other character comes
+//! from the [`fallback`] font, two open bitmap fonts
 //! `scripts/gen-fallback-font.py` aligns to the same lines. The workspace's
 //! other face (the binary's `aa_text`) is an anti-aliased OTF this wasm-clean
 //! crate must not embed.
@@ -11,7 +12,9 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-use crate::display::text::{ACCENT_ROWS, CAP_H, LINE_H, cells, clusters, columns};
+use crate::display::text::{
+    ACCENT_ROWS, ADVANCE, CAP_H, GLYPH_W, LINE_H, cells, clusters, columns,
+};
 
 /// A glyph: each line row's ink, the high bit its leftmost pixel.
 type Rows = [u8; LINE_H as usize];
@@ -48,7 +51,15 @@ fn fallback(c: char) -> Option<Rows> {
 
 /// `c`'s glyph, `None` when neither font draws it.
 fn glyph(c: char) -> Option<Rows> {
-    hand_drawn(c).map(rows_of).or_else(|| fallback(c))
+    hand_drawn(c)
+        .map(rows_of)
+        .or_else(|| ruled(c))
+        .or_else(|| fallback(c))
+}
+
+/// Whether the font draws `c`, rather than tofu.
+pub fn draws(c: char) -> bool {
+    glyph(c).is_some()
 }
 
 /// What `cluster`'s `n` cells show, each glyph with the cells it takes. When
@@ -95,117 +106,262 @@ fn tofu(n: u16) -> Rows {
     rows
 }
 
-/// `c`'s rows from the capital line down, each [`GLYPH_W`](crate::display::text::GLYPH_W) cells of `#` (ink)
-/// or `.`, separated by spaces; rows not given are blank. Lowercase stands
-/// four rows tall under a one-row ascender.
+/// Each character's rows from the capital line down, by code point: a row is
+/// its cells' width less the gap of `#` (ink) or `.`, [`GLYPH_W`](crate::display::text::GLYPH_W)
+/// for one cell; rows are separated by spaces and those not given are blank.
+/// Lowercase stands four rows tall under a one-row ascender.
+const HAND_DRAWN: &[(char, &str)] = &[
+    (' ', ""),
+    ('!', ".#. .#. .#. ... .#."),
+    ('"', "#.# #.#"),
+    ('#', "#.# ### #.# ### #.#"),
+    ('$', ".## ##. .#. .## ##."),
+    ('%', "#.. ..# .#. #.. ..#"),
+    ('&', ".#. #.# .#. #.# .##"),
+    ('\'', ".#. .#."),
+    ('(', "..# .#. .#. .#. ..#"),
+    (')', "#.. .#. .#. .#. #.."),
+    ('*', "... #.# .#. #.#"),
+    ('+', "... .#. ### .#."),
+    (',', "... ... ... .#. #.."),
+    ('-', "... ... ###"),
+    ('.', "... ... ... ... .#."),
+    ('/', "..# ..# .#. #.. #.."),
+    ('0', "### #.# #.# #.# ###"),
+    ('1', ".#. ##. .#. .#. ###"),
+    ('2', "##. ..# .#. #.. ###"),
+    ('3', "##. ..# .#. ..# ##."),
+    ('4', "#.# #.# ### ..# ..#"),
+    ('5', "### #.. ##. ..# ##."),
+    ('6', ".## #.. ### #.# ###"),
+    ('7', "### ..# .#. .#. .#."),
+    ('8', "### #.# ### #.# ###"),
+    ('9', "### #.# ### ..# ##."),
+    (':', "... .#. ... .#."),
+    (';', "... .#. ... .#. #.."),
+    ('<', "..# .#. #.. .#. ..#"),
+    ('=', "... ### ... ###"),
+    ('>', "#.. .#. ..# .#. #.."),
+    ('?', "##. ..# .#. ... .#."),
+    ('@', ".#. #.# ### #.. .##"),
+    ('A', ".#. #.# ### #.# #.#"),
+    ('B', "##. #.# ##. #.# ##."),
+    ('C', ".## #.. #.. #.. .##"),
+    ('D', "##. #.# #.# #.# ##."),
+    ('E', "### #.. ##. #.. ###"),
+    ('F', "### #.. ##. #.. #.."),
+    ('G', ".## #.. #.# #.# .##"),
+    ('H', "#.# #.# ### #.# #.#"),
+    ('I', "### .#. .#. .#. ###"),
+    ('J', "..# ..# ..# #.# .#."),
+    ('K', "#.# #.# ##. #.# #.#"),
+    ('L', "#.. #.. #.. #.. ###"),
+    ('M', "#.# ### ### #.# #.#"),
+    ('N', "##. #.# #.# #.# #.#"),
+    ('O', ".#. #.# #.# #.# .#."),
+    ('P', "##. #.# ##. #.. #.."),
+    ('Q', ".#. #.# #.# ##. .##"),
+    ('R', "##. #.# ##. #.# #.#"),
+    ('S', ".## #.. .#. ..# ##."),
+    ('T', "### .#. .#. .#. .#."),
+    ('U', "#.# #.# #.# #.# ###"),
+    ('V', "#.# #.# #.# #.# .#."),
+    ('W', "#.# #.# ### ### #.#"),
+    ('X', "#.# #.# .#. #.# #.#"),
+    ('Y', "#.# #.# .#. .#. .#."),
+    ('Z', "### ..# .#. #.. ###"),
+    ('[', "##. #.. #.. #.. ##."),
+    ('\\', "#.. #.. .#. ..# ..#"),
+    (']', ".## ..# ..# ..# .##"),
+    ('^', ".#. #.#"),
+    ('_', "... ... ... ... ###"),
+    ('`', "#.. .#."),
+    ('a', "... .## #.# #.# .##"),
+    ('b', "#.. ##. #.# #.# ##."),
+    ('c', "... .## #.. #.. .##"),
+    ('d', "..# .## #.# #.# .##"),
+    ('e', "... .#. ### #.. .##"),
+    ('f', ".## .#. ### .#. .#."),
+    ('g', "... .## #.# .## ..# ##."),
+    ('h', "#.. ##. #.# #.# #.#"),
+    ('i', ".#. ... .#. .#. .#."),
+    ('j', "..# ... ..# ..# ..# ##."),
+    ('k', "#.. #.# ##. #.# #.#"),
+    ('l', "##. .#. .#. .#. .##"),
+    ('m', "... ##. ### #.# #.#"),
+    ('n', "... ##. #.# #.# #.#"),
+    ('o', "... .#. #.# #.# .#."),
+    ('p', "... ##. #.# #.# ##. #.."),
+    ('q', "... .## #.# #.# .## ..#"),
+    ('r', "... #.# ##. #.. #.."),
+    ('s', "... .## ##. ..# ##."),
+    ('t', ".#. ### .#. .#. .##"),
+    ('u', "... #.# #.# #.# .##"),
+    ('v', "... #.# #.# #.# .#."),
+    ('w', "... #.# #.# ### ###"),
+    ('x', "... #.# .#. #.# #.#"),
+    ('y', "... #.# #.# .## ..# ##."),
+    ('z', "... ### .#. #.. ###"),
+    ('{', ".## .#. ##. .#. .##"),
+    ('|', ".#. .#. .#. .#. .#."),
+    ('}', "##. .#. .## .#. ##."),
+    ('~', "... ##. .##"),
+    ('\u{b7}', "... ... .#."),
+    ('\u{2014}', "... ... ###"),
+    ('\u{2190}', "..# .#. ### .#. ..#"),
+    ('\u{2191}', ".#. #.# .#. .#. .#."),
+    ('\u{2192}', "#.. .#. ### .#. #.."),
+    ('\u{2193}', ".#. .#. .#. #.# .#."),
+    ('\u{2197}', ".## ..# .#. #.."),
+    ('\u{21b3}', "#.. #.. #.# ### ..#"),
+    ('\u{22ee}', ".#. ... .#. ... .#."),
+    ('\u{23ce}', "..# ..# #.# ### #.."),
+    ('\u{25a4}', "### ... ### ... ###"),
+    ('\u{25ae}', "### ### ### ###"),
+    ('\u{25af}', "### #.# #.# ###"),
+    ('\u{25b2}', "... .#. ### ###"),
+    ('\u{25b8}', "... #.. ##. #.."),
+    ('\u{25bc}', "... ### ### .#."),
+    ('\u{25be}', "... ### .#."),
+    ('\u{25cb}', "... ### #.# ###"),
+    ('\u{25cc}', "... .#. #.# .#."),
+    ('\u{25cf}', "... ### ### ###"),
+    ('\u{25d0}', "... ### ##. ###"),
+    ('\u{25f7}', "... ### #.# ##. ###"),
+    ('\u{2605}', ".#. ### .#. #.#"),
+    ('\u{2615}', ".#.#... ######. #####.# ######. .####.."),
+    ('\u{2669}', "..# ..# ..# ### ##."),
+    ('\u{26a0}', ".#. .#. #.# #.# ###"),
+    ('\u{2713}', "... ... ..# #.# .#."),
+    ('\u{2b22}', "... .#. ### ### .#."),
+    ('\u{ff9e}', "#.# #.# #.#"),
+    ('\u{ff9f}', "### #.# ###"),
+];
+
+/// `c`'s [`HAND_DRAWN`] drawing.
 fn hand_drawn(c: char) -> Option<&'static str> {
-    Some(match c {
-        'A' => ".#. #.# ### #.# #.#",
-        'B' => "##. #.# ##. #.# ##.",
-        'C' => ".## #.. #.. #.. .##",
-        'D' => "##. #.# #.# #.# ##.",
-        'E' => "### #.. ##. #.. ###",
-        'F' => "### #.. ##. #.. #..",
-        'G' => ".## #.. #.# #.# .##",
-        'H' => "#.# #.# ### #.# #.#",
-        'I' => "### .#. .#. .#. ###",
-        'J' => "..# ..# ..# #.# .#.",
-        'K' => "#.# #.# ##. #.# #.#",
-        'L' => "#.. #.. #.. #.. ###",
-        'M' => "#.# ### ### #.# #.#",
-        'N' => "##. #.# #.# #.# #.#",
-        'O' => ".#. #.# #.# #.# .#.",
-        'P' => "##. #.# ##. #.. #..",
-        'Q' => ".#. #.# #.# ##. .##",
-        'R' => "##. #.# ##. #.# #.#",
-        'S' => ".## #.. .#. ..# ##.",
-        'T' => "### .#. .#. .#. .#.",
-        'U' => "#.# #.# #.# #.# ###",
-        'V' => "#.# #.# #.# #.# .#.",
-        'W' => "#.# #.# ### ### #.#",
-        'X' => "#.# #.# .#. #.# #.#",
-        'Y' => "#.# #.# .#. .#. .#.",
-        'Z' => "### ..# .#. #.. ###",
-        'a' => "... .## #.# #.# .##",
-        'b' => "#.. ##. #.# #.# ##.",
-        'c' => "... .## #.. #.. .##",
-        'd' => "..# .## #.# #.# .##",
-        'e' => "... .#. ### #.. .##",
-        'f' => ".## .#. ### .#. .#.",
-        'g' => "... .## #.# .## ..# ##.",
-        'h' => "#.. ##. #.# #.# #.#",
-        'i' => ".#. ... .#. .#. .#.",
-        'j' => "..# ... ..# ..# ..# ##.",
-        'k' => "#.. #.# ##. #.# #.#",
-        'l' => "##. .#. .#. .#. .##",
-        'm' => "... ##. ### #.# #.#",
-        'n' => "... ##. #.# #.# #.#",
-        'o' => "... .#. #.# #.# .#.",
-        'p' => "... ##. #.# #.# ##. #..",
-        'q' => "... .## #.# #.# .## ..#",
-        'r' => "... #.# ##. #.. #..",
-        's' => "... .## ##. ..# ##.",
-        't' => ".#. ### .#. .#. .##",
-        'u' => "... #.# #.# #.# .##",
-        'v' => "... #.# #.# #.# .#.",
-        'w' => "... #.# #.# ### ###",
-        'x' => "... #.# .#. #.# #.#",
-        'y' => "... #.# #.# .## ..# ##.",
-        'z' => "... ### .#. #.. ###",
-        '0' => "### #.# #.# #.# ###",
-        '1' => ".#. ##. .#. .#. ###",
-        '2' => "##. ..# .#. #.. ###",
-        '3' => "##. ..# .#. ..# ##.",
-        '4' => "#.# #.# ### ..# ..#",
-        '5' => "### #.. ##. ..# ##.",
-        '6' => ".## #.. ### #.# ###",
-        '7' => "### ..# .#. .#. .#.",
-        '8' => "### #.# ### #.# ###",
-        '9' => "### #.# ### ..# ##.",
-        ' ' => "",
-        '!' => ".#. .#. .#. ... .#.",
-        '"' => "#.# #.#",
-        '#' => "#.# ### #.# ### #.#",
-        '$' => ".## ##. .#. .## ##.",
-        '%' => "#.. ..# .#. #.. ..#",
-        '&' => ".#. #.# .#. #.# .##",
-        '\'' => ".#. .#.",
-        '(' => "..# .#. .#. .#. ..#",
-        ')' => "#.. .#. .#. .#. #..",
-        '*' => "... #.# .#. #.#",
-        '+' => "... .#. ### .#.",
-        ',' => "... ... ... .#. #..",
-        '-' => "... ... ###",
-        '.' => "... ... ... ... .#.",
-        '/' => "..# ..# .#. #.. #..",
-        ':' => "... .#. ... .#.",
-        ';' => "... .#. ... .#. #..",
-        '<' => "..# .#. #.. .#. ..#",
-        '=' => "... ### ... ###",
-        '>' => "#.. .#. ..# .#. #..",
-        '?' => "##. ..# .#. ... .#.",
-        '@' => ".#. #.# ### #.. .##",
-        '[' => "##. #.. #.. #.. ##.",
-        '\\' => "#.. #.. .#. ..# ..#",
-        ']' => ".## ..# ..# ..# .##",
-        '^' => ".#. #.#",
-        '_' => "... ... ... ... ###",
-        '`' => "#.. .#.",
-        '{' => ".## .#. ##. .#. .##",
-        '|' => ".#. .#. .#. .#. .#.",
-        '}' => "##. .#. .## .#. ##.",
-        '~' => "... ##. .##",
-        '\u{b7}' => "... ... .#.",
-        '\u{25cf}' => "... ### ### ###",
-        '\u{25cb}' => "... ### #.# ###",
-        '\u{25b2}' => "... .#. ### ###",
-        '\u{25bc}' => "... ### ### .#.",
-        '\u{2605}' => ".#. ### .#. #.#",
-        '\u{2191}' => ".#. #.# .#. .#. .#.",
-        '\u{2014}' => "... ... ###",
-        '\u{2b22}' => "... .#. ### ### .#.",
+    HAND_DRAWN
+        .binary_search_by_key(&c, |&(k, _)| k)
+        .ok()
+        .and_then(|i| HAND_DRAWN.get(i))
+        .map(|&(_, drawing)| drawing)
+}
+
+/// The art row a box-drawing line runs along: the capitals' middle.
+const RULE_ROW: u16 = ACCENT_ROWS + CAP_H / 2;
+/// The art column a box-drawing line runs down: the glyph's middle.
+const RULE_COL: u16 = GLYPH_W / 2;
+
+/// `c`'s glyph when it is a box-drawing line or a block element: computed, not
+/// taken from a font, to fill the whole cell so neighbours join. The idea is
+/// WezTerm's for the same blocks (wezterm/wezterm `docs/config/lua/config/custom_block_glyphs.md`:
+/// "its own idea of what the glyphs … should be"); the geometry is ours.
+fn ruled(c: char) -> Option<Rows> {
+    const FULL: std::ops::Range<u16> = 0..ADVANCE;
+    const TALL: std::ops::Range<u16> = 0..LINE_H;
+    // Unicode's partial blocks come in eighths of the cell.
+    const EIGHTHS: u16 = 8;
+    let (half_w, half_h) = (ADVANCE / 2, LINE_H / 2);
+    let mut rows = Rows::default();
+    let mut ink =
+        |xs: std::ops::Range<u16>, ys: std::ops::Range<u16>, on: &dyn Fn(u16, u16) -> bool| {
+            for y in ys {
+                for x in xs.clone() {
+                    if on(x, y)
+                        && let Some(row) = rows.get_mut(usize::from(y))
+                    {
+                        *row |= LEFTMOST_PIXEL >> x;
+                    }
+                }
+            }
+        };
+    let solid = &|_, _| true;
+    let code = u32::from(c);
+    match c {
+        // Light lines and rounded corners, as the arms they reach: left,
+        // right, up, down.
+        '\u{2500}'..='\u{257f}' => {
+            let [left, right, up, down] = match c {
+                '\u{2500}' => [true, true, false, false],
+                '\u{2502}' => [false, false, true, true],
+                '\u{250c}' | '\u{256d}' => [false, true, false, true],
+                '\u{2510}' | '\u{256e}' => [true, false, false, true],
+                '\u{2514}' | '\u{2570}' => [false, true, true, false],
+                '\u{2518}' | '\u{256f}' => [true, false, true, false],
+                '\u{251c}' => [false, true, true, true],
+                '\u{2524}' => [true, false, true, true],
+                '\u{252c}' => [true, true, false, true],
+                '\u{2534}' => [true, true, true, false],
+                '\u{253c}' => [true, true, true, true],
+                '\u{2574}' => [true, false, false, false],
+                '\u{2575}' => [false, false, true, false],
+                '\u{2576}' => [false, true, false, false],
+                '\u{2577}' => [false, false, false, true],
+                _ => return None,
+            };
+            let row = RULE_ROW..RULE_ROW + 1;
+            let col = RULE_COL..RULE_COL + 1;
+            if left {
+                ink(0..RULE_COL + 1, row.clone(), solid);
+            }
+            if right {
+                ink(RULE_COL..ADVANCE, row, solid);
+            }
+            if up {
+                ink(col.clone(), 0..RULE_ROW + 1, solid);
+            }
+            if down {
+                ink(col, RULE_ROW..LINE_H, solid);
+            }
+        }
+        '\u{2580}' => ink(FULL, 0..half_h, solid),
+        // Lower one to eight eighths.
+        '\u{2581}'..='\u{2588}' => {
+            let eighths = u16::try_from(code - u32::from('\u{2580}')).ok()?;
+            ink(FULL, LINE_H - eighths * LINE_H / EIGHTHS..LINE_H, solid);
+        }
+        // Left seven eighths down to one, at least a pixel.
+        '\u{2589}'..='\u{258f}' => {
+            let eighths = EIGHTHS - u16::try_from(code - u32::from('\u{2588}')).ok()?;
+            ink(0..(eighths * ADVANCE / EIGHTHS).max(1), TALL, solid);
+        }
+        '\u{2590}' => ink(half_w..ADVANCE, TALL, solid),
+        '\u{2591}' => ink(FULL, TALL, &|x, y| x % 2 == 0 && y % 2 == 0),
+        '\u{2592}' => ink(FULL, TALL, &|x, y| (x + y) % 2 == 0),
+        '\u{2593}' => ink(FULL, TALL, &|x, y| x % 2 == 0 || y % 2 == 0),
+        '\u{2594}' => ink(FULL, 0..1, solid),
+        '\u{2595}' => ink(ADVANCE - 1..ADVANCE, TALL, solid),
+        // Quadrants, as which of upper-left, upper-right, lower-left and
+        // lower-right they fill.
+        '\u{2596}'..='\u{259f}' => {
+            let [ul, ur, ll, lr] = match c {
+                '\u{2596}' => [false, false, true, false],
+                '\u{2597}' => [false, false, false, true],
+                '\u{2598}' => [true, false, false, false],
+                '\u{2599}' => [true, false, true, true],
+                '\u{259a}' => [true, false, false, true],
+                '\u{259b}' => [true, true, true, false],
+                '\u{259c}' => [true, true, false, true],
+                '\u{259d}' => [false, true, false, false],
+                '\u{259e}' => [false, true, true, false],
+                _ => [false, true, true, true],
+            };
+            let (left, right) = (0..half_w, half_w..ADVANCE);
+            let (top, bottom) = (0..half_h, half_h..LINE_H);
+            for (on, xs, ys) in [
+                (ul, left.clone(), top.clone()),
+                (ur, right.clone(), top),
+                (ll, left, bottom.clone()),
+                (lr, right, bottom),
+            ] {
+                if on {
+                    ink(xs, ys, solid);
+                }
+            }
+        }
         _ => return None,
-    })
+    }
+    Some(rows)
 }
 
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
@@ -236,7 +392,7 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 mod tests {
     use super::*;
     use crate::anim::Motion;
-    use crate::display::text::{GLYPH_W, advance, width};
+    use crate::display::text::{advance, width};
 
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
@@ -308,23 +464,29 @@ mod tests {
         assert_eq!(missing, []);
     }
 
-    /// Every hand-drawn glyph fits its cell: no row wider than [`GLYPH_W`],
-    /// none below [`LINE_H`], and nothing but ink or blank in it.
+    /// The table is sorted by code point, one drawing each, as its binary
+    /// search needs.
     #[test]
-    fn every_glyph_fits_its_cell() {
-        let chars =
-            (' '..='~')
-                .chain(signs())
-                .chain(['\u{b7}', crate::badge::BADGE_MARKER, '\u{2603}']);
-        for c in chars {
-            let rows: Vec<&str> = hand_drawn(c).unwrap_or_default().split(' ').collect();
+    fn the_hand_drawn_table_ascends_by_code_point() {
+        for pair in HAND_DRAWN.windows(2) {
+            assert!(pair[0].0 < pair[1].0, "{pair:?}");
+        }
+    }
+
+    /// Every hand-drawn glyph fits its cells: each row as wide as its cells
+    /// less the gap, none below [`LINE_H`], and nothing but ink or blank.
+    #[test]
+    fn every_glyph_fits_its_cells() {
+        for &(c, drawing) in HAND_DRAWN {
+            let rows: Vec<&str> = drawing.split(' ').collect();
+            let width = columns(cells(c.encode_utf8(&mut [0; 4]))).0 - 1;
             assert!(
                 rows.len() <= usize::from(LINE_H - ACCENT_ROWS),
                 "{c:?}: {rows:?}"
             );
             for row in rows {
                 assert!(
-                    row.is_empty() || (row.len() == usize::from(GLYPH_W)),
+                    row.is_empty() || row.len() == usize::from(width),
                     "{c:?}: row {row:?}"
                 );
                 assert!(row.bytes().all(|b| b == b'#' || b == b'.'), "{c:?}");
@@ -332,19 +494,81 @@ mod tests {
         }
     }
 
-    /// Each printable ASCII character draws its own shape: a label never
-    /// reads as another.
+    /// Each hand-drawn character draws its own shape: a label never reads
+    /// as another. Three pixels draw an em dash as a hyphen.
     #[test]
-    fn no_two_printable_characters_share_a_glyph() {
+    fn no_two_characters_share_a_glyph() {
         let mut seen = std::collections::HashMap::new();
-        for c in '!'..='~' {
-            let shape = hand_drawn(c)
-                .expect("printable ASCII")
-                .trim_end_matches([' ', '.']);
+        for &(c, drawing) in HAND_DRAWN.iter().filter(|&&(c, _)| c != ' ') {
+            let shape = drawing.trim_end_matches([' ', '.']);
             if let Some(other) = seen.insert(shape, c) {
-                panic!("{c:?} draws as {other:?}");
+                assert_eq!((other, c), ('-', '\u{2014}'), "{c:?} draws as {other:?}");
             }
         }
+    }
+
+    /// Lines join their neighbours: a rule runs through every column of its
+    /// cell, a stem down every row, so a frame drawn of them is unbroken.
+    #[test]
+    fn box_drawing_lines_join_across_cells() {
+        let across = ink("\u{2500}\u{2500}");
+        for x in 0..columns(2).0 {
+            assert!(across.contains(&(x, RULE_ROW)), "a gap at {x}");
+        }
+        let down = ink("\u{2502}");
+        for y in 0..LINE_H {
+            assert!(down.contains(&(RULE_COL, y)), "a gap at {y}");
+        }
+        let corner = ink("\u{2514}");
+        assert!(corner.contains(&(RULE_COL, 0)) && corner.contains(&(ADVANCE - 1, RULE_ROW)));
+        assert!(
+            !corner.contains(&(0, RULE_ROW)),
+            "a └ reaches no further left"
+        );
+    }
+
+    /// No glyph inks past the width a run is measured by: a rule that joins
+    /// its neighbour reaches its cell's gap, and the width counts it.
+    #[test]
+    fn no_glyph_inks_past_its_width() {
+        for c in '\u{2500}'..='\u{259f}' {
+            let filled = crate::display::text::fills_cell(c);
+            assert_eq!(
+                filled,
+                ruled(c).is_some(),
+                "{c:?}: measured as filling its cell"
+            );
+        }
+        let ruled_chars = ('\u{2500}'..='\u{259f}').filter(|&c| ruled(c).is_some());
+        for c in ruled_chars.chain(['I', '\u{25cf}']) {
+            let text = c.to_string();
+            let reach = ink(&text).iter().map(|&(x, _)| x + 1).max().unwrap_or(0);
+            assert!(reach <= width(&text).0, "{c:?} inks to {reach}");
+        }
+        assert_eq!(
+            width("\u{2500}\u{2500}"),
+            columns(2),
+            "a rule ends at its cell's edge"
+        );
+    }
+
+    /// Block elements fill their share of the whole cell: a full block every
+    /// pixel, the eighths one row more each from the bottom up.
+    #[test]
+    fn block_elements_fill_their_share_of_the_cell() {
+        let all: std::collections::BTreeSet<(u16, u16)> = (0..ADVANCE)
+            .flat_map(|x| (0..LINE_H).map(move |y| (x, y)))
+            .collect();
+        assert_eq!(ink("\u{2588}"), all);
+        for (eighths, c) in (1..=8u16).zip('\u{2581}'..='\u{2588}') {
+            let rows: std::collections::BTreeSet<u16> = ink(c.encode_utf8(&mut [0; 4]))
+                .into_iter()
+                .map(|(_, y)| y)
+                .collect();
+            assert_eq!(rows, (LINE_H - eighths..LINE_H).collect(), "{c:?}");
+        }
+        assert_eq!(ink("\u{2580}").len() + ink("\u{2584}").len(), all.len());
+        assert_eq!(ink("\u{258c}").len() + ink("\u{2590}").len(), all.len());
     }
 
     /// One glyph pixel is one art pixel, whatever the scale: `k` buffer
