@@ -981,3 +981,71 @@ f="$(exempt_case digit-led-rename)"
 file_row site/package.json modified $'@@ -9 +9 @@\n-    "v8-to-istanbul": "^9.1.0",\n+    "v8-evil": "^9.1.0",' >"$f/files.jsonl"
 run_exempt "$f" head123 "a digit-led dependency renamed"
 assert_exempt "$f" pending "a digit-led dependency renamed"
+
+# ── The review's units: a module's files pack up to the cap, a bigger file
+# alone, the unreviewable skipped; each kept file gets its head copy.
+units_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Plan review units")"
+units_dir="$test_dir/units"
+mkdir -p "$units_dir/bin"
+# shellcheck disable=SC2016 # The stub reads its fixtures when it runs.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'args="$*"' \
+    'case "$args" in' \
+    '  *"/pulls/42/files"*) cat "$UNITS_FILES" ;;' \
+    '  *"/contents/"*) path="${args#*/contents/}"; path="${path%%\?*}"; printf "head of %s\n" "$path" ;;' \
+    '  *) echo "unexpected gh $args" >&2; exit 1 ;;' \
+    'esac' \
+    >"$units_dir/bin/gh"
+chmod +x "$units_dir/bin/gh"
+unit_file() { jq -cn --arg f "$1" --argjson c "$2" --arg s "${3:-modified}" --argjson p "${4:-true}" '{filename: $f, status: $s, changes: $c, patch: $p}'; }
+run_units() {
+    local work="$units_dir/work-$1"
+    rm -rf "$work"
+    mkdir -p "$work/.claude-review"
+    : >"$units_dir/output"
+    (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" GITHUB_OUTPUT="$units_dir/output" \
+        GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 \
+        bash -c "$units_script") || fail "the unit planner exited non-zero on $1"
+    printf '%s\n' "$work"
+}
+{
+    unit_file crates/a/src/one.rs 120
+    unit_file crates/a/src/two.rs 150
+    unit_file crates/a/src/three.rs 100
+    unit_file crates/b/src/big.rs 400
+    unit_file crates/b/src/gone.rs 10 removed
+    unit_file Cargo.lock 900
+    unit_file site/package-lock.json 50
+    unit_file docs/images/x.png 0 added false
+    unit_file api/pixtuoid-core.txt 20
+    unit_file crates/a/src/snapshots/x.snap 5
+    unit_file assets/blob.bin 0 modified false
+} >"$units_dir/files.jsonl"
+work="$(run_units mixed)"
+want='[{"id":"u1","files":["crates/a/src/one.rs","crates/a/src/three.rs"],"changed":220},{"id":"u2","files":["crates/a/src/two.rs"],"changed":150},{"id":"u3","files":["crates/b/src/big.rs"],"changed":400},{"id":"u4","files":["crates/b/src/gone.rs"],"changed":10}]'
+[[ "$(jq -c . "$work/.claude-review/units.json")" == "$want" ]] ||
+    fail "the unit planner gave $(jq -c . "$work/.claude-review/units.json"), not $want"
+[[ "$(jq -c 'sort' "$work/.claude-review/skipped.json")" == '["Cargo.lock","api/pixtuoid-core.txt","assets/blob.bin","crates/a/src/snapshots/x.snap","docs/images/x.png","site/package-lock.json"]' ]] ||
+    fail "the unit planner skipped $(jq -c . "$work/.claude-review/skipped.json")"
+grep -qx 'units=4' "$units_dir/output" || fail "the unit planner did not report units=4: $(<"$units_dir/output")"
+[[ "$(<"$work/.claude-review/head/crates/a/src/one.rs")" == "head of crates/a/src/one.rs" ]] ||
+    fail "the unit planner did not copy a kept file's head"
+[[ ! -e "$work/.claude-review/head/crates/b/src/gone.rs" ]] || fail "the unit planner copied a removed file's head"
+[[ ! -e "$work/.claude-review/head/Cargo.lock" ]] || fail "the unit planner copied a skipped file's head"
+
+unit_file Cargo.lock 12 >"$units_dir/files.jsonl"
+work="$(run_units lock-only)"
+if ! { [[ "$(jq -c . "$work/.claude-review/units.json")" == '[]' ]] && grep -qx 'units=0' "$units_dir/output"; }; then
+    fail "a lockfile-only PR did not plan zero units"
+fi
+
+unit_file ../escape.rs 3 >"$units_dir/files.jsonl"
+work="$units_dir/work-escape"
+rm -rf "$work"
+mkdir -p "$work/.claude-review"
+if (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" GITHUB_OUTPUT="$units_dir/output" \
+    GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 bash -c "$units_script") 2>/dev/null; then
+    fail "the unit planner copied a path that climbs out of the head directory"
+fi
