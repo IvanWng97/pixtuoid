@@ -1,5 +1,7 @@
 // The lib's rule, for the same reason (see its crate root).
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+// AGENTS.md's Errors rule, as a lint: no `unwrap()` outside tests.
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
 
 use std::io::Write;
 

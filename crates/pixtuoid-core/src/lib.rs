@@ -36,6 +36,8 @@
 // Scoped here rather than `[workspace.lints]` because only this PUBLISHED
 // crate's `pub` items are a semver surface.
 #![warn(missing_docs)]
+// AGENTS.md's Errors rule, as a lint: no `unwrap()` outside tests.
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
 
 pub mod grid;
 /// The offline decode→reduce driver every test/tool that feeds real wire bytes
