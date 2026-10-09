@@ -114,6 +114,15 @@ for (let i = 0; i < supported.length; i += TOOL_COLUMNS) {
     .map((s) => `<td width="${100 / TOOL_COLUMNS}%"><a href="${esc(s.url)}">${esc(s.name)}</a></td>`);
   toolRows.push(`<tr>${cells.join('')}</tr>`);
 }
+// The grid names no OS, so an OS any supported tool runs on only experimentally
+// gets its caveat here: a Windows user installs from this page.
+const OS_LABELS = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
+const experimentalNotes = Object.entries(OS_LABELS).flatMap(([os, label]) => {
+  const n = supported.filter((s) => s.platforms?.[os] === 'experimental').length;
+  if (!n) return [];
+  const scope = n === supported.length ? '' : ' for some tools';
+  return [`_${label} support is experimental${scope} — limited testing, unsigned binaries._`];
+});
 regenSection(
   'Supported-tools glimpse',
   '<!-- tools:start · generated from site/src/sources.json by `just gen-readme` — edit the JSON, not this table -->',
@@ -125,6 +134,7 @@ regenSection(
     '',
     ...(planned.length ? [`_Planned: ${planned.map((s) => cell(s.name)).join(', ')}._`, ''] : []),
     `**→ [Every tool × OS on the site](${SITE}/#tools)**`,
+    ...experimentalNotes.map((n) => `\n${n}`),
   ].join('\n')
 );
 

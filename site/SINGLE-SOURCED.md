@@ -15,10 +15,6 @@ only carries what no gate can.
 
 Notes no gate carries:
 
-- **`sources.json`'s `featured` is NOT dead data** (#694): its consumer is
-  `scripts/gen-readme.mjs` (featured table vs "_Also supported:_" tail). The
-  site never reads it, which is why a site-scoped grep keeps "rediscovering"
-  it as dead.
 - The §3 proof media (`demos/proof*`) renders over the committed proof-session
   fixture — retime the fixture, not the component.
 

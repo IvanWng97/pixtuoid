@@ -110,6 +110,8 @@ Then:
 </table>
 
 **→ [Every tool × OS on the site](https://pixtuoid.dev/#tools)**
+
+_Windows support is experimental — limited testing, unsigned binaries._
 <!-- tools:end -->
 
 ## Configuration
