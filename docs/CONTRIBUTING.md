@@ -90,11 +90,13 @@ CodSpeed skip drafts. The jobs:
   capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
-- **One automatic Claude reviewer per [`REVIEW.md`](../REVIEW.md) lens**
-  rides `claude-readonly-review.yml`: a read-only model job on the trusted
-  default branch, the PR diff, title, body and the lens's prior threads as
-  inert data, and a separate least-privilege publisher that opens a review
-  thread per finding and sets the lens's `claude-review/<lens>` status.
+- **The automatic Claude review** rides `claude-readonly-review.yml`: on the
+  trusted default branch, a read-only model reads the PR diff, its head files,
+  title, body and prior threads as inert data, and spawns the
+  [`REVIEW.md`](../REVIEW.md#scope) readers: repeated passes per planned unit,
+  one per lens over the whole diff, a verifier per candidate. A unit it skips
+  fails the run; a separate least-privilege publisher opens a review thread
+  per finding and sets each lens's `claude-review/<lens>` status.
   `claude.yml` refuses fork PR heads.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
@@ -206,7 +208,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    whole-file comment audit: every file the PR touches — even by one line —
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
+   [`REVIEW.md`](../REVIEW.md#unit)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
