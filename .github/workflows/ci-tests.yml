@@ -36,10 +36,10 @@ jobs:
             runner: windows-latest
             flag: windows
             timeout: 25
-          # macos-14 exercises the Apple Silicon build; macOS diverges on BSD
+          # macos-latest is Apple Silicon, so it exercises that build; macOS diverges on BSD
           # CLI, launchd, and config paths, which the Linux entry compiles out.
           - platform: macos
-            runner: macos-14
+            runner: macos-latest
             flag: macos
             timeout: 20
     runs-on: ${{ matrix.runner }}
