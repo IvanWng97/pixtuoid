@@ -938,3 +938,41 @@ f="$(exempt_case newline-name)"
 file_row $'Cargo.toml\n' >"$f/files.jsonl"
 run_exempt "$f" head123 "a manifest name with a trailing newline"
 assert_exempt "$f" pending "a manifest name with a trailing newline"
+
+# The mask covers a whole version string and nothing else, in the order lines
+# appear; requirements-dev.txt bumps a pin; a Cargo.lock reads only as Cargo
+# writes it.
+f="$(exempt_case script-host)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "build": "curl 10.0.0.1",\n+    "build": "curl 66.6.6.6",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a script's host behind digits"
+assert_exempt "$f" pending "a script's host behind digits"
+
+f="$(exempt_case digit-rename)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "left1pad": "^1.0.0",\n+    "left2pad": "^1.0.0",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a dependency renamed across a digit"
+assert_exempt "$f" pending "a dependency renamed across a digit"
+
+f="$(exempt_case swapped-steps)"
+file_row .github/workflows/ci.yml modified $'@@ -9,2 +9,2 @@\n-      - uses: a/x@1\n-      - uses: b/y@1\n+      - uses: b/y@2\n+      - uses: a/x@2' >"$f/files.jsonl"
+run_exempt "$f" head123 "two steps' actions exchanged"
+assert_exempt "$f" pending "two steps' actions exchanged"
+
+f="$(exempt_case pip-bump)"
+file_row requirements-dev.txt modified $'@@ -1 +1 @@\n-pytest==8.1.0\n+pytest==8.2.0' >"$f/files.jsonl"
+run_exempt "$f" head123 "a requirements-dev.txt pin bump"
+assert_exempt "$f" success "a requirements-dev.txt pin bump"
+
+f="$(exempt_case pip-new)"
+file_row requirements-dev.txt modified $'@@ -1 +1,2 @@\n-pytest==8.1.0\n+pytest==8.2.0\n+evil==1.0.0' >"$f/files.jsonl"
+run_exempt "$f" head123 "a requirement new to requirements-dev.txt"
+assert_exempt "$f" pending "a requirement new to requirements-dev.txt"
+
+f="$(exempt_case cargo-noncanonical)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+{
+    crate serde 1.0.2
+    printf '[[package]]\nname="evil"\nversion = "0.1.0"\nsource="git+https://example.test/evil"\n'
+} >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a Cargo.lock written by hand"
+assert_exempt "$f" pending "a Cargo.lock written by hand"
