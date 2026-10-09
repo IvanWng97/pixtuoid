@@ -1147,3 +1147,33 @@ assert_gate 0 "a plan with no units" "$(
     spawn c correctness-reviewer x
     spawn d design-reviewer x
 )" '[]' 0
+
+# ── apt-install: a download attempt past its bound retries, and the install
+# itself never runs under the bound.
+apt_script="$(yq -e -r '.runs.steps[0].run' .github/actions/apt-install/action.yml)" ||
+    fail "apt-install has no run step"
+apt_dir="$test_dir/apt"
+mkdir -p "$apt_dir/bin"
+# shellcheck disable=SC2016 # The stubs read their fixtures when they run.
+printf '%s\n' '#!/usr/bin/env bash' 'printf "timeout %s\n" "$*" >>"$APT_LOG"; shift; "$@"' >"$apt_dir/bin/timeout"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' '"$@"' >"$apt_dir/bin/sudo"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' 'n=$(($(cat "$APT_LOG.n" 2>/dev/null || echo 0) + 1)); echo $n >"$APT_LOG.n"' \
+    'printf "apt-get %s\n" "$*" >>"$APT_LOG"' '[[ " $* " != *" update "* || $n -gt $APT_FAILS ]]' >"$apt_dir/bin/apt-get"
+chmod +x "$apt_dir/bin/"*
+run_apt() {
+    rm -f "$apt_dir/log" "$apt_dir/log.n"
+    PATH="$apt_dir/bin:$PATH" APT_LOG="$apt_dir/log" APT_FAILS="$1" PACKAGES="pkg-a pkg-b" ATTEMPTS=3 ATTEMPT_TIMEOUT=120 \
+        bash -c "$apt_script" >/dev/null 2>&1
+}
+run_apt 0 || fail "apt-install failed with a healthy mirror"
+grep -q '^apt-get .*install -y --no-download pkg-a pkg-b$' "$apt_dir/log" ||
+    fail "apt-install did not install the downloaded packages: $(<"$apt_dir/log")"
+if grep -q '^timeout .*--no-download' "$apt_dir/log"; then fail "apt-install bounded the install itself"; fi
+grep -q '^timeout 120 sudo apt-get .*install -y --download-only pkg-a pkg-b$' "$apt_dir/log" ||
+    fail "apt-install did not bound the package download: $(<"$apt_dir/log")"
+run_apt 2 || fail "apt-install did not recover on its last attempt"
+[[ "$(grep -c '^timeout 120 sudo apt-get .* update$' "$apt_dir/log")" == 3 ]] || fail "apt-install did not retry each failed attempt"
+run_apt 3 && fail "apt-install passed after every attempt failed"
+! grep -q -- '--no-download' "$apt_dir/log" || fail "apt-install installed after every download failed"

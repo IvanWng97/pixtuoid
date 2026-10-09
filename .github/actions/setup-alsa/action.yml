@@ -5,12 +5,7 @@ runs:
   using: 'composite'
   steps:
     # alsa-sys's build script PANICS when pkg-config can't find the headers
-    # (#633), so this rides every Linux job that compiles the workspace. A
-    # stalled mirror never fails, so only the timeouts let Retries act (#360).
-    - name: Install ALSA headers
-      if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-        sudo apt-get "${apt_opts[@]}" update
-        sudo apt-get "${apt_opts[@]}" install -y libasound2-dev
+    # (#633), so this rides every Linux job that compiles the workspace.
+    - uses: ./.github/actions/apt-install
+      with:
+        packages: libasound2-dev

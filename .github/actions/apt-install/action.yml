@@ -1,0 +1,35 @@
+name: 'apt install'
+description: 'Installs Debian packages on Linux, each download attempt bounded in time'
+
+inputs:
+  packages:
+    description: 'Space-separated package names'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    # A stalled mirror never fails (#360) and a trickling one resets the idle
+    # timeouts, so only a wall-clock bound lets a retry act.
+    # It covers the downloads alone: killing dpkg mid-unpack would leave the
+    # runner half-installed.
+    - name: Install ${{ inputs.packages }}
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        ATTEMPTS: '3'
+        ATTEMPT_TIMEOUT: '120'
+      run: |
+        set -euo pipefail
+        read -ra packages <<< "$PACKAGES"
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        for ((attempt = 1; ; attempt++)); do
+          if timeout "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" update &&
+            timeout "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" install -y --download-only "${packages[@]}"; then
+            break
+          fi
+          ((attempt < ATTEMPTS)) || { echo "::error title=apt download failed::$PACKAGES after $ATTEMPTS attempts"; exit 1; }
+          echo "::warning title=apt download retried::attempt $attempt of $ATTEMPTS"
+        done
+        sudo apt-get "${apt_opts[@]}" install -y --no-download "${packages[@]}"
