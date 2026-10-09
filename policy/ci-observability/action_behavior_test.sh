@@ -1107,37 +1107,49 @@ assert_gate 0 "a plan with no units" "$(
     spawn d design-reviewer x
 )" '[]' 0
 
-# ── apt-install: a download attempt past its bound retries, and the install
-# itself never runs under the bound.
-apt_script="$(yq -e -r '.runs.steps[0].run' .github/actions/apt-install/action.yml)" ||
-    fail "apt-install has no run step"
+# ── apt-install: a failed or stalled update or download retries under the
+# action's own bound, and the install never runs under it or after a failed
+# download.
+apt_action=.github/actions/apt-install/action.yml
+apt_script="$(yq -e -r '.runs.steps[0].run' "$apt_action")" || fail "apt-install has no run step"
+apt_attempts="$(yq -e -r '.runs.steps[0].env.ATTEMPTS' "$apt_action")" || fail "apt-install sets no ATTEMPTS"
+apt_bound="$(yq -e -r '.runs.steps[0].env.ATTEMPT_TIMEOUT' "$apt_action")" || fail "apt-install sets no ATTEMPT_TIMEOUT"
 apt_dir="$test_dir/apt"
 mkdir -p "$apt_dir/bin"
 # shellcheck disable=SC2016 # The stubs read their fixtures when they run.
 printf '%s\n' '#!/usr/bin/env bash' 'printf "timeout %s\n" "$*" >>"$APT_LOG"; while [[ "$1" == -* ]]; do shift 2; done; shift; "$@"' >"$apt_dir/bin/timeout"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' '"$@"' >"$apt_dir/bin/sudo"
+# Fails the first APT_FAILS calls of the kind APT_FAIL_ON names.
 # shellcheck disable=SC2016
-printf '%s\n' '#!/usr/bin/env bash' 'n=$(($(cat "$APT_LOG.n" 2>/dev/null || echo 0) + 1)); echo $n >"$APT_LOG.n"' \
-    'printf "apt-get %s\n" "$*" >>"$APT_LOG"' '[[ " $* " != *" update "* || $n -gt $APT_FAILS ]]' >"$apt_dir/bin/apt-get"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "apt-get %s\n" "$*" >>"$APT_LOG"' \
+    'case " $* " in *" update "*) kind=update ;; *" --download-only "*) kind=download ;; *) exit 0 ;; esac' \
+    '[[ "$kind" == "$APT_FAIL_ON" ]] || exit 0' \
+    'n=$(($(cat "$APT_LOG.n" 2>/dev/null || echo 0) + 1)); echo $n >"$APT_LOG.n"; ((n > APT_FAILS))' >"$apt_dir/bin/apt-get"
 chmod +x "$apt_dir/bin/"*
 run_apt() {
     rm -f "$apt_dir/log" "$apt_dir/log.n"
-    PATH="$apt_dir/bin:$PATH" APT_LOG="$apt_dir/log" APT_FAILS="$1" PACKAGES="pkg-a pkg-b" RECOMMENDS="${2:-true}" ATTEMPTS=3 ATTEMPT_TIMEOUT=120 \
-        bash -c "$apt_script" >/dev/null 2>&1
+    PATH="$apt_dir/bin:$PATH" APT_LOG="$apt_dir/log" APT_FAIL_ON="$1" APT_FAILS="$2" PACKAGES="pkg-a pkg-b" \
+        RECOMMENDS="${3:-true}" ATTEMPTS="$apt_attempts" ATTEMPT_TIMEOUT="$apt_bound" bash -c "$apt_script" >/dev/null 2>&1
 }
-run_apt 0 || fail "apt-install failed with a healthy mirror"
-grep -q '^apt-get .*install -y --no-download pkg-a pkg-b$' "$apt_dir/log" ||
+apt_count() { grep -c -e "$1" "$apt_dir/log" || true; }
+run_apt none 0 || fail "apt-install failed with a healthy mirror"
+[[ "$(apt_count "^timeout -k 10 $apt_bound sudo apt-get .*install -y --download-only pkg-a pkg-b$")" == 1 ]] ||
+    fail "apt-install did not bound the package download by its ATTEMPT_TIMEOUT: $(<"$apt_dir/log")"
+[[ "$(apt_count '^apt-get .*install -y --no-download pkg-a pkg-b$')" == 1 ]] ||
     fail "apt-install did not install the downloaded packages: $(<"$apt_dir/log")"
 if grep -q '^timeout .*--no-download' "$apt_dir/log"; then fail "apt-install bounded the install itself"; fi
-grep -q '^timeout -k 10 120 sudo apt-get .*install -y --download-only pkg-a pkg-b$' "$apt_dir/log" ||
-    fail "apt-install did not bound the package download: $(<"$apt_dir/log")"
-run_apt 2 || fail "apt-install did not recover on its last attempt"
-[[ "$(grep -c '^timeout -k 10 120 sudo apt-get .* update$' "$apt_dir/log")" == 3 ]] || fail "apt-install did not retry each failed attempt"
-run_apt 3 && fail "apt-install passed after every attempt failed"
-! grep -q -- '--no-download' "$apt_dir/log" || fail "apt-install installed after every download failed"
-run_apt 0 false || fail "apt-install failed without recommends"
-[[ "$(grep -c '^apt-get .*install -y --no-install-recommends' "$apt_dir/log")" == 2 ]] ||
+for kind in update download; do
+    run_apt "$kind" $((apt_attempts - 1)) || fail "apt-install did not recover from a failed $kind on its last attempt"
+    pattern=" update\$"
+    [[ "$kind" == download ]] && pattern=" --download-only pkg-a pkg-b\$"
+    [[ "$(apt_count "^timeout .*$pattern")" == "$apt_attempts" ]] ||
+        fail "apt-install did not retry each failed $kind: $(<"$apt_dir/log")"
+    run_apt "$kind" "$apt_attempts" && fail "apt-install passed after every $kind failed"
+    [[ "$(apt_count '--no-download')" == 0 ]] || fail "apt-install installed after every $kind failed"
+done
+run_apt none 0 false || fail "apt-install failed without recommends"
+[[ "$(apt_count '^apt-get .*install -y --no-install-recommends')" == 2 ]] ||
     fail "apt-install did not drop recommends from both the download and the install: $(<"$apt_dir/log")"
 
 # ── path-changed: a PR's merge commit against its base parent; anything it
@@ -1151,12 +1163,13 @@ git -C "$repo" checkout -qb pr && echo b >"$repo/other" && git -C "$repo" commit
 git -C "$repo" checkout -q - && git -C "$repo" merge -q --no-ff --no-edit pr
 changed() {
     : >"$test_dir/changed-output"
-    (cd "$1" && GITHUB_EVENT_NAME="$2" GITHUB_OUTPUT="$test_dir/changed-output" CHANGED_PATH="$3" bash -c "$changed_script") ||
+    (cd "$1" && GITHUB_EVENT_NAME="$2" GITHUB_OUTPUT="$test_dir/changed-output" CHANGED_PATHS="$3" bash -c "$changed_script") ||
         fail "path-changed exited non-zero"
     sed -n 's/^changed=//p' "$test_dir/changed-output"
 }
 [[ "$(changed "$repo" pull_request other)" == true ]] || fail "path-changed missed a path the PR changes"
 [[ "$(changed "$repo" pull_request lock)" == false ]] || fail "path-changed reported a path the PR leaves alone"
+[[ "$(changed "$repo" pull_request "lock other")" == true ]] || fail "path-changed missed one changed path among several"
 [[ "$(changed "$repo" push other)" == false ]] || fail "path-changed judged a push as a PR"
-git init -q "$test_dir/no-parent" && git -C "$test_dir/no-parent" commit -q --allow-empty -m only
+git init -q "$test_dir/no-parent" && git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q --allow-empty -m only
 [[ "$(changed "$test_dir/no-parent" pull_request lock)" == true ]] || fail "path-changed passed a diff it could not run"

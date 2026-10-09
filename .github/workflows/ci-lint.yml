@@ -54,7 +54,8 @@ jobs:
       - uses: ./.github/actions/path-changed
         id: lockfile
         with:
-          path: Cargo.lock
+          # deny.toml decides the verdict as much as the graph does.
+          paths: Cargo.lock deny.toml
       - if: steps.lockfile.outputs.changed == 'true'
         run: just deny-advisories
 

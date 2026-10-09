@@ -28,8 +28,9 @@ on:
 # environment, and in `release` with the OIDC claim crates.io trades for a
 # publish token. `release-plz.toml` turned both on deliberately. A GitHub App
 # installation token (~1 h, `actions/create-github-app-token`) would bound the
-# PAT, not the claim; the `release` environment's required reviewer bounds
-# which runs get either, never what runs inside an approved one.
+# PAT, not the claim. The `release` environment's required reviewer bounds
+# which `release` runs get them; `release-pr` holds the PAT behind its
+# dispatch-from-main `if` alone, and nothing bounds what runs inside either.
 permissions: {}
 
 # Push runs go one at a time, in order: a push merged while a release run waits

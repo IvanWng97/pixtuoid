@@ -24,10 +24,10 @@ runs:
         cache-dependency-path: ${{ inputs.directory }}/package-lock.json
     # A Node major's bundled npm can predate the complete allowScripts
     # toolchain, so pin it before npm ci or install-script policy goes
-    # unenforced.
+    # unenforced. The site's `packageManager` is the repo's one npm version.
     - name: Install pinned npm
       shell: bash
-      run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact npm bootstrap before the lockfile install
+      run: npm install --global "$(jq -r .packageManager site/package.json)" # zizmor: ignore[adhoc-packages] exact packageManager bootstrap before the lockfile install
     - name: Install dependencies
       shell: bash
       working-directory: ${{ inputs.directory }}

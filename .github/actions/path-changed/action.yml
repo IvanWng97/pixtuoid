@@ -1,14 +1,14 @@
 name: 'Path changed'
-description: 'Whether a pull request changes a path, from the merge commit against its base parent'
+description: 'Whether a pull request changes any of some paths, from the merge commit against its base parent'
 
 inputs:
-  path:
-    description: 'The path to compare'
+  paths:
+    description: 'Space-separated paths to compare'
     required: true
 
 outputs:
   changed:
-    description: '"true" when a pull request changes the path'
+    description: '"true" when a pull request changes any of the paths'
     value: ${{ steps.diff.outputs.changed }}
 
 runs:
@@ -20,11 +20,12 @@ runs:
     - id: diff
       shell: bash
       env:
-        CHANGED_PATH: ${{ inputs.path }}
+        CHANGED_PATHS: ${{ inputs.paths }}
       run: |
         set -uo pipefail
+        read -ra paths <<< "$CHANGED_PATHS"
         changed=false
-        if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && ! git diff --quiet HEAD^1 HEAD -- "$CHANGED_PATH"; then
+        if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && ! git diff --quiet HEAD^1 HEAD -- "${paths[@]}"; then
           changed=true
         fi
         echo "changed=$changed" >> "$GITHUB_OUTPUT"

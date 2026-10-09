@@ -50,6 +50,9 @@ a push to `main` or a manual dispatch
 ([two-step CI](https://docs.mergify.com/merge-queue/two-step/)). CodeQL and
 CodSpeed skip drafts. The jobs:
 
+- **advisories** — `just deny-advisories` when a PR changes `Cargo.lock` or
+  `deny.toml`, and site's and Raycast's `npm run audit` when their lockfile
+  changes; `audit.yml` runs all three daily.
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
@@ -140,8 +143,9 @@ a lint to dodge the bump.
    publishes every crate to crates.io over OIDC, creates `vX.Y.Z` and a DRAFT
    GitHub release carrying the changelog; the tag then fires `release.yml`,
    which builds every target in its build matrix and the debs, attaches them,
-   publishes the draft, and publishes the npm packages. The tag also starts a
-   homebrew-core autobump.
+   publishes the draft, and publishes the npm packages. The crates.io and npm
+   jobs each wait for an approval from the `release` environment's reviewer,
+   crates.io first. The tag also starts a homebrew-core autobump.
 
 The crates.io upload happens in the `release` job on the merge push, which
 first waits for that commit's own `ci-gate`: a failure or timeout publishes
@@ -183,7 +187,8 @@ bot opens the PR itself within ~3 hours of the tag. Watch THAT PR's CI and
 intervene only if it reds.
 
 Publishing uses **OIDC trusted publishing** — CI carries no registry tokens;
-the per-crate/per-package Trusted Publishers must exist before the tag
+the per-crate/per-package Trusted Publishers, each naming environment
+`release`, must exist before the tag
 ([#216](https://github.com/IvanWng97/pixtuoid/issues/216)).
 
 ## The arc loop

@@ -1,7 +1,7 @@
 # Every caller inherits the widened graph here: `just deny` and
 # `just deny-advisories`, local and in CI. Without it the graph is
-# default-features-only, so a dep behind a non-default feature leaves the
-# bans/licenses/sources gate while advisories still see it.
+# default-features-only, so a dep behind a non-default feature would leave
+# every check, advisories included.
 [graph]
 all-features = true
 

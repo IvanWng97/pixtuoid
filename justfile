@@ -168,7 +168,7 @@ actionlint-composites:
 # audit that needs the GitHub API (`RUST_LOG=debug zizmor` names each;
 # typosquat-uses still runs, at reduced confidence). ci-lint.yml's hygiene job passes
 # GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless.
-# Same call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
+# Same call as `links` (--offline) and `deny` (advisories in `deny-advisories`): a
 # check whose verdict depends on the network and an upstream feed must not
 # redden a push of unchanged code. Do NOT auto-export `gh auth token` to close
 # the gap — it puts a real token on the wire on every pre-push run and makes the
@@ -236,8 +236,8 @@ machete:
 deny:
     cargo deny check bans licenses sources
 
-# Advisories judge the whole graph, so they run where it changes (a PR that
-# touches Cargo.lock) and on audit.yml's schedule.
+# Advisories judge the whole graph, so they run where it or its policy changes
+# (a PR that touches Cargo.lock or deny.toml) and on audit.yml's schedule.
 [group('rust')]
 deny-advisories:
     cargo deny check advisories
@@ -318,7 +318,7 @@ lint:
 # process and nextest's per-test processes pass different suites (#1104's omp
 # hang showed under only one), so a fallback runs a suite CI never ran. The
 # recipe adds no `--workspace`, which would override a caller's `-p`; a caller
-# meaning every member, like ci-tests.yml, passes it.
+# meaning every member passes it.
 [doc('Run the tests under cargo-nextest; forwards args (e.g. -p <crate> <filter>)')]
 [group('rust')]
 test *args:
@@ -528,7 +528,7 @@ _doc-targets:
 
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
-[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs on the full tier (needs llvm-cov + nextest)')]
+[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs on every tier, the full one uploading it (needs llvm-cov + nextest)')]
 [group('rust')]
 coverage:
     TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
