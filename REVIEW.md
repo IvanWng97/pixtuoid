@@ -7,9 +7,8 @@ diff touches, first; these rules add to generic defect hunting.
 
 Each reader applies [Common](#common) and its own section, nothing else:
 
-- The automatic review's orchestrator merges duplicate candidates, keeps what
-  the [verifier](#verifier) keeps, and applies [Re-review](#re-review) and
-  [Output](#output).
+- The automatic review's [orchestrator](#orchestrator) merges duplicate
+  candidates and keeps what the [verifier](#verifier) keeps.
 - A unit reviewer applies [Unit](#unit) to the files of one unit.
 - The correctness reviewer applies its [lens](#correctness) to the whole diff,
   plus every matching [escalation](#escalation) row, and names the local rows.
@@ -80,6 +79,25 @@ taste with no defect is never posted. Dispositions:
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 
+### Findings
+
+Each finding carries:
+
+- `severity`: the [label](#severity)'s decoration.
+- `lens`: the [lens](#lenses) the finding falls under.
+- `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
+- `line`: the absolute head-side line, never invented.
+- `body`: the verified finding and a concrete failure scenario; a
+  maintenance defect's is the edit that would leave a copy or a comment wrong.
+
+## Orchestrator
+
+Return only the structured result
+[`review-schema.json`](.github/prompts/review-schema.json) defines: a
+one-sentence `summary` and the kept findings, every blocking one first and
+pre-existing last. The summary counts any finding past the schema's `maxItems`
+ceiling.
+
 ### Re-review
 
 Never re-flag a finding that already has a thread in
@@ -91,21 +109,6 @@ new findings follow [Severity](#severity). From round 3 (`Round:` in
 rest in the summary, as the
 [convergence contract](docs/CONTRIBUTING.md#convergence-contract) folds only
 those after round 2.
-
-### Output
-
-The review returns only the structured result
-[`review-schema.json`](.github/prompts/review-schema.json) defines:
-
-- `summary`: one sentence.
-- `severity`: the [label](#severity)'s decoration.
-- `lens`: the [lens](#lenses) the finding falls under.
-- `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
-- `line`: the absolute head-side line, never invented.
-- Every blocking finding first, pre-existing last. The summary counts any
-  finding past the schema's `maxItems` ceiling.
-- Each `body`: the verified finding and a concrete failure scenario; a
-  maintenance defect's is the edit that would leave a copy or a comment wrong.
 
 ## Unit
 
@@ -123,16 +126,13 @@ scope, `issue (pre-existing)` when the diff did not introduce it.
    Test fixtures stay inline.
 3. **Drift** — docs naming a moved file/fn/flag/count, searched including
    `.github/` and `.claude/`.
-4. **Unwired additions** — every new field/flag/parameter/asset/gate has a live
-   consumer in the same diff (`_x` bindings and `pub` fields evade the lints).
-5. **Test teeth** for every test the unit holds, as [Correctness](#correctness)
+4. **Test teeth** for every test the unit holds, as [Correctness](#correctness)
    defines it.
 
 ## Lenses
 
 A finding's `lens` is the section that names its kind; a unit's comment, DRY
-and drift findings are design, its unwired-addition and test findings
-correctness.
+and drift findings are design, its test findings correctness.
 
 ### Correctness
 
@@ -148,6 +148,8 @@ modules nor examples).
   shape; whether a source owes a row is `source/drift.rs`'s header.
 - **Manifest bridge** — `site/src/*.json` and generated schemas vs their Rust
   source of truth.
+- **Unwired additions** — every new field/flag/parameter/asset/gate has a live
+  consumer in the same diff (`_x` bindings and `pub` fields evade the lints).
 - **Population** — a gate, build flag or config key that selects a set
   (crates, features, targets, jobs, a gate's own tests): name the set before
   and after; a silent shrink is a defect (#1012, #1101, #1103, #1123).

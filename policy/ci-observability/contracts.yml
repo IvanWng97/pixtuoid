@@ -45,23 +45,27 @@
     The model reads untrusted diff text and its answer is published, so any
     reach beyond reading the checkout lets an injection act or publish a runner
     secret. dontAsk denies what no allow rule approves, `--tools` leaves only
-    read tools and the Agent tool, whose subagents are the committed
-    definitions reviewer-agents-only-read holds, and
+    read tools and the Agent tool, the step's env leaves that tool only the
+    committed definitions reviewer-agents-only-read holds (a built-in
+    subagent holds every tool, code.claude.com/docs/en/sub-agents),
+    `claudeMdExcludes` keeps a PR's own AGENTS.md under the head copies from
+    loading as instructions (code.claude.com/docs/en/memory), and
     `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
     (code.claude.com/docs/en/settings-reference). `--setting-sources user`
     drops the checkout's `.claude/` settings, which can add a hook and which
     the action loads by default
     (github.com/anthropics/claude-code-action/blob/v1/base-action/src/parse-sdk-options.ts);
-    the action parses only its space-separated form. Any other flag, action input
-    or settings key can add a rule, a tool, a hook or a directory, so all three
-    are allowlists; other values stay free. `allowed_bots` admits only
+    the action parses only its space-separated form. Any other flag, action input,
+    env var or settings key can add a rule, a tool, a hook or a directory, so all
+    four are allowlists; other values stay free. `allowed_bots` admits only
     media-regen.yml's own app (its PR touches only docs/images), never `*`,
     which would let any App's push trigger it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
       and ((.[0].with.allowed_bots // "") == "pixtuoid-bot[bot]")
+      and .[0].env == {"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
       and ((.[0].with | keys) - [
             "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
@@ -79,7 +83,8 @@
              and [$args | scan("--agents[ =](.*?)(?= --|$)")] == [["${{ steps.schema.outputs.agents }}"]]
              and ([$args | scan("--settings")] | length == 1)
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
-                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
+                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true},
+                                 "claudeMdExcludes": ["**/.claude-review/**"]}))
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.allowed_bots)
@@ -133,6 +138,18 @@
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"additional_permissions": "actions: write"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env)
+      |= del(.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS)
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env)
+      |= del(.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env.ANTHROPIC_BASE_URL)
+      = "https://example.test"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(",\"claudeMdExcludes\":\\[[^]]*\\]"; "")
 
 - id: reviewer-agents-only-read
   file: .github/prompts/review-agents.json
@@ -141,7 +158,7 @@
     definition without `tools` inherits every tool, and `mcpServers`, `hooks`,
     `permissionMode` or `skills` widen its reach
     (code.claude.com/docs/en/sub-agents), so tools are an allowlist that holds
-    no Agent, which also keeps a subagent from spawning one, and so are keys.
+    no Agent, which keeps a subagent from spawning one, and so are keys.
   assert: |
     length > 0
     and all(.[];

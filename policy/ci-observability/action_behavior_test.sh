@@ -117,7 +117,7 @@ prompt="$(yq -e -r '.jobs.analyze.steps[] | select(.name == "Run read-only Claud
 # shellcheck disable=SC2016 # A workflow expression, matched literally.
 for part in .claude-review/ pr-description.json prior-threads.json units.json head/ '${{ env.UNIT_PASSES }} times'; do
     [[ "$prompt" == *"$part"* ]] ||
-        fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name \"$part\", an input or the passes the coverage gate holds it to"
+        fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name \"$part\", an input or the passes the plan gate holds it to"
 done
 review_lenses="$(awk '/^## /{on = ($0 == "## Lenses")} on && /^### /{print tolower(substr($0, 5))}' "$REVIEW_RULES_FILE" | sort)"
 [[ -n "$review_lenses" ]] || fail "$REVIEW_RULES_FILE has no \"### <lens>\" under \"## Lenses\""
@@ -138,6 +138,8 @@ review_title="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_TITLE"
 unit_passes="$(yq -e -r '.env.UNIT_PASSES' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level UNIT_PASSES"
+review_safe_path="$(yq -e -r '.env.REVIEW_SAFE_PATH' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_SAFE_PATH"
 run_url="https://github.test/owner/repo/actions/runs/7"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
@@ -222,8 +224,11 @@ run_publisher() {
         BOUNDS="${FAKE_BOUNDS-$bounds}" \
         PR_NUMBER="42" \
         REPOSITORY="owner/repo" \
+        REFUTED="${REFUTED-0}" \
         REVIEW_CONTEXT="$review_context" \
         REVIEW_JSON="$review_json" \
+        REVIEW_SAFE_PATH="$review_safe_path" \
+        SKIPPED="${SKIPPED-[]}" \
         REVIEW_LENSES="$lenses_json" \
         REVIEW_TITLE="$review_title" \
         RUN_URL="$run_url" \
@@ -264,7 +269,7 @@ assert_threads() {
         fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
 }
 
-valid_review='{"summary":"No correctness findings.","findings":[],"coverage":[],"dropped":0}'
+valid_review='{"summary":"No correctness findings.","findings":[]}'
 run_publisher "$valid_review" ||
     fail "Claude publisher rejected a valid zero-finding review"
 assert_status '.state == "success" and .sha == "abc123"' "a published review passes every lens at the reviewed head"
@@ -276,22 +281,27 @@ assert_status '.state == "success" and .sha == "abc123"' "a published review pas
     fail "Claude publisher posted a review thread for zero findings"
 
 run_publisher "$(jq -cn --argjson s "$severities" \
-    '{summary: "s", findings: [$s[] | {severity: ., lens: "correctness", path: "src/a.rs", line: 2, body: "b"}],
-        coverage: [], dropped: 0}')" ||
+    '{summary: "s", findings: [$s[] | {severity: ., lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}')" ||
     fail "Claude publisher rejected a severity the schema allows: $severities"
 [[ "$(<"$published_comment")" == *"$(jq -r '"**Findings: \(length)** (\(map("1 \(.)") | join(", ")))"' <<<"$severities")"* ]] ||
     fail "Claude publisher's count line does not count each of the schema's severities: $(<"$published_comment")"
 assert_status '.state == "success"' "findings still pass the status: their threads block"
-one_finding='{"summary":"s","findings":[{"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"b"}],"coverage":[],"dropped":0}'
-for bad in '.findings[0].severity = "nit"' '.findings[0].lens = "style"' 'del(.findings[0].lens)' \
-    'del(.coverage)' 'del(.dropped)' '.dropped = -1' '.dropped = 1.5'; do
+one_finding='{"summary":"s","findings":[{"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"b"}]}'
+for bad in '.findings[0].severity = "nit"' '.findings[0].lens = "style"' 'del(.findings[0].lens)' '.coverage = []'; do
     run_publisher "$(jq -c "$bad" <<<"$one_finding")" >/dev/null 2>&1 &&
         fail "Claude publisher accepted a review with $bad"
 done
-run_publisher "$(jq -c '.dropped = 3' <<<"$valid_review")" >/dev/null ||
-    fail "Claude publisher rejected a review with refuted candidates"
+for bad in "REFUTED=" "REFUTED=-1" "REFUTED=1.5" "SKIPPED=" 'SKIPPED={}' 'SKIPPED=[1]'; do
+    (export "${bad?}" && run_publisher "$valid_review") >/dev/null 2>&1 &&
+        fail "Claude publisher accepted the analyze output $bad"
+done
+REFUTED=3 SKIPPED='["Cargo.lock", "a b.rs", "docs/images/x.png"]' run_publisher "$valid_review" >/dev/null ||
+    fail "Claude publisher rejected a review with refuted candidates and skipped files"
 [[ "$(<"$published_comment")" == *"Refuted by the verifier: 3"* ]] ||
     fail "Claude publisher's summary does not count the candidates the verifier refuted"
+# shellcheck disable=SC2016 # Markdown backticks, matched literally.
+[[ "$(<"$published_comment")" == *'Not reviewed: `Cargo.lock`, `docs/images/x.png`, 1 unsafe path(s)'* ]] ||
+    fail "Claude publisher's summary does not list what was not reviewed, unsafe paths counted: $(<"$published_comment")"
 bad_bounds=("" "$(with_bounds '.severities = []')" "$(with_bounds '.severities = ["blocking", "**x**"]')")
 for key in max_findings path_max summary_max body_max; do
     bad_bounds+=("$(with_bounds "del(.$key)")" "$(with_bounds ".$key = 0")" "$(with_bounds ".$key = 1.5")")
@@ -316,8 +326,7 @@ assert_schema_bound() {
 
 findings_of() {
     jq -cn --argjson s "$severities" --argjson n "$1" \
-        '{summary: "s", findings: [range($n) | {severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}],
-          coverage: [], dropped: 0}'
+        '{summary: "s", findings: [range($n) | {severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}'
 }
 assert_schema_bound max_findings "$(findings_of "$max_findings")" "$(findings_of $((max_findings + 1)))"
 run_publisher "$(findings_of "$max_findings")" ||
@@ -330,8 +339,7 @@ FAKE_BOUNDS="$(with_bounds '.max_findings += 1')" run_publisher "$(findings_of $
     fail "Claude publisher bounds the findings by its own number, not max_findings"
 review_with() {
     jq -cn --argjson s "$severities" --arg f "$1" --arg v "$(printf 'a%.0s' $(seq "$2"))" '
-        {summary: "s", findings: [{severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}],
-         coverage: [], dropped: 0}
+        {summary: "s", findings: [{severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}
         | if $f == "summary" then .summary = $v else .findings[0][$f] = $v end'
 }
 for field in path summary body; do
@@ -346,7 +354,7 @@ done
 
 six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", findings: [
     "src/a.rs", "src/b.rs", "img.png", ".github/workflows/ci.yml", "a/.hidden/..x", "crates/c/desk@8x.sprite"
-    | {severity: $s[0], lens: "correctness", path: ., line: 1, body: "b"}], coverage: [], dropped: 0}')"
+    | {severity: $s[0], lens: "correctness", path: ., line: 1, body: "b"}]}')"
 schema_accepts "$six_blocking" ||
     fail "$REVIEW_SCHEMA_FILE rejects six blocking findings on repo-relative paths"
 run_publisher "$six_blocking" ||
@@ -354,13 +362,12 @@ run_publisher "$six_blocking" ||
 assert_threads 'length == 6' "every blocking finding opens a thread"
 for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ .. ./a a/./b .; do
     review="$(jq -cn --argjson s "$severities" --arg p "$path" \
-        '{summary: "s", findings: [{severity: $s[0], lens: "correctness", path: $p, line: 1, body: "b"}],
-          coverage: [], dropped: 0}')"
+        '{summary: "s", findings: [{severity: $s[0], lens: "correctness", path: $p, line: 1, body: "b"}]}')"
     ! schema_accepts "$review" || fail "$REVIEW_SCHEMA_FILE accepts the unsafe path $path"
     ! run_publisher "$review" >/dev/null 2>&1 || fail "Claude publisher accepted the unsafe path $path"
 done
 
-in_diff_review='{"summary":"s","coverage":[],"dropped":0,"findings":[
+in_diff_review='{"summary":"s","findings":[
   {"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"added line"},
   {"severity":"non-blocking","lens":"correctness","path":"src/a.rs","line":21,"body":"second hunk"},
   {"severity":"non-blocking","lens":"correctness","path":"src/b.rs","line":5,"body":"count-less hunk header"},
@@ -396,8 +403,7 @@ assert_threads 'length == 4 and ([.[].body] | any(contains("src/a.rs:21")) | not
 hostile_body="it's \"quoted\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\` \\n end"
 hostile_review="$(jq -cn --arg b "$hostile_body" \
     '{summary: "s", findings: [{severity: "blocking", lens: "correctness", path: "docs/other.md", line: 9, body: $b},
-        {severity: "pre-existing", lens: "correctness", path: "gone.rs", line: 1, body: "removed file"}],
-      coverage: [], dropped: 0}')"
+        {severity: "pre-existing", lens: "correctness", path: "gone.rs", line: 1, body: "removed file"}]}')"
 run_publisher "$hostile_review" ||
     fail "Claude publisher rejected a finding outside the diff"
 [[ ! -e "$test_dir/pwned" ]] ||
@@ -418,7 +424,7 @@ jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and co
 
 # A rejected path character would fail the lens on every PR touching a
 # density-variant sprite (`<base>@<N>x.sprite`).
-variant_review='{"summary":"One finding on a density variant.","coverage":[],"dropped":0,"findings":[{"severity":"non-blocking","lens":"design","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
+variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"non-blocking","lens":"design","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
 run_publisher "$variant_review" ||
     fail "Claude publisher rejected a finding on an '@' density-variant path"
 published_content="$(<"$published_comment")"
@@ -1007,90 +1013,134 @@ file_row site/package.json modified $'@@ -9 +9 @@\n-    "v8-to-istanbul": "^9.1.
 run_exempt "$f" head123 "a digit-led dependency renamed"
 assert_exempt "$f" pending "a digit-led dependency renamed"
 
-# ── The review's units: a module's files pack up to the cap, a bigger file
-# alone, the unreviewable skipped; each kept file gets its head copy.
+# ── The review's units: files pack in path order up to the caps, the
+# unreviewable skipped; each kept file gets its head copy.
 units_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Plan review units")"
+units_env() { STEP_NAME="Plan review units" yq -e -r ".jobs.analyze.steps[] | select(.name == strenv(STEP_NAME)) | .env.$1" "$CLAUDE_REVIEW_WORKFLOW_FILE"; }
+unit_cap="$(units_env UNIT_CAP)" || fail "\"Plan review units\" has no UNIT_CAP"
+unit_file_cap="$(units_env UNIT_FILE_CAP)" || fail "\"Plan review units\" has no UNIT_FILE_CAP"
 units_dir="$test_dir/units"
 mkdir -p "$units_dir/bin"
 # shellcheck disable=SC2016 # The stub reads its fixtures when it runs.
 printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
-    'args="$*"' \
+    'args="$*" jq_expr=.' \
+    'while (($#)); do [[ "$1" == --jq ]] && jq_expr="$2"; shift; done' \
     'case "$args" in' \
-    '  *"/pulls/42/files"*) cat "$UNITS_FILES" ;;' \
+    '  *"/pulls/42/files"*) jq -s "$jq_expr" "$UNITS_FILES" ;;' \
     '  *"/contents/"*) path="${args#*/contents/}"; path="${path%%\?*}"; printf "head of %s\n" "$path" ;;' \
     '  *) echo "unexpected gh $args" >&2; exit 1 ;;' \
     'esac' \
     >"$units_dir/bin/gh"
 chmod +x "$units_dir/bin/gh"
-unit_file() { jq -cn --arg f "$1" --argjson c "$2" --arg s "${3:-modified}" --argjson p "${4:-true}" '{filename: $f, status: $s, changes: $c, patch: $p}'; }
+unit_file() { jq -cn --arg f "$1" --argjson c "$2" --arg s "${3:-modified}" --argjson p "${4:-true}" '{filename: $f, status: $s, changes: $c} + if $p then {patch: "@@"} else {} end'; }
 run_units() {
     local work="$units_dir/work-$1"
     rm -rf "$work"
     mkdir -p "$work/.claude-review"
-    (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" \
-        GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 \
-        bash -c "$units_script") || fail "the unit planner exited non-zero on $1"
+    : >"$units_dir/output"
+    (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" GITHUB_OUTPUT="$units_dir/output" \
+        GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP="$unit_cap" UNIT_FILE_CAP="$unit_file_cap" \
+        REVIEW_SAFE_PATH="$review_safe_path" bash -c "$units_script") >/dev/null || fail "the unit planner exited non-zero on $1"
     printf '%s\n' "$work"
 }
+units_of() { jq -c 'map([.id, .files, .changed])' "$1/.claude-review/units.json"; }
 {
-    unit_file crates/a/src/one.rs 120
-    unit_file crates/a/src/two.rs 150
+    unit_file crates/a/src/one.rs $((unit_cap - 180))
     unit_file crates/a/src/three.rs 100
-    unit_file crates/b/src/big.rs 400
+    unit_file crates/a/src/two.rs 150
+    unit_file crates/b/src/big.rs $((unit_cap + 100))
     unit_file crates/b/src/gone.rs 10 removed
+    unit_file crates/c/huge.rs 5000 modified false
+    unit_file docs/x.md 5
     unit_file Cargo.lock 900
     unit_file site/package-lock.json 50
     unit_file docs/images/x.png 0 added false
     unit_file api/pixtuoid-core.txt 20
     unit_file crates/a/src/snapshots/x.snap 5
     unit_file assets/blob.bin 0 modified false
+    unit_file "a b.rs" 3
+    unit_file ../escape.rs 3
 } >"$units_dir/files.jsonl"
 work="$(run_units mixed)"
-want='[{"id":"u1","files":["crates/a/src/one.rs","crates/a/src/three.rs"],"changed":220},{"id":"u2","files":["crates/a/src/two.rs"],"changed":150},{"id":"u3","files":["crates/b/src/big.rs"],"changed":400},{"id":"u4","files":["crates/b/src/gone.rs"],"changed":10}]'
-[[ "$(jq -c . "$work/.claude-review/units.json")" == "$want" ]] ||
-    fail "the unit planner gave $(jq -c . "$work/.claude-review/units.json"), not $want"
-[[ "$(jq -c 'sort' "$work/.claude-review/skipped.json")" == '["Cargo.lock","api/pixtuoid-core.txt","assets/blob.bin","crates/a/src/snapshots/x.snap","docs/images/x.png","site/package-lock.json"]' ]] ||
+want="$(jq -cn --argjson cap "$unit_cap" '[
+    ["u1", ["crates/a/src/one.rs", "crates/a/src/three.rs"], ($cap - 80)],
+    ["u2", ["crates/a/src/two.rs"], 150],
+    ["u3", ["crates/b/src/big.rs"], ($cap + 100)],
+    ["u4", ["crates/b/src/gone.rs"], 10],
+    ["u5", ["crates/c/huge.rs"], 5000],
+    ["u6", ["docs/x.md"], 5]]')"
+[[ "$(units_of "$work")" == "$want" ]] || fail "the unit planner gave $(units_of "$work"), not $want"
+skipped='["../escape.rs","Cargo.lock","a b.rs","api/pixtuoid-core.txt","assets/blob.bin","crates/a/src/snapshots/x.snap","docs/images/x.png","site/package-lock.json"]'
+[[ "$(jq -c 'sort' "$work/.claude-review/skipped.json")" == "$skipped" ]] ||
     fail "the unit planner skipped $(jq -c . "$work/.claude-review/skipped.json")"
-[[ "$(<"$work/.claude-review/head/crates/a/src/one.rs")" == "head of crates/a/src/one.rs" ]] ||
-    fail "the unit planner did not copy a kept file's head"
+[[ "$(sed -n 's/^skipped=//p' "$units_dir/output" | jq -c sort)" == "$skipped" ]] ||
+    fail "the unit planner does not hand its skipped files to the publisher: $(<"$units_dir/output")"
+[[ "$(<"$work/.claude-review/head/crates/c/huge.rs")" == "head of crates/c/huge.rs" ]] ||
+    fail "the unit planner did not copy an oversized text file's head"
 [[ ! -e "$work/.claude-review/head/crates/b/src/gone.rs" ]] || fail "the unit planner copied a removed file's head"
 [[ ! -e "$work/.claude-review/head/Cargo.lock" ]] || fail "the unit planner copied a skipped file's head"
+[[ ! -e "$work/escape.rs" && ! -e "$work/.claude-review/escape.rs" ]] || fail "the unit planner copied a path that climbs out"
+
+# Small files from many directories share a unit until it holds UNIT_FILE_CAP.
+for i in $(seq $((unit_file_cap + 1))); do unit_file "dir$i/f.rs" 1; done >"$units_dir/files.jsonl"
+work="$(run_units wide)"
+[[ "$(jq -c 'map(.files | length)' "$work/.claude-review/units.json")" == "[$unit_file_cap,1]" ]] ||
+    fail "a wide, small PR planned $(units_of "$work"), not one unit per $unit_file_cap files"
 
 unit_file Cargo.lock 12 >"$units_dir/files.jsonl"
 work="$(run_units lock-only)"
 [[ "$(jq -c . "$work/.claude-review/units.json")" == '[]' ]] || fail "a lockfile-only PR did not plan zero units"
 
-unit_file ../escape.rs 3 >"$units_dir/files.jsonl"
-work="$units_dir/work-escape"
-rm -rf "$work"
-mkdir -p "$work/.claude-review"
-if (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" \
-    GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 bash -c "$units_script") >/dev/null 2>&1; then
-    fail "the unit planner copied a path that climbs out of the head directory"
-fi
-
-# ── The coverage gate: the model's report of what it covered, held to the plan.
-gate_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Require a valid structured review")"
+# ── The plan gate: what the run's message log shows ran, held to the plan.
+gate_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Require a reviewed plan")"
 gate_dir="$test_dir/gate"
 mkdir -p "$gate_dir/.claude-review"
-assert_gate() {
-    local units="$1" coverage="$2" want="$3" label="$4"
-    printf '%s' "$units" >"$gate_dir/.claude-review/units.json"
-    if (cd "$gate_dir" && UNIT_PASSES="$unit_passes" \
-        REVIEW_JSON="$(jq -cn --argjson c "$coverage" '{summary: "s", findings: [], coverage: $c, dropped: 0}')" \
-        bash -c "$gate_script") >/dev/null 2>&1; then
-        [[ "$want" == pass ]] || fail "the coverage gate passed $label"
-    else
-        [[ "$want" == fail ]] || fail "the coverage gate failed $label"
-    fi
+# One orchestrator Agent call and its result, as the SDK logs them.
+spawn() {
+    jq -cn --arg id "$1" --arg type "$2" --arg prompt "$3" --argjson err "${4:-false}" --arg parent "${5:-}" '
+        {type: "assistant", parent_tool_use_id: (if $parent == "" then null else $parent end),
+         message: {content: [{type: "tool_use", id: $id, name: "Agent",
+                              input: {subagent_type: $type, description: "d", prompt: $prompt}}]}},
+        {type: "user", parent_tool_use_id: null,
+         message: {content: [{type: "tool_result", tool_use_id: $id, is_error: $err, content: "r"}]}}'
 }
 two_units='[{"id":"u1","files":["a"],"changed":1},{"id":"u2","files":["b"],"changed":1}]'
-full() { jq -cn --argjson n "$unit_passes" "[$1 | {unit: ., passes: \$n}]"; }
-assert_gate "$two_units" "$(full '"u1", "u2"')" pass "every unit at its passes"
-assert_gate "$two_units" "$(full '"u1"')" fail "a unit missing"
-assert_gate "$two_units" "$(full '"u1", "u2"' | jq -c '.[1].passes -= 1')" fail "a unit short of its passes"
-assert_gate "$two_units" "$(full '"u1", "u2", "u3"')" fail "a unit the plan does not have"
-assert_gate "$two_units" "$(full '"u1", "u2"' | jq -c '. + [{unit: "u2", passes: 0}]')" pass "a unit reported twice, once at its passes"
-assert_gate '[]' '[]' pass "a plan with no units"
+plan_run() {
+    local unit pass
+    for unit in u1 u2; do
+        for pass in $(seq "$unit_passes"); do spawn "$unit-$pass" unit-reviewer "Unit $unit: a"; done
+    done
+    spawn c correctness-reviewer "the PR"
+    spawn d design-reviewer "the PR"
+    spawn v1 verifier "candidate 1"
+    spawn v2 verifier "candidate 2"
+}
+assert_gate() {
+    local want="$1" label="$2" log="$3" units="${4:-$two_units}" kept="${5:-1}"
+    printf '%s' "$units" >"$gate_dir/.claude-review/units.json"
+    jq -s . <<<"$log" >"$gate_dir/execution.json"
+    : >"$gate_dir/output"
+    if (cd "$gate_dir" && UNIT_PASSES="$unit_passes" EXECUTION_FILE="$gate_dir/execution.json" GITHUB_OUTPUT="$gate_dir/output" \
+        REVIEW_JSON="$(jq -cn --argjson n "$kept" '{summary: "s", findings: [range($n) | {}]}')" \
+        bash -c "$gate_script") >/dev/null 2>&1; then
+        [[ "$want" == fail ]] && fail "the plan gate passed $label"
+        grep -qx "refuted=$want" "$gate_dir/output" || fail "the plan gate passed $label without refuted=$want: $(<"$gate_dir/output")"
+    else
+        [[ "$want" == fail ]] || fail "the plan gate failed $label"
+    fi
+}
+assert_gate 1 "every unit's passes, both lens reviewers and a verifier per kept finding" "$(plan_run)"
+assert_gate fail "a unit short of a pass" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "u2-1")')"
+assert_gate fail "a unit whose passes name another unit" "$(plan_run | sed 's/Unit u1:/Unit u10:/')"
+assert_gate fail "a unit pass that errored" "$(plan_run | jq -c '(.message.content[0] | select(.tool_use_id == "u1-1") | .is_error) = true')"
+assert_gate fail "a unit pass that never returned" "$(plan_run | jq -c 'select(.message.content[0].tool_use_id != "u1-1")')"
+assert_gate fail "a unit pass a subagent made" "$(plan_run | jq -c '(select(.message.content[0].id == "u1-1") | .parent_tool_use_id) = "c"')"
+assert_gate fail "no design reviewer" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "d")')"
+assert_gate fail "a kept finding no verifier saw" "$(plan_run)" "$two_units" 3
+assert_gate fail "a run that spawned nothing" "$(spawn c correctness-reviewer x | jq -c 'select(.type == "user")')"
+assert_gate 0 "a plan with no units" "$(
+    spawn c correctness-reviewer x
+    spawn d design-reviewer x
+)" '[]' 0
