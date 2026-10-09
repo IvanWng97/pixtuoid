@@ -237,7 +237,7 @@ deny:
     cargo deny check bans licenses sources
 
 # Advisories judge the whole graph, so they run where it or its policy changes
-# (a PR that touches Cargo.lock or deny.toml) and on audit.yml's schedule.
+# (ci-lint's deny job) and on audit.yml's schedule.
 [group('rust')]
 deny-advisories:
     cargo deny check advisories

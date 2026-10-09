@@ -3,7 +3,8 @@ name: raycast
 on:
   # PR-only gate for the self-contained Raycast extension.
   pull_request:
-    paths: ['integrations/raycast/**', '.github/workflows/raycast.yml']
+    # setup-npm installs the site's packageManager, so both are inputs too.
+    paths: ['integrations/raycast/**', '.github/workflows/raycast.yml', '.github/actions/setup-npm/**', 'site/package.json']
 
 permissions:
   contents: read

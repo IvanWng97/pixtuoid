@@ -8,8 +8,9 @@ https://ivanwng97.github.io/pixtuoid/ redirects there).
 A Node project living in `site/`. The live office's `public/wasm/` is
 gitignored output of `just gen-wasm` (needs Rust); `dev` and `verify` work
 without it on the poster fallback. CI (`.github/workflows/site.yml`) runs
-`npm run verify`'s checks except `audit`, plus e2e and Lighthouse; deploys
-run via `.github/workflows/pages.yml`, which audits first. Agent notes,
+`npm run verify`'s checks, plus e2e and Lighthouse, with `audit` only when a
+PR changes `package.json` or `package-lock.json` (and daily in `audit.yml`);
+deploys run via `.github/workflows/pages.yml`. Agent notes,
 build-input coupling, and CSP details: [`AGENTS.md`](AGENTS.md). Generated
 content and its sources: [`SINGLE-SOURCED.md`](SINGLE-SOURCED.md).
 
@@ -34,8 +35,7 @@ npm run lighthouse # three-run a11y / SEO / performance budgets (in-repo runner)
 From the repo root: `just site-check`, `just site-fmt`, and `just site-e2e` for
 the Playwright smoke suite (not bare `npm run e2e`: it builds the wasm first).
 `audit` runs LAST in `verify` on purpose (it resolves advisories live —
-someone else's publish would short-circuit every check below it); `pages.yml`
-keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
+someone else's publish would short-circuit every check below it). npm 12 is required (`packageManager` +
 `engine-strict`); dependency install scripts are fail-closed via `.npmrc` +
 `allowScripts` — review changes with `npm install-scripts ls`.
 

@@ -1159,8 +1159,8 @@ changed_script="$(yq -e -r '.runs.steps[0].run' .github/actions/path-changed/act
     fail "path-changed has no run step"
 repo="$test_dir/changed-repo"
 git init -q "$repo" && git -C "$repo" config user.email t@t && git -C "$repo" config user.name t
-echo a >"$repo/lock" && echo a >"$repo/other" && git -C "$repo" add . && git -C "$repo" commit -qm base
-git -C "$repo" checkout -qb pr && echo b >"$repo/other" && git -C "$repo" commit -qam pr
+echo a >"$repo/lock" && echo a >"$repo/other" && echo a >"$repo/gone" && git -C "$repo" add . && git -C "$repo" commit -qm base
+git -C "$repo" checkout -qb pr && echo b >"$repo/other" && git -C "$repo" rm -q gone && git -C "$repo" commit -qam pr
 git -C "$repo" checkout -q - && git -C "$repo" merge -q --no-ff --no-edit pr
 changed() {
     : >"$test_dir/changed-output"
@@ -1171,6 +1171,7 @@ changed() {
 [[ "$(changed "$repo" pull_request other)" == true ]] || fail "path-changed missed a path the PR changes"
 [[ "$(changed "$repo" pull_request lock)" == false ]] || fail "path-changed reported a path the PR leaves alone"
 [[ "$(changed "$repo" pull_request "lock other")" == true ]] || fail "path-changed missed one changed path among several"
+[[ "$(changed "$repo" pull_request gone)" == true ]] || fail "path-changed missed a path the PR deletes"
 if (cd "$repo" && GITHUB_EVENT_NAME=pull_request GITHUB_OUTPUT=/dev/null CHANGED_PATHS="lock no-such-file" bash -c "$changed_script") >/dev/null 2>&1; then
     fail "path-changed judged a path that exists on neither side"
 fi
