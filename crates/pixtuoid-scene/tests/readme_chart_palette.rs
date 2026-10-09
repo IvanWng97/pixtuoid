@@ -1,7 +1,7 @@
-//! Pins `scripts/star-history-palette.json` — the office colours the README's
-//! star chart is painted with — to the theme each variant names, by struct
-//! access. The chart renderer is Python and can only copy; this is the copy's
-//! guard, the same shape as `site_badge_colors.rs`.
+//! Pins `scripts/readme-palette.json` — the office colours the README's star
+//! chart and Buy Me a Coffee button are painted with — to the theme each
+//! variant names, by struct access. Their renderers are Python and can only
+//! copy; this is the copy's guard, the same shape as `site_badge_colors.rs`.
 //!
 //! Reads the JSON at RUNTIME because `include_str!` of a path outside the
 //! crate fails `cargo test` on the extracted .crate (no workspace tree).
@@ -13,7 +13,7 @@ use pixtuoid_scene::theme::{Theme, theme_by_name};
 
 const PALETTE_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../scripts/star-history-palette.json"
+    "/../../scripts/readme-palette.json"
 );
 
 fn hex(rgb: Rgb) -> String {
@@ -38,10 +38,10 @@ fn readme_chart_palette_matches_the_named_themes_verbatim() {
     let text = std::fs::read_to_string(PALETTE_PATH)
         .unwrap_or_else(|e| panic!("read {PALETTE_PATH}: {e}"));
     let variants = serde_json::from_str::<serde_json::Value>(&text)
-        .expect("star-history-palette.json is valid JSON");
+        .expect("readme-palette.json is valid JSON");
     let variants = variants
         .as_object()
-        .expect("star-history-palette.json is a JSON object keyed by README variant");
+        .expect("readme-palette.json is a JSON object keyed by README variant");
 
     let mut checked = 0usize;
     for (variant, row) in variants {
@@ -57,7 +57,7 @@ fn readme_chart_palette_matches_the_named_themes_verbatim() {
             assert_eq!(
                 got,
                 hex(rgb),
-                "star-history-palette.json {variant}.{field} drifted from theme {name:?}"
+                "readme-palette.json {variant}.{field} drifted from theme {name:?}"
             );
             checked += 1;
         }

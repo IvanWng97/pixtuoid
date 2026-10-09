@@ -17,7 +17,8 @@ on:
     branches: [main]
     paths:
       - scripts/star-history.py
-      - scripts/star-history-palette.json
+      - scripts/readme_pixels.py
+      - scripts/readme-palette.json
       - .github/workflows/star-history.yml
   workflow_dispatch:
 permissions:

@@ -20,7 +20,6 @@
   <a href="https://codecov.io/gh/IvanWng97/pixtuoid"><img src="https://img.shields.io/codecov/c/github/IvanWng97/pixtuoid?style=flat-square" alt="Coverage" /></a>
   <a href="https://app.codspeed.io/IvanWng97/pixtuoid?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fapp.codspeed.io%2Fbadge.json&style=flat-square" alt="CodSpeed" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License" /></a>
-  <a href="https://buymeacoffee.com/IvanWng97"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapp.buymeacoffee.com%2Fapi%2Fcreators%2Fslug%2Fivanwng97&query=%24.data.public_supporters_count&label=buy%20me%20a%20coffee&prefix=%E2%99%A5%20&logo=buymeacoffee&logoColor=white&color=ffdd00&style=flat-square" alt="Buy me a coffee supporters" /></a>
 </p>
 
 <p align="center">
@@ -32,6 +31,16 @@
   &nbsp;·&nbsp; <a href="https://pixtuoid.dev/architecture">Architecture</a>
   &nbsp;·&nbsp; <a href="https://pixtuoid.dev/config">Configuration</a>
   &nbsp;·&nbsp; <a href="https://pixtuoid.dev/contributing">Contributing</a>
+</p>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/IvanWng97">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button-dark.svg" />
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button-light.svg" />
+      <img alt="Buy me a coffee, with the live supporter count" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button-light.svg" />
+    </picture>
+  </a>
 </p>
 
 ---
