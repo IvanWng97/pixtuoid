@@ -84,6 +84,8 @@ winit = { version = "0.30", default-features = false, features = [
     "wayland-csd-adwaita-notitle",
 ] }
 softbuffer         = "0.4"
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "metal", "dx12", "vulkan", "gles"] }
+pollster = "0.4"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 

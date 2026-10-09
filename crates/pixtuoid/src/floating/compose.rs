@@ -132,10 +132,6 @@ impl RgbaLayer {
     }
 
     /// Its rows, top first, tightly packed: a GPU texture's upload.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the GPU painter's, two commits on")
-    )]
     pub(crate) fn bytes(&self) -> &[u8] {
         self.px.as_flattened()
     }
@@ -180,6 +176,14 @@ pub(crate) enum LayerId {
     Footer,
     Tooltip,
     Panels,
+}
+
+impl LayerId {
+    pub(crate) const ALL: [Self; 4] = [Self::Office, Self::Footer, Self::Tooltip, Self::Panels];
+
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
 }
 
 /// A layer's pixels: the office's opaque RGB at its density, or an

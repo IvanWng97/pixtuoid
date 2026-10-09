@@ -14,6 +14,14 @@ pub(crate) mod compose;
 #[cfg(test)]
 mod fixtures;
 pub(crate) mod geometry;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the window presents through it from the next commit"
+    )
+)]
+mod gpu;
 mod input;
 pub(crate) mod offscreen;
 pub(crate) mod overlays;
