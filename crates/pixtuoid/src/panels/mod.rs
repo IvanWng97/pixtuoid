@@ -54,14 +54,28 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
-/// One frame's open panels, as [`paint_overlays`] draws them.
-pub(crate) struct OverlayFrame<'a> {
+/// One frame's open panels, as `paint_overlays` draws them.
+#[derive(Debug, Clone, Copy)]
+pub struct OverlayFrame<'a> {
     pub(crate) theme_picker: Option<usize>,
     pub(crate) dashboard: &'a crate::panels::dashboard::DashboardFrame,
     pub(crate) connection: &'a crate::panels::connection::ConnectionFrame,
+    /// The version popup's scale: 0.0 hidden, 1.0 whole.
     pub(crate) popup_scale: f32,
     pub(crate) help_open: bool,
+    /// Shortcuts the host adds to the help, after the shared ones.
+    pub(crate) host_keys: &'a [widgets::Shortcut],
     pub(crate) onboarding: &'a crate::panels::welcome::OnboardingFrame,
+}
+
+impl OverlayFrame<'static> {
+    /// Every panel closed: a still's.
+    pub(crate) fn closed() -> Self {
+        use std::sync::LazyLock;
+        static CLOSED: LazyLock<crate::panels::ui_state::RenderFrames> =
+            LazyLock::new(Default::default);
+        CLOSED.overlays(0.0, &[])
+    }
 }
 
 impl OverlayFrame<'_> {
@@ -74,6 +88,7 @@ impl OverlayFrame<'_> {
             connection,
             popup_scale,
             help_open,
+            host_keys: _,
             onboarding,
         } = self;
         theme_picker.is_some()
@@ -101,6 +116,7 @@ pub(crate) fn paint_overlays(
         connection,
         popup_scale,
         help_open,
+        host_keys,
         onboarding,
     } = ov;
     if let Some(idx) = theme_picker {
@@ -116,7 +132,7 @@ pub(crate) fn paint_overlays(
         widgets::paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);
     }
     if help_open {
-        widgets::paint_help_overlay(f, bounds, theme);
+        widgets::paint_help_overlay(f, bounds, theme, host_keys);
     }
     if onboarding.open {
         widgets::paint_welcome(f, onboarding, bounds, theme);

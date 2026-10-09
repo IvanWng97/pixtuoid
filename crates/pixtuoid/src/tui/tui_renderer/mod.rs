@@ -27,7 +27,6 @@ use pixtuoid_scene::pathfind::Router;
 
 #[derive(Debug, Default)]
 struct PopupState {
-    open: bool,
     /// When the last visible↔hidden edge happened — the animation clock.
     started_at: Option<SystemTime>,
     /// Scale captured at that edge so an interrupted animation continues from its
@@ -82,16 +81,12 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
 #[derive(Debug)]
 struct Chrome {
     theme: &'static pixtuoid_scene::theme::Theme,
-    theme_picker: Option<usize>,
     active_pet: Option<PetState>,
     pets: Vec<pixtuoid_scene::pet::Pet>,
     popup: PopupState,
-    help_open: bool,
-    /// Footer warning when a source has died; `None` while healthy.
-    source_warning: Option<String>,
-    dashboard: crate::panels::dashboard::DashboardFrame,
-    connection: crate::panels::connection::ConnectionFrame,
-    onboarding: crate::panels::welcome::OnboardingFrame,
+    /// The panels the loop computed, which the frame paints: their
+    /// `version_popup` is `popup`'s target, its scale animated there.
+    frames: crate::panels::ui_state::RenderFrames,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
@@ -101,11 +96,11 @@ struct Chrome {
 }
 
 impl PopupState {
-    fn scale(&self, now: SystemTime) -> f32 {
+    fn scale(&self, open: bool, now: SystemTime) -> f32 {
         use pixtuoid_scene::anim::{Easing, eased_progress};
         const VERSION_POPUP_GROW_MS: u32 = 200;
         const VERSION_POPUP_SHRINK_MS: u32 = 120;
-        match (self.open, self.started_at) {
+        match (open, self.started_at) {
             (true, Some(start)) => {
                 let progress =
                     eased_progress(start, VERSION_POPUP_GROW_MS, Easing::EaseOutCubic, now);
@@ -123,6 +118,12 @@ impl PopupState {
 }
 
 impl Chrome {
+    /// The panels open over a frame at `popup_scale`; the terminal's help
+    /// lists no shortcuts of its own.
+    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
+        self.frames.overlays(popup_scale, &[])
+    }
+
     /// Floor `floor` of `session`'s office in `scene`, whose projection is
     /// `floor_scene`: its inputs as [`OfficeSession::floor_world`] gives
     /// every painter's floors.
@@ -177,19 +178,8 @@ impl Chrome {
             session.footer_floor(scene),
             self.audio.is_audible(),
             self.volume_flash,
-            self.source_warning.as_deref(),
+            self.frames.source_warning.as_deref(),
         )
-    }
-
-    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
-        crate::panels::OverlayFrame {
-            theme_picker: self.theme_picker,
-            dashboard: &self.dashboard,
-            connection: &self.connection,
-            popup_scale,
-            help_open: self.help_open,
-            onboarding: &self.onboarding,
-        }
     }
 }
 
@@ -218,15 +208,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             debug_walkable: false,
             chrome: Chrome {
                 theme,
-                theme_picker: None,
                 active_pet: None,
                 pets,
                 popup: PopupState::default(),
-                help_open: false,
-                source_warning: None,
-                dashboard: Default::default(),
-                connection: Default::default(),
-                onboarding: crate::panels::welcome::OnboardingFrame::default(),
+                frames: crate::panels::ui_state::RenderFrames::default(),
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
@@ -389,26 +374,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.volume_flash = flash;
     }
 
-    pub fn set_dashboard_frame(&mut self, frame: crate::panels::dashboard::DashboardFrame) {
-        self.chrome.dashboard = frame;
-    }
-
-    pub fn set_connection_frame(&mut self, frame: crate::panels::connection::ConnectionFrame) {
-        self.chrome.connection = frame;
-    }
-
-    pub fn set_onboarding_frame(&mut self, frame: crate::panels::welcome::OnboardingFrame) {
-        self.chrome.onboarding = frame;
-    }
-
-    pub fn help_open(&self) -> bool {
-        self.chrome.help_open
-    }
-
-    pub fn set_help_open(&mut self, v: bool) {
-        self.chrome.help_open = v;
-    }
-
     pub fn debug_walkable(&self) -> bool {
         self.debug_walkable
     }
@@ -553,6 +518,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
     }
 
+    #[cfg(test)]
     pub fn current_floor_seed(&self) -> u64 {
         FloorMeta::for_floor(self.session.nav().current(), self.session.n_floors()).floor_seed
     }
@@ -600,31 +566,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.motion = motion;
     }
 
-    pub fn set_theme_picker(&mut self, picker: Option<usize>) {
-        self.chrome.theme_picker = picker;
-    }
-
-    pub fn set_source_warning(&mut self, warning: Option<String>) {
-        self.chrome.source_warning = warning;
-    }
-
-    pub fn set_version_popup(&mut self, v: bool, now: SystemTime) {
-        if v != self.chrome.popup.open {
+    /// The loop's panels for the next frames, the version popup animating
+    /// toward theirs.
+    pub fn set_frames(&mut self, frames: crate::panels::ui_state::RenderFrames, now: SystemTime) {
+        if frames.version_popup != self.chrome.frames.version_popup {
             self.chrome.popup.scale_at_edge = self.version_popup_scale(now);
             self.chrome.popup.started_at = Some(now);
-            self.chrome.popup.open = v;
         }
-    }
-
-    pub fn version_popup_started_at(&self) -> Option<SystemTime> {
-        self.chrome.popup.started_at
+        self.chrome.frames = frames;
     }
 
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
-        self.chrome.popup.scale(now)
+        self.chrome
+            .popup
+            .scale(self.chrome.frames.version_popup, now)
     }
 
-    /// The scale computed during the most recent `render()`.
     pub fn last_popup_scale(&self) -> f32 {
         self.chrome.popup.last_scale
     }
@@ -633,6 +590,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.active_pet = pet;
     }
 
+    #[cfg(test)]
     pub fn active_pet_ref(&self) -> Option<&PetState> {
         self.chrome.active_pet.as_ref()
     }
@@ -696,7 +654,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return Ok(());
         };
         // Modal backdrop: the same multiply a floor's frame takes.
-        crate::tui::renderer::apply_dim(slide, self.chrome.onboarding.dim);
+        crate::tui::renderer::apply_dim(slide, self.chrome.frames.onboarding.dim);
         if self.flash.holds(flashes, term_size) {
             return Ok(());
         }
@@ -932,7 +890,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             theme: self.chrome.theme,
             world: &world,
             mouse_pos,
-            dim: self.chrome.onboarding.dim,
         };
         let Some((floor, _)) = self.session.floor_mut(current) else {
             return Ok(());

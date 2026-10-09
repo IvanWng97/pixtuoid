@@ -179,9 +179,10 @@ impl PipelineBoot {
         self,
         window_size: winit::dpi::PhysicalSize<u32>,
         density: pixtuoid_core::sprite::format::Density,
+        zoom: geometry::Zoom,
     ) -> LivePipeline {
         let _guard = self.rt.enter(); // spawn_pipeline's internal spawns need it
-        let boot_caps = geometry::boot_capacities_for_window(window_size, density);
+        let boot_caps = geometry::boot_capacities_for_window(window_size, density, zoom);
         tracing::debug!(
             ?window_size,
             floor0_desks = boot_caps[0],

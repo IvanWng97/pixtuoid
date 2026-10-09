@@ -5,6 +5,8 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+use super::geometry::{Zoom, ZoomKey};
+
 use super::compose::Screen;
 use super::offscreen::OfficeRenderer;
 use pixtuoid_scene::theme::Theme;
@@ -54,6 +56,67 @@ pub(crate) fn key(
         held |= KeyModifiers::ALT;
     }
     Some((code, held))
+}
+
+/// The modifier a zoom chord is held with: Cmd on macOS, as a terminal
+/// zooms, and Ctrl elsewhere. The window reads a zoom chord before [`key`],
+/// so off macOS it takes Ctrl `+`/`-` from the volume, which
+/// [`dispatch_key`](crate::panels::dispatch_key) reads whatever is held.
+const ZOOM_HOLD: ModifiersState = if cfg!(target_os = "macos") {
+    ModifiersState::SUPER
+} else {
+    ModifiersState::CONTROL
+};
+
+/// The key each zoom chord takes. A zoom's first key is the one the help
+/// names; `=` and `_` are `+` and `-` typed without and with Shift.
+const ZOOM_CHORDS: [(&str, ZoomKey); 5] = [
+    ("+", ZoomKey::In),
+    ("=", ZoomKey::In),
+    ("-", ZoomKey::Out),
+    ("_", ZoomKey::Out),
+    ("0", ZoomKey::Reset),
+];
+
+/// The zoom chords, as the help lists them.
+#[cfg(target_os = "macos")]
+pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
+    &[("Cmd +/-", "zoom in / out"), ("Cmd 0", "reset zoom")];
+#[cfg(not(target_os = "macos"))]
+pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
+    &[("Ctrl +/-", "zoom in / out"), ("Ctrl 0", "reset zoom")];
+
+/// The zoom a pressed `key` held with `mods` leaves a `size` window at,
+/// from the `zoom` it shows; `None` for any other key, which goes on to
+/// [`key`].
+pub(crate) fn zoomed(
+    key: &Key,
+    mods: ModifiersState,
+    zoom: Zoom,
+    size: winit::dpi::PhysicalSize<u32>,
+    density: pixtuoid_core::sprite::format::Density,
+) -> Option<Zoom> {
+    zoom_key(key, mods).map(|step| zoom.stepped(step, size, density))
+}
+
+/// The zoom `key` asks for, held with `mods`; `None` for any other key.
+fn zoom_key(key: &Key, mods: ModifiersState) -> Option<ZoomKey> {
+    zoom_key_with(key, mods, ZOOM_HOLD)
+}
+
+/// [`zoom_key`] with `hold` as the zoom modifier.
+fn zoom_key_with(key: &Key, mods: ModifiersState, hold: ModifiersState) -> Option<ZoomKey> {
+    // Shift is how `+` and `_` are typed, never a different chord.
+    if mods.difference(ModifiersState::SHIFT) != hold {
+        return None;
+    }
+    let Key::Character(c) = key else {
+        return None;
+    };
+    ZOOM_CHORDS
+        .iter()
+        .find(|(chord, _)| *chord == c.as_str())
+        .map(|&(_, zoom)| zoom)
 }
 
 /// Whether a held `code` fires again: a step through a list, a floor or the
@@ -329,5 +392,123 @@ mod tests {
         assert!(host.renderer.debug_walkable);
         host.toggle_walkable_debug();
         assert!(!host.renderer.debug_walkable);
+    }
+
+    /// A zoom chord is `=`/`+` in, `-`/`_` out and `0` back to none, held
+    /// with the platform's zoom modifier and nothing else but Shift, which
+    /// `+` and `_` need.
+    #[test]
+    fn a_zoom_chord_is_its_modifier_and_a_zoom_key() {
+        use super::super::geometry::ZoomKey;
+        let char_key = |c: &str| Key::Character(c.into());
+        for hold in [ModifiersState::SUPER, ModifiersState::CONTROL] {
+            let shifted = hold | ModifiersState::SHIFT;
+            assert_eq!(zoom_key_with(&char_key("="), hold, hold), Some(ZoomKey::In));
+            assert_eq!(
+                zoom_key_with(&char_key("+"), shifted, hold),
+                Some(ZoomKey::In)
+            );
+            assert_eq!(
+                zoom_key_with(&char_key("-"), hold, hold),
+                Some(ZoomKey::Out)
+            );
+            assert_eq!(
+                zoom_key_with(&char_key("_"), shifted, hold),
+                Some(ZoomKey::Out)
+            );
+            assert_eq!(
+                zoom_key_with(&char_key("0"), hold, hold),
+                Some(ZoomKey::Reset)
+            );
+            assert_eq!(
+                zoom_key_with(&char_key("="), ModifiersState::empty(), hold),
+                None,
+                "plain = is volume"
+            );
+            assert_eq!(
+                zoom_key_with(&char_key("="), hold | ModifiersState::ALT, hold),
+                None
+            );
+            assert_eq!(zoom_key_with(&char_key("a"), hold, hold), None);
+            assert_eq!(
+                zoom_key_with(&Key::Named(NamedKey::Enter), hold, hold),
+                None
+            );
+        }
+        assert_eq!(
+            zoom_key_with(
+                &char_key("="),
+                ModifiersState::CONTROL,
+                ModifiersState::SUPER
+            ),
+            None,
+            "the other platform's modifier"
+        );
+    }
+
+    /// A zoom chord leaves the window at the zoom one step from the one it
+    /// shows, and anything else is no zoom and goes on to [`key`].
+    #[test]
+    fn a_zoom_chord_steps_the_zoom_and_nothing_else_does() {
+        use super::super::geometry::Zoom;
+        let d = super::super::fixtures::density();
+        let size = winit::dpi::PhysicalSize::new(3840, 2160);
+        let char_key = |c: &str| Key::Character(c.into());
+        assert_eq!(
+            zoomed(&char_key("="), ZOOM_HOLD, Zoom::default(), size, d),
+            Some(Zoom::default().stepped(ZoomKey::In, size, d))
+        );
+        assert_ne!(
+            zoomed(&char_key("="), ZOOM_HOLD, Zoom::default(), size, d),
+            Some(Zoom::default()),
+            "a step, not the zoom it started from"
+        );
+        assert_eq!(
+            zoomed(&char_key("0"), ZOOM_HOLD, Zoom::new(3), size, d),
+            Some(Zoom::default())
+        );
+        assert_eq!(
+            zoomed(
+                &char_key("="),
+                ModifiersState::empty(),
+                Zoom::default(),
+                size,
+                d
+            ),
+            None,
+            "plain = goes on to the volume"
+        );
+    }
+
+    /// The help names each zoom's first key and the modifier a chord is held
+    /// with, so a change to one and not the other reds here.
+    #[test]
+    fn every_zoom_chord_is_in_the_help() {
+        let keys: String = ZOOM_SHORTCUTS.iter().map(|(k, _)| *k).collect();
+        for zoom in [ZoomKey::In, ZoomKey::Out, ZoomKey::Reset] {
+            let (named, _) = ZOOM_CHORDS
+                .iter()
+                .find(|(_, z)| *z == zoom)
+                .expect("every zoom has a chord");
+            assert!(
+                keys.contains(named),
+                "{named} missing from the help's {keys:?}"
+            );
+        }
+        let held = if ZOOM_HOLD == ModifiersState::SUPER {
+            "Cmd "
+        } else {
+            "Ctrl "
+        };
+        for (k, _) in ZOOM_SHORTCUTS {
+            assert!(k.starts_with(held), "{k:?} names another modifier");
+        }
+        for (c, zoom) in ZOOM_CHORDS {
+            let hold = ZOOM_HOLD;
+            assert_eq!(
+                zoom_key_with(&Key::Character(c.into()), hold, hold),
+                Some(zoom)
+            );
+        }
     }
 }

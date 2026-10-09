@@ -41,15 +41,10 @@ pub struct DrawCtx<'a> {
     /// persisted to config.
     pub debug_walkable: bool,
     pub theme: &'static pixtuoid_scene::theme::Theme,
-    pub theme_picker: Option<usize>,
     /// From [`footer_context`](crate::panels::widgets::footer_context).
     pub footer: FooterContext<'a>,
-    /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
-    pub popup_scale: f32,
-    pub help_open: bool,
-    pub dashboard: &'a crate::panels::dashboard::DashboardFrame,
-    pub connection: &'a crate::panels::connection::ConnectionFrame,
-    pub onboarding: &'a crate::panels::welcome::OnboardingFrame,
+    /// The panels open over the frame.
+    pub overlays: crate::panels::OverlayFrame<'a>,
     /// The flashes the terminal shows, for a live painter; a still has none
     /// to hold.
     pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
@@ -57,8 +52,7 @@ pub struct DrawCtx<'a> {
 
 impl<'a> DrawCtx<'a> {
     /// An offscreen still of one floor, every input and overlay off; the office-wide
-    /// tallies and gateway come from `scene`, as the live renderer's do. The live `TuiRenderer`
-    /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
+    /// tallies and gateway come from `scene`, as the live renderer's do.
     #[doc(hidden)]
     pub fn offscreen(
         floor: &'a mut PerFloor,
@@ -69,13 +63,6 @@ impl<'a> DrawCtx<'a> {
         now: SystemTime,
         meta: pixtuoid_scene::floor::FloorMeta,
     ) -> Self {
-        use std::sync::LazyLock;
-        static CLOSED_DASHBOARD: LazyLock<crate::panels::dashboard::DashboardFrame> =
-            LazyLock::new(Default::default);
-        static CLOSED_CONNECTION: LazyLock<crate::panels::connection::ConnectionFrame> =
-            LazyLock::new(Default::default);
-        static CLOSED_ONBOARDING: LazyLock<crate::panels::welcome::OnboardingFrame> =
-            LazyLock::new(Default::default);
         Self {
             world: FloorInputs {
                 scene,
@@ -89,13 +76,8 @@ impl<'a> DrawCtx<'a> {
             mouse_pos: None,
             debug_walkable: false,
             theme,
-            theme_picker: None,
             footer: crate::panels::widgets::footer_context(scene, None, false, None, None),
-            popup_scale: 0.0,
-            help_open: false,
-            dashboard: &CLOSED_DASHBOARD,
-            connection: &CLOSED_CONNECTION,
-            onboarding: &CLOSED_ONBOARDING,
+            overlays: crate::panels::OverlayFrame::closed(),
             flash: None,
         }
     }
@@ -289,14 +271,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let world = ctx.world;
     let FloorInputs { scene, now, .. } = world;
     let footer = FooterInputs::new(scene, ctx.footer);
-    let overlays = crate::panels::OverlayFrame {
-        theme_picker: ctx.theme_picker,
-        dashboard: ctx.dashboard,
-        connection: ctx.connection,
-        popup_scale: ctx.popup_scale,
-        help_open: ctx.help_open,
-        onboarding: ctx.onboarding,
-    };
+    let overlays = ctx.overlays;
 
     if scene_too_small(scene_rect) {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
@@ -340,7 +315,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         theme,
         world: &world,
         mouse_pos: ctx.mouse_pos,
-        dim: ctx.onboarding.dim,
     };
     let out = flush_classic(term, &frame, layout, ctx.floor)?;
     if let Some(flash) = ctx.flash.as_deref_mut() {
@@ -358,8 +332,6 @@ pub(crate) struct ClassicFrame<'f> {
     /// The floor's inputs, which a tooltip reads.
     pub(crate) world: &'f FloorInputs<'f>,
     pub(crate) mouse_pos: Option<(u16, u16)>,
-    /// The modal backdrop's dim, from the onboarding card.
-    pub(crate) dim: f32,
 }
 
 /// Flush `floor`'s classic drawing of `layout` to `term` with `frame`'s
@@ -380,7 +352,6 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         theme,
         world,
         mouse_pos,
-        dim,
     } = frame;
     let now = world.now;
     let Some(ClassicDrawn {
@@ -405,7 +376,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
-    apply_dim(pixels, dim);
+    apply_dim(pixels, overlays.onboarding.dim);
 
     let buf = &*pixels;
     term.draw(|f| {

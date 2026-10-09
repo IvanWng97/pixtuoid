@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use pixtuoid::dev::TuiRenderer;
+use pixtuoid::dev::{RenderFrames, TuiRenderer};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::pack::OfficeArt;
@@ -13,13 +13,13 @@ use pixtuoid_scene::pack::load_bundled_pack;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
-/// Build an `AgentSlot` for these render tests — fills the boilerplate fields so each
-/// call site only varies what it cares about.
 fn pack() -> Arc<OfficeArt> {
     static PACK: OnceLock<Arc<OfficeArt>> = OnceLock::new();
     Arc::clone(PACK.get_or_init(|| Arc::new(load_bundled_pack().expect("pack"))))
 }
 
+/// Build an `AgentSlot` for these render tests — fills the boilerplate fields so each
+/// call site only varies what it cares about.
 fn agent_slot(
     id: AgentId,
     session: &str,
@@ -186,7 +186,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
 }
 
 #[test]
-fn set_version_popup_records_timestamp_on_edge() {
+fn only_a_popup_edge_restarts_its_animation() {
     use std::time::{Duration, SystemTime};
 
     let backend = TestBackend::new(96, 36);
@@ -203,35 +203,54 @@ fn set_version_popup_records_timestamp_on_edge() {
 
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let t1 = t0 + Duration::from_millis(50);
+    let tick = Duration::from_millis(1);
+    let popup = |open| RenderFrames {
+        version_popup: open,
+        ..Default::default()
+    };
 
-    assert_eq!(renderer.version_popup_started_at(), None);
-
-    renderer.set_version_popup(false, t0);
     assert_eq!(
-        renderer.version_popup_started_at(),
-        None,
-        "no edge from false → false"
+        renderer.version_popup_scale(t0),
+        0.0,
+        "no edge yet: the popup is hidden"
     );
 
-    renderer.set_version_popup(true, t0);
+    renderer.set_frames(popup(false), t0);
     assert_eq!(
-        renderer.version_popup_started_at(),
-        Some(t0),
-        "false → true edge records timestamp"
+        renderer.version_popup_scale(t1),
+        0.0,
+        "false → false is no edge"
     );
 
-    renderer.set_version_popup(true, t1);
+    // 0.0 at t0 means the entrance clock starts no earlier than t0; growing a
+    // tick later means it starts no later.
+    renderer.set_frames(popup(true), t0);
     assert_eq!(
-        renderer.version_popup_started_at(),
-        Some(t0),
-        "true → true is not an edge; timestamp unchanged"
+        renderer.version_popup_scale(t0),
+        0.0,
+        "the entrance starts at its edge"
+    );
+    assert!(
+        renderer.version_popup_scale(t0 + tick) > 0.0,
+        "the entrance starts at its edge"
     );
 
-    renderer.set_version_popup(false, t1);
+    let later = renderer.version_popup_scale(t1 + tick);
+    renderer.set_frames(popup(true), t1);
     assert_eq!(
-        renderer.version_popup_started_at(),
-        Some(t1),
-        "true → false edge records new timestamp"
+        renderer.version_popup_scale(t1 + tick),
+        later,
+        "true → true is no edge: the entrance runs on"
+    );
+
+    // The dismissal starts at t1 from the scale it interrupted: a stale t0 clock
+    // would already have shrunk it by then.
+    let interrupted = renderer.version_popup_scale(t1);
+    renderer.set_frames(popup(false), t1);
+    assert_eq!(
+        renderer.version_popup_scale(t1),
+        interrupted,
+        "the dismissal starts at its edge, from where the entrance stood"
     );
 }
 
@@ -252,7 +271,13 @@ fn version_popup_animation_starts_small_then_grows() {
     );
 
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    renderer.set_version_popup(true, t0);
+    renderer.set_frames(
+        RenderFrames {
+            version_popup: true,
+            ..Default::default()
+        },
+        t0,
+    );
 
     let scale_start = renderer.version_popup_scale(t0);
     assert!(
@@ -273,7 +298,7 @@ fn version_popup_animation_starts_small_then_grows() {
     );
 
     let t1 = t0 + Duration::from_millis(200);
-    renderer.set_version_popup(false, t1);
+    renderer.set_frames(RenderFrames::default(), t1);
 
     let scale_dismiss_mid = renderer.version_popup_scale(t1 + Duration::from_millis(60));
     assert!(
@@ -304,7 +329,13 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // 100ms is mid-entrance: EaseOutCubic(0.5) ≈ 0.875.
-    renderer.set_version_popup(true, t0);
+    renderer.set_frames(
+        RenderFrames {
+            version_popup: true,
+            ..Default::default()
+        },
+        t0,
+    );
     let mid_entrance = t0 + Duration::from_millis(100);
     let scale_at_mid = renderer.version_popup_scale(mid_entrance);
     assert!(
@@ -312,7 +343,7 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
         "expected mid-entrance scale 0.7..1.0; got {scale_at_mid}"
     );
 
-    renderer.set_version_popup(false, mid_entrance);
+    renderer.set_frames(RenderFrames::default(), mid_entrance);
 
     let just_after = mid_entrance + Duration::from_millis(1);
     let scale_after = renderer.version_popup_scale(just_after);
@@ -396,11 +427,33 @@ fn make_renderer() -> TuiRenderer<TestBackend> {
 }
 
 #[test]
-fn help_open_toggles_via_setter() {
+fn the_help_paints_only_while_open() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
+    let scene = SceneState::uniform(8);
+    let pack = pack();
     let mut r = make_renderer();
-    assert!(!r.help_open());
-    r.set_help_open(true);
-    assert!(r.help_open());
-    r.set_help_open(false);
-    assert!(!r.help_open());
+    let help_painted = |r: &TuiRenderer<TestBackend>| {
+        let text: String = r
+            .terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        text.contains("Keyboard")
+    };
+    let help = |open| RenderFrames {
+        help_open: open,
+        ..Default::default()
+    };
+
+    r.render(&scene, &pack, now).expect("render");
+    assert!(!help_painted(&r));
+    r.set_frames(help(true), now);
+    r.render(&scene, &pack, now).expect("render");
+    assert!(help_painted(&r));
+    r.set_frames(help(false), now);
+    r.render(&scene, &pack, now).expect("render");
+    assert!(!help_painted(&r));
 }

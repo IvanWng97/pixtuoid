@@ -709,19 +709,23 @@ fn main() -> Result<()> {
         result: None,
         socket_line: connection_socket_line,
     };
+    let frames = pixtuoid::dev::RenderFrames {
+        theme_picker: args.theme_picker,
+        version_popup: args.popup,
+        help_open: args.help_open,
+        dashboard: dashboard_frame,
+        connection: connection_frame,
+        onboarding: onboarding_frame,
+        ..Default::default()
+    };
     let mut draw_ctx = DrawCtx {
         mouse_pos: args.hover.as_deref().and_then(|s| {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         debug_walkable: args.debug_walkable,
-        theme_picker: args.theme_picker,
         footer: pixtuoid::dev::footer_context(&scene, None, false, None, warning_text.as_deref()),
-        popup_scale: if args.popup { 1.0 } else { 0.0 },
-        help_open: args.help_open,
-        dashboard: &dashboard_frame,
-        connection: &connection_frame,
-        onboarding: &onboarding_frame,
+        overlays: frames.overlays(pixtuoid::dev::popup_whole(args.popup), &[]),
         ..DrawCtx::offscreen(
             &mut floor,
             office.stores(),

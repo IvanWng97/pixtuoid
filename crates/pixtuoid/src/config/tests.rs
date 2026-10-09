@@ -863,17 +863,20 @@ fn floating_config_defaults_and_explicit_roundtrip() {
         (f.width, f.height),
         (FLOATING_DEFAULT_W, FLOATING_DEFAULT_H)
     );
-    assert_eq!((f.x, f.y), (None, None));
+    assert_eq!(f.position, None);
     assert!((f.opacity - 1.0).abs() < f32::EPSILON);
     let cfg: AppConfig =
         toml::from_str("[floating]\nwidth = 480\nheight = 300\nx = 10\ny = 20\nopacity = 0.8\n")
             .unwrap();
     let f = resolve_floating(&cfg);
-    assert_eq!(
-        (f.width, f.height, f.x, f.y),
-        (480, 300, Some(10), Some(20))
-    );
+    assert_eq!((f.width, f.height, f.position), (480, 300, Some((10, 20))));
     assert!((f.opacity - 0.8).abs() < 1e-6);
+    let cfg: AppConfig = toml::from_str("[floating]\nx = 10\n").unwrap();
+    assert_eq!(
+        resolve_floating(&cfg).position,
+        None,
+        "half a position places nothing"
+    );
     assert!(
         !toml::to_string(&AppConfig::default())
             .unwrap()
@@ -886,30 +889,108 @@ fn save_floating_roundtrips_geometry_and_preserves_other_settings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((12, 34)),
+            zoom: Zoom::default(),
+        },
+    )
+    .unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
-    assert_eq!(
-        (f.width, f.height, f.x, f.y),
-        (480, 320, Some(12), Some(34))
-    );
+    assert_eq!((f.width, f.height, f.position), (480, 320, Some((12, 34))));
     assert_eq!(cfg.theme.as_deref(), Some("normal"));
 }
 
 #[test]
 fn save_floating_clears_stale_position_when_os_cannot_report_it() {
-    // A `None` x/y models an `outer_position()` Err — always the case on Wayland.
+    // A `None` position models an `outer_position()` Err — always the case on Wayland.
     // A new size plus a stale position would restore an offscreen window.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
-    save_floating(&path, 500, 360, None, None).unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((12, 34)),
+            zoom: Zoom::default(),
+        },
+    )
+    .unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 500,
+            height: 360,
+            position: None,
+            zoom: Zoom::default(),
+        },
+    )
+    .unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height), (500, 360));
-    assert_eq!((f.x, f.y), (None, None), "stale position keys were dropped");
+    assert_eq!(f.position, None, "stale position keys were dropped");
     assert_eq!(cfg.theme.as_deref(), Some("normal"));
+}
+
+#[test]
+fn floating_zoom_roundtrips_and_a_hand_edited_one_is_clamped() {
+    let cfg: AppConfig = toml::from_str("theme = \"normal\"\n").unwrap();
+    assert_eq!(resolve_floating(&cfg).zoom, Zoom::default());
+    let cfg: AppConfig = toml::from_str("[floating]\nzoom = -2\n").unwrap();
+    assert_eq!(resolve_floating(&cfg).zoom, Zoom::new(-2));
+    let cfg: AppConfig = toml::from_str("[floating]\nzoom = 1000\nwidth = 600\n").unwrap();
+    let f = resolve_floating(&cfg);
+    assert_eq!(
+        (f.zoom, f.width),
+        (Zoom::new(i8::MAX), 600),
+        "clamped, and the rest of the table still loads"
+    );
+    let cfg: AppConfig = toml::from_str("[floating]\nzoom = -1000\n").unwrap();
+    assert_eq!(resolve_floating(&cfg).zoom, Zoom::new(i8::MIN));
+}
+
+#[test]
+fn save_floating_writes_a_zoom_and_drops_a_reset_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((1, 2)),
+            zoom: Zoom::new(3),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_floating(&load(&path, &mut Vec::new())).zoom,
+        Zoom::new(3)
+    );
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((1, 2)),
+            zoom: Zoom::default(),
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("zoom"), "no zoom is no key: {text}");
+    assert_eq!(
+        resolve_floating(&load(&path, &mut Vec::new())).zoom,
+        Zoom::default()
+    );
 }
 
 #[test]

@@ -46,18 +46,24 @@ fn the_too_small_notice_survives_an_open_onboarding_modal() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
     let (cols, rows) = too_small_terminal();
     let mut r = build(cols, rows, vec![]);
-    r.set_onboarding_frame(OnboardingFrame {
-        open: true,
-        rows: vec![WelcomeRow {
-            source_id: "claude-code",
-            label_prefix: "cc",
-            display_name: "Claude Code".into(),
-            checked: true,
-        }],
-        selected: 0,
-        elapsed_ms: 60_000,
-        ..Default::default()
-    });
+    r.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                open: true,
+                rows: vec![WelcomeRow {
+                    source_id: "claude-code",
+                    label_prefix: "cc",
+                    display_name: "Claude Code".into(),
+                    checked: true,
+                }],
+                selected: 0,
+                elapsed_ms: 60_000,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        t0(),
+    );
     r.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -175,7 +181,13 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     // below compute_with_seed's office minimum → draw_scene paints the footer-only frame.
     let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 16, vec![]);
-    r.set_version_popup(true, t0());
+    r.set_frames(
+        RenderFrames {
+            version_popup: true,
+            ..Default::default()
+        },
+        t0(),
+    );
     let t = t0() + Duration::from_millis(150); // mid-entrance ⇒ scale > 0
     let painted = r.version_popup_scale(t);
     assert!(painted > 0.0, "the popup is animating this frame");
@@ -202,7 +214,13 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 
     let (cols, rows) = too_small_terminal();
     let mut r = build(cols, rows, vec![]);
-    r.set_help_open(true);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            ..Default::default()
+        },
+        t0(),
+    );
     r.render(&scene, pack(), t0()).expect("render");
     assert!(
         r.cached_layout().is_none(),
@@ -215,18 +233,24 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     );
 
     let mut r = build(cols, rows, vec![]);
-    r.set_onboarding_frame(OnboardingFrame {
-        open: true,
-        rows: vec![WelcomeRow {
-            source_id: "codex",
-            label_prefix: "cx",
-            display_name: "Codex".into(),
-            checked: true,
-        }],
-        selected: 0,
-        elapsed_ms: 100_000,
-        dim: 0.4,
-    });
+    r.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                open: true,
+                rows: vec![WelcomeRow {
+                    source_id: "codex",
+                    label_prefix: "cx",
+                    display_name: "Codex".into(),
+                    checked: true,
+                }],
+                selected: 0,
+                elapsed_ms: 100_000,
+                dim: 0.4,
+            },
+            ..Default::default()
+        },
+        t0(),
+    );
     r.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -235,11 +259,17 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     );
 
     let mut r = build(cols, rows, vec![]);
-    r.set_connection_frame(ConnectionFrame {
-        open: true,
-        socket_line: "socket  /tmp/p.sock".into(),
-        ..Default::default()
-    });
+    r.set_frames(
+        RenderFrames {
+            connection: ConnectionFrame {
+                open: true,
+                socket_line: "socket  /tmp/p.sock".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        t0(),
+    );
     r.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -259,8 +289,14 @@ fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     );
     let now = t0();
     r.render(&scene, pack(), now).expect("render");
-    r.set_help_open(true);
-    r.set_version_popup(true, now);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            version_popup: true,
+            ..Default::default()
+        },
+        now,
+    );
     r.navigate_floor(1, now);
 
     let t = now + Duration::from_millis(100); // mid-slide, mid-entrance

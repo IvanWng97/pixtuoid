@@ -294,7 +294,13 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
 fn theme_picker_renders_theme_names() {
     let scene = scene_with(vec![idle("/tp/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
-    r.set_theme_picker(Some(0));
+    r.set_frames(
+        RenderFrames {
+            theme_picker: Some(0),
+            ..Default::default()
+        },
+        t0(),
+    );
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -310,7 +316,13 @@ fn version_popup_paints_when_open() {
     r.render(&scene, pack(), t0()).unwrap();
     let baseline = r.buf().expect("a frame").clone();
     // Render past the 200ms entrance animation so the popup is at full scale.
-    r.set_version_popup(true, t0());
+    r.set_frames(
+        RenderFrames {
+            version_popup: true,
+            ..Default::default()
+        },
+        t0(),
+    );
     let t1 = t0() + Duration::from_millis(250);
     r.render(&scene, pack(), t1).unwrap();
     assert!(

@@ -353,7 +353,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::super::fixtures::{active_on, cutaway, density, scene_with};
-    use super::super::geometry::window_geometry;
+    use super::super::geometry::{Zoom, window_geometry};
     use super::super::overlays::footer_budget;
     use super::*;
     use pixtuoid_core::sprite::Rgb;
@@ -604,7 +604,7 @@ mod tests {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let window = PhysicalSize::new(960u32, 640u32);
-        let at = window_geometry(window, pack.max_density_variant());
+        let at = window_geometry(window, pack.max_density_variant(), Zoom::default());
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         renderer
             .render(

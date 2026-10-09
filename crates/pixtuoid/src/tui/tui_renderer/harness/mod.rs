@@ -1,6 +1,7 @@
 //! End-to-end headless harness: drives the real `TuiRenderer` (via ratatui
 //! `TestBackend`) through the production render path.
 use super::*;
+use crate::panels::ui_state::RenderFrames;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
 use pixtuoid_scene::anim::PAINT_FRAME_MS;

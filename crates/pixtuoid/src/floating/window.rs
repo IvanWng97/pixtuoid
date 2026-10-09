@@ -85,6 +85,8 @@ pub(crate) struct FloatingApp {
     /// The animation-tick deadline — see [`super::cadence`] for why the redraw
     /// REQUEST (not just the wait) has to be gated on it.
     clock: super::cadence::FrameClock,
+    /// How far the office is zoomed from its automatic scale.
+    zoom: super::geometry::Zoom,
     /// The chrome over the office, each repainted only when it changed.
     overlays: super::overlays::OverlayLayers,
     window: Option<Arc<Window>>,
@@ -190,6 +192,7 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
+            zoom: cfg.zoom,
             overlays: super::overlays::OverlayLayers::default(),
             window: None,
             gpu: None,
@@ -204,7 +207,7 @@ impl FloatingApp {
         self.failure.into_inner()
     }
 
-    /// Persist the current window geometry into `[floating]` (best-effort — a save error
+    /// Persist the current window geometry and zoom into `[floating]` (best-effort — a save error
     /// must not block quitting). Size is stored LOGICAL (HiDPI-stable); position PHYSICAL.
     fn persist_geometry(&self) {
         let Some(window) = &self.window else {
@@ -212,13 +215,13 @@ impl FloatingApp {
         };
         let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
         let pos = window.outer_position().ok();
-        if let Err(e) = config::save_floating(
-            &self.config_path,
-            logical.width.round() as u32,
-            logical.height.round() as u32,
-            pos.map(|p| p.x),
-            pos.map(|p| p.y),
-        ) {
+        let save = config::FloatingSave {
+            width: logical.width.round() as u32,
+            height: logical.height.round() as u32,
+            position: pos.map(|p| (p.x, p.y)),
+            zoom: self.zoom,
+        };
+        if let Err(e) = config::save_floating(&self.config_path, &save) {
             tracing::warn!(error = ?e, "pixtuoid floating: could not persist window geometry");
         }
     }
@@ -390,7 +393,7 @@ impl FloatingApp {
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
-        let at = super::geometry::window_geometry(size, self.pack.max_density_variant());
+        let at = super::geometry::window_geometry(size, self.pack.max_density_variant(), self.zoom);
         super::geometry::sync_floor_caps(
             &mut self.last_caps_size,
             &floor_caps,
@@ -554,7 +557,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .with_inner_size(LogicalSize::new(self.cfg.width, self.cfg.height))
             .with_min_inner_size(min);
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
-        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
+        if let Some((x, y)) = self.cfg.position
             && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
         {
             attrs = attrs.with_position(PhysicalPosition::new(x, y));
@@ -601,7 +604,11 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // Past the window/surface failure arms, so a failed boot binds no socket.
         // Pinned by `the_boot_seed_tracks_the_physical_window_not_the_logical_config`.
         if let Some(boot) = self.boot.take() {
-            self.live = Some(boot.spawn(window.inner_size(), self.pack.max_density_variant()));
+            self.live = Some(boot.spawn(
+                window.inner_size(),
+                self.pack.max_density_variant(),
+                self.zoom,
+            ));
         }
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
         // per-window opacity, and the surface composites opaque.
@@ -654,6 +661,19 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
+                if let Some(window) = &self.window
+                    && let Some(zoom) = super::input::zoomed(
+                        &event.logical_key,
+                        self.modifiers,
+                        self.zoom,
+                        window.inner_size(),
+                        self.pack.max_density_variant(),
+                    )
+                {
+                    self.zoom = zoom;
+                    window.request_redraw();
+                    return;
+                }
                 if self.key(&event) {
                     self.persist_geometry();
                     self.jank.finish();

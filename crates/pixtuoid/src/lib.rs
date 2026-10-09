@@ -41,13 +41,15 @@ pub mod dev {
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
     pub use crate::floating::compose::{Change, XrgbSurface, composite, composition};
-    pub use crate::floating::geometry::window_geometry;
+    pub use crate::floating::geometry::{Zoom, window_geometry};
     pub use crate::floating::offscreen::{OfficeRenderer, Pressing, WindowFrame};
     pub use crate::floating::overlays::{OverlayLayers, Overlays, footer_budget, panel_preview};
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
+    pub use crate::panels::OverlayFrame;
     pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
     pub use crate::panels::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
+    pub use crate::panels::ui_state::{RenderFrames, popup_whole};
     pub use crate::panels::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
     pub use crate::panels::widgets::{footer_context, grid_of};
     pub use crate::sources::{ConnState, ConnectionRow};

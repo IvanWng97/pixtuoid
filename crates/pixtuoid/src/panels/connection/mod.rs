@@ -71,9 +71,8 @@ pub struct LiveInfo {
     pub dead: bool,
 }
 
-/// The per-tick Sources-panel render frame the event loop hands the renderer via
-/// `set_connection_frame` — one snapshot the painter reads. Mirrors
-/// `OnboardingFrame`.
+/// The Sources panel's per-tick render frame, `RenderFrames::connection`: one
+/// snapshot the painter reads.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionFrame {
     pub open: bool,

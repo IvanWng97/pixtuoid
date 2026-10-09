@@ -289,9 +289,13 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
 fn footer_shows_source_death_warning() {
     let scene = scene_with(vec![idle("/f/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 44, vec![]);
-    r.set_source_warning(Some(
-        "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
-    ));
+    let frames = RenderFrames {
+        source_warning: Some(
+            "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
+        ),
+        ..Default::default()
+    };
+    r.set_frames(frames, t0());
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -299,7 +303,7 @@ fn footer_shows_source_death_warning() {
         "the footer must surface a dead source (#157); footer row:\n{}",
         text.lines().last().unwrap_or("")
     );
-    r.set_source_warning(None);
+    r.set_frames(RenderFrames::default(), t0());
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -314,9 +318,16 @@ fn source_death_warning_survives_floor_transition() {
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
     r.render(&scene, pack(), now).unwrap();
-    r.set_source_warning(Some(
-        "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
-    ));
+    r.set_frames(
+        RenderFrames {
+            source_warning: Some(
+                "claude-code source died — its agents are frozen; restart pixtuoid (see log)"
+                    .into(),
+            ),
+            ..Default::default()
+        },
+        now,
+    );
     r.navigate_floor(1, now);
     now += Duration::from_millis(200); // mid-transition
     r.render(&scene, pack(), now).unwrap();
@@ -334,7 +345,13 @@ fn version_popup_active_during_floor_transition() {
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
     r.render(&scene, pack(), now).unwrap();
-    r.set_version_popup(true, now);
+    r.set_frames(
+        RenderFrames {
+            version_popup: true,
+            ..Default::default()
+        },
+        now,
+    );
     r.navigate_floor(1, now);
     now += Duration::from_millis(200); // mid-transition
     r.render(&scene, pack(), now).unwrap();
@@ -351,14 +368,20 @@ fn help_overlay_renders_during_floor_transition() {
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
     r.render(&scene, pack(), now).unwrap();
-    r.set_help_open(true);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            ..Default::default()
+        },
+        now,
+    );
     r.navigate_floor(1, now);
     now += Duration::from_millis(200);
     r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some());
     let text = frame_text(r.frame_buffer());
     assert!(
-        text.contains("theme") || text.contains("Keyboard") || text.contains("help"),
+        text.contains("Keyboard"),
         "help overlay must paint over a floor transition"
     );
 }
@@ -461,7 +484,13 @@ fn theme_picker_renders_during_floor_transition() {
     let mut r = build(140, 48, vec![]);
     let mut now = t0();
     r.render(&scene, pack(), now).unwrap();
-    r.set_theme_picker(Some(0));
+    r.set_frames(
+        RenderFrames {
+            theme_picker: Some(0),
+            ..Default::default()
+        },
+        now,
+    );
     r.navigate_floor(1, now);
     now += Duration::from_millis(200);
     r.render(&scene, pack(), now).unwrap();
