@@ -40,10 +40,12 @@ pub mod dev {
     pub use crate::audio::demote_to_utility;
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
-    pub use crate::floating::offscreen::{
-        OfficeRenderer, Pressing, WindowFrame, XrgbSurface, footer_budget,
-        paint_footer_into_surface, paint_panels_into_surface, paint_tooltip_into_surface,
-        panel_preview, window_geometry,
+    pub use crate::floating::compose::XrgbSurface;
+    pub use crate::floating::geometry::window_geometry;
+    pub use crate::floating::offscreen::{OfficeRenderer, Pressing, WindowFrame};
+    pub use crate::floating::overlays::{
+        footer_budget, paint_footer_into_surface, paint_panels_into_surface,
+        paint_tooltip_into_surface, panel_preview,
     };
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};

@@ -3,10 +3,11 @@
 //! `FloatingApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
 //! always-on-top window + a `softbuffer` surface, renders the latest `watch`ed scene's
 //! cutaway at the pack's densest art, then upscales it a whole number of times into the
-//! surface ([`super::offscreen::window_geometry`]).
+//! surface ([`super::geometry::window_geometry`]).
 //!
 //! Platform glue — codecov-ignored; the testable seams are `floating::offscreen`
-//! (render), `floating::geometry` (the window/monitor rect math), and
+//! (render), `floating::overlays` and `floating::compose` (the chrome and the
+//! frame), `floating::geometry` (the window/monitor rect math), and
 //! `floating::cadence` (the animation throttle).
 
 use std::num::NonZeroU32;
@@ -48,7 +49,7 @@ pub(crate) struct FloatingApp {
     /// The modifier keys held, which a key is read with.
     modifiers: winit::keyboard::ModifiersState,
     /// What the frame on screen shows beside the office.
-    screen: super::offscreen::Screen,
+    screen: super::compose::Screen,
     /// The frames' times and janks, reported as the TUI's are.
     jank: crate::jank::Jank,
     /// How the office moves.
@@ -145,7 +146,7 @@ impl FloatingApp {
             modifiers: winit::keyboard::ModifiersState::empty(),
             // Until `resumed` names the platform: presenting every frame is
             // safe on any.
-            screen: super::offscreen::Screen::new(false),
+            screen: super::compose::Screen::new(false),
             jank: crate::jank::Jank::new(Instant::now()),
             motion,
             renderer,
@@ -220,7 +221,7 @@ impl FloatingApp {
         };
         let size = window.inner_size();
         let cursor = (self.cursor.x, self.cursor.y);
-        match super::offscreen::modal_press(
+        match super::overlays::modal_press(
             &mut self.ui,
             cursor,
             (size.width, size.height),
@@ -310,11 +311,11 @@ impl FloatingApp {
             return false;
         };
         let now = self.ui.now();
-        super::offscreen::press_key(
+        super::input::press_key(
             key,
             &mut crate::panels::KeyCtx {
                 ui: &mut self.ui,
-                host: &mut super::offscreen::WindowHost {
+                host: &mut super::input::WindowHost {
                     renderer: &mut self.renderer,
                     theme: &mut self.theme,
                     screen: &mut self.screen,
@@ -352,8 +353,8 @@ impl FloatingApp {
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
-        let at = super::offscreen::window_geometry(size, self.pack.max_density_variant());
-        super::offscreen::sync_floor_caps(
+        let at = super::geometry::window_geometry(size, self.pack.max_density_variant());
+        super::geometry::sync_floor_caps(
             &mut self.last_caps_size,
             &floor_caps,
             at.logical().w,
@@ -398,11 +399,11 @@ impl FloatingApp {
             return;
         }
         let cursor = (self.cursor.x, self.cursor.y);
-        let next = super::offscreen::Overlays {
+        let next = super::overlays::Overlays {
             window: (win_w, win_h),
             footer: self.renderer.footer(
                 &scene,
-                super::offscreen::footer_budget(win_w as usize, Face::chrome(at)),
+                super::overlays::footer_budget(win_w as usize, Face::chrome(at)),
                 audio_audible,
                 volume_flash,
                 self.live
@@ -435,9 +436,9 @@ impl FloatingApp {
                     .map(super::LivePipeline::health)
                     .unwrap_or_default();
                 let frames = self.ui.build_frames(now, &scene, &health);
-                super::offscreen::panels_grid(
+                super::overlays::panels_grid(
                     &frames,
-                    super::offscreen::panel_cells((win_w, win_h), Face::chrome(at)),
+                    super::overlays::panel_cells((win_w, win_h), Face::chrome(at)),
                     now,
                     self.theme,
                 )
@@ -462,7 +463,7 @@ impl FloatingApp {
             return;
         };
         let (win_w, win_h) = (win_w as usize, win_h as usize);
-        let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
+        let Some(mut surf) = super::compose::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
         };
         if let Some(office) = self.renderer.buf() {
@@ -470,12 +471,12 @@ impl FloatingApp {
         }
         let cell = Face::chrome(at);
         let look = (self.theme, &*self.pack);
-        super::offscreen::paint_footer_into_surface(&mut surf, &next.footer, look, at);
+        super::overlays::paint_footer_into_surface(&mut surf, &next.footer, look, at);
         if let Some((tip, _)) = &next.tooltip {
-            super::offscreen::paint_tooltip_into_surface(&mut surf, tip, cursor, look, cell);
+            super::overlays::paint_tooltip_into_surface(&mut surf, tip, cursor, look, cell);
         }
         if let Some(panels) = &next.panels {
-            super::offscreen::paint_panels_into_surface(&mut surf, panels, look, cell);
+            super::overlays::paint_panels_into_surface(&mut surf, panels, look, cell);
         }
         window.pre_present_notify();
         let presenting = Instant::now();
@@ -517,7 +518,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         if self.window.is_some() {
             return; // already created — a re-resume must not spawn a second window
         }
-        let min = super::offscreen::min_window(self.pack.max_density_variant());
+        let min = super::geometry::min_window(self.pack.max_density_variant());
         let mut attrs = Window::default_attributes()
             .with_title("pixtuoid")
             .with_decorations(false)
@@ -576,7 +577,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
         // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Real
         // translucency needs a native shim or a wgpu surface.
-        self.screen = super::offscreen::Screen::of_window(
+        self.screen = super::compose::Screen::of_window(
             winit::raw_window_handle::HasWindowHandle::window_handle(&*window)
                 .ok()
                 .map(|h| h.as_raw()),

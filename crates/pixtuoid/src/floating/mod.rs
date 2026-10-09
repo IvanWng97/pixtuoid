@@ -10,9 +10,13 @@
 //! `pixtuoid-core` stays window-free (invariant #1) — all windowing lives here.
 
 mod cadence;
-mod geometry;
+pub(crate) mod compose;
+#[cfg(test)]
+mod fixtures;
+pub(crate) mod geometry;
 mod input;
 pub(crate) mod offscreen;
+pub(crate) mod overlays;
 mod window;
 
 use anyhow::{Context, Result};
@@ -52,7 +56,7 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     let app_config = config::load(&config_path, &mut Vec::new());
     let pack = pixtuoid_scene::pack::load_bundled_pack()
         .context("loading the bundled sprite pack for the floating window")?;
-    let min = offscreen::min_window(pack.max_density_variant());
+    let min = geometry::min_window(pack.max_density_variant());
     let floating_cfg = config::resolve_floating(&app_config).at_least(min.width, min.height);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -172,7 +176,7 @@ impl PipelineBoot {
         density: pixtuoid_core::sprite::format::Density,
     ) -> LivePipeline {
         let _guard = self.rt.enter(); // spawn_pipeline's internal spawns need it
-        let boot_caps = offscreen::boot_capacities_for_window(window_size, density);
+        let boot_caps = geometry::boot_capacities_for_window(window_size, density);
         tracing::debug!(
             ?window_size,
             floor0_desks = boot_caps[0],
