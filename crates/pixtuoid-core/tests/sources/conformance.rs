@@ -316,7 +316,7 @@ fn all_source_fixtures_decode_and_coalesce() {
                         .iter()
                         .all(|i| i.chars().all(|c| c.is_ascii_digit())),
                     "{source}/{scenario}: the captured wire must carry a real gateway port \
-                     (got {instances:?} — the stale-plugin fallback is not a byte-real pin)"
+                     (got {instances:?})"
                 );
                 insta::assert_yaml_snapshot!(format!("{source}__{scenario}"), events);
                 ran += 1;

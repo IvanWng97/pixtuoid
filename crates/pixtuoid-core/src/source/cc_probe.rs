@@ -18,10 +18,10 @@ use crate::source::jsonl::ProbeSnapshot;
 /// vouch may act on.
 ///
 /// PID-reuse guard (#220): kill(0) only proves SOME process owns the pid. When
-/// the entry carries `startedAt` AND the kernel can report the process start
-/// time, the two must agree within `PID_START_TOLERANCE_SECS` or the pid was
-/// recycled and the entry is skipped. Either side missing falls back to
-/// pid-alive-only — the check is additive.
+/// the kernel can report the process start time, it must agree with the
+/// entry's `startedAt` within `PID_START_TOLERANCE_SECS` or the pid was
+/// recycled and the entry is skipped; a kernel that can't falls back to
+/// pid-alive-only.
 pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
     #[cfg(unix)]
     {
@@ -82,13 +82,12 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             if !pid_alive(reg.pid) {
                 continue;
             }
-            if let (Some(claimed_ms), Some(actual_secs)) =
-                (reg.started_at_ms, pid_start_time_secs(reg.pid))
-                && (claimed_ms / 1000).abs_diff(actual_secs) > PID_START_TOLERANCE_SECS
+            if let Some(actual_secs) = pid_start_time_secs(reg.pid)
+                && (reg.started_at_ms / 1000).abs_diff(actual_secs) > PID_START_TOLERANCE_SECS
             {
                 tracing::debug!(
                     pid = reg.pid,
-                    claimed_secs = claimed_ms / 1000,
+                    claimed_secs = reg.started_at_ms / 1000,
                     actual_secs,
                     "pid recycled — registry startedAt does not match process start; skipping"
                 );
@@ -135,19 +134,13 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
 
 /// Deterministic winner between two LIVE entries claiming one sessionId
 /// (#252): read_dir order is unspecified and the binding must not flap.
-/// Newest `startedAt` wins, a `startedAt`-carrying entry beats one without
-/// (better-attested), and both-absent-or-equal falls to the larger pid.
+/// Newest `startedAt` wins, and a tie falls to the larger pid.
 #[cfg(unix)]
 fn prefer_candidate(incumbent: &RegistryEntry, candidate: &RegistryEntry) -> bool {
-    // Guard-pair form rather than `if c != i => c > i`: behavior-identical,
-    // but the old shape's `c > i` could never see `c == i`, leaving a `>`→`>=`
-    // mutation equivalent-unkillable.
-    match (candidate.started_at_ms, incumbent.started_at_ms) {
-        (Some(c), Some(i)) if c > i => true,
-        (Some(c), Some(i)) if c < i => false,
-        (Some(_), None) => true,
-        (None, Some(_)) => false,
-        _ => candidate.pid > incumbent.pid,
+    match candidate.started_at_ms.cmp(&incumbent.started_at_ms) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => candidate.pid > incumbent.pid,
     }
 }
 
@@ -163,9 +156,8 @@ const MAX_REGISTRY_ENTRY_BYTES: u64 = 64 * 1024;
 struct RegistryEntry {
     pid: i32,
     session_id: String,
-    /// `startedAt` — ms-epoch CC stamps at startup. Optional: an older CC
-    /// without the field still probes pid-alive-only.
-    started_at_ms: Option<u64>,
+    /// `startedAt` — ms-epoch CC stamps at startup.
+    started_at_ms: u64,
 }
 
 /// One registry-file parse outcome — the seam the #247 drift warn keys on.
@@ -209,7 +201,9 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     if session_id.is_empty() {
         return RegistryParse::Skip;
     }
-    let started_at_ms = v.get("startedAt").and_then(|s| s.as_u64());
+    let Some(started_at_ms) = v.get("startedAt").and_then(|s| s.as_u64()) else {
+        return RegistryParse::ShapeDrift("startedAt");
+    };
     RegistryParse::Entry(RegistryEntry {
         pid,
         session_id: session_id.to_string(),
@@ -279,10 +273,22 @@ mod liveness_tests {
     // Gated with its only callers: on Windows this would be dead code.
     #[cfg(unix)]
     fn write_entry(dir: &Path, name: &str, pid: i64, session_id: &str) {
+        // The pid's real start, so the PID-reuse guard vouches for a live one.
+        let started = i32::try_from(pid)
+            .ok()
+            .and_then(pid_start_time_secs)
+            .unwrap_or(0);
+        write_entry_started(dir, name, pid, session_id, started * 1000);
+    }
+
+    #[cfg(unix)]
+    fn write_entry_started(dir: &Path, name: &str, pid: i64, session_id: &str, started_ms: u64) {
         std::fs::write(
             dir.join(name),
-            serde_json::json!({ "pid": pid, "sessionId": session_id, "status": "idle" })
-                .to_string(),
+            serde_json::json!({
+                "pid": pid, "sessionId": session_id, "startedAt": started_ms, "status": "idle"
+            })
+            .to_string(),
         )
         .unwrap();
     }
@@ -298,7 +304,9 @@ mod liveness_tests {
                 "pid {bad} must be dropped"
             );
         }
-        let ok = serde_json::json!({ "pid": 4321, "sessionId": "s", "status": "idle" }).to_string();
+        let ok =
+            serde_json::json!({ "pid": 4321, "sessionId": "s", "startedAt": 1, "status": "idle" })
+                .to_string();
         assert!(matches!(
             parse_registry_entry(ok.as_bytes()),
             RegistryParse::Entry(_)
@@ -436,21 +444,17 @@ mod liveness_tests {
 
     #[cfg(unix)]
     #[test]
-    fn prefer_candidate_orders_by_started_at_then_attestation_then_pid() {
-        let e = |started_at_ms: Option<u64>, pid: i32| RegistryEntry {
+    fn prefer_candidate_orders_by_started_at_then_pid() {
+        let e = |started_at_ms: u64, pid: i32| RegistryEntry {
             pid,
             session_id: "s".to_string(),
             started_at_ms,
         };
-        assert!(prefer_candidate(&e(Some(1_000), 99), &e(Some(2_000), 1)));
-        assert!(!prefer_candidate(&e(Some(2_000), 1), &e(Some(1_000), 99)));
-        assert!(prefer_candidate(&e(None, 99), &e(Some(1_000), 1)));
-        assert!(!prefer_candidate(&e(Some(1_000), 1), &e(None, 99)));
-        assert!(prefer_candidate(&e(Some(1_000), 5), &e(Some(1_000), 9)));
-        assert!(!prefer_candidate(&e(Some(1_000), 9), &e(Some(1_000), 5)));
-        assert!(prefer_candidate(&e(None, 5), &e(None, 9)));
-        assert!(!prefer_candidate(&e(Some(1_000), 7), &e(Some(1_000), 7)));
-        assert!(!prefer_candidate(&e(None, 7), &e(None, 7)));
+        assert!(prefer_candidate(&e(1_000, 99), &e(2_000, 1)));
+        assert!(!prefer_candidate(&e(2_000, 1), &e(1_000, 99)));
+        assert!(prefer_candidate(&e(1_000, 5), &e(1_000, 9)));
+        assert!(!prefer_candidate(&e(1_000, 9), &e(1_000, 5)));
+        assert!(!prefer_candidate(&e(1_000, 7), &e(1_000, 7)));
     }
 
     #[cfg(target_os = "macos")]
@@ -522,6 +526,7 @@ mod liveness_tests {
             serde_json::json!({
                 "pid": i64::from(std::process::id()),
                 "sessionId": "padded-session",
+                "startedAt": pid_start_time_secs(std::process::id() as i32).unwrap_or(0) * 1000,
                 "future_upstream_key": "y".repeat(8 * 1024),
             })
             .to_string(),
@@ -562,22 +567,26 @@ mod liveness_tests {
 
     #[cfg(unix)]
     #[test]
-    fn parse_registry_entry_extracts_started_at_and_tolerates_absence() {
+    fn parse_registry_entry_requires_started_at() {
         let with = serde_json::json!({
             "pid": 64924, "sessionId": "s", "startedAt": 1_781_109_422_174_u64
         })
         .to_string();
         let entry = expect_entry(with.as_bytes());
-        assert_eq!(entry.started_at_ms, Some(1_781_109_422_174));
+        assert_eq!(entry.started_at_ms, 1_781_109_422_174);
 
-        let without = serde_json::json!({ "pid": 64924, "sessionId": "s" }).to_string();
-        let entry = expect_entry(without.as_bytes());
-        assert_eq!(entry.started_at_ms, None);
-
-        let junk =
-            serde_json::json!({ "pid": 64924, "sessionId": "s", "startedAt": "soon" }).to_string();
-        let entry = expect_entry(junk.as_bytes());
-        assert_eq!(entry.started_at_ms, None);
+        for bad in [
+            serde_json::json!({ "pid": 64924, "sessionId": "s" }),
+            serde_json::json!({ "pid": 64924, "sessionId": "s", "startedAt": "soon" }),
+        ] {
+            assert!(
+                matches!(
+                    parse_registry_entry(bad.to_string().as_bytes()),
+                    RegistryParse::ShapeDrift("startedAt")
+                ),
+                "{bad}"
+            );
+        }
     }
 
     /// Pin of the CURRENT live `<claude_home>/sessions/<pid>.json` shape —
@@ -610,7 +619,7 @@ mod liveness_tests {
         let entry = expect_entry(live_shape_entry(64924, "pinned-session").as_bytes());
         assert_eq!(entry.pid, 64924);
         assert_eq!(entry.session_id, "pinned-session");
-        assert_eq!(entry.started_at_ms, Some(1_781_109_422_174));
+        assert_eq!(entry.started_at_ms, 1_781_109_422_174);
     }
 
     #[cfg(unix)]
@@ -746,24 +755,7 @@ mod liveness_tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn entry_without_started_at_keeps_pid_alive_only_behavior() {
-        let dir = tempfile::tempdir().unwrap();
-        write_entry(
-            dir.path(),
-            "legacy.json",
-            i64::from(std::process::id()),
-            "legacy-session",
-        );
-        assert!(
-            live_cc_session_ids(dir.path())
-                .expect("readable dir is a healthy probe")
-                .contains("legacy-session")
-        );
-    }
-
-    #[cfg(unix)]
-    fn entry(pid: i32, started_at_ms: Option<u64>) -> RegistryEntry {
+    fn entry(pid: i32, started_at_ms: u64) -> RegistryEntry {
         RegistryEntry {
             pid,
             session_id: "dup".into(),
@@ -776,20 +768,10 @@ mod liveness_tests {
     fn duplicate_winner_rule_is_symmetric_and_total() {
         // Every pair is asserted in BOTH presentation orders: the symmetry IS
         // the scan-order independence.
-        assert!(prefer_candidate(&entry(1, Some(100)), &entry(2, Some(200))));
-        assert!(!prefer_candidate(
-            &entry(2, Some(200)),
-            &entry(1, Some(100))
-        ));
-        assert!(prefer_candidate(&entry(9, None), &entry(1, Some(100))));
-        assert!(!prefer_candidate(&entry(1, Some(100)), &entry(9, None)));
-        assert!(prefer_candidate(&entry(1, None), &entry(2, None)));
-        assert!(!prefer_candidate(&entry(2, None), &entry(1, None)));
-        assert!(prefer_candidate(&entry(1, Some(100)), &entry(2, Some(100))));
-        assert!(!prefer_candidate(
-            &entry(2, Some(100)),
-            &entry(1, Some(100))
-        ));
+        assert!(prefer_candidate(&entry(1, 100), &entry(2, 200)));
+        assert!(!prefer_candidate(&entry(2, 200), &entry(1, 100)));
+        assert!(prefer_candidate(&entry(1, 100), &entry(2, 100)));
+        assert!(!prefer_candidate(&entry(2, 100), &entry(1, 100)));
     }
 
     #[cfg(unix)]
@@ -797,7 +779,7 @@ mod liveness_tests {
     fn duplicate_session_id_binds_a_stable_pid_regardless_of_scan_order() {
         // The same pair is presented under file names sorting in OPPOSITE
         // orders; whatever order read_dir yields, the binding must come out
-        // identical. No startedAt, so the pid tiebreak decides.
+        // identical. One shared startedAt, so the pid tiebreak decides.
         let mut child_a = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
@@ -808,14 +790,16 @@ mod liveness_tests {
             .unwrap();
         let (pid_a, pid_b) = (i64::from(child_a.id()), i64::from(child_b.id()));
         let expected = pid_a.max(pid_b) as i32;
+        // Both children start within the PID-reuse tolerance of this.
+        let started = pid_start_time_secs(child_a.id() as i32).unwrap_or(0) * 1000;
 
         // Probe inside the loop, assert only after the children are reaped —
         // a panicking assert here would leak two `sleep 30`s.
         let mut snapshots = Vec::new();
         for (first, second) in [(pid_a, pid_b), (pid_b, pid_a)] {
             let dir = tempfile::tempdir().unwrap();
-            write_entry(dir.path(), "aaa.json", first, "dup");
-            write_entry(dir.path(), "zzz.json", second, "dup");
+            write_entry_started(dir.path(), "aaa.json", first, "dup", started);
+            write_entry_started(dir.path(), "zzz.json", second, "dup", started);
             snapshots.push(live_cc_session_ids(dir.path()));
         }
 
