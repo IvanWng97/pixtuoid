@@ -113,7 +113,12 @@ def run_pty(argv, env, geometry, secs, hover):
 
 
 def run_live(argv, env, secs):
-    child = subprocess.Popen(argv, env=env)
+    # The binary draws to the terminal, by its device's name, whatever this
+    # script's own output is redirected to.
+    if not os.isatty(0):
+        sys.exit("pace-check: --live runs in a terminal, and stdin is not one")
+    tty = open(os.ttyname(0), "wb", buffering=0)
+    child = subprocess.Popen(argv, env=env, stdout=tty, stderr=tty)
     try:
         child.wait(timeout=secs)
     except subprocess.TimeoutExpired:
