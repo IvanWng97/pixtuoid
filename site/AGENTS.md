@@ -105,7 +105,8 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   not switch to the default `swap` (Ubuntu cold visits reflow past the CLS
   budget; `font-layout.spec.ts` reproduces it deliberately).
 - **npm**: `audit` runs LAST in `verify` (a live advisory would short-circuit
-  the checks below it — #847/#849) but FIRST in `pages.yml` (that one ships).
+  the checks below it — #847/#849); CI runs it when a PR changes
+  `package-lock.json`, and daily in `audit.yml`.
   npm 12 pinned (`packageManager` + `engine-strict`); install scripts
   fail-closed (`strict-allow-scripts`, exact-version `allowScripts`, explicit
   `fsevents` denial) — review with `npm install-scripts ls`.

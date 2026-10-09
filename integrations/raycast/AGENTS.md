@@ -78,6 +78,9 @@ manifest's generated `Preferences` that `tsc` reads, and `ray lint` validates
 the manifest, icons and metadata and runs the Prettier pass. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
+- **Install scripts fail closed, as site's**: `strict-allow-scripts` with an
+  exact-version `allowScripts`, enforced by the npm 12 CI pins
+  (`setup-npm`); review with `npm install-scripts ls`.
 - **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.**
   `npm audit` has no per-advisory ignore, so if an unfixable advisory recurs
   here, restore the per-advisory allow-list script from history rather than

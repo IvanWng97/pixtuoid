@@ -1,0 +1,34 @@
+name: 'Setup npm project'
+description: 'Node + pinned npm + npm ci for one npm project'
+
+inputs:
+  directory:
+    description: 'The project directory, holding package.json and package-lock.json'
+    required: true
+  node-version:
+    description: 'The one authority for the project''s Node major (the default is the site''s); feeds setup-node and the output below'
+    default: '26'
+
+outputs:
+  node-version:
+    description: 'The Node major in effect — withastro/action runs its own Node setup and would otherwise pick a different major'
+    value: ${{ inputs.node-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: ${{ inputs.directory }}/package-lock.json
+    # A Node major's bundled npm can predate the complete allowScripts
+    # toolchain, so pin it before npm ci or install-script policy goes
+    # unenforced.
+    - name: Install pinned npm
+      shell: bash
+      run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact npm bootstrap before the lockfile install
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: npm ci

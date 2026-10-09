@@ -25,7 +25,9 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - uses: ./.github/actions/setup-site-node
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: site
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check
@@ -55,7 +57,9 @@ jobs:
           # checkout silently falls back to Cargo.toml
           fetch-depth: 0
           persist-credentials: false
-      - uses: ./.github/actions/setup-site-node
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: site
       # The one rust-cache for gen-demos and gen-wasm
       # (`site-build-composites-leave-rust-cache-to-the-job`).
       - uses: ./.github/actions/setup-cargo-just
