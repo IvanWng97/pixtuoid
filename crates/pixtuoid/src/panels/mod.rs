@@ -293,25 +293,33 @@ pub(crate) enum KeyAction {
     Redraw,
 }
 
-/// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
-/// — no shown-but-broken source survives a restart.
+/// Re-read `source_id`'s connection into the live gate after a change, whatever its
+/// outcome: a failed install or uninstall can still have moved the hooks.
+fn refresh_gate(
+    config_path: &std::path::Path,
+    connected: &crate::runtime::ConnectedSources,
+    source_id: &str,
+) {
+    connected.set(
+        source_id,
+        crate::sources::is_connected(config_path, source_id),
+    );
+}
+
 fn connect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
     source_id: &str,
     display_name: &str,
 ) -> String {
-    match crate::sources::connect(config_path, source_id) {
-        Ok(outcome) => {
-            connected.set(source_id, true);
-            match outcome {
-                crate::sources::ConnectOutcome::Installed(r) => {
-                    connection::format_connect_result(&r, display_name)
-                }
-                crate::sources::ConnectOutcome::FlagOnly => {
-                    format!("\u{2713} {display_name} connected")
-                }
-            }
+    let done = crate::sources::connect(config_path, source_id);
+    refresh_gate(config_path, connected, source_id);
+    match done {
+        Ok(crate::sources::ConnectOutcome::Installed(r)) => {
+            connection::format_connect_result(&r, display_name)
+        }
+        Ok(crate::sources::ConnectOutcome::FlagOnly) => {
+            format!("\u{2713} {display_name} connected")
         }
         Err(e) => connection::format_failure(
             connection::FailedOp::Connect,
@@ -321,29 +329,20 @@ fn connect_source(
     }
 }
 
-/// The core reserves `Err` for the persist-failure abort — a runtime hide the next
-/// restart reverts is a lie. A hook-removal failure is folded into the `Ok` outcome, so
-/// the gate STILL closes.
 fn disconnect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
     source_id: &str,
     display_name: &str,
 ) -> String {
-    match crate::sources::disconnect(config_path, source_id) {
-        Ok(outcome) => {
-            connected.set(source_id, false);
-            match outcome {
-                crate::sources::DisconnectOutcome::Uninstalled(r) => {
-                    connection::format_disconnect_result(&r, display_name)
-                }
-                crate::sources::DisconnectOutcome::FlagOnly => {
-                    format!("\u{2713} {display_name} disconnected")
-                }
-                crate::sources::DisconnectOutcome::HookRemovalFailed(e) => {
-                    connection::format_failure(connection::FailedOp::HookRemoval, display_name, &e)
-                }
-            }
+    let done = crate::sources::disconnect(config_path, source_id);
+    refresh_gate(config_path, connected, source_id);
+    match done {
+        Ok(crate::sources::DisconnectOutcome::Uninstalled(r)) => {
+            connection::format_disconnect_result(&r, display_name)
+        }
+        Ok(crate::sources::DisconnectOutcome::FlagOnly) => {
+            format!("\u{2713} {display_name} disconnected")
         }
         Err(e) => connection::format_failure(
             connection::FailedOp::Disconnect,
@@ -361,47 +360,21 @@ struct OnboardingFailure {
     line: String,
 }
 
-/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand back one
-/// presentable failure per failed row. `choices` and `outcomes` are index-aligned.
-///
-/// The RETURN is the surfacing half: in TUI mode the alternate screen owns the terminal,
-/// so the warn-floor log is not a user surface.
-fn reflect_onboarding_outcomes(
-    connected: &crate::runtime::ConnectedSources,
-    choices: &[(&'static str, bool)],
+/// One presentable failure per failed onboarding connect: in TUI mode the alternate
+/// screen owns the terminal, so the warn-floor log is not a user surface.
+fn onboarding_failures(
     outcomes: &[(String, crate::sources::AppliedChange)],
 ) -> Vec<OnboardingFailure> {
-    use crate::sources::AppliedChange;
     let mut failures = Vec::new();
-    for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
-        match oc {
-            AppliedChange::Connected => connected.set(id, true),
-            AppliedChange::Disconnected => connected.set(id, false),
-            AppliedChange::Failed(e) => {
-                connected.set(id, false);
-                // `Failed` covers all three operations: connect, disconnect (an UNCHECKED
-                // row, which `freeze_for_skip` makes the common case), and the fold below.
-                let op = if *want {
-                    connection::FailedOp::Connect
-                } else {
-                    connection::FailedOp::Disconnect
-                };
-                tracing::warn!(source = %id, ?op, error = ?e, "onboarding: hook change failed");
-                let name =
-                    crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
-                // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
-                // presents as its own op rather than as a failed disconnect.
-                let line = match e.strip_prefix(crate::sources::HOOK_REMOVAL_FAILED_PREFIX) {
-                    Some(reason) => {
-                        connection::format_failure(connection::FailedOp::HookRemoval, name, reason)
-                    }
-                    None => connection::format_failure(op, name, e),
-                };
-                failures.push(OnboardingFailure {
-                    source_id: id.clone(),
-                    line,
-                });
-            }
+    for (id, oc) in outcomes {
+        if let crate::sources::AppliedChange::Failed(e) = oc {
+            tracing::warn!(source = %id, error = ?e, "onboarding: connect failed");
+            let name =
+                crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
+            failures.push(OnboardingFailure {
+                source_id: id.clone(),
+                line: connection::format_failure(connection::FailedOp::Connect, name, e),
+            });
         }
     }
     failures
@@ -743,15 +716,16 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
         KeyAction::OnboardingDown => cx.ui.onboarding_ui.move_down(),
         KeyAction::OnboardingToggle => cx.ui.onboarding_ui.toggle_selected(),
         KeyAction::OnboardingConfirm => {
-            // SCOPED to the detected sources, so an undetected source's flag is
-            // never written.
-            let choices = cx.ui.onboarding_ui.decisions();
-            let outcomes = crate::sources::apply_choices(cx.config_path, &choices);
-            let failed = reflect_onboarding_outcomes(cx.connected, &choices, &outcomes);
+            let checked = cx.ui.onboarding_ui.checked();
+            let outcomes = crate::sources::connect_each(cx.config_path, &checked);
+            for (id, _) in &outcomes {
+                refresh_gate(cx.config_path, cx.connected, id);
+            }
+            let failed = onboarding_failures(&outcomes);
             cx.ui.close_onboarding();
             surface_onboarding_failures(cx.ui, cx.connected, failed);
         }
-        KeyAction::OnboardingSkip => apply_onboarding_skip(cx),
+        KeyAction::OnboardingSkip => cx.ui.close_onboarding(),
         KeyAction::Redraw => {
             if let Err(e) = cx.host.redraw() {
                 tracing::warn!(error = %e, "redraw failed");
@@ -759,29 +733,6 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
         }
     }
     false
-}
-
-/// Skip marks onboarding done WITHOUT changing any hooks: `skip_freeze` pins each detected
-/// source to its REAL current state — live-gate connected OR already carrying installed
-/// hooks (a pre-0.12 upgrader has hooks but no `[sources]` flag). The apply re-installs
-/// those idempotently and leaves the rest disconnected, so `[sources]` becomes non-empty
-/// (onboarding won't re-trigger) yet NO hooks are added or removed.
-fn apply_onboarding_skip<H: Host>(cx: &mut KeyCtx<'_, H>) {
-    let snap = cx.connected.snapshot();
-    let ids: Vec<&'static str> = cx
-        .ui
-        .onboarding_ui
-        .rows
-        .iter()
-        .map(|r| r.source_id)
-        .collect();
-    let freeze = crate::sources::skip_freeze(ids, &snap);
-    let outcomes = crate::sources::apply_choices(cx.config_path, &freeze);
-    // The freeze persists connected=true for a pre-0.12 upgrader's hooked sources, so the
-    // in-process gate must open THIS session too, or their office stays empty until restart.
-    let failed = reflect_onboarding_outcomes(cx.connected, &freeze, &outcomes);
-    cx.ui.close_onboarding();
-    surface_onboarding_failures(cx.ui, cx.connected, failed);
 }
 
 #[cfg(test)]
@@ -1432,8 +1383,8 @@ mod dispatch_tests {
         assert!(!connected.is_connected("antigravity"), "gate closed");
         let written = std::fs::read_to_string(&cfg).unwrap();
         assert!(
-            written.contains("antigravity") && written.contains("false"),
-            "the flag was persisted: {written}"
+            !written.contains("antigravity"),
+            "the flag was dropped: {written}"
         );
     }
 
@@ -1455,31 +1406,31 @@ mod dispatch_tests {
         );
     }
 
+    /// The gate follows the fact after a FAILED change, not the change's outcome: a
+    /// disconnect that could not write leaves the source connected, and so the gate.
     #[test]
-    fn onboarding_outcomes_map_connected_disconnected_failed() {
-        use crate::sources::AppliedChange;
-        let connected = crate::runtime::ConnectedSources::default();
-        let choices: Vec<(&'static str, bool)> =
-            vec![("antigravity", true), ("codex", false), ("cursor", true)];
-        let outcomes = vec![
-            ("antigravity".to_string(), AppliedChange::Connected),
-            ("codex".to_string(), AppliedChange::Disconnected),
-            ("cursor".to_string(), AppliedChange::Failed("boom".into())),
-        ];
-        super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
-        assert!(connected.is_connected("antigravity"));
-        assert!(!connected.is_connected("codex"));
+    fn a_failed_disconnect_leaves_the_gate_on_the_fact() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("config.toml");
+        std::fs::write(&cfg, "[sources]\nantigravity = true\n").unwrap();
+        let connected = crate::runtime::ConnectedSources::new(
+            std::iter::once("antigravity".to_string()).collect(),
+        );
+        // A held lock refuses the rewrite (`lock_config` fails on contention)
+        // while the flag still reads back.
+        let held = crate::install::io::lock_config(&cfg).unwrap();
+        let res = disconnect_source(&cfg, &connected, "antigravity", "Antigravity");
+        drop(held);
+        assert!(res.contains("disconnect failed"), "result: {res}");
         assert!(
-            !connected.is_connected("cursor"),
-            "a failed connect must NOT go live"
+            connected.is_connected("antigravity"),
+            "still flagged on disk, so still connected"
         );
     }
 
     #[test]
     fn a_failed_onboarding_connect_reports_the_reason_to_the_caller() {
         use crate::sources::AppliedChange;
-        let connected = crate::runtime::ConnectedSources::default();
-        let choices: Vec<(&'static str, bool)> = vec![("cursor", true), ("antigravity", true)];
         let outcomes = vec![
             (
                 "cursor".to_string(),
@@ -1487,7 +1438,7 @@ mod dispatch_tests {
             ),
             ("antigravity".to_string(), AppliedChange::Connected),
         ];
-        let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
+        let failures = super::onboarding_failures(&outcomes);
         assert_eq!(
             failures.len(),
             1,
@@ -1517,60 +1468,6 @@ mod dispatch_tests {
         assert_eq!(
             failures[0].source_id, "cursor",
             "the failure carries the row it belongs to, so the panel can select it"
-        );
-    }
-
-    #[test]
-    fn an_onboarding_failure_names_the_operation_that_actually_failed() {
-        use crate::sources::AppliedChange;
-        let connected = crate::runtime::ConnectedSources::default();
-        let choices: Vec<(&'static str, bool)> = vec![("cursor", false), ("openclaw", false)];
-        let outcomes = vec![
-            (
-                "cursor".to_string(),
-                AppliedChange::Failed("config is not writable".into()),
-            ),
-            (
-                "openclaw".to_string(),
-                AppliedChange::Failed(format!(
-                    "{}openclaw.json is JSON5, not strict JSON",
-                    crate::sources::HOOK_REMOVAL_FAILED_PREFIX
-                )),
-            ),
-        ];
-        let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
-        assert_eq!(failures.len(), 2, "both rows report: {failures:?}");
-
-        let cursor_name = crate::install::target::by_source("cursor")
-            .expect("cursor is a target-bearing source")
-            .display_name;
-        let unchecked = &failures[0].line;
-        assert_eq!(
-            unchecked,
-            &connection::format_failure(
-                connection::FailedOp::Disconnect,
-                cursor_name,
-                "config is not writable",
-            ),
-            "an unchecked row's failure is a DISCONNECT failure: {unchecked}"
-        );
-
-        let openclaw_name = crate::install::target::by_source("openclaw")
-            .expect("openclaw is a target-bearing source")
-            .display_name;
-        let folded = &failures[1].line;
-        assert_eq!(
-            folded,
-            &connection::format_failure(
-                connection::FailedOp::HookRemoval,
-                openclaw_name,
-                "openclaw.json is JSON5, not strict JSON",
-            ),
-            "a folded hook-removal failure keeps the panel's wording: {folded}"
-        );
-        assert!(
-            !folded.contains(crate::sources::HOOK_REMOVAL_FAILED_PREFIX),
-            "the machine token is stripped once the wording carries it: {folded}"
         );
     }
 
@@ -1615,20 +1512,6 @@ mod dispatch_tests {
         assert_ne!(
             ui.connection.selected, 0,
             "cursor is not the first registry row, so this could not pass by default"
-        );
-    }
-
-    #[test]
-    fn onboarding_skip_reflects_its_freeze_into_the_live_gate() {
-        use crate::sources::AppliedChange;
-        let connected = crate::runtime::ConnectedSources::default();
-        assert!(!connected.is_connected("antigravity"), "gate starts empty");
-        let freeze: Vec<(&'static str, bool)> = vec![("antigravity", true)];
-        let outcomes = vec![("antigravity".to_string(), AppliedChange::Connected)];
-        super::reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
-        assert!(
-            connected.is_connected("antigravity"),
-            "skip must open the live gate for a frozen-connected source"
         );
     }
 }

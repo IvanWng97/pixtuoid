@@ -86,8 +86,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Every source connected: the reducer's connection gate drops events for a
-# DISconnected source, so an unset [sources] key reads as "the CLI never ran".
+# The hookless sources are connected by their `[sources]` flag; a hook source's
+# key is ignored — it is connected when its hooks are installed in its real
+# config, which the loop below checks before spending a turn on it.
 {
     echo '[sources]'
     "$ROSTER_BIN" --roster | cut -f1 | sed 's/$/ = true/'
@@ -152,6 +153,14 @@ for id in "${wanted[@]}"; do
         continue
         ;;
     esac
+
+    # A hook source without installed hooks is gated off, so its turn would read
+    # as "no sprite" for the wrong reason.
+    if [ "$(XDG_CONFIG_HOME="$CFG" "$PIX" sources --json | jq -r --arg i "$id" '.[] | select(.id==$i) | .connected')" != "true" ]; then
+        echo "  BLOCKED $id — not connected here (pixtuoid connect $id)"
+        declare_uncovered="$declare_uncovered $id"
+        continue
+    fi
 
     # Relocation is a REPAIR, not a default: a throwaway home also throws away the
     # CLI's credentials, so it is used only when the host's own install is broken

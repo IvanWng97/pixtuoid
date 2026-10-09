@@ -23,7 +23,7 @@ fn empty_detected_is_empty() {
     ui.move_down();
     ui.move_up();
     ui.toggle_selected();
-    assert!(ui.decisions().is_empty());
+    assert!(ui.checked().is_empty());
 }
 
 #[test]
@@ -90,11 +90,13 @@ fn the_close_fade_continues_from_the_dim_it_was_interrupted_at() {
 }
 
 #[test]
-fn toggle_flips_only_the_selected_row_and_feeds_decisions() {
+fn toggle_flips_only_the_selected_row_and_feeds_checked() {
     let mut ui = WelcomeUi::from_detected(&["codex", "claude-code"]);
     ui.move_down();
     ui.toggle_selected();
-    let decisions: std::collections::HashMap<_, _> = ui.decisions().into_iter().collect();
-    assert!(decisions["codex"], "untouched row stays checked");
-    assert!(!decisions["claude-code"], "selected row toggled off");
+    assert_eq!(
+        ui.checked(),
+        ["codex"],
+        "the untouched row stays, the toggled one goes"
+    );
 }

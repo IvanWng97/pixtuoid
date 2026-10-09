@@ -10,7 +10,7 @@ mod sources_cli;
 use std::io::Write;
 
 use crate::cli::{Cli, Cmd, SourceArgs, SourcesAction};
-use crate::{config, doctor, floating, install, runtime, setup, sources};
+use crate::{config, doctor, floating, install, runtime, sources};
 use anyhow::Result;
 use clap::Parser;
 
@@ -133,15 +133,8 @@ pub fn run() -> Result<()> {
         Cmd::Connect { ids, json } => sources_cli::run_change(&ids, json, |c, i| {
             sources::connect(c, i).map(|_| sources::ChangeOutcome::Connected)
         }),
-        // A folded hook-removal failure is PARTIAL (the flag IS disconnected, but
-        // hooks remain), so map it to `Err` for the non-zero exit — a $?-checking
-        // script must not be told a clean "disconnected".
         Cmd::Disconnect { ids, json } => {
             sources_cli::run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
-                sources::DisconnectOutcome::HookRemovalFailed(e) => Err(anyhow::anyhow!(
-                    "{}: {e}",
-                    sources::HOOK_REMOVAL_FAILED_PHRASE
-                )),
                 sources::DisconnectOutcome::Uninstalled(r) if r.plugin_left_registered => {
                     let _ = writeln!(
                         std::io::stderr(),
@@ -191,17 +184,13 @@ fn build_run_config(
     let cfg_path = config::config_path();
     let mut cfg_warnings = Vec::new();
     let (cfg, load_degraded) = config::load_with_status(&cfg_path, &mut cfg_warnings);
-    // A degraded load means the file EXISTS but is malformed — "previously
-    // configured", never a first run (the onboarding apply couldn't succeed
-    // anyway: update_config refuses to rewrite a malformed config). A missing
-    // file warns nothing ⇒ first run.
-    let first_run = setup::is_first_run(&cfg, &cfg_path, load_degraded);
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
     let desk_cap = config::resolve_desk_cap(&cfg, cli_max_desks, &mut cfg_warnings);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
     let graphics = config::resolve_graphics(&cfg, cli_graphics, &mut cfg_warnings);
     let motion = config::resolve_motion(&cfg, &mut cfg_warnings);
-    let connected = config::resolve_connected(&cfg);
+    let connected = sources::connected(&cfg);
+    let first_run = sources::is_first_run(&connected, load_degraded);
     if !headless {
         // Config problems must reach stderr BEFORE any alternate screen / window,
         // not just the log file. Headless already has a stderr tracing subscriber,

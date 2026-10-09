@@ -62,11 +62,13 @@ impl WelcomeUi {
         }
     }
 
-    /// The CONFIRM decision list for `sources::apply_choices`. EVERY row is
-    /// written, checked or not: that makes `[sources]` non-empty, so onboarding
-    /// never re-triggers.
-    pub(crate) fn decisions(&self) -> Vec<(&'static str, bool)> {
-        self.rows.iter().map(|r| (r.source_id, r.checked)).collect()
+    /// The rows CONFIRM connects.
+    pub(crate) fn checked(&self) -> Vec<&'static str> {
+        self.rows
+            .iter()
+            .filter(|r| r.checked)
+            .map(|r| r.source_id)
+            .collect()
     }
 }
 

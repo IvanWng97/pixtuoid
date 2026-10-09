@@ -31,7 +31,7 @@ mkdir -p "$CFGDIR"
 PIXPID=""
 GWPID=""
 
-for bin in openclaw claude; do
+for bin in openclaw claude jq; do
     command -v "$bin" >/dev/null 2>&1 || {
         echo "missing '$bin' on PATH — this live test needs a real OpenClaw + Claude Code install" >&2
         exit 2
@@ -90,10 +90,17 @@ trap cleanup EXIT
 WS_PATH="$(openclaw config get agents.defaults.workspace 2>/dev/null | tr -d '"' | tail -1)"
 WS_LABEL="cc·$(basename "${WS_PATH:-workspace}")"
 
-# Both sources must be connected — the presence/agent connection-gates drop
-# deltas for a disconnected source. Isolated so the dev's real config is untouched.
-mkdir -p "$CFGDIR/pixtuoid"
-printf '[sources]\nopenclaw = true\nclaude-code = true\n' >"$CFGDIR/pixtuoid/config.toml"
+# Both sources must be connected — their hooks installed in this machine's real
+# configs, which the live gateway and claude backend fire anyway — or the
+# presence/agent connection-gates drop their deltas. The pixtuoid config itself
+# is isolated, so the dev's real one is untouched.
+for id in openclaw claude-code; do
+    XDG_CONFIG_HOME="$CFGDIR" "$PIX" sources --json |
+        jq -e --arg i "$id" '.[] | select(.id==$i) | .connected' >/dev/null || {
+        echo "FAIL: $id is not connected here — run: pixtuoid connect $id" >&2
+        exit 1
+    }
+done
 
 echo "[1] headless pixtuoid -> isolated socket, watching $PROJECTS"
 PIXTUOID_SOCKET="$SOCK" XDG_CONFIG_HOME="$CFGDIR" \

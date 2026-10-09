@@ -36,8 +36,9 @@ pub(crate) struct AppConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_seen_version: Option<String>,
-    /// Per-source connection flags (registry source id → connected); only an
-    /// explicit `true` connects. Keep BEFORE `pets` (see `pets`).
+    /// The flag-only sources' connection flags (registry source id →
+    /// connected); a hook-bearing source's is its installed hooks, never a key
+    /// here. Keep BEFORE `pets` (see `pets`).
     #[serde(
         rename = "sources",
         default,
@@ -285,31 +286,34 @@ pub(crate) fn save_version(path: &Path, version: &str) -> Result<()> {
     })
 }
 
-pub(crate) fn save_source_connected(
+/// Rewrite `[sources]` as exactly the `ids` that are on once `change` applies,
+/// each `= true`, dropping the table when none is. The current flags are read
+/// under the config lock, so a concurrent writer's change survives.
+pub(crate) fn save_flag_sources(
     path: &Path,
-    source_id: &'static str,
-    connected: bool,
+    ids: &[&str],
+    change: Option<(&str, bool)>,
 ) -> Result<()> {
     update_config(path, |doc| {
-        doc["sources"][source_id] = toml_edit::value(connected);
-    })
-}
-
-/// Remove a source's connection flag — the connect-rollback restore. An absent
-/// flag and an explicit `false` both read as disconnected, but only absence keeps
-/// the `setup::is_first_run` empty-table signal intact, so an emptied `[sources]`
-/// table is dropped too.
-pub(crate) fn remove_source_connected(path: &Path, source_id: &str) -> Result<()> {
-    update_config(path, |doc| {
-        let emptied = match doc.get_mut("sources").and_then(|s| s.as_table_like_mut()) {
-            Some(t) => {
-                t.remove(source_id);
-                t.is_empty()
+        let mut table = toml_edit::Table::new();
+        for &sid in ids {
+            let on = match change {
+                Some((id, want)) if id == sid => want,
+                _ => {
+                    doc.get("sources")
+                        .and_then(|s| s.get(sid))
+                        .and_then(toml_edit::Item::as_bool)
+                        == Some(true)
+                }
+            };
+            if on {
+                table[sid] = toml_edit::value(true);
             }
-            None => false,
-        };
-        if emptied {
+        }
+        if table.is_empty() {
             doc.as_table_mut().remove("sources");
+        } else {
+            doc["sources"] = toml_edit::Item::Table(table);
         }
     })
 }
@@ -342,17 +346,6 @@ pub(crate) fn save_floating(
             }
         }
     })
-}
-
-/// Resolve the runtime connected-set the office gates its sprites on: a
-/// registered source is connected iff its `[sources]` flag is an explicit `true`.
-/// An absent flag is plainly DISCONNECTED, so a config predating `[sources]`
-/// reads as a first run and replays the onboarding wizard.
-pub(crate) fn resolve_connected(config: &AppConfig) -> std::collections::HashSet<String> {
-    pixtuoid_core::source::registry::registered_source_names()
-        .filter(|src| config.sources.get(*src).copied().unwrap_or(false))
-        .map(String::from)
-        .collect()
 }
 
 /// Resolve the config `max-desks` into the runtime desk cap. `0` is treated as
