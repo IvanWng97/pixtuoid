@@ -43,31 +43,64 @@ pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 
 /// The config CodeWhale actually reads: the `CODEWHALE_CONFIG_PATH` /
 /// `DEEPSEEK_CONFIG_PATH` overrides (each a FULL file path), else
-/// `<CODEWHALE_HOME | OS home>/.codewhale/config.toml`, else the legacy
-/// `<OS home>/.deepseek/config.toml` when only that exists — writing a fresh
+/// `$CODEWHALE_HOME/config.toml`, else `<OS home>/.codewhale/config.toml`, else
+/// the legacy `<OS home>/.deepseek/config.toml` when only that exists — writing a fresh
 /// `.codewhale/config.toml` would make CodeWhale PREFER our near-empty file and
 /// drop the user's provider/key config.
 ///
-/// The OS home comes from `home_first_dir` (`HOME` FIRST), NOT pixtuoid's generic
-/// `USERPROFILE`-first resolver: CodeWhale reads `$HOME ?? dirs::home_dir()`, so a
+/// The OS home comes from [`cw_home`] (`HOME` FIRST), NOT pixtuoid's generic
+/// `USERPROFILE`-first resolver: CodeWhale reads a set `$HOME` first, so a
 /// Windows user who exports `HOME` (Git Bash / MSYS2 / Cygwin) would otherwise get
 /// the hooks written to a file CodeWhale never loads (installed, but no sprite).
 ///
-/// The `*_CONFIG_PATH` overrides are honored verbatim and ASSUMED ABSOLUTE. A
-/// relative one is deliberately NOT reconciled with CodeWhale's
-/// `normalize_config_file_path`: it resolves against `current_dir`, and the
-/// installer and CodeWhale run in DIFFERENT working dirs.
+/// # Errors
+///
+/// If an override is still relative once its `~` is expanded, as CodeWhale
+/// refuses it, or no home resolves.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    // CodeWhale only TRIMS its overrides — it does NOT `~`-expand — so `home: None`.
+    let home = cw_home();
     resolve_config_path(
-        pixtuoid_core::platform::path_env("CODEWHALE_CONFIG_PATH")
-            .map(|v| io::expand_tilde(&v, None)),
-        pixtuoid_core::platform::path_env("DEEPSEEK_CONFIG_PATH")
-            .map(|v| io::expand_tilde(&v, None)),
-        pixtuoid_core::platform::path_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)),
-        pixtuoid_core::platform::home_first_dir(),
+        cw_env("CODEWHALE_CONFIG_PATH", home.as_deref())?,
+        cw_env("DEEPSEEK_CONFIG_PATH", home.as_deref())?,
+        cw_env("CODEWHALE_HOME", home.as_deref())?,
+        home.clone(),
         |p| p.exists(),
     )
+}
+
+/// The OS home as CodeWhale resolves it (`crates/paths/src/lib.rs` `user_home`):
+/// a set `HOME` decides alone and must be absolute, else `USERPROFILE`, else
+/// Windows' `HOMEDRIVE` + `HOMEPATH`, each absolute. Not mirrored: its last
+/// `dirs::home_dir` passwd lookup.
+fn cw_home() -> Option<PathBuf> {
+    use pixtuoid_core::platform::path_env_trimmed;
+    if let Some(home) = path_env_trimmed("HOME") {
+        return home.is_absolute().then_some(home);
+    }
+    path_env_trimmed("USERPROFILE")
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            let mut p = path_env_trimmed("HOMEDRIVE").filter(|_| cfg!(windows))?;
+            p.push(path_env_trimmed("HOMEPATH")?);
+            Some(p).filter(|p| p.is_absolute())
+        })
+}
+
+/// A CodeWhale path variable as CodeWhale reads it (`crates/paths/src/lib.rs`
+/// `absolute_path_env`): blank is unset, text is trimmed, a leading `~`
+/// expands against the OS home, and a path still relative is refused.
+fn cw_env(name: &str, home: Option<&Path>) -> Result<Option<PathBuf>> {
+    let Some(raw) = pixtuoid_core::platform::path_env_trimmed(name) else {
+        return Ok(None);
+    };
+    // Upstream expands only text; other bytes stay verbatim, and so relative.
+    let path = io::expand_tilde(&raw, home.filter(|_| raw.to_str().is_some()));
+    anyhow::ensure!(
+        path.is_absolute(),
+        "{name} must be an absolute path, got {}",
+        path.display()
+    );
+    Ok(Some(path))
 }
 
 /// Pure core for [`default_config_path`] — env overrides, the resolved OS home,
@@ -87,29 +120,24 @@ fn resolve_config_path(
     if let Some(p) = deepseek_config_env {
         return Ok(p);
     }
-    let modern_dir = match (codewhale_home_env, &os_home) {
-        (Some(h), _) => h,
-        (None, Some(home)) => home.join(".codewhale"),
-        (None, None) => {
-            return Err(io::home_unset(
-                "CodeWhale's home",
-                "CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/CODEWHALE_HOME/HOME/USERPROFILE",
-            ));
-        }
+    // An explicit CODEWHALE_HOME is final (`crates/config/src/lib.rs`
+    // `default_config_path`, `codewhale_home_is_explicit`).
+    if let Some(h) = codewhale_home_env {
+        return Ok(h.join("config.toml"));
+    }
+    let Some(home) = os_home else {
+        return Err(io::home_unset(
+            "CodeWhale's home",
+            "CODEWHALE_CONFIG_PATH/DEEPSEEK_CONFIG_PATH/CODEWHALE_HOME/HOME/USERPROFILE",
+        ));
     };
-    let modern = modern_dir.join("config.toml");
-    if exists(&modern) {
-        return Ok(modern);
-    }
-    // Legacy .deepseek is anchored to the OS home only — CodeWhale's
-    // `legacy_deepseek_home` ignores CODEWHALE_HOME.
-    if let Some(home) = &os_home {
-        let legacy = home.join(".deepseek").join("config.toml");
-        if exists(&legacy) {
-            return Ok(legacy);
-        }
-    }
-    Ok(modern)
+    let modern = home.join(".codewhale").join("config.toml");
+    let legacy = home.join(".deepseek").join("config.toml");
+    Ok(if !exists(&modern) && exists(&legacy) {
+        legacy
+    } else {
+        modern
+    })
 }
 
 /// Presence probe for auto-detection. CodeWhale's config FILE may be absent on a
@@ -117,15 +145,16 @@ fn resolve_config_path(
 /// layout puts config elsewhere — so probe the state dirs (created by CodeWhale on
 /// first launch) rather than the file we write.
 pub(crate) fn detect_installed() -> bool {
-    let os_home = pixtuoid_core::platform::home_first_dir();
-    let modern = match pixtuoid_core::platform::path_env("CODEWHALE_HOME")
-        .map(|v| io::expand_tilde(&v, None))
-    {
-        Some(h) => Some(h),
-        None => os_home.as_ref().map(|h| h.join(".codewhale")),
-    };
-    let legacy = os_home.map(|h| h.join(".deepseek"));
-    modern.is_some_and(|d| d.exists()) || legacy.is_some_and(|d| d.exists())
+    let home = cw_home();
+    // An explicit CODEWHALE_HOME suppresses the legacy dir (`legacy_deepseek_home`);
+    // one CodeWhale refuses is no install.
+    match cw_env("CODEWHALE_HOME", home.as_deref()) {
+        Ok(Some(h)) => h.exists(),
+        Ok(None) => {
+            home.is_some_and(|h| h.join(".codewhale").exists() || h.join(".deepseek").exists())
+        }
+        Err(_) => false,
+    }
 }
 
 /// The BASE hook command — no `--event`, which `merge_install` appends per event.
@@ -282,6 +311,117 @@ mod tests {
     const BASE: &str = "PIXTUOID_SOURCE=codewhale '/opt/bin/pixtuoid-hook'";
 
     #[test]
+    fn env_paths_are_read_as_codewhale_reads_them() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".deepseek")).unwrap();
+        let cw = home.path().join("cw");
+        let padded = format!("  {}  ", cw.display());
+        temp_env::with_vars(
+            [
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", Some(padded.as_str())),
+                ("HOME", Some(home.path().to_str().unwrap())),
+            ],
+            || {
+                assert_eq!(
+                    default_config_path().unwrap(),
+                    cw.join("config.toml"),
+                    "trimmed"
+                );
+                assert!(
+                    !detect_installed(),
+                    "an explicit CODEWHALE_HOME is not found by its legacy sibling"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn an_override_expands_its_tilde_and_must_be_absolute() {
+        let home = tempfile::tempdir().unwrap();
+        let home_str = home.path().to_str().unwrap();
+        temp_env::with_vars(
+            [
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", Some("~/cw")),
+                ("HOME", Some(home_str)),
+            ],
+            || {
+                assert_eq!(
+                    default_config_path().unwrap(),
+                    home.path().join("cw").join("config.toml")
+                );
+            },
+        );
+        for var in [
+            "CODEWHALE_HOME",
+            "CODEWHALE_CONFIG_PATH",
+            "DEEPSEEK_CONFIG_PATH",
+        ] {
+            let mut vars = vec![
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", None),
+                ("HOME", Some(home_str)),
+            ];
+            vars.retain(|(k, _)| *k != var);
+            vars.push((var, Some("rel/cw")));
+            temp_env::with_vars(vars, || {
+                let err = default_config_path().unwrap_err().to_string();
+                assert!(
+                    err.contains(var) && err.contains("absolute"),
+                    "{var}: {err}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn a_set_home_decides_alone_and_must_be_absolute() {
+        let profile = tempfile::tempdir().unwrap();
+        temp_env::with_vars(
+            [
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", None),
+                ("HOME", Some("rel/home")),
+                ("USERPROFILE", Some(profile.path().to_str().unwrap())),
+            ],
+            || {
+                assert!(
+                    cw_home().is_none(),
+                    "a relative HOME is no home, not a fallback"
+                );
+                assert!(default_config_path().is_err());
+            },
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_override_is_not_tilde_expanded() {
+        use std::os::unix::ffi::OsStrExt;
+        let home = tempfile::tempdir().unwrap();
+        let raw = std::ffi::OsStr::from_bytes(b"~/cw\xff");
+        temp_env::with_vars(
+            [
+                ("CODEWHALE_CONFIG_PATH", None),
+                ("DEEPSEEK_CONFIG_PATH", None),
+                ("CODEWHALE_HOME", Some(raw)),
+                ("HOME", Some(home.path().as_os_str())),
+            ],
+            || {
+                assert!(
+                    default_config_path().is_err(),
+                    "verbatim, so relative, so refused"
+                )
+            },
+        );
+    }
+
+    #[test]
     fn config_path_honors_codewhale_then_deepseek_env_overrides() {
         let p = resolve_config_path(
             Some("/custom/cw.toml".into()),
@@ -322,7 +462,10 @@ mod tests {
             |q| q == legacy,
         )
         .unwrap();
-        assert_eq!(p, legacy);
+        assert_eq!(
+            p, modern,
+            "an explicit CODEWHALE_HOME never falls back to .deepseek"
+        );
         let p = resolve_config_path(None, None, Some(cw_home.into()), None, |_| false).unwrap();
         assert_eq!(p, modern);
     }

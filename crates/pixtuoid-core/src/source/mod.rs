@@ -445,6 +445,7 @@ mod focus_pid_tests {
             serde_json::json!({
                 "pid": std::process::id(),
                 "sessionId": "focus-sess",
+                "startedAt": cc_probe::pid_start_time_secs(std::process::id() as i32).unwrap_or(0) * 1000,
                 "status": "idle"
             })
             .to_string(),
