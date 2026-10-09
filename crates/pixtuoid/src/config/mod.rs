@@ -59,7 +59,7 @@ pub(crate) struct AppConfig {
 }
 
 /// Default `pixtuoid floating` window size (logical px); the window's own
-/// minimum is the pack's (`floating::offscreen::min_window`).
+/// minimum is the pack's (`floating::geometry::min_window`).
 pub const FLOATING_DEFAULT_W: u32 = 480;
 pub const FLOATING_DEFAULT_H: u32 = 320;
 /// Below this the window is too transparent to read.

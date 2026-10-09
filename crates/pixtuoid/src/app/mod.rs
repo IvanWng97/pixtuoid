@@ -25,7 +25,7 @@ pub fn run() -> Result<()> {
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 
     // Only the terminal `run` TUI needs the terminal's color: `floating` paints
-    // real RGB via softbuffer, and every other command is plain text.
+    // real RGB through its GPU surface, and every other command is plain text.
     let is_run_tui = matches!(
         &cmd,
         Cmd::Run {

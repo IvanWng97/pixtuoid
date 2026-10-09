@@ -69,7 +69,7 @@ open               = "5"
 semver             = "1"
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays
 # window-free): winit is the frameless always-on-top window + main-thread event
-# loop, softbuffer the CPU blit of the office RgbBuffer into it (no GPU).
+# loop, wgpu draws each frame's layers into it (`floating/gpu.rs`).
 #
 # This is winit's own default set with ONE substitution, so dropping
 # `default-features` must keep every other default verbatim — a missing one is a
@@ -83,7 +83,11 @@ winit = { version = "0.30", default-features = false, features = [
     "wayland-dlopen",
     "wayland-csd-adwaita-notitle",
 ] }
-softbuffer         = "0.4"
+# wgpu's default set minus `webgpu`, a browser backend a native window never
+# takes; `gles` is the old-driver and software fallback.
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "dx12", "vulkan", "gles"] }
+# Blocks on wgpu's async adapter and device requests, once at window creation.
+pollster = "1"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
@@ -127,10 +131,14 @@ rustix = { workspace = true, features = ["shm", "mm"], optional = true }
 # deny.toml fails CI on a second copy.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
+# The floating window tags its Metal layer sRGB (floating/gpu.rs). The same
+# versions and features wgpu-hal already builds, so they add no crate.
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGColorSpace"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-graphics", "CAMetalLayer"] }
 
 # Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol needs
 # an X11 client, and x11rb is already in-tree transitively via winit — so this MUST
-# track the version winit AND softbuffer resolve to, exactly like the objc2-app-kit
+# track the version winit resolves to, exactly like the objc2-app-kit
 # stanza above. A grouped dependabot bump to "0.14" once silently built a SECOND
 # x11rb + x11rb-protocol on every Linux build; dependabot holds this at 0.13.x
 # until winit itself moves, and deny.toml fails CI on a second copy.

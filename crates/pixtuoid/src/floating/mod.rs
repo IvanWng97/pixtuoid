@@ -4,15 +4,21 @@
 //! A binary-only front-end on the shared engine: it boots the SAME
 //! `runtime::pipeline::spawn_pipeline` spine the TUI uses — from
 //! `window::resumed` rather than [`run`], because the desk-capacity seed needs
-//! the REAL window size (see `PipelineBoot`) — but presents each frame as an
-//! [`offscreen::OfficeRenderer`] `RgbBuffer` upscaled into a `winit` +
-//! `softbuffer` window instead of half-block terminal cells.
+//! the REAL window size (see `PipelineBoot`) — but presents each frame as a
+//! composition of layers ([`compose`]), the [`offscreen::OfficeRenderer`]
+//! office and its chrome, drawn by the GPU into a `winit` window instead of
+//! half-block terminal cells.
 //! `pixtuoid-core` stays window-free (invariant #1) — all windowing lives here.
 
 mod cadence;
-mod geometry;
+pub(crate) mod compose;
+#[cfg(test)]
+mod fixtures;
+pub(crate) mod geometry;
+mod gpu;
 mod input;
 pub(crate) mod offscreen;
+pub(crate) mod overlays;
 mod window;
 
 use anyhow::{Context, Result};
@@ -32,7 +38,7 @@ use window::{FloatingApp, FloatingEvent};
 ///
 /// # Errors
 ///
-/// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, or the event loop exits with an error.
+/// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, the event loop exits with an error, or the window or its GPU fails to start or is lost.
 pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     let RunConfig {
         socket,
@@ -52,7 +58,7 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     let app_config = config::load(&config_path, &mut Vec::new());
     let pack = pixtuoid_scene::pack::load_bundled_pack()
         .context("loading the bundled sprite pack for the floating window")?;
-    let min = offscreen::min_window(pack.max_density_variant());
+    let min = geometry::min_window(pack.max_density_variant());
     let floating_cfg = config::resolve_floating(&app_config).at_least(min.width, min.height);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -100,9 +106,12 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
             drift,
         },
     );
-    event_loop
-        .run_app(&mut app)
-        .context("running the floating window event loop")
+    let ran = event_loop.run_app(&mut app);
+    // The window's own failure is the cause; a loop error after it is not.
+    if let Some(failure) = app.into_failure() {
+        return Err(failure);
+    }
+    ran.context("running the floating window event loop")
 }
 
 /// Everything the pipeline needs, held by [`FloatingApp`] until `resumed` can
@@ -172,7 +181,7 @@ impl PipelineBoot {
         density: pixtuoid_core::sprite::format::Density,
     ) -> LivePipeline {
         let _guard = self.rt.enter(); // spawn_pipeline's internal spawns need it
-        let boot_caps = offscreen::boot_capacities_for_window(window_size, density);
+        let boot_caps = geometry::boot_capacities_for_window(window_size, density);
         tracing::debug!(
             ?window_size,
             floor0_desks = boot_caps[0],

@@ -32,10 +32,19 @@ updates:
       - dependency-name: "objc2-app-kit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
-      # Same discipline for x11rb: winit and softbuffer both require `^0.13.0`,
+      # Same discipline for x11rb: winit requires `^0.13.0`,
       # so a bump past 0.13.x builds a SECOND x11rb stack on Linux, which
       # deny.toml bans. Lift at winit's x11rb 0.14.
       - dependency-name: "x11rb"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
+      # The floating window's sRGB tag calls wgpu-hal's own CAMetalLayer, so these
+      # MUST stay at the versions wgpu-hal builds: a lone bump is a second copy
+      # whose types the call no longer accepts. Move them with wgpu.
+      - dependency-name: "objc2-core-graphics"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "objc2-quartz-core"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
       # winit's default set is copied verbatim into crates/pixtuoid/Cargo.toml and

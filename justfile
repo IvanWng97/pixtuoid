@@ -261,7 +261,7 @@ arch:
         # recipe via set -e, instead of reading as "no match" inside the if —
         # which would print the green line without having checked anything.
         deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
-        if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
+        if grep -qE '^(ratatui|crossterm|winit|wgpu|rodio|cpal)' <<<"$deps"; then
             echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (AGENTS.md invariant #1)"; exit 1
         fi
     done

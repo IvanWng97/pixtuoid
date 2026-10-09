@@ -24,6 +24,7 @@ jobs:
       # cargo-mutants builds its baseline with DEFAULT features — it needs
       # ALSA even where a reader assumes the flag-stripped release shape.
       - uses: ./.github/actions/setup-alsa
+      - uses: ./.github/actions/setup-gpu
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v1-rust # match setup-cargo-just's default cache namespace
