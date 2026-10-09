@@ -22,7 +22,7 @@ use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
 
 pub(crate) use crate::panels::widgets::{TooltipAt, paint_tooltip};
-pub(super) use crate::panels::widgets::{paint_footer, paint_world, star_area};
+pub(super) use crate::panels::widgets::{paint_footer, paint_host_text, star_area};
 pub(crate) use crate::panels::{FOOTER_ROWS, scene_rect};
 use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
@@ -385,7 +385,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
     let now = world.now;
     let Some(ClassicDrawn {
         pixels,
-        world: text,
+        text,
         hovers,
     }) = floor.raster.classic_drawn()
     else {
@@ -415,7 +415,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_world(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
+        paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,

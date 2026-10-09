@@ -87,7 +87,7 @@ pub(crate) struct DisplayList<'a> {
     pub(super) backdrop: super::Backdrop,
     pub(super) recolours: Recolours,
     /// Its world text, for a host that sets it over the frame itself.
-    pub(super) world: super::text::WorldRuns,
+    pub(super) host_text: super::text::HostRuns,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pub(super) pack: &'a OfficeArt,
@@ -240,10 +240,10 @@ impl<'a> DisplayList<'a> {
 
     /// Leave the world text to the host: no text piece paints, and none
     /// counts toward what changed. Returns the text.
-    pub(crate) fn host_text(&mut self) -> super::text::WorldRuns {
+    pub(crate) fn host_text(&mut self) -> super::text::HostRuns {
         self.pieces
             .retain(|p| !matches!(p.kind, PieceKind::Text { .. }));
-        std::mem::take(&mut self.world)
+        std::mem::take(&mut self.host_text)
     }
 
     /// Each text run, in draw order.

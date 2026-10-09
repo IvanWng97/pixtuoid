@@ -42,7 +42,7 @@ pub enum Look {
 pub enum WorldText {
     /// The image, in the scene's pixel font.
     Baked,
-    /// The host, in its own font over the image ([`Raster::world`]).
+    /// The host, in its own font over the image ([`Raster::host_text`]).
     Host,
 }
 
@@ -177,8 +177,8 @@ struct Classic {
 }
 
 impl Classic {
-    fn world(&self) -> crate::display::World<'_> {
-        crate::display::World {
+    fn host_text(&self) -> crate::display::HostText<'_> {
+        crate::display::HostText {
             badges: &self.hits.badges,
             bubbles: &self.hits.bubbles,
             signs: &self.signs,
@@ -193,7 +193,7 @@ pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
     /// The text the painter sets over it.
-    pub world: crate::display::World<'a>,
+    pub text: crate::display::HostText<'a>,
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
 }
@@ -230,7 +230,7 @@ impl Raster {
         } = classic;
         Some(ClassicDrawn {
             pixels: buf,
-            world: crate::display::World {
+            text: crate::display::HostText {
                 badges: &hits.badges,
                 bubbles: &hits.bubbles,
                 signs,
@@ -241,10 +241,10 @@ impl Raster {
 
     /// The world text the last frame left to its host, in either look;
     /// `None` before the first and for a cutaway that baked its own.
-    pub fn world(&self) -> Option<crate::display::World<'_>> {
+    pub fn host_text(&self) -> Option<crate::display::HostText<'_>> {
         match self.shown? {
-            Look::Classic => self.classic.as_ref().map(Classic::world),
-            Look::Cutaway { .. } => self.cutaway.as_ref()?.world(),
+            Look::Classic => self.classic.as_ref().map(Classic::host_text),
+            Look::Cutaway { .. } => self.cutaway.as_ref()?.host_text(),
         }
     }
 
@@ -273,7 +273,7 @@ impl Raster {
 
     /// The cells of the star the last frame baked, where a pointer opens the
     /// repo; `None` before the first, when it drew none, or where its host
-    /// sets it ([`Self::world`]), which then places it.
+    /// sets it ([`Self::host_text`]), which then places it.
     pub fn star(&self) -> Option<crate::layout::Bounds> {
         match self.shown? {
             Look::Classic => None,
