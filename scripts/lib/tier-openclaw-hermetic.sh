@@ -37,12 +37,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# An ISOLATED config (via XDG_CONFIG_HOME, so the dev's real ~/.config/pixtuoid is
-# untouched) marking OpenClaw connected — the reducer's presence connection-gate
-# drops every delta for a DISconnected source, so a clean dev box with no prior
-# [sources] entry would time out.
-mkdir -p "$CFGDIR/pixtuoid"
-printf '[sources]\nopenclaw = true\n' >"$CFGDIR/pixtuoid/config.toml"
+# OpenClaw connected in an ISOLATED state dir (the dev's real ~/.openclaw and
+# ~/.config/pixtuoid are untouched): the reducer's presence connection-gate drops
+# every delta for a source whose hooks are not installed, so a clean dev box
+# would time out. The envelopes below go straight to the shim, so the plugin is
+# never loaded.
+# Both outrank OPENCLAW_HOME (install/openclaw.rs), so one exported in the dev's
+# shell would send this `connect` to their real config.
+unset OPENCLAW_STATE_DIR OPENCLAW_CONFIG_PATH
+export OPENCLAW_HOME="$SB/openclaw"
+mkdir -p "$OPENCLAW_HOME/.openclaw"
+XDG_CONFIG_HOME="$CFGDIR" "$PIX" connect openclaw --json >/dev/null || {
+    echo "FAIL: connect openclaw in the isolated state dir" >&2
+    exit 1
+}
 
 # An empty projects root keeps agents=[].
 XDG_CONFIG_HOME="$CFGDIR" PIXTUOID_SOCKET="$SOCK" "$PIX" run --headless --projects-root "$PROJ" >"$OUT" 2>&1 &

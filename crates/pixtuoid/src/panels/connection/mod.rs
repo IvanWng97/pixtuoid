@@ -206,17 +206,11 @@ pub(crate) fn format_disconnect_result(r: &UninstallReport, display_name: &str) 
     s
 }
 
-/// WHICH bind/unbind step a panel failure line reports. `HookRemoval` is not a
-/// failed disconnect: the flag IS persisted false and only the hook removal
-/// didn't land, so it words the residual rather than the operation.
+/// WHICH operation a panel failure line reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailedOp {
-    /// A connect that left the source disconnected (the core rolled the flag back).
     Connect,
-    /// A disconnect that wrote nothing (the persist itself aborted).
     Disconnect,
-    /// A disconnect that persisted, with the hooks left behind.
-    HookRemoval,
 }
 
 /// THE Sources-panel failure line, `{display_name}: {what failed} — {reason}`.
@@ -229,7 +223,6 @@ pub(crate) fn format_failure(op: FailedOp, display_name: &str, reason: &str) -> 
     let what = match op {
         FailedOp::Connect => "connect failed",
         FailedOp::Disconnect => "disconnect failed",
-        FailedOp::HookRemoval => crate::sources::HOOK_REMOVAL_FAILED_PHRASE,
     };
     format!("{display_name}: {what} \u{2014} {reason}")
 }

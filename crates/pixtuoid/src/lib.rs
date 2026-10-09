@@ -26,7 +26,6 @@ pub(crate) mod pacing;
 pub(crate) mod panels;
 pub(crate) mod run_log;
 pub(crate) mod runtime;
-pub(crate) mod setup;
 pub(crate) mod sources;
 pub(crate) mod term;
 pub(crate) mod tui;

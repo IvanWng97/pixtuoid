@@ -1574,11 +1574,40 @@ fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
 }
 
 #[test]
-fn claude_install_fails_when_registering_fails() {
+fn claude_install_fails_when_registering_fails_and_leaves_no_hooks() {
     with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
         let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
-        assert!(install_target(&CLAUDE, Some(plugin_hooks_path(tmp.path())), hook).is_err());
+        assert!(install_target(&CLAUDE, Some(hooks.clone()), hook).is_err());
+        assert!(
+            !has_hooks(&CLAUDE, Some(hooks)),
+            "a failed connect must not read as connected"
+        );
+    });
+}
+
+#[test]
+fn a_failed_registration_restores_the_hooks_it_found() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let hooks = plugin_hooks_path(tmp.path());
+    let old = Some(PathBuf::from("/fake/old/pixtuoid-hook"));
+    with_fake_claude(|_| install_target(&CLAUDE, Some(hooks.clone()), old.clone()).unwrap());
+    let before = std::fs::read_to_string(&hooks).unwrap();
+    with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
+        assert!(install_target(&CLAUDE, Some(hooks.clone()), old).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&hooks).unwrap(),
+            before,
+            "a re-registration that wrote nothing takes nothing back"
+        );
+        let new = Some(PathBuf::from("/fake/new/pixtuoid-hook"));
+        assert!(install_target(&CLAUDE, Some(hooks.clone()), new).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&hooks).unwrap(),
+            before,
+            "an update that failed to register leaves the hooks it found"
+        );
     });
 }
 

@@ -1,8 +1,9 @@
 //! The source-control CORE: detect / connect / disconnect / reconcile, TUI-free.
 //!
-//! The mutating ops here are the PERSISTED half — they write the `[sources]`
-//! flag + install/uninstall hooks, but DON'T touch a running instance's live
-//! `ConnectedSources`, which reflects the change on its next launch.
+//! A source is connected by ONE fact: a hook-bearing source's installed hooks,
+//! a flag-only source's `[sources]` flag. The mutating ops here change that
+//! fact but not a running instance's live `ConnectedSources`, which reflects
+//! the change on its next launch.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -147,9 +148,8 @@ pub(crate) struct SourceStatus {
     pub health: Option<String>,
 }
 
-/// Resolve a user-supplied id to the `'static` registry id, or a clear error —
-/// the CLI surface takes arbitrary input and `config::save_source_connected`
-/// needs `&'static str`.
+/// Resolve a user-supplied id to the registry id, or a clear error — the CLI
+/// surface takes arbitrary input.
 ///
 /// # Errors
 ///
@@ -167,22 +167,17 @@ pub(crate) fn registered_id(id: &str) -> Result<&'static str> {
         })
 }
 
-/// `FlagOnly` for a no-target (JSONL-only) source.
+/// `FlagOnly` for a flag-only source.
 #[derive(Debug)]
 pub(crate) enum ConnectOutcome {
     FlagOnly,
     Installed(InstallReport),
 }
 
-/// Result of a disconnect whose FLAG was persisted false. `Err` from
-/// `disconnect` is reserved for the persist-failure abort; a failed hook removal
-/// folds in here so the gate still closes (connect rolls back, disconnect does not).
-/// Pinned by `map_disconnect_outcome_surfaces_a_folded_hook_removal_failure`.
 #[derive(Debug)]
 pub(crate) enum DisconnectOutcome {
     FlagOnly,
     Uninstalled(UninstallReport),
-    HookRemovalFailed(String),
 }
 
 /// The step (if any) a user must still take after a successful `connect` —
@@ -191,9 +186,57 @@ pub(crate) fn post_install_hint(id: &str) -> Option<&'static str> {
     crate::install::target::by_source(id).and_then(|t| t.post_install_hint)
 }
 
-/// Connect a source: PERSIST the `[sources]` flag FIRST, then — only for a
-/// target-bearing source — install its hooks, rolling the flag back if the
-/// install fails.
+/// Whether each registered source is connected: by its hooks when it has an
+/// install target, else by its `[sources]` flag.
+pub(crate) fn connected(app: &config::AppConfig) -> HashSet<String> {
+    connected_with(app, installed_hooks)
+}
+
+/// [`connected`] with the hook read injected.
+fn connected_with(
+    app: &config::AppConfig,
+    hooked: impl Fn(&str) -> Option<bool>,
+) -> HashSet<String> {
+    registry::registered_source_names()
+        .filter(|sid| is_on(app, sid, &hooked))
+        .map(String::from)
+        .collect()
+}
+
+/// Whether `sid`'s hooks are installed; `None` for a flag-only source.
+fn installed_hooks(sid: &str) -> Option<bool> {
+    by_source(sid).map(|t| install::has_hooks(t, None))
+}
+
+/// The one fact for `sid`: `hooked(sid)`, else its `[sources]` flag.
+fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<bool>) -> bool {
+    hooked(sid).unwrap_or_else(|| app.sources.get(sid) == Some(&true))
+}
+
+/// Onboarding opens when nothing is connected — unless the config failed to
+/// load, which means "previously configured": every write its apply makes
+/// would be refused by `update_config`.
+pub(crate) fn is_first_run(connected: &HashSet<String>, load_degraded: bool) -> bool {
+    !load_degraded && connected.is_empty()
+}
+
+/// [`connected`] for one source, as the live gate re-reads it after a change.
+pub(crate) fn is_connected(cfg: &Path, sid: &str) -> bool {
+    is_on(&config::load(cfg, &mut Vec::new()), sid, installed_hooks)
+}
+
+/// Rewrite `[sources]` whole, as the flag-only sources that are on once
+/// `change` applies, so a key no reader looks at never outlives a change.
+/// Runs before any hook write: a config `update_config` refuses stops the op
+/// with nothing to undo.
+fn write_flags(cfg: &Path, change: Option<(&str, bool)>) -> Result<()> {
+    let flag_only: Vec<&str> = registry::registered_source_names()
+        .filter(|sid| by_source(sid).is_none())
+        .collect();
+    config::save_flag_sources(cfg, &flag_only, change)
+}
+
+/// Connect a source: install its hooks, or turn on a flag-only source's flag.
 ///
 /// **Honors the explicit id — it does NOT gate on CLI presence.** Unlike the
 /// in-TUI panel (which renders an absent CLI as `NoCli` and refuses the toggle),
@@ -202,56 +245,32 @@ pub(crate) fn post_install_hint(id: &str) -> Option<&'static str> {
 ///
 /// # Errors
 ///
-/// If `id` is not a registered source, saving the `[sources]` flag fails, or the hook install fails (the flag is then rolled back).
+/// If `id` is not a registered source, rewriting `[sources]` fails, or the hook install fails.
 pub(crate) fn connect(cfg: &Path, id: &str) -> Result<ConnectOutcome> {
     let sid = registered_id(id)?;
     connect_target(cfg, sid, by_source(sid))
 }
 
-/// The persist + install + rollback core, with `target` passed EXPLICITLY so
-/// tests can inject a deterministic-fail fake.
+/// The core of [`connect`], with `target` passed EXPLICITLY so tests can inject
+/// a deterministic-fail fake.
 fn connect_target(
     cfg: &Path,
     sid: &'static str,
     target: Option<&Target>,
 ) -> Result<ConnectOutcome> {
-    // Capture the PRIOR flag before the optimistic save: a failed re-connect of
-    // an ALREADY-connected source must not force `false` — its old working hooks
-    // are still on disk, so that would silently disconnect it on the next launch.
-    let prior = config::load(cfg, &mut Vec::new()).sources.get(sid).copied();
-    config::save_source_connected(cfg, sid, true)?;
-    match target {
-        Some(t) => match install::install_target(t, None, None) {
-            Ok(r) => Ok(ConnectOutcome::Installed(r)),
-            Err(e) => {
-                // An absent flag rolls back to ABSENT, not an explicit `false` —
-                // preserving the `is_first_run` empty-table signal.
-                let restore = match prior {
-                    Some(v) => config::save_source_connected(cfg, sid, v),
-                    None => config::remove_source_connected(cfg, sid),
-                };
-                if let Err(re) = restore {
-                    // The error chain can carry raw config content (a `toml_edit`
-                    // parse failure) and `connect` writes tracing to RAW stderr.
-                    tracing::warn!(
-                        source = sid,
-                        error = %crate::strip_control_chars(&format!("{re:#}")),
-                        "connect rollback failed to restore the prior [sources] flag"
-                    );
-                }
-                Err(e)
-            }
-        },
-        None => Ok(ConnectOutcome::FlagOnly),
-    }
+    write_flags(cfg, target.is_none().then_some((sid, true)))?;
+    Ok(match target {
+        Some(t) => ConnectOutcome::Installed(install::install_target(t, None, None)?),
+        None => ConnectOutcome::FlagOnly,
+    })
 }
 
-/// No rollback — a failed uninstall still leaves the user disconnected (the
-/// safer direction).
+/// Disconnect a source: uninstall its hooks, or turn off a flag-only source's
+/// flag.
 ///
 /// # Errors
 ///
-/// If `id` is not a registered source or persisting the cleared `[sources]` flag fails; a failed hook removal is reported in the outcome instead.
+/// If `id` is not a registered source, rewriting `[sources]` fails, or the hook removal fails.
 pub(crate) fn disconnect(cfg: &Path, id: &str) -> Result<DisconnectOutcome> {
     let sid = registered_id(id)?;
     disconnect_target(cfg, sid, by_source(sid))
@@ -262,14 +281,9 @@ fn disconnect_target(
     sid: &'static str,
     target: Option<&Target>,
 ) -> Result<DisconnectOutcome> {
-    // `?` here = the persist-failure abort (flip nothing). Past it, the flag is
-    // false, so a hook-removal error folds into the outcome rather than erroring.
-    config::save_source_connected(cfg, sid, false)?;
+    write_flags(cfg, target.is_none().then_some((sid, false)))?;
     Ok(match target {
-        Some(t) => match install::uninstall_target(t, None) {
-            Ok(r) => DisconnectOutcome::Uninstalled(r),
-            Err(e) => DisconnectOutcome::HookRemovalFailed(format!("{e:#}")),
-        },
+        Some(t) => DisconnectOutcome::Uninstalled(install::uninstall_target(t, None)?),
         None => DisconnectOutcome::FlagOnly,
     })
 }
@@ -304,12 +318,19 @@ pub(crate) fn plan_reconcile(
 }
 
 /// Declarative apply: make the connected set EXACTLY `desired`, reporting each
-/// source (a failed item doesn't abort the batch). CURRENT is resolved the same
-/// way the boot seed is — explicit `true` flags only.
+/// source (a failed item doesn't abort the batch).
 pub(crate) fn reconcile_to(cfg: &Path, desired: &HashSet<String>) -> Vec<(String, ChangeOutcome)> {
-    let app = config::load(cfg, &mut Vec::new());
-    let current = config::resolve_connected(&app);
-    plan_reconcile(&current, desired)
+    let current = connected(&config::load(cfg, &mut Vec::new()));
+    reconcile_from(cfg, &current, desired)
+}
+
+/// [`reconcile_to`] from an injected `current`.
+fn reconcile_from(
+    cfg: &Path,
+    current: &HashSet<String>,
+    desired: &HashSet<String>,
+) -> Vec<(String, ChangeOutcome)> {
+    plan_reconcile(current, desired)
         .into_iter()
         .map(|(sid, action)| (sid.to_string(), apply_one(cfg, sid, action)))
         .collect()
@@ -324,91 +345,33 @@ fn apply_one(cfg: &Path, sid: &'static str, action: Action) -> ChangeOutcome {
 }
 
 fn apply_want(cfg: &Path, sid: &'static str, want: bool) -> AppliedChange {
-    if want {
-        match connect(cfg, sid) {
-            Ok(_) => AppliedChange::Connected,
-            Err(e) => AppliedChange::Failed(format!("{e:#}")),
-        }
+    let done = if want {
+        connect(cfg, sid).map(|_| AppliedChange::Connected)
     } else {
-        match disconnect(cfg, sid) {
-            Ok(o) => map_disconnect_outcome(o),
-            Err(e) => AppliedChange::Failed(format!("{e:#}")),
-        }
-    }
+        disconnect(cfg, sid).map(|_| AppliedChange::Disconnected)
+    };
+    done.unwrap_or_else(|e| AppliedChange::Failed(format!("{e:#}")))
 }
-
-/// The marker a folded hook-removal failure carries into [`ChangeOutcome::Failed`]
-/// — a presenter reads it back to tell the fold (the disconnect SUCCEEDED; only
-/// the hook removal didn't) apart from a real failure.
-pub(crate) const HOOK_REMOVAL_FAILED_PREFIX: &str = "hooks not removed: ";
-
-/// How BOTH presenters word that same fold for a human. It is the PHRASE only —
-/// each surface adds its own framing, so neither can reword the fold alone.
-pub(crate) const HOOK_REMOVAL_FAILED_PHRASE: &str = "disconnected, but hook removal failed";
 
 /// How both presenters word a disconnect that couldn't reach `claude` to
 /// deregister the plugin, which keeps it registered with no hooks.
 pub(crate) const PLUGIN_LEFT_REGISTERED_PHRASE: &str =
     "plugin left registered (claude not on PATH)";
 
-/// A folded hook-removal failure MUST surface as `Failed` (with the reason),
-/// NEVER a clean `Disconnected` — else a caller hides stale hooks behind it.
-fn map_disconnect_outcome(o: DisconnectOutcome) -> AppliedChange {
-    match o {
-        DisconnectOutcome::HookRemovalFailed(e) => {
-            AppliedChange::Failed(format!("{HOOK_REMOVAL_FAILED_PREFIX}{e}"))
-        }
-        DisconnectOutcome::FlagOnly | DisconnectOutcome::Uninstalled(_) => {
-            AppliedChange::Disconnected
-        }
-    }
-}
-
-/// Apply an EXPLICIT per-source decision list (the first-run onboarding apply).
-/// Unlike the declarative `reconcile_to`, this touches ONLY the ids passed — a
-/// source absent from the list keeps its existing flag, never a surprise write.
-pub(crate) fn apply_choices(
-    cfg: &Path,
-    choices: &[(&'static str, bool)],
-) -> Vec<(String, AppliedChange)> {
-    choices
-        .iter()
-        .map(|&(sid, want)| (sid.to_string(), apply_want(cfg, sid, want)))
+/// Connect each of `ids` — onboarding's confirm and `setup --yes`. Nothing is
+/// connected on a first run, so an id left out needs no change.
+pub(crate) fn connect_each(cfg: &Path, ids: &[&'static str]) -> Vec<(String, AppliedChange)> {
+    ids.iter()
+        .map(|&sid| (sid.to_string(), apply_want(cfg, sid, true)))
         .collect()
-}
-
-/// The onboarding SKIP freeze (pure core): a detected source freezes `true` if
-/// it is in the live gate OR already carries installed hooks. The live gate
-/// alone is EMPTY on a first run, so a hooked-but-unflagged source would freeze
-/// `false` and the skip would UNINSTALL its working hooks.
-pub(crate) fn freeze_for_skip(
-    detected: impl IntoIterator<Item = &'static str>,
-    connected: &HashSet<String>,
-    is_hooked: impl Fn(&'static str) -> bool,
-) -> Vec<(&'static str, bool)> {
-    detected
-        .into_iter()
-        .map(|id| (id, connected.contains(id) || is_hooked(id)))
-        .collect()
-}
-
-/// The production onboarding-SKIP freeze. Does blocking per-target config reads
-/// (`has_hooks`) inline on the caller's thread — a brief one-shot stall.
-pub(crate) fn skip_freeze(
-    detected: impl IntoIterator<Item = &'static str>,
-    connected: &HashSet<String>,
-) -> Vec<(&'static str, bool)> {
-    freeze_for_skip(detected, connected, |id| {
-        by_source(id).is_some_and(|t| install::has_hooks(t, None))
-    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnState {
     Connected,
     Disconnected,
-    /// A target-bearing CLI that isn't installed on this machine. Carries the
-    /// persisted `[sources]` intent because a connected-but-absent source is
+    /// A target-bearing CLI that isn't installed on this machine. Carries
+    /// whether its hooks are installed, because a connected-but-absent source is
     /// still disconnectable — its hooks live in the config, not the missing
     /// binary — so the toggle needs the bit the `NoCli` display hides.
     NoCli {
@@ -532,8 +495,8 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
 }
 
 /// The wire `connected` is deliberately PRESENT-AND-BOUND (`state == Connected`),
-/// NOT the persisted `[sources]` intent bit (`ConnState::connected`, which stays
-/// `true` for a connected-but-absent `NoCli` source). Changing it is a `--json`
+/// NOT [`ConnState::connected`], which stays `true` for a connected-but-absent
+/// `NoCli` source. Changing it is a `--json`
 /// contract change needing `gen-contract`.
 fn status_from_row(r: &ConnectionRow) -> SourceStatus {
     SourceStatus {
@@ -546,8 +509,7 @@ fn status_from_row(r: &ConnectionRow) -> SourceStatus {
 }
 
 pub(crate) fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
-    let app = config::load(cfg, &mut Vec::new());
-    let connected = config::resolve_connected(&app);
+    let connected = connected(&config::load(cfg, &mut Vec::new()));
     build_rows(&connected, log)
         .iter()
         .map(status_from_row)
@@ -638,34 +600,122 @@ mod tests {
         assert!(err.contains("antigravity"), "lists known sources: {err}");
     }
 
-    #[test]
-    fn freeze_for_skip_keeps_a_hooked_but_unflagged_source_connected() {
-        let connected = HashSet::new();
-        let freeze = freeze_for_skip(
-            ["claude-code", "codex"],
-            &connected,
-            |id| id == "claude-code", // only claude-code has installed hooks
-        );
-        assert_eq!(freeze, vec![("claude-code", true), ("codex", false)]);
-    }
-
-    #[test]
-    fn freeze_for_skip_honors_the_live_connected_gate() {
-        let connected = set(&["antigravity"]);
-        let freeze = freeze_for_skip(["antigravity", "codex"], &connected, |_| false);
-        assert_eq!(freeze, vec![("antigravity", true), ("codex", false)]);
-    }
-
-    #[test]
-    fn map_disconnect_outcome_surfaces_a_folded_hook_removal_failure() {
-        match map_disconnect_outcome(DisconnectOutcome::HookRemovalFailed("boom".into())) {
-            AppliedChange::Failed(m) => assert_eq!(m, "hooks not removed: boom"),
-            other => panic!("expected Failed, got {other:?}"),
+    fn flags(pairs: &[(&str, bool)]) -> config::AppConfig {
+        config::AppConfig {
+            sources: pairs.iter().map(|&(k, v)| (k.to_string(), v)).collect(),
+            ..Default::default()
         }
-        assert!(matches!(
-            map_disconnect_outcome(DisconnectOutcome::FlagOnly),
-            AppliedChange::Disconnected
-        ));
+    }
+
+    #[test]
+    fn a_hook_source_is_connected_by_its_hooks_and_never_by_its_flag() {
+        let app = flags(&[("claude-code", true), ("codex", false)]);
+        let hooked = |sid: &str| match sid {
+            "codex" => Some(true),
+            "copilot" | "antigravity" => None,
+            _ => Some(false),
+        };
+        assert_eq!(connected_with(&app, hooked), set(&["codex"]));
+        let every: HashSet<String> = registry::registered_source_names()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            connected_with(&app, |_| Some(true)),
+            every,
+            "every registered source, only those"
+        );
+    }
+
+    #[test]
+    fn first_run_is_nothing_connected_over_a_config_that_loaded() {
+        assert!(is_first_run(&HashSet::new(), false));
+        assert!(!is_first_run(&set(&["codex"]), false));
+        assert!(
+            !is_first_run(&HashSet::new(), true),
+            "a degraded config was configured"
+        );
+    }
+
+    #[test]
+    fn a_flag_only_source_is_connected_by_its_flag() {
+        let app = flags(&[("copilot", true), ("antigravity", false)]);
+        let hooked = |sid: &str| match sid {
+            "copilot" | "antigravity" => None,
+            _ => Some(false),
+        };
+        assert_eq!(connected_with(&app, hooked), set(&["copilot"]));
+    }
+
+    #[test]
+    fn a_change_rewrites_sources_as_exactly_the_flag_only_sources_that_are_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        std::fs::write(
+            &cfg,
+            "theme = \"x\"\n[sources]\nclaude-code = true\ncodex = false\nantigravity = true\n",
+        )
+        .unwrap();
+        connect(&cfg, "copilot").unwrap();
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(
+            app.sources,
+            flags(&[("antigravity", true), ("copilot", true)]).sources
+        );
+        assert_eq!(
+            app.theme.as_deref(),
+            Some("x"),
+            "only [sources] is rewritten"
+        );
+
+        disconnect(&cfg, "antigravity").unwrap();
+        disconnect(&cfg, "copilot").unwrap();
+        let raw = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            !raw.contains("[sources]"),
+            "an all-off table is dropped: {raw}"
+        );
+    }
+
+    #[test]
+    fn a_failed_install_leaves_no_flag_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        // A registered hook-bearing id, so a flag written for it would persist.
+        std::fs::write(&cfg, "[sources]\ncodex = true\n").unwrap();
+        let err = connect_target(&cfg, "codex", Some(&FAIL_TARGET)).unwrap_err();
+        assert!(err.to_string().contains("forced install failure"), "{err}");
+        let app = config::load(&cfg, &mut Vec::new());
+        assert!(app.sources.is_empty(), "{:?}", app.sources);
+    }
+
+    #[test]
+    fn a_failed_hook_removal_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        assert!(disconnect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).is_err());
+    }
+
+    #[test]
+    fn a_change_over_a_malformed_config_touches_no_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        std::fs::write(&cfg, "not = [valid").unwrap();
+        // FAIL_TARGET's install would name itself; the table write must stop first.
+        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
+        assert!(!err.to_string().contains("forced install failure"), "{err}");
+    }
+
+    #[test]
+    fn connect_each_connects_only_the_ids_it_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("config.toml");
+        let outcomes = connect_each(&cfg, &["antigravity"]);
+        assert_eq!(
+            outcomes,
+            vec![("antigravity".to_string(), AppliedChange::Connected)]
+        );
+        let app = config::load(&cfg, &mut Vec::new());
+        assert_eq!(app.sources, flags(&[("antigravity", true)]).sources);
     }
 
     #[test]
@@ -693,8 +743,8 @@ mod tests {
         let app = config::load(&cfg, &mut Vec::new());
         assert_eq!(
             app.sources.get("antigravity"),
-            Some(&false),
-            "flag persisted false"
+            None,
+            "an off flag is not kept"
         );
     }
 
@@ -725,61 +775,6 @@ mod tests {
         post_install_hint: None,
         host: None,
     };
-
-    #[test]
-    fn connect_target_rolls_the_flag_back_when_install_fails() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("config.toml");
-        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
-        assert!(err.to_string().contains("forced install failure"), "{err}");
-        let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(
-            app.sources.get("rollbacktest"),
-            None,
-            "a previously-absent flag rolls back to ABSENT, not false"
-        );
-    }
-
-    #[test]
-    fn connect_target_rollback_restores_a_previously_connected_flag() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("config.toml");
-        config::save_source_connected(&cfg, "rollbacktest", true).unwrap();
-
-        let err = connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
-        assert!(err.to_string().contains("forced install failure"), "{err}");
-        let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(
-            app.sources.get("rollbacktest"),
-            Some(&true),
-            "a previously-connected flag must survive a failed re-install"
-        );
-    }
-
-    #[test]
-    fn connect_target_rollback_restores_a_previously_disconnected_flag() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("config.toml");
-        config::save_source_connected(&cfg, "rollbacktest", false).unwrap();
-
-        connect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap_err();
-        let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(app.sources.get("rollbacktest"), Some(&false));
-    }
-
-    #[test]
-    fn disconnect_target_folds_a_hook_removal_failure_into_the_outcome() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("config.toml");
-        let outcome = disconnect_target(&cfg, "rollbacktest", Some(&FAIL_TARGET)).unwrap();
-        assert!(matches!(outcome, DisconnectOutcome::HookRemovalFailed(_)));
-        let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(
-            app.sources.get("rollbacktest"),
-            Some(&false),
-            "the flag is persisted false even though hook removal failed"
-        );
-    }
 
     #[test]
     fn connect_rejects_an_unknown_source_without_writing() {
@@ -915,16 +910,16 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_to_disconnects_the_complement_and_noops_the_rest() {
-        // Drive only the no-target source (antigravity) to avoid agent-config I/O;
-        // every other source has no flag ⇒ resolves "not connected", so no
-        // install-state injection is needed.
+    fn reconcile_disconnects_the_complement_and_noops_the_rest() {
+        // The injected current set keeps this off the machine's real hooks.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         connect(&cfg, "antigravity").unwrap();
 
         let outcomes: std::collections::HashMap<_, _> =
-            reconcile_to(&cfg, &HashSet::new()).into_iter().collect();
+            reconcile_from(&cfg, &set(&["antigravity"]), &HashSet::new())
+                .into_iter()
+                .collect();
 
         assert_eq!(outcomes["antigravity"], ChangeOutcome::Disconnected);
         assert_eq!(
@@ -933,31 +928,6 @@ mod tests {
             "not connected → no change"
         );
         let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(app.sources.get("antigravity"), Some(&false));
-    }
-
-    #[test]
-    fn apply_choices_writes_only_the_listed_sources() {
-        // Drive only the no-target source so there's no agent-config I/O.
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("config.toml");
-
-        let outcomes: std::collections::HashMap<_, _> =
-            apply_choices(&cfg, &[("antigravity", true)])
-                .into_iter()
-                .collect();
-        assert_eq!(outcomes["antigravity"], AppliedChange::Connected);
-
-        let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(
-            app.sources.get("antigravity"),
-            Some(&true),
-            "listed → written"
-        );
-        assert_eq!(app.sources.get("codex"), None, "unlisted → untouched");
-
-        apply_choices(&cfg, &[("antigravity", false)]);
-        let app = config::load(&cfg, &mut Vec::new());
-        assert_eq!(app.sources.get("antigravity"), Some(&false));
+        assert!(app.sources.is_empty(), "{:?}", app.sources);
     }
 }

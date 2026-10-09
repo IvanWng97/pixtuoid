@@ -922,59 +922,18 @@ fn floating_opacity_is_bounded() {
 }
 
 #[test]
-fn resolve_connected_only_explicit_true_connects() {
-    let mut cfg = AppConfig::default();
-    cfg.sources.insert("claude-code".into(), false);
-    cfg.sources.insert("codex".into(), true);
-    let set = resolve_connected(&cfg);
-    assert!(!set.contains("claude-code"), "explicit false disconnects");
-    assert!(set.contains("codex"), "explicit true connects");
-    assert!(
-        !set.contains("antigravity"),
-        "an absent flag is plainly disconnected (no migrate inference)"
-    );
-}
-
-#[test]
-fn resolve_connected_absent_sources_table_connects_nothing() {
-    let cfg = AppConfig::default(); // no [sources]
-    assert!(
-        resolve_connected(&cfg).is_empty(),
-        "absent [sources] is the plain default: nothing connected"
-    );
-}
-
-#[test]
-fn resolve_connected_covers_every_registered_source() {
-    let mut cfg = AppConfig::default();
-    for src in pixtuoid_core::source::registry::registered_source_names() {
-        cfg.sources.insert(src.into(), true);
-    }
-    cfg.sources.insert("not-a-registered-source".into(), true);
-    let set = resolve_connected(&cfg);
-    let expected: std::collections::HashSet<String> =
-        pixtuoid_core::source::registry::registered_source_names()
-            .map(|s| s.to_string())
-            .collect();
-    assert_eq!(
-        set, expected,
-        "resolve_connected must decide every registered source and only those"
-    );
-}
-
-#[test]
-fn save_source_connected_roundtrips_and_preserves_other_keys() {
+fn save_flag_sources_replaces_the_table_and_keeps_the_rest_of_the_file() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     std::fs::write(
         &p,
-        "# hand-tuned\ntheme = \"normal\"\nfuture-key = 1\n\n[[pets]]\nkind = \"cat\"\n",
+        "# hand-tuned\ntheme = \"normal\"\nfuture-key = 1\n\n[sources]\nclaude-code = true\n\n[[pets]]\nkind = \"cat\"\n",
     )
     .unwrap();
 
-    save_source_connected(&p, "claude-code", false).unwrap();
+    save_flag_sources(&p, &["copilot", "antigravity"], Some(("copilot", true))).unwrap();
     let cfg = load(&p, &mut Vec::new());
-    assert_eq!(cfg.sources.get("claude-code"), Some(&false));
+    assert_eq!(cfg.sources, [("copilot".to_string(), true)].into());
     assert_eq!(cfg.theme.as_deref(), Some("normal"), "theme survives");
     assert_eq!(
         cfg.pets,
@@ -988,37 +947,12 @@ fn save_source_connected_roundtrips_and_preserves_other_keys() {
     assert!(after.contains("# hand-tuned"), "comment survives");
     assert!(after.contains("future-key = 1"), "unknown key survives");
 
-    save_source_connected(&p, "claude-code", true).unwrap();
-    assert_eq!(
-        load(&p, &mut Vec::new()).sources.get("claude-code"),
-        Some(&true)
-    );
-}
-
-#[test]
-fn remove_source_connected_drops_the_key_and_an_emptied_table() {
-    let dir = tempfile::tempdir().unwrap();
-    let p = dir.path().join("config.toml");
-    std::fs::write(&p, "theme = \"normal\"\n").unwrap();
-
-    save_source_connected(&p, "claude-code", true).unwrap();
-    save_source_connected(&p, "codex", true).unwrap();
-    remove_source_connected(&p, "claude-code").unwrap();
-    let cfg = load(&p, &mut Vec::new());
-    assert_eq!(cfg.sources.get("claude-code"), None, "key removed");
-    assert_eq!(cfg.sources.get("codex"), Some(&true), "sibling survives");
-    assert_eq!(cfg.theme.as_deref(), Some("normal"), "other keys survive");
-
-    // The `is_first_run` signal reads table emptiness, so a rolled-back first
-    // connect must leave no `[sources]` residue.
-    remove_source_connected(&p, "codex").unwrap();
+    save_flag_sources(&p, &["copilot", "antigravity"], Some(("copilot", false))).unwrap();
     let after = std::fs::read_to_string(&p).unwrap();
     assert!(
         !after.contains("[sources]"),
-        "emptied table dropped: {after}"
+        "an empty table is dropped: {after}"
     );
-    // Removing an absent key / from an absent table is a quiet no-op.
-    remove_source_connected(&p, "codex").unwrap();
 }
 
 #[test]

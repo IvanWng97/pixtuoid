@@ -839,8 +839,8 @@ fn collect(
     let config_path = crate::config::config_path();
     let cfg = crate::config::load(&config_path, &mut config_warnings);
     // A separate PROCESS from the TUI, so the live `ConnectedSources` is
-    // unreachable; persist-first makes the config a complete substitute.
-    let connected = crate::config::resolve_connected(&cfg);
+    // unreachable; it reads the same facts that gate does.
+    let connected = crate::sources::connected(&cfg);
     let (log, log_warning) = log_at.read();
 
     let term_env = pixtuoid_core::platform::text_env("TERM");
