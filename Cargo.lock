@@ -2767,6 +2767,8 @@ dependencies = [
  "libc",
  "miniz_oxide",
  "objc2-app-kit",
+ "objc2-core-graphics",
+ "objc2-quartz-core 0.3.2",
  "open",
  "pixtuoid-core",
  "pixtuoid-scene",

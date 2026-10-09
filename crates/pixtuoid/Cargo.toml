@@ -131,6 +131,10 @@ rustix = { workspace = true, features = ["shm", "mm"], optional = true }
 # deny.toml fails CI on a second copy.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
+# The floating window tags its Metal layer sRGB (floating/gpu.rs). The same
+# versions and features wgpu-hal already builds, so they add no crate.
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGColorSpace"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-graphics", "CAMetalLayer"] }
 
 # Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol needs
 # an X11 client, and x11rb is already in-tree transitively via winit — so this MUST

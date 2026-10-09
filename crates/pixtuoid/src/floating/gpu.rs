@@ -363,6 +363,29 @@ fn surface_size((w, h): (u32, u32), max: u32) -> (u32, u32) {
     (w.clamp(1, max), h.clamp(1, max))
 }
 
+/// Configure `surface`, its layer tagged sRGB on macOS: wgpu's `Srgb` leaves
+/// a `CAMetalLayer`'s colorspace nil, which Apple documents as "the rendered
+/// content isn't color-matched" (`CAMetalLayer.colorspace`).
+fn configure(
+    surface: &wgpu::Surface<'_>,
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+) {
+    surface.configure(device, config);
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: the Metal surface is borrowed for one call that sets what
+        // wgpu's own `configure` just set; nothing is destroyed.
+        let Some(hal) = (unsafe { surface.as_hal::<wgpu::hal::api::Metal>() }) else {
+            return;
+        };
+        // SAFETY: a CoreGraphics constant, valid for the process's life.
+        let srgb = unsafe { objc2_core_graphics::kCGColorSpaceSRGB };
+        let space = objc2_core_graphics::CGColorSpace::with_name(Some(srgb));
+        hal.render_layer().lock().setColorspace(space.as_deref());
+    }
+}
+
 /// The window's surface and the painter that draws into it.
 #[derive(Debug)]
 pub(super) struct Gpu {
@@ -414,7 +437,7 @@ impl Gpu {
             .context("the window's surface has no configuration for this adapter")?;
         config.format = format;
         config.present_mode = wgpu::PresentMode::AutoVsync;
-        surface.configure(&device, &config);
+        configure(&surface, &device, &config);
         let painter = Painter::new(device, queue, format);
         Ok(Self {
             instance,
@@ -434,7 +457,7 @@ impl Gpu {
         );
         if (self.config.width, self.config.height) != size {
             (self.config.width, self.config.height) = size;
-            self.surface.configure(self.painter.device(), &self.config);
+            configure(&self.surface, self.painter.device(), &self.config);
         }
         let (frame, suboptimal) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -444,7 +467,7 @@ impl Gpu {
                 return false;
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(self.painter.device(), &self.config);
+                configure(&self.surface, self.painter.device(), &self.config);
                 self.window.request_redraw();
                 return false;
             }
@@ -455,7 +478,7 @@ impl Gpu {
                 {
                     Ok(surface) => {
                         self.surface = surface;
-                        self.surface.configure(self.painter.device(), &self.config);
+                        configure(&self.surface, self.painter.device(), &self.config);
                     }
                     Err(e) => tracing::error!(
                         error = ?e,
@@ -473,7 +496,7 @@ impl Gpu {
         self.window.pre_present_notify();
         self.painter.queue().present(frame);
         if suboptimal {
-            self.surface.configure(self.painter.device(), &self.config);
+            configure(&self.surface, self.painter.device(), &self.config);
         }
         true
     }
