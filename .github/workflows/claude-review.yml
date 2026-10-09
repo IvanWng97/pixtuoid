@@ -45,3 +45,107 @@ jobs:
     concurrency:
       group: claude-review-${{ matrix.lens }}-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
+
+  # The owner's policy: Dependabot's dependency and action bumps merge without
+  # the model review, which reads a lockfile diff it cannot audit. Main requires
+  # each lens's status by name from this app, and no protection rule can key on
+  # a PR's author, so the exemption is posted as that status. Anything short of
+  # a same-name bump of Dependabot's own manifests gets `pending` and waits for
+  # a maintainer's /claude-review.
+  exempt:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
+    strategy:
+      fail-fast: false
+      matrix:
+        lens: [correctness, design]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Exempt a Dependabot bump
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LENS: ${{ matrix.lens }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          post() {
+            jq -n --arg state "$1" --arg context "claude-review/$LENS" --arg target_url "$RUN_URL" \
+              --arg description "$2" '$ARGS.named' |
+              gh api --method POST "repos/${REPOSITORY}/statuses/${HEAD_SHA}" --input - > /dev/null
+          }
+          refuse() {
+            echo "::notice title=Not exempt::$1"
+            post pending "Not exempt ($1): comment /claude-review"
+            exit 0
+          }
+          # `github.actor` is only the last actor (zizmor's bot-conditions): a
+          # commit anyone else pushed onto Dependabot's branch ends the exemption.
+          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/commits" \
+            --jq '.[] | {author: .author.login, committer: .committer.login, verified: .commit.verification.verified}' |
+            jq -se 'length > 0 and all(.[]; . == {author: "dependabot[bot]", committer: "web-flow", verified: true})' \
+            > /dev/null || refuse "a commit Dependabot did not sign"
+          # Every ecosystem .github/dependabot.yml updates, and nothing else.
+          allow='^(Cargo\.(lock|toml)|crates/[^/]+/Cargo\.toml|requirements-dev\.txt|(site|integrations/raycast)/package(-lock)?\.json|\.github/(workflows/[^/]+|actions/[^/]+/action)\.ya?ml)$'
+          files="$RUNNER_TEMP/files.jsonl"
+          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[] | {filename, status, patch}' > "$files"
+          jq -se --arg allow "$allow" \
+            'length > 0 and all(.[]; .status == "modified" and (.filename | test($allow)))' \
+            "$files" > /dev/null || refuse "a file outside its manifests"
+          # A workflow or action may change only its `uses:` pins.
+          jq -se 'all(.[] | select(.filename | startswith(".github/"));
+              .patch != null
+              and ([.patch | split("\n")[] | select(test("^[-+]"))]
+                   | all(test("^[-+][ \t]*(- +)?uses: +[^ ]+( +#.*)?$"))))' \
+            "$files" > /dev/null || refuse "a workflow edit beyond a uses: pin"
+
+          base="$(gh api "repos/${REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq .merge_base_commit.sha)"
+          at() { gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/$1?ref=$2"; }
+          # A bump may move versions, never bring in a name the base lacked.
+          new_names() { comm -13 <(sort -u <<< "$1") <(sort -u <<< "$2"); }
+          npm_names() { jq -r '.packages | keys[] | select(. != "") | sub("^.*node_modules/"; "")'; }
+          npm_scripts() { jq -r '.packages | to_entries[] | select(.value.hasInstallScript) | .key | sub("^.*node_modules/"; "")'; }
+          pip_names() { grep -Ev '^[[:space:]]*(#|$)' | sed -E 's/[[:space:]]*([=<>!~;[].*)?$//' | tr '[:upper:]' '[:lower:]'; }
+          while IFS= read -r lock; do
+            before="$(at "$lock" "$base")"
+            after="$(at "$lock" "$HEAD_SHA")"
+            case "$lock" in
+              Cargo.lock)
+                [[ -z "$(new_names "$(grep '^name = ' <<< "$before")" "$(grep '^name = ' <<< "$after")")" ]] ||
+                  refuse "a crate new to Cargo.lock"
+                ! grep '^source = ' <<< "$after" |
+                  grep -qvxF 'source = "registry+https://github.com/rust-lang/crates.io-index"' ||
+                  refuse "a crate source other than crates.io"
+                ;;
+              */package-lock.json)
+                [[ -z "$(new_names "$(npm_names <<< "$before")" "$(npm_names <<< "$after")")" ]] ||
+                  refuse "a package new to $lock"
+                [[ -z "$(new_names "$(npm_scripts <<< "$before")" "$(npm_scripts <<< "$after")")" ]] ||
+                  refuse "a new install script in $lock"
+                ! jq -r '.packages[] | .resolved // empty' <<< "$after" |
+                  grep -qv '^https://registry.npmjs.org/' ||
+                  refuse "a package host other than npmjs.org"
+                ;;
+              requirements-dev.txt)
+                [[ -z "$(new_names "$(pip_names <<< "$before")" "$(pip_names <<< "$after")")" ]] ||
+                  refuse "a package new to requirements-dev.txt"
+                ;;
+            esac
+          done < <(jq -r 'select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json|requirements-dev\\.txt)$")) | .filename' "$files")
+
+          # Read last, so the files judged are this head's.
+          current="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          [[ "$current" == "$HEAD_SHA" ]] || refuse "the head moved"
+          post success "Exempt by policy: Dependabot bump"

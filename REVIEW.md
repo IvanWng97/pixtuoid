@@ -185,7 +185,7 @@ its focused lens alone: the floor is never re-run locally.
 | A refactor: a `refactor` PR, or a move or dedup across modules | | local | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). No test leaves `cargo nextest list` at head unless the PR body names it. |
 | Geometry, sky, lighting or other domain math | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | local | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
 | A crate edge, new dependency or widened public API (a version bump of an existing dependency doesn't match) | `Cargo.toml`, `crates/*/Cargo.toml`, `api/` | local | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
-| CI, the merge gate or release tooling | `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `policy/`, `release-plz.toml`, `REVIEW.md`, `docs/CONTRIBUTING.md` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
+| CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `policy/`, `release-plz.toml`, `REVIEW.md`, `docs/CONTRIBUTING.md` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
 
 ## Severity
 

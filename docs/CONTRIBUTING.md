@@ -263,8 +263,9 @@ invariants"), which every contributor and agent reads first.
 
 ### The merge gate
 
-Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
-`success` at the final head; every finding's review thread resolved by its
+Green `ci-gate`; every lens's required `claude-review/<lens>` status
+`success` at the final head, from a published review or Dependabot's policy
+exemption; every finding's review thread resolved by its
 disposition; zero open confirmed `issue (blocking)`; each matching
 [local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
@@ -292,8 +293,11 @@ run, then comments `/claude-review`, again after every push. Its author can
 resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
-The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
-too, again after every Dependabot rebase.
+A Dependabot PR is not reviewed: [`claude-review.yml`](../.github/workflows/claude-review.yml)'s
+`exempt` job posts each lens's status when every commit is Dependabot's and the
+PR only moves versions in its manifests or an action's `uses:` pin, with no
+package, install script or source new to it. Anything else gets `pending`, and
+a maintainer comments `/claude-review`.
 
 ### Dispositions
 
