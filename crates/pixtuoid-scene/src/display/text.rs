@@ -233,7 +233,7 @@ impl Badge {
 /// the badges, each bubble over them, then the signs over every badge and
 /// bubble.
 #[derive(Debug, Clone, Copy)]
-pub struct World<'a> {
+pub struct HostText<'a> {
     /// Each drawn agent's badge.
     pub badges: &'a [Badge],
     /// Each chitchat bubble, hung over its speaker's badge.
@@ -242,17 +242,17 @@ pub struct World<'a> {
     pub signs: &'a [TextRun],
 }
 
-/// A frame's [`World`], held.
+/// A frame's [`HostText`], held.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct WorldRuns {
+pub(crate) struct HostRuns {
     pub(crate) badges: Vec<Badge>,
     pub(crate) bubbles: Vec<TextRun>,
     pub(crate) signs: Vec<TextRun>,
 }
 
-impl WorldRuns {
-    pub(crate) fn view(&self) -> World<'_> {
-        World {
+impl HostRuns {
+    pub(crate) fn view(&self) -> HostText<'_> {
+        HostText {
             badges: &self.badges,
             bubbles: &self.bubbles,
             signs: &self.signs,
@@ -291,6 +291,26 @@ pub enum TextRole {
 }
 
 impl TextRun {
+    /// Each of `runs` that is set, with where `place` sets it: a run yields
+    /// to one before it that it `meets` there, since on a grid wider than the
+    /// one the runs were laid out on the star would write over the brand
+    /// (`no_run_overprints_another_on_its_line`). Each painter's grid brings
+    /// its own `place` and `meets`.
+    pub fn set_first<P>(
+        runs: &[TextRun],
+        place: impl Fn(&TextRun) -> P,
+        meets: impl Fn(&P, &P) -> bool,
+    ) -> Vec<(&TextRun, P)> {
+        let mut set: Vec<(&TextRun, P)> = Vec::new();
+        for run in runs {
+            let at = place(run);
+            if !set.iter().any(|(_, s)| meets(s, &at)) {
+                set.push((run, at));
+            }
+        }
+        set
+    }
+
     /// The floor indicator naming `floor` over the elevator at `door`:
     /// centred on the door, in the cell over it, on the badge plate, an arrow
     /// with no floor its way dim.

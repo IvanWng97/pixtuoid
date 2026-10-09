@@ -165,9 +165,9 @@ pub(crate) fn compose_at<'a>(
         pack, theme, scale, ..
     } = office;
     let ambient = crate::display::light::Ambient::of(&moment.look);
-    let (mut collected, mut world) = collect_pieces(frame, office, moment, outside);
-    world.signs = TextRun::signs(board, office.layout.door, floor, theme);
-    collected.extend(signs(office, &world.signs));
+    let (mut collected, mut host_text) = collect_pieces(frame, office, moment, outside);
+    host_text.signs = TextRun::signs(board, office.layout.door, floor, theme);
+    collected.extend(signs(office, &host_text.signs));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -199,7 +199,7 @@ pub(crate) fn compose_at<'a>(
         pieces,
         backdrop: crate::display::Backdrop::of(office.layout, theme),
         recolours: crate::display::Recolours::of(theme),
-        world,
+        host_text,
         pack,
         scale,
     }
@@ -494,23 +494,20 @@ pub(crate) fn ground_shadow(
 /// The room's signs, `runs`, as the pixel font sets them.
 fn signs(office: Office<'_>, runs: &[TextRun]) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let mut drawn: Vec<(u16, ArtRect)> = Vec::new();
-    runs.iter()
-        .filter_map(|run| {
-            let rect = run_rect(run, pen);
-            // A run yields to one before it on its line: on the base art's grid
-            // the pixel font is too wide for the sign, and the star would write
-            // over the brand (`no_run_overprints_another_on_its_line`).
-            if drawn.iter().any(|&(y, r)| y == run.at.y && meets(r, rect)) {
-                return None;
-            }
-            drawn.push((run.at.y, rect));
-            Some((
-                topmost_span(rect, pen),
-                PieceKind::Text { run: run.clone() },
-            ))
-        })
-        .collect()
+    // On the base art's grid the pixel font is too wide for the sign.
+    TextRun::set_first(
+        runs,
+        |run| (run.at.y, run_rect(run, pen)),
+        |&(y, r), &(line, rect)| y == line && meets(r, rect),
+    )
+    .into_iter()
+    .map(|(run, (_, rect))| {
+        (
+            topmost_span(rect, pen),
+            PieceKind::Text { run: run.clone() },
+        )
+    })
+    .collect()
 }
 
 /// The logical cells `run`'s line takes on `pen`'s grid ([`run_rect`]): where
@@ -539,7 +536,7 @@ fn collect_pieces(
     office: Office<'_>,
     moment: &Moment,
     outside: &mut crate::outside::OutsideCache,
-) -> (Vec<(Span, PieceKind)>, crate::display::text::WorldRuns) {
+) -> (Vec<(Span, PieceKind)>, crate::display::text::HostRuns) {
     let layout = office.layout;
     let inputs = ComposeInputs {
         frame,
@@ -554,20 +551,20 @@ fn collect_pieces(
         &mut order,
         outside,
     );
-    let mut world = crate::display::text::WorldRuns::default();
+    let mut host_text = crate::display::text::HostRuns::default();
     let carried = push_characters(
         frame,
         office,
         moment.timing.now,
-        (&mut order, &mut world.badges),
+        (&mut order, &mut host_text.badges),
     );
-    world.bubbles = push_bubbles(frame, office, &world.badges, &mut order);
+    host_text.bubbles = push_bubbles(frame, office, &host_text.badges, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
     wall_segments(layout, crate::glass::WallTrim::of(office.theme), &mut order);
-    (order, world)
+    (order, host_text)
 }
 
 #[derive(Clone, Copy)]
