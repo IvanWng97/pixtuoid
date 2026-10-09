@@ -1179,3 +1179,18 @@ fi
 git init -q "$test_dir/no-parent" && echo a >"$test_dir/no-parent/lock" && git -C "$test_dir/no-parent" add lock &&
     git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q -m only
 [[ "$(changed "$test_dir/no-parent" pull_request lock)" == true ]] || fail "path-changed passed a diff it could not run"
+
+# ── An errored run names its error on one annotation line, escaped so the
+# message cannot start a workflow command; a clean or absent result says nothing.
+error_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Report the model's error")"
+report_error() {
+    jq -n "$1" >"$test_dir/execution.json"
+    EXECUTION_FILE="$test_dir/execution.json" bash -c "$error_script"
+}
+out="$(report_error '[{type: "assistant"}, {type: "result", is_error: true, result: "API Error: 429 50%\n::warning::x\r"}]')" ||
+    fail "the error report exited non-zero"
+[[ "$out" == '::error title=Claude run errored::API Error: 429 50%25%0A::warning::x%0D' ]] ||
+    fail "the error report did not print one escaped annotation: $out"
+[[ -z "$(report_error '[{type: "result", is_error: false, result: "{}"}]')" ]] ||
+    fail "the error report spoke for a clean run"
+[[ -z "$(report_error '[{type: "assistant"}]')" ]] || fail "the error report spoke with no result"
