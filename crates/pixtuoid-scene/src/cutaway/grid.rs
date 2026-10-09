@@ -176,6 +176,13 @@ fn screen_font(c: char) -> Option<Bitmap> {
 pub trait Canvas {
     fn pixel(&self, x: i32, y: i32) -> Option<Rgb>;
     fn set(&mut self, x: i32, y: i32, rgb: Rgb);
+    /// Darken `(x, y)` toward black by `factor`, as a card's drop shadow
+    /// does: a canvas with nothing under a pixel overrides it.
+    fn shade(&mut self, x: i32, y: i32, factor: f32) {
+        if let Some(under) = self.pixel(x, y) {
+            self.set(x, y, darken(under, factor));
+        }
+    }
 }
 
 impl Canvas for RgbBuffer {
@@ -223,9 +230,7 @@ pub fn paint_grid(
         let (w, h) = (i32::from(grid.width()) * cw, i32::from(grid.height()) * ch);
         for y in at.1 + ch / 2..at.1 + ch / 2 + h {
             for x in at.0 + cw..at.0 + cw + w {
-                if let Some(under) = canvas.pixel(x, y) {
-                    canvas.set(x, y, darken(under, factor));
-                }
+                canvas.shade(x, y, factor);
             }
         }
     }
@@ -575,5 +580,56 @@ mod tests {
         let pack = crate::pack::test_office();
         paint_grid(&mut buf, &grid, ((0, 0), cell), (face, &pack), INK);
         buf
+    }
+
+    /// A card's shadow reaches the canvas through `shade`, over the card's
+    /// extent shifted a cell right and half a cell down, so a canvas with
+    /// nothing under it can still draw one.
+    #[test]
+    fn a_cards_shadow_shades_through_the_canvas() {
+        struct Shades(Vec<(i32, i32)>);
+        impl Canvas for Shades {
+            fn pixel(&self, _: i32, _: i32) -> Option<Rgb> {
+                None
+            }
+            fn set(&mut self, _: i32, _: i32, _: Rgb) {}
+            fn shade(&mut self, x: i32, y: i32, _: f32) {
+                self.0.push((x, y));
+            }
+        }
+        let pack = crate::pack::test_office();
+        let card = CellGrid::new(2, 1);
+        let cell = Face::Screen.cell(1);
+        let mut shades = Shades(Vec::new());
+        let ink = GridInk {
+            shadow: Some(crate::display::cells::CARD_SHADOW),
+            ..INK
+        };
+        paint_grid(
+            &mut shades,
+            &card,
+            ((0, 0), cell),
+            (Face::Screen, &pack),
+            ink,
+        );
+        let (cw, ch) = (i32::from(cell.w), i32::from(cell.h));
+        assert_eq!(shades.0.len(), usize::try_from(2 * cw * ch).expect("small"));
+        assert_eq!(shades.0[0], (cw, ch / 2), "a cell right, half a cell down");
+    }
+
+    /// The default `shade` darkens what is there, as the shadow always has.
+    #[test]
+    fn the_default_shade_darkens_what_is_under_it() {
+        let mut buf = RgbBuffer::filled(
+            1,
+            1,
+            Rgb {
+                r: 100,
+                g: 50,
+                b: 10,
+            },
+        );
+        buf.shade(0, 0, 0.5);
+        assert_eq!(buf.get(0, 0), Rgb { r: 50, g: 25, b: 5 });
     }
 }
