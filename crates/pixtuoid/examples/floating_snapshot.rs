@@ -1,7 +1,7 @@
 //! Render ONE frame of the `pixtuoid floating` office to a PNG — visual verification for
 //! the floating window. It drives the SAME `window_geometry`, `OfficeRenderer`,
-//! `XrgbSurface` upscale and footer painter the live window uses, so the PNG is
-//! byte-faithful to what it blits.
+//! overlay layers and `composition` the live window presents, drawn by the CPU
+//! compositor the window's GPU frames are held to.
 //!
 //! Usage:
 //!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y] [--pet cat|dog] [--drag X0,Y0:X1,Y1 [--drop-after MS]] [--panel help|dashboard|sources|theme]`
@@ -272,42 +272,53 @@ fn main() -> Result<()> {
         }
     }
     let buf = renderer.buf().context("a frame")?;
+    let (bw, bh) = (buf.width(), buf.height());
+    let cell = Face::chrome(at);
+    let world = FloorInputs {
+        scene: &scene,
+        pack: &pack,
+        now,
+        floor: FloorMeta::ground(),
+        pets: PetInputs::default(),
+    };
+    let next = pixtuoid::dev::Overlays {
+        window: (win_w, win_h),
+        // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
+        footer: renderer.footer(
+            &scene,
+            pixtuoid::dev::footer_budget(win_w as usize, cell),
+            true,
+            None,
+            None,
+        ),
+        tooltip: hover.and_then(|cursor| {
+            let tip = renderer
+                .hit_at(cursor, at)
+                .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))?;
+            Some((tip, (cursor.0 as i32, cursor.1 as i32)))
+        }),
+        panels: match panel {
+            Some(name) => Some(
+                pixtuoid::dev::panel_preview(&name, &scene, theme, ((win_w, win_h), cell), now)
+                    .ok_or_else(|| anyhow!("no panel named {name}"))?,
+            ),
+            None => None,
+        },
+    };
+    let mut overlays = pixtuoid::dev::OverlayLayers::default();
+    overlays.update(&next, at, (theme, &pack));
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
-    let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
-    surf.fill_upscaled(buf, usize::from(at.upscale()));
-    let (bw, bh) = (buf.width(), buf.height());
-    // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
-    let cell = Face::chrome(at);
-    let budget = pixtuoid::dev::footer_budget(ww, cell);
-    let footer = renderer.footer(&scene, budget, true, None, None);
-    pixtuoid::dev::paint_footer_into_surface(&mut surf, &footer, (theme, &pack), at);
-    if let Some(cursor) = hover {
-        let world = FloorInputs {
-            scene: &scene,
-            pack: &pack,
-            now,
-            floor: FloorMeta::ground(),
-            pets: PetInputs::default(),
-        };
-        if let Some(tip) = renderer
-            .hit_at(cursor, at)
-            .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))
-        {
-            pixtuoid::dev::paint_tooltip_into_surface(
-                &mut surf,
-                &tip,
-                cursor,
-                (theme, &pack),
-                cell,
-            );
-        }
-    }
-    if let Some(name) = panel {
-        let grid = pixtuoid::dev::panel_preview(&name, &scene, theme, ((win_w, win_h), cell), now)
-            .ok_or_else(|| anyhow!("no panel named {name}"))?;
-        pixtuoid::dev::paint_panels_into_surface(&mut surf, &grid, (theme, &pack), cell);
-    }
+    pixtuoid::dev::composite(
+        &pixtuoid::dev::composition(
+            buf,
+            pixtuoid::dev::Change::All,
+            at,
+            (win_w, win_h),
+            &overlays,
+        ),
+        &mut XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window"),
+    );
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {

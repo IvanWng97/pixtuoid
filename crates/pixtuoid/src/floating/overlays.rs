@@ -1,25 +1,25 @@
 //! The window's chrome over the office: its footer, tooltip and panels, and the panel geometry a press maps through.
 
 use pixtuoid_core::state::SceneState;
-use pixtuoid_scene::cutaway::{CellPx, Face, GridInk, paint_grid};
+use pixtuoid_scene::cutaway::{Canvas, CellPx, Face, GridInk, paint_grid};
 use pixtuoid_scene::display::cells::{CARD_SHADOW, CellGrid, CellRect};
 use pixtuoid_scene::footer::FooterModel;
 use pixtuoid_scene::pack::OfficeArt;
 use pixtuoid_scene::render_scale::PixelFit;
 use pixtuoid_scene::theme::Theme;
 
-use super::compose::{XrgbSurface, pack_xrgb};
+use super::compose::{Change, Layer, LayerId, LayerPixels, PxRect, RgbaLayer};
 use super::geometry::{FOOTER_MARGIN_PX, footer_band};
 
 /// Everything a presented frame shows beside the office: the window's size,
 /// its footer, and the tooltip by the pointer.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Overlays {
-    pub(crate) window: (u32, u32),
-    pub(crate) footer: FooterModel,
-    pub(crate) tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
-    /// The open panels, as the TUI paints them: [`panels_grid`].
-    pub(crate) panels: Option<CellGrid>,
+pub struct Overlays {
+    pub window: (u32, u32),
+    pub footer: FooterModel,
+    pub tooltip: Option<(pixtuoid_scene::tooltip::Tooltip, (i32, i32))>,
+    /// The open panels, as the TUI paints them: `panels_grid`.
+    pub panels: Option<CellGrid>,
 }
 
 /// `frames`' open panels over a window `cols`×`rows` screen cells big, as
@@ -50,7 +50,7 @@ pub(crate) fn panel_cells((w, h): (u32, u32), cell: CellPx) -> (u16, u16) {
 }
 
 /// The screen cell of `cell` under window point `(x, y)`: the panels paint
-/// from the window's top-left ([`paint_panels_into_surface`]).
+/// from the window's top-left ([`paint_panels`]).
 pub(crate) fn cell_at((x, y): (f64, f64), cell: CellPx) -> (u16, u16) {
     let at = |p: f64, size: u16| {
         u16::try_from(p.max(0.0) as u32 / u32::from(size.max(1))).unwrap_or(u16::MAX)
@@ -77,41 +77,80 @@ pub(crate) fn modal_press(
     })
 }
 
-/// Paint `tip` by the pointer at `cursor` (physical px): the shared
-/// [`card`](pixtuoid_scene::tooltip::Tooltip::card) where
-/// [`place`](pixtuoid_scene::tooltip::place) opens it, in screen cells of
-/// `cell`, as the TUI draws it in terminal cells.
-pub fn paint_tooltip_into_surface(
-    sb: &mut XrgbSurface<'_>,
+/// Where `tip`'s card opens by the pointer at `cursor` in a `window`-px
+/// window of screen cells `cell`: its top-left in window px, and the card.
+fn tooltip_card(
     tip: &pixtuoid_scene::tooltip::Tooltip,
     cursor: (f64, f64),
-    (theme, pack): (&Theme, &OfficeArt),
+    theme: &Theme,
     cell: CellPx,
-) {
+    (w, h): (u32, u32),
+) -> ((i32, i32), CellGrid) {
     let card = tip.card(theme);
-    let cells =
-        |px: usize, size: u16| u16::try_from(px / usize::from(size.max(1))).unwrap_or(u16::MAX);
+    let cells = |px: u32, size: u16| u16::try_from(px / u32::from(size.max(1))).unwrap_or(u16::MAX);
     let area = CellRect {
         x: 0,
         y: 0,
-        w: cells(sb.w, cell.w),
-        h: cells(sb.h, cell.h),
+        w: cells(w, cell.w),
+        h: cells(h, cell.h),
     };
     let pointer = (
-        cells(cursor.0.max(0.0) as usize, cell.w),
-        cells(cursor.1.max(0.0) as usize, cell.h),
+        cells(cursor.0.max(0.0) as u32, cell.w),
+        cells(cursor.1.max(0.0) as u32, cell.h),
     );
     let placed = pixtuoid_scene::tooltip::place(card.rect(), pointer, area, tip.anchor);
     let at = (
         i32::from(placed.x) * i32::from(cell.w),
         i32::from(placed.y) * i32::from(cell.h),
     );
+    (at, card)
+}
+
+/// What [`paint_tooltip`] draws over: the card and its shadow, a cell right
+/// and half a cell down ([`paint_grid`]), inside the window.
+pub(crate) fn tooltip_rect(
+    tip: &pixtuoid_scene::tooltip::Tooltip,
+    cursor: (f64, f64),
+    theme: &Theme,
+    cell: CellPx,
+    window: (u32, u32),
+) -> PxRect {
+    let ((x, y), card) = tooltip_card(tip, cursor, theme, cell, window);
+    let (cw, ch) = (u32::from(cell.w), u32::from(cell.h));
+    PxRect {
+        x,
+        y,
+        w: u32::from(card.width()) * cw + cw,
+        h: u32::from(card.height()) * ch + ch / 2,
+    }
+    .within(window)
+    .unwrap_or(PxRect {
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+    })
+}
+
+/// Paint `tip` by the pointer at `cursor` (physical px) in a `window`-px
+/// window: the shared [`card`](pixtuoid_scene::tooltip::Tooltip::card) where
+/// [`place`](pixtuoid_scene::tooltip::place) opens it, in screen cells of
+/// `cell`, as the TUI draws it in terminal cells.
+pub(crate) fn paint_tooltip(
+    canvas: &mut impl Canvas,
+    tip: &pixtuoid_scene::tooltip::Tooltip,
+    cursor: (f64, f64),
+    (theme, pack): (&Theme, &OfficeArt),
+    cell: CellPx,
+    window: (u32, u32),
+) {
+    let (at, card) = tooltip_card(tip, cursor, theme, cell, window);
     let ink = GridInk {
         text: theme.ui.tooltip_text,
         halo: None,
         shadow: Some(CARD_SHADOW),
     };
-    paint_grid(sb, &card, (at, cell), (Face::Screen, pack), ink);
+    paint_grid(canvas, &card, (at, cell), (Face::Screen, pack), ink);
 }
 
 /// The panel `name` (`help`, `dashboard`, `sources` or `theme`) open over
@@ -151,10 +190,38 @@ pub fn panel_preview(
     )
 }
 
+/// What open `panels` draw over: the cells they ink, and one cell more right
+/// and down, which a wide glyph, a halo or a bold strike reaches into
+/// ([`paint_grid`]); `None` when they ink none.
+pub(crate) fn panels_rect(panels: &CellGrid, cell: CellPx, window: (u32, u32)) -> Option<PxRect> {
+    let inked = |x, y| {
+        panels
+            .get(x, y)
+            .is_some_and(|c| c.bg.is_some() || !c.symbol.trim().is_empty())
+    };
+    let (x0, y0, x1, y1) = (0..panels.height())
+        .flat_map(|y| (0..panels.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| inked(x, y))
+        .fold(None::<(u16, u16, u16, u16)>, |span, (x, y)| {
+            Some(match span {
+                None => (x, y, x, y),
+                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+            })
+        })?;
+    let (cw, ch) = (u32::from(cell.w), u32::from(cell.h));
+    PxRect {
+        x: i32::try_from(u32::from(x0) * cw).unwrap_or(i32::MAX),
+        y: i32::try_from(u32::from(y0) * ch).unwrap_or(i32::MAX),
+        w: (u32::from(x1 - x0) + 2) * cw,
+        h: (u32::from(y1 - y0) + 2) * ch,
+    }
+    .within(window)
+}
+
 /// Paint `panels` over the window from its top-left, in screen cells of
 /// `cell`: the TUI's panels, cell for cell.
-pub fn paint_panels_into_surface(
-    sb: &mut XrgbSurface<'_>,
+pub(crate) fn paint_panels(
+    canvas: &mut impl Canvas,
     panels: &CellGrid,
     (theme, pack): (&Theme, &OfficeArt),
     cell: CellPx,
@@ -164,7 +231,7 @@ pub fn paint_panels_into_surface(
         halo: None,
         shadow: None,
     };
-    paint_grid(sb, panels, ((0, 0), cell), (Face::Screen, pack), ink);
+    paint_grid(canvas, panels, ((0, 0), cell), (Face::Screen, pack), ink);
 }
 
 /// How many screen cells of `cell` fit across a `win_w`-pixel window
@@ -174,38 +241,178 @@ pub fn footer_budget(win_w: usize, cell: CellPx) -> u16 {
     u16::try_from(room / usize::from(cell.w.max(1))).unwrap_or(u16::MAX)
 }
 
-/// Paint the shared status footer in `at`'s `footer_band` at the window's
-/// foot: the theme's ground, the TUI footer row's terminal background, and
-/// the line in `at`'s screen cells over it — the window's twin of the TUI's
-/// status row, from the same [`build_footer`](pixtuoid_scene::footer::build_footer) model.
-pub fn paint_footer_into_surface(
-    sb: &mut XrgbSurface<'_>,
+/// The footer's band: a `window`'s full width at its foot, `at`'s
+/// [`footer_band`] tall.
+pub(crate) fn footer_rect(at: PixelFit, (w, h): (u32, u32)) -> PxRect {
+    let band = u32::from(footer_band(at)).min(h);
+    PxRect {
+        x: 0,
+        y: i32::try_from(h - band).unwrap_or(i32::MAX),
+        w,
+        h: band,
+    }
+}
+
+/// Paint the shared status footer in `at`'s `footer_band` at the foot of a
+/// `window`-px window: the theme's ground, the TUI footer row's terminal
+/// background, and the line in `at`'s screen cells over it — the window's
+/// twin of the TUI's status row, from the same
+/// [`build_footer`](pixtuoid_scene::footer::build_footer) model.
+pub(crate) fn paint_footer(
+    canvas: &mut impl Canvas,
     model: &FooterModel,
     (theme, pack): (&Theme, &OfficeArt),
     at: PixelFit,
+    window: (u32, u32),
 ) {
     let cell = Face::chrome(at);
-    let top = sb.h.saturating_sub(usize::from(footer_band(at)));
-    let ground = pack_xrgb(theme.surface.bg_fallback);
-    sb.px[top * sb.w..].fill(ground);
+    let band = footer_rect(at, window);
+    let ground = theme.surface.bg_fallback;
+    for y in band.y..band.y.saturating_add_unsigned(band.h) {
+        for x in 0..i32::try_from(band.w).unwrap_or(i32::MAX) {
+            canvas.set(x, y, ground);
+        }
+    }
     let margin = i32::from(FOOTER_MARGIN_PX);
-    let y = i32::try_from(top).unwrap_or(i32::MAX) + margin;
     let ink = GridInk {
         text: theme.ui.label_idle,
         halo: None,
         shadow: None,
     };
     paint_grid(
-        sb,
+        canvas,
         &model.line(theme),
-        ((margin, y), cell),
+        ((margin, band.y + margin), cell),
         (Face::Screen, pack),
         ink,
     );
 }
 
+/// What an overlay's pixels depend on beside its model. The theme is
+/// compared by identity: every theme is a `&'static` table.
+#[derive(Debug, Clone, Copy)]
+struct Look {
+    theme: &'static Theme,
+    at: PixelFit,
+    window: (u32, u32),
+}
+
+impl PartialEq for Look {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.theme, other.theme) && self.at == other.at && self.window == other.window
+    }
+}
+
+#[derive(Debug)]
+struct Painted<K> {
+    key: K,
+    layer: RgbaLayer,
+    /// Whether the last [`OverlayLayers::update`] painted it.
+    fresh: bool,
+}
+
+/// A tooltip and the window point it opens by, as [`Overlays`] holds it.
+type Tip = (pixtuoid_scene::tooltip::Tooltip, (i32, i32));
+
+/// The overlays as layers, each repainted only when what it shows changed.
+#[derive(Debug, Default)]
+pub struct OverlayLayers {
+    footer: Option<Painted<(FooterModel, Look)>>,
+    tooltip: Option<Painted<(Tip, Look)>>,
+    panels: Option<Painted<(CellGrid, Look)>>,
+}
+
+/// Keep `slot` if it already shows `want`, else repaint it, or drop it when
+/// nothing is wanted or `paint` draws nothing.
+fn refresh<K: PartialEq>(
+    slot: &mut Option<Painted<K>>,
+    want: Option<K>,
+    paint: impl FnOnce(&K) -> Option<RgbaLayer>,
+) {
+    match (slot.as_mut(), want) {
+        (Some(painted), Some(key)) if painted.key == key => painted.fresh = false,
+        (_, Some(key)) => {
+            *slot = paint(&key).map(|layer| Painted {
+                key,
+                layer,
+                fresh: true,
+            });
+        }
+        (_, None) => *slot = None,
+    }
+}
+
+impl OverlayLayers {
+    /// Bring the layers to `next` over a frame drawn at `at`.
+    pub fn update(
+        &mut self,
+        next: &Overlays,
+        at: PixelFit,
+        (theme, pack): (&'static Theme, &OfficeArt),
+    ) {
+        let window = next.window;
+        let look = Look { theme, at, window };
+        let cell = Face::chrome(at);
+        refresh(
+            &mut self.footer,
+            Some((next.footer.clone(), look)),
+            |(model, _)| {
+                let mut layer = RgbaLayer::new(footer_rect(at, window));
+                paint_footer(&mut layer, model, (theme, pack), at, window);
+                Some(layer)
+            },
+        );
+        refresh(
+            &mut self.tooltip,
+            next.tooltip.clone().map(|tip| (tip, look)),
+            |((tip, cursor), _)| {
+                let cursor = (f64::from(cursor.0), f64::from(cursor.1));
+                let mut layer = RgbaLayer::new(tooltip_rect(tip, cursor, theme, cell, window));
+                paint_tooltip(&mut layer, tip, cursor, (theme, pack), cell, window);
+                Some(layer)
+            },
+        );
+        refresh(
+            &mut self.panels,
+            next.panels.clone().map(|panels| (panels, look)),
+            |(panels, _)| {
+                let mut layer = RgbaLayer::new(panels_rect(panels, cell, window)?);
+                paint_panels(&mut layer, panels, (theme, pack), cell);
+                Some(layer)
+            },
+        );
+    }
+
+    /// The layers shown, in paint order: each [`Change::All`] in the update
+    /// that painted it, else [`Change::Unchanged`].
+    pub(crate) fn layers(&self) -> impl Iterator<Item = Layer<'_>> {
+        fn one<K>(id: LayerId, p: &Option<Painted<K>>) -> Option<Layer<'_>> {
+            p.as_ref().map(|p| Layer {
+                id,
+                pixels: LayerPixels::Rgba(&p.layer),
+                origin: p.layer.origin(),
+                scale: 1,
+                extent: p.layer.size(),
+                change: if p.fresh {
+                    Change::All
+                } else {
+                    Change::Unchanged
+                },
+            })
+        }
+        [
+            one(LayerId::Footer, &self.footer),
+            one(LayerId::Tooltip, &self.tooltip),
+            one(LayerId::Panels, &self.panels),
+        ]
+        .into_iter()
+        .flatten()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::compose::{XrgbSurface, pack_xrgb};
     use super::super::fixtures::{active_on, density, scene_with};
     use super::super::geometry::window_geometry;
     use super::*;
@@ -225,7 +432,14 @@ mod tests {
             let mut px = vec![0u32; w * h];
             let mut sb = XrgbSurface::new(&mut px, w, h).expect("sized");
             let look = (theme, &pack);
-            paint_tooltip_into_surface(&mut sb, tip, cursor, look, Face::Screen.cell(1));
+            paint_tooltip(
+                &mut sb,
+                tip,
+                cursor,
+                look,
+                Face::Screen.cell(1),
+                (w as u32, h as u32),
+            );
             let rows: Vec<usize> = (0..h)
                 .filter(|&y| px[y * w..(y + 1) * w].contains(&bg))
                 .collect();
@@ -324,11 +538,12 @@ mod tests {
         // The office as the window draws it, then the footer over it.
         const OFFICE: u32 = 0x0012_3456;
         let mut sb = vec![OFFICE; w * h];
-        paint_footer_into_surface(
+        paint_footer(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
             &model,
             (theme, &pack),
             at,
+            (w as u32, h as u32),
         );
         let top = h - usize::from(footer_band(at));
         assert!(sb[..top * w].iter().all(|&p| p == OFFICE), "above the band");
@@ -397,6 +612,103 @@ mod tests {
         assert_eq!(
             modal_press(&mut ui, corner, window, shown),
             ModalMouse::Inert
+        );
+    }
+
+    /// Each overlay painted into its own layer is what the same painter
+    /// draws over the whole window, inside the layer's rect, and nothing
+    /// outside it.
+    #[test]
+    fn an_overlay_layer_holds_what_the_whole_window_paint_draws() {
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let window = (640u32, 400u32);
+        let at = window_geometry(PhysicalSize::new(window.0, window.1), density());
+        let cell = Face::chrome(at);
+        let tip = pixtuoid_scene::tooltip::coffee();
+        for cursor in [(100.0, 4.0), (630.0, 390.0), (0.0, 200.0)] {
+            let rect = tooltip_rect(&tip, cursor, theme, cell, window);
+            let mut layer = RgbaLayer::new(rect);
+            paint_tooltip(&mut layer, &tip, cursor, (theme, &pack), cell, window);
+            // The whole-window paint over a known ground: every pixel it
+            // changed is inside the rect and set in the layer.
+            const GROUND: u32 = 0x0012_3456;
+            let (w, h) = (window.0 as usize, window.1 as usize);
+            let mut px = vec![GROUND; w * h];
+            let mut flat = XrgbSurface::new(&mut px, w, h).expect("sized");
+            paint_tooltip(&mut flat, &tip, cursor, (theme, &pack), cell, window);
+            let mut changed = 0;
+            for (i, &p) in px.iter().enumerate() {
+                let (x, y) = ((i % w) as i32, (i / w) as i32);
+                let inside = x >= rect.x
+                    && y >= rect.y
+                    && x < rect.x + rect.w as i32
+                    && y < rect.y + rect.h as i32;
+                if p != GROUND {
+                    changed += 1;
+                    assert!(inside, "{cursor:?}: ({x},{y}) painted outside {rect:?}");
+                    let [_, _, _, a] = layer.texel((x - rect.x) as u32, (y - rect.y) as u32);
+                    assert_ne!(a, 0, "{cursor:?}: ({x},{y}) missing from the layer");
+                }
+            }
+            assert!(changed > 0, "{cursor:?}: the tooltip painted nothing");
+        }
+    }
+
+    /// A theme change repaints an overlay whose model did not change, and an
+    /// unchanged frame repaints nothing.
+    #[test]
+    fn a_theme_change_repaints_an_unchanged_overlay() {
+        let normal = pixtuoid_scene::theme::theme_by_name("normal").expect("normal");
+        let other = pixtuoid_scene::theme::ALL_THEMES
+            .iter()
+            .copied()
+            .find(|t| !std::ptr::eq(*t, normal))
+            .expect("a second theme");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let window = (640u32, 400u32);
+        let at = window_geometry(PhysicalSize::new(window.0, window.1), density());
+        let next = Overlays {
+            window,
+            footer: FooterModel {
+                segments: vec![pixtuoid_scene::footer::FooterSegment {
+                    text: "a".into(),
+                    tone: pixtuoid_scene::footer::FooterTone::Neutral,
+                }],
+            },
+            tooltip: None,
+            panels: None,
+        };
+        let mut layers = OverlayLayers::default();
+        let fresh = |l: &OverlayLayers| {
+            l.layers()
+                .map(|l| l.change == Change::All)
+                .collect::<Vec<_>>()
+        };
+        layers.update(&next, at, (normal, &pack));
+        assert_eq!(fresh(&layers), [true], "the first frame paints the footer");
+        layers.update(&next, at, (normal, &pack));
+        assert_eq!(fresh(&layers), [false], "nothing changed");
+        layers.update(&next, at, (other, &pack));
+        assert_eq!(fresh(&layers), [true], "the theme changed");
+    }
+
+    /// Open panels' layer spans the cells they ink, plus the one-cell spill a
+    /// glyph may reach into, and is absent when no cell is inked.
+    #[test]
+    fn the_panels_layer_spans_the_inked_cells() {
+        let cell = CellPx { w: 4, h: 8 };
+        let mut grid = CellGrid::new(10, 5);
+        assert_eq!(panels_rect(&grid, cell, (40, 40)), None);
+        grid.put((3, 1), "x", None, false);
+        assert_eq!(
+            panels_rect(&grid, cell, (40, 40)),
+            Some(PxRect {
+                x: 12,
+                y: 8,
+                w: 8,
+                h: 16
+            })
         );
     }
 }

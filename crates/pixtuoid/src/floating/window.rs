@@ -85,6 +85,8 @@ pub(crate) struct FloatingApp {
     /// The animation-tick deadline — see [`super::cadence`] for why the redraw
     /// REQUEST (not just the wait) has to be gated on it.
     clock: super::cadence::FrameClock,
+    /// The chrome over the office, each repainted only when it changed.
+    overlays: super::overlays::OverlayLayers,
     window: Option<Rc<Window>>,
     // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
     context: Option<softbuffer::Context<Rc<Window>>>,
@@ -161,6 +163,7 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
+            overlays: super::overlays::OverlayLayers::default(),
             window: None,
             context: None,
             surface: None,
@@ -444,9 +447,21 @@ impl FloatingApp {
                 )
             },
         };
+        self.overlays.update(&next, at, (self.theme, &*self.pack));
+        let Some(office) = self.renderer.buf() else {
+            return;
+        };
         let dirty = self.renderer.dirty();
         let painted = crate::jank::Painted::from(dirty);
-        if !self.screen.needs(&next, dirty) {
+        let comp = super::compose::composition(
+            office,
+            super::compose::Change::from(dirty),
+            at,
+            (win_w, win_h),
+            &self.overlays,
+        );
+        if !self.screen.needs(&comp) {
+            drop(comp);
             // The frame on screen is this one: its flash phase shows.
             self.renderer.presented();
             return;
@@ -462,27 +477,21 @@ impl FloatingApp {
         let Ok(mut sb) = surface.buffer_mut() else {
             return;
         };
-        let (win_w, win_h) = (win_w as usize, win_h as usize);
-        let Some(mut surf) = super::compose::XrgbSurface::new(&mut sb, win_w, win_h) else {
+        let Some(mut surf) =
+            super::compose::XrgbSurface::new(&mut sb, win_w as usize, win_h as usize)
+        else {
             return;
         };
-        if let Some(office) = self.renderer.buf() {
-            surf.fill_upscaled(office, usize::from(at.upscale()));
-        }
-        let cell = Face::chrome(at);
-        let look = (self.theme, &*self.pack);
-        super::overlays::paint_footer_into_surface(&mut surf, &next.footer, look, at);
-        if let Some((tip, _)) = &next.tooltip {
-            super::overlays::paint_tooltip_into_surface(&mut surf, tip, cursor, look, cell);
-        }
-        if let Some(panels) = &next.panels {
-            super::overlays::paint_panels_into_surface(&mut surf, panels, look, cell);
-        }
+        super::compose::composite(&comp, &mut surf);
         window.pre_present_notify();
         let presenting = Instant::now();
-        if sb.present().is_ok() {
+        let shown = sb.present().is_ok();
+        if shown {
+            self.screen.shown(&comp);
+        }
+        drop(comp);
+        if shown {
             self.renderer.presented();
-            self.screen.shown(next);
         }
         let now = Instant::now();
         self.jank.painted_by(crate::jank::Painter {
