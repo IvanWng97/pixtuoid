@@ -5,11 +5,11 @@
 <h1 align="center">pixtuoid</h1>
 
 <p align="center">
-  <em>Your AI coding agents, visualized as pixel-art coworkers in a terminal office.</em>
+  <samp>Your AI coding agents, visualized as pixel-art coworkers in a terminal office.</samp>
 </p>
 
 <p align="center">
-  <sub><em><b>pix</b>el + <b>tu</b>i + (agent-)<b>oid</b></em></sub>
+  <sub><samp><b>pix</b>el + <b>tu</b>i + (agent-)<b>oid</b></samp></sub>
 </p>
 
 <p align="center">
