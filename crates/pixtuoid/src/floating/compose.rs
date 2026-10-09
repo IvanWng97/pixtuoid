@@ -753,7 +753,7 @@ mod tests {
                 let mut flat = vec![0u32; w * h];
                 {
                     let mut s = XrgbSurface::new(&mut flat, w, h).expect("sized");
-                    // The office over the whole window, as `fill_upscaled` drew it.
+                    // The office under the whole window, the band included.
                     let full = Layer {
                         id: LayerId::Office,
                         pixels: LayerPixels::Opaque(&office),

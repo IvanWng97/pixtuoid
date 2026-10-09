@@ -32,7 +32,7 @@ updates:
       - dependency-name: "objc2-app-kit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
-      # Same discipline for x11rb: winit and softbuffer both require `^0.13.0`,
+      # Same discipline for x11rb: winit requires `^0.13.0`,
       # so a bump past 0.13.x builds a SECOND x11rb stack on Linux, which
       # deny.toml bans. Lift at winit's x11rb 0.14.
       - dependency-name: "x11rb"

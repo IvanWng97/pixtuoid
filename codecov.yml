@@ -68,8 +68,8 @@ ignore:
   - "crates/pixtuoid/src/runtime/driver.rs"     # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
   - "crates/pixtuoid/src/runtime/pipeline.rs"   # the shared source-to-reducer spine: same channel/spawn glue class as driver.rs
   - "crates/pixtuoid/src/floating/mod.rs"       # floating run(): tokio runtime + winit EventLoop glue (the floating twin of driver.rs)
-  - "crates/pixtuoid/src/floating/window.rs"    # winit ApplicationHandler: creates the real OS window + softbuffer surface
+  - "crates/pixtuoid/src/floating/window.rs"    # winit ApplicationHandler: creates the real OS window + its GPU surface
   # The testable floating logic IS counted: offscreen.rs, overlays.rs,
-  # compose.rs, geometry.rs, input.rs, cadence.rs. Keeps the % honest: "of the
-  # code we CAN test headlessly, X% is tested", rather than dragging it down
-  # with paths no test can reach.
+  # compose.rs, gpu.rs, geometry.rs, input.rs, cadence.rs. Keeps the % honest:
+  # "of the code we CAN test headlessly, X% is tested", rather than dragging it
+  # down with paths no test can reach.
