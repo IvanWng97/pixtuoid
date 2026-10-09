@@ -21,7 +21,7 @@ fn hex(rgb: Rgb) -> String {
 }
 
 /// Every field the renderer paints with, and the theme role it copies.
-fn roles(t: &Theme) -> [(&'static str, Rgb); 7] {
+fn roles(t: &Theme) -> [(&'static str, Rgb); 17] {
     [
         ("wall", t.surface.wall),
         ("trim", t.surface.wall_trim),
@@ -30,6 +30,16 @@ fn roles(t: &Theme) -> [(&'static str, Rgb); 7] {
         ("title", t.ui.tooltip_title),
         ("text", t.ui.tooltip_text),
         ("star", t.lighting.desk_lamp),
+        ("window_frame", t.surface.window_frame),
+        ("sky_top", t.lighting.night_sky_b),
+        ("sky_horizon", t.lighting.night_sky_a),
+        ("building_dark", t.office.building_dark),
+        ("building_light", t.office.building_light),
+        ("window_dark", t.office.city_dark_window),
+        ("window_lit_a", t.office.city_lit_windows[0]),
+        ("window_lit_b", t.office.city_lit_windows[1]),
+        ("window_lit_c", t.office.city_lit_windows[2]),
+        ("moon", t.lighting.moon_core),
     ]
 }
 

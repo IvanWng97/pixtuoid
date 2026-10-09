@@ -6,7 +6,7 @@ name: star-history
 # scripts/star-history.py. `watch` refreshes on each new star —
 # `cancel-in-progress` folds a burst into one run — the cron keeps the right
 # edge current on quiet days, and the `push` arm republishes the moment the
-# renderer or this file changes on main (it is also the first run after merge).
+# renderer, its art or this file changes on main (it is also the first run after merge).
 
 on:
   schedule:
@@ -19,6 +19,8 @@ on:
       - scripts/star-history.py
       - scripts/readme_pixels.py
       - scripts/readme-palette.json
+      - crates/pixtuoid-scene/sprites/default/pack.toml
+      - crates/pixtuoid-scene/sprites/default/cat_sit_[0-9].sprite
       - .github/workflows/star-history.yml
   workflow_dispatch:
 permissions:

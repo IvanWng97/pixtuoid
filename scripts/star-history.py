@@ -11,6 +11,10 @@ tokens, so the first live run is the proof — and the chart is drawn here and
 published to the `star-history` branch by `.github/workflows/star-history.yml`;
 nothing leaves the repo.
 
+The chart is the office's night window: one tower per month of the last
+year, a floor per `stars_per_floor` stars, and this month's tower still going
+up under a crane.
+
 Usage: `star-history.py OWNER/REPO OUT_DIR` with the token in `GH_TOKEN`
 (`GITHUB_TOKEN` accepted). Writes `star-history-{light,dark}.svg`.
 `--selftest` exercises the pure halves (bucketing, axes, rendering, paging)
@@ -20,6 +24,7 @@ with no network; exit 0 = pass.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import pathlib
@@ -28,9 +33,10 @@ import sys
 import traceback
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable
+from typing import NamedTuple
 from urllib import request
 
-from readme_pixels import BASELINE, GLYPH_ADVANCE, GLYPH_H, GLYPH_W, GLYPHS, THEMES, _run, compact, text_path, text_width
+from readme_pixels import BASELINE, GLYPH_ADVANCE, GLYPH_H, GLYPH_W, GLYPHS, PACK_DIR, THEMES, _run, animation, compact, load_pack, mask_path, text_path, text_width
 
 GRAPHQL_URL = "https://api.github.com/graphql"
 # The API's hard page ceiling for `stargazers(first:)`.
@@ -49,20 +55,39 @@ query($owner: String!, $name: String!, $first: Int!, $after: String) {
 
 Point = tuple[dt.date, int]
 
-WIDTH, HEIGHT = 800, 400
+WIDTH, HEIGHT = 640, 320
 # One chart pixel — coarser than a label glyph needs, finer than the README banner's sprites.
 PX = 4
-TITLE_PX, LABEL_PX = 3, 2
-MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM = 64, 32, 56, 44
+COUNT_PX, LABEL_PX = 3, 2
+# The window the city stands in; the wall around it carries the axes and the header.
+MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM = 64, 20, 60, 64
 PLOT_COLS = (WIDTH - MARGIN_LEFT - MARGIN_RIGHT) // PX
 PLOT_ROWS = (HEIGHT - MARGIN_TOP - MARGIN_BOTTOM) // PX
 Y_TICKS = 5
-X_TICKS = 5
 LABEL_GAP = 3 * PX
-TITLE_Y = MARGIN_TOP - 10 * PX
-STAMP_Y = MARGIN_TOP - 8 * PX
-# The office carpet's two-tone checkerboard, tiled under the curve.
-TILE = 2 * PX
+HEADER_Y = 4 * PX
+MONTHS = 12
+# A window row and a slab row.
+FLOOR_ROWS = 2
+# Sky above the tallest tower: the scaffold floor plus the crane, and the moon beside them.
+HEADROOM = 9
+MAX_FLOORS = (PLOT_ROWS - HEADROOM) // FLOOR_ROWS
+LOT_GAP = 2
+LIT_PERCENT = 14
+SKY_BANDS = 6
+STAR_SEEDS, STAR_CLEARANCE, BIG_STAR_EVERY = 80, 2, 9
+MOON = ("..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###..")
+# Chart pixels from the window's top-left; inside HEADROOM, so no tower reaches it.
+MOON_AT = (4, 1)
+STAR_ICON = ("....#....", "...###...", "...###...", "#########", ".#######.", "..#####..", "..#####..", ".###.###.", ".##...##.")
+METEOR = ("#...", ".#..", "..#.", "...#")
+CAT, CAT_PX = "cat_sit", 4
+
+
+class Bucket(NamedTuple):
+    label: str
+    end: dt.date
+    count: int
 
 
 def cumulative_by_day(dates: Iterable[dt.date]) -> list[Point]:
@@ -96,88 +121,226 @@ def nice_step(top: int) -> int:
 
 
 
-def x_labels(first: dt.date, last: dt.date) -> list[tuple[int, str]]:
-    """Date labels as (x, text): as many as fit without touching, edge ones flush with the plot, one per day."""
-    span_days = max((last - first).days, 1)
-    fmt = "%b %d" if span_days < 365 else "%b %Y"
-    w = text_width(last.strftime(fmt), LABEL_PX)
-    plot_w = PLOT_COLS * PX
-    # Edge labels are flush, interior ones centred: the first gap is pitch − 1.5·w.
-    ticks = min(X_TICKS, plot_w // (w + w // 2 + LABEL_GAP))
-    placed: list[tuple[int, str]] = []
-    for i in range(ticks + 1):
-        day = first + dt.timedelta(days=round(span_days * i / ticks))
-        if day > last or (placed and placed[-1][1] == day.strftime(fmt)):
+def _hash(*key: object) -> int:
+    """A stable pseudo-random int per key, so a window only changes where the data does."""
+    return int.from_bytes(hashlib.blake2b(repr(key).encode(), digest_size=4).digest(), "big")
+
+
+def _count_on(series: list[Point], day: dt.date) -> int:
+    count = 0
+    for d, n in series:
+        if d > day:
+            break
+        count = n
+    return count
+
+
+def gain_since(series: list[Point], day: dt.date) -> int:
+    """Stars added after `day`."""
+    return (series[-1][1] if series else 0) - _count_on(series, day)
+
+
+def month_buckets(series: list[Point], today: dt.date) -> list[Bucket]:
+    """One bucket per month from the first star's (at most MONTHS back) to today's, each with its closing cumulative count."""
+    first = series[0][0] if series else today
+    months = (today.year - first.year) * 12 + today.month - first.month + 1
+    y, m = today.year, today.month - min(months, MONTHS) + 1
+    while m < 1:
+        y, m = y - 1, m + 12
+    out = []
+    while (y, m) <= (today.year, today.month):
+        ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+        end = min(dt.date(ny, nm, 1) - dt.timedelta(days=1), today)
+        label = str(y) if m == 1 else dt.date(y, m, 1).strftime("%b")
+        out.append(Bucket(label, end, _count_on(series, end)))
+        y, m = ny, nm
+    return out
+
+
+def floor_ladder(limit: int) -> list[int]:
+    """Whole 1/2/2.5/3/4/5/6/8 × 10ⁿ values up to `limit`, ascending."""
+    out, k = [], 1
+    while k <= max(limit, 1):
+        out += [int(m * k) for m in (1, 2, 2.5, 3, 4, 5, 6, 8) if m * k == int(m * k) and m * k <= limit]
+        k *= 10
+    return sorted(set(out))
+
+
+def stars_per_floor(top: int) -> int:
+    """The smallest ladder value that keeps `top` stars within MAX_FLOORS."""
+    return next(n for n in floor_ladder(max(top, 1)) + [max(top, 1)] if -(-top // n) <= MAX_FLOORS)
+
+
+def scaffold_cols(count: int, per_floor: int, width: int) -> int:
+    """Columns of the floor going up: its earned share of `width`, at least a post once any star is in."""
+    partial = count % per_floor
+    return max(1, round(width * partial / per_floor)) if partial else 0
+
+
+def month_label_xs(labels: list[str]) -> list[int]:
+    slot = PLOT_COLS // max(len(labels), 1) * PX
+    left = MARGIN_LEFT + (PLOT_COLS * PX - slot * len(labels)) // 2
+    return [left + i * slot + (slot - text_width(label, LABEL_PX)) // 2 for i, label in enumerate(labels)]
+
+
+def sky_stars(roofs: list[int]) -> list[tuple[int, int, bool]]:
+    """(column, row up from the ground, big?) for every star seed that lands in open sky."""
+    mc, mr = MOON_AT
+    out = []
+    for s in range(STAR_SEEDS):
+        c, r = _hash("sx", s) % PLOT_COLS, PLOT_ROWS - 1 - _hash("sy", s) % (PLOT_ROWS - 2)
+        if r <= roofs[c] + STAR_CLEARANCE:
             continue
-        col = MARGIN_LEFT + round((PLOT_COLS - 1) * (day - first).days / span_days) * PX
-        x = col if i == 0 else col + PX - w if i == ticks else col + (PX - w) // 2
-        placed.append((max(MARGIN_LEFT, min(x, MARGIN_LEFT + plot_w - w)), day.strftime(fmt)))
-    return placed
+        if mc - 2 <= c <= mc + len(MOON[0]) + 1 and PLOT_ROWS - 1 - r <= mr + len(MOON):
+            continue
+        out.append((c, r, s % BIG_STAR_EVERY == 0))
+    return out
+
+
+def _header_right(gain: int, per_floor: int) -> tuple[str, str]:
+    return f"+{compact(gain)} this week", f"{compact(per_floor)} stars / floor"
+
+
+def header_spans(top: int, gain: int, per_floor: int) -> tuple[int, int]:
+    """Where the count's block ends and the legend's begins."""
+    left = MARGIN_LEFT - PX + (len(STAR_ICON[0]) + 3) * COUNT_PX + text_width(compact(top), COUNT_PX) + text_width(" stars", LABEL_PX)
+    right = WIDTH - MARGIN_RIGHT + PX - max(text_width(t, LABEL_PX) for t in _header_right(gain, per_floor))
+    return left, right
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    ca, cb = (int(a[i:i + 2], 16) for i in (1, 3, 5)), (int(b[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(ca, cb))
 
 
 def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> str:
     pal = THEMES[theme]
-    pts = extend_to(series, today) or [(today, 0)]
-    first, last = pts[0][0], pts[-1][0]
-    span_days = max((last - first).days, 1)
-    top = pts[-1][1]
-    step = nice_step(max(top, 1))
-    y_max = max(step * ((top // step) + 1), step)
-    plot_x, plot_y = MARGIN_LEFT, MARGIN_TOP
-    plot_w, plot_h = PLOT_COLS * PX, PLOT_ROWS * PX
-    base_y = plot_y + plot_h
+    buckets = month_buckets(series, today)
+    top = buckets[-1].count
+    per_floor = stars_per_floor(top)
+    gain = gain_since(series, today - dt.timedelta(days=7))
+    slot = PLOT_COLS // len(buckets)
+    lot0 = (PLOT_COLS - slot * len(buckets)) // 2
+    win_x, win_bottom = MARGIN_LEFT, MARGIN_TOP + PLOT_ROWS * PX
 
-    def col_x(day: dt.date) -> int:
-        return plot_x + round((PLOT_COLS - 1) * (day - first).days / span_days) * PX
+    def col_x(c: int) -> int:
+        return win_x + c * PX
 
-    def rows_of(count: int) -> int:
-        return round(PLOT_ROWS * count / y_max)
+    def row_y(r: int) -> int:
+        """Top of row `r`, counted up from the ground."""
+        return win_bottom - (r + 1) * PX
 
-    # Stepped, not interpolated: a column's height is a count that was true on its day.
-    heights = []
-    k = 0
-    for c in range(PLOT_COLS):
-        day = first + dt.timedelta(days=round(span_days * c / (PLOT_COLS - 1)))
-        while k + 1 < len(pts) and pts[k + 1][0] <= day:
-            k += 1
-        heights.append(rows_of(pts[k][1]) if pts[k][0] <= day else 0)
-    fill = "".join(_run(plot_x + c * PX, base_y - h * PX, PX, h * PX) for c, h in enumerate(heights) if h)
-    cap = "".join(_run(plot_x + c * PX, base_y - h * PX, PX, PX) for c, h in enumerate(heights) if h)
-    grid = "".join(
-        _run(plot_x + c * PX, base_y - rows_of(count) * PX - PX, PX, PX)
-        for count in range(step, y_max + 1, step)
-        for c in range(0, PLOT_COLS, 2)
-    )
-    axis = [_run(plot_x - PX, plot_y, PX, plot_h), _run(plot_x - PX, base_y, plot_w + PX, PX)]
-    for count in range(0, y_max + 1, step):
-        label = compact(count)
-        axis.append(text_path(label, plot_x - LABEL_GAP - text_width(label, LABEL_PX), base_y - rows_of(count) * PX - BASELINE * LABEL_PX // 2, LABEL_PX))
-    for lx, label in x_labels(first, last):
-        axis.append(text_path(label, lx, base_y + LABEL_GAP, LABEL_PX))
-    stamp = f"updated {today.isoformat()}"
-    axis.append(text_path(stamp, WIDTH - MARGIN_RIGHT - text_width(stamp, LABEL_PX), STAMP_Y, LABEL_PX))
-    count_label = f"* {top}"
-    cw = text_width(count_label, LABEL_PX)
-    cx = max(col_x(last) + PX - cw, plot_x)
-    cy = max(base_y - rows_of(top) * PX - (BASELINE + 2) * LABEL_PX, plot_y)
-    frame = "".join(
-        [_run(0, 0, WIDTH, PX), _run(0, HEIGHT - PX, WIDTH, PX), _run(0, 0, PX, HEIGHT), _run(WIDTH - PX, 0, PX, HEIGHT)]
+    band_h = PLOT_ROWS * PX / SKY_BANDS
+    bands = [_mix(pal.sky_top, pal.sky_horizon, b / (SKY_BANDS - 1)) for b in range(SKY_BANDS)]
+    sky = [f'<rect x="{win_x}" y="{MARGIN_TOP + round(b * band_h)}" width="{PLOT_COLS * PX}" height="{round((b + 1) * band_h) - round(b * band_h)}" fill="{c}"/>' for b, c in enumerate(bands)]
+
+    # Faint star-count rules on nice values, placed where that count's floor would stand.
+    step = nice_step(max(per_floor * MAX_FLOORS, 1))
+    rules, ylabels = [], []
+    for n in range(0, per_floor * MAX_FLOORS + 1, step):
+        y = win_bottom - round(n / per_floor * FLOOR_ROWS) * PX
+        if n:
+            rules += [_run(col_x(c), y, PX // 2, PX // 2) for c in range(0, PLOT_COLS, 3)]
+        label = compact(n)
+        ylabels.append(text_path(label, win_x - LABEL_GAP - text_width(label, LABEL_PX), y - BASELINE * LABEL_PX // 2, LABEL_PX))
+
+    mc, mr = MOON_AT
+    moon = mask_path(MOON, col_x(mc), MARGIN_TOP + mr * PX, PX)
+    bite = mask_path(MOON, col_x(mc + 2), MARGIN_TOP + (mr - 1) * PX, PX)
+
+    lits = (pal.window_lit_a, pal.window_lit_b, pal.window_lit_c)
+    shades = (pal.building_dark, _mix(pal.building_dark, pal.building_light, 0.3))
+    bodies: dict[str, list[str]] = {}
+    roofline, windows, scaffold, crane, beacon = [], {}, [], [], []
+    roofs = [0] * PLOT_COLS
+    for i, bucket in enumerate(buckets):
+        c0, width = lot0 + i * slot + LOT_GAP // 2, slot - LOT_GAP
+        floors = bucket.count // per_floor
+        rows = floors * FLOOR_ROWS
+        if rows:
+            bodies.setdefault(shades[i % 2], []).append(_run(col_x(c0), row_y(rows - 1), width * PX, rows * PX))
+            roofline.append(_run(col_x(c0), row_y(rows - 1), width * PX, PX // 2))
+        for f in range(floors):
+            r = f * FLOOR_ROWS
+            for c in range(c0 + 1, c0 + width - 1, 2):
+                lit = _hash("lit", bucket.end, f, c - c0) % 100 < LIT_PERCENT
+                key = lits[_hash("hue", bucket.end, f, c - c0) % len(lits)] if lit else pal.window_dark
+                windows.setdefault(key, []).append(_run(col_x(c), row_y(r), PX, PX))
+        roofs[c0:c0 + width] = [rows] * width
+        if i == len(buckets) - 1:
+            sw = scaffold_cols(bucket.count, per_floor, width)
+            if sw:
+                scaffold.append(_run(col_x(c0), row_y(rows + FLOOR_ROWS - 1), sw * PX, PX // 2))
+                scaffold += [_run(col_x(c), row_y(rows + FLOOR_ROWS - 1), PX // 2, FLOOR_ROWS * PX) for c in range(c0, c0 + sw, 3)]
+                rows += FLOOR_ROWS
+                roofs[c0:c0 + width] = [rows] * width
+            mast = c0 + width - 3
+            jib = max(mast - 9, 0)
+            crane += [_run(col_x(mast), row_y(rows + 6), PX, 7 * PX), _run(col_x(jib), row_y(rows + 6), (mast + 3 - jib) * PX, PX), _run(col_x(jib + 1), row_y(rows + 5), PX // 2, 3 * PX)]
+            beacon.append(_run(col_x(mast), row_y(rows + 7), PX, PX))
+            for c in range(jib, min(mast + 3, PLOT_COLS)):
+                roofs[c] = max(roofs[c], rows + 7)
+
+    small: dict[int, list[str]] = {0: [], 1: [], 2: []}
+    big = []
+    for k, (c, r, is_big) in enumerate(sky_stars(roofs)):
+        if is_big:
+            big.append(_run(col_x(c) - PX, row_y(r), 3 * PX, PX) + _run(col_x(c), row_y(r) - PX, PX, 3 * PX))
+        else:
+            small[k % 3].append(_run(col_x(c), row_y(r), PX // 2, PX // 2))
+
+    frame = "".join([_run(win_x - PX, MARGIN_TOP - PX, PLOT_COLS * PX + 2 * PX, PX), _run(win_x - PX, win_bottom, PLOT_COLS * PX + 2 * PX, PX), _run(win_x - PX, MARGIN_TOP, PX, PLOT_ROWS * PX), _run(win_x + PLOT_COLS * PX, MARGIN_TOP, PX, PLOT_ROWS * PX)])
+    sill_y = win_bottom + PX
+    labels = [b.label for b in buckets]
+    xlabels = "".join(text_path(label, x, sill_y + 4 * PX, LABEL_PX) for x, label in zip(month_label_xs(labels), labels))
+    cat, cat_css = animation(load_pack(PACK_DIR, (CAT,)), CAT, win_x + PLOT_COLS * PX - 8 * PX, sill_y, CAT_PX)
+
+    hx = win_x - PX
+    count = compact(top)
+    count_x = hx + (len(STAR_ICON[0]) + 3) * COUNT_PX
+    right_x = WIDTH - MARGIN_RIGHT + PX
+    week, legend = _header_right(gain, per_floor)
+    edge = _run(0, 0, WIDTH, PX) + _run(0, HEIGHT - PX, WIDTH, PX) + _run(0, 0, PX, HEIGHT) + _run(WIDTH - PX, 0, PX, HEIGHT)
+    css = "".join(
+        [
+            ".tw{animation:tw 2.4s steps(2,jump-none) infinite}.tw1{animation-delay:-.8s}.tw2{animation-delay:-1.6s}",
+            "@keyframes tw{0%,100%{opacity:1}50%{opacity:.25}}",
+            ".beacon{animation:bk 1.2s steps(1,end) infinite}@keyframes bk{0%{opacity:1}50%{opacity:.15}}",
+            f".meteor{{opacity:0;animation:mt 7s steps(14,end) infinite}}@keyframes mt{{0%{{opacity:0;transform:translate(0,0)}}3%{{opacity:1}}12%{{opacity:0;transform:translate({42 * PX}px,{21 * PX}px)}}100%{{opacity:0}}}}",
+            "@media (prefers-reduced-motion:reduce){.tw,.beacon,.meteor{animation:none}}",
+            *cat_css,
+        ]
     )
     return "\n".join(
         [
             f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" width="{WIDTH}" height="{HEIGHT}" shape-rendering="crispEdges" role="img" aria-labelledby="t">',
-            f'<title id="t">{repo} star history: {top} stars as of {today.isoformat()}</title>',
-            f'<pattern id="carpet" width="{2 * TILE}" height="{2 * TILE}" patternUnits="userSpaceOnUse">'
-            f'<rect width="{2 * TILE}" height="{2 * TILE}" fill="{pal.carpet_dark}"/>'
-            f'<rect width="{TILE}" height="{TILE}" fill="{pal.carpet_light}"/>'
-            f'<rect x="{TILE}" y="{TILE}" width="{TILE}" height="{TILE}" fill="{pal.carpet_light}"/></pattern>',
+            f'<title id="t">{repo} star history: {top} stars as of {today.isoformat()}, {per_floor} per floor</title>',
+            f"<style>{css}</style>",
+            f'<clipPath id="moon"><path d="{moon}"/></clipPath>',
+            f'<clipPath id="upper"><rect x="{win_x}" y="{MARGIN_TOP}" width="{PLOT_COLS * PX}" height="{PLOT_ROWS * PX // 2}"/></clipPath>',
             f'<rect width="{WIDTH}" height="{HEIGHT}" fill="{pal.wall}"/>',
-            f'<path fill="{pal.trim}" d="{frame}{grid}"/>',
-            f'<path fill="url(#carpet)" d="{fill}"/>',
-            f'<path fill="{pal.star}" d="{cap}"/>',
-            f'<path fill="{pal.text}" d="{"".join(axis)}"/>',
-            f'<path fill="{pal.title}" d="{text_path(repo, MARGIN_LEFT, TITLE_Y, TITLE_PX)}"/>',
-            f'<path fill="{pal.star}" d="{text_path(count_label, cx, cy, LABEL_PX)}"/>',
+            f'<path fill="{pal.trim}" d="{edge}"/>',
+            *sky,
+            f'<path fill="{pal.text}" fill-opacity="0.22" d="{"".join(rules)}"/>',
+            f'<path fill="{pal.moon}" d="{moon}"/><path fill="{bands[0]}" clip-path="url(#moon)" d="{bite}"/>',
+            *(f'<path fill="{c}" d="{"".join(d)}"/>' for c, d in bodies.items()),
+            f'<path fill="{pal.building_light}" d="{"".join(roofline)}"/>',
+            *(f'<path fill="{c}" d="{"".join(d)}"/>' for c, d in windows.items()),
+            f'<path fill="{pal.star}" fill-opacity="0.8" d="{"".join(scaffold)}"/>',
+            f'<path fill="{pal.building_light}" d="{"".join(crane)}"/>',
+            f'<path class="beacon" fill="{pal.star}" d="{"".join(beacon)}"/>',
+            *(f'<path class="tw tw{g}" fill="{pal.title}" d="{"".join(d)}"/>' for g, d in small.items()),
+            f'<path class="tw tw2" fill="{pal.star}" d="{"".join(big)}"/>',
+            f'<g clip-path="url(#upper)"><path class="meteor" fill="{pal.title}" d="{mask_path(METEOR, col_x(PLOT_COLS // 3), MARGIN_TOP + 2 * PX, PX)}"/></g>',
+            f'<path fill="{pal.window_frame}" d="{frame}"/>',
+            f'<path fill="{pal.trim}" d="{_run(win_x - 3 * PX, sill_y, PLOT_COLS * PX + 6 * PX, 2 * PX)}"/>',
+            f'<path fill="{pal.text}" d="{"".join(ylabels)}{xlabels}"/>',
+            cat,
+            f'<path fill="{pal.star}" d="{mask_path(STAR_ICON, hx, HEADER_Y - 2, COUNT_PX)}"/>',
+            f'<path fill="{pal.title}" d="{text_path(count, count_x, HEADER_Y, COUNT_PX)}"/>',
+            f'<path fill="{pal.text}" d="{text_path(" stars", count_x + text_width(count, COUNT_PX), HEADER_Y + (COUNT_PX - LABEL_PX) * BASELINE, LABEL_PX)}"/>',
+            f'<path fill="{pal.star}" d="{text_path(week, right_x - text_width(week, LABEL_PX), HEADER_Y - 2, LABEL_PX)}"/>',
+            f'<path fill="{pal.text}" fill-opacity="0.75" d="{text_path(legend, right_x - text_width(legend, LABEL_PX), HEADER_Y - 2 + GLYPH_H * LABEL_PX, LABEL_PX)}"/>',
             "</svg>",
         ]
     ) + "\n"
@@ -320,15 +483,63 @@ def _render_ok(svg: str, label: str) -> ET.Element | None:
         return None
 
 
-def test_x_labels_never_touch_and_stay_on_the_canvas() -> None:
-    today = _d("2026-08-23")
-    for span in (0, 1, 2, 30, 364, 365, 2405):
-        placed = x_labels(today - dt.timedelta(days=span), today)
-        boxes = [(x, x + text_width(label, LABEL_PX)) for x, label in placed]
-        check(len(placed) >= 2 or span == 0, f"span {span}: both ends need a date, got {placed}")
-        check(all(0 <= a and b <= WIDTH for a, b in boxes), f"span {span}: a label leaves the canvas: {boxes}")
-        check(all(boxes[i + 1][0] - boxes[i][1] >= LABEL_GAP for i in range(len(boxes) - 1)), f"span {span}: labels need LABEL_GAP of air: {placed}")
-        check(len({label for _, label in placed}) == len(placed), f"span {span}: a date is labelled twice: {placed}")
+def test_gain_since_counts_the_last_week() -> None:
+    series = [(_d("2026-08-01"), 10), (_d("2026-08-17"), 15), (_d("2026-08-20"), 21)]
+    check(gain_since(series, _d("2026-08-16")) == 11, f"gain since 08-16 is 21 - 10, got {gain_since(series, _d('2026-08-16'))}")
+    check(gain_since(series, _d("2026-08-17")) == 6, "a star on the cut-off day itself is not new")
+    check(gain_since(series, _d("2026-07-01")) == 21, "a series younger than the window gains all of it")
+    check(gain_since([], _d("2026-08-16")) == 0, "no stars, no gain")
+
+
+def test_buckets_roll_the_last_twelve_months() -> None:
+    series = cumulative_by_day([_d("2025-03-10")] * 5 + [_d("2026-01-15")] * 3 + [_d("2026-08-20")])
+    got = month_buckets(series, _d("2026-08-23"))
+    check(len(got) == MONTHS, f"a long history shows the last {MONTHS} months, got {len(got)}")
+    check(got[0].end == _d("2025-09-30") and got[-1].end == _d("2026-08-23"), f"window runs Sep 2025 to today: {got[0]}, {got[-1]}")
+    check([b.count for b in got] == [5] * 4 + [8] * 7 + [9], f"each month carries the cumulative count at its end: {[b.count for b in got]}")
+    check(got[4].label == "2026" and got[3].label == "Dec", f"January is labelled with its year: {[b.label for b in got]}")
+    young = month_buckets(cumulative_by_day([_d("2026-06-02")]), _d("2026-08-23"))
+    check([b.label for b in young] == ["Jun", "Jul", "Aug"], f"a young repo starts at its first star's month: {young}")
+    empty = month_buckets([], _d("2026-08-23"))
+    check(len(empty) == 1 and empty[0].count == 0, f"no stars still draws this month's empty lot: {empty}")
+
+
+def test_stars_per_floor_keeps_the_city_under_the_ceiling() -> None:
+    for top in (0, 1, 19, 20, 21, 491, 6000, 123_456, 10**6):
+        n = stars_per_floor(top)
+        check(-(-top // n) <= MAX_FLOORS, f"{top} stars at {n}/floor overflows {MAX_FLOORS} floors")
+        smaller = [m for m in floor_ladder(n) if m < n]
+        check(not smaller or -(-top // smaller[-1]) > MAX_FLOORS, f"{top} stars: {smaller[-1] if smaller else None}/floor would fit too, so {n} is not the smallest")
+
+
+def test_scaffold_is_the_earned_share_of_the_next_floor() -> None:
+    check(scaffold_cols(0, 25, 20) == 0 and scaffold_cols(50, 25, 20) == 0, "a whole number of floors needs no scaffold")
+    check(scaffold_cols(491, 25, 20) == 13, f"16 of 25 stars is 13 of 20 columns, got {scaffold_cols(491, 25, 20)}")
+    check(scaffold_cols(1, 25, 20) == 1, "one star still shows a post")
+
+
+def test_month_labels_never_touch_and_stay_on_the_canvas() -> None:
+    for n in range(1, MONTHS + 1):
+        labels = ["2027" if i % 5 == 0 else "Sep" for i in range(n)]
+        boxes = [(x, x + text_width(label, LABEL_PX)) for x, label in zip(month_label_xs(labels), labels)]
+        check(all(0 <= a and b <= WIDTH for a, b in boxes), f"{n} months: a label leaves the canvas: {boxes}")
+        check(all(boxes[i + 1][0] - boxes[i][1] >= PX for i in range(n - 1)), f"{n} months: labels touch: {boxes}")
+
+
+def test_stars_stay_in_open_sky() -> None:
+    roofs = [min(c // 2, PLOT_ROWS - HEADROOM) for c in range(PLOT_COLS)]
+    stars = sky_stars(roofs)
+    check(len(stars) > 10, f"the sky needs stars, got {len(stars)}")
+    check(all(r > roofs[c] + STAR_CLEARANCE for c, r, _ in stars), "a star must clear the rooftop under it")
+    mc, mr = MOON_AT
+    check(not any(mc - 2 <= c <= mc + len(MOON[0]) + 1 and PLOT_ROWS - 1 - r <= mr + len(MOON) for c, r, _ in stars), "no star on the moon")
+    check(PLOT_ROWS - mr - len(MOON) >= PLOT_ROWS - HEADROOM, "the moon hangs above the tallest tower")
+
+
+def test_header_halves_never_collide() -> None:
+    for top, gain in ((0, 0), (491, 6), (123_456, 12_345), (10**6, 10**6)):
+        left_end, right_start = header_spans(top, gain, stars_per_floor(top))
+        check(left_end + LABEL_GAP <= right_start, f"{top} stars, +{gain}: the count ends at {left_end}, the legend starts at {right_start}")
 
 
 def test_render_is_well_formed_and_carries_the_facts() -> None:
