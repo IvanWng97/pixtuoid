@@ -25,11 +25,11 @@ on:
 # ACCEPTED RISK: both jobs COMPILE inside the step that holds this token —
 # `cargo-semver-checks` on the release PR, `cargo publish` on the tag — so every
 # dependency build script runs with a repository-scoped write credential in its
-# environment.
-# `release-plz.toml` turned both on deliberately. The mechanism that bounds it
-# is a GitHub App installation token (~1 h, `actions/create-github-app-token`),
-# which release-plz documents and its own repository uses; switching is a
-# step-level change here plus two secrets.
+# environment, and in `release` with the OIDC claim crates.io trades for a
+# publish token. `release-plz.toml` turned both on deliberately. A GitHub App
+# installation token (~1 h, `actions/create-github-app-token`) would bound the
+# PAT, not the claim; the `release` environment's required reviewer bounds
+# which runs get either, never what runs inside an approved one.
 permissions: {}
 
 # Push runs go one at a time, in order: a push merged while a release run waits
@@ -62,7 +62,11 @@ jobs:
       - uses: ./.github/actions/setup-alsa
       # cargo-semver-checks builds the baseline and the current tree, and the
       # default `audio` feature reaches alsa-sys — hence the ALSA step above.
+      # No restored cache in a job holding a write credential: a cache any
+      # main run can write would reach this one (zizmor cache-poisoning).
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          enable-cache: 'false'
       # homebrew-core's `test do` runs against every release on its autobump
       # and changes only by a PR there, so a subcommand it still calls that
       # this tree dropped breaks a CI we never see. Checked before a release
@@ -203,6 +207,9 @@ jobs:
     name: publish and tag a merged release PR
     needs: [release-merge, ci-passed]
     if: needs.release-merge.outputs.release == 'true'
+    # Its required reviewer is the publish approval, and the crates.io Trusted
+    # Publisher records name it, so no other job can mint a publish token.
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -221,7 +228,11 @@ jobs:
       - uses: ./.github/actions/setup-alsa
       # `cargo publish` BUILDS each crate to verify it, and the default `audio`
       # feature reaches alsa-sys — hence the ALSA step above.
+      # No restored cache in a job holding a write credential: a cache any
+      # main run can write would reach this one (zizmor cache-poisoning).
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          enable-cache: 'false'
       - uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
         with:
           command: release

@@ -552,6 +552,21 @@
     - (.jobs[] | select(has("if")) | .if) |= sub("( && )?github.repository_id == '[0-9]+'"; "")
     - '.jobs.ungated = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
 
+- id: publishers-need-the-release-environment
+  file: [.github/workflows/release-plz.yml, .github/workflows/release.yml]
+  why: >-
+    The crates.io and npm Trusted Publisher records name environment
+    `release`, whose required reviewer is the only approval a publish gets; a
+    publishing job without it either fails to mint or, once a record drops the
+    environment, publishes unapproved.
+  assert: |
+    [.jobs[] | select(.permissions["id-token"] == "write")
+             | select(any(.steps[]?; ((.uses // "") | startswith("release-plz/action@")) or ((.run // "") | test("npm publish"))))]
+    | length > 0 and all(.[]; .environment == "release")
+  break:
+    - del(.jobs[].environment)
+    - (.jobs[] | select(has("environment")) | .environment) = "staging"
+
 - id: release-attests-before-publishing
   file: .github/workflows/release.yml
   why: >-

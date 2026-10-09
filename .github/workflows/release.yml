@@ -269,6 +269,9 @@ jobs:
     needs: [check, build, deb]
     # Never publish a pre-release to npm — tester tags build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
+    # Its required reviewer is the publish approval, and the npm Trusted
+    # Publisher records name it, so no other job can publish.
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
