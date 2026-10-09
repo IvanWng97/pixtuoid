@@ -715,13 +715,16 @@ fn main() -> Result<()> {
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         debug_walkable: args.debug_walkable,
-        theme_picker: args.theme_picker,
         footer: pixtuoid::dev::footer_context(&scene, None, false, None, warning_text.as_deref()),
-        popup_scale: if args.popup { 1.0 } else { 0.0 },
-        help_open: args.help_open,
-        dashboard: &dashboard_frame,
-        connection: &connection_frame,
-        onboarding: &onboarding_frame,
+        overlays: pixtuoid::dev::OverlayFrame {
+            theme_picker: args.theme_picker,
+            popup_scale: if args.popup { 1.0 } else { 0.0 },
+            help_open: args.help_open,
+            dashboard: &dashboard_frame,
+            connection: &connection_frame,
+            onboarding: &onboarding_frame,
+            ..pixtuoid::dev::OverlayFrame::closed()
+        },
         ..DrawCtx::offscreen(
             &mut floor,
             office.stores(),

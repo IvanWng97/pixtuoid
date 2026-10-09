@@ -88,22 +88,7 @@ fn push_frames<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     now: SystemTime,
 ) {
-    let ui_state::RenderFrames {
-        theme_picker,
-        version_popup,
-        help_open,
-        source_warning,
-        dashboard,
-        connection,
-        onboarding,
-    } = frames;
-    renderer.set_theme_picker(theme_picker);
-    renderer.set_version_popup(version_popup, now);
-    renderer.set_help_open(help_open);
-    renderer.set_source_warning(source_warning);
-    renderer.set_dashboard_frame(dashboard);
-    renderer.set_connection_frame(connection);
-    renderer.set_onboarding_frame(onboarding);
+    renderer.set_frames(frames, now);
 }
 
 impl<B: ratatui::backend::Backend<Error: Send + Sync + 'static>> crate::panels::Host

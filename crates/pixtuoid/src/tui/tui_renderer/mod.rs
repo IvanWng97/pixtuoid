@@ -82,16 +82,12 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
 #[derive(Debug)]
 struct Chrome {
     theme: &'static pixtuoid_scene::theme::Theme,
-    theme_picker: Option<usize>,
     active_pet: Option<PetState>,
     pets: Vec<pixtuoid_scene::pet::Pet>,
     popup: PopupState,
-    help_open: bool,
-    /// Footer warning when a source has died; `None` while healthy.
-    source_warning: Option<String>,
-    dashboard: crate::panels::dashboard::DashboardFrame,
-    connection: crate::panels::connection::ConnectionFrame,
-    onboarding: crate::panels::welcome::OnboardingFrame,
+    /// The panels the loop computed, which the frame paints: their
+    /// `version_popup` is `popup`'s target, its scale animated there.
+    frames: crate::panels::ui_state::RenderFrames,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
@@ -177,20 +173,8 @@ impl Chrome {
             session.footer_floor(scene),
             self.audio.is_audible(),
             self.volume_flash,
-            self.source_warning.as_deref(),
+            self.frames.source_warning.as_deref(),
         )
-    }
-
-    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
-        crate::panels::OverlayFrame {
-            theme_picker: self.theme_picker,
-            dashboard: &self.dashboard,
-            connection: &self.connection,
-            popup_scale,
-            help_open: self.help_open,
-            host_keys: &[],
-            onboarding: &self.onboarding,
-        }
     }
 }
 
@@ -219,15 +203,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             debug_walkable: false,
             chrome: Chrome {
                 theme,
-                theme_picker: None,
                 active_pet: None,
                 pets,
                 popup: PopupState::default(),
-                help_open: false,
-                source_warning: None,
-                dashboard: Default::default(),
-                connection: Default::default(),
-                onboarding: crate::panels::welcome::OnboardingFrame::default(),
+                frames: crate::panels::ui_state::RenderFrames::default(),
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
@@ -391,23 +370,23 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn set_dashboard_frame(&mut self, frame: crate::panels::dashboard::DashboardFrame) {
-        self.chrome.dashboard = frame;
+        self.chrome.frames.dashboard = frame;
     }
 
     pub fn set_connection_frame(&mut self, frame: crate::panels::connection::ConnectionFrame) {
-        self.chrome.connection = frame;
+        self.chrome.frames.connection = frame;
     }
 
     pub fn set_onboarding_frame(&mut self, frame: crate::panels::welcome::OnboardingFrame) {
-        self.chrome.onboarding = frame;
+        self.chrome.frames.onboarding = frame;
     }
 
     pub fn help_open(&self) -> bool {
-        self.chrome.help_open
+        self.chrome.frames.help_open
     }
 
     pub fn set_help_open(&mut self, v: bool) {
-        self.chrome.help_open = v;
+        self.chrome.frames.help_open = v;
     }
 
     pub fn debug_walkable(&self) -> bool {
@@ -602,11 +581,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
-        self.chrome.theme_picker = picker;
+        self.chrome.frames.theme_picker = picker;
     }
 
     pub fn set_source_warning(&mut self, warning: Option<String>) {
-        self.chrome.source_warning = warning;
+        self.chrome.frames.source_warning = warning;
+    }
+
+    /// The loop's panels for the next frames, the version popup animating
+    /// toward theirs.
+    pub(crate) fn set_frames(
+        &mut self,
+        frames: crate::panels::ui_state::RenderFrames,
+        now: SystemTime,
+    ) {
+        self.set_version_popup(frames.version_popup, now);
+        self.chrome.frames = frames;
     }
 
     pub fn set_version_popup(&mut self, v: bool, now: SystemTime) {
@@ -690,14 +680,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.footer(&self.session, scene),
         );
         let popup_scale = self.version_popup_scale(now);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self.chrome.frames.overlays(popup_scale);
         let theme = self.chrome.theme;
         let flashes = self.session.flashes();
         let Some(slide) = self.session.slide_mut() else {
             return Ok(());
         };
         // Modal backdrop: the same multiply a floor's frame takes.
-        crate::tui::renderer::apply_dim(slide, self.chrome.onboarding.dim);
+        crate::tui::renderer::apply_dim(slide, self.chrome.frames.onboarding.dim);
         if self.flash.holds(flashes, term_size) {
             return Ok(());
         }
@@ -728,7 +718,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.terminal,
             &footer,
             self.chrome.theme,
-            &self.chrome.overlays(popup_scale),
+            &self.chrome.frames.overlays(popup_scale),
             now,
         );
         self.session.drew_no_office();
@@ -926,14 +916,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self.chrome.frames.overlays(popup_scale);
         let frame = crate::tui::renderer::ClassicFrame {
             footer: &footer,
             overlays: &overlays,
             theme: self.chrome.theme,
             world: &world,
             mouse_pos,
-            dim: self.chrome.onboarding.dim,
+            dim: self.chrome.frames.onboarding.dim,
         };
         let Some((floor, _)) = self.session.floor_mut(current) else {
             return Ok(());
@@ -992,7 +982,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self.chrome.frames.overlays(popup_scale);
         /// What a frame sets over its image: the world's text, with the agent
         /// the pointer is on, and the tooltip by the pointer.
         struct Over<'w> {

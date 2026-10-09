@@ -54,16 +54,28 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
-/// One frame's open panels, as [`paint_overlays`] draws them.
-pub(crate) struct OverlayFrame<'a> {
-    pub(crate) theme_picker: Option<usize>,
-    pub(crate) dashboard: &'a crate::panels::dashboard::DashboardFrame,
-    pub(crate) connection: &'a crate::panels::connection::ConnectionFrame,
-    pub(crate) popup_scale: f32,
-    pub(crate) help_open: bool,
+/// One frame's open panels, as `paint_overlays` draws them.
+#[derive(Debug, Clone, Copy)]
+pub struct OverlayFrame<'a> {
+    pub theme_picker: Option<usize>,
+    pub dashboard: &'a crate::panels::dashboard::DashboardFrame,
+    pub connection: &'a crate::panels::connection::ConnectionFrame,
+    /// The version popup's scale: 0.0 hidden, 1.0 whole.
+    pub popup_scale: f32,
+    pub help_open: bool,
     /// Shortcuts the host adds to the help, after the shared ones.
-    pub(crate) host_keys: &'a [widgets::Shortcut],
-    pub(crate) onboarding: &'a crate::panels::welcome::OnboardingFrame,
+    pub host_keys: &'a [(&'static str, &'static str)],
+    pub onboarding: &'a crate::panels::welcome::OnboardingFrame,
+}
+
+impl OverlayFrame<'static> {
+    /// Every panel closed: a still's.
+    pub fn closed() -> Self {
+        use std::sync::LazyLock;
+        static CLOSED: LazyLock<crate::panels::ui_state::RenderFrames> =
+            LazyLock::new(Default::default);
+        CLOSED.overlays(0.0)
+    }
 }
 
 impl OverlayFrame<'_> {

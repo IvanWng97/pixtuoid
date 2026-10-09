@@ -46,6 +46,7 @@ pub mod dev {
     pub use crate::floating::overlays::{OverlayLayers, Overlays, footer_budget, panel_preview};
     #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
+    pub use crate::panels::OverlayFrame;
     pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
     pub use crate::panels::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
     pub use crate::panels::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
