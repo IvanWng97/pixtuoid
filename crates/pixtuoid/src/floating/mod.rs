@@ -4,9 +4,10 @@
 //! A binary-only front-end on the shared engine: it boots the SAME
 //! `runtime::pipeline::spawn_pipeline` spine the TUI uses — from
 //! `window::resumed` rather than [`run`], because the desk-capacity seed needs
-//! the REAL window size (see `PipelineBoot`) — but presents each frame as an
-//! [`offscreen::OfficeRenderer`] `RgbBuffer` upscaled into a `winit` +
-//! `softbuffer` window instead of half-block terminal cells.
+//! the REAL window size (see `PipelineBoot`) — but presents each frame as a
+//! composition of layers ([`compose`]), the [`offscreen::OfficeRenderer`]
+//! office and its chrome, drawn by the GPU into a `winit` window instead of
+//! half-block terminal cells.
 //! `pixtuoid-core` stays window-free (invariant #1) — all windowing lives here.
 
 mod cadence;
@@ -14,13 +15,6 @@ pub(crate) mod compose;
 #[cfg(test)]
 mod fixtures;
 pub(crate) mod geometry;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the window presents through it from the next commit"
-    )
-)]
 mod gpu;
 mod input;
 pub(crate) mod offscreen;
@@ -44,7 +38,7 @@ use window::{FloatingApp, FloatingEvent};
 ///
 /// # Errors
 ///
-/// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, or the event loop exits with an error.
+/// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, the event loop exits with an error, or the window or its GPU fails to start or is lost.
 pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     let RunConfig {
         socket,
@@ -114,7 +108,8 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     );
     event_loop
         .run_app(&mut app)
-        .context("running the floating window event loop")
+        .context("running the floating window event loop")?;
+    app.into_failure().map_or(Ok(()), Err)
 }
 
 /// Everything the pipeline needs, held by [`FloatingApp`] until `resumed` can

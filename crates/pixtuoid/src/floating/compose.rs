@@ -8,10 +8,10 @@ use pixtuoid_scene::render_scale::PixelFit;
 
 use super::overlays::OverlayLayers;
 
-/// Pack an `Rgb` into the softbuffer word format, `0x00RRGGBB` (XRGB) — the ONE
-/// definition of the floating surface pixel format; the office blit (`window.rs`)
-/// and this label overlay write into the SAME surface, so a lone edit to one would
-/// color-swap the badges with no compile error. The test oracle re-derives the
+/// Pack an `Rgb` into [`XrgbSurface`]'s word format, `0x00RRGGBB` (XRGB) — the
+/// ONE definition of it; the compositor's office blit and its overlay blend
+/// write into the SAME surface, so a lone edit to one would color-swap the
+/// chrome with no compile error. The test oracle re-derives the
 /// packing independently ON PURPOSE — don't route it through this.
 pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
     u32::from(c.r) << 16 | u32::from(c.g) << 8 | u32::from(c.b)
@@ -394,10 +394,6 @@ impl Screen {
 
     /// Whether the screen shows the last frame rendered, which each layer's
     /// change is measured against: an upload out of sync must be whole.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the GPU presenter's, two commits on")
-    )]
     pub(crate) fn in_sync(&self) -> bool {
         self.shown.is_some()
     }

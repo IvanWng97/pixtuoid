@@ -1,18 +1,16 @@
-//! The `winit` + `softbuffer` window for `pixtuoid floating`.
+//! The `winit` window for `pixtuoid floating`.
 //!
 //! `FloatingApp` is the `ApplicationHandler`: on `Resumed` it creates ONE frameless,
-//! always-on-top window + a `softbuffer` surface, renders the latest `watch`ed scene's
-//! cutaway at the pack's densest art, then upscales it a whole number of times into the
-//! surface ([`super::geometry::window_geometry`]).
+//! always-on-top window + its GPU surface, renders the latest `watch`ed scene's
+//! cutaway at the pack's densest art, composes it with the chrome, and presents it
+//! upscaled a whole number of times ([`super::geometry::window_geometry`]).
 //!
 //! Platform glue — codecov-ignored; the testable seams are `floating::offscreen`
 //! (render), `floating::overlays` and `floating::compose` (the chrome and the
 //! frame), `floating::geometry` (the window/monitor rect math), and
 //! `floating::cadence` (the animation throttle).
 
-use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
@@ -32,9 +30,11 @@ use pixtuoid_scene::look::Place;
 use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum FloatingEvent {
     SceneChanged,
+    /// wgpu reported a validation error or a lost device, off the main thread.
+    GpuFailed(String),
 }
 
 pub(crate) struct FloatingApp {
@@ -87,10 +87,13 @@ pub(crate) struct FloatingApp {
     clock: super::cadence::FrameClock,
     /// The chrome over the office, each repainted only when it changed.
     overlays: super::overlays::OverlayLayers,
-    window: Option<Rc<Window>>,
-    // softbuffer's `Context` must outlive the `Surface` it spawned, so keep both.
-    context: Option<softbuffer::Context<Rc<Window>>>,
-    surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
+    window: Option<Arc<Window>>,
+    gpu: Option<super::gpu::Gpu>,
+    /// Where the GPU's off-thread failures reach the loop: `boot` is taken
+    /// by `resumed`, the proxy outlives it.
+    proxy: winit::event_loop::EventLoopProxy<FloatingEvent>,
+    /// Why the window stopped, for [`super::run`] to return.
+    failure: Option<anyhow::Error>,
 }
 
 /// What the run keeps beside the office: the config it persists to, its
@@ -129,6 +132,7 @@ impl FloatingApp {
         renderer.set_audio(audio_ctl.handle().clone());
         renderer.set_pets(pets);
         let focus_roots = boot.focus_roots();
+        let proxy = boot.proxy.clone();
         let ui = crate::panels::ui_state::UiState::boot(
             theme,
             first_run,
@@ -165,9 +169,16 @@ impl FloatingApp {
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
             overlays: super::overlays::OverlayLayers::default(),
             window: None,
-            context: None,
-            surface: None,
+            gpu: None,
+            proxy,
+            failure: None,
         }
+    }
+
+    /// Why the window stopped, when it failed: its creation, its GPU's, or a
+    /// GPU failure reported while it ran.
+    pub(crate) fn into_failure(self) -> Option<anyhow::Error> {
+        self.failure
     }
 
     /// Persist the current window geometry into `[floating]` (best-effort — a save error
@@ -341,9 +352,9 @@ impl FloatingApp {
         };
         let size = window.inner_size();
         let (win_w, win_h) = (size.width, size.height);
-        let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
+        if win_w == 0 || win_h == 0 {
             return; // a 0-area window: nothing to draw
-        };
+        }
         // Cloned out: a held `watch::Ref` read-locks the channel, stalling the sender.
         let Some((scene, floor_caps)) = self
             .live
@@ -466,26 +477,14 @@ impl FloatingApp {
             self.renderer.presented();
             return;
         }
+        let in_sync = self.screen.in_sync();
         // Until this one presents, the screen matches no frame rendered.
         self.screen.stale();
-        let Some(surface) = self.surface.as_mut() else {
+        let Some(gpu) = self.gpu.as_mut() else {
             return;
         };
-        if surface.resize(nw, nh).is_err() {
-            return;
-        }
-        let Ok(mut sb) = surface.buffer_mut() else {
-            return;
-        };
-        let Some(mut surf) =
-            super::compose::XrgbSurface::new(&mut sb, win_w as usize, win_h as usize)
-        else {
-            return;
-        };
-        super::compose::composite(&comp, &mut surf);
-        window.pre_present_notify();
         let presenting = Instant::now();
-        let shown = sb.present().is_ok();
+        let shown = gpu.present(&comp, in_sync);
         if shown {
             self.screen.shown(&comp);
         }
@@ -553,25 +552,26 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             attrs = attrs.with_skip_taskbar(true);
         }
         let window = match event_loop.create_window(attrs) {
-            Ok(w) => Rc::new(w),
+            Ok(w) => Arc::new(w),
             Err(e) => {
-                tracing::error!(error = %e, "pixtuoid floating: failed to create window");
+                self.failure = Some(anyhow::Error::new(e).context("creating the floating window"));
                 event_loop.exit();
                 return;
             }
         };
-        let context = match softbuffer::Context::new(window.clone()) {
-            Ok(c) => c,
+        let proxy = self.proxy.clone();
+        let gpu = match super::gpu::Gpu::for_window(
+            Arc::clone(&window),
+            event_loop.owned_display_handle(),
+            move |message| {
+                let _ = proxy.send_event(FloatingEvent::GpuFailed(message));
+            },
+        ) {
+            Ok(gpu) => gpu,
             Err(e) => {
-                tracing::error!(error = %e, "pixtuoid floating: failed to create softbuffer context");
-                event_loop.exit();
-                return;
-            }
-        };
-        let surface = match softbuffer::Surface::new(&context, window.clone()) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(error = %e, "pixtuoid floating: failed to create softbuffer surface");
+                self.failure = Some(e.context(
+                    "starting the floating window's GPU (`pixtuoid run` shows the office in the terminal)",
+                ));
                 event_loop.exit();
                 return;
             }
@@ -584,8 +584,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             self.live = Some(boot.spawn(window.inner_size(), self.pack.max_density_variant()));
         }
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
-        // per-window opacity, and softbuffer writes opaque XRGB (no alpha). Real
-        // translucency needs a native shim or a wgpu surface.
+        // per-window opacity, and the surface composites opaque.
         self.screen = super::compose::Screen::of_window(
             winit::raw_window_handle::HasWindowHandle::window_handle(&*window)
                 .ok()
@@ -593,13 +592,19 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         );
         window.request_redraw();
         self.window = Some(window);
-        self.context = Some(context);
-        self.surface = Some(surface);
+        self.gpu = Some(gpu);
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: FloatingEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: FloatingEvent) {
         match event {
             FloatingEvent::SceneChanged => self.request_redraw(),
+            FloatingEvent::GpuFailed(message) => {
+                tracing::error!(error = ?message, "pixtuoid floating: the GPU failed");
+                self.failure =
+                    Some(anyhow::anyhow!(message).context("the floating window's GPU failed"));
+                self.jank.finish();
+                event_loop.exit();
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 //! Backend-agnostic render + simulation engine shared by every front-end.
 //!
 //! It has **no** terminal or window dependency — `tui` (ratatui half-block),
-//! `floating` (winit/softbuffer) and `pixtuoid-web` (wasm canvas) are thin
+//! `floating` (winit/wgpu) and `pixtuoid-web` (wasm canvas) are thin
 //! painters layered on top.
 //!
 //! ```

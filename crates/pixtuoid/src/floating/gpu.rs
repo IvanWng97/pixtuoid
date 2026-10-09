@@ -39,9 +39,9 @@ pub(super) fn adapter(
             apply_limit_buckets: false,
         }))
     };
-    request(false).or_else(|_| request(true)).context(
-        "no GPU adapter, hardware or software; `pixtuoid run` shows the office in the terminal",
-    )
+    request(false)
+        .or_else(|_| request(true))
+        .context("no GPU adapter, hardware or software")
 }
 
 /// A device that runs on a GLES3-only adapter, with the adapter's own
@@ -357,6 +357,128 @@ impl Painter {
     }
 }
 
+/// A window's size as a surface may be configured: inside the device's
+/// texture limit, and never zero.
+fn surface_size((w, h): (u32, u32), max: u32) -> (u32, u32) {
+    (w.clamp(1, max), h.clamp(1, max))
+}
+
+/// The window's surface and the painter that draws into it.
+#[derive(Debug)]
+pub(super) struct Gpu {
+    instance: wgpu::Instance,
+    window: std::sync::Arc<winit::window::Window>,
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    painter: Painter,
+}
+
+impl Gpu {
+    /// `window`'s surface and painter. `on_fatal` hears a validation error or
+    /// a lost device, which wgpu reports off the main thread.
+    pub(super) fn for_window(
+        window: std::sync::Arc<winit::window::Window>,
+        display: winit::event_loop::OwnedDisplayHandle,
+        on_fatal: impl Fn(String) + Send + Sync + Clone + 'static,
+    ) -> anyhow::Result<Self> {
+        let instance = wgpu::Instance::new(
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
+        );
+        let surface = instance
+            .create_surface(std::sync::Arc::clone(&window))
+            .context("creating the window's GPU surface")?;
+        let adapter = adapter(&instance, Some(&surface))?;
+        let (device, queue) = device(&adapter)?;
+        // wgpu's default handler panics, on whichever thread raised it.
+        let fatal = on_fatal.clone();
+        device.on_uncaptured_error(std::sync::Arc::new(move |e| fatal(e.to_string())));
+        device.set_device_lost_callback(move |reason, message| {
+            on_fatal(format!("{reason:?}: {message}"));
+        });
+        let caps = surface.get_capabilities(&adapter);
+        // Unencoded, as the CPU compositor's bytes are: an sRGB format would
+        // re-encode every texel.
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| !f.is_srgb())
+            .context("the window's surface offers no unencoded format")?;
+        let size = window.inner_size();
+        let (width, height) = surface_size(
+            (size.width, size.height),
+            device.limits().max_texture_dimension_2d,
+        );
+        let mut config = surface
+            .get_default_config(&adapter, width, height)
+            .context("the window's surface has no configuration for this adapter")?;
+        config.format = format;
+        config.present_mode = wgpu::PresentMode::AutoVsync;
+        surface.configure(&device, &config);
+        let painter = Painter::new(device, queue, format);
+        Ok(Self {
+            instance,
+            window,
+            surface,
+            config,
+            painter,
+        })
+    }
+
+    /// Present `c`, uploading every layer whole unless the screen is
+    /// `in_sync` with the last frame shown; whether it reached the screen.
+    pub(super) fn present(&mut self, c: &Composition<'_>, in_sync: bool) -> bool {
+        let size = surface_size(
+            c.window,
+            self.painter.device().limits().max_texture_dimension_2d,
+        );
+        if (self.config.width, self.config.height) != size {
+            (self.config.width, self.config.height) = size;
+            self.surface.configure(self.painter.device(), &self.config);
+        }
+        let (frame, suboptimal) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            // "skip the current frame and try again later"
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return false;
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(self.painter.device(), &self.config);
+                self.window.request_redraw();
+                return false;
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                match self
+                    .instance
+                    .create_surface(std::sync::Arc::clone(&self.window))
+                {
+                    Ok(surface) => {
+                        self.surface = surface;
+                        self.surface.configure(self.painter.device(), &self.config);
+                    }
+                    Err(e) => tracing::error!(
+                        error = ?e,
+                        "pixtuoid floating: could not recreate the lost GPU surface"
+                    ),
+                }
+                self.window.request_redraw();
+                return false;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => return false,
+        };
+        self.painter.upload(c, !in_sync);
+        self.painter
+            .draw(c, &frame.texture.create_view(&Default::default()));
+        self.window.pre_present_notify();
+        self.painter.queue().present(frame);
+        if suboptimal {
+            self.surface.configure(self.painter.device(), &self.config);
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,5 +645,14 @@ mod tests {
             &cpu(&partial),
             "partial",
         );
+    }
+
+    /// The surface never asks for more than the device's texture limit, nor
+    /// for nothing.
+    #[test]
+    fn the_surface_size_stays_inside_the_device() {
+        assert_eq!(surface_size((3840, 2160), 8192), (3840, 2160));
+        assert_eq!(surface_size((20000, 10), 8192), (8192, 10));
+        assert_eq!(surface_size((0, 0), 8192), (1, 1));
     }
 }
