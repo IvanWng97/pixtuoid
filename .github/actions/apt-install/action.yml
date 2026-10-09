@@ -5,6 +5,9 @@ inputs:
   packages:
     description: 'Space-separated package names'
     required: true
+  recommends:
+    description: 'Whether to install recommended packages too'
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -18,18 +21,21 @@ runs:
       shell: bash
       env:
         PACKAGES: ${{ inputs.packages }}
+        RECOMMENDS: ${{ inputs.recommends }}
         ATTEMPTS: '3'
         ATTEMPT_TIMEOUT: '120'
       run: |
         set -euo pipefail
         read -ra packages <<< "$PACKAGES"
         apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        install_opts=(-y)
+        [[ "$RECOMMENDS" == true ]] || install_opts+=(--no-install-recommends)
         for ((attempt = 1; ; attempt++)); do
-          if timeout "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" update &&
-            timeout "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" install -y --download-only "${packages[@]}"; then
+          if timeout -k 10 "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" update &&
+            timeout -k 10 "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" install "${install_opts[@]}" --download-only "${packages[@]}"; then
             break
           fi
           ((attempt < ATTEMPTS)) || { echo "::error title=apt download failed::$PACKAGES after $ATTEMPTS attempts"; exit 1; }
           echo "::warning title=apt download retried::attempt $attempt of $ATTEMPTS"
         done
-        sudo apt-get "${apt_opts[@]}" install -y --no-download "${packages[@]}"
+        sudo apt-get "${apt_opts[@]}" install "${install_opts[@]}" --no-download "${packages[@]}"

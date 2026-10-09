@@ -1115,7 +1115,7 @@ apt_script="$(yq -e -r '.runs.steps[0].run' .github/actions/apt-install/action.y
 apt_dir="$test_dir/apt"
 mkdir -p "$apt_dir/bin"
 # shellcheck disable=SC2016 # The stubs read their fixtures when they run.
-printf '%s\n' '#!/usr/bin/env bash' 'printf "timeout %s\n" "$*" >>"$APT_LOG"; shift; "$@"' >"$apt_dir/bin/timeout"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "timeout %s\n" "$*" >>"$APT_LOG"; while [[ "$1" == -* ]]; do shift 2; done; shift; "$@"' >"$apt_dir/bin/timeout"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' '"$@"' >"$apt_dir/bin/sudo"
 # shellcheck disable=SC2016
@@ -1124,16 +1124,19 @@ printf '%s\n' '#!/usr/bin/env bash' 'n=$(($(cat "$APT_LOG.n" 2>/dev/null || echo
 chmod +x "$apt_dir/bin/"*
 run_apt() {
     rm -f "$apt_dir/log" "$apt_dir/log.n"
-    PATH="$apt_dir/bin:$PATH" APT_LOG="$apt_dir/log" APT_FAILS="$1" PACKAGES="pkg-a pkg-b" ATTEMPTS=3 ATTEMPT_TIMEOUT=120 \
+    PATH="$apt_dir/bin:$PATH" APT_LOG="$apt_dir/log" APT_FAILS="$1" PACKAGES="pkg-a pkg-b" RECOMMENDS="${2:-true}" ATTEMPTS=3 ATTEMPT_TIMEOUT=120 \
         bash -c "$apt_script" >/dev/null 2>&1
 }
 run_apt 0 || fail "apt-install failed with a healthy mirror"
 grep -q '^apt-get .*install -y --no-download pkg-a pkg-b$' "$apt_dir/log" ||
     fail "apt-install did not install the downloaded packages: $(<"$apt_dir/log")"
 if grep -q '^timeout .*--no-download' "$apt_dir/log"; then fail "apt-install bounded the install itself"; fi
-grep -q '^timeout 120 sudo apt-get .*install -y --download-only pkg-a pkg-b$' "$apt_dir/log" ||
+grep -q '^timeout -k 10 120 sudo apt-get .*install -y --download-only pkg-a pkg-b$' "$apt_dir/log" ||
     fail "apt-install did not bound the package download: $(<"$apt_dir/log")"
 run_apt 2 || fail "apt-install did not recover on its last attempt"
-[[ "$(grep -c '^timeout 120 sudo apt-get .* update$' "$apt_dir/log")" == 3 ]] || fail "apt-install did not retry each failed attempt"
+[[ "$(grep -c '^timeout -k 10 120 sudo apt-get .* update$' "$apt_dir/log")" == 3 ]] || fail "apt-install did not retry each failed attempt"
 run_apt 3 && fail "apt-install passed after every attempt failed"
 ! grep -q -- '--no-download' "$apt_dir/log" || fail "apt-install installed after every download failed"
+run_apt 0 false || fail "apt-install failed without recommends"
+[[ "$(grep -c '^apt-get .*install -y --no-install-recommends' "$apt_dir/log")" == 2 ]] ||
+    fail "apt-install did not drop recommends from both the download and the install: $(<"$apt_dir/log")"
