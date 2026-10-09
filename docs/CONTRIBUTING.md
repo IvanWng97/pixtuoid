@@ -37,9 +37,9 @@ the tests are CI's).
 ## CI gates
 
 CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
-runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
-offline audits are invisible to preflight, so a green preflight does not mean a
-green PR.
+runs those locally), it runs the jobs below. Preflight's `just lint` covers
+only **hygiene**, **zizmor**, cargo-deny and the sprite half of **generated
+drift**, so a green preflight does not mean a green PR.
 
 A PR's pushes run only the **light tier** (every job without
 `if: inputs.full`: linters, formatters, unit tests on every platform and
@@ -58,10 +58,18 @@ CodSpeed skip drafts. The jobs:
 - **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
   compare-selftest`) — generated sprites, icons and README freshness, and the
   image comparator.
-- **smoke · npm package generator (`just npm-check`)** — the release
-  binaries and the hook shim's silent exit, and the npm package generator +
-  OpenClaw plugin contract. The README's media drift (`just gen-media-check`)
-  is reported in smoke as evidence, not a gate.
+- **smoke** — the release binaries and the hook shim's silent exit. The
+  README's media drift (`just gen-media-check`) is reported in it as evidence,
+  not a gate.
+- **npm package generator** (`just npm-check`) — the npm package generator +
+  OpenClaw plugin contract.
+- **msrv** — the workspace compiles on its declared `rust-version`.
+- **packaging-build** (full tier) — a clean `cargo install --locked` on both
+  Homebrew bottle platforms.
+- **coverage** (full tier) — the instrumented suite, uploaded to Codecov,
+  whose statuses are informational.
+- **GitGuardian Security Checks** — the GitGuardian app's secret scan, a
+  required status.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
@@ -88,7 +96,7 @@ CodSpeed skip drafts. The jobs:
   inert data, and a separate least-privilege publisher that opens a review
   thread per finding and sets the lens's `claude-review/<lens>` status.
   `claude.yml` refuses fork PR heads.
-- **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
+- **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
 
@@ -116,7 +124,8 @@ a lint to dodge the bump.
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
    rewritten.
 2. **Review it like any PR, but merge it by hand**: the merge queue refuses it,
-   since its update would merge `main` in. If `main` moved, **re-dispatch —
+   since it would squash it onto whatever `main` has become by then, which
+   `release-merge` refuses after the merge. If `main` moved, **re-dispatch —
    never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the
    new commits, and the merge commit "Update branch" adds counts as a human's,
    so the next dispatch closes this PR and opens a new number. Merged behind
@@ -218,11 +227,11 @@ crate IS.
 |---|---|
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
-| before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
+| before push | the [self-review](#the-arc-loop) (step 7); the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once the branch is ready to merge and [a PR slot](../AGENTS.md#workflow) is free | open the PR ready: the light tier and the review bots run; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
-| when a REVIEW.md local row matches | the `local-review` skill |
-| once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
+| once the PR is open, when a REVIEW.md local row matches | the `local-review` skill, its record on the PR |
+| once [the merge gate](#the-merge-gate) holds | the session comments `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
 The e2e tiers live under `scripts/lib/`; none runs in CI. Cheapest first:
@@ -259,7 +268,6 @@ invariants"), which every contributor and agent reads first.
 ## Pull requests
 
 - Review rules: [`REVIEW.md`](../REVIEW.md).
-- AI-authored PRs get the `needs-human-verify` label and a human visual check.
 
 ### The merge gate
 
@@ -271,7 +279,8 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-an update that only merges `main` in leaves the record standing. The
+an update that only merges `main` in, or whose every changed line is a comment
+or prose, leaves the record standing. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A published review passes whatever it found; a failed or missing status
 is no review: comment `/claude-review`, else split the PR smaller.

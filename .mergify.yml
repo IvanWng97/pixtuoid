@@ -33,8 +33,7 @@ queue_rules:
       # A stacked PR waits until its base lands and GitHub retargets it.
       - base = main
       - -draft
-      # A queue update would merge main into it, which release-plz.yml's
-      # release-merge refuses after the merge (docs/CONTRIBUTING.md#cutting-the-release).
+      # A release PR merges by hand (docs/CONTRIBUTING.md#cutting-the-release).
       - -head ~= ^release-plz-
       - check-success = ci-gate
       - check-success = GitGuardian Security Checks

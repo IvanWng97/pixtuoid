@@ -130,7 +130,7 @@ invariant-breaking sequence against:
    self-repetition); a story told twice keeps the copy on the narrowest thing
    it constrains.
 5. **Proportion**, each with the cheaper alternative, `issue (non-blocking)`
-   unless it breaches AGENTS.md: **over-engineering** (YAGNI), a branch,
+   unless it breaches AGENTS.md ([Severity](#severity)): **over-engineering** (YAGNI), a branch,
    helper, parameter, type, fallback arm or test machinery serving no
    reachable case; **low ROI**, code, API change or coupling out of proportion
    to its payoff (an API made `Option` across three painters for a width
@@ -158,9 +158,7 @@ invariant-breaking sequence against:
      word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
      never a placeholder.
 7. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
-   rule. A missing or contradicting source is `issue (non-blocking)`, blocking
-   only under [Severity](#severity)'s rule: verified against the code as a
-   correctness, security or invariant breach.
+   rule; a claim with no fetched source, or one that contradicts it, breaches it.
 
 ## Escalation
 
@@ -185,16 +183,17 @@ its focused lens alone: the floor is never re-run locally.
 | A refactor: a `refactor` PR, or a move or dedup across modules | | local | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). No test leaves `cargo nextest list` at head unless the PR body names it. |
 | Geometry, sky, lighting or other domain math | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | local | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
 | A crate edge, new dependency or widened public API (a version bump of an existing dependency doesn't match) | `Cargo.toml`, `crates/*/Cargo.toml`, `api/` | local | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
-| CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `policy/`, `release-plz.toml`, `REVIEW.md`, `docs/CONTRIBUTING.md` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
+| CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/`, `.github/actions/`, `.github/dependabot.yml`, `.mergify.yml`, `policy/`, `release-plz.toml` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
 
 ## Severity
 
 [Conventional Comments](https://conventionalcomments.org/) labels, the
 [`review-schema.json`](.github/prompts/review-schema.json) `severity` enum;
-nits and taste are never posted. Dispositions:
+taste with no defect is never posted. Dispositions:
 [CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
 
-- `issue (blocking)` — correctness, security or invariant. It blocks only once
+- `issue (blocking)` — correctness, security, an invariant, or a breach of any
+  AGENTS.md rule, its Conventions included. It blocks only once
   the agent that ran the review or a maintainer confirms it against the code;
   the finder's label alone never blocks.
 - `issue (non-blocking)` — any other real defect this PR introduced.
@@ -220,4 +219,5 @@ Bots return only the structured result
 - Every blocking finding, first; then at most 5 non-blocking and pre-existing
   ones, pre-existing last. The summary counts every finding left out,
   including any past the schema's `maxItems` ceiling.
-- Each `body`: the verified finding and a concrete failure scenario.
+- Each `body`: the verified finding and a concrete failure scenario; a
+  maintenance defect's is the edit that would leave a copy or a comment wrong.
