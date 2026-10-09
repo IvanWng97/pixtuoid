@@ -68,10 +68,10 @@ paraphrase here.
      -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
    ```
 
-6. **Record** each row's run as the PR comment
+6. **Record** each row's run as
    [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate) defines, naming
-   the head the lens judged. A push that is not only a merge of `main` leaves
-   that sha unmatched: run the matching lenses at the new head and record it.
+   the head the lens judged; a push the gate does not carry over needs the
+   lens run again at the new head.
 7. **Before merge**, judge against the gate.
 
 ## Whole-codebase scope
