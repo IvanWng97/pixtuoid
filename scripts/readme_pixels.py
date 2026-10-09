@@ -30,10 +30,10 @@ class Palette(NamedTuple):
     sky_horizon: str
     building_dark: str
     building_light: str
-    window_dark: str
-    window_lit_a: str
-    window_lit_b: str
-    window_lit_c: str
+    city_dark_window: str
+    city_lit_a: str
+    city_lit_b: str
+    city_lit_c: str
     moon: str
 
 
@@ -51,7 +51,7 @@ THEMES: dict[str, Palette] = {
 GLYPH_W, GLYPH_H, BASELINE = 5, 9, 7
 GLYPH_ADVANCE = GLYPH_W + 1
 
-# Classic dot-matrix forms; `*` is the star. Drawn as rectangles so the art
+# Classic dot-matrix forms. Drawn as rectangles so the art
 # needs no font: an SVG inside a GitHub `<img>` can't fetch a webfont, and a
 # system font wouldn't be pixel art.
 _FORMS: dict[str, tuple[str, ...]] = {
@@ -123,7 +123,6 @@ _FORMS: dict[str, tuple[str, ...]] = {
     "_": (".....", ".....", ".....", ".....", ".....", ".....", "#####"),
     ".": (".....", ".....", ".....", ".....", ".....", ".##..", ".##.."),
     "+": (".....", "..#..", "..#..", "#####", "..#..", "..#..", "....."),
-    "*": ("..#..", "#.#.#", ".###.", "#####", ".###.", "#.#.#", "..#.."),
 }
 GLYPHS: dict[str, tuple[str, ...]] = {ch: rows + ("." * GLYPH_W,) * (GLYPH_H - len(rows)) for ch, rows in _FORMS.items()}
 

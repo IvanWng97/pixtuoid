@@ -35,10 +35,10 @@ fn roles(t: &Theme) -> [(&'static str, Rgb); 17] {
         ("sky_horizon", t.lighting.night_sky_a),
         ("building_dark", t.office.building_dark),
         ("building_light", t.office.building_light),
-        ("window_dark", t.office.city_dark_window),
-        ("window_lit_a", t.office.city_lit_windows[0]),
-        ("window_lit_b", t.office.city_lit_windows[1]),
-        ("window_lit_c", t.office.city_lit_windows[2]),
+        ("city_dark_window", t.office.city_dark_window),
+        ("city_lit_a", t.office.city_lit_windows[0]),
+        ("city_lit_b", t.office.city_lit_windows[1]),
+        ("city_lit_c", t.office.city_lit_windows[2]),
         ("moon", t.lighting.moon_core),
     ]
 }

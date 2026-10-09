@@ -13,11 +13,11 @@
     "sky_horizon": "#121a34",
     "building_dark": "#141620",
     "building_light": "#3c4152",
-    "window_dark": "#1e202c",
-    "window_lit_a": "#fcd76e",
-    "window_lit_b": "#b4dcff",
-    "window_lit_c": "#ffb48c",
-    "moon": "#ecf2ff"
+    "moon": "#ecf2ff",
+    "city_dark_window": "#1e202c",
+    "city_lit_a": "#fcd76e",
+    "city_lit_b": "#b4dcff",
+    "city_lit_c": "#ffb48c"
   },
   "dark": {
     "theme": "tokyo-night",
@@ -33,10 +33,10 @@
     "sky_horizon": "#0e1020",
     "building_dark": "#12121c",
     "building_light": "#373e5a",
-    "window_dark": "#161824",
-    "window_lit_a": "#b4c8ff",
-    "window_lit_b": "#e0af68",
-    "window_lit_c": "#9ece6a",
-    "moon": "#7aa2f7"
+    "moon": "#7aa2f7",
+    "city_dark_window": "#161824",
+    "city_lit_a": "#b4c8ff",
+    "city_lit_b": "#e0af68",
+    "city_lit_c": "#9ece6a"
   }
 }

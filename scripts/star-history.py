@@ -69,8 +69,12 @@ HEADER_Y = 4 * PX
 MONTHS = 12
 # A window row and a slab row.
 FLOOR_ROWS = 2
-# Sky above the tallest tower: the scaffold floor plus the crane, and the moon beside them.
-HEADROOM = 9
+# The newest tower's crane: its mast's rows (the beacon sits one above), the jib's reach left and right of the mast, the hook's drop.
+CRANE_MAST_ROWS = 7
+CRANE_JIB = (9, 2)
+CRANE_HOOK_ROWS = 3
+# Sky above the tallest tower (whose scaffold `stars_per_floor` already counts): the crane and its beacon, plus a row of air the moon and the meteor share.
+HEADROOM = CRANE_MAST_ROWS + 2
 MAX_FLOORS = (PLOT_ROWS - HEADROOM) // FLOOR_ROWS
 LOT_GAP = 2
 LIT_PERCENT = 14
@@ -79,6 +83,8 @@ STAR_SEEDS, STAR_CLEARANCE, BIG_STAR_EVERY = 80, 2, 9
 MOON = ("..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###..")
 # Chart pixels from the window's top-left; inside HEADROOM, so no tower reaches it.
 MOON_AT = (4, 1)
+# Glyph pixels of air between the header's star icon and the count.
+HEADER_ICON_GAP = 3
 STAR_ICON = ("....#....", "...###...", "...###...", "#########", ".#######.", "..#####..", "..#####..", ".###.###.", ".##...##.")
 METEOR = ("#...", ".#..", "..#.", "...#")
 # Start (column, row from the top) and travel, in chart pixels: its whole run stays in HEADROOM, right of the moon.
@@ -102,13 +108,6 @@ def cumulative_by_day(dates: Iterable[dt.date]) -> list[Point]:
             series[-1] = (day, total)
         else:
             series.append((day, total))
-    return series
-
-
-def extend_to(series: list[Point], today: dt.date) -> list[Point]:
-    """Carry the last total to `today` so the right edge reads as-of-render, not as-of-last-star."""
-    if series and series[-1][0] < today:
-        return [*series, (today, series[-1][1])]
     return series
 
 
@@ -179,10 +178,21 @@ def scaffold_cols(count: int, per_floor: int, width: int) -> int:
     return max(1, round(width * partial / per_floor)) if partial else 0
 
 
+def lots(n: int) -> tuple[int, int]:
+    """(first column, columns per month) of n month lots centred in the window."""
+    slot = PLOT_COLS // max(n, 1)
+    return (PLOT_COLS - slot * n) // 2, slot
+
+
+def tower_cols(i: int, n: int) -> tuple[int, int]:
+    """(first column, width) of the tower on lot i of n."""
+    lot0, slot = lots(n)
+    return lot0 + i * slot + LOT_GAP // 2, slot - LOT_GAP
+
+
 def month_label_xs(labels: list[str]) -> list[int]:
-    slot = PLOT_COLS // max(len(labels), 1) * PX
-    left = MARGIN_LEFT + (PLOT_COLS * PX - slot * len(labels)) // 2
-    return [left + i * slot + (slot - text_width(label, LABEL_PX)) // 2 for i, label in enumerate(labels)]
+    lot0, slot = lots(len(labels))
+    return [MARGIN_LEFT + (lot0 + i * slot) * PX + (slot * PX - text_width(label, LABEL_PX)) // 2 for i, label in enumerate(labels)]
 
 
 def sky_stars(roofs: list[int]) -> list[tuple[int, int, bool]]:
@@ -191,23 +201,34 @@ def sky_stars(roofs: list[int]) -> list[tuple[int, int, bool]]:
     out = []
     for s in range(STAR_SEEDS):
         c, r = _hash("sx", s) % PLOT_COLS, PLOT_ROWS - 1 - _hash("sy", s) % (PLOT_ROWS - 2)
-        if r <= roofs[c] + STAR_CLEARANCE:
+        big = s % BIG_STAR_EVERY == 0
+        # A big star is a plus: its arms reach the columns either side.
+        if r <= max(roofs[max(c - big, 0):c + big + 1]) + STAR_CLEARANCE:
             continue
         if mc - 2 <= c <= mc + len(MOON[0]) + 1 and PLOT_ROWS - 1 - r <= mr + len(MOON):
             continue
-        out.append((c, r, s % BIG_STAR_EVERY == 0))
+        out.append((c, r, big))
     return out
 
 
-def _header_right(gain: int, per_floor: int) -> tuple[str, str]:
-    return f"+{compact(gain)} this week", f"{compact(per_floor)} stars / floor"
+class Header(NamedTuple):
+    icon_x: int
+    count_x: int
+    count_end: int
+    right_x: int
+    legend_left: int
+    week: str
+    legend: str
 
 
-def header_spans(top: int, gain: int, per_floor: int) -> tuple[int, int]:
-    """Where the count's block ends and the legend's begins."""
-    left = MARGIN_LEFT - PX + (len(STAR_ICON[0]) + 3) * COUNT_PX + text_width(compact(top), COUNT_PX) + text_width(" stars", LABEL_PX)
-    right = WIDTH - MARGIN_RIGHT + PX - max(text_width(t, LABEL_PX) for t in _header_right(gain, per_floor))
-    return left, right
+def header_layout(top: int, gain: int, per_floor: int) -> Header:
+    """The header as drawn: the star icon and count on the left, the week's gain and the floor legend right-aligned."""
+    icon_x = MARGIN_LEFT - PX
+    count_x = icon_x + (len(STAR_ICON[0]) + HEADER_ICON_GAP) * COUNT_PX
+    count_end = count_x + text_width(compact(top), COUNT_PX) + text_width(" stars", LABEL_PX)
+    right_x = WIDTH - MARGIN_RIGHT + PX
+    week, legend = f"+{compact(gain)} this week", f"{compact(per_floor)} stars / floor"
+    return Header(icon_x, count_x, count_end, right_x, right_x - max(text_width(week, LABEL_PX), text_width(legend, LABEL_PX)), week, legend)
 
 
 def _mix(a: str, b: str, t: float) -> str:
@@ -221,8 +242,6 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
     top = buckets[-1].count
     per_floor = stars_per_floor(top)
     gain = gain_since(series, today - dt.timedelta(days=7))
-    slot = PLOT_COLS // len(buckets)
-    lot0 = (PLOT_COLS - slot * len(buckets)) // 2
     win_x, win_bottom = MARGIN_LEFT, MARGIN_TOP + PLOT_ROWS * PX
 
     def col_x(c: int) -> int:
@@ -250,23 +269,24 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
     moon = mask_path(MOON, col_x(mc), MARGIN_TOP + mr * PX, PX)
     bite = mask_path(MOON, col_x(mc + 2), MARGIN_TOP + (mr - 1) * PX, PX)
 
-    lits = (pal.window_lit_a, pal.window_lit_b, pal.window_lit_c)
+    lits = (pal.city_lit_a, pal.city_lit_b, pal.city_lit_c)
     shades = (pal.building_dark, _mix(pal.building_dark, pal.building_light, 0.3))
     bodies: dict[str, list[str]] = {}
     roofline, windows, scaffold, crane, beacon = [], {}, [], [], []
     roofs = [0] * PLOT_COLS
     for i, bucket in enumerate(buckets):
-        c0, width = lot0 + i * slot + LOT_GAP // 2, slot - LOT_GAP
+        c0, width = tower_cols(i, len(buckets))
         floors = bucket.count // per_floor
         rows = floors * FLOOR_ROWS
         if rows:
             bodies.setdefault(shades[i % 2], []).append(_run(col_x(c0), row_y(rows - 1), width * PX, rows * PX))
             roofline.append(_run(col_x(c0), row_y(rows - 1), width * PX, PX // 2))
+        month = (bucket.end.year, bucket.end.month)
         for f in range(floors):
             r = f * FLOOR_ROWS
             for c in range(c0 + 1, c0 + width - 1, 2):
-                lit = _hash("lit", bucket.end, f, c - c0) % 100 < LIT_PERCENT
-                key = lits[_hash("hue", bucket.end, f, c - c0) % len(lits)] if lit else pal.window_dark
+                lit = _hash("lit", month, f, c - c0) % 100 < LIT_PERCENT
+                key = lits[_hash("hue", month, f, c - c0) % len(lits)] if lit else pal.city_dark_window
                 windows.setdefault(key, []).append(_run(col_x(c), row_y(r), PX, PX))
         roofs[c0:c0 + width] = [rows] * width
         if i == len(buckets) - 1:
@@ -276,12 +296,16 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
                 scaffold += [_run(col_x(c), row_y(rows + FLOOR_ROWS - 1), PX // 2, FLOOR_ROWS * PX) for c in range(c0, c0 + sw, 3)]
                 rows += FLOOR_ROWS
                 roofs[c0:c0 + width] = [rows] * width
-            mast = c0 + width - 3
-            jib = max(mast - 9, 0)
-            crane += [_run(col_x(mast), row_y(rows + 6), PX, 7 * PX), _run(col_x(jib), row_y(rows + 6), (mast + 3 - jib) * PX, PX), _run(col_x(jib + 1), row_y(rows + 5), PX // 2, 3 * PX)]
-            beacon.append(_run(col_x(mast), row_y(rows + 7), PX, PX))
-            for c in range(jib, min(mast + 3, PLOT_COLS)):
-                roofs[c] = max(roofs[c], rows + 7)
+            mast = c0 + width - 1 - CRANE_JIB[1]
+            jib, top_row = max(mast - CRANE_JIB[0], 0), rows + CRANE_MAST_ROWS - 1
+            crane += [
+                _run(col_x(mast), row_y(top_row), PX, CRANE_MAST_ROWS * PX),
+                _run(col_x(jib), row_y(top_row), (mast + CRANE_JIB[1] + 1 - jib) * PX, PX),
+                _run(col_x(jib + 1), row_y(top_row - 1), PX // 2, CRANE_HOOK_ROWS * PX),
+            ]
+            beacon.append(_run(col_x(mast), row_y(top_row + 1), PX, PX))
+            for c in range(jib, min(mast + CRANE_JIB[1] + 1, PLOT_COLS)):
+                roofs[c] = max(roofs[c], top_row + 1)
 
     small: dict[int, list[str]] = {0: [], 1: [], 2: []}
     big = []
@@ -297,11 +321,8 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
     xlabels = "".join(text_path(label, x, sill_y + 4 * PX, LABEL_PX) for x, label in zip(month_label_xs(labels), labels))
     cat, cat_css = animation(load_pack(PACK_DIR, (CAT,)), CAT, win_x + PLOT_COLS * PX - 8 * PX, sill_y, CAT_PX)
 
-    hx = win_x - PX
+    head = header_layout(top, gain, per_floor)
     count = compact(top)
-    count_x = hx + (len(STAR_ICON[0]) + 3) * COUNT_PX
-    right_x = WIDTH - MARGIN_RIGHT + PX
-    week, legend = _header_right(gain, per_floor)
     edge = _run(0, 0, WIDTH, PX) + _run(0, HEIGHT - PX, WIDTH, PX) + _run(0, 0, PX, HEIGHT) + _run(WIDTH - PX, 0, PX, HEIGHT)
     css = "".join(
         [
@@ -338,11 +359,11 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
             f'<path fill="{pal.trim}" d="{_run(win_x - 3 * PX, sill_y, PLOT_COLS * PX + 6 * PX, 2 * PX)}"/>',
             f'<path fill="{pal.text}" d="{"".join(ylabels)}{xlabels}"/>',
             cat,
-            f'<path fill="{pal.star}" d="{mask_path(STAR_ICON, hx, HEADER_Y - 2, COUNT_PX)}"/>',
-            f'<path fill="{pal.title}" d="{text_path(count, count_x, HEADER_Y, COUNT_PX)}"/>',
-            f'<path fill="{pal.text}" d="{text_path(" stars", count_x + text_width(count, COUNT_PX), HEADER_Y + (COUNT_PX - LABEL_PX) * BASELINE, LABEL_PX)}"/>',
-            f'<path fill="{pal.star}" d="{text_path(week, right_x - text_width(week, LABEL_PX), HEADER_Y - 2, LABEL_PX)}"/>',
-            f'<path fill="{pal.text}" fill-opacity="0.75" d="{text_path(legend, right_x - text_width(legend, LABEL_PX), HEADER_Y - 2 + GLYPH_H * LABEL_PX, LABEL_PX)}"/>',
+            f'<path fill="{pal.star}" d="{mask_path(STAR_ICON, head.icon_x, HEADER_Y - 2, COUNT_PX)}"/>',
+            f'<path fill="{pal.title}" d="{text_path(count, head.count_x, HEADER_Y, COUNT_PX)}"/>',
+            f'<path fill="{pal.text}" d="{text_path(" stars", head.count_x + text_width(count, COUNT_PX), HEADER_Y + (COUNT_PX - LABEL_PX) * BASELINE, LABEL_PX)}"/>',
+            f'<path fill="{pal.star}" d="{text_path(head.week, head.right_x - text_width(head.week, LABEL_PX), HEADER_Y - 2, LABEL_PX)}"/>',
+            f'<path fill="{pal.text}" fill-opacity="0.75" d="{text_path(head.legend, head.right_x - text_width(head.legend, LABEL_PX), HEADER_Y - 2 + GLYPH_H * LABEL_PX, LABEL_PX)}"/>',
             "</svg>",
         ]
     ) + "\n"
@@ -410,14 +431,6 @@ def test_cumulative_by_day_counts_one_point_per_day_in_order() -> None:
         "cumulative_by_day must sort, bucket per day, and accumulate",
     )
     check(cumulative_by_day([]) == [], "cumulative_by_day of nothing is nothing")
-
-
-def test_extend_to_holds_the_last_count_through_today() -> None:
-    series = [(_d("2026-05-24"), 2), (_d("2026-05-26"), 4)]
-    got = extend_to(series, _d("2026-06-01"))
-    check(got[-1] == (_d("2026-06-01"), 4), f"extend_to must end at today with the last count, got {got[-1]}")
-    check(got[:-1] == series, "extend_to must not alter the recorded points")
-    check(extend_to(series, _d("2026-05-26")) == series, "extend_to is a no-op when today is the last point")
 
 
 def test_compact_keeps_axis_labels_to_four_glyphs() -> None:
@@ -526,13 +539,22 @@ def test_month_labels_never_touch_and_stay_on_the_canvas() -> None:
         boxes = [(x, x + text_width(label, LABEL_PX)) for x, label in zip(month_label_xs(labels), labels)]
         check(all(0 <= a and b <= WIDTH for a, b in boxes), f"{n} months: a label leaves the canvas: {boxes}")
         check(all(boxes[i + 1][0] - boxes[i][1] >= PX for i in range(n - 1)), f"{n} months: labels touch: {boxes}")
+        for i, (a, b) in enumerate(boxes):
+            c0, width = tower_cols(i, n)
+            tower_mid = MARGIN_LEFT + c0 * PX + width * PX / 2
+            check(abs((a + b) / 2 - tower_mid) <= 1, f"{n} months: label {i} centres at {(a + b) / 2}, its tower at {tower_mid}")
 
 
 def test_stars_stay_in_open_sky() -> None:
-    roofs = [min(c // 2, PLOT_ROWS - HEADROOM) for c in range(PLOT_COLS)]
-    stars = sky_stars(roofs)
-    check(len(stars) > 10, f"the sky needs stars, got {len(stars)}")
-    check(all(r > roofs[c] + STAR_CLEARANCE for c, r, _ in stars), "a star must clear the rooftop under it")
+    ramp = [min(c // 2, PLOT_ROWS - HEADROOM) for c in range(PLOT_COLS)]
+    alleys = [0 if c % 9 < 2 else (PLOT_ROWS - HEADROOM) * (c // 9 % 3) // 2 for c in range(PLOT_COLS)]
+    for roofs in (ramp, alleys):
+        stars = sky_stars(roofs)
+        check(len(stars) > 10, f"the sky needs stars, got {len(stars)}")
+        for c, r, big in stars:
+            under = roofs[max(c - 1, 0):c + 2] if big else [roofs[c]]
+            check(r > max(under) + STAR_CLEARANCE, f"a {'big' if big else 'small'} star at ({c}, {r}) paints over a roof")
+    stars = sky_stars(ramp)
     mc, mr = MOON_AT
     check(not any(mc - 2 <= c <= mc + len(MOON[0]) + 1 and PLOT_ROWS - 1 - r <= mr + len(MOON) for c, r, _ in stars), "no star on the moon")
     check(PLOT_ROWS - mr - len(MOON) >= PLOT_ROWS - HEADROOM, "the moon hangs above the tallest tower")
@@ -544,10 +566,28 @@ def test_meteor_crosses_open_sky_only() -> None:
     check(mc > MOON_AT[0] + len(MOON[0]) and mc + len(METEOR[0]) + dc <= PLOT_COLS, "the meteor starts right of the moon and ends inside the window")
 
 
+def test_the_crane_tops_out_under_the_frame() -> None:
+    check(MAX_FLOORS * FLOOR_ROWS + CRANE_MAST_ROWS < PLOT_ROWS, "the beacon on the tallest tower's crane must stay inside the window")
+    full = cumulative_by_day([_d("2026-08-01")] * (MAX_FLOORS * 25 - 3))
+    svg = render_svg("o/r", full, "light", _d("2026-08-23"))
+    beacon = re.search(r'class="beacon"[^>]* d="([^"]*)"', svg)
+    ys = [int(r[1]) for r in RUN_RE.findall(beacon.group(1))] if beacon else []
+    check(bool(ys) and min(ys) >= MARGIN_TOP, f"the beacon must sit below the window's top frame, at {ys}")
+
+
+def test_live_tower_windows_hold_still_within_a_month() -> None:
+    series = cumulative_by_day([_d("2026-09-10")] * 40 + [_d("2026-10-02")] * 30)
+    def windows(today: dt.date) -> list[str]:
+        svg = render_svg("o/r", series, "light", today)
+        hues = {THEMES["light"].city_dark_window, THEMES["light"].city_lit_a, THEMES["light"].city_lit_b, THEMES["light"].city_lit_c}
+        return sorted(m.group(0) for m in re.finditer(r'<path fill="(#[0-9a-f]{6})" d="[^"]*"/>', svg) if m.group(1) in hues)
+    check(windows(_d("2026-10-09")) == windows(_d("2026-10-23")), "a day with no new stars must not reshuffle this month's lit windows")
+
+
 def test_header_halves_never_collide() -> None:
     for top, gain in ((0, 0), (491, 6), (123_456, 12_345), (10**6, 10**6)):
-        left_end, right_start = header_spans(top, gain, stars_per_floor(top))
-        check(left_end + LABEL_GAP <= right_start, f"{top} stars, +{gain}: the count ends at {left_end}, the legend starts at {right_start}")
+        h = header_layout(top, gain, stars_per_floor(top))
+        check(h.count_end + LABEL_GAP <= h.legend_left, f"{top} stars, +{gain}: the count ends at {h.count_end}, the legend starts at {h.legend_left}")
 
 
 def test_render_is_well_formed_and_carries_the_facts() -> None:
