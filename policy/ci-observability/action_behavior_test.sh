@@ -525,7 +525,6 @@ yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     and ([.jobs.report_absence.steps[].env.PR_STATE // empty] == ["${{ needs.analyze.outputs.state }}"])' >/dev/null ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the resolved PR state to the absence report"
 
-
 # ── require-jobs: the verdict ci-gate and every group's `required` job reach ──
 # Anything but success is red, and an empty needs map must not pass vacuously.
 REQUIRE_JOBS_ACTION_FILE="${REQUIRE_JOBS_ACTION_FILE:-.github/actions/require-jobs/action.yml}"
@@ -1140,3 +1139,24 @@ run_apt 3 && fail "apt-install passed after every attempt failed"
 run_apt 0 false || fail "apt-install failed without recommends"
 [[ "$(grep -c '^apt-get .*install -y --no-install-recommends' "$apt_dir/log")" == 2 ]] ||
     fail "apt-install did not drop recommends from both the download and the install: $(<"$apt_dir/log")"
+
+# ── path-changed: a PR's merge commit against its base parent; anything it
+# cannot diff counts as changed.
+changed_script="$(yq -e -r '.runs.steps[0].run' .github/actions/path-changed/action.yml)" ||
+    fail "path-changed has no run step"
+repo="$test_dir/changed-repo"
+git init -q "$repo" && git -C "$repo" config user.email t@t && git -C "$repo" config user.name t
+echo a >"$repo/lock" && echo a >"$repo/other" && git -C "$repo" add . && git -C "$repo" commit -qm base
+git -C "$repo" checkout -qb pr && echo b >"$repo/other" && git -C "$repo" commit -qam pr
+git -C "$repo" checkout -q - && git -C "$repo" merge -q --no-ff --no-edit pr
+changed() {
+    : >"$test_dir/changed-output"
+    (cd "$1" && GITHUB_EVENT_NAME="$2" GITHUB_OUTPUT="$test_dir/changed-output" CHANGED_PATH="$3" bash -c "$changed_script") ||
+        fail "path-changed exited non-zero"
+    sed -n 's/^changed=//p' "$test_dir/changed-output"
+}
+[[ "$(changed "$repo" pull_request other)" == true ]] || fail "path-changed missed a path the PR changes"
+[[ "$(changed "$repo" pull_request lock)" == false ]] || fail "path-changed reported a path the PR leaves alone"
+[[ "$(changed "$repo" push other)" == false ]] || fail "path-changed judged a push as a PR"
+git init -q "$test_dir/no-parent" && git -C "$test_dir/no-parent" commit -q --allow-empty -m only
+[[ "$(changed "$test_dir/no-parent" pull_request lock)" == true ]] || fail "path-changed passed a diff it could not run"

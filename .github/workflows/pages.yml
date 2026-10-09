@@ -38,9 +38,6 @@ jobs:
           shared-key: site
       # Before `check`: astro.config.mjs asserts each demo exists.
       - uses: ./.github/actions/gen-demos
-      - name: Audit site dependencies
-        working-directory: site
-        run: npm run audit
       - name: Lint site
         working-directory: site
         run: npm run lint

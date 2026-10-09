@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -41,6 +42,11 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
       - run: npx eslint .
+      - uses: ./.github/actions/path-changed
+        id: lockfile
+        with:
+          path: integrations/raycast/package-lock.json
       # LAST: it resolves advisories live, so at step one someone else's publish
       # skips every check below it (#846/#848).
-      - run: npm run audit
+      - if: steps.lockfile.outputs.changed == 'true'
+        run: npm run audit

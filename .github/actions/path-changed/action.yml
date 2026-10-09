@@ -1,0 +1,30 @@
+name: 'Path changed'
+description: 'Whether a pull request changes a path, from the merge commit against its base parent'
+
+inputs:
+  path:
+    description: 'The path to compare'
+    required: true
+
+outputs:
+  changed:
+    description: '"true" when a pull request changes the path'
+    value: ${{ steps.diff.outputs.changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    # On a pull_request run HEAD is GitHub's merge commit, whose first parent
+    # is the base: the checkout needs `fetch-depth: 2`. A push or dispatch run
+    # changes nothing by this rule; a diff that cannot run counts as changed.
+    - id: diff
+      shell: bash
+      env:
+        CHANGED_PATH: ${{ inputs.path }}
+      run: |
+        set -uo pipefail
+        changed=false
+        if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && ! git diff --quiet HEAD^1 HEAD -- "$CHANGED_PATH"; then
+          changed=true
+        fi
+        echo "changed=$changed" >> "$GITHUB_OUTPUT"

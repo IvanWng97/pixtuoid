@@ -231,11 +231,16 @@ machete:
     cargo machete
 
 # License + supply-chain gate (bans/licenses/sources). Advisories are NOT here:
-# they're owned by the daily audit.yml (`check advisories`) so an overnight
-# RustSec advisory can't block a push of unchanged code.
+# an overnight RustSec advisory must not block a push of unchanged code.
 [group('rust')]
 deny:
     cargo deny check bans licenses sources
+
+# Advisories judge the whole graph, so they run where it changes (a PR that
+# touches Cargo.lock) and on audit.yml's schedule.
+[group('rust')]
+deny-advisories:
+    cargo deny check advisories
 
 # Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay
 # terminal/window/audio-device-free.
