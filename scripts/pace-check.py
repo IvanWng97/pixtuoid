@@ -115,15 +115,13 @@ def run_pty(argv, env, geometry, secs, hover):
 def run_live(argv, env, secs):
     # The binary draws to the terminal, by its device's name, whatever this
     # script's own output is redirected to.
-    if not os.isatty(0):
-        sys.exit("pace-check: --live runs in a terminal, and stdin is not one")
-    tty = open(os.ttyname(0), "wb", buffering=0)
-    child = subprocess.Popen(argv, env=env, stdout=tty, stderr=tty)
-    try:
-        child.wait(timeout=secs)
-    except subprocess.TimeoutExpired:
-        child.send_signal(signal.SIGTERM)
-        child.wait()
+    with open(os.ttyname(0), "wb", buffering=0) as tty:
+        child = subprocess.Popen(argv, env=env, stdout=tty, stderr=tty)
+        try:
+            child.wait(timeout=secs)
+        except subprocess.TimeoutExpired:
+            child.send_signal(signal.SIGTERM)
+            child.wait()
 
 
 FIELD = re.compile(r'(\w+)=("[^"]*"|\S+)')
@@ -163,6 +161,8 @@ def main():
     args = ap.parse_args()
     if args.hover and args.live:
         sys.exit("pace-check: --hover drives the pty's pointer; live, hover by hand")
+    if args.live and not os.isatty(0):
+        sys.exit("pace-check: --live runs in a terminal, and stdin is not one")
     if not os.access(BIN, os.X_OK):
         sys.exit(f"pace-check: no {BIN}: run it as `just pace-check`, which builds it")
     load = os.getloadavg()[0]
