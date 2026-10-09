@@ -121,20 +121,25 @@ jobs:
             echo "Head: $HEAD_SHA"
           } > .claude-review/review-context.md
 
-      # REVIEW.md's Re-review keys on it. Each published review is a PR comment
-      # headed by its title; a deleted one undercounts, which posts more.
+      # REVIEW.md's Re-review keys on it: the heads this lens published a
+      # review of before this one, from the PR comments headed by its title. A
+      # re-review of a head counts it once, and a deleted comment undercounts,
+      # which posts more.
       - name: Count this lens's rounds
         if: steps.pr.outputs.reviewable == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          published="$(gh api --paginate --slurp "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" |
-            jq --arg heading "## $REVIEW_TITLE" \
-              '[add[] | select(.user.login == "github-actions[bot]" and (.body | split("\n")[0]) == $heading)] | length')"
-          echo "Round: $((published + 1))" >> .claude-review/review-context.md
+          earlier="$(gh api --paginate --slurp "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" |
+            jq --arg heading "## $REVIEW_TITLE" --arg head "$HEAD_SHA" '
+              [add[] | select(.user.login == "github-actions[bot]" and (.body | split("\n")[0]) == $heading)
+                | .body | capture("(?m)^Head: `(?<sha>[0-9a-f]+)`").sha | select(. != $head)]
+              | unique | length')"
+          echo "Round: $((earlier + 1))" >> .claude-review/review-context.md
 
       - name: Record the PR title and body
         if: steps.pr.outputs.reviewable == 'true'

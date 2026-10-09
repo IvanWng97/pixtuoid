@@ -837,7 +837,7 @@ crate serde 1.0.2 >"$f/head123/Cargo.lock"
 run_exempt "$f" newer456 "a head that moved"
 assert_exempt "$f" pending "a head that moved"
 
-# ── The reviewer's round: this lens's published reviews so far, plus one.
+# ── The reviewer's round: the heads this lens reviewed before this one, plus one.
 round_script="$(workflow_step_script .github/workflows/claude-readonly-review.yml "Count this lens's rounds")"
 round_dir="$test_dir/round"
 mkdir -p "$round_dir/bin" "$round_dir/work/.claude-review"
@@ -850,13 +850,18 @@ jq -cs '[.[:2], .[2:]]' <(
     comment "github-actions[bot]" $'## Claude correctness review\n\nHead: `a`'
     comment "someone" $'## Claude design review\n\nquoted'
     comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
+    comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
 ) >"$round_dir/comments.json"
-: >"$round_dir/work/.claude-review/review-context.md"
-(cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
-    GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="Claude design review" \
-    bash -c "$round_script") || fail "the round count exited non-zero"
-grep -qx 'Round: 3' "$round_dir/work/.claude-review/review-context.md" ||
-    fail "the round count wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: 3 (two of this lens's reviews, across pages)"
+assert_round() {
+    : >"$round_dir/work/.claude-review/review-context.md"
+    (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
+        GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="Claude design review" HEAD_SHA="$1" \
+        bash -c "$round_script") || fail "the round count exited non-zero"
+    grep -qx "Round: $2" "$round_dir/work/.claude-review/review-context.md" ||
+        fail "the round count at head $1 wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: $2 ($3)"
+}
+assert_round c 3 "two heads of this lens's, one reviewed twice, across pages"
+assert_round b 2 "a re-review of a head counts that head once"
 
 # A manifest outside the lockfiles may move version strings, nothing else.
 f="$(exempt_case owner-swap)"
@@ -878,3 +883,58 @@ f="$(exempt_case cargo-patch)"
 file_row Cargo.toml modified $'@@ -40 +40,2 @@\n-serde = "1.0.1"\n+serde = "1.0.2"\n+[patch.crates-io]' >"$f/files.jsonl"
 run_exempt "$f" head123 "a Cargo.toml edit beyond a version"
 assert_exempt "$f" pending "a Cargo.toml edit beyond a version"
+
+# The lockfile guards hold on a lock large enough to fill a pipe, with the
+# offending entry first, and refuse a lock they cannot read.
+big_crates() { for i in $(seq 1 2000); do crate "filler$i" 1.0.0; done; }
+f="$(exempt_case big-git-source)"
+file_row Cargo.lock >"$f/files.jsonl"
+{
+    crate serde 1.0.1
+    big_crates
+} >"$f/base123/Cargo.lock"
+{
+    crate serde 1.0.2 "git+https://example.test/serde"
+    big_crates
+} >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a git source ahead of a large lock"
+assert_exempt "$f" pending "a git source ahead of a large lock"
+
+npm_lock() { jq -n --arg host "$1" --argjson extra "${2:-false}" '{packages: ({"": {}, "node_modules/a": {version: "1.0.1", resolved: "\($host)/a/-/a-1.0.1.tgz"}}
+    + ([range(2000)] | map({key: "node_modules/f\(.)", value: {version: "1.0.0", resolved: "https://registry.npmjs.org/f/-/f-1.0.0.tgz"}}) | from_entries)
+    + (if $extra then {"node_modules/new": {version: "1.0.0", resolved: "https://registry.npmjs.org/new/-/new-1.0.0.tgz"}} else {} end))}'; }
+f="$(exempt_case npm-host)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+npm_lock https://registry.npmjs.org >"$f/base123/site/package-lock.json"
+npm_lock https://evil.example.test >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "a package host ahead of a large lock"
+assert_exempt "$f" pending "a package host ahead of a large lock"
+
+f="$(exempt_case npm-new-package)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+npm_lock https://registry.npmjs.org >"$f/base123/site/package-lock.json"
+npm_lock https://registry.npmjs.org true >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "a package new to the npm lock"
+assert_exempt "$f" pending "a package new to the npm lock"
+
+f="$(exempt_case npm-unreadable)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+npm_lock https://registry.npmjs.org >"$f/base123/site/package-lock.json"
+echo '{"lockfileVersion": 1, "dependencies": {}}' >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "an npm lock with no packages map"
+assert_exempt "$f" pending "an npm lock with no packages map"
+
+f="$(exempt_case cargo-unreadable)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+echo 'not a lock' >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "an unreadable Cargo.lock"
+assert_exempt "$f" pending "an unreadable Cargo.lock"
+
+f="$(exempt_case newline-name)"
+file_row $'Cargo.toml\n' >"$f/files.jsonl"
+run_exempt "$f" head123 "a manifest name with a trailing newline"
+assert_exempt "$f" pending "a manifest name with a trailing newline"

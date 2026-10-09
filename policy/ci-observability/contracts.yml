@@ -223,6 +223,7 @@
   assert: |
     (.jobs.exempt.if // "" | gsub("\r?\n[ \t]*"; " ")) as $if
     | all(["github.event_name == 'pull_request_target'",
+           "contains(fromJSON('[\"opened\", \"synchronize\"]'), github.event.action)",
            "github.event.pull_request.user.login == 'dependabot[bot]'",
            "github.event.pull_request.head.repo.full_name == github.repository",
            "github.event.pull_request.base.ref == github.event.repository.default_branch"][];
@@ -234,6 +235,20 @@
     - .jobs.exempt.if |= sub(" &&\n?[ \t]*github.event.pull_request.head.repo.full_name == github.repository"; "")
     - .jobs.exempt.if += " || github.event_name == 'issue_comment'"
     - .jobs.exempt.permissions["pull-requests"] = "write"
+    - .jobs.exempt.if |= sub("contains\\(fromJSON\\('\\[\"opened\", \"synchronize\"\\]'\\), github.event.action\\) &&"; "")
+
+- id: review-runs-on-edited-only-for-a-new-base
+  file: .github/workflows/claude-review.yml
+  why: >-
+    `edited` fires on every title and body edit; a review arm without the
+    base-change clause starts two billed reviews per edit, and each cancels an
+    in-flight one in its concurrency group.
+  assert: |
+    (.on.pull_request_target.types | index("edited")) == null
+    or ((.jobs.review.if // "") | gsub("\r?\n[ \t]*"; " ")
+        | contains("github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base) &&"))
+  break:
+    - .jobs.review.if |= sub(" *\\(github.event.action != 'edited' \\|\\| github.event.changes.base\\) &&"; "")
 
 - id: exemption-covers-every-lens
   file: .github/workflows/claude-review.yml

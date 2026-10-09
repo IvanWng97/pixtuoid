@@ -57,7 +57,7 @@ jobs:
   exempt:
     if: >
       github.event_name == 'pull_request_target' &&
-      github.event.action != 'edited' &&
+      contains(fromJSON('["opened", "synchronize"]'), github.event.action) &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.base.ref == github.event.repository.default_branch
@@ -100,7 +100,8 @@ jobs:
             jq -se 'length > 0 and all(.[]; . == {author: "dependabot[bot]", committer: "web-flow", verified: true})' \
             > /dev/null || refuse "a commit Dependabot did not sign"
           # Every ecosystem .github/dependabot.yml updates, and nothing else.
-          allow='^(Cargo\.(lock|toml)|crates/[^/]+/Cargo\.toml|requirements-dev\.txt|(site|integrations/raycast)/package(-lock)?\.json|\.github/(workflows/[^/]+|actions/[^/]+/action)\.ya?ml)$'
+          # \A and \z: jq's `$` also matches before a trailing newline.
+          allow='\A(Cargo\.(lock|toml)|crates/[^/]+/Cargo\.toml|requirements-dev\.txt|(site|integrations/raycast)/package(-lock)?\.json|\.github/(workflows/[^/]+|actions/[^/]+/action)\.ya?ml)\z'
           files="$RUNNER_TEMP/files.jsonl"
           gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
             --jq '.[] | {filename, status, patch}' > "$files"
@@ -125,30 +126,34 @@ jobs:
             "$files" > /dev/null || refuse "a manifest edit beyond a version"
 
           base="$(gh api "repos/${REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq .merge_base_commit.sha)"
-          at() { gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/$1?ref=$2"; }
-          # A bump may move versions, never bring in a name the base lacked.
-          new_names() { comm -13 <(sort -u <<< "$1") <(sort -u <<< "$2"); }
-          npm_names() { jq -r '.packages | keys[] | select(. != "") | sub("^.*node_modules/"; "")'; }
-          npm_scripts() { jq -r '.packages | to_entries[] | select(.value.hasInstallScript) | .key | sub("^.*node_modules/"; "")'; }
+          locks="$RUNNER_TEMP/locks"
+          mkdir -p "$locks"
+          # Each verdict reads whole files, never a `grep -q` pipe: under
+          # pipefail its early exit SIGPIPEs the writer, and a negation would
+          # turn that into a pass. A lock that doesn't parse refuses.
           while IFS= read -r lock; do
-            before="$(at "$lock" "$base")"
-            after="$(at "$lock" "$HEAD_SHA")"
+            gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/${lock}?ref=${base}" > "$locks/before"
+            gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/${lock}?ref=${HEAD_SHA}" > "$locks/after"
             case "$lock" in
               Cargo.lock)
-                [[ -z "$(new_names "$(grep '^name = ' <<< "$before")" "$(grep '^name = ' <<< "$after")")" ]] ||
+                if ! { grep -qx '\[\[package\]\]' "$locks/before" && grep -qx '\[\[package\]\]' "$locks/after"; }; then
+                  refuse "an unreadable Cargo.lock"
+                fi
+                # A bump may move versions, never bring in a name the base lacked.
+                [[ -z "$(comm -13 <(grep '^name = ' "$locks/before" | sort -u) <(grep '^name = ' "$locks/after" | sort -u))" ]] ||
                   refuse "a crate new to Cargo.lock"
-                ! grep '^source = ' <<< "$after" |
-                  grep -qvxF 'source = "registry+https://github.com/rust-lang/crates.io-index"' ||
+                [[ -z "$(grep '^source = ' "$locks/after" | grep -vxF 'source = "registry+https://github.com/rust-lang/crates.io-index"' || true)" ]] ||
                   refuse "a crate source other than crates.io"
                 ;;
               */package-lock.json)
-                [[ -z "$(new_names "$(npm_names <<< "$before")" "$(npm_names <<< "$after")")" ]] ||
-                  refuse "a package new to $lock"
-                [[ -z "$(new_names "$(npm_scripts <<< "$before")" "$(npm_scripts <<< "$after")")" ]] ||
-                  refuse "a new install script in $lock"
-                ! jq -r '.packages[] | .resolved // empty' <<< "$after" |
-                  grep -qv '^https://registry.npmjs.org/' ||
-                  refuse "a package host other than npmjs.org"
+                jq -en --slurpfile before "$locks/before" --slurpfile after "$locks/after" '
+                  def pkgs: .packages | if type == "object" then . else error("no packages map") end;
+                  def named(f): [pkgs | to_entries[] | select(.key != "") | select(.value | f) | .key | sub("^.*node_modules/"; "")] | unique;
+                  ($before[0] | named(true)) as $had | ($before[0] | named(.hasInstallScript)) as $scripted
+                  | ($after[0] | named(true) - $had) == []
+                    and ($after[0] | named(.hasInstallScript) - $scripted) == []
+                    and ([$after[0] | pkgs[] | .resolved // empty | select(startswith("https://registry.npmjs.org/") | not)] == [])
+                ' > /dev/null || refuse "a package, install script or host new to $lock"
                 ;;
             esac
           done < <(jq -r 'select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$")) | .filename' "$files")
