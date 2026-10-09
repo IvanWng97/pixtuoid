@@ -35,9 +35,9 @@ CREATOR_URL = "https://app.buymeacoffee.com/api/creators/slug/{slug}"
 AGENT, CAT = "walking_coffee", "cat_sit"
 TITLE = "Buy me a coffee"
 # One button pixel; the sprites are drawn a size up so the coworker reads at a glance.
-PX, SPRITE_PX = 4, 5
+PX, SPRITE_PX = 3, 4
 TITLE_PX, LABEL_PX = 3, 2
-WIDTH, HEIGHT = 404, 104
+WIDTH, HEIGHT = 368, 87
 CARPET_H = 4 * PX
 FLOOR_Y = HEIGHT - PX - CARPET_H
 # How far a sprite's feet sink into the carpet.
@@ -269,6 +269,10 @@ def test_text_never_reaches_the_cat() -> None:
     lay = layout(pack)
     for count in (0, 1, 999, 1500, 123_456, 999_999, 10**6):
         check(lay.text_x + count_line_width(count) < lay.cat_x, f"count {count}: the label runs into the cat")
+
+
+def test_label_clears_the_carpet() -> None:
+    check(LABEL_Y + GLYPH_H * LABEL_PX < FLOOR_Y - PX, "the count line's descenders must clear the carpet's trim")
 
 
 def test_write_buttons_emits_both_themes() -> None:
