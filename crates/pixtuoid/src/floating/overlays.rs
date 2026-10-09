@@ -23,8 +23,8 @@ pub struct Overlays {
 }
 
 /// `frames`' open panels over a window `cols`×`rows` screen cells big, as
-/// the TUI paints them over its terminal, read back as a grid; `None` when
-/// none is open.
+/// the TUI paints them over its terminal with the window's zoom keys in the
+/// help, read back as a grid; `None` when none is open.
 pub(crate) fn panels_grid(
     frames: &crate::panels::ui_state::RenderFrames,
     (cols, rows): (u16, u16),

@@ -381,7 +381,7 @@ fn help_overlay_renders_during_floor_transition() {
     assert!(r.transition().is_some());
     let text = frame_text(r.frame_buffer());
     assert!(
-        text.contains("theme") || text.contains("Keyboard") || text.contains("help"),
+        text.contains("Keyboard"),
         "help overlay must paint over a floor transition"
     );
 }

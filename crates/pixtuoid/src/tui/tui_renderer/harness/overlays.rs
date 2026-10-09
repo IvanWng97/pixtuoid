@@ -185,7 +185,7 @@ fn help_overlay_renders_shortcuts() {
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
-        text.contains("theme") || text.contains("Keyboard") || text.contains("help"),
+        text.contains("Keyboard"),
         "help overlay should list shortcuts; frame was:\n{text}"
     );
 }

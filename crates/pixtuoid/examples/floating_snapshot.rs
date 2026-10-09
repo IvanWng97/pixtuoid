@@ -8,7 +8,7 @@
 //! `--drag` presses at the first window point and carries what it lifts to the second,
 //! drawing it in hand; with `--drop-after` it releases there and draws `MS` later.
 //! `--panel` opens that panel over the office, as its key does; `--zoom` zooms
-//! it N density steps from the automatic scale, as the zoom keys do.
+//! the office N density steps from the automatic scale, as the zoom keys do.
 //! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
 //! `... -- /tmp/f.png 960x640`.
 

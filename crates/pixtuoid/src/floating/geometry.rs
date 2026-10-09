@@ -618,9 +618,8 @@ mod tests {
         );
     }
 
-    /// A step moves from the zoom in effect, so a zoom past the largest that
-    /// lays out comes back down at the first step out, and the keys go one
-    /// step each way or back to none.
+    /// [`Zoom::stepped`] from past the largest zoom that lays out, and each
+    /// key's one step or reset.
     #[test]
     fn a_step_starts_from_the_zoom_in_effect() {
         let size = PhysicalSize::new(3840, 2160);

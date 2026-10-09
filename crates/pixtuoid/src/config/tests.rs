@@ -871,6 +871,12 @@ fn floating_config_defaults_and_explicit_roundtrip() {
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height, f.position), (480, 300, Some((10, 20))));
     assert!((f.opacity - 0.8).abs() < 1e-6);
+    let cfg: AppConfig = toml::from_str("[floating]\nx = 10\n").unwrap();
+    assert_eq!(
+        resolve_floating(&cfg).position,
+        None,
+        "half a position places nothing"
+    );
     assert!(
         !toml::to_string(&AppConfig::default())
             .unwrap()

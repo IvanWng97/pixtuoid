@@ -347,19 +347,16 @@ pub(crate) fn save_floating(path: &Path, save: &FloatingSave) -> Result<()> {
     update_config(path, |doc| {
         doc["floating"]["width"] = toml_edit::value(i64::from(width));
         doc["floating"]["height"] = toml_edit::value(i64::from(height));
-        // No zoom is no key, as an unset one reads.
-        if zoom == Zoom::default() {
-            if let Some(t) = doc["floating"].as_table_like_mut() {
-                t.remove("zoom");
-            }
-        } else {
-            doc["floating"]["zoom"] = toml_edit::value(i64::from(zoom.steps()));
-        }
         // Set-or-CLEAR x/y: a `None` means the OS couldn't report the position
         // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords
         // would restore a stale/offscreen spot next launch, so drop the keys and
-        // let the OS place the window.
-        for (key, val) in [("x", position.map(|p| p.0)), ("y", position.map(|p| p.1))] {
+        // let the OS place the window. No zoom is no key, as an unset one reads.
+        let zoom = (zoom != Zoom::default()).then(|| i32::from(zoom.steps()));
+        for (key, val) in [
+            ("x", position.map(|p| p.0)),
+            ("y", position.map(|p| p.1)),
+            ("zoom", zoom),
+        ] {
             match val {
                 Some(v) => doc["floating"][key] = toml_edit::value(i64::from(v)),
                 // `as_table_like_mut`, not `as_table_mut`: `floating` serializes as

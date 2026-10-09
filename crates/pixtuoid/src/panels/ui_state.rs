@@ -37,7 +37,7 @@ impl RenderFrames {
     /// no animation of its own) and `host_keys` after the help's shared rows.
     /// The one place a frame's panels become an
     /// [`OverlayFrame`](super::OverlayFrame).
-    pub(crate) fn overlays(
+    pub fn overlays(
         &self,
         popup_scale: f32,
         host_keys: &'static [super::widgets::Shortcut],
@@ -56,7 +56,7 @@ impl RenderFrames {
 
 /// The version popup's scale for a painter that draws it whole, with no
 /// animation of its own.
-pub(crate) fn popup_whole(open: bool) -> f32 {
+pub fn popup_whole(open: bool) -> f32 {
     if open { 1.0 } else { 0.0 }
 }
 

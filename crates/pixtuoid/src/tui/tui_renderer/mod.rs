@@ -118,6 +118,12 @@ impl PopupState {
 }
 
 impl Chrome {
+    /// The panels open over a frame at `popup_scale`; the terminal's help
+    /// lists no shortcuts of its own.
+    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
+        self.frames.overlays(popup_scale, &[])
+    }
+
     /// Floor `floor` of `session`'s office in `scene`, whose projection is
     /// `floor_scene`: its inputs as [`OfficeSession::floor_world`] gives
     /// every painter's floors.
@@ -641,7 +647,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.footer(&self.session, scene),
         );
         let popup_scale = self.version_popup_scale(now);
-        let overlays = self.chrome.frames.overlays(popup_scale, &[]);
+        let overlays = self.chrome.overlays(popup_scale);
         let theme = self.chrome.theme;
         let flashes = self.session.flashes();
         let Some(slide) = self.session.slide_mut() else {
@@ -679,7 +685,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.terminal,
             &footer,
             self.chrome.theme,
-            &self.chrome.frames.overlays(popup_scale, &[]),
+            &self.chrome.overlays(popup_scale),
             now,
         );
         self.session.drew_no_office();
@@ -877,7 +883,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.frames.overlays(popup_scale, &[]);
+        let overlays = self.chrome.overlays(popup_scale);
         let frame = crate::tui::renderer::ClassicFrame {
             footer: &footer,
             overlays: &overlays,
@@ -942,7 +948,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.frames.overlays(popup_scale, &[]);
+        let overlays = self.chrome.overlays(popup_scale);
         /// What a frame sets over its image: the world's text, with the agent
         /// the pointer is on, and the tooltip by the pointer.
         struct Over<'w> {
