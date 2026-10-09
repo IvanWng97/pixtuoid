@@ -214,6 +214,54 @@
     - (.jobs[] | select(has("uses")) | .if) += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
     - .jobs.second = (.jobs[] | select(has("uses")))
 
+- id: exemption-needs-a-dependabot-pr
+  file: .github/workflows/claude-review.yml
+  why: >-
+    exempt posts the statuses main requires in place of a review, so an `if:`
+    admitting any PR but Dependabot's own from this repository, or a scope past
+    reading and posting a status, lets that PR merge unreviewed.
+  assert: |
+    (.jobs.exempt.if // "" | gsub("\r?\n[ \t]*"; " ")) as $if
+    | all(["github.event_name == 'pull_request_target'",
+           "contains(fromJSON('[\"opened\", \"synchronize\"]'), github.event.action)",
+           "github.event.pull_request.user.login == 'dependabot[bot]'",
+           "github.event.pull_request.head.repo.full_name == github.repository",
+           "github.event.pull_request.base.ref == github.event.repository.default_branch"][];
+          . as $arm | $if | contains($arm))
+      and ($if | contains("||") | not)
+      and .jobs.exempt.permissions == {"contents": "read", "pull-requests": "read", "statuses": "write"}
+  break:
+    - .jobs.exempt.if |= sub("github.event.pull_request.user.login == 'dependabot\\[bot\\]' &&"; "")
+    - .jobs.exempt.if |= sub(" &&\n?[ \t]*github.event.pull_request.head.repo.full_name == github.repository"; "")
+    - .jobs.exempt.if += " || github.event_name == 'issue_comment'"
+    - .jobs.exempt.permissions["pull-requests"] = "write"
+    - .jobs.exempt.if |= sub("contains\\(fromJSON\\('\\[\"opened\", \"synchronize\"\\]'\\), github.event.action\\) &&"; "")
+
+- id: review-runs-on-edited-only-for-a-new-base
+  file: .github/workflows/claude-review.yml
+  why: >-
+    `edited` fires on every title and body edit; a review arm without the
+    base-change clause starts two billed reviews per edit, and each cancels an
+    in-flight one in its concurrency group.
+  assert: |
+    (.on.pull_request_target.types | index("edited")) == null
+    or ((.jobs.review.if // "") | gsub("\r?\n[ \t]*"; " ")
+        | contains("github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base) &&"))
+  break:
+    - .jobs.review.if |= sub(" *\\(github.event.action != 'edited' \\|\\| github.event.changes.base\\) &&"; "")
+
+- id: exemption-covers-every-lens
+  file: .github/workflows/claude-review.yml
+  why: >-
+    Main requires one status per review lens; an exemption short a lens leaves
+    every Dependabot PR waiting on it, and one past them posts a context no
+    review would.
+  assert: |
+    .jobs.exempt.strategy.matrix.lens == .jobs.review.strategy.matrix.lens
+  break:
+    - .jobs.exempt.strategy.matrix.lens |= .[:1]
+    - .jobs.review.strategy.matrix.lens += ["security"]
+
 # ── claude.yml: the only Claude job with contents:write
 
 - id: claude-review-events-need-a-same-repo-head

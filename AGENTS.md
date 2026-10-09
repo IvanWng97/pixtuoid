@@ -76,17 +76,17 @@ Non-trivial work runs as an arc — pick → grill the design → design gate �
 spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `local-review`
-skill runs its local rows. Merging is `@mergifyio queue`; a release PR merges
-by hand.
+skill runs its local rows. Merging is `@mergifyio queue`, which a session
+comments itself once that gate holds; a release PR merges by hand.
 
 **At most 6 open PRs across the sessions** (bots' and outside contributors'
 aside), the owner's cap: the runners take
 [20 jobs at once](https://docs.github.com/en/actions/reference/limits) and one
 light-tier push needs more, so each open PR past the first lengthens the wait
 of every push. A PR
-opens, never as a draft, once its local rows are run; the pre-push hook runs
-preflight and CI the rest, so neither is rerun by hand. The bots review it from
-there. Until a slot frees, the branch stays pushed
+opens, never as a draft, once its branch is ready to merge; its local rows run
+on it, since their records and dispositions live there. The pre-push hook runs
+preflight and CI the rest, so neither is rerun by hand. Until a slot frees, the branch stays pushed
 with no PR. A PR
 that stops being ready closes with its branch kept and never force-pushed,
 since a force-pushed branch can't reopen; a stacked one is retargeted to
