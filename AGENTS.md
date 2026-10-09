@@ -54,6 +54,7 @@ just build [--release] · just test                   # the one test runner (nex
 just test -p <crate> <filter>                        # fast loop
 just preflight [full]                                # pre-push gate: lint → clippy; `full` adds hack → test (CI's Rust recipes)
 cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
+cargo run --profile release-local --example snapshot -- /tmp/snap.png   # the same, rebuilt faster; scripts still read target/release
 ```
 
 - clippy doesn't warm test's build ([why](docs/CONTRIBUTING.md#build--test)) — iterate with one of them. Never pipe preflight through `tail`/`head` (exit code eaten).
