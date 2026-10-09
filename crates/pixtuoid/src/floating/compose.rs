@@ -711,7 +711,7 @@ mod tests {
     #[test]
     fn layers_composite_to_the_flat_paint() {
         use super::super::overlays::{OverlayLayers, Overlays, footer_budget, panel_preview};
-        use super::super::overlays::{paint_footer, paint_panels, paint_tooltip};
+        use super::super::overlays::{PlacedTip, paint_footer, paint_panels, paint_tooltip};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let pack = crate::test_flash::pack_arc();
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
@@ -771,13 +771,14 @@ mod tests {
                     );
                     paint_footer(&mut s, &next.footer, (theme, &pack), at, window);
                     let c = (f64::from(cursor.0), f64::from(cursor.1));
-                    paint_tooltip(&mut s, &tip, c, (theme, &pack), cell, window);
+                    let placed = PlacedTip::new(&tip, c, theme, cell, window);
+                    paint_tooltip(&mut s, &placed, (theme, &pack), cell);
                     if let Some(p) = &next.panels {
                         paint_panels(&mut s, p, (theme, &pack), cell);
                     }
                 }
                 let mut overlays = OverlayLayers::default();
-                overlays.update(&next, at, (theme, &pack));
+                overlays.update(next, at, (theme, &pack));
                 let mut layered = vec![0u32; w * h];
                 composite(
                     &composition(&office, Change::All, at, window, &overlays),

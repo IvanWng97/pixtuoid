@@ -357,6 +357,20 @@ impl Painter {
     }
 }
 
+/// The surface format of `offered` the window draws in: unencoded, as the
+/// CPU compositor's bytes are (an sRGB format would re-encode every texel),
+/// and 8-bit before any other, which a float format would read as linear.
+fn surface_format(offered: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
+    const EIGHT_BIT: [wgpu::TextureFormat; 2] = [
+        wgpu::TextureFormat::Bgra8Unorm,
+        wgpu::TextureFormat::Rgba8Unorm,
+    ];
+    EIGHT_BIT
+        .into_iter()
+        .find(|f| offered.contains(f))
+        .or_else(|| offered.iter().copied().find(|f| !f.is_srgb()))
+}
+
 /// A window's size as a surface may be configured: inside the device's
 /// texture limit, and never zero.
 fn surface_size((w, h): (u32, u32), max: u32) -> (u32, u32) {
@@ -398,7 +412,7 @@ pub(super) struct Gpu {
 
 impl Gpu {
     /// `window`'s surface and painter. `on_fatal` hears a validation error or
-    /// a lost device, which wgpu reports off the main thread.
+    /// a lost device, from inside the wgpu call that raised it.
     pub(super) fn for_window(
         window: std::sync::Arc<winit::window::Window>,
         display: winit::event_loop::OwnedDisplayHandle,
@@ -419,13 +433,7 @@ impl Gpu {
             on_fatal(format!("{reason:?}: {message}"));
         });
         let caps = surface.get_capabilities(&adapter);
-        // Unencoded, as the CPU compositor's bytes are: an sRGB format would
-        // re-encode every texel.
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
+        let format = surface_format(&caps.formats)
             .context("the window's surface offers no unencoded format")?;
         let size = window.inner_size();
         let (width, height) = surface_size(
@@ -488,6 +496,8 @@ impl Gpu {
                 self.window.request_redraw();
                 return false;
             }
+            // wgpu has already handed the error to `on_uncaptured_error`, which
+            // stops the window.
             wgpu::CurrentSurfaceTexture::Validation => return false,
         };
         self.painter.upload(c, !in_sync);
@@ -668,6 +678,65 @@ mod tests {
             &cpu(&partial),
             "partial",
         );
+        // Out of sync, the rects measure against a frame the screen never
+        // showed: the whole office uploads, not only the pixel they name.
+        let mut unseen = changed.clone();
+        unseen.put(0, 0, px(5, 6, 7));
+        unseen.put(2, 1, px(8, 9, 10));
+        let stale = frame(&unseen, Change::Rects(&rect));
+        assert_close(
+            &drawn(&mut painter, &stale, true),
+            &cpu(&stale),
+            "out of sync",
+        );
+    }
+
+    /// Every layer the window composes draws in paint order: the footer, a
+    /// tooltip over it, and the panels over both.
+    #[test]
+    fn gpu_draws_every_layer_in_paint_order() {
+        let mut painter = painter();
+        let px = |r, g, b| Rgb { r, g, b };
+        let office = RgbBuffer::filled(4, 3, px(20, 40, 60));
+        let rgba = |x, y, w, h, c| {
+            let mut layer = RgbaLayer::new(PxRect { x, y, w, h });
+            for ly in y..y + h as i32 {
+                for lx in x..x + w as i32 {
+                    layer.set(lx, ly, c);
+                }
+            }
+            layer
+        };
+        let footer = rgba(0, 5, 8, 1, px(200, 0, 0));
+        let tip = rgba(2, 4, 3, 2, px(0, 200, 0));
+        let panels = rgba(3, 3, 2, 3, px(0, 0, 200));
+        fn over(id: LayerId, l: &RgbaLayer) -> Layer<'_> {
+            Layer {
+                id,
+                pixels: LayerPixels::Rgba(l),
+                origin: l.origin(),
+                scale: 1,
+                extent: l.size(),
+                change: Change::All,
+            }
+        }
+        let c = Composition {
+            window: (8, 6),
+            layers: vec![
+                Layer {
+                    id: LayerId::Office,
+                    pixels: LayerPixels::Opaque(&office),
+                    origin: (0, 0),
+                    scale: 2,
+                    extent: (8, 5),
+                    change: Change::All,
+                },
+                over(LayerId::Footer, &footer),
+                over(LayerId::Tooltip, &tip),
+                over(LayerId::Panels, &panels),
+            ],
+        };
+        assert_close(&drawn(&mut painter, &c, true), &cpu(&c), "four layers");
     }
 
     /// The surface never asks for more than the device's texture limit, nor
@@ -677,5 +746,23 @@ mod tests {
         assert_eq!(surface_size((3840, 2160), 8192), (3840, 2160));
         assert_eq!(surface_size((20000, 10), 8192), (8192, 10));
         assert_eq!(surface_size((0, 0), 8192), (1, 1));
+    }
+
+    /// The surface takes an 8-bit unencoded format, as the CPU compositor's
+    /// bytes are, before any other unencoded one: a float surface would read
+    /// them as linear and wash the colours out.
+    #[test]
+    fn the_surface_prefers_an_8_bit_unencoded_format() {
+        use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb, Rgba8Unorm, Rgba16Float};
+        assert_eq!(
+            surface_format(&[Rgba16Float, Bgra8UnormSrgb, Bgra8Unorm]),
+            Some(Bgra8Unorm)
+        );
+        assert_eq!(surface_format(&[Rgba16Float, Rgba8Unorm]), Some(Rgba8Unorm));
+        assert_eq!(
+            surface_format(&[Bgra8UnormSrgb, Rgba16Float]),
+            Some(Rgba16Float)
+        );
+        assert_eq!(surface_format(&[Bgra8UnormSrgb]), None);
     }
 }

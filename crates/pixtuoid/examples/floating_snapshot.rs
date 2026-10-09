@@ -306,7 +306,7 @@ fn main() -> Result<()> {
         },
     };
     let mut overlays = pixtuoid::dev::OverlayLayers::default();
-    overlays.update(&next, at, (theme, &pack));
+    overlays.update(next, at, (theme, &pack));
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
     pixtuoid::dev::composite(

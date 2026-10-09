@@ -106,10 +106,12 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
             drift,
         },
     );
-    event_loop
-        .run_app(&mut app)
-        .context("running the floating window event loop")?;
-    app.into_failure().map_or(Ok(()), Err)
+    let ran = event_loop.run_app(&mut app);
+    // The window's own failure is the cause; a loop error after it is not.
+    if let Some(failure) = app.into_failure() {
+        return Err(failure);
+    }
+    ran.context("running the floating window event loop")
 }
 
 /// Everything the pipeline needs, held by [`FloatingApp`] until `resumed` can

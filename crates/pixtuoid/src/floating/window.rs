@@ -33,7 +33,7 @@ use pixtuoid_scene::theme::Theme;
 #[derive(Debug, Clone)]
 pub(crate) enum FloatingEvent {
     SceneChanged,
-    /// wgpu reported a validation error or a lost device, off the main thread.
+    /// wgpu reported a validation error or a lost device.
     GpuFailed(String),
 }
 
@@ -89,11 +89,34 @@ pub(crate) struct FloatingApp {
     overlays: super::overlays::OverlayLayers,
     window: Option<Arc<Window>>,
     gpu: Option<super::gpu::Gpu>,
-    /// Where the GPU's off-thread failures reach the loop: `boot` is taken
-    /// by `resumed`, the proxy outlives it.
+    /// How a GPU failure reaches the loop: wgpu reports it from inside its
+    /// own call, to a `Send + Sync + 'static` handler that cannot reach the
+    /// app. `boot` is taken by `resumed`; the proxy outlives it.
     proxy: winit::event_loop::EventLoopProxy<FloatingEvent>,
     /// Why the window stopped, for [`super::run`] to return.
-    failure: Option<anyhow::Error>,
+    failure: Stop,
+}
+
+/// Why the window stopped: its first failure. wgpu reports each error as it
+/// happens and `exit` stops the loop only after the event, so a follow-on
+/// error (an invalid command buffer after the encoder error that caused it)
+/// arrives too.
+#[derive(Debug, Default)]
+struct Stop(Option<anyhow::Error>);
+
+impl Stop {
+    /// Hold `e` unless a failure is held already; whether it is the first.
+    fn fail(&mut self, e: anyhow::Error) -> bool {
+        if self.0.is_some() {
+            return false;
+        }
+        self.0 = Some(e);
+        true
+    }
+
+    fn into_inner(self) -> Option<anyhow::Error> {
+        self.0
+    }
 }
 
 /// What the run keeps beside the office: the config it persists to, its
@@ -171,14 +194,14 @@ impl FloatingApp {
             window: None,
             gpu: None,
             proxy,
-            failure: None,
+            failure: Stop::default(),
         }
     }
 
     /// Why the window stopped, when it failed: its creation, its GPU's, or a
     /// GPU failure reported while it ran.
     pub(crate) fn into_failure(self) -> Option<anyhow::Error> {
-        self.failure
+        self.failure.into_inner()
     }
 
     /// Persist the current window geometry into `[floating]` (best-effort — a save error
@@ -458,7 +481,7 @@ impl FloatingApp {
                 )
             },
         };
-        self.overlays.update(&next, at, (self.theme, &*self.pack));
+        self.overlays.update(next, at, (self.theme, &*self.pack));
         let Some(office) = self.renderer.buf() else {
             return;
         };
@@ -554,7 +577,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
-                self.failure = Some(anyhow::Error::new(e).context("creating the floating window"));
+                self.failure
+                    .fail(anyhow::Error::new(e).context("creating the floating window"));
                 event_loop.exit();
                 return;
             }
@@ -569,7 +593,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         ) {
             Ok(gpu) => gpu,
             Err(e) => {
-                self.failure = Some(e.context(
+                self.failure.fail(e.context(
                     "starting the floating window's GPU (`pixtuoid run` shows the office in the terminal)",
                 ));
                 event_loop.exit();
@@ -600,10 +624,12 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             FloatingEvent::SceneChanged => self.request_redraw(),
             FloatingEvent::GpuFailed(message) => {
                 tracing::error!(error = ?message, "pixtuoid floating: the GPU failed");
-                self.failure =
-                    Some(anyhow::anyhow!(message).context("the floating window's GPU failed"));
-                self.jank.finish();
-                event_loop.exit();
+                let failure = anyhow::anyhow!(message).context("the floating window's GPU failed");
+                if self.failure.fail(failure) {
+                    self.persist_geometry();
+                    self.jank.finish();
+                    event_loop.exit();
+                }
             }
         }
     }
@@ -705,5 +731,25 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             self.jank.due_at(due);
             self.request_redraw();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A follow-on failure, as an invalid command buffer after the encoder
+    /// error that caused it, never replaces the first, and only the first
+    /// stops the window.
+    #[test]
+    fn a_follow_on_failure_keeps_the_first() {
+        let mut stop = Stop::default();
+        assert!(stop.fail(anyhow::anyhow!("root cause")), "the first stops");
+        assert!(
+            !stop.fail(anyhow::anyhow!("follow-on")),
+            "a second does not"
+        );
+        let kept = stop.into_inner().expect("a failure");
+        assert_eq!(kept.to_string(), "root cause");
     }
 }

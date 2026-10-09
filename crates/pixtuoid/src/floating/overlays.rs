@@ -13,7 +13,7 @@ use super::geometry::{FOOTER_MARGIN_PX, footer_band};
 
 /// Everything a presented frame shows beside the office: the window's size,
 /// its footer, and the tooltip by the pointer.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Overlays {
     pub window: (u32, u32),
     pub footer: FooterModel,
@@ -77,80 +77,85 @@ pub(crate) fn modal_press(
     })
 }
 
-/// Where `tip`'s card opens by the pointer at `cursor` in a `window`-px
-/// window of screen cells `cell`: its top-left in window px, and the card.
-fn tooltip_card(
-    tip: &pixtuoid_scene::tooltip::Tooltip,
-    cursor: (f64, f64),
-    theme: &Theme,
-    cell: CellPx,
-    (w, h): (u32, u32),
-) -> ((i32, i32), CellGrid) {
-    let card = tip.card(theme);
-    let cells = |px: u32, size: u16| u16::try_from(px / u32::from(size.max(1))).unwrap_or(u16::MAX);
-    let area = CellRect {
-        x: 0,
-        y: 0,
-        w: cells(w, cell.w),
-        h: cells(h, cell.h),
-    };
-    let pointer = (
-        cells(cursor.0.max(0.0) as u32, cell.w),
-        cells(cursor.1.max(0.0) as u32, cell.h),
-    );
-    let placed = pixtuoid_scene::tooltip::place(card.rect(), pointer, area, tip.anchor);
-    let at = (
-        i32::from(placed.x) * i32::from(cell.w),
-        i32::from(placed.y) * i32::from(cell.h),
-    );
-    (at, card)
+/// A tooltip's card where it opens: its top-left in window px, and the card.
+#[derive(Debug)]
+pub(crate) struct PlacedTip {
+    at: (i32, i32),
+    card: CellGrid,
 }
 
-/// What [`paint_tooltip`] draws over: the card and its shadow, a cell right
-/// and half a cell down ([`paint_grid`]), inside the window.
-pub(crate) fn tooltip_rect(
-    tip: &pixtuoid_scene::tooltip::Tooltip,
-    cursor: (f64, f64),
-    theme: &Theme,
-    cell: CellPx,
-    window: (u32, u32),
-) -> PxRect {
-    let ((x, y), card) = tooltip_card(tip, cursor, theme, cell, window);
-    let (cw, ch) = (u32::from(cell.w), u32::from(cell.h));
-    PxRect {
-        x,
-        y,
-        w: u32::from(card.width()) * cw + cw,
-        h: u32::from(card.height()) * ch + ch / 2,
+impl PlacedTip {
+    /// `tip`'s shared [`card`](pixtuoid_scene::tooltip::Tooltip::card) where
+    /// [`place`](pixtuoid_scene::tooltip::place) opens it by the pointer at
+    /// `cursor` (physical px) in a `window`-px window of screen cells `cell`,
+    /// as the TUI places it in terminal cells.
+    pub(crate) fn new(
+        tip: &pixtuoid_scene::tooltip::Tooltip,
+        cursor: (f64, f64),
+        theme: &Theme,
+        cell: CellPx,
+        (w, h): (u32, u32),
+    ) -> Self {
+        let card = tip.card(theme);
+        let cells =
+            |px: u32, size: u16| u16::try_from(px / u32::from(size.max(1))).unwrap_or(u16::MAX);
+        let area = CellRect {
+            x: 0,
+            y: 0,
+            w: cells(w, cell.w),
+            h: cells(h, cell.h),
+        };
+        let pointer = (
+            cells(cursor.0.max(0.0) as u32, cell.w),
+            cells(cursor.1.max(0.0) as u32, cell.h),
+        );
+        let placed = pixtuoid_scene::tooltip::place(card.rect(), pointer, area, tip.anchor);
+        let at = (
+            i32::from(placed.x) * i32::from(cell.w),
+            i32::from(placed.y) * i32::from(cell.h),
+        );
+        Self { at, card }
     }
-    .within(window)
-    .unwrap_or(PxRect {
-        x: 0,
-        y: 0,
-        w: 0,
-        h: 0,
-    })
+
+    /// What [`paint_tooltip`] draws over: the card and its shadow, a cell
+    /// right and half a cell down ([`paint_grid`]), inside the window.
+    pub(crate) fn rect(&self, cell: CellPx, window: (u32, u32)) -> PxRect {
+        let (cw, ch) = (u32::from(cell.w), u32::from(cell.h));
+        PxRect {
+            x: self.at.0,
+            y: self.at.1,
+            w: u32::from(self.card.width()) * cw + cw,
+            h: u32::from(self.card.height()) * ch + ch / 2,
+        }
+        .within(window)
+        .unwrap_or(PxRect {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+        })
+    }
 }
 
-/// Paint `tip` by the pointer at `cursor` (physical px) in a `window`-px
-/// window: the shared [`card`](pixtuoid_scene::tooltip::Tooltip::card) where
-/// [`place`](pixtuoid_scene::tooltip::place) opens it, in screen cells of
-/// `cell`, as the TUI draws it in terminal cells.
+/// Paint `placed` in screen cells of `cell`, with its drop shadow.
 pub(crate) fn paint_tooltip(
     canvas: &mut impl Canvas,
-    tip: &pixtuoid_scene::tooltip::Tooltip,
-    cursor: (f64, f64),
+    placed: &PlacedTip,
     (theme, pack): (&Theme, &OfficeArt),
     cell: CellPx,
-    window: (u32, u32),
 ) {
-    let (at, card) = tooltip_card(tip, cursor, theme, cell, window);
     let ink = GridInk {
         text: theme.ui.tooltip_text,
         halo: None,
         shadow: Some(CARD_SHADOW),
     };
-    paint_grid(canvas, &card, (at, cell), (Face::Screen, pack), ink);
+    paint_grid(
+        canvas,
+        &placed.card,
+        (placed.at, cell),
+        (Face::Screen, pack),
+        ink,
+    );
 }
 
 /// The panel `name` (`help`, `dashboard`, `sources` or `theme`) open over
@@ -346,35 +351,37 @@ impl OverlayLayers {
     /// Bring the layers to `next` over a frame drawn at `at`.
     pub fn update(
         &mut self,
-        next: &Overlays,
+        next: Overlays,
         at: PixelFit,
         (theme, pack): (&'static Theme, &OfficeArt),
     ) {
-        let window = next.window;
+        let Overlays {
+            window,
+            footer,
+            tooltip,
+            panels,
+        } = next;
         let look = Look { theme, at, window };
         let cell = Face::chrome(at);
-        refresh(
-            &mut self.footer,
-            Some((next.footer.clone(), look)),
-            |(model, _)| {
-                let mut layer = RgbaLayer::new(footer_rect(at, window));
-                paint_footer(&mut layer, model, (theme, pack), at, window);
-                Some(layer)
-            },
-        );
+        refresh(&mut self.footer, Some((footer, look)), |(model, _)| {
+            let mut layer = RgbaLayer::new(footer_rect(at, window));
+            paint_footer(&mut layer, model, (theme, pack), at, window);
+            Some(layer)
+        });
         refresh(
             &mut self.tooltip,
-            next.tooltip.clone().map(|tip| (tip, look)),
+            tooltip.map(|tip| (tip, look)),
             |((tip, cursor), _)| {
                 let cursor = (f64::from(cursor.0), f64::from(cursor.1));
-                let mut layer = RgbaLayer::new(tooltip_rect(tip, cursor, theme, cell, window));
-                paint_tooltip(&mut layer, tip, cursor, (theme, pack), cell, window);
+                let placed = PlacedTip::new(tip, cursor, theme, cell, window);
+                let mut layer = RgbaLayer::new(placed.rect(cell, window));
+                paint_tooltip(&mut layer, &placed, (theme, pack), cell);
                 Some(layer)
             },
         );
         refresh(
             &mut self.panels,
-            next.panels.clone().map(|panels| (panels, look)),
+            panels.map(|panels| (panels, look)),
             |(panels, _)| {
                 let mut layer = RgbaLayer::new(panels_rect(panels, cell, window)?);
                 paint_panels(&mut layer, panels, (theme, pack), cell);
@@ -432,14 +439,9 @@ mod tests {
             let mut px = vec![0u32; w * h];
             let mut sb = XrgbSurface::new(&mut px, w, h).expect("sized");
             let look = (theme, &pack);
-            paint_tooltip(
-                &mut sb,
-                tip,
-                cursor,
-                look,
-                Face::Screen.cell(1),
-                (w as u32, h as u32),
-            );
+            let cell = Face::Screen.cell(1);
+            let placed = PlacedTip::new(tip, cursor, theme, cell, (w as u32, h as u32));
+            paint_tooltip(&mut sb, &placed, look, cell);
             let rows: Vec<usize> = (0..h)
                 .filter(|&y| px[y * w..(y + 1) * w].contains(&bg))
                 .collect();
@@ -627,16 +629,17 @@ mod tests {
         let cell = Face::chrome(at);
         let tip = pixtuoid_scene::tooltip::coffee();
         for cursor in [(100.0, 4.0), (630.0, 390.0), (0.0, 200.0)] {
-            let rect = tooltip_rect(&tip, cursor, theme, cell, window);
+            let placed = PlacedTip::new(&tip, cursor, theme, cell, window);
+            let rect = placed.rect(cell, window);
             let mut layer = RgbaLayer::new(rect);
-            paint_tooltip(&mut layer, &tip, cursor, (theme, &pack), cell, window);
+            paint_tooltip(&mut layer, &placed, (theme, &pack), cell);
             // The whole-window paint over a known ground: every pixel it
             // changed is inside the rect and set in the layer.
             const GROUND: u32 = 0x0012_3456;
             let (w, h) = (window.0 as usize, window.1 as usize);
             let mut px = vec![GROUND; w * h];
             let mut flat = XrgbSurface::new(&mut px, w, h).expect("sized");
-            paint_tooltip(&mut flat, &tip, cursor, (theme, &pack), cell, window);
+            paint_tooltip(&mut flat, &placed, (theme, &pack), cell);
             let mut changed = 0;
             for (i, &p) in px.iter().enumerate() {
                 let (x, y) = ((i % w) as i32, (i / w) as i32);
@@ -685,11 +688,11 @@ mod tests {
                 .map(|l| l.change == Change::All)
                 .collect::<Vec<_>>()
         };
-        layers.update(&next, at, (normal, &pack));
+        layers.update(next.clone(), at, (normal, &pack));
         assert_eq!(fresh(&layers), [true], "the first frame paints the footer");
-        layers.update(&next, at, (normal, &pack));
+        layers.update(next.clone(), at, (normal, &pack));
         assert_eq!(fresh(&layers), [false], "nothing changed");
-        layers.update(&next, at, (other, &pack));
+        layers.update(next, at, (other, &pack));
         assert_eq!(fresh(&layers), [true], "the theme changed");
     }
 
