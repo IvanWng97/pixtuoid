@@ -121,6 +121,21 @@ jobs:
             echo "Head: $HEAD_SHA"
           } > .claude-review/review-context.md
 
+      # REVIEW.md's Re-review keys on it. Each published review is a PR comment
+      # headed by its title; a deleted one undercounts, which posts more.
+      - name: Count this lens's rounds
+        if: steps.pr.outputs.reviewable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          published="$(gh api --paginate --slurp "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" |
+            jq --arg heading "## $REVIEW_TITLE" \
+              '[add[] | select(.user.login == "github-actions[bot]" and (.body | split("\n")[0]) == $heading)] | length')"
+          echo "Round: $((published + 1))" >> .claude-review/review-context.md
+
       - name: Record the PR title and body
         if: steps.pr.outputs.reviewable == 'true'
         run: |

@@ -814,3 +814,24 @@ f="$(exempt_case moved)"
 file_row Cargo.lock >"$f/files.jsonl"
 crate serde 1.0.1 >"$f/base123/Cargo.lock"; crate serde 1.0.2 >"$f/head123/Cargo.lock"
 run_exempt "$f" newer456 "a head that moved"; assert_exempt "$f" pending "a head that moved"
+
+# ── The reviewer's round: this lens's published reviews so far, plus one.
+round_script="$(workflow_step_script .github/workflows/claude-readonly-review.yml "Count this lens's rounds")"
+round_dir="$test_dir/round"
+mkdir -p "$round_dir/bin" "$round_dir/work/.claude-review"
+# shellcheck disable=SC2016 # The stub reads its fixture when it runs.
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' '[[ "$*" == *"/issues/42/comments"* ]]' 'cat "$ROUND_COMMENTS"' >"$round_dir/bin/gh"
+chmod +x "$round_dir/bin/gh"
+comment() { jq -cn --arg u "$1" --arg b "$2" '{user: {login: $u}, body: $b}'; }
+jq -cs '[.[:2], .[2:]]' <(
+    comment "github-actions[bot]" $'## Claude design review\n\nHead: `a`'
+    comment "github-actions[bot]" $'## Claude correctness review\n\nHead: `a`'
+    comment "someone" $'## Claude design review\n\nquoted'
+    comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
+) >"$round_dir/comments.json"
+: >"$round_dir/work/.claude-review/review-context.md"
+(cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
+    GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="Claude design review" \
+    bash -c "$round_script") || fail "the round count exited non-zero"
+grep -qx 'Round: 3' "$round_dir/work/.claude-review/review-context.md" ||
+    fail "the round count wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: 3 (two of this lens's reviews, across pages)"
