@@ -81,6 +81,8 @@ MOON = ("..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###
 MOON_AT = (4, 1)
 STAR_ICON = ("....#....", "...###...", "...###...", "#########", ".#######.", "..#####..", "..#####..", ".###.###.", ".##...##.")
 METEOR = ("#...", ".#..", "..#.", "...#")
+# Start (column, row from the top) and travel, in chart pixels: its whole run stays in HEADROOM, right of the moon.
+METEOR_AT, METEOR_TRAVEL = (46, 1), (42, 4)
 CAT, CAT_PX = "cat_sit", 4
 
 
@@ -306,7 +308,7 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
             ".tw{animation:tw 2.4s steps(2,jump-none) infinite}.tw1{animation-delay:-.8s}.tw2{animation-delay:-1.6s}",
             "@keyframes tw{0%,100%{opacity:1}50%{opacity:.25}}",
             ".beacon{animation:bk 1.2s steps(1,end) infinite}@keyframes bk{0%{opacity:1}50%{opacity:.15}}",
-            f".meteor{{opacity:0;animation:mt 7s steps(14,end) infinite}}@keyframes mt{{0%{{opacity:0;transform:translate(0,0)}}3%{{opacity:1}}12%{{opacity:0;transform:translate({42 * PX}px,{21 * PX}px)}}100%{{opacity:0}}}}",
+            f".meteor{{opacity:0;animation:mt 7s steps(14,end) infinite}}@keyframes mt{{0%{{opacity:0;transform:translate(0,0)}}3%{{opacity:1}}12%{{opacity:0;transform:translate({METEOR_TRAVEL[0] * PX}px,{METEOR_TRAVEL[1] * PX}px)}}100%{{opacity:0}}}}",
             "@media (prefers-reduced-motion:reduce){.tw,.beacon,.meteor{animation:none}}",
             *cat_css,
         ]
@@ -317,7 +319,7 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
             f'<title id="t">{repo} star history: {top} stars as of {today.isoformat()}, {per_floor} per floor</title>',
             f"<style>{css}</style>",
             f'<clipPath id="moon"><path d="{moon}"/></clipPath>',
-            f'<clipPath id="upper"><rect x="{win_x}" y="{MARGIN_TOP}" width="{PLOT_COLS * PX}" height="{PLOT_ROWS * PX // 2}"/></clipPath>',
+            f'<clipPath id="upper"><rect x="{win_x}" y="{MARGIN_TOP}" width="{PLOT_COLS * PX}" height="{HEADROOM * PX}"/></clipPath>',
             f'<rect width="{WIDTH}" height="{HEIGHT}" fill="{pal.wall}"/>',
             f'<path fill="{pal.trim}" d="{edge}"/>',
             *sky,
@@ -331,7 +333,7 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
             f'<path class="beacon" fill="{pal.star}" d="{"".join(beacon)}"/>',
             *(f'<path class="tw tw{g}" fill="{pal.title}" d="{"".join(d)}"/>' for g, d in small.items()),
             f'<path class="tw tw2" fill="{pal.star}" d="{"".join(big)}"/>',
-            f'<g clip-path="url(#upper)"><path class="meteor" fill="{pal.title}" d="{mask_path(METEOR, col_x(PLOT_COLS // 3), MARGIN_TOP + 2 * PX, PX)}"/></g>',
+            f'<g clip-path="url(#upper)"><path class="meteor" fill="{pal.title}" d="{mask_path(METEOR, col_x(METEOR_AT[0]), MARGIN_TOP + METEOR_AT[1] * PX, PX)}"/></g>',
             f'<path fill="{pal.window_frame}" d="{frame}"/>',
             f'<path fill="{pal.trim}" d="{_run(win_x - 3 * PX, sill_y, PLOT_COLS * PX + 6 * PX, 2 * PX)}"/>',
             f'<path fill="{pal.text}" d="{"".join(ylabels)}{xlabels}"/>',
@@ -534,6 +536,12 @@ def test_stars_stay_in_open_sky() -> None:
     mc, mr = MOON_AT
     check(not any(mc - 2 <= c <= mc + len(MOON[0]) + 1 and PLOT_ROWS - 1 - r <= mr + len(MOON) for c, r, _ in stars), "no star on the moon")
     check(PLOT_ROWS - mr - len(MOON) >= PLOT_ROWS - HEADROOM, "the moon hangs above the tallest tower")
+
+
+def test_meteor_crosses_open_sky_only() -> None:
+    (mc, mr), (dc, dr) = METEOR_AT, METEOR_TRAVEL
+    check(mr + len(METEOR) + dr <= HEADROOM, "the meteor's run must stay above the tallest tower")
+    check(mc > MOON_AT[0] + len(MOON[0]) and mc + len(METEOR[0]) + dc <= PLOT_COLS, "the meteor starts right of the moon and ends inside the window")
 
 
 def test_header_halves_never_collide() -> None:
