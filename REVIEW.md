@@ -84,7 +84,8 @@ taste with no defect is never posted. Dispositions:
 Each finding carries:
 
 - `severity`: the [label](#severity)'s decoration.
-- `lens`: the [lens](#lenses) the finding falls under.
+- `lens`: the [lens](#lenses) whose section names the finding's kind; a unit's
+  comment, DRY and drift findings are design, its test findings correctness.
 - `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
 - `line`: the absolute head-side line, never invented.
 - `body`: the verified finding and a concrete failure scenario; a
@@ -130,9 +131,6 @@ scope, `issue (pre-existing)` when the diff did not introduce it.
    defines it.
 
 ## Lenses
-
-A finding's `lens` is the section that names its kind; a unit's comment, DRY
-and drift findings are design, its test findings correctness.
 
 ### Correctness
 
