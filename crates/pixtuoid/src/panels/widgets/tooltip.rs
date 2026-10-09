@@ -20,18 +20,18 @@ pub(crate) struct TooltipAt {
     pub(crate) scene_rect: Rect,
 }
 
-/// Paint `world` as terminal text over the office in `scene_rect`, whose
+/// Paint `text` as terminal text over the office in `scene_rect`, whose
 /// cells `map` lays over it: the badges, each bubble over them, then the
 /// signs, which a bubble must not cover.
 pub(crate) fn paint_host_text(
     f: &mut ratatui::Frame<'_>,
-    world: HostText<'_>,
+    text: HostText<'_>,
     (scene_rect, map): (Rect, CellMap),
     hovered: Option<AgentId>,
 ) {
-    paint_badges(f, world.badges, (scene_rect, map), hovered);
-    paint_text_runs(f, world.bubbles, (scene_rect, map));
-    for (run, at) in set_signs(world.signs, map) {
+    paint_badges(f, text.badges, (scene_rect, map), hovered);
+    paint_text_runs(f, text.bubbles, (scene_rect, map));
+    for (run, at) in set_signs(text.signs, map) {
         put_line(f, run_line(run), at, scene_rect);
     }
 }

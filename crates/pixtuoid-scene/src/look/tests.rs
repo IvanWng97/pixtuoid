@@ -265,7 +265,7 @@ fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
         baked_px.as_slice(),
         "the text left the image"
     );
-    let world = host.raster.host_text().expect("handed over");
+    let handed = host.raster.host_text().expect("handed over");
     let mut classic = PerFloor::new(Arc::clone(&pack));
     render(
         &mut classic,
@@ -279,9 +279,9 @@ fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
     let agents = |w: crate::display::HostText<'_>| -> HashSet<AgentId> {
         w.badges.iter().map(|b| b.agent).collect()
     };
-    assert!(!world.badges.is_empty());
-    assert_eq!(agents(world), agents(classic));
-    assert_eq!(world.signs, classic.signs);
+    assert!(!handed.badges.is_empty());
+    assert_eq!(agents(handed), agents(classic));
+    assert_eq!(handed.signs, classic.signs);
 }
 
 /// The cutaway's recoloured figures leave with their agents: a long run that
