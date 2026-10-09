@@ -113,6 +113,16 @@ jobs:
               and ([.patch | split("\n")[] | select(test("^[-+]"))]
                    | all(test("^[-+][ \t]*(- +)?uses: +[^ ]+( +#.*)?$"))))' \
             "$files" > /dev/null || refuse "a workflow edit beyond a uses: pin"
+          # Any manifest but a lockfile may move version strings and nothing
+          # else: its removed and added lines match once those are masked, so a
+          # new dependency, script, patch or action owner leaves one unpaired.
+          jq -se 'def mask($f):
+                if ($f | startswith(".github/")) then sub("@[^ ]+"; "@") | sub(" +#.*$"; "")
+                else gsub("[0-9][0-9A-Za-z.+~^-]*"; "0") end;
+              def side($f; $sign): [.patch | split("\n")[] | select(startswith($sign)) | .[1:] | mask($f)] | sort;
+              all(.[] | select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$") | not);
+                .filename as $f | .patch != null and side($f; "-") == side($f; "+"))' \
+            "$files" > /dev/null || refuse "a manifest edit beyond a version"
 
           base="$(gh api "repos/${REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq .merge_base_commit.sha)"
           at() { gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/$1?ref=$2"; }
@@ -120,7 +130,6 @@ jobs:
           new_names() { comm -13 <(sort -u <<< "$1") <(sort -u <<< "$2"); }
           npm_names() { jq -r '.packages | keys[] | select(. != "") | sub("^.*node_modules/"; "")'; }
           npm_scripts() { jq -r '.packages | to_entries[] | select(.value.hasInstallScript) | .key | sub("^.*node_modules/"; "")'; }
-          pip_names() { grep -Ev '^[[:space:]]*(#|$)' | sed -E 's/[[:space:]]*([=<>!~;[].*)?$//' | tr '[:upper:]' '[:lower:]'; }
           while IFS= read -r lock; do
             before="$(at "$lock" "$base")"
             after="$(at "$lock" "$HEAD_SHA")"
@@ -141,12 +150,8 @@ jobs:
                   grep -qv '^https://registry.npmjs.org/' ||
                   refuse "a package host other than npmjs.org"
                 ;;
-              requirements-dev.txt)
-                [[ -z "$(new_names "$(pip_names <<< "$before")" "$(pip_names <<< "$after")")" ]] ||
-                  refuse "a package new to requirements-dev.txt"
-                ;;
             esac
-          done < <(jq -r 'select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json|requirements-dev\\.txt)$")) | .filename' "$files")
+          done < <(jq -r 'select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$")) | .filename' "$files")
 
           # Read last, so the files judged are this head's.
           current="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"

@@ -857,3 +857,24 @@ jq -cs '[.[:2], .[2:]]' <(
     bash -c "$round_script") || fail "the round count exited non-zero"
 grep -qx 'Round: 3' "$round_dir/work/.claude-review/review-context.md" ||
     fail "the round count wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: 3 (two of this lens's reviews, across pages)"
+
+# A manifest outside the lockfiles may move version strings, nothing else.
+f="$(exempt_case owner-swap)"
+file_row .github/workflows/ci.yml modified $'@@ -9 +9 @@\n-      - uses: actions/checkout@aaa # v6\n+      - uses: someone-else/checkout@bbb # v7' >"$f/files.jsonl"
+run_exempt "$f" head123 "an action swapped for another"
+assert_exempt "$f" pending "an action swapped for another"
+
+f="$(exempt_case package-json-version)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "astro": "^5.1.0",\n+    "astro": "^5.2.3",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a package.json version bump"
+assert_exempt "$f" success "a package.json version bump"
+
+f="$(exempt_case package-json-dep)"
+file_row site/package.json modified $'@@ -9 +9,2 @@\n-    "astro": "^5.1.0",\n+    "astro": "^5.2.3",\n+    "evil": "^1.0.0",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a package.json dependency the lock never saw"
+assert_exempt "$f" pending "a package.json dependency the lock never saw"
+
+f="$(exempt_case cargo-patch)"
+file_row Cargo.toml modified $'@@ -40 +40,2 @@\n-serde = "1.0.1"\n+serde = "1.0.2"\n+[patch.crates-io]' >"$f/files.jsonl"
+run_exempt "$f" head123 "a Cargo.toml edit beyond a version"
+assert_exempt "$f" pending "a Cargo.toml edit beyond a version"
