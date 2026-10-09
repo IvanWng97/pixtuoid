@@ -20,17 +20,21 @@ name: codspeed
 # already-good simulation result whenever the newer memory instrument fails.
 # The build takes no mode — both instruments consume the same build today.
 on:
+  # A PR compares against the latest base-branch commit that has a run
+  # (codspeed.io/docs/features/understanding-the-metrics), so a main push that
+  # touches no Rust needs none.
   push:
     branches: [main]
-  pull_request:
-    # ready_for_review: the job skips drafts, so a PR's first trend point
-    # lands when it leaves draft.
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
+    paths: &rust-paths
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/codspeed.yml"
+  pull_request:
+    # ready_for_review: the job skips drafts, so a PR's first trend point
+    # lands when it leaves draft.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *rust-paths
 
 concurrency:
   group: codspeed-${{ github.ref }}
@@ -57,7 +61,10 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           channel: stable
-          cache-target: release
+          # Its release-target cache was the repository's largest (1.46 GB of
+          # the 10 GB quota), and a cache past the quota evicts the required
+          # jobs' caches by last access; this advisory job builds cold instead.
+          cache: false
           bins: cargo-codspeed
       # Deliberately NOT continue-on-error: a bench that won't build is a
       # broken build, not a perf trend.
