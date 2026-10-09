@@ -108,39 +108,36 @@ assert_description "$hostile_text" "$(jq -n --arg b "$hostile_text" '$b')" "$hos
 assert_description "t" null ""
 assert_description "t" '""' ""
 
-# Each bot's lens must be a REVIEW.md `### <lens>` heading, one bot each, or a
-# lens silently has no bot.
+# Every lens the review reports is a REVIEW.md `### <lens>` heading and one a
+# finding may carry, or a lens silently has no reviewer.
 REVIEW_RULES_FILE="${REVIEW_RULES_FILE:-REVIEW.md}"
+REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
+prompt="$(yq -e -r '.jobs.analyze.steps[] | select(.name == "Run read-only Claude review") | .with.prompt' \
+    "$CLAUDE_REVIEW_WORKFLOW_FILE")" || fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no review prompt"
 # shellcheck disable=SC2016 # A workflow expression, matched literally.
-yq -e '.jobs.analyze.steps[] | select(.name == "Run read-only Claude review") | .with.prompt
-    | select(contains("${{ inputs.lens }} lens") and contains(".claude-review/pr-description.json"))
-    | contains(".claude-review/prior-threads.json")' \
-    "$CLAUDE_REVIEW_WORKFLOW_FILE" >/dev/null ||
-    fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name its lens input, PR description and prior threads"
+for part in .claude-review/ pr-description.json prior-threads.json units.json head/ '${{ env.UNIT_PASSES }} times'; do
+    [[ "$prompt" == *"$part"* ]] ||
+        fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name \"$part\", an input or the passes the coverage gate holds it to"
+done
 review_lenses="$(awk '/^## /{on = ($0 == "## Lenses")} on && /^### /{print tolower(substr($0, 5))}' "$REVIEW_RULES_FILE" | sort)"
 [[ -n "$review_lenses" ]] || fail "$REVIEW_RULES_FILE has no \"### <lens>\" under \"## Lenses\""
-bot_lenses="$(
+caller_lenses="$(
     for caller in .github/workflows/*.yml; do
         yq -o=json '.' "$caller" | jq -r '.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")
-            | if .with.lens == "${{ matrix.lens }}" then .strategy.matrix.lens[] else .with.lens end'
+            | .with.lenses | fromjson[]'
     done | sort
 )"
-[[ "$bot_lenses" == "$review_lenses" ]] ||
-    fail "the review bots' lenses [${bot_lenses//$'\n'/ }] are not $REVIEW_RULES_FILE's lens headings [${review_lenses//$'\n'/ }], one bot each"
+schema_lenses="$(jq -r '.properties.findings.items.properties.lens.enum[]' "$REVIEW_SCHEMA_FILE" | sort)"
+[[ "$caller_lenses" == "$review_lenses" && "$schema_lenses" == "$review_lenses" ]] ||
+    fail "the review's lenses [${caller_lenses//$'\n'/ }] and $REVIEW_SCHEMA_FILE's [${schema_lenses//$'\n'/ }] are not $REVIEW_RULES_FILE's lens headings [${review_lenses//$'\n'/ }]"
+lenses_json="$(jq -cn --arg l "$review_lenses" '$l | split("\n")')"
 
-status_template="$(yq -e -r '.env.REVIEW_STATUS' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
-    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_STATUS"
-title_template="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+review_context="$(yq -e -r '.env.REVIEW_CONTEXT' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_CONTEXT"
+review_title="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_TITLE"
-# shellcheck disable=SC2016 # A workflow expression, substituted literally.
-lens_expr='${{ inputs.lens }}'
-contexts="$(while IFS= read -r lens; do echo "${status_template//"$lens_expr"/$lens}"; done <<<"$bot_lenses")"
-[[ "$(sort -u <<<"$contexts")" == "$(sort <<<"$contexts")" ]] ||
-    fail "the review bots share a status [${contexts//$'\n'/ }], so one lens's verdict reads as the other's"
-lens="${bot_lenses%%$'\n'*}"
-# A sentinel no workflow holds, so only a context read from the env matches.
-review_status="ctx/sentinel"
-review_title="${title_template//"$lens_expr"/$lens}"
+unit_passes="$(yq -e -r '.env.UNIT_PASSES' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level UNIT_PASSES"
 run_url="https://github.test/owner/repo/actions/runs/7"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
@@ -225,21 +222,23 @@ run_publisher() {
         BOUNDS="${FAKE_BOUNDS-$bounds}" \
         PR_NUMBER="42" \
         REPOSITORY="owner/repo" \
+        REVIEW_CONTEXT="$review_context" \
         REVIEW_JSON="$review_json" \
-        REVIEW_STATUS="$review_status" \
+        REVIEW_LENSES="$lenses_json" \
         REVIEW_TITLE="$review_title" \
         RUN_URL="$run_url" \
         bash -c "$publisher_script"
 }
 
+# One status per lens, each the context main requires by name.
 assert_status() {
-    jq -e -s --arg context "$review_status" --arg url "$run_url" \
-        "length == 1 and (.[0] | .context == \$context and .target_url == \$url and $1)" \
+    jq -e -s --argjson lenses "$lenses_json" --arg url "$run_url" \
+        "map(.context) == [\$lenses[] | \"claude-review/\\(.)\"] and all(.[]; .target_url == \$url and $1)" \
         "$posted_statuses" >/dev/null 2>&1 ||
         fail "review status: $2: $(cat "$posted_statuses" 2>/dev/null)"
 }
 
-schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review schema")"
+schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review schema and agents")"
 : >"$test_dir/schema-output"
 GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script" ||
     fail "the review schema step exited non-zero"
@@ -247,6 +246,12 @@ bounds="$(sed -n 's/^bounds=//p' "$test_dir/schema-output")"
 severities="$(jq -c '.severities' <<<"$bounds")"
 max_findings="$(jq '.max_findings' <<<"$bounds")"
 [[ "$max_findings" =~ ^[1-9][0-9]*$ ]] || fail "the review schema step outputs no bounds: $bounds"
+# claude_args is shell-split, so each JSON output must split back to its file.
+for output in json:.github/prompts/review-schema.json agents:.github/prompts/review-agents.json; do
+    quoted="$(sed -n "s/^${output%%:*}=//p" "$test_dir/schema-output")"
+    [[ "$(python3 -c 'import shlex,sys; print(*shlex.split(sys.argv[1]))' "$quoted")" == "$(jq -c . "${output#*:}")" ]] ||
+        fail "the review schema step's ${output%%:*} output does not split back to ${output#*:}: $quoted"
+done
 # shellcheck disable=SC2016 # Workflow expressions, matched literally.
 yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     .jobs.analyze.outputs.bounds == "${{ steps.schema.outputs.bounds }}"
@@ -259,10 +264,10 @@ assert_threads() {
         fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
 }
 
-valid_review='{"summary":"No correctness findings.","findings":[]}'
+valid_review='{"summary":"No correctness findings.","findings":[],"coverage":[],"dropped":0}'
 run_publisher "$valid_review" ||
     fail "Claude publisher rejected a valid zero-finding review"
-assert_status '.state == "success" and .sha == "abc123"' "a published review passes its lens at the reviewed head"
+assert_status '.state == "success" and .sha == "abc123"' "a published review passes every lens at the reviewed head"
 [[ -s "$published_comment" ]] ||
     fail "Claude publisher posted no review body"
 [[ "$(<"$published_comment")" == *"**Findings: 0**"* ]] ||
@@ -271,13 +276,22 @@ assert_status '.state == "success" and .sha == "abc123"' "a published review pas
     fail "Claude publisher posted a review thread for zero findings"
 
 run_publisher "$(jq -cn --argjson s "$severities" \
-    '{summary: "s", findings: [$s[] | {severity: ., path: "src/a.rs", line: 2, body: "b"}]}')" ||
+    '{summary: "s", findings: [$s[] | {severity: ., lens: "correctness", path: "src/a.rs", line: 2, body: "b"}],
+        coverage: [], dropped: 0}')" ||
     fail "Claude publisher rejected a severity the schema allows: $severities"
 [[ "$(<"$published_comment")" == *"$(jq -r '"**Findings: \(length)** (\(map("1 \(.)") | join(", ")))"' <<<"$severities")"* ]] ||
     fail "Claude publisher's count line does not count each of the schema's severities: $(<"$published_comment")"
 assert_status '.state == "success"' "findings still pass the status: their threads block"
-run_publisher '{"summary":"s","findings":[{"severity":"nit","path":"src/a.rs","line":2,"body":"b"}]}' >/dev/null 2>&1 &&
-    fail "Claude publisher accepted a severity the schema does not allow"
+one_finding='{"summary":"s","findings":[{"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"b"}],"coverage":[],"dropped":0}'
+for bad in '.findings[0].severity = "nit"' '.findings[0].lens = "style"' 'del(.findings[0].lens)' \
+    'del(.coverage)' 'del(.dropped)' '.dropped = -1' '.dropped = 1.5'; do
+    run_publisher "$(jq -c "$bad" <<<"$one_finding")" >/dev/null 2>&1 &&
+        fail "Claude publisher accepted a review with $bad"
+done
+run_publisher "$(jq -c '.dropped = 3' <<<"$valid_review")" >/dev/null ||
+    fail "Claude publisher rejected a review with refuted candidates"
+[[ "$(<"$published_comment")" == *"Refuted by the verifier: 3"* ]] ||
+    fail "Claude publisher's summary does not count the candidates the verifier refuted"
 bad_bounds=("" "$(with_bounds '.severities = []')" "$(with_bounds '.severities = ["blocking", "**x**"]')")
 for key in max_findings path_max summary_max body_max; do
     bad_bounds+=("$(with_bounds "del(.$key)")" "$(with_bounds ".$key = 0")" "$(with_bounds ".$key = 1.5")")
@@ -291,7 +305,6 @@ for bad in "${bad_bounds[@]}"; do
         fail "Claude publisher posted with the bounds '$bad'"
 done
 
-REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
 schema_accepts() {
     printf '%s' "$1" >"$test_dir/instance.json"
     check-jsonschema --schemafile "$REVIEW_SCHEMA_FILE" "$test_dir/instance.json" >/dev/null 2>&1
@@ -303,7 +316,8 @@ assert_schema_bound() {
 
 findings_of() {
     jq -cn --argjson s "$severities" --argjson n "$1" \
-        '{summary: "s", findings: [range($n) | {severity: $s[0], path: "src/a.rs", line: 2, body: "b"}]}'
+        '{summary: "s", findings: [range($n) | {severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}],
+          coverage: [], dropped: 0}'
 }
 assert_schema_bound max_findings "$(findings_of "$max_findings")" "$(findings_of $((max_findings + 1)))"
 run_publisher "$(findings_of "$max_findings")" ||
@@ -316,7 +330,8 @@ FAKE_BOUNDS="$(with_bounds '.max_findings += 1')" run_publisher "$(findings_of $
     fail "Claude publisher bounds the findings by its own number, not max_findings"
 review_with() {
     jq -cn --argjson s "$severities" --arg f "$1" --arg v "$(printf 'a%.0s' $(seq "$2"))" '
-        {summary: "s", findings: [{severity: $s[0], path: "src/a.rs", line: 2, body: "b"}]}
+        {summary: "s", findings: [{severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}],
+         coverage: [], dropped: 0}
         | if $f == "summary" then .summary = $v else .findings[0][$f] = $v end'
 }
 for field in path summary body; do
@@ -331,7 +346,7 @@ done
 
 six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", findings: [
     "src/a.rs", "src/b.rs", "img.png", ".github/workflows/ci.yml", "a/.hidden/..x", "crates/c/desk@8x.sprite"
-    | {severity: $s[0], path: ., line: 1, body: "b"}]}')"
+    | {severity: $s[0], lens: "correctness", path: ., line: 1, body: "b"}], coverage: [], dropped: 0}')"
 schema_accepts "$six_blocking" ||
     fail "$REVIEW_SCHEMA_FILE rejects six blocking findings on repo-relative paths"
 run_publisher "$six_blocking" ||
@@ -339,21 +354,24 @@ run_publisher "$six_blocking" ||
 assert_threads 'length == 6' "every blocking finding opens a thread"
 for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ .. ./a a/./b .; do
     review="$(jq -cn --argjson s "$severities" --arg p "$path" \
-        '{summary: "s", findings: [{severity: $s[0], path: $p, line: 1, body: "b"}]}')"
+        '{summary: "s", findings: [{severity: $s[0], lens: "correctness", path: $p, line: 1, body: "b"}],
+          coverage: [], dropped: 0}')"
     ! schema_accepts "$review" || fail "$REVIEW_SCHEMA_FILE accepts the unsafe path $path"
     ! run_publisher "$review" >/dev/null 2>&1 || fail "Claude publisher accepted the unsafe path $path"
 done
 
-in_diff_review='{"summary":"s","findings":[
-  {"severity":"blocking","path":"src/a.rs","line":2,"body":"added line"},
-  {"severity":"non-blocking","path":"src/a.rs","line":21,"body":"second hunk"},
-  {"severity":"non-blocking","path":"src/b.rs","line":5,"body":"count-less hunk header"},
-  {"severity":"blocking","path":"src/a.rs","line":10,"body":"between hunks"},
-  {"severity":"pre-existing","path":"img.png","line":1,"body":"no patch"}]}'
+in_diff_review='{"summary":"s","coverage":[],"dropped":0,"findings":[
+  {"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"added line"},
+  {"severity":"non-blocking","lens":"correctness","path":"src/a.rs","line":21,"body":"second hunk"},
+  {"severity":"non-blocking","lens":"correctness","path":"src/b.rs","line":5,"body":"count-less hunk header"},
+  {"severity":"blocking","lens":"design","path":"src/a.rs","line":10,"body":"between hunks"},
+  {"severity":"pre-existing","lens":"correctness","path":"img.png","line":1,"body":"no patch"}]}'
 run_publisher "$in_diff_review" ||
     fail "Claude publisher rejected findings inside the diff"
 assert_threads 'length == 5 and all(.[]; .commit_id == "abc123")' \
     "one thread per finding, at the reviewed head"
+assert_status '.description == "Published at this head: \(if .context == "claude-review/design" then 1 else 4 end) findings"' \
+    "each lens's status counts its own findings"
 assert_threads '[.[:3][] | [.path, .line, .side]] == [["src/a.rs", 2, "RIGHT"], ["src/a.rs", 21, "RIGHT"], ["src/b.rs", 5, "RIGHT"]]' \
     "a finding on a diff line is an inline comment on that line"
 assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs", "file", false], ["img.png", "file", false]]' \
@@ -361,8 +379,9 @@ assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs",
 assert_threads '[.[].body | split(" — ")[0][1:-1]] == ["src/a.rs:2", "src/a.rs:21", "src/b.rs:5", "src/a.rs:10", "img.png:1"]' \
     "every thread opens with the finding's own location"
 # shellcheck disable=SC2016 # jq's $title.
-assert_threads '[.[].body | capture("\\*\\*\($title) · (?<l>issue \\([a-z-]+\\))\\*\\*").l]
-    == ["issue (blocking)", "issue (non-blocking)", "issue (non-blocking)", "issue (blocking)", "issue (pre-existing)"]' \
+assert_threads '[.[].body | capture("\\*\\*\($title) · (?<lens>[a-z]+) · (?<l>issue \\([a-z-]+\\))\\*\\*") | "\(.lens) \(.l)"]
+    == ["correctness issue (blocking)", "correctness issue (non-blocking)", "correctness issue (non-blocking)",
+        "design issue (blocking)", "correctness issue (pre-existing)"]' \
     "every thread names its lens and its finding's Conventional Comments label"
 
 FAKE_FAIL_POST=2 run_publisher "$in_diff_review" >/dev/null 2>&1 &&
@@ -376,8 +395,9 @@ assert_threads 'length == 4 and ([.[].body] | any(contains("src/a.rs:21")) | not
 
 hostile_body="it's \"quoted\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\` \\n end"
 hostile_review="$(jq -cn --arg b "$hostile_body" \
-    '{summary: "s", findings: [{severity: "blocking", path: "docs/other.md", line: 9, body: $b},
-        {severity: "pre-existing", path: "gone.rs", line: 1, body: "removed file"}]}')"
+    '{summary: "s", findings: [{severity: "blocking", lens: "correctness", path: "docs/other.md", line: 9, body: $b},
+        {severity: "pre-existing", lens: "correctness", path: "gone.rs", line: 1, body: "removed file"}],
+      coverage: [], dropped: 0}')"
 run_publisher "$hostile_review" ||
     fail "Claude publisher rejected a finding outside the diff"
 [[ ! -e "$test_dir/pwned" ]] ||
@@ -398,7 +418,7 @@ jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and co
 
 # A rejected path character would fail the lens on every PR touching a
 # density-variant sprite (`<base>@<N>x.sprite`).
-variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"non-blocking","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
+variant_review='{"summary":"One finding on a density variant.","coverage":[],"dropped":0,"findings":[{"severity":"non-blocking","lens":"design","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
 run_publisher "$variant_review" ||
     fail "Claude publisher rejected a finding on an '@' density-variant path"
 published_content="$(<"$published_comment")"
@@ -420,18 +440,19 @@ if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"
 fi
 
-# The analyzer's prior threads are this lens's own bot threads, told apart by
-# the header the publisher itself writes.
+# The analyzer's prior threads are the review's own bot threads, every lens's,
+# told apart by the header the publisher itself writes.
 run_publisher "$in_diff_review" || fail "Claude publisher rejected findings inside the diff"
 own_body="$(jq -r -s '.[0].body' "$posted_threads")"
-other_body="${own_body//"$review_title"/${title_template//"$lens_expr"/$(sed -n 2p <<<"$bot_lenses")}}"
+design_body="$(jq -r -s '.[3].body' "$posted_threads")"
+other_body="${own_body//"$review_title"/Gemini review}"
 hostile_thread_body="$own_body it's \"x\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\`"
 thread() {
     jq -cn --arg body "$1" --arg type "$2" --arg login "$3" '{path: "src/a.rs", line: 2, isResolved: false,
         isOutdated: true, comments: {nodes: [{author: {__typename: $type, login: $login}, body: $body}]}}'
 }
 page() { jq -cs '{data: {repository: {pullRequest: {reviewThreads: {nodes: .}}}}}'; }
-prior_step="Fetch this lens's prior threads"
+prior_step="Fetch the review's prior threads"
 prior_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "$prior_step")"
 threads_query="$(STEP_NAME="$prior_step" yq -e -r '.jobs.analyze.steps[] | select(.name == strenv(STEP_NAME))
     | .env.THREADS_QUERY' "$CLAUDE_REVIEW_WORKFLOW_FILE")" || fail "\"$prior_step\" has no THREADS_QUERY"
@@ -448,16 +469,17 @@ run_prior_fetch "$({
         thread "$other_body"$'\n'" — **$review_title · issue (blocking)**" Bot github-actions
         thread "$own_body" User alice
         thread "$own_body" User github-actions
+        thread "$design_body" Bot github-actions
     } | page
     thread "$hostile_thread_body" Bot github-actions | page
 } | jq -cs .)"
-jq -e --arg b "$hostile_thread_body" \
-    '. == [{path: "src/a.rs", line: 2, isResolved: false, isOutdated: true, body: $b}]' \
+jq -e --arg d "$design_body" --arg b "$hostile_thread_body" \
+    '. == [{path: "src/a.rs", line: 2, isResolved: false, isOutdated: true, body: ($d, $b)}]' \
     "$prior_threads" >/dev/null && [[ ! -e "$test_dir/pwned" ]] ||
-    fail "the analyzer's prior threads are not this lens's bot threads, verbatim: $(<"$prior_threads")"
+    fail "the analyzer's prior threads are not the review's bot threads, verbatim: $(<"$prior_threads")"
 run_prior_fetch "$(page </dev/null | jq -cs .)"
 jq -e '. == []' "$prior_threads" >/dev/null ||
-    fail "a PR without this lens's threads does not get an empty list, a full review: $(<"$prior_threads")"
+    fail "a PR without the review's threads does not get an empty list, a full review: $(<"$prior_threads")"
 
 report_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Mark the review failed")"
 run_report() {
@@ -469,7 +491,8 @@ run_report() {
         PR_STATE="${4:-open}" \
         POSTED_STATUSES="$posted_statuses" \
         REPOSITORY="owner/repo" \
-        REVIEW_STATUS="$review_status" \
+        REVIEW_CONTEXT="$review_context" \
+        REVIEW_LENSES="${REVIEW_LENSES_OVERRIDE:-$lenses_json}" \
         REVIEW_TITLE="$review_title" \
         RUN_URL="$run_url" \
         bash -c "$report_script"
@@ -478,16 +501,18 @@ report="$(run_report success failure old-head)" ||
     fail "the absence report exited non-zero"
 [[ "$report" == *"::error "* ]] ||
     fail "the absence report left no annotation"
-assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails its lens at the analyzed head"
+assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails every lens at the analyzed head"
 run_report failure skipped "" >/dev/null 2>&1 &&
     fail "the absence report marked no head"
 run_report success skipped declined-head >/dev/null ||
     fail "the absence report exited non-zero on an open PR it declined"
-assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails its lens"
+assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails every lens"
 run_report success skipped merged-head closed >/dev/null ||
     fail "the absence report exited non-zero on a closed PR"
 [[ ! -e "$posted_statuses" ]] ||
-    fail "the absence report set a closed PR's lens status: $(<"$posted_statuses")"
+    fail "the absence report set a closed PR's lens statuses: $(<"$posted_statuses")"
+REVIEW_LENSES_OVERRIDE='[]' run_report success failure old-head >/dev/null 2>&1 &&
+    fail "the absence report exited zero with no lens to fail"
 # shellcheck disable=SC2016 # Workflow expressions, matched literally.
 yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     .jobs.analyze.outputs.state == "${{ steps.pr.outputs.state }}"
@@ -837,8 +862,8 @@ crate serde 1.0.2 >"$f/head123/Cargo.lock"
 run_exempt "$f" newer456 "a head that moved"
 assert_exempt "$f" pending "a head that moved"
 
-# ── The reviewer's round: the heads this lens reviewed before this one, plus one.
-round_script="$(workflow_step_script .github/workflows/claude-readonly-review.yml "Count this lens's rounds")"
+# ── The reviewer's round: the heads the review was published at before this one, plus one.
+round_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Count the review's rounds")"
 round_dir="$test_dir/round"
 mkdir -p "$round_dir/bin" "$round_dir/work/.claude-review"
 # shellcheck disable=SC2016 # The stub reads its fixture when it runs.
@@ -846,21 +871,21 @@ printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' '[[ "$*" == *"/issues/42
 chmod +x "$round_dir/bin/gh"
 comment() { jq -cn --arg u "$1" --arg b "$2" '{user: {login: $u}, body: $b}'; }
 jq -cs '[.[:2], .[2:]]' <(
-    comment "github-actions[bot]" $'## Claude design review\n\nHead: `a`'
-    comment "github-actions[bot]" $'## Claude correctness review\n\nHead: `a`'
-    comment "someone" $'## Claude design review\n\nquoted'
-    comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
-    comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `a`'
+    comment "github-actions[bot]" $'## Claude correctness review\n\nHead: `z`'
+    comment "someone" "## $review_title"$'\n\nquoted'
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `b`'
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `b`'
 ) >"$round_dir/comments.json"
 assert_round() {
     : >"$round_dir/work/.claude-review/review-context.md"
     (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
-        GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="Claude design review" HEAD_SHA="$1" \
+        GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="$review_title" HEAD_SHA="$1" \
         bash -c "$round_script") || fail "the round count exited non-zero"
     grep -qx "Round: $2" "$round_dir/work/.claude-review/review-context.md" ||
         fail "the round count at head $1 wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: $2 ($3)"
 }
-assert_round c 3 "two heads of this lens's, one reviewed twice, across pages"
+assert_round c 3 "two heads of the review's, one reviewed twice, across pages"
 assert_round b 2 "a re-review of a head counts that head once"
 
 # A manifest outside the lockfiles may move version strings, nothing else.
@@ -1004,8 +1029,7 @@ run_units() {
     local work="$units_dir/work-$1"
     rm -rf "$work"
     mkdir -p "$work/.claude-review"
-    : >"$units_dir/output"
-    (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" GITHUB_OUTPUT="$units_dir/output" \
+    (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" \
         GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 \
         bash -c "$units_script") || fail "the unit planner exited non-zero on $1"
     printf '%s\n' "$work"
@@ -1029,7 +1053,6 @@ want='[{"id":"u1","files":["crates/a/src/one.rs","crates/a/src/three.rs"],"chang
     fail "the unit planner gave $(jq -c . "$work/.claude-review/units.json"), not $want"
 [[ "$(jq -c 'sort' "$work/.claude-review/skipped.json")" == '["Cargo.lock","api/pixtuoid-core.txt","assets/blob.bin","crates/a/src/snapshots/x.snap","docs/images/x.png","site/package-lock.json"]' ]] ||
     fail "the unit planner skipped $(jq -c . "$work/.claude-review/skipped.json")"
-grep -qx 'units=4' "$units_dir/output" || fail "the unit planner did not report units=4: $(<"$units_dir/output")"
 [[ "$(<"$work/.claude-review/head/crates/a/src/one.rs")" == "head of crates/a/src/one.rs" ]] ||
     fail "the unit planner did not copy a kept file's head"
 [[ ! -e "$work/.claude-review/head/crates/b/src/gone.rs" ]] || fail "the unit planner copied a removed file's head"
@@ -1037,15 +1060,37 @@ grep -qx 'units=4' "$units_dir/output" || fail "the unit planner did not report 
 
 unit_file Cargo.lock 12 >"$units_dir/files.jsonl"
 work="$(run_units lock-only)"
-if ! { [[ "$(jq -c . "$work/.claude-review/units.json")" == '[]' ]] && grep -qx 'units=0' "$units_dir/output"; }; then
-    fail "a lockfile-only PR did not plan zero units"
-fi
+[[ "$(jq -c . "$work/.claude-review/units.json")" == '[]' ]] || fail "a lockfile-only PR did not plan zero units"
 
 unit_file ../escape.rs 3 >"$units_dir/files.jsonl"
 work="$units_dir/work-escape"
 rm -rf "$work"
 mkdir -p "$work/.claude-review"
-if (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" GITHUB_OUTPUT="$units_dir/output" \
-    GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 bash -c "$units_script") 2>/dev/null; then
+if (cd "$work" && PATH="$units_dir/bin:$PATH" UNITS_FILES="$units_dir/files.jsonl" \
+    GH_TOKEN=t HEAD_SHA=head123 PR_NUMBER=42 REPOSITORY=owner/repo UNIT_CAP=300 bash -c "$units_script") >/dev/null 2>&1; then
     fail "the unit planner copied a path that climbs out of the head directory"
 fi
+
+# ── The coverage gate: the model's report of what it covered, held to the plan.
+gate_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Require a valid structured review")"
+gate_dir="$test_dir/gate"
+mkdir -p "$gate_dir/.claude-review"
+assert_gate() {
+    local units="$1" coverage="$2" want="$3" label="$4"
+    printf '%s' "$units" >"$gate_dir/.claude-review/units.json"
+    if (cd "$gate_dir" && UNIT_PASSES="$unit_passes" \
+        REVIEW_JSON="$(jq -cn --argjson c "$coverage" '{summary: "s", findings: [], coverage: $c, dropped: 0}')" \
+        bash -c "$gate_script") >/dev/null 2>&1; then
+        [[ "$want" == pass ]] || fail "the coverage gate passed $label"
+    else
+        [[ "$want" == fail ]] || fail "the coverage gate failed $label"
+    fi
+}
+two_units='[{"id":"u1","files":["a"],"changed":1},{"id":"u2","files":["b"],"changed":1}]'
+full() { jq -cn --argjson n "$unit_passes" "[$1 | {unit: ., passes: \$n}]"; }
+assert_gate "$two_units" "$(full '"u1", "u2"')" pass "every unit at its passes"
+assert_gate "$two_units" "$(full '"u1"')" fail "a unit missing"
+assert_gate "$two_units" "$(full '"u1", "u2"' | jq -c '.[1].passes -= 1')" fail "a unit short of its passes"
+assert_gate "$two_units" "$(full '"u1", "u2", "u3"')" fail "a unit the plan does not have"
+assert_gate "$two_units" "$(full '"u1", "u2"' | jq -c '. + [{unit: "u2", passes: 0}]')" pass "a unit reported twice, once at its passes"
+assert_gate '[]' '[]' pass "a plan with no units"

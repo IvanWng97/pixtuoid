@@ -45,7 +45,9 @@
     The model reads untrusted diff text and its answer is published, so any
     reach beyond reading the checkout lets an injection act or publish a runner
     secret. dontAsk denies what no allow rule approves, `--tools` leaves only
-    read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
+    read tools and the Agent tool, whose subagents are the committed
+    definitions reviewer-agents-only-read holds, and
+    `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
     (code.claude.com/docs/en/settings-reference). `--setting-sources user`
     drops the checkout's `.claude/` settings, which can add a hook and which
@@ -67,13 +69,14 @@
             "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
       and (.[0].with.claude_args as $args
            | ([$args | scan("(?<![\\w-])-{1,2}[A-Za-z][\\w-]*")] - [
-                "--max-turns", "--max-budget-usd", "--permission-mode",
-                "--setting-sources", "--tools", "--settings", "--json-schema"] == [])
+                "--model", "--effort", "--max-turns", "--max-budget-usd", "--permission-mode",
+                "--setting-sources", "--tools", "--agents", "--settings", "--json-schema"] == [])
              and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
              and [$args | scan("--setting-sources (\\S+)")] == [["user"]]
              and ($args | test("--setting-sources=") | not)
              and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
-                  | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
+                  | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep", "Agent"] == []))
+             and [$args | scan("--agents[ =](.*?)(?= --|$)")] == [["${{ steps.schema.outputs.agents }}"]]
              and ([$args | scan("--settings")] | length == 1)
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
                   | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
@@ -119,7 +122,10 @@
       |= sub("\\{\"permissions\""; "{\"hooks\":{},\"permissions\"")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
+      |= sub("--tools Read,Glob,Grep,Agent"; "--tools Read,Glob,Grep,Agent,Bash")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--agents [^-]+"; "--agents {\"x\":{\"tools\":[\"Bash\"]}}")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --settings '[^']+'"; "")
@@ -127,6 +133,25 @@
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"additional_permissions": "actions: write"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
+
+- id: reviewer-agents-only-read
+  file: .github/prompts/review-agents.json
+  why: >-
+    Each subagent reads the same untrusted text as the model that spawns it. A
+    definition without `tools` inherits every tool, and `mcpServers`, `hooks`,
+    `permissionMode` or `skills` widen its reach
+    (code.claude.com/docs/en/sub-agents), so tools are an allowlist that holds
+    no Agent, which also keeps a subagent from spawning one, and so are keys.
+  assert: |
+    length > 0
+    and all(.[];
+      (keys - ["description", "prompt", "tools", "model", "effort", "maxTurns"] == [])
+      and (.tools | type == "array" and length > 0 and (. - ["Read", "Glob", "Grep"] == [])))
+  break:
+    - del(.verifier.tools)
+    - .verifier.tools += ["Agent"]
+    - .verifier.permissionMode = "bypassPermissions"
+    - .verifier.tools = []
 
 - id: reviewer-model-auth-is-scoped
   file: .github/workflows/claude-readonly-review.yml
@@ -180,7 +205,7 @@
 - id: reviewer-writers-only-comment-and-status
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish comments and sets the lens's status, report_absence only sets it,
+    publish comments and sets each lens's status, report_absence only sets them,
     and any action in either, a checkout included, runs with that scope: an
     action reads `github.token` without being passed it
     (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
@@ -257,10 +282,10 @@
     every Dependabot PR waiting on it, and one past them posts a context no
     review would.
   assert: |
-    .jobs.exempt.strategy.matrix.lens == .jobs.review.strategy.matrix.lens
+    .jobs.exempt.strategy.matrix.lens == (.jobs.review.with.lenses | fromjson)
   break:
     - .jobs.exempt.strategy.matrix.lens |= .[:1]
-    - .jobs.review.strategy.matrix.lens += ["security"]
+    - .jobs.review.with.lenses = "[\"correctness\", \"design\", \"security\"]"
 
 # ── claude.yml: the only Claude job with contents:write
 

@@ -9,7 +9,7 @@
     },
     "findings": {
       "type": "array",
-      "maxItems": 10,
+      "maxItems": 40,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -20,6 +20,13 @@
               "blocking",
               "non-blocking",
               "pre-existing"
+            ]
+          },
+          "lens": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "design"
             ]
           },
           "path": {
@@ -40,15 +47,43 @@
         },
         "required": [
           "severity",
+          "lens",
           "path",
           "line",
           "body"
         ]
       }
+    },
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unit": {
+            "type": "string",
+            "pattern": "^u[1-9][0-9]*$"
+          },
+          "passes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "unit",
+          "passes"
+        ]
+      }
+    },
+    "dropped": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "required": [
     "summary",
-    "findings"
+    "findings",
+    "coverage",
+    "dropped"
   ]
 }
