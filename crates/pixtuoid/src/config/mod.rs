@@ -327,14 +327,23 @@ pub(crate) fn save_flag_sources(
     })
 }
 
-pub(crate) fn save_floating(
-    path: &Path,
-    width: u32,
-    height: u32,
-    x: Option<i32>,
-    y: Option<i32>,
-    zoom: i8,
-) -> Result<()> {
+/// What the floating window keeps of itself across runs: its logical size,
+/// its physical position when the OS reports one, and its zoom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FloatingSave {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) position: Option<(i32, i32)>,
+    pub(crate) zoom: i8,
+}
+
+pub(crate) fn save_floating(path: &Path, save: &FloatingSave) -> Result<()> {
+    let &FloatingSave {
+        width,
+        height,
+        position,
+        zoom,
+    } = save;
     update_config(path, |doc| {
         doc["floating"]["width"] = toml_edit::value(i64::from(width));
         doc["floating"]["height"] = toml_edit::value(i64::from(height));
@@ -350,7 +359,7 @@ pub(crate) fn save_floating(
         // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords
         // would restore a stale/offscreen spot next launch, so drop the keys and
         // let the OS place the window.
-        for (key, val) in [("x", x), ("y", y)] {
+        for (key, val) in [("x", position.map(|p| p.0)), ("y", position.map(|p| p.1))] {
             match val {
                 Some(v) => doc["floating"][key] = toml_edit::value(i64::from(v)),
                 // `as_table_like_mut`, not `as_table_mut`: `floating` serializes as

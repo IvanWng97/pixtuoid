@@ -215,14 +215,13 @@ impl FloatingApp {
         };
         let logical = window.inner_size().to_logical::<f64>(window.scale_factor());
         let pos = window.outer_position().ok();
-        if let Err(e) = config::save_floating(
-            &self.config_path,
-            logical.width.round() as u32,
-            logical.height.round() as u32,
-            pos.map(|p| p.x),
-            pos.map(|p| p.y),
-            self.zoom.steps(),
-        ) {
+        let save = config::FloatingSave {
+            width: logical.width.round() as u32,
+            height: logical.height.round() as u32,
+            position: pos.map(|p| (p.x, p.y)),
+            zoom: self.zoom.steps(),
+        };
+        if let Err(e) = config::save_floating(&self.config_path, &save) {
             tracing::warn!(error = ?e, "pixtuoid floating: could not persist window geometry");
         }
     }

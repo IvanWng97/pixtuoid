@@ -67,6 +67,16 @@ const ZOOM_HOLD: ModifiersState = if cfg!(target_os = "macos") {
     ModifiersState::CONTROL
 };
 
+/// The key each zoom chord takes, the first of each zoom the one the help
+/// names; `=` and `_` are `+` and `-` without and with Shift.
+const ZOOM_CHORDS: [(&str, ZoomKey); 5] = [
+    ("+", ZoomKey::In),
+    ("=", ZoomKey::In),
+    ("-", ZoomKey::Out),
+    ("_", ZoomKey::Out),
+    ("0", ZoomKey::Reset),
+];
+
 /// The zoom chords, as the help lists them.
 #[cfg(target_os = "macos")]
 pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
@@ -86,15 +96,13 @@ fn zoom_key_with(key: &Key, mods: ModifiersState, hold: ModifiersState) -> Optio
     if mods.difference(ModifiersState::SHIFT) != hold {
         return None;
     }
-    match key {
-        Key::Character(c) => match c.as_str() {
-            "=" | "+" => Some(ZoomKey::In),
-            "-" | "_" => Some(ZoomKey::Out),
-            "0" => Some(ZoomKey::Reset),
-            _ => None,
-        },
-        _ => None,
-    }
+    let Key::Character(c) = key else {
+        return None;
+    };
+    ZOOM_CHORDS
+        .iter()
+        .find(|(chord, _)| *chord == c.as_str())
+        .map(|&(_, zoom)| zoom)
 }
 
 /// Whether a held `code` fires again: a step through a list, a floor or the
@@ -422,5 +430,29 @@ mod tests {
             None,
             "the other platform's modifier"
         );
+    }
+
+    /// The help names every key a zoom chord takes, so a key added to one
+    /// and not the other reds here.
+    #[test]
+    fn every_zoom_chord_is_in_the_help() {
+        let keys: String = ZOOM_SHORTCUTS.iter().map(|(k, _)| *k).collect();
+        for zoom in [ZoomKey::In, ZoomKey::Out, ZoomKey::Reset] {
+            let (named, _) = ZOOM_CHORDS
+                .iter()
+                .find(|(_, z)| *z == zoom)
+                .expect("every zoom has a chord");
+            assert!(
+                keys.contains(named),
+                "{named} missing from the help's {keys:?}"
+            );
+        }
+        for (c, zoom) in ZOOM_CHORDS {
+            let hold = ZOOM_HOLD;
+            assert_eq!(
+                zoom_key_with(&Key::Character(c.into()), hold, hold),
+                Some(zoom)
+            );
+        }
     }
 }

@@ -886,7 +886,16 @@ fn save_floating_roundtrips_geometry_and_preserves_other_settings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(12), Some(34), 0).unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((12, 34)),
+            zoom: 0,
+        },
+    )
+    .unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
     assert_eq!(
@@ -903,8 +912,26 @@ fn save_floating_clears_stale_position_when_os_cannot_report_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(12), Some(34), 0).unwrap();
-    save_floating(&path, 500, 360, None, None, 0).unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((12, 34)),
+            zoom: 0,
+        },
+    )
+    .unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 500,
+            height: 360,
+            position: None,
+            zoom: 0,
+        },
+    )
+    .unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height), (500, 360));
@@ -934,9 +961,27 @@ fn save_floating_writes_a_zoom_and_drops_a_reset_one() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(1), Some(2), 3).unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((1, 2)),
+            zoom: 3,
+        },
+    )
+    .unwrap();
     assert_eq!(resolve_floating(&load(&path, &mut Vec::new())).zoom, 3);
-    save_floating(&path, 480, 320, Some(1), Some(2), 0).unwrap();
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 480,
+            height: 320,
+            position: Some((1, 2)),
+            zoom: 0,
+        },
+    )
+    .unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("zoom"), "no zoom is no key: {text}");
     assert_eq!(resolve_floating(&load(&path, &mut Vec::new())).zoom, 0);
