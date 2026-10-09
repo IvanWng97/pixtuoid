@@ -10,7 +10,8 @@ workspace [`../../AGENTS.md`](../../AGENTS.md).
 > `AGENTS.md` still loads above this file — but its Rust house rules
 > (TDD-in-Rust, `cargo`/`clippy`, `just preflight`, the crate CI gates)
 > **do not apply here**. This is a Node project; the gates are `tsc` + `eslint` + `npm test`.
-> Don't run `cargo` anything for a change scoped to this directory.
+> Don't run `cargo` anything for a change scoped to this directory; the
+> pre-push hook still runs `just preflight`.
 
 ## What it is
 

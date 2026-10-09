@@ -8,7 +8,7 @@ docs, demo media all flow in from outside `site/`. Parent guide: the workspace
 > **You are in the Astro consumer, not the Rust producer.** Rust house rules
 > (`cargo`/`clippy`, `just preflight`, the crate CI gates) do not apply to a
 > site-only change. The gates here are `just site-check` (+ `just site-fmt`)
-> and `just site-e2e`.
+> and `just site-e2e`; the pre-push hook still runs `just preflight`.
 
 ## Cross-boundary build inputs (the coupling that bites)
 
