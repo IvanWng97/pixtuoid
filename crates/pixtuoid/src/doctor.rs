@@ -1121,8 +1121,8 @@ fn drift_category(r: &DoctorReport, ink: &Ink) -> Category {
             plural_s(drifted)
         ),
         details: vec![ink.hint(&format!(
-            "{DETAIL_INDENT}→ may predate a CLI's wire format — report: \
-             https://github.com/IvanWng97/pixtuoid/issues"
+            "{DETAIL_INDENT}→ may predate a CLI's wire format — report: {}/issues",
+            pixtuoid_scene::hit::REPO_URL
         ))],
     }
 }
@@ -1921,7 +1921,7 @@ mod tests {
             "the breakdown rides the source row: {out}"
         );
         assert!(
-            out.contains("report: https://github.com/IvanWng97/pixtuoid/issues"),
+            out.contains(&format!("report: {}/issues", pixtuoid_scene::hit::REPO_URL)),
             "{out}"
         );
     }
