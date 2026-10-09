@@ -7,7 +7,17 @@
     "carpet_dark": "#765232",
     "title": "#f0f0f0",
     "text": "#c8c8d2",
-    "star": "#ffd282"
+    "star": "#ffd282",
+    "window_frame": "#181820",
+    "sky_top": "#1c2446",
+    "sky_horizon": "#121a34",
+    "building_dark": "#141620",
+    "building_light": "#3c4152",
+    "moon": "#ecf2ff",
+    "city_dark_window": "#1e202c",
+    "city_lit_a": "#fcd76e",
+    "city_lit_b": "#b4dcff",
+    "city_lit_c": "#ffb48c"
   },
   "dark": {
     "theme": "tokyo-night",
@@ -17,6 +27,16 @@
     "carpet_dark": "#1a1c2a",
     "title": "#c0cae6",
     "text": "#a9b1d6",
-    "star": "#ffbe78"
+    "star": "#ffbe78",
+    "window_frame": "#12121c",
+    "sky_top": "#161a32",
+    "sky_horizon": "#0e1020",
+    "building_dark": "#12121c",
+    "building_light": "#373e5a",
+    "moon": "#7aa2f7",
+    "city_dark_window": "#161824",
+    "city_lit_a": "#b4c8ff",
+    "city_lit_b": "#e0af68",
+    "city_lit_c": "#9ece6a"
   }
 }

@@ -174,7 +174,7 @@ Inspired by [`pixel-agents`](https://github.com/pablodelucca/pixel-agents) (VS C
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-dark.svg" />
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" />
-    <img alt="star history chart for IvanWng97/pixtuoid" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" width="800" />
+    <img alt="star history chart for IvanWng97/pixtuoid" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" width="640" />
   </picture>
 </p>
 

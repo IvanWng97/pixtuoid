@@ -18,16 +18,14 @@ import json
 import pathlib
 import re
 import sys
-import tomllib
 import traceback
 from typing import NamedTuple
 from urllib import request
 
-from readme_pixels import GLYPH_H, THEMES, _run, compact, text_path, text_width
+from readme_pixels import GLYPH_H, PACK_DIR, THEMES, Pack, _run, animation, compact, load_pack, mask_path, parse_sprite, sprite_size, text_path, text_width
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 FUNDING_PATH = REPO / ".github" / "FUNDING.yml"
-PACK_DIR = REPO / "crates" / "pixtuoid-scene" / "sprites" / "default"
 # BMC's own app API, unauthenticated; `public_supporters_count` is the "N
 # supporters" the creator page shows.
 CREATOR_URL = "https://app.buymeacoffee.com/api/creators/slug/{slug}"
@@ -35,9 +33,9 @@ CREATOR_URL = "https://app.buymeacoffee.com/api/creators/slug/{slug}"
 AGENT, CAT = "walking_coffee", "cat_sit"
 TITLE = "Buy me a coffee"
 # One button pixel; the sprites are drawn a size up so the coworker reads at a glance.
-PX, SPRITE_PX = 4, 5
-TITLE_PX, LABEL_PX = 3, 2
-WIDTH, HEIGHT = 404, 104
+PX, SPRITE_PX = 3, 4
+TITLE_PX, LABEL_PX = 2, 2
+WIDTH, HEIGHT = 318, 76
 CARPET_H = 4 * PX
 FLOOR_Y = HEIGHT - PX - CARPET_H
 # How far a sprite's feet sink into the carpet.
@@ -47,14 +45,6 @@ LABEL_Y = TITLE_Y + GLYPH_H * TITLE_PX + 2 * PX
 HEART = (".##.##.", "#######", "#######", ".#####.", "..###..", "...#...")
 HEART_KEY = "o"
 SHADOW_OPACITY = 0.35
-
-Frame = list[list[str]]
-
-
-class Pack(NamedTuple):
-    palette: dict[str, str]
-    animations: dict[str, tuple[list[Frame], int]]
-
 
 class Layout(NamedTuple):
     agent_x: int
@@ -82,32 +72,10 @@ def count_label(count: int) -> tuple[str, str]:
     return compact(count), " supporter" if count == 1 else " supporters"
 
 
-def parse_sprite(text: str) -> Frame:
-    lines = [ln.strip() for ln in text.splitlines()]
-    if sum(ln.startswith("@frame") for ln in lines) > 1:
-        raise ValueError("a multi-frame sprite file; the button reads one frame per file")
-    return [ln.split() for ln in lines if ln and not ln.startswith(("#", "@"))]
-
-
-def load_pack(pack_dir: pathlib.Path) -> Pack:
-    manifest = tomllib.loads((pack_dir / "pack.toml").read_text(encoding="utf-8"))
-    animations = {}
-    for name in (AGENT, CAT):
-        a = manifest["animations"][name]
-        frames = [parse_sprite((pack_dir / f).read_text(encoding="utf-8")) for f in a["frames"]]
-        animations[name] = (frames, a["frame_ms"])
-    return Pack(manifest["palette"], animations)
-
-
-def _size(pack: Pack, name: str) -> tuple[int, int]:
-    frame = pack.animations[name][0][0]
-    return len(frame[0]) * SPRITE_PX, len(frame) * SPRITE_PX
-
-
 def layout(pack: Pack) -> Layout:
     agent_x = 5 * PX
-    cat_x = WIDTH - 3 * PX - _size(pack, CAT)[0]
-    return Layout(agent_x, cat_x, agent_x + _size(pack, AGENT)[0] + 5 * PX)
+    cat_x = WIDTH - 3 * PX - sprite_size(pack, CAT, SPRITE_PX)[0]
+    return Layout(agent_x, cat_x, agent_x + sprite_size(pack, AGENT, SPRITE_PX)[0] + 5 * PX)
 
 
 def count_line_width(count: int) -> int:
@@ -115,47 +83,13 @@ def count_line_width(count: int) -> int:
     return max(text_width(TITLE, TITLE_PX), len(HEART[0]) * LABEL_PX + 2 * PX + text_width(num + word, LABEL_PX))
 
 
-def _sprite(frame: Frame, x: int, y: int, palette: dict[str, str]) -> str:
-    """One path per palette key, one run per horizontal stretch of it."""
-    runs: dict[str, list[str]] = {}
-    for r, row in enumerate(frame):
-        c = 0
-        while c < len(row):
-            key, end = row[c], c
-            while end + 1 < len(row) and row[end + 1] == key:
-                end += 1
-            if key != ".":
-                runs.setdefault(key, []).append(_run(x + c * SPRITE_PX, y + r * SPRITE_PX, (end - c + 1) * SPRITE_PX, SPRITE_PX))
-            c = end + 1
-    return "".join(f'<path fill="{palette[k]}" d="{"".join(v)}"/>' for k, v in runs.items())
-
-
-def _animation(pack: Pack, name: str, x: int) -> tuple[str, list[str]]:
-    """Every frame drawn, each shown for its `frame_ms` turn by a stepped CSS opacity loop."""
-    frames, frame_ms = pack.animations[name]
-    n, period = len(frames), frame_ms * len(frames)
-    y = FLOOR_Y + FOOTING - _size(pack, name)[1]
-    css = [
-        f".{name} g{{opacity:0;animation:{name} {period}ms steps(1,end) infinite}}",
-        f"@keyframes {name}{{0%{{opacity:1}}{100 / n:g}%{{opacity:0}}100%{{opacity:0}}}}",
-        *(f".{name} g:nth-child({i + 1}){{animation-delay:{(i - n) * frame_ms}ms}}" for i in range(1, n)),
-        f"@media (prefers-reduced-motion:reduce){{.{name} g{{animation:none}}.{name} g:first-child{{opacity:1}}}}",
-    ]
-    body = "".join(f"<g>{_sprite(f, x, y, pack.palette)}</g>" for f in frames)
-    return f'<g class="{name}">{body}</g>', css
-
-
 def render_svg(count: int, theme: str, pack: Pack) -> str:
     pal = THEMES[theme]
     lay = layout(pack)
-    agent, agent_css = _animation(pack, AGENT, lay.agent_x)
-    cat, cat_css = _animation(pack, CAT, lay.cat_x)
+    agent, agent_css = animation(pack, AGENT, lay.agent_x, FLOOR_Y + FOOTING, SPRITE_PX)
+    cat, cat_css = animation(pack, CAT, lay.cat_x, FLOOR_Y + FOOTING, SPRITE_PX)
     num, word = count_label(count)
-    heart = "".join(
-        _run(lay.text_x + m.start() * LABEL_PX, LABEL_Y + (r + 1) * LABEL_PX, (m.end() - m.start()) * LABEL_PX, LABEL_PX)
-        for r, row in enumerate(HEART)
-        for m in re.finditer(r"#+", row)
-    )
+    heart = mask_path(HEART, lay.text_x, LABEL_Y + LABEL_PX, LABEL_PX)
     num_x = lay.text_x + len(HEART[0]) * LABEL_PX + 2 * PX
     frame = _run(0, 0, WIDTH, PX) + _run(0, HEIGHT - PX, WIDTH, PX) + _run(0, 0, PX, HEIGHT) + _run(WIDTH - PX, 0, PX, HEIGHT)
     tile = 2 * PX
@@ -241,7 +175,7 @@ def test_sprite_parse_skips_comments_and_directives() -> None:
 
 
 def test_pack_animations_have_uniform_frames() -> None:
-    pack = load_pack(PACK_DIR)
+    pack = load_pack(PACK_DIR, (AGENT, CAT))
     for name, (frames, frame_ms) in pack.animations.items():
         check(frame_ms > 0 and len(frames) > 1, f"{name}: {len(frames)} frames at {frame_ms}ms")
         dims = {(len(f[0]), len(f)) for f in frames}
@@ -253,7 +187,7 @@ def test_pack_animations_have_uniform_frames() -> None:
 def test_render_draws_every_frame_and_names_the_count() -> None:
     import xml.etree.ElementTree as ET
 
-    pack = load_pack(PACK_DIR)
+    pack = load_pack(PACK_DIR, (AGENT, CAT))
     ns = "{http://www.w3.org/2000/svg}"
     for theme in ("light", "dark"):
         root = ET.fromstring(render_svg(3, theme, pack))
@@ -265,17 +199,21 @@ def test_render_draws_every_frame_and_names_the_count() -> None:
 
 
 def test_text_never_reaches_the_cat() -> None:
-    pack = load_pack(PACK_DIR)
+    pack = load_pack(PACK_DIR, (AGENT, CAT))
     lay = layout(pack)
     for count in (0, 1, 999, 1500, 123_456, 999_999, 10**6):
         check(lay.text_x + count_line_width(count) < lay.cat_x, f"count {count}: the label runs into the cat")
+
+
+def test_label_clears_the_carpet() -> None:
+    check(LABEL_Y + GLYPH_H * LABEL_PX < FLOOR_Y - PX, "the count line's descenders must clear the carpet's trim")
 
 
 def test_write_buttons_emits_both_themes() -> None:
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
-        paths = write_buttons(3, pathlib.Path(tmp) / "nested", load_pack(PACK_DIR))
+        paths = write_buttons(3, pathlib.Path(tmp) / "nested", load_pack(PACK_DIR, (AGENT, CAT)))
         check(sorted(p.name for p in paths) == ["bmc-button-dark.svg", "bmc-button-light.svg"], f"got {paths}")
         check(all(p.stat().st_size > 0 for p in paths), "every button must be written non-empty")
 
@@ -301,7 +239,7 @@ def main(argv: list[str]) -> int:
         return 2
     slug = slug_from_funding(FUNDING_PATH.read_text(encoding="utf-8"))
     count = supporter_count(fetch_creator(slug))
-    for p in write_buttons(count, pathlib.Path(argv[0]), load_pack(PACK_DIR)):
+    for p in write_buttons(count, pathlib.Path(argv[0]), load_pack(PACK_DIR, (AGENT, CAT))):
         print(p)
     print(f"{slug}: {count} supporters", file=sys.stderr)
     return 0
