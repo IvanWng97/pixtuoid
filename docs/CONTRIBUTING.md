@@ -407,8 +407,7 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 8. **If the CLI has hooks**, add an `install/` target (a `Target` row +
    `merge_install`/`merge_uninstall` + a `verify_schema` fn mirroring the
    target's own config format + the registered-events↔decoder-arms guard).
-9. **Add a row to `site/src/sources.json`** (`status`, `featured`, per-OS
-   `platforms`), then `just gen-readme`. Pinned to `registered_source_names()`
+9. **Add a row to `site/src/sources.json`** (`status`, per-OS `platforms`), then `just gen-readme`. Pinned to `registered_source_names()`
    by `supported_sources_manifest.rs`.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility

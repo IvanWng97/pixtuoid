@@ -10,6 +10,7 @@
     "icon": "🛗",
     "name": "Multi-floor office",
     "desc": "Hop between floors with `PageUp`/`PageDown`, `↑`/`↓`, or `j`/`k` — each switch slides into view",
+    "featured": false,
     "pix": "multifloor"
   },
   {
@@ -59,6 +60,7 @@
     "icon": "🔎",
     "name": "Hover tooltips",
     "desc": "Hover an agent for session duration, tool-call count and active-time %; hover any furniture — desks, sofas, plants, vending machine, printer — for its name",
+    "featured": false,
     "pix": "magnify",
     "card": {
       "blurb": "hover a coworker for session length, tool-call count and active-time %, or any desk or plant for its name."
@@ -99,6 +101,7 @@
     "icon": "🦞",
     "name": "OpenClaw gateway mascot",
     "desc": "A live OpenClaw gateway shows up as a wandering lobster — the way it moves shows the gateway's health",
+    "featured": false,
     "pix": "lobster",
     "channel": "openclaw"
   },
@@ -128,6 +131,7 @@
     "icon": "🛡️",
     "name": "Hook-safe",
     "desc": "The tiny hook shim pixtuoid installs always exits 0 — even a stuck office can never block your agent",
+    "featured": false,
     "pix": "shield",
     "card": {
       "blurb": "the hook shim always exits 0 — a stuck office can never block the agent it's watching."

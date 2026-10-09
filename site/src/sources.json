@@ -6,7 +6,6 @@
     "name": "Claude Code",
     "url": "https://code.claude.com",
     "status": "supported",
-    "featured": true,
     "transport": "hooks + session transcripts",
     "platforms": {
       "macos": "yes",
@@ -21,7 +20,6 @@
     "name": "Codex CLI",
     "url": "https://github.com/openai/codex",
     "status": "supported",
-    "featured": true,
     "transport": "hooks + session transcripts (merged per session)",
     "platforms": {
       "macos": "yes",
@@ -36,7 +34,6 @@
     "name": "Antigravity CLI",
     "url": "https://github.com/google-antigravity/antigravity-cli",
     "status": "supported",
-    "featured": false,
     "transport": "session transcripts",
     "platforms": {
       "macos": "yes",
@@ -51,7 +48,6 @@
     "name": "DeepSeek-Reasonix",
     "url": "https://github.com/esengine/DeepSeek-Reasonix",
     "status": "supported",
-    "featured": false,
     "transport": "hooks only (global ~/.reasonix/settings.json)",
     "platforms": {
       "macos": "yes",
@@ -66,7 +62,6 @@
     "name": "CodeWhale",
     "url": "https://github.com/Hmbown/CodeWhale",
     "status": "supported",
-    "featured": false,
     "transport": "hooks only (~/.codewhale/config.toml [hooks], cwd-keyed)",
     "platforms": {
       "macos": "yes",
@@ -81,7 +76,6 @@
     "name": "Copilot CLI",
     "url": "https://github.com/github/copilot-cli",
     "status": "supported",
-    "featured": false,
     "transport": "session transcripts only (~/.copilot/session-state/, sub-agents interleave by agentId)",
     "platforms": {
       "macos": "yes",
@@ -96,7 +90,6 @@
     "name": "opencode",
     "url": "https://github.com/anomalyco/opencode",
     "status": "supported",
-    "featured": false,
     "transport": "hooks (TS plugin → ~/.config/opencode/plugins/, session-id-keyed)",
     "platforms": {
       "macos": "yes",
@@ -111,7 +104,6 @@
     "name": "Cursor CLI",
     "url": "https://cursor.com/cli",
     "status": "supported",
-    "featured": false,
     "transport": "hooks (~/.cursor/hooks.json, session-id-keyed)",
     "platforms": {
       "macos": "yes",
@@ -126,7 +118,6 @@
     "name": "Hermes Agent",
     "url": "https://hermes-agent.nousresearch.com",
     "status": "supported",
-    "featured": false,
     "transport": "hooks (~/.hermes/config.yaml hooks, session-id-keyed; approve the hook once in Hermes to activate)",
     "platforms": {
       "macos": "yes",
@@ -141,7 +132,6 @@
     "name": "Oh My Pi",
     "url": "https://omp.sh",
     "status": "supported",
-    "featured": false,
     "transport": "session transcripts (default ~/.omp/agent/sessions/, redirectable by profile, PI_CONFIG_DIR, XDG, or .env; subagents nested per-task) + a bridge extension (TS → agent-dir extensions/) for approval waits and instant lifecycle",
     "platforms": {
       "macos": "yes",
@@ -156,7 +146,6 @@
     "name": "OpenClaw",
     "url": "https://github.com/openclaw/openclaw",
     "status": "supported",
-    "featured": false,
     "transport": "hooks (JS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
     "platforms": {
       "macos": "yes",
@@ -171,7 +160,6 @@
     "name": "Grok Build",
     "url": "https://github.com/xai-org/grok-build",
     "status": "supported",
-    "featured": false,
     "transport": "hooks (~/.grok/hooks/) + session transcripts (~/.grok/sessions/, updates.jsonl)",
     "platforms": {
       "macos": "yes",
@@ -186,7 +174,6 @@
     "name": "Kimi Code CLI",
     "url": "https://github.com/MoonshotAI/kimi-code",
     "status": "supported",
-    "featured": false,
     "transport": "hooks (~/.kimi-code/config.toml [[hooks]], session-id-keyed)",
     "platforms": {
       "macos": "yes",
@@ -201,7 +188,6 @@
     "name": "DeepSeek Harness",
     "url": "https://github.com/deepseek-ai/deepseek-harness",
     "status": "supported",
-    "featured": false,
     "transport": "cordis plugin (zero-import .mjs mounted via $DSH_HOME/cordis.patch.yml, session-id-keyed)",
     "platforms": {
       "macos": "yes",
