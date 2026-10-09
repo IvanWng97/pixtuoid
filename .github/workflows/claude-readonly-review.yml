@@ -46,7 +46,7 @@ env:
   # The one rule for a path the review reads or anchors a thread on:
   # repository-relative, and nothing that climbs.
   REVIEW_SAFE_PATH: >-
-    def safe_path: type == "string" and length > 0 and test("^[A-Za-z0-9._/@-]+$")
+    def safe_path: type == "string" and length > 0 and test("\\A[A-Za-z0-9._/@-]+\\z")
     and (split("/") | all(. != "" and . != "." and . != ".."));
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -284,8 +284,8 @@ jobs:
             review-context.md, pr-description.json, prior-threads.json,
             units.json (the units planned for you), skipped.json, and head/ (each
             kept file at the PR head). Spawn, all in parallel: the unit-reviewer
-            ${{ env.UNIT_PASSES }} times for every unit in units.json, naming the
-            unit's id and its files, the files in reverse order on every second
+            ${{ env.UNIT_PASSES }} times for every unit in units.json, naming it
+            "unit <id>" and listing its files, the files in reverse order on every second
             pass; the correctness-reviewer once; the design-reviewer once. Union
             their candidates, merge duplicates (one defect at one path and line),
             and spawn one verifier per remaining candidate, keeping only what a
@@ -332,7 +332,7 @@ jobs:
             | def ran($type): [$spawns[] | select(.subagent_type == $type)];
             ($review.findings | length) as $kept
             | select(all($units[0][]; .id as $id
-                       | [ran("unit-reviewer")[] | select(.prompt | test("\\b\($id)\\b"))] | length >= $passes)
+                       | [ran("unit-reviewer")[] | select(.prompt | test("(?i)\\bunit \($id)\\b"))] | length >= $passes)
                      and (ran("correctness-reviewer") | length > 0)
                      and (ran("design-reviewer") | length > 0)
                      and (ran("verifier") | length >= $kept))

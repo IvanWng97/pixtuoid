@@ -115,7 +115,7 @@ REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
 prompt="$(yq -e -r '.jobs.analyze.steps[] | select(.name == "Run read-only Claude review") | .with.prompt' \
     "$CLAUDE_REVIEW_WORKFLOW_FILE")" || fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no review prompt"
 # shellcheck disable=SC2016 # A workflow expression, matched literally.
-for part in .claude-review/ pr-description.json prior-threads.json units.json head/ '${{ env.UNIT_PASSES }} times'; do
+for part in .claude-review/ pr-description.json prior-threads.json units.json head/ '${{ env.UNIT_PASSES }} times' '"unit <id>"'; do
     [[ "$prompt" == *"$part"* ]] ||
         fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name \"$part\", an input or the passes the plan gate holds it to"
 done
@@ -360,7 +360,7 @@ schema_accepts "$six_blocking" ||
 run_publisher "$six_blocking" ||
     fail "Claude publisher rejected six blocking findings"
 assert_threads 'length == 6' "every blocking finding opens a thread"
-for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ .. ./a a/./b .; do
+for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ .. ./a a/./b . $'src/a.rs\n'; do
     review="$(jq -cn --argjson s "$severities" --arg p "$path" \
         '{summary: "s", findings: [{severity: $s[0], lens: "correctness", path: $p, line: 1, body: "b"}]}')"
     ! schema_accepts "$review" || fail "$REVIEW_SCHEMA_FILE accepts the unsafe path $path"
@@ -1134,10 +1134,12 @@ assert_gate() {
 assert_gate 1 "every unit's passes, both lens reviewers and a verifier per kept finding" "$(plan_run)"
 assert_gate fail "a unit short of a pass" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "u2-1")')"
 assert_gate fail "a unit whose passes name another unit" "$(plan_run | sed 's/Unit u1:/Unit u10:/')"
+assert_gate fail "a unit only another unit's file list names" "$(plan_run | sed 's|Unit u1: a|Unit u2: crates/u1/a.rs|')"
 assert_gate fail "a unit pass that errored" "$(plan_run | jq -c '(.message.content[0] | select(.tool_use_id == "u1-1") | .is_error) = true')"
 assert_gate fail "a unit pass that never returned" "$(plan_run | jq -c 'select(.message.content[0].tool_use_id != "u1-1")')"
 assert_gate fail "a unit pass a subagent made" "$(plan_run | jq -c '(select(.message.content[0].id == "u1-1") | .parent_tool_use_id) = "c"')"
 assert_gate fail "no design reviewer" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "d")')"
+assert_gate fail "no correctness reviewer" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "c")')"
 assert_gate fail "a kept finding no verifier saw" "$(plan_run)" "$two_units" 3
 assert_gate fail "a run that spawned nothing" "$(spawn c correctness-reviewer x | jq -c 'select(.type == "user")')"
 assert_gate 0 "a plan with no units" "$(

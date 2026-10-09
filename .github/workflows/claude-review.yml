@@ -36,7 +36,7 @@ jobs:
       prompt_path: REVIEW.md
       lenses: '["correctness", "design"]'
       max_turns: 120
-      max_budget_usd: 30
+      max_budget_usd: 50
       allow_fork: ${{ github.event_name == 'issue_comment' }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

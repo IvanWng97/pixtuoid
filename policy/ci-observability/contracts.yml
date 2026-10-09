@@ -62,10 +62,13 @@
     media-regen.yml's own app (its PR touches only docs/images), never `*`,
     which would let any App's push trigger it.
   assert: |
-    [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
+    . as $doc
+    | [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
       and ((.[0].with.allowed_bots // "") == "pixtuoid-bot[bot]")
       and .[0].env == {"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
+      and $doc.jobs.analyze.env == null
+      and ($doc.env | keys) == ["REVIEW_CONTEXT", "REVIEW_LENSES", "REVIEW_SAFE_PATH", "REVIEW_TITLE", "RUN_URL", "UNIT_PASSES"]
       and ((.[0].with | keys) - [
             "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
@@ -144,12 +147,25 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env)
       |= del(.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)
+    - '.jobs.analyze.env = {"CLAUDE_CONFIG_DIR": "/tmp/x"}'
+    - .env.CLAUDE_CODE_PLUGIN_DIRS = "/tmp/x"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env.ANTHROPIC_BASE_URL)
       = "https://example.test"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(",\"claudeMdExcludes\":\\[[^]]*\\]"; "")
+
+- id: reviewer-absence-runs-on-failure
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    report_absence posts the failure statuses exactly when analyze or publish
+    failed, and an `if:` with no status function gets an implicit `success()`,
+    which skips it then: the PR waits on statuses no run will post.
+  assert: |
+    (.jobs.report_absence.if // "") | contains("!cancelled()")
+  break:
+    - .jobs.report_absence.if = "${{ needs.publish.result != 'success' }}"
 
 - id: reviewer-agents-only-read
   file: .github/prompts/review-agents.json
