@@ -424,17 +424,16 @@ impl FloatingApp {
             (win_w, win_h),
         );
         self.shown = Some(at);
-        if !live
-            || self
-                .renderer
-                .buf()
-                .is_none_or(|o| o.width() == 0 || o.height() == 0)
-        {
+        let Some(office) = self
+            .renderer
+            .buf()
+            .filter(|o| live && o.width() > 0 && o.height() > 0)
+        else {
             // Nothing rendered, or held: the window keeps the last frame, which
             // the next one's dirt is no longer measured against.
             self.screen.stale();
             return;
-        }
+        };
         let cursor = (self.cursor.x, self.cursor.y);
         let next = super::overlays::Overlays {
             window: (win_w, win_h),
@@ -482,9 +481,6 @@ impl FloatingApp {
             },
         };
         self.overlays.update(next, at, (self.theme, &*self.pack));
-        let Some(office) = self.renderer.buf() else {
-            return;
-        };
         let dirty = self.renderer.dirty();
         let painted = crate::jank::Painted::from(dirty);
         let comp = super::compose::composition(

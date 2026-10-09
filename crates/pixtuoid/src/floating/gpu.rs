@@ -401,23 +401,35 @@ fn configure(
 }
 
 /// The window's surface and the painter that draws into it.
-#[derive(Debug)]
 pub(super) struct Gpu {
     instance: wgpu::Instance,
     window: std::sync::Arc<winit::window::Window>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     painter: Painter,
+    /// Where a failure that ends the window goes.
+    on_fatal: std::sync::Arc<dyn Fn(String) + Send + Sync>,
+}
+
+impl std::fmt::Debug for Gpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gpu")
+            .field("config", &self.config)
+            .field("painter", &self.painter)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Gpu {
     /// `window`'s surface and painter. `on_fatal` hears a validation error or
-    /// a lost device, from inside the wgpu call that raised it.
+    /// a lost device, from inside the wgpu call that raised it, and a lost
+    /// surface that cannot be recreated.
     pub(super) fn for_window(
         window: std::sync::Arc<winit::window::Window>,
         display: winit::event_loop::OwnedDisplayHandle,
-        on_fatal: impl Fn(String) + Send + Sync + Clone + 'static,
+        on_fatal: impl Fn(String) + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
+        let on_fatal: std::sync::Arc<dyn Fn(String) + Send + Sync> = std::sync::Arc::new(on_fatal);
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
         );
@@ -427,10 +439,11 @@ impl Gpu {
         let adapter = adapter(&instance, Some(&surface))?;
         let (device, queue) = device(&adapter)?;
         // wgpu's default handler panics, on whichever thread raised it.
-        let fatal = on_fatal.clone();
+        let fatal = std::sync::Arc::clone(&on_fatal);
         device.on_uncaptured_error(std::sync::Arc::new(move |e| fatal(e.to_string())));
+        let fatal = std::sync::Arc::clone(&on_fatal);
         device.set_device_lost_callback(move |reason, message| {
-            on_fatal(format!("{reason:?}: {message}"));
+            fatal(format!("{reason:?}: {message}"));
         });
         let caps = surface.get_capabilities(&adapter);
         let format = surface_format(&caps.formats)
@@ -453,6 +466,7 @@ impl Gpu {
             surface,
             config,
             painter,
+            on_fatal,
         })
     }
 
@@ -488,10 +502,11 @@ impl Gpu {
                         self.surface = surface;
                         configure(&self.surface, self.painter.device(), &self.config);
                     }
-                    Err(e) => tracing::error!(
-                        error = ?e,
-                        "pixtuoid floating: could not recreate the lost GPU surface"
-                    ),
+                    // Retrying each frame would only repeat the failure.
+                    Err(e) => {
+                        (self.on_fatal)(format!("could not recreate the lost GPU surface: {e}"));
+                        return false;
+                    }
                 }
                 self.window.request_redraw();
                 return false;

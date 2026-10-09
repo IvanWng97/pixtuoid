@@ -14,8 +14,9 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
-CI jobs call `justfile` recipes.
+headers (`apt install lld pkg-config libasound2-dev`), and, with no GPU driver,
+Mesa's software Vulkan for the GPU tests (`apt install mesa-vulkan-drivers`).
+The git hooks and most CI jobs call `justfile` recipes.
 
 ```bash
 just              # list recipes
