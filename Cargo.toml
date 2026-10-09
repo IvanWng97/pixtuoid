@@ -93,6 +93,16 @@ opt-level = 2
 inherits = "dev"
 debug = true
 
+# Iterating on a release build (a snapshot, a live run):
+# `cargo build --profile release-local`. Thin LTO over 16 incremental codegen
+# units, where `release`'s fat LTO over one re-optimizes the whole program on
+# every change. Not the binary that ships, nor the one `pace-check` measures.
+[profile.release-local]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true
+
 [workspace.dependencies]
 lru                = { version = "0.18", default-features = false }
 tokio              = { version = "1", default-features = false }
