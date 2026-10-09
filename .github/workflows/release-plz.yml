@@ -43,8 +43,9 @@ jobs:
   release-pr:
     name: release PR
     # A dispatch from any other ref would open a release PR computed from that
-    # tree; a fork has no secret.
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'IvanWng97/pixtuoid'
+    # tree; a fork has no secret. The repository is gated by its id, which a
+    # transfer or rename keeps (policy: `releases-run-only-in-this-repository`).
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository_id == '1245333424'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -115,7 +116,7 @@ jobs:
   # is a no-op for `release`, so nothing after this holds a runner for it.
   release-merge:
     name: is this push a merged release PR
-    if: github.event_name == 'push' && github.repository == 'IvanWng97/pixtuoid'
+    if: github.event_name == 'push' && github.repository_id == '1245333424'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

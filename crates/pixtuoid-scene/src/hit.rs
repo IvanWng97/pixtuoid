@@ -11,8 +11,8 @@ use crate::display::{HoverTarget, Hovers, PetHover};
 use crate::layout::{Bounds, SceneLayout};
 use crate::pet::{PetKind, PetState};
 
-/// The project repository.
-pub const REPO_URL: &str = "https://github.com/IvanWng97/pixtuoid";
+/// The project repository: `Cargo.toml`'s `repository`, its one spelling.
+pub const REPO_URL: &str = env!("CARGO_PKG_REPOSITORY");
 
 /// Where the coffee machine links.
 pub const COFFEE_URL: &str = "https://buymeacoffee.com/IvanWng97";

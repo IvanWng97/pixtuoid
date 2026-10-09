@@ -124,7 +124,11 @@ fn the_popup_body_reaches_the_frame_at_every_office_width() {
         r.render(&scene_with(vec![], 16), pack(), now).unwrap();
         let text = frame_text(r.frame_buffer());
         assert!(
-            text.contains("github.com/IvanWng97/pixtuoid"),
+            text.contains(
+                pixtuoid_scene::hit::REPO_URL
+                    .strip_prefix("https://")
+                    .expect("an https repository")
+            ),
             "the body row's address is clipped at {cols} cols:\n{text}"
         );
         // At the popup's own measure the whole URL must land, version included.
