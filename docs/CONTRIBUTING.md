@@ -66,8 +66,8 @@ CodSpeed skip drafts. The jobs:
 - **msrv** — the workspace compiles on its declared `rust-version`.
 - **packaging-build** (full tier) — a clean `cargo install --locked` on both
   Homebrew bottle platforms.
-- **coverage** (full tier) — the instrumented suite, uploaded to Codecov,
-  whose statuses are informational.
+- **coverage** — every tier runs the suite instrumented; the full tier
+  uploads it to Codecov, whose statuses are informational.
 - **GitGuardian Security Checks** — the GitGuardian app's secret scan, a
   required status.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
