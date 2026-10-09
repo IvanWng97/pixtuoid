@@ -976,3 +976,8 @@ crate serde 1.0.1 >"$f/base123/Cargo.lock"
 } >"$f/head123/Cargo.lock"
 run_exempt "$f" head123 "a Cargo.lock written by hand"
 assert_exempt "$f" pending "a Cargo.lock written by hand"
+
+f="$(exempt_case digit-led-rename)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "v8-to-istanbul": "^9.1.0",\n+    "v8-evil": "^9.1.0",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a digit-led dependency renamed"
+assert_exempt "$f" pending "a digit-led dependency renamed"

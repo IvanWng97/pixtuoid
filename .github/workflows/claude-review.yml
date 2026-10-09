@@ -116,11 +116,12 @@ jobs:
             "$files" > /dev/null || refuse "a workflow edit beyond a uses: pin"
           # Any manifest but a lockfile may move version strings and nothing
           # else: its removed and added lines match, in order, once each whole
-          # version (a quoted one, a pip pin, an action's @ref) is masked, so a
-          # new dependency, script, patch or action owner leaves one unpaired.
+          # version (a quoted value after `:` or `=`, a pip pin, an action's
+          # @ref) is masked, so a new dependency, rename, script, patch or action
+          # owner leaves one unpaired.
           jq -se 'def mask($f):
                 if ($f | startswith(".github/")) then sub("@[^ ]+"; "@") | sub(" +#.*$"; "")
-                else gsub("\"[~^=<>! ]*v?[0-9][0-9A-Za-z.+*-]*\""; "\"0\"")
+                else gsub("(?<k>[:=] *)\"[~^=<>! ]*v?[0-9][0-9A-Za-z.+*-]*\""; "\(.k)\"0\"")
                   | gsub("(?<op>[=<>!~]=)[0-9][0-9A-Za-z.*+!-]*"; "\(.op)0") end;
               def side($f; $sign): [.patch | split("\n")[] | select(startswith($sign)) | .[1:] | mask($f)];
               all(.[] | select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$") | not);
