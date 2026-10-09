@@ -552,6 +552,21 @@
     - (.jobs[] | select(has("if")) | .if) |= sub("( && )?github.repository_id == '[0-9]+'"; "")
     - '.jobs.ungated = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
 
+- id: release-attests-before-publishing
+  file: .github/workflows/release.yml
+  why: >-
+    softprops publishes the draft once its assets are attached, so an
+    attestation after it can fail with the release already public and its
+    binaries unattested.
+  assert: |
+    .jobs.release.steps as $steps
+    | ([$steps | to_entries[] | select((.value.uses // "") | startswith("actions/attest")) | .key] | min) as $attest
+    | ([$steps | to_entries[] | select((.value.uses // "") | startswith("softprops/action-gh-release@")) | .key] | min) as $publish
+    | $attest != null and $publish != null and $attest < $publish
+  break:
+    - .jobs.release.steps |= ([.[] | select((.uses // "") | startswith("actions/attest") | not)] + [.[] | select((.uses // "") | startswith("actions/attest"))])
+    - .jobs.release.steps |= map(select((.uses // "") | startswith("actions/attest") | not))
+
 - id: release-publishes-after-ci-gate
   file: .github/workflows/release-plz.yml
   why: >-

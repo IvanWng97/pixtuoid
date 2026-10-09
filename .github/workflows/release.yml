@@ -231,6 +231,16 @@ jobs:
           cd artifacts
           sha256sum -- *.tar.gz *.deb *.zip > sha256sums.txt
 
+      # Before the release goes public, so a failed attestation leaves a draft,
+      # never a published release without provenance.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            artifacts/*.deb
+            artifacts/*.zip
+
       # release-plz created this release as a DRAFT carrying the changelog, so
       # the version is never visible without its binaries. Passing neither
       # `body` nor `prerelease` keeps what release-plz wrote (the action retains
@@ -250,14 +260,6 @@ jobs:
             artifacts/*.deb
             artifacts/*.zip
             artifacts/sha256sums.txt
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            artifacts/*.tar.gz
-            artifacts/*.deb
-            artifacts/*.zip
 
   npm:
     name: publish to npm
