@@ -525,46 +525,6 @@ yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     and ([.jobs.report_absence.steps[].env.PR_STATE // empty] == ["${{ needs.analyze.outputs.state }}"])' >/dev/null ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the resolved PR state to the absence report"
 
-# claude-refuses-forks-before-the-action pins only that the fork refusal exists
-# and runs before the action; what it actually does is asserted here.
-CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.yml}"
-
-# Replaces the publisher stub, which answers only `{head: {sha}}`; this step
-# reads the whole PR through --jq.
-cat >"$fake_bin/gh" <<'STUB'
-#!/usr/bin/env bash
-set -euo pipefail
-[[ "$1" == api ]]
-jq_expr=""
-while [[ $# -gt 0 ]]; do
-    [[ "$1" == --jq ]] && jq_expr="$2"
-    shift
-done
-printf '%s' "$FAKE_PR_JSON" | jq -r "$jq_expr"
-STUB
-chmod +x "$fake_bin/gh"
-
-refusal_script="$(workflow_step_script "$CLAUDE_TAG_WORKFLOW_FILE" "Refuse fork pull requests")"
-
-assert_refusal() {
-    local fixture="$1"
-    local expect_refused="$2"
-    local label="$3"
-    if PATH="$fake_bin:$PATH" \
-        FAKE_PR_JSON="$fixture" \
-        GH_TOKEN="test-token" \
-        PR_NUMBER="42" \
-        REPOSITORY="owner/repo" \
-        bash -c "$refusal_script" >/dev/null 2>&1; then
-        [[ "$expect_refused" == false ]] || fail "@claude fork guard admitted $label"
-    else
-        [[ "$expect_refused" == true ]] || fail "@claude fork guard rejected $label"
-    fi
-}
-
-assert_refusal "$valid_pr" false "an internal pull request"
-assert_refusal "$fork_pr" true "a fork pull request"
-assert_refusal '{"head":{"repo":null},"base":{"ref":"main"},"state":"open"}' true "a deleted fork head"
 
 # ── require-jobs: the verdict ci-gate and every group's `required` job reach ──
 # Anything but success is red, and an empty needs map must not pass vacuously.

@@ -97,7 +97,6 @@ CodSpeed skip drafts. The jobs:
   one per lens over the whole diff, a verifier per candidate. A unit it skips
   fails the run; a separate least-privilege publisher opens a review thread
   per finding and sets each lens's `claude-review/<lens>` status.
-  `claude.yml` refuses fork PR heads.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
