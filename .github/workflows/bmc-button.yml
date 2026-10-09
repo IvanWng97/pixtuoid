@@ -1,0 +1,56 @@
+name: bmc-button
+
+# Draws the README's Buy Me a Coffee button with the live supporter count and
+# force-pushes it as ONE orphan commit on the `bmc-button` branch, as
+# star-history.yml does its chart. Its own workflow, so a BMC outage can't hold
+# back the star chart. The cron refreshes the count; the `push` arm republishes
+# the moment the renderer, its art or this file changes on main.
+
+on:
+  schedule:
+    - cron: "47 4 * * *" # daily 04:47 UTC
+  push:
+    branches: [main]
+    paths:
+      - scripts/bmc-button.py
+      - scripts/readme_pixels.py
+      - scripts/readme-palette.json
+      - .github/FUNDING.yml
+      - crates/pixtuoid-scene/sprites/default/pack.toml
+      - crates/pixtuoid-scene/sprites/default/walking_coffee_[0-9].sprite
+      - crates/pixtuoid-scene/sprites/default/cat_sit_[0-9].sprite
+      - .github/workflows/bmc-button.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: bmc-button
+  cancel-in-progress: true
+
+jobs:
+  button:
+    name: render and publish
+    if: github.repository_id == '1245333424'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Render the button
+        run: python3 scripts/bmc-button.py "$RUNNER_TEMP/button"
+
+      - id: day
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Publish to the bmc-button branch
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ github.token }}
+          publish_branch: bmc-button
+          publish_dir: ${{ runner.temp }}/button
+          force_orphan: true
+          disable_nojekyll: true
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          full_commit_message: "button: supporter count as of ${{ steps.day.outputs.date }}"
