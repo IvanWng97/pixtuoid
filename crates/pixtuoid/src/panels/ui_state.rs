@@ -39,6 +39,7 @@ impl RenderFrames {
             connection: &self.connection,
             popup_scale: popup_whole(self.version_popup),
             help_open: self.help_open,
+            host_keys: &[],
             onboarding: &self.onboarding,
         }
     }

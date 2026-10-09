@@ -723,6 +723,7 @@ mod tests {
             let at = super::super::geometry::window_geometry(
                 winit::dpi::PhysicalSize::new(window.0, window.1),
                 pack.max_density_variant(),
+                super::super::geometry::Zoom::default(),
             );
             let mut renderer =
                 super::super::offscreen::OfficeRenderer::new(std::sync::Arc::clone(&pack));
@@ -803,6 +804,7 @@ mod tests {
         let at = super::super::geometry::window_geometry(
             winit::dpi::PhysicalSize::new(400, 3),
             crate::test_flash::pack().max_density_variant(),
+            super::super::geometry::Zoom::default(),
         );
         let overlays = super::super::overlays::OverlayLayers::default();
         let mut sb = vec![0u32; 400 * 3];

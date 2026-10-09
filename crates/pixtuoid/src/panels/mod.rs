@@ -61,6 +61,8 @@ pub(crate) struct OverlayFrame<'a> {
     pub(crate) connection: &'a crate::panels::connection::ConnectionFrame,
     pub(crate) popup_scale: f32,
     pub(crate) help_open: bool,
+    /// Shortcuts the host adds to the help, after the shared ones.
+    pub(crate) host_keys: &'a [widgets::Shortcut],
     pub(crate) onboarding: &'a crate::panels::welcome::OnboardingFrame,
 }
 
@@ -74,6 +76,7 @@ impl OverlayFrame<'_> {
             connection,
             popup_scale,
             help_open,
+            host_keys: _,
             onboarding,
         } = self;
         theme_picker.is_some()
@@ -101,6 +104,7 @@ pub(crate) fn paint_overlays(
         connection,
         popup_scale,
         help_open,
+        host_keys,
         onboarding,
     } = ov;
     if let Some(idx) = theme_picker {
@@ -116,7 +120,7 @@ pub(crate) fn paint_overlays(
         widgets::paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);
     }
     if help_open {
-        widgets::paint_help_overlay(f, bounds, theme);
+        widgets::paint_help_overlay(f, bounds, theme, host_keys);
     }
     if onboarding.open {
         widgets::paint_welcome(f, onboarding, bounds, theme);

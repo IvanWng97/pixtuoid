@@ -31,7 +31,10 @@ pub(crate) fn panels_grid(
     now: std::time::SystemTime,
     theme: &Theme,
 ) -> Option<CellGrid> {
-    let overlays = frames.overlays();
+    let overlays = crate::panels::OverlayFrame {
+        host_keys: super::input::ZOOM_SHORTCUTS,
+        ..frames.overlays()
+    };
     if !overlays.any_open() {
         return None;
     }
@@ -421,7 +424,7 @@ impl OverlayLayers {
 mod tests {
     use super::super::compose::{XrgbSurface, pack_xrgb};
     use super::super::fixtures::{active_on, density, scene_with};
-    use super::super::geometry::window_geometry;
+    use super::super::geometry::{Zoom, window_geometry};
     use super::*;
     use pixtuoid_scene::footer::{FooterInputs, build_footer};
     use winit::dpi::PhysicalSize;
@@ -520,6 +523,7 @@ mod tests {
             .map(|c| c.symbol.as_str())
             .collect();
         assert!(text.contains("switch floor"), "{text}");
+        assert!(text.contains("zoom"), "the window's own keys: {text}");
     }
 
     #[test]
@@ -534,7 +538,11 @@ mod tests {
             crate::panels::widgets::footer_context(&scene, None, true, None, None),
         );
         let (w, h) = (640usize, 400usize);
-        let at = window_geometry(PhysicalSize::new(w as u32, h as u32), density());
+        let at = window_geometry(
+            PhysicalSize::new(w as u32, h as u32),
+            density(),
+            Zoom::default(),
+        );
         let model = build_footer(&inputs, footer_budget(w, Face::chrome(at)));
         let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         // The office as the window draws it, then the footer over it.
@@ -582,6 +590,7 @@ mod tests {
         let shown = Some(window_geometry(
             PhysicalSize::new(window.0, window.1),
             density(),
+            Zoom::default(),
         ));
         let boot = |popup: bool| {
             crate::panels::ui_state::UiState::new(
@@ -625,7 +634,11 @@ mod tests {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let window = (640u32, 400u32);
-        let at = window_geometry(PhysicalSize::new(window.0, window.1), density());
+        let at = window_geometry(
+            PhysicalSize::new(window.0, window.1),
+            density(),
+            Zoom::default(),
+        );
         let cell = Face::chrome(at);
         let tip = pixtuoid_scene::tooltip::coffee();
         for cursor in [(100.0, 4.0), (630.0, 390.0), (0.0, 200.0)] {
@@ -670,7 +683,11 @@ mod tests {
             .expect("a second theme");
         let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let window = (640u32, 400u32);
-        let at = window_geometry(PhysicalSize::new(window.0, window.1), density());
+        let at = window_geometry(
+            PhysicalSize::new(window.0, window.1),
+            density(),
+            Zoom::default(),
+        );
         let next = Overlays {
             window,
             footer: FooterModel {

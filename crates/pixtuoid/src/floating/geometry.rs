@@ -57,25 +57,110 @@ pub(crate) fn office_scale(win_h: u32) -> u32 {
         .max(1.0) as u32
 }
 
-/// How a PHYSICAL-px window draws its office: the cutaway at the pack's
-/// `density`, `office_scale` fitted to it and never below it, so the window
-/// never falls back to the classic, over the window above its
+/// How far the window is zoomed from its automatic scale, in steps of the
+/// pack's density: the `[floating]` `zoom` the window's keys move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Zoom(i8);
+
+/// What a zoom key asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ZoomKey {
+    In,
+    Out,
+    Reset,
+}
+
+impl Zoom {
+    pub fn new(steps: i8) -> Self {
+        Self(steps)
+    }
+
+    pub(crate) fn steps(self) -> i8 {
+        self.0
+    }
+
+    /// The zoom `key` leaves a `size` window at: one step from the zoom in
+    /// effect, which a step past the largest that lays out never exceeds, so
+    /// a step back always shows.
+    #[must_use]
+    pub(crate) fn stepped(self, key: ZoomKey, size: PhysicalSize<u32>, density: Density) -> Self {
+        let step = match key {
+            ZoomKey::In => 1,
+            ZoomKey::Out => -1,
+            ZoomKey::Reset => return Self::default(),
+        };
+        let d = i32::from(density.get());
+        let auto = i32::from(auto_scale(size, density));
+        let in_effect = (i32::from(zoom_scale(size, density, self)) - auto) / d;
+        let next = Self(i8::try_from(in_effect + step).unwrap_or(self.0));
+        Self(
+            i8::try_from((i32::from(zoom_scale(size, density, next)) - auto) / d).unwrap_or(next.0),
+        )
+    }
+}
+
+/// `size`'s two axes in the layout's pixels, a too-wide one held at the most
+/// it counts.
+fn px_size(size: PhysicalSize<u32>) -> Size {
+    let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
+    Size {
+        w: px(size.width),
+        h: px(size.height),
+    }
+}
+
+/// The office at `scale` real px per unit over a `px` window, above its
+/// `footer_band`.
+fn fit_at(scale: u16, density: Density, px: Size) -> PixelFit {
+    let fit = PixelFit::at_least_density(scale, density, px);
+    // The band's cell is the fit's, and `over` keeps the fit's scale, so the
+    // band measured here is the band painted.
+    fit.over(Size {
+        w: px.w,
+        h: px.h.saturating_sub(footer_band(fit)),
+    })
+}
+
+/// `office_scale` fitted to the pack's `density` and never below it, so the
+/// window never falls back to the classic.
+fn auto_scale(size: PhysicalSize<u32>, density: Density) -> u16 {
+    let natural = u16::try_from(office_scale(size.height)).unwrap_or(u16::MAX);
+    PixelFit::at_least_density(natural, density, px_size(size))
+        .scale()
+        .get()
+}
+
+/// The scale `zoom` draws a `size` window at: the automatic scale moved that
+/// many density steps, never below the density, and never so far in that the
+/// office stops laying out, unless the automatic scale already doesn't.
+fn zoom_scale(size: PhysicalSize<u32>, density: Density, zoom: Zoom) -> u16 {
+    let d = density.get();
+    let auto = auto_scale(size, density);
+    let want = (i32::from(auto) + i32::from(zoom.0) * i32::from(d)).max(i32::from(d));
+    let want = u16::try_from(want).unwrap_or(u16::MAX);
+    if want <= auto {
+        return want;
+    }
+    let min = pixtuoid_scene::layout::min_layout_size();
+    let lays_out = |scale: u16| {
+        let office = fit_at(scale, density, px_size(size)).logical();
+        office.w >= min.w && office.h >= min.h
+    };
+    std::iter::successors(Some(want), |&s| s.checked_sub(d).filter(|&s| s > auto))
+        .find(|&s| lays_out(s))
+        .unwrap_or(auto)
+}
+
+/// How a PHYSICAL-px window draws its office at `zoom`: the cutaway at the
+/// pack's `density`, at [`Zoom`]'s scale, over the window above its
 /// `footer_band`. The ONE place this geometry lives, so the desk capacity
 /// derived from it can't drift from the office drawn.
 ///
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI mis-seed (#803).
-pub fn window_geometry(size: PhysicalSize<u32>, density: Density) -> PixelFit {
-    let px = |p: u32| u16::try_from(p).unwrap_or(u16::MAX);
-    let (w, h) = (px(size.width), px(size.height));
-    let fit = PixelFit::at_least_density(px(office_scale(size.height)), density, Size { w, h });
-    // The band's cell is the fit's, and `over` keeps the fit's scale, so the
-    // band measured here is the band painted.
-    fit.over(Size {
-        w,
-        h: h.saturating_sub(footer_band(fit)),
-    })
+pub fn window_geometry(size: PhysicalSize<u32>, density: Density, zoom: Zoom) -> PixelFit {
+    fit_at(zoom_scale(size, density, zoom), density, px_size(size))
 }
 
 /// The footer's own row at the window's foot, in physical px: one screen
@@ -121,8 +206,9 @@ pub(crate) fn floor_caps_for_buffer(buf_w: u16, buf_h: u16) -> [usize; MAX_FLOOR
 pub(crate) fn boot_capacities_for_window(
     size: PhysicalSize<u32>,
     density: Density,
+    zoom: Zoom,
 ) -> [usize; MAX_FLOORS] {
-    let office = window_geometry(size, density).logical();
+    let office = window_geometry(size, density, zoom).logical();
     floor_caps_for_buffer(office.w, office.h)
 }
 
@@ -228,7 +314,7 @@ mod tests {
     #[test]
     fn the_footer_band_is_below_the_office_not_over_it() {
         for (w, h) in [(480u32, 320u32), (960, 640), (1280, 720)] {
-            let at = window_geometry(PhysicalSize::new(w, h), density());
+            let at = window_geometry(PhysicalSize::new(w, h), density(), Zoom::default());
             let band = u32::from(footer_band(at));
             let office_px = u32::from(at.logical().h) * u32::from(at.scale().get());
             assert!(office_px <= h - band, "{w}x{h}: office reaches the band");
@@ -241,7 +327,7 @@ mod tests {
             );
             let office = at.logical();
             assert_eq!(
-                boot_capacities_for_window(PhysicalSize::new(w, h), density()),
+                boot_capacities_for_window(PhysicalSize::new(w, h), density(), Zoom::default()),
                 floor_caps_for_buffer(office.w, office.h),
             );
         }
@@ -256,7 +342,11 @@ mod tests {
             toml::from_str("[floating]\nwidth = 1\nheight = 1\n").expect("parses");
         let f = crate::config::resolve_floating(&cfg).at_least(min.width, min.height);
         assert_eq!((f.width, f.height), (min.width, min.height));
-        let caps = boot_capacities_for_window(PhysicalSize::new(f.width, f.height), density());
+        let caps = boot_capacities_for_window(
+            PhysicalSize::new(f.width, f.height),
+            density(),
+            Zoom::default(),
+        );
         assert!(caps.iter().all(|&c| c > 0), "{caps:?}");
     }
 
@@ -265,7 +355,7 @@ mod tests {
         let min = min_window(density());
         for factor in 1..=3 {
             let size = PhysicalSize::new(min.width * factor, min.height * factor);
-            let caps = boot_capacities_for_window(size, density());
+            let caps = boot_capacities_for_window(size, density(), Zoom::default());
             assert!(caps.iter().all(|&c| c > 0), "{factor}x: {caps:?}");
         }
     }
@@ -273,8 +363,8 @@ mod tests {
     #[test]
     fn boot_capacities_for_window_match_the_first_redraw_geometry_not_the_tui_overseed() {
         let (w, h) = (1280u32, 720u32);
-        let office = window_geometry(PhysicalSize::new(w, h), density()).logical();
-        let boot = boot_capacities_for_window(PhysicalSize::new(w, h), density());
+        let office = window_geometry(PhysicalSize::new(w, h), density(), Zoom::default()).logical();
+        let boot = boot_capacities_for_window(PhysicalSize::new(w, h), density(), Zoom::default());
         for (i, &got) in boot.iter().enumerate() {
             let want = pixtuoid_scene::floor::floor_capacity(
                 office.w,
@@ -313,6 +403,7 @@ mod tests {
         let as_if_physical = boot_capacities_for_window(
             PhysicalSize::new(logical.width as u32, logical.height as u32),
             density(),
+            Zoom::default(),
         );
 
         // MEASURED offices for the default 480×320 logical window, above its
@@ -328,19 +419,20 @@ mod tests {
         ];
         for (sf, want_buf, want_floor0) in measured {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
-            let office = window_geometry(physical, density()).logical();
+            let office = window_geometry(physical, density(), Zoom::default()).logical();
             assert_eq!(
                 (u32::from(office.w), u32::from(office.h)),
                 want_buf,
                 "office at {sf}× of {logical:?}"
             );
             assert_eq!(
-                boot_capacities_for_window(physical, density())[0],
+                boot_capacities_for_window(physical, density(), Zoom::default())[0],
                 want_floor0,
                 "floor-0 seed at {sf}×"
             );
         }
-        let at_2x = boot_capacities_for_window(logical.to_physical(2.0), density());
+        let at_2x =
+            boot_capacities_for_window(logical.to_physical(2.0), density(), Zoom::default());
         assert!(
             at_2x[0] > as_if_physical[0],
             "logical-as-physical under-seeds at 2×: {} vs the real {}",
@@ -355,7 +447,7 @@ mod tests {
         // assert below went red. Derive so the next move can't reach it.
         let min = pixtuoid_scene::layout::min_layout_size();
         let tiny = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
-        let office = window_geometry(tiny, density()).logical();
+        let office = window_geometry(tiny, density(), Zoom::default()).logical();
         assert_eq!(
             pixtuoid_scene::floor::floor_capacity(
                 office.w,
@@ -366,7 +458,7 @@ mod tests {
             "fixture must actually be unlayoutable, else this asserts nothing"
         );
         assert_eq!(
-            boot_capacities_for_window(tiny, density())[0],
+            boot_capacities_for_window(tiny, density(), Zoom::default())[0],
             0,
             "the seed must agree with what the redraw stores, not invent desks"
         );
@@ -416,20 +508,22 @@ mod tests {
         // DERIVED as in the sibling above, which reds by name if this stops seeding zero.
         let min = pixtuoid_scene::layout::min_layout_size();
         let unlayoutable = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
-        for window in [
+        let windows = [
             PhysicalSize::new(1280u32, 720u32),
             PhysicalSize::new(853, 480),
             unlayoutable,
-        ] {
-            let seed = boot_capacities_for_window(window, density());
+        ];
+        let zooms = [Zoom::default(), Zoom::new(1), Zoom::new(-1)];
+        for (window, zoom) in windows.into_iter().flat_map(|w| zooms.map(|z| (w, z))) {
+            let seed = boot_capacities_for_window(window, density(), zoom);
             let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));
-            let office = window_geometry(window, density()).logical();
+            let office = window_geometry(window, density(), zoom).logical();
             sync_floor_caps(&mut None, &caps, office.w, office.h);
             let published: [usize; MAX_FLOORS] =
                 std::array::from_fn(|i| caps[i].load(Ordering::Relaxed));
             assert_eq!(
                 published, seed,
-                "the first redraw's publish must store what {window:?} seeded"
+                "the first redraw's publish must store what {window:?} at {zoom:?} seeded"
             );
         }
     }
@@ -461,6 +555,93 @@ mod tests {
             caps[0].load(Ordering::Relaxed),
             999,
             "a skipped publish must not touch the atomics"
+        );
+    }
+
+    /// No zoom is the automatic scale: the window as it opened before zoom.
+    #[test]
+    fn no_zoom_is_the_automatic_scale() {
+        let d = density();
+        for (w, h) in [(3840u32, 2160u32), (960, 640), (1280, 720)] {
+            let auto = PixelFit::at_least_density(
+                u16::try_from(office_scale(h)).expect("small"),
+                d,
+                Size { w: 1, h: 1 },
+            );
+            let at = window_geometry(PhysicalSize::new(w, h), d, Zoom::default());
+            assert_eq!(at.scale(), auto.scale(), "{w}x{h}");
+        }
+    }
+
+    /// A zoom step is one density step of scale, and zooming out stops at
+    /// the density itself, the art's own pixels.
+    #[test]
+    fn a_zoom_step_is_one_density_step() {
+        let d = density().get();
+        let size = PhysicalSize::new(3840, 2160);
+        let scale = |steps| {
+            window_geometry(size, density(), Zoom::new(steps))
+                .scale()
+                .get()
+        };
+        let auto = scale(0);
+        assert_eq!(scale(1), auto + d);
+        assert_eq!(scale(-1), auto - d);
+        assert_eq!(scale(i8::MIN), d, "never below the density");
+    }
+
+    /// Zooming in stops at the largest scale whose office still lays out.
+    #[test]
+    fn zooming_in_never_drops_the_office_below_its_layout() {
+        let min = pixtuoid_scene::layout::min_layout_size();
+        let d = density().get();
+        let size = PhysicalSize::new(3840, 2160);
+        let at = window_geometry(size, density(), Zoom::new(i8::MAX));
+        assert!(
+            at.logical().w >= min.w && at.logical().h >= min.h,
+            "{:?}",
+            at.logical()
+        );
+        let one_more =
+            PixelFit::at_least_density(at.scale().get() + d, density(), Size { w: 3840, h: 2160 });
+        let one_more = one_more.over(Size {
+            w: 3840,
+            h: 2160 - footer_band(one_more),
+        });
+        assert!(
+            one_more.logical().w < min.w || one_more.logical().h < min.h,
+            "a larger scale would still lay out: {:?}",
+            one_more.logical()
+        );
+    }
+
+    /// A step moves from the zoom in effect, so a zoom past the largest that
+    /// lays out comes back down at the first step out, and the keys go one
+    /// step each way or back to none.
+    #[test]
+    fn a_step_starts_from_the_zoom_in_effect() {
+        let size = PhysicalSize::new(3840, 2160);
+        let scale = |zoom: Zoom| window_geometry(size, density(), zoom).scale().get();
+        let max = Zoom::new(i8::MAX);
+        let out = max.stepped(ZoomKey::Out, size, density());
+        assert_eq!(
+            scale(out) + density().get(),
+            scale(max),
+            "one step under the largest"
+        );
+        assert_eq!(
+            Zoom::default().stepped(ZoomKey::In, size, density()),
+            Zoom::new(1)
+        );
+        assert_eq!(
+            Zoom::new(3).stepped(ZoomKey::Reset, size, density()),
+            Zoom::default()
+        );
+        let floor = Zoom::new(i8::MIN).stepped(ZoomKey::Out, size, density());
+        assert_eq!(
+            scale(floor),
+            density().get(),
+            "out from the floor stays there"
         );
     }
 }

@@ -4,10 +4,11 @@
 //! compositor the window's GPU frames are held to.
 //!
 //! Usage:
-//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y] [--pet cat|dog] [--drag X0,Y0:X1,Y1 [--drop-after MS]] [--panel help|dashboard|sources|theme]`
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N] [--hover X,Y] [--pet cat|dog] [--drag X0,Y0:X1,Y1 [--drop-after MS]] [--panel help|dashboard|sources|theme] [--zoom N]`
 //! `--drag` presses at the first window point and carries what it lifts to the second,
 //! drawing it in hand; with `--drop-after` it releases there and draws `MS` later.
-//! `--panel` opens that panel over the office, as its key does.
+//! `--panel` opens that panel over the office, as its key does; `--zoom` zooms
+//! it N density steps from the automatic scale, as the zoom keys do.
 //! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
 //! `... -- /tmp/f.png 960x640`.
 
@@ -118,6 +119,7 @@ fn main() -> Result<()> {
     let mut drag: Option<((f64, f64), (f64, f64))> = None;
     let mut drop_after: Option<u64> = None;
     let mut panel: Option<String> = None;
+    let mut zoom = pixtuoid::dev::Zoom::default();
     let point = |v: &str, flag: &str| -> Result<(f64, f64)> {
         let (x, y) = v
             .split_once(',')
@@ -179,6 +181,15 @@ fn main() -> Result<()> {
                 );
                 i += 2;
             }
+            "--zoom" => {
+                zoom = pixtuoid::dev::Zoom::new(
+                    rest.get(i + 1)
+                        .ok_or_else(|| anyhow!("--zoom needs a step count"))?
+                        .parse()
+                        .context("bad --zoom")?,
+                );
+                i += 2;
+            }
             "--agents" => {
                 n_agents = rest
                     .get(i + 1)
@@ -219,6 +230,7 @@ fn main() -> Result<()> {
     let at = window_geometry(
         winit::dpi::PhysicalSize::new(win_w, win_h),
         pack.max_density_variant(),
+        zoom,
     );
     let render = |renderer: &mut OfficeRenderer, now| {
         renderer.render(

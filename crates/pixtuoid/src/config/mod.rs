@@ -77,6 +77,10 @@ pub(crate) struct FloatingConfigRaw {
     pub y: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f32>,
+    /// Wider than the zoom it holds: a hand-edited value past it clamps
+    /// instead of failing the whole file's parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<i64>,
 }
 
 /// Position stays `Option` — `None` lets the OS place the window.
@@ -87,6 +91,8 @@ pub(crate) struct FloatingConfig {
     pub x: Option<i32>,
     pub y: Option<i32>,
     pub opacity: f32,
+    /// Density steps from the window's automatic scale (`floating::geometry::Zoom`).
+    pub zoom: i8,
 }
 
 impl FloatingConfig {
@@ -110,6 +116,9 @@ pub(crate) fn resolve_floating(config: &AppConfig) -> FloatingConfig {
         x: raw.x,
         y: raw.y,
         opacity: raw.opacity.unwrap_or(1.0).clamp(FLOATING_MIN_OPACITY, 1.0),
+        zoom: raw
+            .zoom
+            .map_or(0, |z| z.clamp(i64::from(i8::MIN), i64::from(i8::MAX)) as i8),
     }
 }
 
@@ -324,10 +333,19 @@ pub(crate) fn save_floating(
     height: u32,
     x: Option<i32>,
     y: Option<i32>,
+    zoom: i8,
 ) -> Result<()> {
     update_config(path, |doc| {
         doc["floating"]["width"] = toml_edit::value(i64::from(width));
         doc["floating"]["height"] = toml_edit::value(i64::from(height));
+        // No zoom is no key, as an unset one reads.
+        if zoom == 0 {
+            if let Some(t) = doc["floating"].as_table_like_mut() {
+                t.remove("zoom");
+            }
+        } else {
+            doc["floating"]["zoom"] = toml_edit::value(i64::from(zoom));
+        }
         // Set-or-CLEAR x/y: a `None` means the OS couldn't report the position
         // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords
         // would restore a stale/offscreen spot next launch, so drop the keys and

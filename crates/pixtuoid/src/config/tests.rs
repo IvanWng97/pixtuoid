@@ -886,7 +886,7 @@ fn save_floating_roundtrips_geometry_and_preserves_other_settings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
+    save_floating(&path, 480, 320, Some(12), Some(34), 0).unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
     assert_eq!(
@@ -903,13 +903,43 @@ fn save_floating_clears_stale_position_when_os_cannot_report_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
-    save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
-    save_floating(&path, 500, 360, None, None).unwrap();
+    save_floating(&path, 480, 320, Some(12), Some(34), 0).unwrap();
+    save_floating(&path, 500, 360, None, None, 0).unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height), (500, 360));
     assert_eq!((f.x, f.y), (None, None), "stale position keys were dropped");
     assert_eq!(cfg.theme.as_deref(), Some("normal"));
+}
+
+#[test]
+fn floating_zoom_roundtrips_and_a_hand_edited_one_is_clamped() {
+    let cfg: AppConfig = toml::from_str("theme = \"normal\"\n").unwrap();
+    assert_eq!(resolve_floating(&cfg).zoom, 0);
+    let cfg: AppConfig = toml::from_str("[floating]\nzoom = -2\n").unwrap();
+    assert_eq!(resolve_floating(&cfg).zoom, -2);
+    let cfg: AppConfig = toml::from_str("[floating]\nzoom = 1000\nwidth = 600\n").unwrap();
+    let f = resolve_floating(&cfg);
+    assert_eq!(
+        (f.zoom, f.width),
+        (i8::MAX, 600),
+        "clamped, and the rest of the table still loads"
+    );
+    let cfg: AppConfig = toml::from_str("[floating]\nzoom = -1000\n").unwrap();
+    assert_eq!(resolve_floating(&cfg).zoom, i8::MIN);
+}
+
+#[test]
+fn save_floating_writes_a_zoom_and_drops_a_reset_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+    save_floating(&path, 480, 320, Some(1), Some(2), 3).unwrap();
+    assert_eq!(resolve_floating(&load(&path, &mut Vec::new())).zoom, 3);
+    save_floating(&path, 480, 320, Some(1), Some(2), 0).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("zoom"), "no zoom is no key: {text}");
+    assert_eq!(resolve_floating(&load(&path, &mut Vec::new())).zoom, 0);
 }
 
 #[test]

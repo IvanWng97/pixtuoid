@@ -295,6 +295,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         connection: ctx.connection,
         popup_scale: ctx.popup_scale,
         help_open: ctx.help_open,
+        host_keys: &[],
         onboarding: ctx.onboarding,
     };
 

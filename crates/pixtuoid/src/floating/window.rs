@@ -85,6 +85,8 @@ pub(crate) struct FloatingApp {
     /// The animation-tick deadline — see [`super::cadence`] for why the redraw
     /// REQUEST (not just the wait) has to be gated on it.
     clock: super::cadence::FrameClock,
+    /// How far the office is zoomed from its automatic scale.
+    zoom: super::geometry::Zoom,
     /// The chrome over the office, each repainted only when it changed.
     overlays: super::overlays::OverlayLayers,
     window: Option<Arc<Window>>,
@@ -190,6 +192,7 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
+            zoom: super::geometry::Zoom::new(cfg.zoom),
             overlays: super::overlays::OverlayLayers::default(),
             window: None,
             gpu: None,
@@ -218,9 +221,21 @@ impl FloatingApp {
             logical.height.round() as u32,
             pos.map(|p| p.x),
             pos.map(|p| p.y),
+            self.zoom.steps(),
         ) {
             tracing::warn!(error = ?e, "pixtuoid floating: could not persist window geometry");
         }
+    }
+
+    /// Zoom the office as `key` asks, from the zoom the window shows.
+    fn zoom_by(&mut self, key: super::geometry::ZoomKey) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        self.zoom = self
+            .zoom
+            .stepped(key, window.inner_size(), self.pack.max_density_variant());
+        window.request_redraw();
     }
 
     fn request_redraw(&self) {
@@ -390,7 +405,7 @@ impl FloatingApp {
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
-        let at = super::geometry::window_geometry(size, self.pack.max_density_variant());
+        let at = super::geometry::window_geometry(size, self.pack.max_density_variant(), self.zoom);
         super::geometry::sync_floor_caps(
             &mut self.last_caps_size,
             &floor_caps,
@@ -601,7 +616,11 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // Past the window/surface failure arms, so a failed boot binds no socket.
         // Pinned by `the_boot_seed_tracks_the_physical_window_not_the_logical_config`.
         if let Some(boot) = self.boot.take() {
-            self.live = Some(boot.spawn(window.inner_size(), self.pack.max_density_variant()));
+            self.live = Some(boot.spawn(
+                window.inner_size(),
+                self.pack.max_density_variant(),
+                self.zoom,
+            ));
         }
         // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
         // per-window opacity, and the surface composites opaque.
@@ -654,6 +673,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
+                if let Some(zoom) = super::input::zoom_key(&event.logical_key, self.modifiers) {
+                    self.zoom_by(zoom);
+                    return;
+                }
                 if self.key(&event) {
                     self.persist_geometry();
                     self.jank.finish();

@@ -14,7 +14,7 @@ pub(crate) use connection::paint_connection_panel;
 pub(crate) use dashboard::paint_dashboard;
 pub use footer::footer_context;
 pub(crate) use footer::paint_footer;
-pub(crate) use help::paint_help_overlay;
+pub(crate) use help::{Shortcut, paint_help_overlay};
 pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(crate) use theme_picker::paint_theme_picker;
 pub(crate) use tooltip::{TooltipAt, paint_host_text, paint_tooltip, star_area};
