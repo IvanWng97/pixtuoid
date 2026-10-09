@@ -32,7 +32,7 @@ pub struct RenderFrames {
 }
 
 impl RenderFrames {
-    /// Its panels as [`paint_overlays`](super::paint_overlays) draws them,
+    /// Its panels as `paint_overlays` draws them,
     /// the version popup at `popup_scale` ([`popup_whole`] for a painter with
     /// no animation of its own) and `host_keys` after the help's shared rows.
     /// The one place a frame's panels become an
