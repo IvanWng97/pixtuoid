@@ -303,7 +303,6 @@ lint:
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run e2escrub just e2e-scrub-selftest  & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
-    run bmcbtn  just bmc-button-selftest  & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     run piiself just fixture-pii-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
@@ -1216,11 +1215,6 @@ e2e-scrub-selftest:
 [group('meta')]
 star-history-selftest:
     python3 scripts/star-history.py --selftest
-
-[doc("Self-test the README Buy Me a Coffee button renderer")]
-[group('meta')]
-bmc-button-selftest:
-    python3 scripts/bmc-button.py --selftest
 
 # The recorder refuses a capture carrying its own identity, but that check runs
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so

@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <a href="https://buymeacoffee.com/IvanWng97"><img src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button.svg" alt="Buy me a coffee" /></a>
+  <a href="https://buymeacoffee.com/IvanWng97"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=IvanWng97&button_colour=2763E3&font_colour=ffffff&font_family=Arial&outline_colour=ffffff&coffee_colour=FFDD00" alt="Buy me a coffee" /></a>
 </p>
 
 ---

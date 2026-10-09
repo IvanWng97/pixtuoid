@@ -481,7 +481,6 @@
   file:
     - .github/workflows/release-plz.yml
     - .github/workflows/star-history.yml
-    - .github/workflows/bmc-button.yml
   expected: "1245333424"
   why: >-
     These jobs publish or force-push, so a fork must not run them: every entry
