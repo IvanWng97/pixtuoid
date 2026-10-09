@@ -52,8 +52,7 @@ pub struct DrawCtx<'a> {
 
 impl<'a> DrawCtx<'a> {
     /// An offscreen still of one floor, every input and overlay off; the office-wide
-    /// tallies and gateway come from `scene`, as the live renderer's do. The live `TuiRenderer`
-    /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
+    /// tallies and gateway come from `scene`, as the live renderer's do.
     #[doc(hidden)]
     pub fn offscreen(
         floor: &'a mut PerFloor,
@@ -316,7 +315,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         theme,
         world: &world,
         mouse_pos: ctx.mouse_pos,
-        dim: ctx.overlays.onboarding.dim,
     };
     let out = flush_classic(term, &frame, layout, ctx.floor)?;
     if let Some(flash) = ctx.flash.as_deref_mut() {
@@ -334,8 +332,6 @@ pub(crate) struct ClassicFrame<'f> {
     /// The floor's inputs, which a tooltip reads.
     pub(crate) world: &'f FloorInputs<'f>,
     pub(crate) mouse_pos: Option<(u16, u16)>,
-    /// The modal backdrop's dim, from the onboarding card.
-    pub(crate) dim: f32,
 }
 
 /// Flush `floor`'s classic drawing of `layout` to `term` with `frame`'s
@@ -356,7 +352,6 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         theme,
         world,
         mouse_pos,
-        dim,
     } = frame;
     let now = world.now;
     let Some(ClassicDrawn {
@@ -381,7 +376,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
-    apply_dim(pixels, dim);
+    apply_dim(pixels, overlays.onboarding.dim);
 
     let buf = &*pixels;
     term.draw(|f| {

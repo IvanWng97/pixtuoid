@@ -80,8 +80,8 @@ impl Zoom {
     }
 
     /// The zoom `key` leaves a `size` window at: one step from the zoom in
-    /// effect, which a step past the largest that lays out never exceeds, so
-    /// a step back always shows.
+    /// effect, so a step back from past the largest that lays out always
+    /// shows.
     #[must_use]
     pub(crate) fn stepped(self, key: ZoomKey, size: PhysicalSize<u32>, density: Density) -> Self {
         let step = match key {
@@ -89,13 +89,16 @@ impl Zoom {
             ZoomKey::Out => -1,
             ZoomKey::Reset => return Self::default(),
         };
+        Self(self.in_effect(size, density).0.saturating_add(step)).in_effect(size, density)
+    }
+
+    /// The zoom a `size` window shows for this one: [`zoom_scale`]'s clamps
+    /// read back as steps.
+    fn in_effect(self, size: PhysicalSize<u32>, density: Density) -> Self {
         let d = i32::from(density.get());
-        let auto = i32::from(auto_scale(size, density));
-        let in_effect = (i32::from(zoom_scale(size, density, self)) - auto) / d;
-        let next = Self(i8::try_from(in_effect + step).unwrap_or(self.0));
-        Self(
-            i8::try_from((i32::from(zoom_scale(size, density, next)) - auto) / d).unwrap_or(next.0),
-        )
+        let moved =
+            i32::from(zoom_scale(size, density, self)) - i32::from(auto_scale(size, density));
+        Self(i8::try_from(moved / d).unwrap_or(self.0))
     }
 }
 

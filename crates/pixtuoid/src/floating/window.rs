@@ -192,7 +192,7 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
-            zoom: super::geometry::Zoom::new(cfg.zoom),
+            zoom: cfg.zoom,
             overlays: super::overlays::OverlayLayers::default(),
             window: None,
             gpu: None,
@@ -207,7 +207,7 @@ impl FloatingApp {
         self.failure.into_inner()
     }
 
-    /// Persist the current window geometry into `[floating]` (best-effort — a save error
+    /// Persist the current window geometry and zoom into `[floating]` (best-effort — a save error
     /// must not block quitting). Size is stored LOGICAL (HiDPI-stable); position PHYSICAL.
     fn persist_geometry(&self) {
         let Some(window) = &self.window else {
@@ -219,7 +219,7 @@ impl FloatingApp {
             width: logical.width.round() as u32,
             height: logical.height.round() as u32,
             position: pos.map(|p| (p.x, p.y)),
-            zoom: self.zoom.steps(),
+            zoom: self.zoom,
         };
         if let Err(e) = config::save_floating(&self.config_path, &save) {
             tracing::warn!(error = ?e, "pixtuoid floating: could not persist window geometry");
@@ -568,7 +568,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             .with_inner_size(LogicalSize::new(self.cfg.width, self.cfg.height))
             .with_min_inner_size(min);
         // A spot on a since-disconnected monitor would open the frameless window unreachably.
-        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
+        if let Some((x, y)) = self.cfg.position
             && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
         {
             attrs = attrs.with_position(PhysicalPosition::new(x, y));

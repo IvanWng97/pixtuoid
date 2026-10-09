@@ -705,7 +705,13 @@ fn shrinking_mid_slide_lands_on_the_destination() {
 #[test]
 fn a_modal_over_the_image_shows_its_text() {
     let (mut r, _wire) = kitty(120, 40);
-    r.set_help_open(true);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            ..Default::default()
+        },
+        t0(),
+    );
     r.render(&office(), pack(), t0()).expect("render");
     assert!(frame_text(r.frame_buffer()).contains("? Keyboard"));
 }
@@ -1033,7 +1039,13 @@ fn each_strike_phase_holds_the_floor_in_the_cells_a_full_modal_leaves() {
         let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Sixel);
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
-        r.set_help_open(true);
+        r.set_frames(
+            RenderFrames {
+                help_open: true,
+                ..Default::default()
+            },
+            t0(),
+        );
         let scene = office();
         let now = strike.start - lead(frame) + offset;
         screen.at(now);
@@ -1270,14 +1282,18 @@ fn the_cells_a_modal_held_go_back_to_the_image_when_it_closes() {
     let cadence = ImageProtocol::Sixel.cadence();
     r.render(&scene, pack(), t0()).expect("render");
     wire.take();
-    r.set_help_open(true);
+    let frames = RenderFrames {
+        help_open: true,
+        ..Default::default()
+    };
+    r.set_frames(frames, t0());
     r.render(&scene, pack(), t0() + cadence).expect("render");
     let held = text_cells(r.frame_buffer());
     let open = sixel_cells(&wire.take());
     assert!(!open.is_empty(), "the modal's tiles are sent");
     assert!(open.is_disjoint(&held), "never over its text");
 
-    r.set_help_open(false);
+    r.set_frames(RenderFrames::default(), t0());
     r.render(&scene, pack(), t0() + cadence * 2)
         .expect("render");
     let sent = sixel_cells(&wire.take());
@@ -1311,7 +1327,13 @@ fn no_image_is_drawn_over_text() {
     let cadence = ImageProtocol::Sixel.cadence();
     r.render(&scene, pack(), t0()).expect("render");
     wire.take();
-    r.set_help_open(true);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            ..Default::default()
+        },
+        t0(),
+    );
     r.redraw().expect("redraw");
     // The backend keeps a cell's last text under an image ratatui skips, so
     // a frame's text is the modal's, as the cleared screen first got it, and

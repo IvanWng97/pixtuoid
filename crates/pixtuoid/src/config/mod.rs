@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::floating::geometry::Zoom;
+
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
 /// `resolve_pets` rather than failing the whole `toml::from_str` and tripping
@@ -83,16 +85,14 @@ pub(crate) struct FloatingConfigRaw {
     pub zoom: Option<i64>,
 }
 
-/// Position stays `Option` — `None` lets the OS place the window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FloatingConfig {
     pub width: u32,
     pub height: u32,
-    pub x: Option<i32>,
-    pub y: Option<i32>,
+    /// `None` lets the OS place the window.
+    pub position: Option<(i32, i32)>,
     pub opacity: f32,
-    /// Density steps from the window's automatic scale (`floating::geometry::Zoom`).
-    pub zoom: i8,
+    pub zoom: Zoom,
 }
 
 impl FloatingConfig {
@@ -113,12 +113,12 @@ pub(crate) fn resolve_floating(config: &AppConfig) -> FloatingConfig {
     FloatingConfig {
         width: raw.width.unwrap_or(FLOATING_DEFAULT_W),
         height: raw.height.unwrap_or(FLOATING_DEFAULT_H),
-        x: raw.x,
-        y: raw.y,
+        position: raw.x.zip(raw.y),
         opacity: raw.opacity.unwrap_or(1.0).clamp(FLOATING_MIN_OPACITY, 1.0),
-        zoom: raw
-            .zoom
-            .map_or(0, |z| z.clamp(i64::from(i8::MIN), i64::from(i8::MAX)) as i8),
+        zoom: Zoom::new(
+            raw.zoom
+                .map_or(0, |z| z.clamp(i64::from(i8::MIN), i64::from(i8::MAX)) as i8),
+        ),
     }
 }
 
@@ -186,10 +186,6 @@ fn warn_user(warnings: &mut Vec<String>, line: String) {
     warnings.push(line);
 }
 
-/// Load the config, never crashing: unreadable/malformed files fall back to
-/// defaults. Fallbacks go onto `warnings` (as well as the log) so `main` can
-/// print them to stderr BEFORE the alternate screen swallows them; callers with
-/// no user to warn pass a throwaway Vec.
 /// [`load`] plus the DEGRADED bit: the file exists but did not parse cleanly.
 ///
 /// Captured here rather than read back off `warnings` at the call site. The
@@ -205,6 +201,10 @@ pub(crate) fn load_with_status(path: &Path, warnings: &mut Vec<String>) -> (AppC
     (cfg, degraded)
 }
 
+/// Load the config, never crashing: unreadable/malformed files fall back to
+/// defaults. Fallbacks go onto `warnings` (as well as the log) so `main` can
+/// print them to stderr BEFORE the alternate screen swallows them; callers with
+/// no user to warn pass a throwaway Vec.
 pub(crate) fn load(path: &Path, warnings: &mut Vec<String>) -> AppConfig {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -334,7 +334,7 @@ pub(crate) struct FloatingSave {
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) position: Option<(i32, i32)>,
-    pub(crate) zoom: i8,
+    pub(crate) zoom: Zoom,
 }
 
 pub(crate) fn save_floating(path: &Path, save: &FloatingSave) -> Result<()> {
@@ -348,12 +348,12 @@ pub(crate) fn save_floating(path: &Path, save: &FloatingSave) -> Result<()> {
         doc["floating"]["width"] = toml_edit::value(i64::from(width));
         doc["floating"]["height"] = toml_edit::value(i64::from(height));
         // No zoom is no key, as an unset one reads.
-        if zoom == 0 {
+        if zoom == Zoom::default() {
             if let Some(t) = doc["floating"].as_table_like_mut() {
                 t.remove("zoom");
             }
         } else {
-            doc["floating"]["zoom"] = toml_edit::value(i64::from(zoom));
+            doc["floating"]["zoom"] = toml_edit::value(i64::from(zoom.steps()));
         }
         // Set-or-CLEAR x/y: a `None` means the OS couldn't report the position
         // (ALWAYS on Wayland, or a transient at close). Keeping the OLD coords

@@ -43,7 +43,7 @@ fn key_col_width(host: &[Shortcut]) -> usize {
         + 1
 }
 
-/// DERIVED from `SHORTCUTS`, never a literal — a hardcoded width hard-clips
+/// DERIVED from the rows it lists, never a literal — a hardcoded width hard-clips
 /// every long row mid-word at ANY terminal size (the panel is centered, not
 /// edge-limited).
 fn content_width(host: &[Shortcut]) -> u16 {

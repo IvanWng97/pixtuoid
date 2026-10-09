@@ -59,16 +59,17 @@ pub(crate) fn key(
 }
 
 /// The modifier a zoom chord is held with: Cmd on macOS, as a terminal
-/// zooms, and Ctrl elsewhere. Cmd chords never reach [`key`], so these are
-/// the window's own.
+/// zooms, and Ctrl elsewhere. The window reads a zoom chord before [`key`],
+/// so off macOS it takes Ctrl `+`/`-` from the volume, which
+/// [`dispatch_key`](crate::panels::dispatch_key) reads whatever is held.
 const ZOOM_HOLD: ModifiersState = if cfg!(target_os = "macos") {
     ModifiersState::SUPER
 } else {
     ModifiersState::CONTROL
 };
 
-/// The key each zoom chord takes, the first of each zoom the one the help
-/// names; `=` and `_` are `+` and `-` without and with Shift.
+/// The key each zoom chord takes. A zoom's first key is the one the help
+/// names; `=` and `_` are `+` and `-` typed without and with Shift.
 const ZOOM_CHORDS: [(&str, ZoomKey); 5] = [
     ("+", ZoomKey::In),
     ("=", ZoomKey::In),
@@ -80,10 +81,10 @@ const ZOOM_CHORDS: [(&str, ZoomKey); 5] = [
 /// The zoom chords, as the help lists them.
 #[cfg(target_os = "macos")]
 pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
-    &[("Cmd +/-", "zoom in / out"), ("Cmd 0", "zoom to fit")];
+    &[("Cmd +/-", "zoom in / out"), ("Cmd 0", "reset zoom")];
 #[cfg(not(target_os = "macos"))]
 pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
-    &[("Ctrl +/-", "zoom in / out"), ("Ctrl 0", "zoom to fit")];
+    &[("Ctrl +/-", "zoom in / out"), ("Ctrl 0", "reset zoom")];
 
 /// The zoom `key` asks for, held with `mods`; `None` for any other key.
 pub(crate) fn zoom_key(key: &Key, mods: ModifiersState) -> Option<ZoomKey> {
@@ -432,8 +433,8 @@ mod tests {
         );
     }
 
-    /// The help names every key a zoom chord takes, so a key added to one
-    /// and not the other reds here.
+    /// The help names each zoom's first key and the modifier a chord is held
+    /// with, so a change to one and not the other reds here.
     #[test]
     fn every_zoom_chord_is_in_the_help() {
         let keys: String = ZOOM_SHORTCUTS.iter().map(|(k, _)| *k).collect();
@@ -446,6 +447,14 @@ mod tests {
                 keys.contains(named),
                 "{named} missing from the help's {keys:?}"
             );
+        }
+        let held = if ZOOM_HOLD == ModifiersState::SUPER {
+            "Cmd "
+        } else {
+            "Ctrl "
+        };
+        for (k, _) in ZOOM_SHORTCUTS {
+            assert!(k.starts_with(held), "{k:?} names another modifier");
         }
         for (c, zoom) in ZOOM_CHORDS {
             let hold = ZOOM_HOLD;

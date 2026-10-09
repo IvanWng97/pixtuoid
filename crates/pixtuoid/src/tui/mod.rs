@@ -82,15 +82,6 @@ impl FloorCapacitySweep {
     }
 }
 
-/// One frame's panel mirrors, pushed into the renderer that paints them.
-fn push_frames<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    frames: ui_state::RenderFrames,
-    renderer: &mut TuiRenderer<B>,
-    now: SystemTime,
-) {
-    renderer.set_frames(frames, now);
-}
-
 impl<B: ratatui::backend::Backend<Error: Send + Sync + 'static>> crate::panels::Host
     for TuiRenderer<B>
 {
@@ -577,7 +568,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     now = ui.now();
                     snapshot = scene_rx.borrow_and_update().clone();
                     let health = source_health.borrow_and_update().clone();
-                    push_frames(ui.build_frames(now, &snapshot, &health), &mut renderer, now);
+                    renderer.set_frames(ui.build_frames(now, &snapshot, &health), now);
                     let audio_now = std::time::Instant::now();
                     audio_ctl.tick(audio_now);
                     renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));

@@ -64,7 +64,7 @@ pub struct OverlayFrame<'a> {
     pub popup_scale: f32,
     pub help_open: bool,
     /// Shortcuts the host adds to the help, after the shared ones.
-    pub host_keys: &'a [(&'static str, &'static str)],
+    pub host_keys: &'a [widgets::Shortcut],
     pub onboarding: &'a crate::panels::welcome::OnboardingFrame,
 }
 
@@ -74,7 +74,7 @@ impl OverlayFrame<'static> {
         use std::sync::LazyLock;
         static CLOSED: LazyLock<crate::panels::ui_state::RenderFrames> =
             LazyLock::new(Default::default);
-        CLOSED.overlays(0.0)
+        CLOSED.overlays(0.0, &[])
     }
 }
 

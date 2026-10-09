@@ -1,10 +1,11 @@
-//! `run_tui`'s per-surface UI state: [`UiState`] owns each modal surface's
-//! open/close transitions, projects the dispatch-facing [`ModalState`] (one
-//! source of truth instead of an ad-hoc literal per key event), and computes
-//! the per-frame renderer mirrors ([`RenderFrames`]). `run_tui` keeps the event
-//! loop, the terminal lifecycle, and every renderer/config/install side effect;
-//! the blocking-I/O sites (`build_rows`, connect/disconnect, the onboarding
-//! apply) stay at the loop as brief inline stalls.
+//! Each painter's loop's per-surface UI state, `run_tui`'s and the floating
+//! window's: [`UiState`] owns each modal surface's open/close transitions,
+//! projects the dispatch-facing [`ModalState`] (one source of truth instead of
+//! an ad-hoc literal per key event), and computes the per-frame renderer
+//! mirrors ([`RenderFrames`]). The loop keeps its painter's lifecycle and every
+//! renderer/config/install side effect; the blocking-I/O sites (`build_rows`,
+//! connect/disconnect, the onboarding apply) stay at the loop as brief inline
+//! stalls.
 
 use std::time::{Instant, SystemTime};
 
@@ -20,29 +21,34 @@ use welcome::{OnboardingFrame, WelcomeUi};
 /// One frame's renderer mirrors — bundling them keeps the compute (here) and
 /// the push (one call in the loop) from drifting apart per surface.
 #[derive(Debug, Default)]
-pub(crate) struct RenderFrames {
-    pub(crate) theme_picker: Option<usize>,
-    pub(crate) version_popup: bool,
-    pub(crate) help_open: bool,
-    pub(crate) source_warning: Option<String>,
-    pub(crate) dashboard: DashboardFrame,
-    pub(crate) connection: ConnectionFrame,
-    pub(crate) onboarding: OnboardingFrame,
+pub struct RenderFrames {
+    pub theme_picker: Option<usize>,
+    pub version_popup: bool,
+    pub help_open: bool,
+    pub source_warning: Option<String>,
+    pub dashboard: DashboardFrame,
+    pub connection: ConnectionFrame,
+    pub onboarding: OnboardingFrame,
 }
 
 impl RenderFrames {
     /// Its panels as [`paint_overlays`](super::paint_overlays) draws them,
-    /// the version popup at `popup_scale`: [`popup_whole`] for a painter with
-    /// no animation of its own. The one place a frame's panels become an
+    /// the version popup at `popup_scale` ([`popup_whole`] for a painter with
+    /// no animation of its own) and `host_keys` after the help's shared rows.
+    /// The one place a frame's panels become an
     /// [`OverlayFrame`](super::OverlayFrame).
-    pub(crate) fn overlays(&self, popup_scale: f32) -> super::OverlayFrame<'_> {
+    pub(crate) fn overlays(
+        &self,
+        popup_scale: f32,
+        host_keys: &'static [super::widgets::Shortcut],
+    ) -> super::OverlayFrame<'_> {
         super::OverlayFrame {
             theme_picker: self.theme_picker,
             dashboard: &self.dashboard,
             connection: &self.connection,
             popup_scale,
             help_open: self.help_open,
-            host_keys: &[],
+            host_keys,
             onboarding: &self.onboarding,
         }
     }
