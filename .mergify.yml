@@ -52,7 +52,7 @@ pull_request_rules:
   - name: queue the README media regen
     conditions:
       - head = bot/media-regen
-      - head-repo-full-name = IvanWng97/pixtuoid
+      - -from-fork
       - -files ~= ^(?!docs/images/)
     actions:
       queue:

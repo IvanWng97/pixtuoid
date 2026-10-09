@@ -186,9 +186,12 @@ mod tests {
 
     #[test]
     fn the_body_row_drops_only_the_scheme() {
+        let host_path = REPO_URL
+            .strip_prefix("https://")
+            .expect("an https repository");
         assert_eq!(
             body_row("1.2.3", 80),
-            "github.com/IvanWng97/pixtuoid/releases/tag/v1.2.3"
+            format!("{host_path}/releases/tag/v1.2.3")
         );
     }
 

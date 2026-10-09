@@ -29,8 +29,9 @@ concurrency:
 jobs:
   chart:
     name: render and publish
-    # A fork would force-push a `star-history` branch into its own repo on every cron.
-    if: github.repository == 'IvanWng97/pixtuoid'
+    # A fork would force-push a `star-history` branch into its own repo on every
+    # cron. Gated by id, as release-plz.yml is.
+    if: github.repository_id == '1245333424'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

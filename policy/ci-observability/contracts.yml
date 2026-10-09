@@ -477,6 +477,28 @@
 
 # ── Publishing
 
+- id: releases-run-only-in-this-repository
+  file:
+    - .github/workflows/release-plz.yml
+    - .github/workflows/star-history.yml
+  expected: "1245333424"
+  why: >-
+    These jobs publish or force-push, so a fork must not run them: every entry
+    job (one with no `needs`; the rest inherit its skip) gates on the
+    repository's id rather than its owner/name. A transfer keeps the id (the
+    old name 301s to /repositories/<id>), while a name gate would skip every
+    release after one, silently.
+  assert: |
+    [.jobs[] | select(has("needs") | not) | .if // ""] as $entries
+    | ($entries | length > 0)
+      and all($entries[]; contains("github.repository_id == '" + $expected + "'")
+                          and (test("github\\.repository ==") | not))
+  break:
+    - (.jobs[] | select(has("if")) | .if) |= sub("repository_id == '[0-9]+'"; "repository_id == '1'")
+    - (.jobs[] | select(has("if")) | .if) |= sub("github.repository_id == '[0-9]+'"; "github.repository == 'IvanWng97/pixtuoid'")
+    - (.jobs[] | select(has("if")) | .if) |= sub("( && )?github.repository_id == '[0-9]+'"; "")
+    - '.jobs.ungated = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
+
 - id: release-publishes-after-ci-gate
   file: .github/workflows/release-plz.yml
   why: >-
