@@ -124,13 +124,26 @@ fn fit_at(scale: u16, density: Density, px: Size) -> PixelFit {
     })
 }
 
+/// Whether the office at `scale` over a `size` window lays out.
+fn lays_out(scale: u16, density: Density, size: PhysicalSize<u32>) -> bool {
+    let min = pixtuoid_scene::layout::min_layout_size();
+    let office = fit_at(scale, density, px_size(size)).logical();
+    office.w >= min.w && office.h >= min.h
+}
+
 /// `office_scale` fitted to the pack's `density` and never below it, so the
-/// window never falls back to the classic.
+/// window never falls back to the classic, then stepped down to the largest
+/// scale whose office lays out: `office_scale` reads the height alone, so a
+/// narrow window's would not fit across.
 fn auto_scale(size: PhysicalSize<u32>, density: Density) -> u16 {
     let natural = u16::try_from(office_scale(size.height)).unwrap_or(u16::MAX);
-    PixelFit::at_least_density(natural, density, px_size(size))
+    let natural = PixelFit::at_least_density(natural, density, px_size(size))
         .scale()
-        .get()
+        .get();
+    let d = density.get();
+    std::iter::successors(Some(natural), |&s| s.checked_sub(d).filter(|&s| s >= d))
+        .find(|&s| lays_out(s, density, size))
+        .unwrap_or(natural)
 }
 
 /// The scale `zoom` draws a `size` window at: the automatic scale moved that
@@ -144,13 +157,8 @@ fn zoom_scale(size: PhysicalSize<u32>, density: Density, zoom: Zoom) -> u16 {
     if want <= auto {
         return want;
     }
-    let min = pixtuoid_scene::layout::min_layout_size();
-    let lays_out = |scale: u16| {
-        let office = fit_at(scale, density, px_size(size)).logical();
-        office.w >= min.w && office.h >= min.h
-    };
     std::iter::successors(Some(want), |&s| s.checked_sub(d).filter(|&s| s > auto))
-        .find(|&s| lays_out(s))
+        .find(|&s| lays_out(s, density, size))
         .unwrap_or(auto)
 }
 
@@ -591,6 +599,10 @@ mod tests {
         assert_eq!(scale(1), auto + d);
         assert_eq!(scale(-1), auto - d);
         assert_eq!(scale(i8::MIN), d, "never below the density");
+        for steps in i8::MIN..=i8::MAX {
+            let s = zoom_scale(size, density(), Zoom::new(steps));
+            assert!(s >= d && s.is_multiple_of(d), "zoom {steps} draws {s}");
+        }
     }
 
     /// Zooming in stops at the largest scale whose office still lays out.
@@ -598,24 +610,45 @@ mod tests {
     fn zooming_in_never_drops_the_office_below_its_layout() {
         let min = pixtuoid_scene::layout::min_layout_size();
         let d = density().get();
-        let size = PhysicalSize::new(3840, 2160);
-        let at = window_geometry(size, density(), Zoom::new(i8::MAX));
-        assert!(
-            at.logical().w >= min.w && at.logical().h >= min.h,
-            "{:?}",
-            at.logical()
-        );
-        let one_more =
-            PixelFit::at_least_density(at.scale().get() + d, density(), Size { w: 3840, h: 2160 });
-        let one_more = one_more.over(Size {
-            w: 3840,
-            h: 2160 - footer_band(one_more),
-        });
-        assert!(
-            one_more.logical().w < min.w || one_more.logical().h < min.h,
-            "a larger scale would still lay out: {:?}",
-            one_more.logical()
-        );
+        // Height-limited, then width-limited.
+        for (w, h) in [(3840u16, 2160u16), (1000, 2160)] {
+            let size = PhysicalSize::new(u32::from(w), u32::from(h));
+            let at = window_geometry(size, density(), Zoom::new(i8::MAX));
+            assert!(
+                at.logical().w >= min.w && at.logical().h >= min.h,
+                "{w}x{h}: {:?}",
+                at.logical()
+            );
+            let one_more =
+                PixelFit::at_least_density(at.scale().get() + d, density(), Size { w, h });
+            let one_more = one_more.over(Size {
+                w,
+                h: h - footer_band(one_more),
+            });
+            assert!(
+                one_more.logical().w < min.w || one_more.logical().h < min.h,
+                "{w}x{h}: a larger scale would still lay out: {:?}",
+                one_more.logical()
+            );
+        }
+    }
+
+    /// A window the office lays out in lays it out with no zoom, however
+    /// tall: the automatic scale follows the height alone, so a narrow one
+    /// takes the largest scale whose office still fits across.
+    #[test]
+    fn a_window_that_can_lay_out_does_with_no_zoom() {
+        let min = pixtuoid_scene::layout::min_layout_size();
+        let d = density();
+        let narrowest = min_window(d).width;
+        for h in (min_window(d).height..4000).step_by(37) {
+            let size = PhysicalSize::new(narrowest, h);
+            let office = window_geometry(size, d, Zoom::default()).logical();
+            assert!(
+                office.w >= min.w && office.h >= min.h,
+                "{narrowest}x{h}: {office:?}"
+            );
+        }
     }
 
     /// [`Zoom::stepped`] from past the largest zoom that lays out, and each
