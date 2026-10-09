@@ -5,7 +5,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
-use super::geometry::ZoomKey;
+use super::geometry::{Zoom, ZoomKey};
 
 use super::compose::Screen;
 use super::offscreen::OfficeRenderer;
@@ -86,8 +86,21 @@ pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
 pub(crate) const ZOOM_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
     &[("Ctrl +/-", "zoom in / out"), ("Ctrl 0", "reset zoom")];
 
+/// The zoom a pressed `key` held with `mods` leaves a `size` window at,
+/// from the `zoom` it shows; `None` for any other key, which goes on to
+/// [`key`].
+pub(crate) fn zoomed(
+    key: &Key,
+    mods: ModifiersState,
+    zoom: Zoom,
+    size: winit::dpi::PhysicalSize<u32>,
+    density: pixtuoid_core::sprite::format::Density,
+) -> Option<Zoom> {
+    zoom_key(key, mods).map(|step| zoom.stepped(step, size, density))
+}
+
 /// The zoom `key` asks for, held with `mods`; `None` for any other key.
-pub(crate) fn zoom_key(key: &Key, mods: ModifiersState) -> Option<ZoomKey> {
+fn zoom_key(key: &Key, mods: ModifiersState) -> Option<ZoomKey> {
     zoom_key_with(key, mods, ZOOM_HOLD)
 }
 
@@ -430,6 +443,40 @@ mod tests {
             ),
             None,
             "the other platform's modifier"
+        );
+    }
+
+    /// A zoom chord leaves the window at the zoom one step from the one it
+    /// shows, and anything else is no zoom and goes on to [`key`].
+    #[test]
+    fn a_zoom_chord_steps_the_zoom_and_nothing_else_does() {
+        use super::super::geometry::Zoom;
+        let d = super::super::fixtures::density();
+        let size = winit::dpi::PhysicalSize::new(3840, 2160);
+        let char_key = |c: &str| Key::Character(c.into());
+        assert_eq!(
+            zoomed(&char_key("="), ZOOM_HOLD, Zoom::default(), size, d),
+            Some(Zoom::default().stepped(ZoomKey::In, size, d))
+        );
+        assert_ne!(
+            zoomed(&char_key("="), ZOOM_HOLD, Zoom::default(), size, d),
+            Some(Zoom::default()),
+            "a step, not the zoom it started from"
+        );
+        assert_eq!(
+            zoomed(&char_key("0"), ZOOM_HOLD, Zoom::new(3), size, d),
+            Some(Zoom::default())
+        );
+        assert_eq!(
+            zoomed(
+                &char_key("="),
+                ModifiersState::empty(),
+                Zoom::default(),
+                size,
+                d
+            ),
+            None,
+            "plain = goes on to the volume"
         );
     }
 

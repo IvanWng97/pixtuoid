@@ -226,17 +226,6 @@ impl FloatingApp {
         }
     }
 
-    /// Zoom the office as `key` asks, from the zoom the window shows.
-    fn zoom_by(&mut self, key: super::geometry::ZoomKey) {
-        let Some(window) = &self.window else {
-            return;
-        };
-        self.zoom = self
-            .zoom
-            .stepped(key, window.inner_size(), self.pack.max_density_variant());
-        window.request_redraw();
-    }
-
     fn request_redraw(&self) {
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -672,8 +661,17 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 is_synthetic: false,
                 ..
             } if event.state == ElementState::Pressed => {
-                if let Some(zoom) = super::input::zoom_key(&event.logical_key, self.modifiers) {
-                    self.zoom_by(zoom);
+                if let Some(window) = &self.window
+                    && let Some(zoom) = super::input::zoomed(
+                        &event.logical_key,
+                        self.modifiers,
+                        self.zoom,
+                        window.inner_size(),
+                        self.pack.max_density_variant(),
+                    )
+                {
+                    self.zoom = zoom;
+                    window.request_redraw();
                     return;
                 }
                 if self.key(&event) {
