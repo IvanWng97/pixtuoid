@@ -26,16 +26,16 @@ runs:
         ATTEMPT_TIMEOUT: '120'
       run: |
         set -euo pipefail
-        read -ra packages <<< "$PACKAGES"
+        read -ra names <<< "$PACKAGES"
         apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
         install_opts=(-y)
         [[ "$RECOMMENDS" == true ]] || install_opts+=(--no-install-recommends)
         for ((attempt = 1; ; attempt++)); do
           if timeout -k 10 "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" update &&
-            timeout -k 10 "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" install "${install_opts[@]}" --download-only "${packages[@]}"; then
+            timeout -k 10 "$ATTEMPT_TIMEOUT" sudo apt-get "${apt_opts[@]}" install "${install_opts[@]}" --download-only "${names[@]}"; then
             break
           fi
           ((attempt < ATTEMPTS)) || { echo "::error title=apt download failed::$PACKAGES after $ATTEMPTS attempts"; exit 1; }
           echo "::warning title=apt download retried::attempt $attempt of $ATTEMPTS"
         done
-        sudo apt-get "${apt_opts[@]}" install "${install_opts[@]}" --no-download "${packages[@]}"
+        sudo apt-get "${apt_opts[@]}" install "${install_opts[@]}" --no-download "${names[@]}"
