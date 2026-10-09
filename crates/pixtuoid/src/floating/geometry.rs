@@ -569,7 +569,7 @@ mod tests {
         );
     }
 
-    /// No zoom is the automatic scale: the window as it opened before zoom.
+    /// No zoom is the automatic scale.
     #[test]
     fn no_zoom_is_the_automatic_scale() {
         let d = density();
@@ -631,6 +631,24 @@ mod tests {
                 one_more.logical()
             );
         }
+    }
+
+    /// A window too narrow for any scale to lay out keeps the scale its
+    /// height asks for, as it did before the step down existed.
+    #[test]
+    fn a_window_nothing_lays_out_in_keeps_its_natural_scale() {
+        let d = density();
+        let size = PhysicalSize::new(min_window(d).width - 1, 1200);
+        let natural = PixelFit::at_least_density(
+            u16::try_from(office_scale(size.height)).expect("small"),
+            d,
+            Size { w: 1, h: 1 },
+        );
+        assert!(natural.scale().get() > d.get(), "a step down was possible");
+        assert_eq!(
+            window_geometry(size, d, Zoom::default()).scale(),
+            natural.scale()
+        );
     }
 
     /// A window the office lays out in lays it out with no zoom, however
