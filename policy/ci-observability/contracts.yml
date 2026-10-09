@@ -45,21 +45,31 @@
     The model reads untrusted diff text and its answer is published, so any
     reach beyond reading the checkout lets an injection act or publish a runner
     secret. dontAsk denies what no allow rule approves, `--tools` leaves only
-    read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
+    read tools and the Agent tool, the step's env leaves that tool only the
+    committed definitions reviewer-agents-only-read holds (a built-in
+    subagent holds every tool, code.claude.com/docs/en/sub-agents),
+    `claudeMdExcludes` keeps a PR's own AGENTS.md under the head copies from
+    loading as instructions (code.claude.com/docs/en/memory), and
+    `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
     (code.claude.com/docs/en/settings-reference). `--setting-sources user`
     drops the checkout's `.claude/` settings, which can add a hook and which
     the action loads by default
     (github.com/anthropics/claude-code-action/blob/v1/base-action/src/parse-sdk-options.ts);
-    the action parses only its space-separated form. Any other flag, action input
-    or settings key can add a rule, a tool, a hook or a directory, so all three
-    are allowlists; other values stay free. `allowed_bots` admits only
+    the action parses only its space-separated form. Any other flag, action input,
+    env var or settings key can add a rule, a tool, a hook or a directory, so all
+    four are allowlists; other values stay free. `allowed_bots` admits only
     media-regen.yml's own app (its PR touches only docs/images), never `*`,
     which would let any App's push trigger it.
   assert: |
-    [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
+    . as $doc
+    | [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
       and ((.[0].with.allowed_bots // "") == "pixtuoid-bot[bot]")
+      and .[0].env == {"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
+      and $doc.jobs.analyze.env == null
+      and ([$doc.jobs.analyze.steps[].run // "" | select(test("GITHUB_ENV|GITHUB_PATH"))] == [])
+      and ($doc.env | keys) == ["REVIEW_CONTEXT", "REVIEW_LENSES", "REVIEW_SAFE_PATH", "REVIEW_TITLE", "RUN_URL", "UNIT_PASSES"]
       and ((.[0].with | keys) - [
             "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
@@ -67,16 +77,18 @@
             "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
       and (.[0].with.claude_args as $args
            | ([$args | scan("(?<![\\w-])-{1,2}[A-Za-z][\\w-]*")] - [
-                "--max-turns", "--max-budget-usd", "--permission-mode",
-                "--setting-sources", "--tools", "--settings", "--json-schema"] == [])
+                "--model", "--effort", "--max-turns", "--max-budget-usd", "--permission-mode",
+                "--setting-sources", "--tools", "--agents", "--settings", "--json-schema"] == [])
              and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
              and [$args | scan("--setting-sources (\\S+)")] == [["user"]]
              and ($args | test("--setting-sources=") | not)
              and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
-                  | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
+                  | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep", "Agent"] == []))
+             and [$args | scan("--agents[ =](.*?)(?= --|$)")] == [["${{ steps.schema.outputs.agents }}"]]
              and ([$args | scan("--settings")] | length == 1)
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
-                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
+                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true},
+                                 "claudeMdExcludes": ["**/.claude-review/**"]}))
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.allowed_bots)
@@ -119,7 +131,10 @@
       |= sub("\\{\"permissions\""; "{\"hooks\":{},\"permissions\"")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
+      |= sub("--tools Read,Glob,Grep,Agent"; "--tools Read,Glob,Grep,Agent,Bash")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--agents [^-]+"; "--agents {\"x\":{\"tools\":[\"Bash\"]}}")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --settings '[^']+'"; "")
@@ -127,6 +142,52 @@
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"additional_permissions": "actions: write"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env)
+      |= del(.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS)
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env)
+      |= del(.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)
+    - '.jobs.analyze.env = {"CLAUDE_CONFIG_DIR": "/tmp/x"}'
+    - '.jobs.analyze.steps[0].run += "\necho CLAUDE_CONFIG_DIR=/tmp/x >> \"$GITHUB_ENV\""'
+    - .env.CLAUDE_CODE_PLUGIN_DIRS = "/tmp/x"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env.ANTHROPIC_BASE_URL)
+      = "https://example.test"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(",\"claudeMdExcludes\":\\[[^]]*\\]"; "")
+
+- id: reviewer-absence-runs-on-failure
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    report_absence posts the failure statuses exactly when analyze or publish
+    failed, and an `if:` with no status function gets an implicit `success()`,
+    which skips it then: the PR waits on statuses no run will post.
+  assert: |
+    .jobs.report_absence.if == "${{ !cancelled() && needs.publish.result != 'success' }}"
+  break:
+    - .jobs.report_absence.if = "${{ needs.publish.result != 'success' }}"
+    - .jobs.report_absence.if = "${{ !cancelled() && false }}"
+
+- id: reviewer-agents-only-read
+  file: .github/prompts/review-agents.json
+  why: >-
+    Each subagent reads the same untrusted text as the model that spawns it. A
+    definition without `tools` inherits every tool, and `mcpServers`, `hooks`,
+    `permissionMode` or `skills` widen its reach
+    (code.claude.com/docs/en/sub-agents), so tools are an allowlist that holds
+    no Agent, which keeps a subagent from spawning one, and so are keys.
+  assert: |
+    length > 0
+    and all(.[];
+      (keys - ["description", "prompt", "tools", "model", "effort", "maxTurns"] == [])
+      and (.tools | type == "array" and length > 0 and (. - ["Read", "Glob", "Grep"] == [])))
+  break:
+    - del(.verifier.tools)
+    - .verifier.tools += ["Agent"]
+    - .verifier.permissionMode = "bypassPermissions"
+    - .verifier.tools = []
 
 - id: reviewer-model-auth-is-scoped
   file: .github/workflows/claude-readonly-review.yml
@@ -180,7 +241,7 @@
 - id: reviewer-writers-only-comment-and-status
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish comments and sets the lens's status, report_absence only sets it,
+    publish comments and sets each lens's status, report_absence only sets them,
     and any action in either, a checkout included, runs with that scope: an
     action reads `github.token` without being passed it
     (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
@@ -257,10 +318,10 @@
     every Dependabot PR waiting on it, and one past them posts a context no
     review would.
   assert: |
-    .jobs.exempt.strategy.matrix.lens == .jobs.review.strategy.matrix.lens
+    .jobs.exempt.strategy.matrix.lens == (.jobs.review.with.lenses | fromjson)
   break:
     - .jobs.exempt.strategy.matrix.lens |= .[:1]
-    - .jobs.review.strategy.matrix.lens += ["security"]
+    - .jobs.review.with.lenses = "[\"correctness\", \"design\", \"security\"]"
 
 # ── claude.yml: the only Claude job with contents:write
 

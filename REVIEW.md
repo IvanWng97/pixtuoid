@@ -5,15 +5,17 @@ diff touches, first; these rules add to generic defect hunting.
 
 ## Scope
 
-- A lens bot applies [What to check](#what-to-check), its [lens](#lenses)
-  and [Re-review](#re-review); the **correctness** bot also applies every
-  matching [escalation](#escalation) row to the diff and names the local rows
-  in its summary.
-- A local row lens applies only its [row](#escalation).
-- All apply [Do not flag](#do-not-flag), the Lenses preamble,
-  [Severity](#severity) and [Output](#output).
+Each reader applies [Common](#common) and its own section, nothing else:
 
-## What to check
+- The automatic review's [orchestrator](#orchestrator) merges duplicate
+  candidates and keeps what the [verifier](#verifier) keeps.
+- A unit reviewer applies [Unit](#unit) to the files of one unit.
+- The correctness reviewer applies its [lens](#correctness) to the whole diff,
+  plus every matching [escalation](#escalation) row, and names the local rows.
+- The design reviewer applies its [lens](#design) to the whole diff.
+- A local row lens applies its [row](#escalation).
+
+## Common
 
 ### Traps (the obvious reading is wrong here)
 
@@ -43,34 +45,6 @@ diff touches, first; these rules add to generic defect hunting.
 - A breach of AGENTS.md (invariants, conventions, "Things NOT to do").
 - New behavior without a test; scope beyond what the PR body states.
 
-### Sweeps that leave the diff
-
-- **Siblings** — a guard/cap/validation added to some of a sibling set
-  (per-source decoders, install targets, platform arms, twin call sites) or to
-  one caller of a shared fn: `rg` and verify the full set and every call site.
-- **DRY** — every new fn/type/helper/const gets a whole-tree search for an
-  existing implementation, weighted by divergence risk; every value a new line
-  reads is the authority its consumer uses, not a sibling's (#1042, #1155).
-  Test fixtures stay inline.
-- **Drift** — docs naming a moved file/fn/flag/count, searched including
-  `.github/` and `.claude/`.
-- **Wire format** — a decoder or drift-watch row vs the recorded upstream
-  shape; whether a source owes a row is `source/drift.rs`'s header.
-- **Unwired additions** — every new field/flag/parameter/asset/gate has a live
-  consumer in the same diff (`_x` bindings and `pub` fields evade the lints).
-- **Manifest bridge** — `site/src/*.json` and generated schemas vs their Rust
-  source of truth.
-- **Population** — a gate, build flag or config key that selects a set
-  (crates, features, targets, jobs, a gate's own tests): name the set before
-  and after; a silent shrink is a defect (#1012, #1101, #1103, #1123).
-- **Test teeth** — every new or changed test, and every test asserting an
-  effect the diff removes or reroutes, fails when the code it names is wrong
-  (#889 left `occupied_floor_stays_lit` unable to). Refusal paths are pinned on
-  both sides of every window, offsets derived from the constant under test; a
-  new gate fires on the violation, stays silent on the legitimate case, and
-  names the real requirement. No test reads ambient state: the local time
-  zone, `HOME`, the developer's config, a fixed temp path (#1023, #1048).
-
 ### Do not flag
 
 - Anything a [CI gate](docs/CONTRIBUTING.md#ci-gates) or clippy/rustfmt
@@ -82,14 +56,81 @@ diff touches, first; these rules add to generic defect hunting.
   boundary is `issue (non-blocking)`.
 - Risks needing unlikely or unreachable preconditions; performance unless
   measurable (the TUI repaints at `anim::PAINT_FPS`).
-- A missing comment ([comment audit](#design) owns the rest).
+- A missing comment ([comment audit](#unit) owns the rest).
 
-## Lenses
+### Evidence
 
 Every finding states its evidence before its claim, cites a `file:line` from a
 file actually read, and survives a sharp-edge check: the same seam is not the
 same claim. A claim about an external artifact (action tag, crate release,
 upstream shape) not fetched this session says "unverified" (#112).
+
+### Severity
+
+[Conventional Comments](https://conventionalcomments.org/) labels, the
+[`review-schema.json`](.github/prompts/review-schema.json) `severity` enum;
+taste with no defect is never posted. Dispositions:
+[CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
+
+- `issue (blocking)` — correctness, security, an invariant, or a breach of any
+  AGENTS.md rule, its Conventions included. It blocks only once
+  the agent that ran the review or a maintainer confirms it against the code;
+  the finder's label alone never blocks.
+- `issue (non-blocking)` — any other real defect this PR introduced.
+- `issue (pre-existing)` — real, not introduced here.
+
+### Findings
+
+Each finding carries:
+
+- `severity`: the [label](#severity)'s decoration.
+- `lens`: the [lens](#lenses) whose section names the finding's kind; a unit's
+  comment, DRY and drift findings are design, its test findings correctness.
+- `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
+- `line`: the absolute head-side line, never invented.
+- `body`: the verified finding and a concrete failure scenario; a
+  maintenance defect's is the edit that would leave a copy or a comment wrong.
+
+## Orchestrator
+
+Return only the structured result
+[`review-schema.json`](.github/prompts/review-schema.json) defines: a
+one-sentence `summary` and the kept findings, every blocking one first and
+pre-existing last. The summary counts any finding past the schema's `maxItems`
+ceiling.
+
+### Re-review
+
+Never re-flag a finding that already has a thread in
+`.claude-review/prior-threads.json` (the review's own threads on the PR),
+resolved or not
+([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune));
+new findings follow [Severity](#severity). From round 3 (`Round:` in
+`.claude-review/review-context.md`), post only `issue (blocking)` and count the
+rest in the summary, as the
+[convergence contract](docs/CONTRIBUTING.md#convergence-contract) folds only
+those after round 2.
+
+## Unit
+
+Read each file of the unit whole at the head (`.claude-review/head/`; a removed
+file has only its hunks), against the base tree. A defect anywhere in it is in
+scope, `issue (pre-existing)` when the diff did not introduce it.
+
+1. **Comment audit**: for every file, a one-line change included, read its
+   entire comment population against the code and AGENTS.md's comment rules
+   (accuracy, value, rot, vestigial, self-repetition); a story told twice keeps
+   the copy on the narrowest thing it constrains.
+2. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
+   existing implementation, weighted by divergence risk; every value a new line
+   reads is the authority its consumer uses, not a sibling's (#1042, #1155).
+   Test fixtures stay inline.
+3. **Drift** — docs naming a moved file/fn/flag/count, searched including
+   `.github/` and `.claude/`.
+4. **Test teeth** for every test the unit holds, as [Correctness](#correctness)
+   defines it.
+
+## Lenses
 
 ### Correctness
 
@@ -97,6 +138,26 @@ Hold the diff to each claim the PR body's
 [plan answers](.github/prompts/impl-plan.prompt.md#the-contract-with-review)
 make. Name any CI-only gate the diff can turn red (`--lib` builds neither bin
 modules nor examples).
+
+- **Siblings** — a guard/cap/validation added to some of a sibling set
+  (per-source decoders, install targets, platform arms, twin call sites) or to
+  one caller of a shared fn: `rg` and verify the full set and every call site.
+- **Wire format** — a decoder or drift-watch row vs the recorded upstream
+  shape; whether a source owes a row is `source/drift.rs`'s header.
+- **Manifest bridge** — `site/src/*.json` and generated schemas vs their Rust
+  source of truth.
+- **Unwired additions** — every new field/flag/parameter/asset/gate has a live
+  consumer in the same diff (`_x` bindings and `pub` fields evade the lints).
+- **Population** — a gate, build flag or config key that selects a set
+  (crates, features, targets, jobs, a gate's own tests): name the set before
+  and after; a silent shrink is a defect (#1012, #1101, #1103, #1123).
+- **Test teeth** — every new or changed test, and every test asserting an
+  effect the diff removes or reroutes, fails when the code it names is wrong
+  (#889 left `occupied_floor_stays_lit` unable to). Refusal paths are pinned on
+  both sides of every window, offsets derived from the constant under test; a
+  new gate fires on the violation, stays silent on the legitimate case, and
+  names the real requirement. No test reads ambient state: the local time
+  zone, `HOME`, the developer's config, a fixed temp path (#1023, #1048).
 
 #### Security
 
@@ -124,12 +185,7 @@ invariant-breaking sequence against:
    not shared topic; verify join keys against real production constants,
    never test fixtures.
 3. Layering: mechanism calls route through the designated orchestrator.
-4. **Comment audit**, every diff: for EVERY file the diff touches, a one-line
-   change included, read its entire comment population against the code and
-   AGENTS.md's comment rules (accuracy, value, rot, vestigial,
-   self-repetition); a story told twice keeps the copy on the narrowest thing
-   it constrains.
-5. **Proportion**, each with the cheaper alternative, `issue (non-blocking)`
+4. **Proportion**, each with the cheaper alternative, `issue (non-blocking)`
    unless it breaches AGENTS.md ([Severity](#severity)): **over-engineering** (YAGNI), a branch,
    helper, parameter, type, fallback arm or test machinery serving no
    reachable case; **low ROI**, code, API change or coupling out of proportion
@@ -146,7 +202,7 @@ invariant-breaking sequence against:
    naming X and the source checked.
    Documented load-bearing defense (shim exit-0, config-never-wipe, liveness
    ladders) stays.
-6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
+5. **Naming**: every new or renamed name, `pub(crate)` and modules included,
    is faithful, clear and concise. Each finding cites what the name breaks;
    severity per [Severity](#severity), non-blocking by default.
    - **Faithful**: it says what the item is or does at head; a behavior change
@@ -157,12 +213,19 @@ invariant-breaking sequence against:
    - **Concise**: the shortest name that stays clear, in the domain's existing
      word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
      never a placeholder.
-7. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
+6. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
    rule; a claim with no fetched source, or one that contradicts it, breaches it.
+
+## Verifier
+
+Refute by default. Keep a candidate only when the code at its `file:line`,
+read this time, shows the evidence it states, the claim follows from it, and
+its failure scenario is reachable; drop it when [Do not flag](#do-not-flag)
+covers it.
 
 ## Escalation
 
-The two lens bots are the floor; each matching row adds one focused lens. The
+The automatic review is the floor; each matching row adds one focused lens. The
 first column decides; Paths are where it usually fires. A **local** row needs
 the head tree read, built or run, or an upstream fetched, so its local run is
 mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)), and that run is
@@ -185,43 +248,3 @@ its focused lens alone: the floor is never re-run locally.
 | A crate edge, new dependency or widened public API (a version bump of an existing dependency doesn't match) | `Cargo.toml`, `crates/*/Cargo.toml`, `api/` | local | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
 | CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/`, `.github/actions/`, `.github/dependabot.yml`, `.mergify.yml`, `policy/`, `release-plz.toml` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
 
-## Severity
-
-[Conventional Comments](https://conventionalcomments.org/) labels, the
-[`review-schema.json`](.github/prompts/review-schema.json) `severity` enum;
-taste with no defect is never posted. Dispositions:
-[CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
-
-- `issue (blocking)` — correctness, security, an invariant, or a breach of any
-  AGENTS.md rule, its Conventions included. It blocks only once
-  the agent that ran the review or a maintainer confirms it against the code;
-  the finder's label alone never blocks.
-- `issue (non-blocking)` — any other real defect this PR introduced.
-- `issue (pre-existing)` — real, not introduced here.
-
-## Re-review
-
-Never re-flag a finding that already has a thread in
-`.claude-review/prior-threads.json` (this lens's own threads on the PR),
-resolved or not
-([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune));
-new findings follow [Severity](#severity). From round 3 (`Round:` in
-`.claude-review/review-context.md`), post only `issue (blocking)` and count the
-rest in the summary, as the
-[convergence contract](docs/CONTRIBUTING.md#convergence-contract) folds only
-those after round 2.
-
-## Output
-
-Bots return only the structured result
-[`review-schema.json`](.github/prompts/review-schema.json) defines:
-
-- `summary`: one sentence.
-- `severity`: the [label](#severity)'s decoration.
-- `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
-- `line`: the absolute head-side line, never invented.
-- Every blocking finding, first; then at most 5 non-blocking and pre-existing
-  ones, pre-existing last. The summary counts every finding left out,
-  including any past the schema's `maxItems` ceiling.
-- Each `body`: the verified finding and a concrete failure scenario; a
-  maintenance defect's is the edit that would leave a copy or a comment wrong.

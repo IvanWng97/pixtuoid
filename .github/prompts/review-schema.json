@@ -9,7 +9,7 @@
     },
     "findings": {
       "type": "array",
-      "maxItems": 10,
+      "maxItems": 40,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -20,6 +20,13 @@
               "blocking",
               "non-blocking",
               "pre-existing"
+            ]
+          },
+          "lens": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "design"
             ]
           },
           "path": {
@@ -40,6 +47,7 @@
         },
         "required": [
           "severity",
+          "lens",
           "path",
           "line",
           "body"

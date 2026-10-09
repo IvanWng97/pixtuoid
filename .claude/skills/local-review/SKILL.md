@@ -1,7 +1,7 @@
 ---
 name: local-review
 version: 3.0.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (one lens per matching REVIEW.md local escalation row; the correctness and design lenses are the CI bots, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use when a diff touches a local-only row, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
+description: "Run pixtuoid's review locally at either scope — a DIFF review (one lens per matching REVIEW.md local escalation row; the correctness and design lenses are the automatic CI review's, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use when a diff touches a local-only row, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -14,8 +14,8 @@ paraphrase here.
 ## When to run
 
 - **Diff scope**: the diff matches a REVIEW.md escalation row marked
-  **local**. The correctness and design lenses are the bots'; never re-run
-  them here.
+  **local**. The correctness and design lenses are the automatic review's;
+  never re-run them here.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
 
 ## Diff scope
@@ -32,8 +32,8 @@ paraphrase here.
    Worktree: <path> (branch <name>, base <sha>, head <sha>), read-only;
    stop if HEAD is not that head.
    Diff: git -C <path> diff <base>..<head>.
-   Read AGENTS.md, then apply REVIEW.md's <row>, its Lenses preamble and
-   Do not flag.
+   Read AGENTS.md, then apply REVIEW.md's <row> and its Common
+   section.
    <change-specific claims (from the PR body's impl-plan answers) or design
    questions, one per line>
    Run the applicable gates; report each exit code as observed, never through
