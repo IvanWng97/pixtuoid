@@ -93,10 +93,11 @@ opt-level = 2
 inherits = "dev"
 debug = true
 
-# Iterating on a release build (a snapshot, a live run):
-# `cargo build --profile release-local`. Thin LTO over 16 incremental codegen
-# units, where `release`'s fat LTO over one re-optimizes the whole program on
-# every change. Not the binary that ships, nor the one `pace-check` measures.
+# Iterating on a release build: `cargo run --profile release-local …`, into
+# `target/release-local/`. Thin LTO over 16 incremental codegen units, where
+# `release`'s fat LTO over one re-optimizes the whole program on every change.
+# The scripts, `pace-check` and the shipped binary all read `target/release`,
+# which this never writes.
 [profile.release-local]
 inherits = "release"
 lto = "thin"
