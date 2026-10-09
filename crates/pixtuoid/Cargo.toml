@@ -87,7 +87,7 @@ winit = { version = "0.30", default-features = false, features = [
 # takes; `gles` is the old-driver and software fallback.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "dx12", "vulkan", "gles"] }
 # Blocks on wgpu's async adapter and device requests, once at window creation.
-pollster = "0.4"
+pollster = "1"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
