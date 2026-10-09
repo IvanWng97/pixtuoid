@@ -54,7 +54,6 @@ pixel painter, attach a cropped snapshot and self-critique:
 
 ## AI assistance
 
-<!-- If this PR was authored or heavily assisted by an AI agent, say so — a maintainer
-     will visually verify before merge (see the `needs-human-verify` label). -->
+<!-- If this PR was authored or heavily assisted by an AI agent, say so. -->
 
 - [ ] This PR was written/heavily-assisted by an AI agent.

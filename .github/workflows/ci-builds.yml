@@ -92,9 +92,9 @@ jobs:
       - uses: ./.github/actions/packaging-build
 
   packaging-macos:
-    name: packaging-build (macos-14)
+    name: packaging-build (macos-latest)
     if: ${{ inputs.full }}
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7

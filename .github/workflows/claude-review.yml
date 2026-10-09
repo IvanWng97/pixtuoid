@@ -4,7 +4,8 @@ on:
   # The secret-bearing path loads only from the trusted default branch, and the
   # reusable workflow never checks out or executes the PR head.
   pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; policy/ci-observability pins the read-only analyzer/publisher split
-    types: [opened, reopened, ready_for_review, synchronize]
+    # `edited` for a stacked PR GitHub retargets to main once its base merges.
+    types: [opened, reopened, ready_for_review, synchronize, edited]
   issue_comment:
     types: [created]
 
@@ -14,6 +15,7 @@ jobs:
   review:
     if: >
       (github.event_name == 'pull_request_target' &&
+        (github.event.action != 'edited' || github.event.changes.base) &&
         github.actor != 'dependabot[bot]' &&
         github.event.pull_request.draft == false &&
         github.event.pull_request.head.repo.full_name == github.repository &&
@@ -45,3 +47,124 @@ jobs:
     concurrency:
       group: claude-review-${{ matrix.lens }}-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
+
+  # The owner's policy: Dependabot's dependency and action bumps merge without
+  # the model review, which reads a lockfile diff it cannot audit. Main requires
+  # each lens's status by name from this app, and no protection rule can key on
+  # a PR's author, so the exemption is posted as that status. Anything short of
+  # a same-name bump of Dependabot's own manifests gets `pending` and waits for
+  # a maintainer's /claude-review.
+  exempt:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      contains(fromJSON('["opened", "synchronize"]'), github.event.action) &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
+    strategy:
+      fail-fast: false
+      matrix:
+        lens: [correctness, design]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Exempt a Dependabot bump
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LENS: ${{ matrix.lens }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          post() {
+            jq -n --arg state "$1" --arg context "claude-review/$LENS" --arg target_url "$RUN_URL" \
+              --arg description "$2" '$ARGS.named' |
+              gh api --method POST "repos/${REPOSITORY}/statuses/${HEAD_SHA}" --input - > /dev/null
+          }
+          refuse() {
+            echo "::notice title=Not exempt::$1"
+            post pending "Not exempt ($1): comment /claude-review"
+            exit 0
+          }
+          # `github.actor` is only the last actor (zizmor's bot-conditions): a
+          # commit anyone else pushed onto Dependabot's branch ends the exemption.
+          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/commits" \
+            --jq '.[] | {author: .author.login, committer: .committer.login, verified: .commit.verification.verified}' |
+            jq -se 'length > 0 and all(.[]; . == {author: "dependabot[bot]", committer: "web-flow", verified: true})' \
+            > /dev/null || refuse "a commit Dependabot did not sign"
+          # Every ecosystem .github/dependabot.yml updates, and nothing else.
+          # \A and \z: jq's `$` also matches before a trailing newline.
+          allow='\A(Cargo\.(lock|toml)|crates/[^/]+/Cargo\.toml|requirements-dev\.txt|(site|integrations/raycast)/package(-lock)?\.json|\.github/(workflows/[^/]+|actions/[^/]+/action)\.ya?ml)\z'
+          files="$RUNNER_TEMP/files.jsonl"
+          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[] | {filename, status, patch}' > "$files"
+          jq -se --arg allow "$allow" \
+            'length > 0 and all(.[]; .status == "modified" and (.filename | test($allow)))' \
+            "$files" > /dev/null || refuse "a file outside its manifests"
+          # A workflow or action may change only its `uses:` pins.
+          jq -se 'all(.[] | select(.filename | startswith(".github/"));
+              .patch != null
+              and ([.patch | split("\n")[] | select(test("^[-+]"))]
+                   | all(test("^[-+][ \t]*(- +)?uses: +[^ ]+( +#.*)?$"))))' \
+            "$files" > /dev/null || refuse "a workflow edit beyond a uses: pin"
+          # Any manifest but a lockfile may move version strings and nothing
+          # else: its removed and added lines match, in order, once each whole
+          # version (a quoted value after `:` or `=`, a pip pin, an action's
+          # @ref) is masked, so a new dependency, rename, script, patch or action
+          # owner leaves one unpaired.
+          jq -se 'def mask($f):
+                if ($f | startswith(".github/")) then sub("@[^ ]+"; "@") | sub(" +#.*$"; "")
+                else gsub("(?<k>[:=] *)\"[~^=<>! ]*v?[0-9][0-9A-Za-z.+*-]*\""; "\(.k)\"0\"")
+                  | gsub("(?<op>[=<>!~]=)[0-9][0-9A-Za-z.*+!-]*"; "\(.op)0") end;
+              def side($f; $sign): [.patch | split("\n")[] | select(startswith($sign)) | .[1:] | mask($f)];
+              all(.[] | select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$") | not);
+                .filename as $f | .patch != null and side($f; "-") == side($f; "+"))' \
+            "$files" > /dev/null || refuse "a manifest edit beyond a version"
+
+          base="$(gh api "repos/${REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" --jq .merge_base_commit.sha)"
+          locks="$RUNNER_TEMP/locks"
+          mkdir -p "$locks"
+          # Each verdict reads whole files, never a `grep -q` pipe: under
+          # pipefail its early exit SIGPIPEs the writer, and a negation would
+          # turn that into a pass. A lock that doesn't parse refuses.
+          while IFS= read -r lock; do
+            gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/${lock}?ref=${base}" > "$locks/before"
+            gh api -H "Accept: application/vnd.github.raw" "repos/${REPOSITORY}/contents/${lock}?ref=${HEAD_SHA}" > "$locks/after"
+            case "$lock" in
+              Cargo.lock)
+                # Read as Cargo writes it: a `name`/`source` line in any other
+                # form would slip past the line matches below.
+                if ! { grep -qx '\[\[package\]\]' "$locks/before" && grep -qx '\[\[package\]\]' "$locks/after"; } ||
+                  [[ -n "$(grep -E '^[[:space:]]*(name|source)[[:space:]]*=' "$locks/after" | grep -Ev '^(name|source) = "[^"]*"$' || true)" ]]; then
+                  refuse "an unreadable Cargo.lock"
+                fi
+                # A bump may move versions, never bring in a name the base lacked.
+                [[ -z "$(comm -13 <(grep '^name = ' "$locks/before" | sort -u) <(grep '^name = ' "$locks/after" | sort -u))" ]] ||
+                  refuse "a crate new to Cargo.lock"
+                [[ -z "$(grep '^source = ' "$locks/after" | grep -vxF 'source = "registry+https://github.com/rust-lang/crates.io-index"' || true)" ]] ||
+                  refuse "a crate source other than crates.io"
+                ;;
+              */package-lock.json)
+                jq -en --slurpfile before "$locks/before" --slurpfile after "$locks/after" '
+                  def pkgs: .packages | if type == "object" then . else error("no packages map") end;
+                  def named(f): [pkgs | to_entries[] | select(.key != "") | select(.value | f) | .key | sub("^.*node_modules/"; "")] | unique;
+                  ($before[0] | named(true)) as $had | ($before[0] | named(.hasInstallScript)) as $scripted
+                  | ($after[0] | named(true) - $had) == []
+                    and ($after[0] | named(.hasInstallScript) - $scripted) == []
+                    and ([$after[0] | pkgs[] | .resolved // empty | select(startswith("https://registry.npmjs.org/") | not)] == [])
+                ' > /dev/null || refuse "a package, install script or host new to $lock"
+                ;;
+            esac
+          done < <(jq -r 'select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$")) | .filename' "$files")
+
+          # Read last, so the files judged are this head's.
+          current="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          [[ "$current" == "$HEAD_SHA" ]] || refuse "the head moved"
+          post success "Exempt by policy: Dependabot bump"
