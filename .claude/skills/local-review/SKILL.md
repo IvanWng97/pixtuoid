@@ -21,7 +21,7 @@ paraphrase here.
 ## Diff scope
 
 1. **Isolate** the branch in a worktree (two sessions on one tree race on
-   HEAD). Note `path`, `branch`, `base` sha.
+   HEAD). Note `path`, `branch`, `base` and `head` sha.
 2. **Dispatch** one lens per matching local row, in parallel, in the
    background: `model: sonnet` for a lens that reads evidence or runs a
    mechanical check (test lists, mutations, renders, a walk), `opus` only for
@@ -29,8 +29,9 @@ paraphrase here.
 
    ```
    You are the <row> lens for <PR/branch> on pixtuoid.
-   Worktree: <path> (branch <name>, base <sha>), read-only.
-   Diff: git -C <path> diff <base>..HEAD.
+   Worktree: <path> (branch <name>, base <sha>, head <sha>), read-only;
+   stop if HEAD is not that head.
+   Diff: git -C <path> diff <base>..<head>.
    Read AGENTS.md, then apply REVIEW.md's <row>, its Lenses preamble and
    Do not flag.
    <change-specific claims (from the PR body's impl-plan answers) or design
@@ -67,9 +68,11 @@ paraphrase here.
      -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
    ```
 
-6. **Before merge**, judge against
-   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate), which also says
-   how each local row's run is recorded.
+6. **Record** each row's run as the PR comment
+   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate) defines, naming
+   the head the lens judged. A push that is not only a merge of `main` leaves
+   that sha unmatched: run the matching lenses at the new head and record it.
+7. **Before merge**, judge against the gate.
 
 ## Whole-codebase scope
 
