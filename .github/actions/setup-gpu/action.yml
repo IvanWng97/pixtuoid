@@ -1,0 +1,17 @@
+name: 'Setup GPU'
+description: 'Installs a software Vulkan driver so the floating window''s GPU test has an adapter on Linux'
+
+runs:
+  using: 'composite'
+  steps:
+    # gpu_matches_the_cpu_compositor fails without an adapter (a skip would
+    # pass with the presenter untested), and a hosted Linux runner has no GPU:
+    # mesa-vulkan-drivers ships lavapipe (libvulkan_lvp.so) and pulls in the
+    # libvulkan1 loader wgpu opens.
+    - name: Install lavapipe
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        sudo apt-get "${apt_opts[@]}" update
+        sudo apt-get "${apt_opts[@]}" install -y mesa-vulkan-drivers
