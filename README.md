@@ -148,7 +148,7 @@ config), see **[SECURITY.md](SECURITY.md)**.
 
 ## Contributing
 
-PRs welcome — especially new themes, sprite/decoration polish, and `Source` adapters for agent CLIs we don't support yet (every CLI already wired up is in [Supported Tools](#supported-tools)). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`AGENTS.md`](AGENTS.md).
+PRs welcome — especially new themes, sprite/decoration polish, and `Source` adapters for agent CLIs we don't support yet (every CLI already wired up is in [Supported Tools](#supported-tools)). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and [how to add a new agent CLI](docs/CONTRIBUTING.md#adding-a-new-agent-cli). Architecture and the load-bearing invariants live in [`AGENTS.md`](AGENTS.md).
 
 <p align="center">
   <picture>

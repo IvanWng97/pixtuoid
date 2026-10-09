@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         New **themes** and **`Source` adapters** (Copilot, Cursor, OpenCode, …) are
-        especially welcome — see the "Adding a new agent CLI" note in the README.
+        especially welcome — see [Adding a new agent CLI](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#adding-a-new-agent-cli).
   - type: textarea
     id: problem
     attributes:
