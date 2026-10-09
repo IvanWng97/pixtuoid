@@ -1114,6 +1114,7 @@ apt_action=.github/actions/apt-install/action.yml
 apt_script="$(yq -e -r '.runs.steps[0].run' "$apt_action")" || fail "apt-install has no run step"
 apt_attempts="$(yq -e -r '.runs.steps[0].env.ATTEMPTS' "$apt_action")" || fail "apt-install sets no ATTEMPTS"
 apt_bound="$(yq -e -r '.runs.steps[0].env.ATTEMPT_TIMEOUT' "$apt_action")" || fail "apt-install sets no ATTEMPT_TIMEOUT"
+((apt_attempts > 1)) || fail "apt-install allows $apt_attempts attempt(s), so nothing retries"
 apt_dir="$test_dir/apt"
 mkdir -p "$apt_dir/bin"
 # shellcheck disable=SC2016 # The stubs read their fixtures when they run.
@@ -1143,7 +1144,7 @@ for kind in update download; do
     run_apt "$kind" $((apt_attempts - 1)) || fail "apt-install did not recover from a failed $kind on its last attempt"
     pattern=" update\$"
     [[ "$kind" == download ]] && pattern=" --download-only pkg-a pkg-b\$"
-    [[ "$(apt_count "^timeout .*$pattern")" == "$apt_attempts" ]] ||
+    [[ "$(apt_count "^timeout -k 10 $apt_bound sudo apt-get .*$pattern")" == "$apt_attempts" ]] ||
         fail "apt-install did not retry each failed $kind: $(<"$apt_dir/log")"
     run_apt "$kind" "$apt_attempts" && fail "apt-install passed after every $kind failed"
     [[ "$(apt_count '--no-download')" == 0 ]] || fail "apt-install installed after every $kind failed"
@@ -1170,6 +1171,10 @@ changed() {
 [[ "$(changed "$repo" pull_request other)" == true ]] || fail "path-changed missed a path the PR changes"
 [[ "$(changed "$repo" pull_request lock)" == false ]] || fail "path-changed reported a path the PR leaves alone"
 [[ "$(changed "$repo" pull_request "lock other")" == true ]] || fail "path-changed missed one changed path among several"
+if (cd "$repo" && GITHUB_EVENT_NAME=pull_request GITHUB_OUTPUT=/dev/null CHANGED_PATHS="lock no-such-file" bash -c "$changed_script") >/dev/null 2>&1; then
+    fail "path-changed judged a path that exists on neither side"
+fi
 [[ "$(changed "$repo" push other)" == false ]] || fail "path-changed judged a push as a PR"
-git init -q "$test_dir/no-parent" && git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q --allow-empty -m only
+git init -q "$test_dir/no-parent" && echo a >"$test_dir/no-parent/lock" && git -C "$test_dir/no-parent" add lock &&
+    git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q -m only
 [[ "$(changed "$test_dir/no-parent" pull_request lock)" == true ]] || fail "path-changed passed a diff it could not run"

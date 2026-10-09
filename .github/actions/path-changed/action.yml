@@ -25,6 +25,14 @@ runs:
         set -uo pipefail
         read -ra paths <<< "$CHANGED_PATHS"
         changed=false
+        # A typo or a rename would otherwise read as "unchanged" forever.
+        for path in "${paths[@]}"; do
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]] &&
+            ! git cat-file -e "HEAD:$path" 2>/dev/null && ! git cat-file -e "HEAD^1:$path" 2>/dev/null; then
+            echo "::error title=Unknown path::$path is on neither side of the pull request"
+            exit 1
+          fi
+        done
         if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && ! git diff --quiet HEAD^1 HEAD -- "${paths[@]}"; then
           changed=true
         fi
