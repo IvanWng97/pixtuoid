@@ -51,8 +51,8 @@ a push to `main` or a manual dispatch
 CodSpeed skip drafts. The jobs:
 
 - **advisories** — `just deny-advisories` when a PR changes `Cargo.lock` or
-  `deny.toml`, and site's and Raycast's `npm run audit` when their lockfile
-  changes; `audit.yml` runs all three daily.
+  `deny.toml`, and site's and Raycast's `npm run audit` when their
+  `package.json` or lockfile changes; `audit.yml` runs all three daily.
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,

@@ -43,7 +43,8 @@ jobs:
       - uses: ./.github/actions/path-changed
         id: lockfile
         with:
-          paths: integrations/raycast/package-lock.json
+          # package.json holds the audit script and its level.
+          paths: integrations/raycast/package-lock.json integrations/raycast/package.json
       # LAST: it resolves advisories live, so at step one someone else's publish
       # skips every check below it (#846/#848).
       - if: steps.lockfile.outputs.changed == 'true'

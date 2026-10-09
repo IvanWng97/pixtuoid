@@ -36,7 +36,8 @@ jobs:
       - uses: ./.github/actions/path-changed
         id: lockfile
         with:
-          paths: site/package-lock.json
+          # package.json holds the audit script and its level.
+          paths: site/package-lock.json site/package.json
       # LAST: it resolves advisories live (#846/#848).
       - if: steps.lockfile.outputs.changed == 'true'
         run: npm run audit

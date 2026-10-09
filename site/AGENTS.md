@@ -106,7 +106,7 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   budget; `font-layout.spec.ts` reproduces it deliberately).
 - **npm**: `audit` runs LAST in `verify` (a live advisory would short-circuit
   the checks below it — #847/#849); CI runs it when a PR changes
-  `package-lock.json`, and daily in `audit.yml`.
+  `package.json` or `package-lock.json`, and daily in `audit.yml`.
   npm 12 pinned (`packageManager` + `engine-strict`); install scripts
   fail-closed (`strict-allow-scripts`, exact-version `allowScripts`, explicit
   `fsevents` denial) — review with `npm install-scripts ls`.

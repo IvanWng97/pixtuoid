@@ -31,7 +31,7 @@ jobs:
             timeout: 25
           # Track windows-latest deliberately: this gate catches hosted-image
           # changes. It runs the Windows pipes and atomic-write retries the Linux
-          # entry compiles out, and the full tier measures their coverage.
+          # entry compiles out, and the full tier uploads their coverage.
           - platform: windows
             runner: windows-latest
             flag: windows
