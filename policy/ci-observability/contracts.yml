@@ -68,6 +68,7 @@
       and ((.[0].with.allowed_bots // "") == "pixtuoid-bot[bot]")
       and .[0].env == {"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
       and $doc.jobs.analyze.env == null
+      and ([$doc.jobs.analyze.steps[].run // "" | select(test("GITHUB_ENV|GITHUB_PATH"))] == [])
       and ($doc.env | keys) == ["REVIEW_CONTEXT", "REVIEW_LENSES", "REVIEW_SAFE_PATH", "REVIEW_TITLE", "RUN_URL", "UNIT_PASSES"]
       and ((.[0].with | keys) - [
             "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
@@ -148,6 +149,7 @@
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env)
       |= del(.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS)
     - '.jobs.analyze.env = {"CLAUDE_CONFIG_DIR": "/tmp/x"}'
+    - '.jobs.analyze.steps[0].run += "\necho CLAUDE_CONFIG_DIR=/tmp/x >> \"$GITHUB_ENV\""'
     - .env.CLAUDE_CODE_PLUGIN_DIRS = "/tmp/x"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .env.ANTHROPIC_BASE_URL)
@@ -163,9 +165,10 @@
     failed, and an `if:` with no status function gets an implicit `success()`,
     which skips it then: the PR waits on statuses no run will post.
   assert: |
-    (.jobs.report_absence.if // "") | contains("!cancelled()")
+    .jobs.report_absence.if == "${{ !cancelled() && needs.publish.result != 'success' }}"
   break:
     - .jobs.report_absence.if = "${{ needs.publish.result != 'success' }}"
+    - .jobs.report_absence.if = "${{ !cancelled() && false }}"
 
 - id: reviewer-agents-only-read
   file: .github/prompts/review-agents.json

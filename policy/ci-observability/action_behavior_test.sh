@@ -1135,6 +1135,7 @@ assert_gate 1 "every unit's passes, both lens reviewers and a verifier per kept 
 assert_gate fail "a unit short of a pass" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "u2-1")')"
 assert_gate fail "a unit whose passes name another unit" "$(plan_run | sed 's/Unit u1:/Unit u10:/')"
 assert_gate fail "a unit only another unit's file list names" "$(plan_run | sed 's|Unit u1: a|Unit u2: crates/u1/a.rs|')"
+assert_gate fail "one pass naming two units" "$(plan_run | sed 's|Unit u1: a|Unit u1 and unit u2: a|; s|Unit u2: a|Unit u1 and unit u2: a|')"
 assert_gate fail "a unit pass that errored" "$(plan_run | jq -c '(.message.content[0] | select(.tool_use_id == "u1-1") | .is_error) = true')"
 assert_gate fail "a unit pass that never returned" "$(plan_run | jq -c 'select(.message.content[0].tool_use_id != "u1-1")')"
 assert_gate fail "a unit pass a subagent made" "$(plan_run | jq -c '(select(.message.content[0].id == "u1-1") | .parent_tool_use_id) = "c"')"

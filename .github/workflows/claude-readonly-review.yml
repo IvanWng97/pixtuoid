@@ -332,7 +332,8 @@ jobs:
             | def ran($type): [$spawns[] | select(.subagent_type == $type)];
             ($review.findings | length) as $kept
             | select(all($units[0][]; .id as $id
-                       | [ran("unit-reviewer")[] | select(.prompt | test("(?i)\\bunit \($id)\\b"))] | length >= $passes)
+                       | [ran("unit-reviewer")[] | select([.prompt | scan("(?i)\\bunit (u[0-9]+)\\b")[0]] | unique == [$id])]
+                         | length >= $passes)
                      and (ran("correctness-reviewer") | length > 0)
                      and (ran("design-reviewer") | length > 0)
                      and (ran("verifier") | length >= $kept))
