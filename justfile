@@ -288,6 +288,7 @@ lint:
     pids=(); fail=0
     run fmt     just fmt-check          & pids+=($!)
     run genart  just gen-art-check       & pids+=($!)
+    run genhero just gen-hero-check      & pids+=($!)
     run machete just machete            & pids+=($!)
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
@@ -822,7 +823,7 @@ site-e2e: gen-wasm site-demos
 # No gen-media: media renders from main in media-regen.yml, never in a PR.
 [doc('Regenerate what a look-changing PR commits (sprites + icons + README sections + cutaway golden)')]
 [group('gen')]
-gen: gen-art gen-icons gen-readme gen-cutaway-golden
+gen: gen-art gen-hero gen-icons gen-readme gen-cutaway-golden
 
 [doc("Regenerate the bundled pack's generated sprites (every @Nx variant + the 1x pieces it owns) from scripts/gen-art.py")]
 [group('gen')]
@@ -835,6 +836,18 @@ gen-art:
 gen-art-check:
     python3 scripts/gen-art.py --selftest
     python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
+
+[doc("Regenerate the README's hero (docs/images/hero/) from scripts/gen-hero.py")]
+[group('gen')]
+gen-hero:
+    python3 scripts/gen-hero.py docs/images/hero
+
+# Stdlib-only, so `lint` runs it too.
+[doc('Fail if the committed README hero differs from what scripts/gen-hero.py draws')]
+[group('gen')]
+gen-hero-check:
+    python3 scripts/gen-hero.py --selftest
+    python3 scripts/gen-hero.py --check docs/images/hero
 
 # Not in `gen`: it downloads its pinned fonts.
 [doc("Regenerate the scene's Fusion Pixel faces + their licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fonts.py")]

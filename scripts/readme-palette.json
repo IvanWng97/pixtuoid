@@ -17,7 +17,9 @@
     "city_dark_window": "#1e202c",
     "city_lit_a": "#fcd76e",
     "city_lit_b": "#b4dcff",
-    "city_lit_c": "#ffb48c"
+    "city_lit_c": "#ffb48c",
+    "neon_panel": "#0c0e16",
+    "neon_brand": "#50f0ff"
   },
   "dark": {
     "theme": "tokyo-night",
@@ -37,6 +39,8 @@
     "city_dark_window": "#161824",
     "city_lit_a": "#b4c8ff",
     "city_lit_b": "#e0af68",
-    "city_lit_c": "#9ece6a"
+    "city_lit_c": "#9ece6a",
+    "neon_panel": "#12121c",
+    "neon_brand": "#7aa2f7"
   }
 }

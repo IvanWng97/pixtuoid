@@ -55,9 +55,9 @@ CodSpeed skip drafts. The jobs:
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
   the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
   nextest skips.
-- **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
-  compare-selftest`) — generated sprites, icons and README freshness, and the
-  image comparator.
+- **generated drift** (`just gen-readme-check gen-art-check gen-hero-check
+  gen-icons-check compare-selftest`) — generated sprites, icons, the README
+  hero and README freshness, and the image comparator.
 - **smoke** — the release binaries and the hook shim's silent exit. The
   README's media drift (`just gen-media-check`) is reported in it as evidence,
   not a gate.

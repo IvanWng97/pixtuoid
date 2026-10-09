@@ -13,6 +13,9 @@ import tomllib
 from typing import NamedTuple
 
 PACK_DIR = pathlib.Path(__file__).resolve().parent.parent / "crates" / "pixtuoid-scene" / "sprites" / "default"
+# The pack's ramp shades as `Rgb::ramp` resolves them, copied because the walk is
+# Rust's; `readme_chart_palette.rs` pins the copy to pack.toml.
+RAMPS_PATH = pathlib.Path(__file__).with_name("readme-pack-ramps.json")
 
 
 class Palette(NamedTuple):
@@ -35,6 +38,8 @@ class Palette(NamedTuple):
     city_lit_b: str
     city_lit_c: str
     moon: str
+    neon_panel: str
+    neon_brand: str
 
 
 # Copied from the themes, not derived — the renderer is Python. The copy's guard
@@ -178,12 +183,15 @@ def parse_sprite(text: str) -> Frame:
 
 def load_pack(pack_dir: pathlib.Path, names: tuple[str, ...]) -> Pack:
     manifest = tomllib.loads((pack_dir / "pack.toml").read_text(encoding="utf-8"))
+    ramps = json.loads(RAMPS_PATH.read_text(encoding="utf-8"))
+    if ramps.keys() != manifest.get("ramps", {}).keys():
+        raise ValueError(f"{RAMPS_PATH.name} lists other ramps than pack.toml; regenerate it from readme_chart_palette.rs's message")
     animations = {}
     for name in names:
         a = manifest["animations"][name]
         frames = [parse_sprite((pack_dir / f).read_text(encoding="utf-8")) for f in a["frames"]]
         animations[name] = (frames, a["frame_ms"])
-    return Pack(manifest["palette"], animations)
+    return Pack({**manifest["palette"], **ramps}, animations)
 
 
 def sprite_size(pack: Pack, name: str, px: int) -> tuple[int, int]:
@@ -211,11 +219,13 @@ def animation(pack: Pack, name: str, x: int, bottom: int, px: int) -> tuple[str,
     frames, frame_ms = pack.animations[name]
     n, period = len(frames), frame_ms * len(frames)
     y = bottom - sprite_size(pack, name, px)[1]
+    # An `@Nx` animation's name is no CSS identifier.
+    cls = re.sub(r"[^A-Za-z0-9_-]", "-", name)
     css = [
-        f".{name} g{{opacity:0;animation:{name} {period}ms steps(1,end) infinite}}",
-        f"@keyframes {name}{{0%{{opacity:1}}{100 / n:g}%{{opacity:0}}100%{{opacity:0}}}}",
-        *(f".{name} g:nth-child({i + 1}){{animation-delay:{(i - n) * frame_ms}ms}}" for i in range(1, n)),
-        f"@media (prefers-reduced-motion:reduce){{.{name} g{{animation:none}}.{name} g:first-child{{opacity:1}}}}",
+        f".{cls} g{{opacity:0;animation:{cls} {period}ms steps(1,end) infinite}}",
+        f"@keyframes {cls}{{0%{{opacity:1}}{100 / n:g}%{{opacity:0}}100%{{opacity:0}}}}",
+        *(f".{cls} g:nth-child({i + 1}){{animation-delay:{(i - n) * frame_ms}ms}}" for i in range(1, n)),
+        f"@media (prefers-reduced-motion:reduce){{.{cls} g{{animation:none}}.{cls} g:first-child{{opacity:1}}}}",
     ]
     body = "".join(f"<g>{sprite_path(f, x, y, px, pack.palette)}</g>" for f in frames)
-    return f'<g class="{name}">{body}</g>', css
+    return f'<g class="{cls}">{body}</g>', css
