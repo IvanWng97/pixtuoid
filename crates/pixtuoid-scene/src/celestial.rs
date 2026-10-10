@@ -62,8 +62,9 @@ pub(crate) const MIN_DISC_VIS: f32 = 0.08;
 const HORIZON_FADE: f32 = 0.1;
 
 impl Disc {
-    /// This frame's disc over a wall band `top_wall_h` tall, or `None` under
-    /// thick cloud.
+    /// This frame's disc over a wall band `top_wall_h` tall, or `None` while its
+    /// body is below the horizon or its visibility (cloud, nightfall, horizon
+    /// fade) is under [`MIN_DISC_VIS`].
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.body();
         // A body below the horizon shows no disc; one up fades in with its
@@ -330,7 +331,7 @@ impl PaneSky<'_> {
     fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
         let v = self.view;
         let d = self.d;
-        let unit = |c: u16| (f32::from(c) + 0.5) / f32::from(d) - 0.5;
+        let unit = |c: u16| crate::display::pen::layout_point(crate::display::pen::ArtPx(c), d);
         let (p, glass_dy) = ((unit(g.0), unit(g.1)), unit(glass_dy));
         let share = crate::atmosphere::sky_share(glass_dy, self.glass_h);
         let band = crate::dither::nearest(share * (SKY_BANDS - 1) as f32, g.0, g.1);
@@ -438,9 +439,9 @@ mod tests {
         assert_eq!(vis(5, 0), 0.0);
         assert_eq!(vis(20, 0), 0.0);
         let morning: Vec<f32> = (0..=180).map(|m| vis(5, m)).collect();
-        assert!(morning.windows(2).all(|w| w[0] <= w[1]), "{morning:?}");
+        assert!(morning.is_sorted(), "{morning:?}");
         let evening: Vec<f32> = (0..=180).map(|m| vis(17, m)).collect();
-        assert!(evening.windows(2).all(|w| w[0] >= w[1]), "{evening:?}");
+        assert!(evening.iter().rev().is_sorted(), "{evening:?}");
     }
 
     /// A moon below the horizon shows no disc, and one up fades in with the

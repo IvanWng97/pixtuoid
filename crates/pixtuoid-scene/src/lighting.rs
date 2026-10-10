@@ -207,7 +207,7 @@ impl Emitter {
     /// [`Self::level_at`] at any point, in layout units: a painter whose grid is
     /// finer than a layout cell samples each of its pixels where it lies, so a
     /// light's falloff steps with the art rather than in blocks a cell wide. A
-    /// spill's rows and a patch's footprint stay whole cells ([`cell_of`]), the
+    /// spill's rows and a patch's footprint stay whole cells ([`unit_holding`]), the
     /// shapes they are.
     pub(crate) fn level_at_f(&self, x: f32, y: f32) -> Option<f32> {
         let strength = self.strength;
@@ -239,16 +239,16 @@ impl Emitter {
                 top,
                 slant,
             } => {
-                let below = cell_of(y) - i32::from(top);
+                let below = unit_holding(y) - i32::from(top);
                 let dy = u16::try_from(below).ok().filter(|&dy| dy < SPILL_DEPTH)?;
                 let row = spill_rows(wx, w, slant).nth(usize::from(dy))?;
-                row.contains(&cell_of(x))
+                row.contains(&unit_holding(x))
                     .then(|| strength * (1.0 - f32::from(dy) / f32::from(SPILL_DEPTH)))
             }
             Light::Patch { centre } => {
                 let ((x0, y0), (x1, y1)) = self.bounds();
-                if !(i32::from(x0)..i32::from(x1)).contains(&cell_of(x))
-                    || !(i32::from(y0)..i32::from(y1)).contains(&cell_of(y))
+                if !(i32::from(x0)..i32::from(x1)).contains(&unit_holding(x))
+                    || !(i32::from(y0)..i32::from(y1)).contains(&unit_holding(y))
                 {
                     return None;
                 }
@@ -262,17 +262,10 @@ impl Emitter {
     }
 }
 
-/// Where art pixel `a` lies in layout cells at `d` art pixels a cell: a cell's
-/// centre on its integer, so at `d == 1` the cell itself, as the classic samples
-/// it. The one sampler [`Emitter::level_at_f`]'s callers use; [`cell_of`] is its
-/// inverse.
-pub(crate) fn art_pixel_at(a: u16, d: f32) -> f32 {
-    (f32::from(a) + 0.5) / d - 0.5
-}
-
-/// The cell a point of [`Emitter::level_at_f`] falls in: a cell spans
-/// `[u - 0.5, u + 0.5)` around its integer, as [`art_pixel_at`] places pixels.
-fn cell_of(v: f32) -> i32 {
+/// The layout unit a point of [`Emitter::level_at_f`] falls in: a unit spans
+/// `[u - 0.5, u + 0.5)` around its integer, as
+/// [`layout_point`](crate::display::pen::layout_point) places art pixels.
+fn unit_holding(v: f32) -> i32 {
     (v + 0.5).floor() as i32
 }
 

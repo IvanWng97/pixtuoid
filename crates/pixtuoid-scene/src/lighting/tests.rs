@@ -2,6 +2,7 @@ use crate::anim::Beat;
 use std::collections::HashMap;
 
 use super::*;
+use crate::display::pen::{ArtPx, layout_point};
 use crate::layout::WINDOW_W;
 use crate::sky::{Sky, Weather};
 
@@ -344,16 +345,27 @@ fn every_shape() -> [Emitter; 4] {
     ]
 }
 
+/// Whether a shape lights whole cells rather than a continuous falloff; no
+/// wildcard, so a new shape fails to compile until it is classified.
+fn is_whole_cell(light: &Light) -> bool {
+    match light {
+        Light::Spill { .. } | Light::Patch { .. } => true,
+        Light::Halo { .. } | Light::Glow { .. } => false,
+    }
+}
+
 #[test]
 fn a_light_sampled_between_cells_stays_inside_its_bounds() {
     const D: u16 = 4;
-    let at = |a: u16| art_pixel_at(a, f32::from(D));
+    let at = |a: u16| layout_point(ArtPx(a), D);
     for e in every_shape() {
         let ((x0, y0), (x1, y1)) = e.bounds();
         // A whole-cell shape lights exactly its bounds' cells; a continuous
-        // one's reach ends at its bound, so its edge pixels sit up to half a
-        // cell outside the last cell.
-        let whole_cell = matches!(e.light, Light::Spill { .. } | Light::Patch { .. });
+        // one's reach ends at its bound, so its far-edge pixels sit up to half
+        // a cell past the last cell, and a bound saturated at 0 stands that
+        // far from the pixels beside it.
+        let from = |b: u16| if b == 0 { -0.5 } else { f32::from(b) };
+        let whole_cell = is_whole_cell(&e.light);
         for y in 0..48 * D {
             for x in 0..64 * D {
                 let (fx, fy) = (at(x), at(y));
@@ -361,13 +373,10 @@ fn a_light_sampled_between_cells_stays_inside_its_bounds() {
                     continue;
                 }
                 let inside = if whole_cell {
-                    (i32::from(x0)..i32::from(x1)).contains(&cell_of(fx))
-                        && (i32::from(y0)..i32::from(y1)).contains(&cell_of(fy))
+                    (i32::from(x0)..i32::from(x1)).contains(&unit_holding(fx))
+                        && (i32::from(y0)..i32::from(y1)).contains(&unit_holding(fy))
                 } else {
-                    fx >= f32::from(x0) - 0.5
-                        && fx < f32::from(x1)
-                        && fy >= f32::from(y0) - 0.5
-                        && fy < f32::from(y1)
+                    fx >= from(x0) && fx < f32::from(x1) && fy >= from(y0) && fy < f32::from(y1)
                 };
                 assert!(
                     inside,
@@ -380,18 +389,18 @@ fn a_light_sampled_between_cells_stays_inside_its_bounds() {
     }
 }
 
-/// A whole-cell shape sampled the way the display does ([`art_pixel_at`])
+/// A whole-cell shape sampled the way the display does ([`layout_point`])
 /// lights exactly the art pixels of the cells it lights at density 1.
 #[test]
 fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
     const D: u16 = 4;
     for e in every_shape() {
-        if matches!(e.light, Light::Halo { .. } | Light::Glow { .. }) {
+        if !is_whole_cell(&e.light) {
             continue;
         }
         for y in 0..48 * D {
             for x in 0..64 * D {
-                let at = |a: u16| art_pixel_at(a, f32::from(D));
+                let at = |a: u16| layout_point(ArtPx(a), D);
                 assert_eq!(
                     e.level_at_f(at(x), at(y)).is_some(),
                     e.level_at(x / D, y / D).is_some(),
