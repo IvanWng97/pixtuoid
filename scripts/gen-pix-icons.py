@@ -456,8 +456,12 @@ def selftest():
         expect(stale() == [], "a dotfile is no orphan")
         (readme / f"{name}.png").write_bytes(b"")
         expect(stale() == [f"readme: orphaned {name}.png"], "an icon in the other format is an orphan")
+        (site / "gone.png").write_bytes(b"")
+        (readme / "gone.svg").write_bytes(b"")
+        expect(stale() == ["site: orphaned gone.png", f"readme: orphaned gone.svg, {name}.png"], "a removed icon's files are orphans")
         generate(site, readme, check=False, icons=one)
-        expect(not (readme / f"{name}.png").exists() and (readme / ".DS_Store").exists(), "a write deletes the orphan and keeps the dotfile")
+        left = {p.name for d in (site, readme) for p in d.iterdir()}
+        expect(left == {f"{name}.png", f"{name}.svg", ".DS_Store"}, "a write deletes the orphans and keeps the dotfiles")
         out = readme / f"{name}.svg"
         out.write_text(out.read_text(encoding="utf-8") + " ", encoding="utf-8")
         expect(stale() == [f"readme/{name} (differs)"], "an edited SVG differs")
