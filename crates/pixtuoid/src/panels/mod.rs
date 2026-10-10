@@ -18,9 +18,11 @@ use ratatui::layout::Rect;
 
 /// The one URL launcher both painters call: `open::that` blocks on Linux until the
 /// browser exits (`xdg-open`), freezing frames, input and the quit arm on the event
-/// loop. A failed launch is no error to surface: the click just does nothing.
+/// loop. A failed launch only logs: the click does nothing on screen.
 pub(crate) fn open_url(url: &str) {
-    let _ = open::that_detached(url);
+    if let Err(e) = open::that_detached(url) {
+        tracing::warn!(error = %e, url = ?url, "opening a url failed");
+    }
 }
 
 /// How many rows at the bottom of a surface of cells the status footer owns.
