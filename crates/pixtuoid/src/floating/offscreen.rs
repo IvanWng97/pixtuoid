@@ -330,7 +330,7 @@ fn under<'a>(
     }
 }
 
-/// What a press on `under` does, as its cursor, in CSS UI 3's names
+/// What a press on `under` affords, as its cursor, in CSS UI 3's names
 /// (<https://www.w3.org/TR/css-ui-3/#cursor>, which winit's `CursorIcon`
 /// takes): a hand where a click acts, an open hand on a figure a press only
 /// lifts, the resize arrow, else the arrow where a press drags the window.
@@ -339,13 +339,15 @@ fn cursor_for(
     petting: Option<&pixtuoid_scene::pet::PetState>,
     now: std::time::SystemTime,
 ) -> winit::window::CursorIcon {
-    use pixtuoid_scene::hit::SceneHit;
+    use pixtuoid_scene::interact::Affordance;
     use winit::window::CursorIcon;
     match under {
         Under::Corner => CursorIcon::NwseResize,
-        Under::Office(Some(hit)) if hit.action(petting, now).is_some() => CursorIcon::Pointer,
-        Under::Office(Some(SceneHit::Figure(_))) => CursorIcon::Grab,
-        Under::Office(_) => CursorIcon::Default,
+        Under::Office(hit) => match Affordance::of(hit, petting, now) {
+            Affordance { click: Some(_), .. } => CursorIcon::Pointer,
+            Affordance { lift: Some(_), .. } => CursorIcon::Grab,
+            Affordance { .. } => CursorIcon::Default,
+        },
     }
 }
 
@@ -1089,8 +1091,9 @@ mod tests {
     fn the_cursor_shows_what_a_press_there_does() {
         use pixtuoid_core::source::daemon::DaemonInstanceKey;
         use pixtuoid_core::state::DaemonInstanceId;
-        use pixtuoid_scene::display::HoverTarget;
+        use pixtuoid_scene::display::{HoverTarget, PetHover};
         use pixtuoid_scene::hit::SceneHit;
+        use pixtuoid_scene::pet::{PetKind, PetState};
         use winit::window::CursorIcon;
         let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let agent = HoverTarget::Agent(pixtuoid_core::AgentId::from_transcript_path("/p/a.jsonl"));
@@ -1098,25 +1101,61 @@ mod tests {
             "openclaw",
             DaemonInstanceId::new("18789").expect("non-empty"),
         ));
-        for (under, want) in [
-            (Under::Corner, CursorIcon::NwseResize),
+        let pet = HoverTarget::Pet(PetHover {
+            kind: PetKind::Cat,
+            centre: pixtuoid_scene::layout::Point { x: 0, y: 0 },
+            anim: pixtuoid_core::sprite::format::Piece::CatSit,
+        });
+        let playing = PetState {
+            petted_at: now,
+            kind: PetKind::Cat,
+            floor_idx: 0,
+        };
+        for (under, petting, want) in [
+            (Under::Corner, None, CursorIcon::NwseResize),
             (
                 Under::Office(Some(SceneHit::Figure(&agent))),
+                None,
                 CursorIcon::Pointer,
             ),
-            (Under::Office(Some(SceneHit::Star)), CursorIcon::Pointer),
-            (Under::Office(Some(SceneHit::Coffee)), CursorIcon::Pointer),
+            (
+                Under::Office(Some(SceneHit::Star)),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Coffee)),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&pet))),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&pet))),
+                Some(&playing),
+                CursorIcon::Grab,
+            ),
             (
                 Under::Office(Some(SceneHit::Figure(&mascot))),
+                None,
                 CursorIcon::Grab,
             ),
             (
                 Under::Office(Some(SceneHit::Furniture("plant"))),
+                None,
                 CursorIcon::Default,
             ),
-            (Under::Office(None), CursorIcon::Default),
+            (Under::Office(None), None, CursorIcon::Default),
         ] {
-            assert_eq!(cursor_for(under, None, now), want, "{under:?}");
+            assert_eq!(
+                cursor_for(under, petting, now),
+                want,
+                "{under:?}, petting {}",
+                petting.is_some()
+            );
         }
     }
 
@@ -1135,7 +1174,7 @@ mod tests {
         let icon = |r: &OfficeRenderer, cursor, modal: &crate::panels::ModalState| {
             r.cursor_icon(cursor, size, at, modal, None, now)
         };
-        let on_agent = agent_unit(&renderer, at, now);
+        let on_agent = agent_point(&renderer, at, now);
         assert_eq!(icon(&renderer, on_agent, &closed), CursorIcon::Pointer);
         assert_eq!(icon(&renderer, on_agent, &open), CursorIcon::Default);
         let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
@@ -1201,18 +1240,17 @@ mod tests {
     }
 
     /// A window point on the agent the frame drew.
-    fn agent_unit(renderer: &OfficeRenderer, at: PixelFit, now: SystemTime) -> (f64, f64) {
-        use pixtuoid_scene::hit::{HitAction, SceneHit};
+    fn agent_point(renderer: &OfficeRenderer, at: PixelFit, now: SystemTime) -> (f64, f64) {
+        use pixtuoid_scene::hit::HitAction;
         (0..at.logical().h)
             .flat_map(|y| {
                 (0..at.logical().w).map(move |x| (unit_centre(x, at), unit_centre(y, at)))
             })
             .find(|&cursor| {
                 matches!(
-                    renderer.hit_at(cursor, at).and_then(|hit| match hit {
-                        SceneHit::Figure(_) => hit.action(None, now),
-                        _ => None,
-                    }),
+                    renderer
+                        .hit_at(cursor, at)
+                        .and_then(|hit| hit.action(None, now)),
                     Some(HitAction::Focus(_))
                 )
             })

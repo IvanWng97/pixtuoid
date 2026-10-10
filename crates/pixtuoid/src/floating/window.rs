@@ -410,10 +410,14 @@ impl FloatingApp {
         )
     }
 
+    /// The cursor reads the frame just painted, as a press and the tooltip do.
     fn redraw(&mut self) {
-        let started = Instant::now();
-        // Over the frame on screen, which the one below replaces.
+        self.paint();
         self.recursor();
+    }
+
+    fn paint(&mut self) {
+        let started = Instant::now();
         let Some(window) = self.window.as_ref() else {
             return;
         };

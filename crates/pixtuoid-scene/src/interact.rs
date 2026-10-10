@@ -1,8 +1,8 @@
 //! A pointer's gestures over the office, for every painter: a press on what
 //! the frame shows, then a click or a drag. A painter turns its own events
 //! into [`Pointer::down`] / [`Pointer::moved`] / [`Pointer::up`] in layout
-//! units and carries out the [`Gesture`]s; what a click does is
-//! [`SceneHit::action`]'s, and a drag lifts the figure under the press.
+//! units and carries out the [`Gesture`]s; what a press affords, a click or a
+//! lift, is [`Affordance`]'s.
 
 use std::time::SystemTime;
 
@@ -44,6 +44,37 @@ impl Figure {
             HoverTarget::Agent(id) => Self::Agent(*id),
             &HoverTarget::Pet(PetHover { kind, .. }) => Self::Pet(kind),
             HoverTarget::Mascot(key) => Self::Mascot(key.clone()),
+        }
+    }
+}
+
+/// What a press on a hit affords: the action a click there carries out and
+/// the figure a drag lifts, either, both or neither. [`Pointer::down`] acts
+/// on it, and a painter's cursor shows it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Affordance {
+    pub click: Option<HitAction>,
+    pub lift: Option<Figure>,
+}
+
+impl Affordance {
+    /// What a press on `hit` affords at `now`, with `petting` the last one.
+    pub fn of(hit: Option<SceneHit<'_>>, petting: Option<&PetState>, now: SystemTime) -> Self {
+        Self {
+            click: hit.and_then(|hit| hit.action(petting, now)),
+            lift: match hit {
+                Some(SceneHit::Figure(target)) => Some(Figure::of(target)),
+                _ => None,
+            },
+        }
+    }
+
+    /// What the press lands on.
+    pub fn pressed(&self) -> Pressed {
+        if self.click.is_some() || self.lift.is_some() {
+            Pressed::Something
+        } else {
+            Pressed::Bare
         }
     }
 }
@@ -142,22 +173,14 @@ impl Pointer {
         // A carry whose release never came — the window lost focus, the
         // terminal dropped the mouse-up — sets its figure down first.
         let ended = self.cancel();
-        let figure = match hit {
-            Some(SceneHit::Figure(target)) => Some(Figure::of(target)),
-            _ => None,
-        };
-        let action = hit.and_then(|hit| hit.action(petting, now));
-        let pressed = if figure.is_some() || action.is_some() {
-            Pressed::Something
-        } else {
-            Pressed::Bare
-        };
+        let affords = Affordance::of(hit, petting, now);
+        let pressed = affords.pressed();
         self.state = match pressed {
             Pressed::Something => State::Pressed {
                 at,
                 slop,
-                figure,
-                action,
+                figure: affords.lift,
+                action: affords.click,
             },
             Pressed::Bare => State::Up,
         };
@@ -385,5 +408,79 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// A press affords its hit's click and its figure's lift: both on an agent
+    /// or an idle pet, a lift alone on a mascot or a pet mid-petting, a click
+    /// alone on a link, and nothing on a fixture or the bare office.
+    #[test]
+    fn a_press_affords_its_hits_click_and_figure() {
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100);
+        let id = AgentId::from_parts("claude-code", "s");
+        let agent = HoverTarget::Agent(id);
+        let key = DaemonInstanceKey::new(
+            "openclaw",
+            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+        );
+        let mascot = HoverTarget::Mascot(key.clone());
+        let pet = HoverTarget::Pet(PetHover {
+            kind: PetKind::Cat,
+            centre: pt(0, 0),
+            anim: pixtuoid_core::sprite::format::Piece::CatSit,
+        });
+        let playing = PetState {
+            petted_at: now,
+            kind: PetKind::Cat,
+            floor_idx: 0,
+        };
+        let affords = |click, lift| Affordance { click, lift };
+        for (hit, petting, want) in [
+            (
+                Some(SceneHit::Figure(&agent)),
+                None,
+                affords(Some(HitAction::Focus(id)), Some(Figure::Agent(id))),
+            ),
+            (
+                Some(SceneHit::Figure(&pet)),
+                None,
+                affords(
+                    Some(HitAction::Pet(PetKind::Cat)),
+                    Some(Figure::Pet(PetKind::Cat)),
+                ),
+            ),
+            (
+                Some(SceneHit::Figure(&pet)),
+                Some(&playing),
+                affords(None, Some(Figure::Pet(PetKind::Cat))),
+            ),
+            (
+                Some(SceneHit::Figure(&mascot)),
+                None,
+                affords(None, Some(Figure::Mascot(key.clone()))),
+            ),
+            (
+                Some(SceneHit::Star),
+                None,
+                affords(Some(HitAction::Open(crate::hit::REPO_URL)), None),
+            ),
+            (Some(SceneHit::Furniture("Desk")), None, affords(None, None)),
+            (None, None, affords(None, None)),
+        ] {
+            let pressed = if want == Affordance::default() {
+                Pressed::Bare
+            } else {
+                Pressed::Something
+            };
+            let got = Affordance::of(hit, petting, now);
+            assert_eq!(got, want, "{hit:?}");
+            assert_eq!(got.pressed(), pressed, "{hit:?}");
+            assert_eq!(
+                Pointer::default()
+                    .down(hit, pt(5, 5), SLOP, petting, now)
+                    .pressed,
+                pressed,
+                "a press lands where it affords: {hit:?}"
+            );
+        }
     }
 }
