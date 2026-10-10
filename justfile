@@ -254,12 +254,14 @@ arch:
     # unseen, as a denylist's omission does. deny-arch.toml says how it sees
     # every feature and target, the point a bare `cargo tree` misses.
     cargo deny --config deny-arch.toml check bans
-    # A gate that cannot fail is no gate: the same list minus one crate must.
+    # A gate that cannot fail is no gate (an empty `allow` permits everything),
+    # and windows-sys, core's cfg(windows) dependency, proves the graph spans
+    # targets: the same list minus it must fail.
     trimmed="$(mktemp)"
     trap 'rm -f "$trimmed"' EXIT
-    grep -v '^    "serde",$' deny-arch.toml >"$trimmed"
-    if out="$(cargo deny --config "$trimmed" check bans 2>&1)" || ! grep -Fq "crate 'serde = " <<<"$out"; then
-        echo "ARCH SELFTEST: deny-arch.toml without serde did not fail on serde"; exit 1
+    grep -v '^    "windows-sys",$' deny-arch.toml >"$trimmed"
+    if out="$(cargo deny --config "$trimmed" check bans 2>&1)" || ! grep -Fq "crate 'windows-sys = " <<<"$out"; then
+        echo "ARCH SELFTEST: deny-arch.toml without windows-sys did not fail on windows-sys"; exit 1
     fi
     echo "arch: pixtuoid-core + pixtuoid-scene depend only on deny-arch.toml's crates"
 
