@@ -10,6 +10,7 @@ use crate::layout::{
     Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def,
 };
+use crate::physics::PROGRESS_SCALE;
 use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::Sprite;
@@ -59,7 +60,7 @@ pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, stride: NonZeroU16) -> u
 /// The distance `t_x1000` along a leg `length` long is, both in
 /// [`travelled`](Pose::Walking::travelled)'s unit.
 pub(crate) fn distance_at(t_x1000: u16, length: u32) -> u32 {
-    u32::from(t_x1000) * length / u32::from(crate::physics::PROGRESS_SCALE)
+    u32::from(t_x1000) * length / u32::from(PROGRESS_SCALE)
 }
 
 /// How far `t_x1000` along the straight leg `from`→`to` is.
@@ -184,7 +185,7 @@ pub enum Pose {
         from: Point,
         /// Leg end point (layout pixels).
         to: Point,
-        /// Progress along the leg, 0..=1000 (thousandths).
+        /// Progress along the leg, `0..=PROGRESS_SCALE`.
         t_x1000: u16,
         /// How far into the whole leg the walker is, in octile units: the
         /// tenths of a layout pixel A* measures by.
@@ -267,7 +268,8 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 /// distinct from the routed path's kinematic profiles — the overlay/snapshot
 /// path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
-    let t = (since_ms * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
+    let scale = u64::from(PROGRESS_SCALE);
+    let t = (since_ms * scale / ENTRY_ANIMATION_MS).min(scale) as u16;
     Pose::walking(from, to, t, false)
 }
 
@@ -547,7 +549,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         Pose::SeatedIdle
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
-        let t = ((phase_t - seated_end) * 1000 / span) as u16;
+        let t = ((phase_t - seated_end) * u64::from(PROGRESS_SCALE) / span) as u16;
         Pose::walking(desk, dest, t, false)
     } else if phase_t < at_wp_end {
         at_dest_pose
@@ -556,7 +558,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         // estimate-constant change that zeroed it can't divide by zero here.
         let span = cycle_ms - at_wp_end;
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
-        let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
+        let t = ((phase_t - at_wp_end) * u64::from(PROGRESS_SCALE) / span) as u16;
         Pose::walking(dest, desk, t, target.kind.carries_coffee())
     }
 }

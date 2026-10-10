@@ -103,7 +103,9 @@ import { asset } from '../consts';
     font-size: 0.88rem;
   }
   .pantry__bubble--a {
-    margin-left: clamp(1.2rem, 8%, 2.4rem);
+    --indent: clamp(1.2rem, 8%, 2.4rem);
+    margin-left: var(--indent);
+    max-width: calc(100% - var(--indent));
   }
   /* bare text over the dimmed office (not on a bubble's --screen plate) — --fg-muted
      falls under the 4.5:1 floor there; --office-ink is THE token for this ground. */

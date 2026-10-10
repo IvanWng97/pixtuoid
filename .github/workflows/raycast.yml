@@ -10,7 +10,7 @@ permissions:
 jobs:
   # A PR that leaves the extension and its contract inputs alone skips `check`
   # (a skip `required` accepts); path-changed treats a push or dispatch run as
-  # unchanged, as this workflow's old PR-only trigger did.
+  # unchanged.
   scope:
     name: raycast in scope
     runs-on: ubuntu-latest

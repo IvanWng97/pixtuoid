@@ -1,7 +1,7 @@
 [
   {
     "q": "will it slow my agent down?",
-    "a": "never — the hook exits 0 in under 200ms, by contract.",
+    "a": "never — the hook's send is time-capped and it always exits 0, by contract.",
     "cite": "the hook-shim contract (AGENTS.md, architecture invariant 5)"
   },
   {

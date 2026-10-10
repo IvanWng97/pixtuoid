@@ -12,7 +12,9 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 
-use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position};
+use crate::physics::{
+    PROGRESS_SCALE, WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position,
+};
 use crate::walk::{
     LegPlan, Lifted, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
     advance_wander, snapshot_leg_profile,
@@ -740,10 +742,11 @@ impl Leg {
         for w in path.windows(2) {
             let leg = octile_distance(w[0], w[1]);
             if acc + leg >= travelled {
-                let t_x1000 = ((travelled - acc) * 1000)
+                let scale = u32::from(PROGRESS_SCALE);
+                let t_x1000 = ((travelled - acc) * scale)
                     .checked_div(leg)
-                    .map(|t| t.min(1000) as u16)
-                    .unwrap_or(1000);
+                    .map(|t| t.min(scale) as u16)
+                    .unwrap_or(PROGRESS_SCALE);
                 return Leg {
                     from: w[0],
                     to: w[1],
@@ -757,7 +760,7 @@ impl Leg {
         Leg {
             from: path[last.saturating_sub(1)],
             to: path[last],
-            t_x1000: 1000,
+            t_x1000: PROGRESS_SCALE,
             travelled: acc,
         }
     }

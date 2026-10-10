@@ -1,6 +1,7 @@
 //! The cutaway through the production render path: what reaches the
 //! terminal as escapes, and what the cells show.
 use super::*;
+use crate::graphics::kitty::PLACEHOLDER;
 use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
@@ -11,7 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// A cell whose natural scale is the bundled art's density, so the image is
 /// the density render itself, unscaled.
 const CELL: CellSize = CellSize { w: 4, h: 8 };
-const PLACEHOLDER: char = '\u{10EEEE}';
 const TRANSMIT: &str = "\x1b_Ga=T,";
 const SIXEL: &str = "\x1bP9;1q";
 const ITERM2: &str = "\x1b]1337;File=";

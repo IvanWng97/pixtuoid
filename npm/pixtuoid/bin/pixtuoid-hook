@@ -6,7 +6,7 @@
 // ALWAYS exits 0, NEVER writes to stderr, and NEVER throws — on any failure it
 // exits 0 silently (the visualizer just misses that event; the agent is never
 // blocked). It forwards the JSON payload (stdin) to the native shim, which
-// self-bounds to 200ms.
+// self-bounds by its `WRITE_TIMEOUT` watchdog.
 //
 // NOTE: a Node hop adds ~tens of ms in front of the native shim. That stays well
 // within CC's hook tolerance, but the latency-optimal path is to have the

@@ -1,7 +1,7 @@
 //! Pins the shim's stdin-cap arithmetic AGAINST the daemon's Windows
 //! named-pipe in-buffer quota, cross-crate: the shim caps stdin so a stamped
 //! wire line always fits `IN_BUFFER_SIZE` and its sync write can't stall on
-//! quota (stall → 200ms watchdog → the event is silently dropped).
+//! quota (stall → the `WRITE_TIMEOUT` watchdog → the event is silently dropped).
 //!
 //! The daemon's source can't be `#[path]`-included here — windows.rs needs
 //! tokio/windows-sys and the shim must stay dependency-free — so this pins the
