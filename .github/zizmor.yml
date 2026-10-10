@@ -8,24 +8,10 @@ rules:
     disable: true
   unpinned-uses:
     config:
-      # Symbolic refs are accepted by repository policy; zizmor still rejects
-      # missing refs and audits their freshness and version consistency.
+      # Every other action is hash-pinned, zizmor's default since v1.20: a tag
+      # can move, and "Pinning an action to a full-length commit SHA is currently
+      # the only way to use an action as an immutable release" (GitHub's
+      # secure-use reference). `actions/*` floats on a major under
+      # .github/dependabot.yml's ignore, which names the same namespace.
       policies:
-        "*": ref-pin
-        # A third-party action handed a write token or secret runs at a commit SHA:
-        # a tag can move, and "Pinning an action to a full-length commit SHA is
-        # currently the only way to use an action as an immutable release" (GitHub's
-        # secure-use reference). A new one gets a row here.
-        anthropics/claude-code-action: hash-pin
-        CodSpeedHQ/action: hash-pin
-        codecov/codecov-action: hash-pin
-        extractions/setup-just: hash-pin
-        github/codeql-action: hash-pin
-        Mergifyio/gha-mergify-ci: hash-pin
-        moonrepo/setup-rust: hash-pin
-        peaceiris/actions-gh-pages: hash-pin
-        peter-evans/create-pull-request: hash-pin
-        release-plz/action: hash-pin
-        softprops/action-gh-release: hash-pin
-        Swatinem/rust-cache: hash-pin
-        taiki-e/install-action: hash-pin
+        actions/*: ref-pin

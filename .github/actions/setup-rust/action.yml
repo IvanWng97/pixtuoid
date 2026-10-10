@@ -15,15 +15,26 @@ runs:
   using: 'composite'
   steps:
     # The runner images ship rustup on Linux, macOS and Windows
-    # (github.com/actions/runner-images, "Rust Tools"), so no third-party action
-    # runs in a job that holds a credential. Since rustup 1.28 nothing installs
-    # the file's toolchain implicitly.
+    # (github.com/actions/runner-images, "Rust Tools"), so the toolchain needs
+    # no third-party action, pinned or not. The image's stable trails the
+    # current release (macOS and Windows images lag the MSRV policy's "latest
+    # stable"), and a no-argument install never updates an installed toolchain
+    # (rustup src/config.rs `ensure_installed`), hence the update first.
     - shell: bash
       env:
         COMPONENTS: ${{ inputs.components }}
         TARGETS: ${{ inputs.targets }}
+        UPDATE_ATTEMPTS: '3'
+        UPDATE_RETRY_SECONDS: '30'
       run: |
         set -euo pipefail
+        # A release-day manifest can be mid-publish and fail its checksum.
+        for ((attempt = 1; ; attempt++)); do
+          rustup update --no-self-update && break
+          ((attempt < UPDATE_ATTEMPTS)) || { echo "::error title=rustup update failed::after $UPDATE_ATTEMPTS attempts"; exit 1; }
+          echo "::warning title=rustup update retried::attempt $attempt of $UPDATE_ATTEMPTS"
+          sleep "$UPDATE_RETRY_SECONDS"
+        done
         rustup toolchain install --profile minimal --no-self-update
         read -ra extra_components <<< "${COMPONENTS//,/ }"
         read -ra extra_targets <<< "${TARGETS//,/ }"

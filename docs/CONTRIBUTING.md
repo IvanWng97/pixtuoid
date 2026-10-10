@@ -94,7 +94,7 @@ CodSpeed skip drafts. The jobs:
   workflows' own shell) and
   `just fixture-pii` (gitleaks over the committed capture tree); the
   capture-tree rules ride `just test` instead.
-- **zizmor** — workflow/action security: symbolic-or-SHA pins,
+- **zizmor** — workflow/action security: SHA pins (`actions/*` may float on a major),
   credential-dropping checkouts, exact inline suppressions.
 - **The automatic Claude review** rides `claude-readonly-review.yml`: on the
   trusted default branch, a read-only model reads the PR diff, its head files,
