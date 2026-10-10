@@ -194,6 +194,15 @@ pub(crate) fn output_within(
     child.wait_with_output().ok()
 }
 
+/// The one URL launcher both painters call: `open::that` blocks on Linux until the
+/// browser exits (`xdg-open`), freezing frames, input and the quit arm on the event
+/// loop. A failed launch only logs: the click does nothing on screen.
+pub(crate) fn open_url(url: &str) {
+    if let Err(e) = open::that_detached(url) {
+        tracing::warn!(error = %e, url = ?url, "opening a url failed");
+    }
+}
+
 /// The Unicode Bidi_Control characters. `char::is_control` covers only category
 /// Cc; these are Cf and slip through — yet they REORDER displayed text in a
 /// terminal (the "Trojan Source" class, CVE-2021-42574).

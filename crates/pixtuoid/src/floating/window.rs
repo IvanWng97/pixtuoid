@@ -35,7 +35,7 @@ pub(crate) enum FloatingEvent {
     SceneChanged,
     /// wgpu reported a validation error or a lost device.
     GpuFailed(String),
-    /// SIGINT or SIGTERM: quit as the close button does.
+    /// A quit signal ([`QuitArms`](crate::runtime::QuitArms)): quit as the close button does.
     Quit,
 }
 
@@ -372,7 +372,7 @@ impl FloatingApp {
                 });
             }
             Some(HitAction::Open(url)) => {
-                let _ = open::that(url);
+                crate::open_url(url);
             }
             None => {}
         }
