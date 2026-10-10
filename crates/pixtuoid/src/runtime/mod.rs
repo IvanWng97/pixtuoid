@@ -235,8 +235,8 @@ const QUIT_SIGNALS: [(tokio::signal::unix::SignalKind, &str); 4] = {
 
 /// The quit signal that ended a run. After the painter's teardown,
 /// [`reraise`](Self::reraise) hands it back to the kernel, so the exit status and a
-/// SIGQUIT core dump are its own: a parent shell reads a signal death as the
-/// user's interrupt and stops its script.
+/// SIGQUIT core dump are its own (glibc, "Termination in Handler"); for SIGINT a
+/// waiting shell reads the death as the user's interrupt (cons.org/cracauer/sigint.html).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct QuitSignal(#[cfg(unix)] std::os::raw::c_int);
 
