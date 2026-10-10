@@ -114,7 +114,7 @@ pub enum Gesture {
 /// floor showing, unless a slide shows none; its carry and drop to the floor
 /// it lifted on, whatever shows since.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct GripFloor(Option<usize>);
+pub(crate) struct GripFloor(Option<usize>);
 
 impl GripFloor {
     /// The floor `gesture` goes to as `nav` shows them; `None` for a click,

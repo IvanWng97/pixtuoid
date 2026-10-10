@@ -369,7 +369,7 @@ pub(crate) fn wall_pieces(
 /// `start.x == end.x` ⇒ a vertical wall's doorway (the span is in y), else
 /// horizontal (span in x).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Doorway {
+pub(crate) struct Doorway {
     /// One endpoint of the opening (pixel-space).
     pub(crate) start: Point,
     /// The other endpoint (pixel-space).

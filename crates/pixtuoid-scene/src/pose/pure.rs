@@ -162,7 +162,7 @@ pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: 
 
 /// The pose an agent renders this frame — the output of pose derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pose {
+pub(crate) enum Pose {
     /// Seated at the desk, idle.
     SeatedIdle,
     /// Seated at desk, awake but not typing — the agent recently finished a

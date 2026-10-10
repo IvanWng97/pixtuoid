@@ -496,18 +496,23 @@ mod tests {
                 b: 80,
             },
         );
-        let out = seated.recolorable(0).expect("frame 0").recolored(&[
+        let overrides = [
             ('B', Some(red)),
             ('H', Some(blond)),
             ('.', Some(red)),
             ('Q', None),
-        ]);
+        ];
+        let out = seated.recolorable_at(0).recolored(&overrides);
         let shirt = pack.palette().get('B').flatten();
         assert_eq!(
             out.as_slice(),
             &[Some(red), shirt, Some(blond.ramp(-1)), None][..]
         );
-        assert!(seated.recolorable(1).is_none());
+        assert_eq!(
+            seated.recolorable_at(1).recolored(&overrides).as_slice(),
+            out.as_slice(),
+            "an index past the last frame wraps to the first"
+        );
         assert_eq!(
             seated.frames()[0].as_slice(),
             &[shirt, shirt, Some(HAIR.ramp(-1)), None][..],

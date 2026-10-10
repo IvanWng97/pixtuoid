@@ -19,7 +19,7 @@ use crate::walk::{
 };
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-pub use pure::Pose;
+pub(crate) use pure::Pose;
 pub(crate) use pure::{
     ENTRY_ANIMATION_MS, STALE_RESUME_GAP_BASE_MS, WANDER_DWELL_EST_MS, derive, derive_state_only,
     dwell_ms, stale_resume_gap_ms,

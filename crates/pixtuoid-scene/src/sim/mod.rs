@@ -66,7 +66,7 @@ pub(crate) struct SimStores<'a> {
 /// glow applies; paint maps it to a `Theme` color — colors are presentation
 /// and must not leak into the sim layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CharacterGlow {
+pub(crate) enum CharacterGlow {
     /// No glow.
     None,
     /// `SeatedThinking` — paint uses the theme's default tool-glow color.

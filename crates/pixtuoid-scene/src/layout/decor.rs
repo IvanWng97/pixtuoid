@@ -35,7 +35,7 @@ pub enum WaypointKind {
 /// Per-spot idle dwell window. `range_ms == 0` is the DECOR sentinel (not a
 /// wander destination).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DwellWindow {
+pub(crate) struct DwellWindow {
     /// Baseline dwell time at the spot, in milliseconds.
     pub(crate) base_ms: u64,
     /// Extra randomized dwell added on top of `base_ms`, in milliseconds
@@ -61,7 +61,7 @@ pub(crate) const PLANT_FOOTPRINT: Size = Size { w: 6, h: 3 };
 /// rotates this to the live `facing`, so one stored set works for
 /// variable-facing furniture. **To add/remove an entry side, flip one bool.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ApproachSides {
+pub(crate) struct ApproachSides {
     /// Approachable from the north (−y) in the canonical frame?
     pub(crate) n: bool,
     /// Approachable from the south (+y, the canonical front)?

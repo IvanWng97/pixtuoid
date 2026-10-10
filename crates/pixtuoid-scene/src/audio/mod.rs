@@ -132,7 +132,7 @@ pub struct AudioFrame {
 
 /// The soundtrack ids — ALL-GENERATIVE: every `TRACK_EPOCH_SECS` block
 /// COMPOSES a fresh take. The payload is the compose seed (the `track_epoch`
-/// block), so the id changing IS the song change and the [`TrackSwitch`]
+/// block), so the id changing IS the song change and the `TrackSwitch`
 /// crossfade machinery needs no new state. Deterministic everywhere: the same
 /// block renders the same song on native, wasm, and in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -209,7 +209,7 @@ impl StemLevels {
 /// synths) → while `is_holding`, the caller silences the track stems → once they
 /// reach silence, `try_swap` hands back the new track and releases the hold.
 #[derive(Debug, Default)]
-pub struct TrackSwitch {
+pub(crate) struct TrackSwitch {
     current: Option<TrackId>,
     pending: Option<TrackId>,
 }
@@ -270,7 +270,7 @@ impl TrackSwitch {
 /// emits each [`OneShot`] exactly once on the EDGE. The FIRST observe only
 /// primes — attaching to a full office must not fire a door-chime volley.
 #[derive(Debug, Default)]
-pub struct AudioCueTracker {
+pub(crate) struct AudioCueTracker {
     primed: bool,
     seen_agents: std::collections::HashSet<pixtuoid_core::AgentId>,
     occupied: std::collections::HashSet<usize>,

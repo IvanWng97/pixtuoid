@@ -21,7 +21,7 @@ use crate::source::{
 /// shared id-key branch is never reached) — pick `TranscriptPathThenSessionId`
 /// with an `// inert` comment there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum IdKey {
+pub(crate) enum IdKey {
     /// `transcript_path` when present and non-empty, else `session_id`. Correct
     /// for path-keyed sources whose hook and JSONL both carry the transcript
     /// path, so they coalesce on it. NOT CC — see [`Self::SessionId`].
@@ -39,7 +39,7 @@ pub enum IdKey {
 /// arms — TYPED by whether it may decline, so a [`Self::ClaimsAll`] fn has no
 /// `Option` to get wrong.
 #[derive(Debug, Clone, Copy)]
-pub enum HookCustom {
+pub(crate) enum HookCustom {
     /// EXTENDS the shared arms: tried first; `Ok(Some(events))` short-circuits,
     /// `Ok(None)` DECLINES and falls through to the shared arms, `Err`
     /// propagates.
@@ -56,7 +56,7 @@ pub enum HookCustom {
 /// because reading the wrong name is SILENT — the field is optional, so a
 /// mis-spelling is indistinguishable from an absent id, and every kimi tool call
 /// decoded to `None` for the whole source's life. Moot for a
-/// [`HookCustom::ClaimsAll`] source, exactly as [`IdKey`] is — pick `ToolUse`
+/// `HookCustom::ClaimsAll` source, exactly as `IdKey` is — pick `ToolUse`
 /// with an `// inert` comment there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolIdKey {
@@ -95,7 +95,7 @@ pub struct HookDecoding {
 /// protocol, NOT policy names, so a future CLI picks values truthfully and the
 /// policy falls out.
 #[derive(Debug, Clone, Copy)]
-pub struct SourceCaps {
+pub(crate) struct SourceCaps {
     /// Does a CLEAN exit leave any end signal at all (a SessionEnd hook and/or
     /// a JSONL end marker — best-effort counts; "none of any kind" is the bar
     /// for `false`)? When false, the stale-sweep is the ONLY reaper a closed
@@ -224,7 +224,7 @@ impl FocusChannel {
 /// `daemon_sources()` sweep loop dispatch on this, so a 2nd daemon needs no
 /// `handle_conn` edit and no new reducer arm.
 #[derive(Debug)]
-pub enum SourceKind {
+pub(crate) enum SourceKind {
     /// Produces `AgentEvent`s → `SceneState::agents` → a desk sprite.
     Agent {
         /// `None` = a HOOK-ONLY agent: the fixture harness then accepts a
@@ -381,7 +381,7 @@ pub(crate) fn path_filter_for(source: &str) -> PathFilter {
 /// A daemon source's wire decoder: its envelope → the sending INSTANCE's
 /// identity plus its presence deltas. Handed to the `HookRouter` demux, which
 /// therefore never learns what makes two instances of a daemon different.
-pub type PresenceDecoder = fn(&Value) -> Result<crate::source::daemon::DecodedPresence>;
+pub(crate) type PresenceDecoder = fn(&Value) -> Result<crate::source::daemon::DecodedPresence>;
 
 /// The presence decoder for a daemon source, or `None` for an agent source.
 pub fn presence_decoder_for(source: &str) -> Option<PresenceDecoder> {

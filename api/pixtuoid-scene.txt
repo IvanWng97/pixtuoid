@@ -1,68 +1,8 @@
 pub mod pixtuoid_scene
 pub mod pixtuoid_scene::chitchat
-pub enum pixtuoid_scene::chitchat::VenueKey
-pub pixtuoid_scene::chitchat::VenueKey::Room
-pub pixtuoid_scene::chitchat::VenueKey::Room::floor_idx: usize
-pub pixtuoid_scene::chitchat::VenueKey::Room::room_id: usize
-pub pixtuoid_scene::chitchat::VenueKey::Waypoint
-pub pixtuoid_scene::chitchat::VenueKey::Waypoint::floor_idx: usize
-pub pixtuoid_scene::chitchat::VenueKey::Waypoint::wp_idx: usize
-impl core::clone::Clone for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::clone(&self) -> pixtuoid_scene::chitchat::VenueKey
-impl core::cmp::Eq for pixtuoid_scene::chitchat::VenueKey
-impl core::cmp::PartialEq for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::eq(&self, &pixtuoid_scene::chitchat::VenueKey) -> bool
-impl core::fmt::Debug for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::StructuralPartialEq for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Freeze for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Send for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Sync for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Unpin for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::VenueKey
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::VenueKey
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::VenueKey
-pub struct pixtuoid_scene::chitchat::ActiveChitchat
-impl core::fmt::Debug for pixtuoid_scene::chitchat::ActiveChitchat
-pub fn pixtuoid_scene::chitchat::ActiveChitchat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::Send for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::Sync for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::Unpin for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
-pub struct pixtuoid_scene::chitchat::ChitchatBubble
-impl core::clone::Clone for pixtuoid_scene::chitchat::ChitchatBubble
-pub fn pixtuoid_scene::chitchat::ChitchatBubble::clone(&self) -> pixtuoid_scene::chitchat::ChitchatBubble
-impl core::fmt::Debug for pixtuoid_scene::chitchat::ChitchatBubble
-pub fn pixtuoid_scene::chitchat::ChitchatBubble::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Freeze for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Send for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Sync for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Unpin for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ChitchatBubble
 pub const pixtuoid_scene::chitchat::CHITCHAT_LINES: &[&str]
 pub mod pixtuoid_scene::floor
 pub use pixtuoid_scene::floor::MAX_FLOORS
-pub struct pixtuoid_scene::floor::AudioObserver
-impl core::default::Default for pixtuoid_scene::floor::AudioObserver
-pub fn pixtuoid_scene::floor::AudioObserver::default() -> pixtuoid_scene::floor::AudioObserver
-impl core::fmt::Debug for pixtuoid_scene::floor::AudioObserver
-pub fn pixtuoid_scene::floor::AudioObserver::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::floor::AudioObserver
-impl core::marker::Send for pixtuoid_scene::floor::AudioObserver
-impl core::marker::Sync for pixtuoid_scene::floor::AudioObserver
-impl core::marker::Unpin for pixtuoid_scene::floor::AudioObserver
-impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::AudioObserver
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::AudioObserver
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::AudioObserver
 pub struct pixtuoid_scene::floor::CoffeeState(_)
 impl pixtuoid_scene::floor::CoffeeState
 pub fn pixtuoid_scene::floor::CoffeeState::insert(&mut self, pixtuoid_core::id::AgentId, std::time::SystemTime)
@@ -555,23 +495,6 @@ impl core::marker::Unpin for pixtuoid_scene::layout::WaypointKind
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::WaypointKind
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::WaypointKind
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::WaypointKind
-pub struct pixtuoid_scene::layout::ApproachSides
-impl core::clone::Clone for pixtuoid_scene::layout::ApproachSides
-pub fn pixtuoid_scene::layout::ApproachSides::clone(&self) -> pixtuoid_scene::layout::ApproachSides
-impl core::cmp::Eq for pixtuoid_scene::layout::ApproachSides
-impl core::cmp::PartialEq for pixtuoid_scene::layout::ApproachSides
-pub fn pixtuoid_scene::layout::ApproachSides::eq(&self, &pixtuoid_scene::layout::ApproachSides) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::ApproachSides
-pub fn pixtuoid_scene::layout::ApproachSides::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::layout::ApproachSides
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Freeze for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Send for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Sync for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Unpin for pixtuoid_scene::layout::ApproachSides
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::ApproachSides
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::ApproachSides
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::ApproachSides
 pub struct pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::Bounds::height: u16
 pub pixtuoid_scene::layout::Bounds::width: u16
@@ -595,42 +518,6 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Bounds
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Bounds
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Bounds
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Bounds
-pub struct pixtuoid_scene::layout::Doorway
-impl core::clone::Clone for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::clone(&self) -> pixtuoid_scene::layout::Doorway
-impl core::cmp::Eq for pixtuoid_scene::layout::Doorway
-impl core::cmp::PartialEq for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::eq(&self, &pixtuoid_scene::layout::Doorway) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for pixtuoid_scene::layout::Doorway
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::Doorway
-impl core::marker::Freeze for pixtuoid_scene::layout::Doorway
-impl core::marker::Send for pixtuoid_scene::layout::Doorway
-impl core::marker::Sync for pixtuoid_scene::layout::Doorway
-impl core::marker::Unpin for pixtuoid_scene::layout::Doorway
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Doorway
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Doorway
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Doorway
-pub struct pixtuoid_scene::layout::DwellWindow
-impl core::clone::Clone for pixtuoid_scene::layout::DwellWindow
-pub fn pixtuoid_scene::layout::DwellWindow::clone(&self) -> pixtuoid_scene::layout::DwellWindow
-impl core::cmp::Eq for pixtuoid_scene::layout::DwellWindow
-impl core::cmp::PartialEq for pixtuoid_scene::layout::DwellWindow
-pub fn pixtuoid_scene::layout::DwellWindow::eq(&self, &pixtuoid_scene::layout::DwellWindow) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::DwellWindow
-pub fn pixtuoid_scene::layout::DwellWindow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::layout::DwellWindow
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Freeze for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Send for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Sync for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Unpin for pixtuoid_scene::layout::DwellWindow
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::DwellWindow
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::DwellWindow
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::DwellWindow
 pub struct pixtuoid_scene::layout::FurnitureDef
 pub pixtuoid_scene::layout::FurnitureDef::visual: pixtuoid_scene::layout::Size
 impl core::clone::Clone for pixtuoid_scene::layout::FurnitureDef
@@ -790,24 +677,6 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Point
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Point
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Point
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Point
-pub struct pixtuoid_scene::layout::ReachSet
-impl core::clone::Clone for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::clone(&self) -> pixtuoid_scene::layout::ReachSet
-impl core::cmp::Eq for pixtuoid_scene::layout::ReachSet
-impl core::cmp::PartialEq for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::eq(&self, &pixtuoid_scene::layout::ReachSet) -> bool
-impl core::default::Default for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::default() -> pixtuoid_scene::layout::ReachSet
-impl core::fmt::Debug for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::ReachSet
-impl core::marker::Freeze for pixtuoid_scene::layout::ReachSet
-impl core::marker::Send for pixtuoid_scene::layout::ReachSet
-impl core::marker::Sync for pixtuoid_scene::layout::ReachSet
-impl core::marker::Unpin for pixtuoid_scene::layout::ReachSet
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::ReachSet
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::ReachSet
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::ReachSet
 pub struct pixtuoid_scene::layout::SceneLayout
 pub pixtuoid_scene::layout::SceneLayout::buf_h: u16
 pub pixtuoid_scene::layout::SceneLayout::buf_w: u16
@@ -1245,39 +1114,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::pet::PetState
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pet::PetState
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pet::PetState
 pub mod pixtuoid_scene::pose
-pub enum pixtuoid_scene::pose::Pose
-pub pixtuoid_scene::pose::Pose::AimlessAt
-pub pixtuoid_scene::pose::Pose::AimlessAt::dest: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::AtWaypoint
-pub pixtuoid_scene::pose::Pose::AtWaypoint::kind: pixtuoid_scene::layout::WaypointKind
-pub pixtuoid_scene::pose::Pose::AtWaypoint::wp: usize
-pub pixtuoid_scene::pose::Pose::Held
-pub pixtuoid_scene::pose::Pose::Held::at: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::SeatedIdle
-pub pixtuoid_scene::pose::Pose::SeatedThinking
-pub pixtuoid_scene::pose::Pose::SeatedTyping
-pub pixtuoid_scene::pose::Pose::Walking
-pub pixtuoid_scene::pose::Pose::Walking::carrying_coffee: bool
-pub pixtuoid_scene::pose::Pose::Walking::from: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::Walking::t_x1000: u16
-pub pixtuoid_scene::pose::Pose::Walking::to: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::Walking::travelled: u32
-impl core::clone::Clone for pixtuoid_scene::pose::Pose
-pub fn pixtuoid_scene::pose::Pose::clone(&self) -> pixtuoid_scene::pose::Pose
-impl core::cmp::Eq for pixtuoid_scene::pose::Pose
-impl core::cmp::PartialEq for pixtuoid_scene::pose::Pose
-pub fn pixtuoid_scene::pose::Pose::eq(&self, &pixtuoid_scene::pose::Pose) -> bool
-impl core::fmt::Debug for pixtuoid_scene::pose::Pose
-pub fn pixtuoid_scene::pose::Pose::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pose::Pose
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pose::Pose
-impl core::marker::Freeze for pixtuoid_scene::pose::Pose
-impl core::marker::Send for pixtuoid_scene::pose::Pose
-impl core::marker::Sync for pixtuoid_scene::pose::Pose
-impl core::marker::Unpin for pixtuoid_scene::pose::Pose
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pose::Pose
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pose::Pose
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pose::Pose
 pub struct pixtuoid_scene::pose::PoseHistory
 impl pixtuoid_scene::pose::PoseHistory
 pub fn pixtuoid_scene::pose::PoseHistory::contains(&self, pixtuoid_core::id::AgentId) -> bool
@@ -1331,26 +1167,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::render_scale::RenderScale
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::render_scale::RenderScale
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::render_scale::RenderScale
 pub mod pixtuoid_scene::sim
-pub enum pixtuoid_scene::sim::CharacterGlow
-pub pixtuoid_scene::sim::CharacterGlow::None
-pub pixtuoid_scene::sim::CharacterGlow::Thinking
-pub pixtuoid_scene::sim::CharacterGlow::Tool
-impl core::clone::Clone for pixtuoid_scene::sim::CharacterGlow
-pub fn pixtuoid_scene::sim::CharacterGlow::clone(&self) -> pixtuoid_scene::sim::CharacterGlow
-impl core::cmp::Eq for pixtuoid_scene::sim::CharacterGlow
-impl core::cmp::PartialEq for pixtuoid_scene::sim::CharacterGlow
-pub fn pixtuoid_scene::sim::CharacterGlow::eq(&self, &pixtuoid_scene::sim::CharacterGlow) -> bool
-impl core::fmt::Debug for pixtuoid_scene::sim::CharacterGlow
-pub fn pixtuoid_scene::sim::CharacterGlow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::StructuralPartialEq for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Freeze for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Send for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Sync for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Unpin for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::UnsafeUnpin for pixtuoid_scene::sim::CharacterGlow
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::CharacterGlow
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterGlow
 pub struct pixtuoid_scene::sim::CharacterPlacement
 pub pixtuoid_scene::sim::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::sim::CharacterPlacement::anim_name: pixtuoid_core::sprite::format::Piece

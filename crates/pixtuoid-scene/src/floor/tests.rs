@@ -2188,8 +2188,8 @@ fn a_frame_without_the_office_forgets_the_last() {
     assert!(office.heard_occupied().is_empty());
 }
 
-/// An office whose upper floor empties shows one floor: the count, the
-/// breadcrumb and the way up all follow the live scene, not the views kept.
+/// An office whose upper floor empties shows one floor: the count and the
+/// breadcrumb follow the live scene, not the views kept.
 #[test]
 fn an_office_session_follows_its_floors_down() {
     let pack = Arc::new(crate::pack::test_office());

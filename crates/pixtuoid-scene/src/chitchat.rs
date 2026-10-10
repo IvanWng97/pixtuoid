@@ -77,7 +77,7 @@ const _: () = assert!(!CHITCHAT_LINES.is_empty());
 /// A social venue that hosts at most one conversation at a time. Meeting-room
 /// slots all map to the same `Room`; every other social waypoint is its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VenueKey {
+pub(crate) enum VenueKey {
     /// A whole meeting room's group conversation (all its slots share one venue).
     Room {
         /// Index of the floor the room is on.
@@ -96,7 +96,7 @@ pub enum VenueKey {
 
 /// A live conversation among the agents currently at a venue.
 #[derive(Debug)]
-pub struct ActiveChitchat {
+pub(crate) struct ActiveChitchat {
     /// Current attendees, sorted ascending by raw id for a stable rotation.
     pub(crate) participants: Vec<AgentId>,
     /// When the conversation began — the turn/expiry clock.
@@ -222,9 +222,9 @@ pub(crate) fn supports_chitchat(kind: WaypointKind) -> bool {
     chitchat_venue(kind) != ChitchatVenue::None
 }
 
-/// A single speech bubble ready for the widget layer to render.
+/// A single speech bubble, for the display layer's `TextRun::bubble` to draw.
 #[derive(Debug, Clone, Copy)]
-pub struct ChitchatBubble {
+pub(crate) struct ChitchatBubble {
     /// The quip to render.
     pub(crate) text: &'static str,
     /// The speaking agent; a painter places the bubble over its drawn frame.

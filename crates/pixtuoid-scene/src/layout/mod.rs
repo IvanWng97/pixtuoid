@@ -21,21 +21,21 @@ mod windows;
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub(crate) use compute::PANTRY_COUNTER_LARGE_W;
 pub use compute::min_layout_size;
-pub use decor::{
-    ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor,
-    WaypointKind, furniture_def,
-};
 pub(crate) use decor::{
-    SEAT_RENDER_Y_OFF, WALKING_Y_OFF, desk_furniture_def, desk_walk_anchor_facing, seated_foot_cell,
+    DwellWindow, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, desk_furniture_def, desk_walk_anchor_facing,
+    seated_foot_cell,
+};
+pub use decor::{
+    Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, furniture_def,
 };
 pub(crate) use decor::{repels_plants, seated_sort_row};
 pub(crate) use placement::{Pivot, anchored_top_left, sort_row_at};
-pub use reach::ReachSet;
+pub(crate) use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
 pub(crate) use rooms::pantry::{
     COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
 };
-pub use rooms::walls::Doorway;
+pub(crate) use rooms::walls::Doorway;
 pub(crate) use rooms::walls::{WALL_THICK_H, WALL_THICK_V, WallPiece};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 pub use roster::Station;

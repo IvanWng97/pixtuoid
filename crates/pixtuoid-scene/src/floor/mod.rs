@@ -433,7 +433,7 @@ pub fn track_for(
 /// composition every painter shares. Holds the [`AudioCueTracker`] plus the
 /// floor it is primed for, so a floor switch reprimes silently.
 #[derive(Debug, Default)]
-pub struct AudioObserver {
+pub(crate) struct AudioObserver {
     cues: AudioCueTracker,
     primed_floor: Option<usize>,
 }

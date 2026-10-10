@@ -1,7 +1,6 @@
-//! What a hovered thing's tooltip says, for every painter: tone-tagged rows a
-//! painter lays out and colours through [`TipTone::rgb`], as the footer's
-//! [`FooterModel`](crate::footer::FooterModel) is. A painter owns only the
-//! box, its placement and how a tone draws.
+//! What a hovered thing's tooltip says, for every painter: tone-tagged rows
+//! that [`Tooltip::card`] lays out and colours into one cell grid. A painter
+//! owns only placing and drawing it.
 
 use std::time::SystemTime;
 
@@ -40,8 +39,8 @@ pub enum TipTone {
 }
 
 impl TipTone {
-    /// This tone's theme colour, the one authority every tooltip painter
-    /// reads; `None` for [`Self::Plain`].
+    /// This tone's theme colour, the one authority [`Tooltip::card`] colours
+    /// through; `None` for [`Self::Plain`].
     pub fn rgb(self, theme: &Theme) -> Option<Rgb> {
         Some(match self {
             Self::Title => theme.ui.tooltip_title,
@@ -57,7 +56,7 @@ impl TipTone {
 
 /// One tone-tagged text run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TipSpan {
+pub(crate) struct TipSpan {
     pub(crate) text: String,
     pub(crate) tone: TipTone,
 }
@@ -73,7 +72,7 @@ impl TipSpan {
 
 /// One row of a tooltip.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TipRow {
+pub(crate) enum TipRow {
     /// Runs laid left to right.
     Spans(Vec<TipSpan>),
     /// `left`, then `right` flush to the box's right edge.

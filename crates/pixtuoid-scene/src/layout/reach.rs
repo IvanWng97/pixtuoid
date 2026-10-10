@@ -20,7 +20,7 @@ const SEED_SNAP_CELLS: u16 = 3;
 /// seed — i.e. the agent's connected walkable component. Built once per layout
 /// from a known in-component seed (the door, or a home desk).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReachSet {
+pub(crate) struct ReachSet {
     /// Coarse-cell reachability; the grid dims are `mask` dims / `COARSE_CELL_SIZE`.
     grid: Grid<bool>,
 }

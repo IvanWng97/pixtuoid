@@ -86,6 +86,9 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     ]);
     assert_eq!(rows[0].state, ConnState::Connected);
     assert_eq!(rows[1].state, ConnState::Disconnected);
+    // Without the carried bit a connected-but-absent NoCli would be
+    // indistinguishable from a never-connected one, and un-disconnectable via
+    // the panel — its hooks live in the config, not the missing binary.
     assert_eq!(rows[2].state, ConnState::NoCli { connected: true });
     assert_eq!(rows[3].state, ConnState::Connected);
     assert_eq!(rows[4].state, ConnState::Disconnected);
@@ -94,17 +97,6 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     assert_eq!(rows[3].display_name, "Antigravity");
     assert!(rows[3].target.is_none());
     assert!(rows[3].config_path.is_none());
-    // Without the carried bit a connected-but-absent NoCli would be
-    // indistinguishable from a never-connected one, and un-disconnectable via
-    // the panel — its hooks live in the config, not the missing binary.
-    assert!(
-        rows[2].state.connected(),
-        "a connected-but-absent NoCli must keep its connected bit"
-    );
-    assert!(rows[0].state.connected());
-    assert!(!rows[1].state.connected());
-    assert!(rows[3].state.connected());
-    assert!(!rows[4].state.connected());
 }
 
 #[test]

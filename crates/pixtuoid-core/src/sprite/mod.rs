@@ -599,16 +599,6 @@ impl Sprite {
     pub fn stride(&self) -> Option<std::num::NonZeroU16> {
         self.stride
     }
-
-    /// Frame `idx` as the palette indices a recolor resolves; `None` past the
-    /// last frame.
-    #[cfg(test)]
-    pub(crate) fn recolorable(&self, idx: usize) -> Option<RecolorableFrame<'_>> {
-        Some(RecolorableFrame {
-            indexed: self.indexed.get(idx)?,
-            palette: &self.palette,
-        })
-    }
 }
 
 /// One frame of a [`Sprite`] as palette indices, from [`Sprite::recolorable_at`].

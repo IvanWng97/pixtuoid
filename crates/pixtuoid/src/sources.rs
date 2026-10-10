@@ -379,17 +379,6 @@ pub enum ConnState {
     },
 }
 
-impl ConnState {
-    #[cfg(test)]
-    pub(crate) fn connected(self) -> bool {
-        match self {
-            ConnState::Connected => true,
-            ConnState::Disconnected => false,
-            ConnState::NoCli { connected } => connected,
-        }
-    }
-}
-
 /// One row = one agent CLI (the union of registry sources + install targets).
 #[derive(Debug, Clone)]
 pub struct ConnectionRow {
