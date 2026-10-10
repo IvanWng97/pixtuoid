@@ -767,7 +767,7 @@ pub(crate) mod tests {
         let noon = crate::localclock::at_hour(12);
         let at = |mix, secs: u64| moment(mix, noon + std::time::Duration::from_secs(secs), 0.0);
         // a grid of its own whatever variants the pack draws
-        let (one, dense) = (Density::ONE, Density::new(4).expect("nonzero"));
+        let (one, dense) = (Density::ONE, test_density(4));
         let overcast = WeatherMix::pure(Weather::Overcast);
         let fog = WeatherMix::pure(Weather::Fog);
         let raining = Moment::resolve(

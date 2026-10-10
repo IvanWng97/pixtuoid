@@ -636,7 +636,7 @@ mod tests {
             idx: 1,
         };
         for d in [1, 4] {
-            let density = Density::new(d).expect("nonzero");
+            let density = test_density(d);
             let strip = CityStrip::draw(
                 &pack(),
                 (80, glass_h),
@@ -644,11 +644,10 @@ mod tests {
                 theme,
                 density,
             );
-            let front = strip.front(run_x0, test_density(d));
-            let view =
-                crate::outside::WindowView::new(bay, rows.clone(), test_density(d), |cell| {
-                    front(cell).unwrap_or(SKY)
-                });
+            let front = strip.front(run_x0, density);
+            let view = crate::outside::WindowView::new(bay, rows.clone(), density, |cell| {
+                front(cell).unwrap_or(SKY)
+            });
             let mut buildings = 0;
             for (at, c) in view.cells() {
                 let (ax, ay) = (at.0 - bay.x * d, at.1 - rows.start * d);
@@ -810,7 +809,7 @@ mod tests {
                 &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH))
                     .outlook(theme),
                 theme,
-                Density::new(d).expect("nonzero"),
+                test_density(d),
             )
         };
         let (one, three, four) = (strip(1), strip(3), strip(4));
@@ -884,7 +883,7 @@ mod tests {
                     (run_w, glass_h),
                     &moment.outlook(theme),
                     theme,
-                    Density::new(d).expect("nonzero"),
+                    test_density(d),
                 );
                 (s, near)
             };
@@ -921,7 +920,7 @@ mod tests {
                         return false;
                     };
                     let (art, grow) = building
-                        .variant(Density::new(d).expect("nonzero"))
+                        .variant(test_density(d))
                         .map_or((building.base(), d), |a| (a, 1));
                     let frame = art
                         .sprite()
@@ -971,7 +970,7 @@ mod tests {
         {
             for d in 1..=4 {
                 let (art, grow) = tower
-                    .variant(Density::new(d).expect("nonzero"))
+                    .variant(test_density(d))
                     .map_or((tower.base(), d), |a| (a, 1));
                 let frame = art
                     .sprite()

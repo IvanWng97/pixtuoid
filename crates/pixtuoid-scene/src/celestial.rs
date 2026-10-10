@@ -68,16 +68,15 @@ impl Disc {
     /// fade) is under [`MIN_DISC_VIS`].
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.body();
-        // A body below the horizon shows no disc; one up fades in with its
-        // altitude as it rises and sets, and a moon with the night too.
         if e.altitude <= 0.0 {
             return None;
         }
-        let nightly = match e.kind {
+        let night_gate = match e.kind {
+            // A sun is only ever up by day, so the night has nothing to take.
             BodyKind::Sun => 1.0,
             BodyKind::Moon => sky.nightfall(),
         };
-        let vis = sky.transmission().disc * nightly * (e.altitude / HORIZON_FADE).min(1.0);
+        let vis = sky.transmission().disc * night_gate * (e.altitude / HORIZON_FADE).min(1.0);
         if vis < MIN_DISC_VIS {
             return None;
         }

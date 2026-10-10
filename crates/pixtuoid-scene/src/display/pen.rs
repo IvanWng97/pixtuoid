@@ -25,7 +25,7 @@ pub(crate) fn layout_point(a: ArtPx, d: Density) -> f32 {
 
 /// A density literal for a test.
 #[cfg(test)]
-pub(crate) fn test_density(n: u16) -> Density {
+pub(crate) const fn test_density(n: u16) -> Density {
     Density::new(n).expect("a test density is nonzero")
 }
 

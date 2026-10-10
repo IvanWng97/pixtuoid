@@ -1888,7 +1888,7 @@ mod tests {
         // frame has had no frames to be drawn ahead in.
         let lead = (AHEAD.as_millis() / frame.as_millis()) as u32;
         let pack = crate::pack::test_office();
-        let d = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
+        let d = test_density(4);
         let wall = crate::outside::Wall {
             size: (crate::layout::WINDOW_W * 3, 32),
             bays: crate::layout::window_slots(crate::layout::WINDOW_W * 3).collect(),

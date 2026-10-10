@@ -5,6 +5,8 @@ use crate::anim::{Motion, epoch_ms};
 use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
 use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
 use crate::cutaway::wall::paint_wall;
+#[cfg(feature = "cutaway-assets")]
+use crate::display::pen::test_density;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::{Point, Size};
@@ -17,8 +19,6 @@ use crate::sim::anchors::{
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use pixtuoid_core::sprite::Frame;
-#[cfg(feature = "cutaway-assets")]
-use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::format::Piece;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use std::sync::Arc;
@@ -4106,7 +4106,7 @@ fn appliance_at(sprite: Piece, busy: bool, ms: u64) -> RgbBuffer {
 #[cfg(feature = "cutaway-assets")]
 fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
     let pack = crate::pack::test_office();
-    let four = Density::new(4).expect("nonzero");
+    let four = test_density(4);
     for (name, art) in [
         ("vending_machine", pack.piece(Piece::VendingMachine)),
         ("printer", pack.piece(Piece::Printer)),
