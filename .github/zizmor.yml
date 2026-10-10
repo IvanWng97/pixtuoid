@@ -19,8 +19,8 @@ rules:
         anthropics/claude-code-action: hash-pin
         CodSpeedHQ/action: hash-pin
         codecov/codecov-action: hash-pin
-        dtolnay/rust-toolchain: hash-pin
         extractions/setup-just: hash-pin
+        github/codeql-action: hash-pin
         Mergifyio/gha-mergify-ci: hash-pin
         moonrepo/setup-rust: hash-pin
         peaceiris/actions-gh-pages: hash-pin

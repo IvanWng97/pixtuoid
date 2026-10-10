@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0 # `--in-diff` needs the merge base in history
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: ./.github/actions/setup-rust
       # cargo-mutants builds its baseline with DEFAULT features — it needs
       # ALSA even where a reader assumes the flag-stripped release shape.
       - uses: ./.github/actions/setup-alsa

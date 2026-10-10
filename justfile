@@ -1016,7 +1016,7 @@ workspace-version:
     @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
 
 # Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross); anything but true/false
+# (CI installs it via taiki-e/install-action with `tool: cross`); anything but true/false
 # fails loudly (the case below).
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 [group('release')]
@@ -1067,7 +1067,7 @@ stage-notices dir:
     done
 
 # `--no-build`: the target is already built by `build-target`. Needs cargo-deb
-# (CI installs it via taiki-e/install-action@cargo-deb).
+# (CI installs it via taiki-e/install-action with `tool: cargo-deb`).
 [doc('Package the .deb for ONE already-built target (release.yml deb job)')]
 [group('release')]
 deb target:

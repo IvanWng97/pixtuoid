@@ -1,0 +1,31 @@
+name: 'Setup Rust'
+description: 'Installs the toolchain rust-toolchain.toml names, plus extra components and targets, with the runner image''s own rustup'
+
+inputs:
+  components:
+    description: 'Comma-separated components beyond rust-toolchain.toml''s'
+    required: false
+    default: ''
+  targets:
+    description: 'Comma-separated list of target triples'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # The runner images ship rustup on Linux, macOS and Windows
+    # (github.com/actions/runner-images, "Rust Tools"), so no third-party action
+    # runs in a job that holds a credential. Since rustup 1.28 nothing installs
+    # the file's toolchain implicitly.
+    - shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        set -euo pipefail
+        rustup toolchain install --profile minimal --no-self-update
+        read -ra extra_components <<< "${COMPONENTS//,/ }"
+        read -ra extra_targets <<< "${TARGETS//,/ }"
+        ((${#extra_components[@]} == 0)) || rustup component add "${extra_components[@]}"
+        ((${#extra_targets[@]} == 0)) || rustup target add "${extra_targets[@]}"

@@ -416,6 +416,7 @@
     - .github/workflows/ci-builds.yml
     - .github/workflows/ci-tests.yml
     - .github/workflows/site.yml
+    - .github/workflows/raycast.yml
   why: >-
     ci.yml's gate sees a group only through the call's result, and GitHub does
     not document how a called workflow's jobs roll up into it. The `required`
@@ -575,24 +576,29 @@
     Any step of a job can read the credentials the job holds, and a job with
     `id-token: write` can mint the OIDC token itself, so a third-party action
     there must be a commit SHA: a tag can move (.github/zizmor.yml). A job
-    holds credentials through its own or the workflow's `id-token: write`, a
-    `secrets.*` reference in the job, or one in the workflow's `env`. Local
-    actions are held to the same rule by credential-actions-use-only-pinned-actions.
+    holds credentials when its effective permissions (its own block, else the
+    workflow's) grant any `write` scope, or when it references `secrets.*`
+    itself or through the workflow's `env`. Local actions are held to the same
+    rule by credential-actions-use-only-pinned-actions.
   assert: |
     def pinned: test("^\\./|^actions/|@[0-9a-f]{40}$");
-    def oidc: type == "object" and .["id-token"] == "write";
+    def writes: if type == "string" then . == "write-all"
+                elif type == "object" then any(.[]; . == "write")
+                else false end;
     (.env // {} | tojson | test("secrets\\.")) as $env_secret
-    | (.permissions | oidc) as $workflow_oidc
+    | (.permissions | writes) as $workflow_writes
     | [.jobs[]
        | select($env_secret or (tojson | test("secrets\\."))
-                or (if (.permissions | type) == "object" then .permissions | oidc else $workflow_oidc end))
+                or (if has("permissions") then .permissions | writes else $workflow_writes end))
        | ([.uses // empty] + [.steps[]?.uses // empty])[]
        | select(pinned | not)] == []
   break:
     - '.jobs.zz = {"permissions": {"id-token": "write"}, "steps": [{"uses": "a/b@v1"}]}'
+    - '.jobs.zz = {"permissions": {"contents": "write"}, "steps": [{"uses": "a/b@v1"}]}'
+    - '.jobs.zz = {"permissions": "write-all", "steps": [{"uses": "a/b@v1"}]}'
     - '.jobs.zz = {"steps": [{"uses": "a/b@v1", "env": {"T": "${{ secrets.X }}"}}]}'
     - '.env.T = "${{ secrets.X }}" | .jobs.zz = {"steps": [{"uses": "a/b@v1"}]}'
-    - '.permissions = {"id-token": "write"} | .jobs.zz = {"steps": [{"uses": "a/b@v1"}]}'
+    - '.permissions = {"pull-requests": "write"} | .jobs.zz = {"steps": [{"uses": "a/b@v1"}]}'
     - '.jobs.zz = {"permissions": {"id-token": "write"}, "uses": "a/b/.github/workflows/c.yml@v1"}'
 
 - id: credential-actions-use-only-pinned-actions
