@@ -16,9 +16,15 @@ pub(crate) struct ArtPx(pub(crate) u16);
 /// Where art pixel `a`'s centre lies on the layout's units at `d` art pixels to
 /// the unit, with a unit's own centre on its integer: at one to the unit, the
 /// unit itself, as the classic samples it. The continuous twin of
-/// [`Pen::logical`]; a `d` of zero reads as one.
-pub(crate) fn layout_point(a: ArtPx, d: u16) -> f32 {
-    (f32::from(a.0) + 0.5) / f32::from(d.max(1)) - 0.5
+/// [`Pen::logical`].
+pub(crate) fn layout_point(a: ArtPx, d: NonZeroU16) -> f32 {
+    (f32::from(a.0) + 0.5) / f32::from(d.get()) - 0.5
+}
+
+/// A density literal for a test.
+#[cfg(test)]
+pub(crate) fn nz(n: u16) -> NonZeroU16 {
+    NonZeroU16::new(n).expect("a test density is nonzero")
 }
 
 /// A length or coordinate in a render's buffer pixels, which a [`Pen`] turns
@@ -80,6 +86,11 @@ impl Pen {
             })
     }
 
+    /// How many art pixels make one layout unit.
+    pub(crate) fn density(self) -> NonZeroU16 {
+        self.d
+    }
+
     /// `logical` layout units, as art pixels: the one conversion from the
     /// layout's units onto the grid.
     pub(crate) fn art(self, logical: u16) -> ArtPx {
@@ -111,6 +122,13 @@ impl Pen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pen_reports_the_density_it_was_built_at() {
+        let scale = RenderScale::new(4).expect("a scale");
+        assert_eq!(Pen::new(scale, 4).map(Pen::density), Some(nz(4)));
+        assert_eq!(Pen::UNIT.density(), nz(1));
+    }
 
     #[test]
     #[cfg(feature = "cutaway-assets")]

@@ -7,6 +7,7 @@
 //! Every length is in layout units: x from the window run's west end, y from
 //! the glass's top.
 
+use std::num::NonZeroU16;
 use std::ops::Range;
 
 use pixtuoid_core::sprite::Rgb;
@@ -777,7 +778,7 @@ struct RasterKey {
     id: usize,
     span: u16,
     glass_h: u16,
-    d: u16,
+    d: NonZeroU16,
     share: u8,
     light: LightKey,
 }
@@ -872,7 +873,7 @@ pub(crate) struct Clouds {
     /// Each mass's bands, by index.
     rasters: Vec<std::sync::Arc<MassRaster>>,
     /// The grid the rasters are drawn on, cells to the unit.
-    d: u16,
+    d: NonZeroU16,
     lighting: Lighting,
     /// Each weather's tones under this light.
     tones: Vec<(Weather, [Rgb; 3])>,
@@ -914,10 +915,9 @@ impl Clouds {
         sky: &Sky,
         secs: f64,
         (span, glass_h): (u16, u16),
-        d: u16,
+        d: NonZeroU16,
     ) -> (Self, Vec<(Mass, RasterKey)>) {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
-        let d = d.max(1);
         let weather = sky.weather();
         let (light, shares) = Self::keyed(sky);
         let night = dequantize(light.night, LIGHT_STEPS);
@@ -987,7 +987,7 @@ impl Clouds {
     pub(crate) fn of(
         outlook: &crate::atmosphere::Outlook,
         (span, glass_h): (u16, u16),
-        d: u16,
+        d: NonZeroU16,
         panes: &[Range<u16>],
         cache: &mut CloudCache,
     ) -> Self {
@@ -1022,7 +1022,12 @@ impl Clouds {
     /// needs and `cache` lacks, the soonest needed first: each quantized
     /// step's bands drawn a few a frame before it lands, not all in the frame
     /// it does. Its budget is a frame's, so every painted frame calls it.
-    pub(crate) fn draw_ahead(moment: &Moment, size: (u16, u16), d: u16, cache: &mut CloudCache) {
+    pub(crate) fn draw_ahead(
+        moment: &Moment,
+        size: (u16, u16),
+        d: NonZeroU16,
+        cache: &mut CloudCache,
+    ) {
         let _ahead = tracing::trace_span!("clouds.ahead").entered();
         let frame = std::time::Duration::from_millis(crate::anim::PAINT_FRAME_MS);
         let mut budget = if std::mem::take(&mut cache.warming) {
@@ -1054,7 +1059,7 @@ impl Clouds {
     /// Mass `m`'s bands over glass `glass_h` tall on its grid, in its own
     /// undrifted frame, closed: a notch narrower than [`CLOSE`] fills.
     fn draw(&self, m: &Mass, glass_h: f32) -> MassRaster {
-        let df = f32::from(self.d);
+        let df = f32::from(self.d.get());
         let k = ((CLOSE * df).round() as i32).max(1);
         let (west, east) = m.extent();
         let x0 = ((west - SLIT) * df).floor() as i32 - k;
@@ -1109,7 +1114,7 @@ impl Clouds {
 
     /// `m`'s drift this frame in whole cells of its grid: where it is drawn.
     fn cell_drift(&self, m: &Mass) -> i32 {
-        (m.off * f32::from(self.d)).round() as i32
+        (m.off * f32::from(self.d.get())).round() as i32
     }
 
     /// The nearest mass's band at each cell of a grid `cols` by `rows` whose
@@ -1201,8 +1206,8 @@ impl Clouds {
         if self.masses.is_empty() {
             return;
         }
-        let d = self.d;
-        debug_assert_eq!(view.d(), d, "the clouds were drawn for another grid");
+        let d = self.d.get();
+        debug_assert_eq!(view.d().get(), d, "the clouds were drawn for another grid");
         let df = f32::from(d);
         let unit = |cell: Cell| {
             (
@@ -1435,7 +1440,7 @@ impl Clouds {
         let (gx, gy) = (u32::from(cell.at.0), u32::from(cell.at.1));
         // sparse, slanted streaks, half their cells; tested before the mass
         // search, which scans every lobe
-        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d)) == 0;
+        let streak = (gx + gy / 2) % (VIRGA_PITCH * u32::from(self.d.get())) == 0;
         if !(streak && gx % 2 == gy % 2) {
             return c;
         }
@@ -1454,7 +1459,7 @@ impl Clouds {
     /// drawn drift, as [`bands`](Self::bands) lays the masses.
     fn virga_mass(&self, x: f32, y: f32) -> Option<&Mass> {
         self.masses.iter().rev().find(|m| {
-            let off = self.cell_drift(m) as f32 / f32::from(self.d);
+            let off = self.cell_drift(m) as f32 / f32::from(self.d.get());
             m.layer >= Layer::Mid
                 && m.base < y
                 && y <= m.base + VIRGA_DEPTH
@@ -1469,7 +1474,7 @@ impl Clouds {
     fn bolt_cells(&self, run_x0: u16) -> std::collections::HashSet<(u16, u16)> {
         let mut out = std::collections::HashSet::new();
         let Some(s) = &self.strike else { return out };
-        let d = self.d;
+        let d = self.d.get();
         let df = f32::from(d);
         for (li, line) in s.bolt.iter().enumerate() {
             // 1 cell wide on every grid; at 4x the trunk's top few segments 2
@@ -1717,6 +1722,7 @@ fn close_thin_runs(px: &mut [Option<(Band, usize)>], cols: usize, rows: usize, t
 mod tests {
     use super::*;
     use crate::anim::Motion;
+    use crate::display::pen::nz;
     use crate::sky::Sky;
     use std::time::Duration;
 
@@ -1740,7 +1746,7 @@ mod tests {
         Clouds::of(
             &moment.outlook(&crate::theme::NORMAL),
             (SPAN, GLASS_H),
-            1,
+            nz(1),
             RUN,
             &mut CloudCache::default(),
         )
@@ -1796,20 +1802,26 @@ mod tests {
         Clouds::of(
             &moment_at(0).outlook(theme),
             (SPAN, GLASS_H),
-            4,
+            nz(4),
             RUN,
             &mut cache,
         );
-        Clouds::draw_ahead(&moment_at(0), (SPAN, GLASS_H), 4, &mut cache);
+        Clouds::draw_ahead(&moment_at(0), (SPAN, GLASS_H), nz(4), &mut cache);
         for n in 1..(AHEAD.as_millis() / frame.as_millis()) as u32 {
             let moment = moment_at(n);
-            let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), 4);
+            let (_, planned) = Clouds::plan(&moment.sky, 0.0, (SPAN, GLASS_H), nz(4));
             assert!(
                 planned.iter().all(|&(_, key)| cache.holds(key)),
                 "frame {n} drew on demand"
             );
-            Clouds::of(&moment.outlook(theme), (SPAN, GLASS_H), 4, RUN, &mut cache);
-            Clouds::draw_ahead(&moment, (SPAN, GLASS_H), 4, &mut cache);
+            Clouds::of(
+                &moment.outlook(theme),
+                (SPAN, GLASS_H),
+                nz(4),
+                RUN,
+                &mut cache,
+            );
+            Clouds::draw_ahead(&moment, (SPAN, GLASS_H), nz(4), &mut cache);
         }
     }
 
@@ -1820,8 +1832,8 @@ mod tests {
     fn a_mass_draws_the_same_bands_at_any_drift() {
         for weather in Weather::ALL {
             let sky = Sky::at_with(crate::localclock::at_hour(12), weather);
-            let (clouds, still) = Clouds::plan(&sky, 0.0, (SPAN, GLASS_H), 4);
-            let (_, drifted) = Clouds::plan(&sky, 4321.5, (SPAN, GLASS_H), 4);
+            let (clouds, still) = Clouds::plan(&sky, 0.0, (SPAN, GLASS_H), nz(4));
+            let (_, drifted) = Clouds::plan(&sky, 4321.5, (SPAN, GLASS_H), nz(4));
             assert_eq!(still.len(), drifted.len(), "{weather:?}");
             for ((a, key_a), (b, key_b)) in still.iter().zip(&drifted) {
                 assert_eq!(key_a, key_b, "{weather:?}");
@@ -1885,8 +1897,9 @@ mod tests {
         for motion in [Motion::Full, Motion::Calm] {
             for (start, policy, length) in windows {
                 let timing = |n: u32| motion.timing(start - AHEAD + frame * n);
-                let planned =
-                    |sky: &Sky| Clouds::plan(sky, 0.0, (run.end - run.start, glass_h), d.get()).1;
+                let planned = |sky: &Sky| {
+                    Clouds::plan(sky, 0.0, (run.end - run.start, glass_h), d.as_nonzero()).1
+                };
                 // Only a frame within `AHEAD` of a step, where the plan
                 // changes, can draw ahead or on demand, so the rest are
                 // found by the plan alone, which paints nothing, and skipped.
@@ -1954,7 +1967,7 @@ mod tests {
                 let c = Clouds::of(
                     &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
-                    d,
+                    nz(d),
                     RUN,
                     &mut CloudCache::default(),
                 );
@@ -1986,7 +1999,7 @@ mod tests {
             Clouds::of(
                 &moment.outlook(&crate::theme::NORMAL),
                 (SPAN, GLASS_H),
-                1,
+                nz(1),
                 RUN,
                 &mut CloudCache::default(),
             )
@@ -2100,7 +2113,7 @@ mod tests {
                 let c = Clouds::of(
                     &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
-                    d,
+                    nz(d),
                     RUN,
                     &mut CloudCache::default(),
                 );
@@ -2149,7 +2162,7 @@ mod tests {
                 Clouds::of(
                     &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
-                    1,
+                    nz(1),
                     RUN,
                     &mut CloudCache::default(),
                 )
@@ -2374,7 +2387,7 @@ mod tests {
                 let c = Clouds::of(
                     &moment.outlook(&crate::theme::NORMAL),
                     (SPAN, GLASS_H),
-                    1,
+                    nz(1),
                     RUN,
                     &mut CloudCache::default(),
                 );
@@ -2433,7 +2446,7 @@ mod tests {
             Clouds::of(
                 &moment.outlook(&crate::theme::NORMAL),
                 (SPAN, GLASS_H),
-                1,
+                nz(1),
                 RUN,
                 &mut CloudCache::default(),
             )

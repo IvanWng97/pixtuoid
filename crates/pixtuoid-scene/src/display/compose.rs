@@ -514,7 +514,7 @@ fn signs(office: Office<'_>, runs: &[TextRun]) -> Vec<(Span, PieceKind)> {
 /// a pointer names a run the cutaway drew.
 pub(crate) fn run_box(run: &TextRun, pen: Pen) -> Bounds {
     let r = run_rect(run, pen);
-    let d = pen.art(1).0;
+    let d = pen.density().get();
     let (x, y) = (pen.logical(r.x), pen.logical(r.y));
     Bounds {
         x,
@@ -1414,7 +1414,7 @@ pub(crate) fn push_windows(
         scale,
     } = office;
     let Some(density) =
-        pixtuoid_core::sprite::format::Density::new(Pen::for_pack(scale, pack).art(1).0)
+        pixtuoid_core::sprite::format::Density::new(Pen::for_pack(scale, pack).density().get())
     else {
         return;
     };

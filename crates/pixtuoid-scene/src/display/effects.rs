@@ -42,7 +42,7 @@ impl Riding {
     /// The logical cells it paints, sorted with the figure it rides on at
     /// `depth`; `None` when it paints nothing this frame.
     pub(crate) fn span(&self, depth: u16) -> Option<Span> {
-        let d = i32::from(self.pen.art(1).0);
+        let d = i32::from(self.pen.density().get());
         let mut cells: Option<(i32, i32, i32, i32)> = None;
         self.look(&mut |at, size, _, _| {
             let (x1, y1) = (at.x + size - 1, at.y + size - 1);
@@ -67,7 +67,7 @@ impl Riding {
     /// share of it covered.
     pub(crate) fn look(&self, emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32)) {
         let (e, inks) = (self.effect, &self.inks);
-        let d = self.pen.art(1).0;
+        let d = self.pen.density().get();
         match self.head {
             Some(head) if d == LOOK_DENSITY => return dense_look(e, head, inks, emit),
             Some(head) if d == 1 && base_look(e, head, inks, emit) => return,

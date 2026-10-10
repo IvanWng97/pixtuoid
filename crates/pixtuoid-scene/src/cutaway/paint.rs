@@ -570,7 +570,7 @@ fn paint_ground_shadows(
     // a shadow off the writable art darkens none of it, so a repaint of a few
     // rects builds only theirs
     let (art_xs, art_ys) = pen.writable_art(buf);
-    let per = pen.art(1).0;
+    let per = pen.density().get();
     let near = shadows.filter(|c| {
         let ((x0, y0), (x1, y1)) = c.bounds();
         let cells = |a: u16, b: u16| a.saturating_mul(per)..b.saturating_mul(per);
@@ -925,7 +925,7 @@ fn paint_rug(
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let d = pen.art(1).0;
+    let d = pen.density().get();
     let (x0, y0, w, h) = (
         pen.art(rug.x).0,
         pen.art(rug.y).0,
@@ -1392,7 +1392,7 @@ fn paint_clock(
         }
     };
     let (hour, minute) = reading.turns();
-    let d = pen.art(1).0;
+    let d = pen.density().get();
     let side = pen.art(crate::layout::CLOCK.w).0;
     if d == 1 {
         // The classic's [`CLOCK`](crate::layout::CLOCK) face: the centre pin, the
@@ -1447,7 +1447,7 @@ fn paint_runner(
         pen.art(b.width).0,
         pen.art(b.height).0,
     );
-    let pitch = i32::from(pen.art(1).0) * crate::layout::roster::RUNNER_LATTICE_STRIDE;
+    let pitch = i32::from(pen.density().get()) * crate::layout::roster::RUNNER_LATTICE_STRIDE;
     let px = |buf: &mut RgbBuffer, x: u16, y: u16, c| {
         pen.fill(
             buf,
@@ -2249,7 +2249,7 @@ mod tests {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
-        let d = pen.art(1).0;
+        let d = pen.density();
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -2307,7 +2307,7 @@ mod tests {
                 assert_eq!(span.depth, 0, "a window sorts at the very back");
                 paint_window(view, *frame, pen, &mut buf);
             }
-            let density = pixtuoid_core::sprite::format::Density::new(d).expect("nonzero");
+            let density = pixtuoid_core::sprite::format::Density::new(d.get()).expect("nonzero");
             let band = (layout.buf_w, layout.wall_band_h());
             let wall = crate::outside::Wall {
                 size: band,
@@ -2379,7 +2379,7 @@ mod tests {
             pen,
             &mut buf,
         );
-        let k = scale.get() / pen.art(1).0;
+        let k = scale.get() / pen.density().get();
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let mut posts = 0;
         for post in crate::layout::window_posts(layout.buf_w) {
@@ -2807,7 +2807,7 @@ mod tests {
         paint_list(&list, &mut cache, &mut night);
         let lights: Vec<&crate::display::light::LightView> =
             list.lights().iter().map(|l| &*l.view).collect();
-        let k = scale.get() / Pen::for_pack(scale, &pack).art(1).0;
+        let k = scale.get() / Pen::for_pack(scale, &pack).density().get();
         let walls: Vec<Span> = list
             .pieces()
             .iter()
@@ -5428,7 +5428,7 @@ mod tests {
                         .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
                         .collect();
                     // Art pixels of this art, on the pen's grid.
-                    let k = f32::from(pen.art(1).0) / f32::from(desk.density.get());
+                    let k = f32::from(pen.density().get()) / f32::from(desk.density.get());
                     (!hits.is_empty()).then(|| {
                         let n = hits.len() as f32;
                         (
@@ -5448,7 +5448,7 @@ mod tests {
                 .map(|l| l.view.peak())
                 .collect();
             assert_eq!(lamps.len(), bulbs.len(), "one pool a bulb");
-            let near = f32::from(pen.art(1).0);
+            let near = f32::from(pen.density().get());
             for bulb in &bulbs {
                 assert!(
                     lamps
@@ -5482,7 +5482,7 @@ mod tests {
             w: 4,
             idx: 0,
         };
-        let view = WindowView::new(bay, desk.y..desk.y + 4, pen.art(1).0, |cell| {
+        let view = WindowView::new(bay, desk.y..desk.y + 4, pen.density(), |cell| {
             let (x, y) = at(cell.at);
             painted.get(x, y)
         });

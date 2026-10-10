@@ -2,6 +2,8 @@
 //! and what a pane's glass shows at a point, as a few tones resolved once a
 //! frame and picked per pixel by ordered dither.
 
+use std::num::NonZeroU16;
+
 use pixtuoid_core::sprite::Rgb;
 
 use crate::composite::{blend, blend_rgb};
@@ -283,7 +285,7 @@ impl SkyView {
         &self,
         bay: WindowBay,
         rows: std::ops::Range<u16>,
-        d: u16,
+        d: NonZeroU16,
         front: impl Fn(crate::outside::Cell) -> Option<Rgb>,
     ) -> WindowView {
         let pane = self.pane(
@@ -302,13 +304,13 @@ impl SkyView {
 
     /// One pane's glass, over columns `x..x + w` and `glass_h` rows tall, on a
     /// grid of `d` cells to the unit.
-    fn pane(&self, x: u16, w: u16, glass_h: u16, d: u16) -> PaneSky<'_> {
+    fn pane(&self, x: u16, w: u16, glass_h: u16, d: NonZeroU16) -> PaneSky<'_> {
         PaneSky {
             view: self,
             hosts_disc: self.disc.is_some_and(|d| d.hosted_by(x, w)),
             glass_h,
             clear_rows: crate::skyline::clear_sky_rows(glass_h),
-            d: d.max(1),
+            d,
         }
     }
 }
@@ -320,7 +322,7 @@ struct PaneSky<'a> {
     hosts_disc: bool,
     glass_h: u16,
     clear_rows: u16,
-    d: u16,
+    d: NonZeroU16,
 }
 
 impl PaneSky<'_> {
@@ -353,6 +355,7 @@ impl PaneSky<'_> {
             }
             None => {}
         }
+        let d = d.get();
         let (sx, sy) = (g.0 / d, g.1 / d);
         if v.stars
             && (g.0 % d, g.1 % d) == (d / 2, d / 2)
@@ -370,6 +373,7 @@ impl PaneSky<'_> {
 mod tests {
     use super::*;
     use crate::atmosphere::Moment;
+    use crate::display::pen::nz;
 
     /// A star turns only on a Full beat, and the field's cycles span every
     /// beat count from the base to the base plus the span.
@@ -522,8 +526,8 @@ mod tests {
         };
         let rows = 1..33;
         for d in [1, 4] {
-            let pane = v.pane(bay.x, bay.w, glass_rows(rows.end - rows.start), d);
-            let window = v.window(bay, rows.clone(), d, |_| None);
+            let pane = v.pane(bay.x, bay.w, glass_rows(rows.end - rows.start), nz(d));
+            let window = v.window(bay, rows.clone(), nz(d), |_| None);
             let mut cells = 0;
             for (at, c) in window.cells() {
                 let ay = at.1 - rows.start * d;
@@ -543,7 +547,7 @@ mod tests {
                 .flatten()
                 .chain(v.halo.into_iter().flatten())
                 .collect();
-            let pane = v.pane(0, 160, 30, 1);
+            let pane = v.pane(0, 160, 30, nz(1));
             for y in 0..30u16 {
                 for x in 0..160u16 {
                     let c = pane.colour((x, y), y);
@@ -560,10 +564,10 @@ mod tests {
         let v = view(2);
         let glass_h = 30;
         let star = |c: Rgb| v.star.contains(&c);
-        let one = v.pane(0, 0, glass_h, 1);
+        let one = v.pane(0, 0, glass_h, nz(1));
         let mut stars = 0;
         for d in [2, 4] {
-            let dense = v.pane(0, 0, glass_h, d);
+            let dense = v.pane(0, 0, glass_h, nz(d));
             for y in 0..glass_h {
                 for x in 0..160u16 {
                     let cells = (0..d)
@@ -583,7 +587,7 @@ mod tests {
     fn the_sky_is_flat_at_its_ends() {
         let v = view(12);
         let glass_h = 30;
-        let pane = v.pane(0, 0, glass_h, 1);
+        let pane = v.pane(0, 0, glass_h, nz(1));
         let tile = |glass_dy: u16| -> Vec<Rgb> {
             (0..crate::dither::PERIOD)
                 .flat_map(|y| (0..crate::dither::PERIOD).map(move |x| (x, y)))

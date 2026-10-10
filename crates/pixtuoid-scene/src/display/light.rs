@@ -150,7 +150,7 @@ impl LightView {
         }
         let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
         let (ax1, ay1) = (pen.art(x1).0, pen.art(y1).0);
-        let d = pen.art(1).0;
+        let d = pen.density();
         let mut solid = false;
         let lift: Vec<u8> = (ay0..ay1)
             .flat_map(|ay| (ax0..ax1).map(move |ax| (ax, ay)))
