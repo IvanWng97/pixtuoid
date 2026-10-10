@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1.3.0
         with:
           channel: stable
           # Its release-target cache was the repository's largest (1.46 GB of
@@ -82,12 +82,12 @@ jobs:
           done
       # Non-required is not enough: a red step still reaches mergeStateStatus
       # (#964 sat gated on a red simulation while memory was already forgiven).
-      - uses: CodSpeedHQ/action@v5
+      - uses: CodSpeedHQ/action@f842b9a3ffe213dbb81768fd7f7eeb4dfcf1c369 # v5.4.2
         continue-on-error: true
         with:
           mode: simulation
           run: cargo codspeed run
-      - uses: CodSpeedHQ/action@v5
+      - uses: CodSpeedHQ/action@f842b9a3ffe213dbb81768fd7f7eeb4dfcf1c369 # v5.4.2
         continue-on-error: true
         with:
           mode: memory
