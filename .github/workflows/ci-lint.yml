@@ -161,7 +161,6 @@ jobs:
       # while the MSRV recipe installs the exact rust-version toolchain.
       - uses: ./.github/actions/setup-just
       - run: just msrv
-      - run: just hawk-pin-check
 
   npm-gen:
     name: npm package generator

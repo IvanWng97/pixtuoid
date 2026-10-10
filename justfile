@@ -310,7 +310,6 @@ lint:
     run composites just actionlint-composites & pids+=($!)
     run zizmor  just zizmor              & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
-    run hawkpin just hawk-pin-check      & pids+=($!)
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
@@ -494,12 +493,9 @@ _api-toolchain:
     echo "installing {{ API_NIGHTLY }} (api-surface needs nightly rustdoc JSON)…" >&2
     rustup toolchain install {{ API_NIGHTLY }} --profile minimal
 
-# Report-only: findings are warnings, so it fails only when hawk cannot run.
 # `pixtuoid_web`'s `pub` surface is the wasm exports the site's JS calls,
 # outside the workspace: hawk's `--exclude-crate` case.
-# `unnecessary_restricted_visibility` (`pub(crate)` → private) goes past
-# AGENTS.md's Visibility rule.
-[doc('Report `pub` items no other workspace crate needs (cargo-hawk, advisory); forwards args, e.g. --fix')]
+[doc('Fail on a `pub` item no other workspace crate needs (cargo-hawk; the full tier gates on it); forwards args, e.g. --fix')]
 [group('rust')]
 hawk *args:
     #!/usr/bin/env bash
@@ -518,25 +514,9 @@ hawk *args:
     fi
     rustup toolchain list | grep -q '^{{ HAWK_RUST }}-' \
         || rustup toolchain install {{ HAWK_RUST }} --profile minimal --no-self-update >&2
+    # The `-A`: AGENTS.md's Visibility rule stops at `pub(crate)`, never private.
     PATH="$bin:$PATH" cargo +{{ HAWK_RUST }} hawk check --target-dir target/hawk \
-        --exclude-crate pixtuoid_web -A hawk::unnecessary_restricted_visibility "$@"
-
-# cargo refuses to build a crate below its `rust-version`, so a bump past
-# HAWK_RUST would break `hawk` only after the merge, in its advisory job.
-[doc("Fail when HAWK_RUST is below a workspace crate's rust-version")]
-[group('rust')]
-hawk-pin-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    floors="$(cargo metadata --no-deps --format-version 1 \
-        | jq -er '[.packages[].rust_version | values] | if length > 0 then .[] else error("no rust-version") end')"
-    below() { [ "$({ printf '%s\n' "$floors"; echo "$1"; } | sort -V | tail -n 1)" != "$1" ]; }
-    # The negative control: a comparison that cannot fire would pass any pin.
-    below 0 || { echo "hawk-pin-check: its comparison passed version 0, so it cannot fire" >&2; exit 2; }
-    if below {{ HAWK_RUST }}; then
-        echo "error: HAWK_RUST {{ HAWK_RUST }} is below a crate's rust-version ($(sort -V <<<"$floors" | tail -n 1)): bump HAWK_VERSION to a hawk built on one at least that new" >&2
-        exit 1
-    fi
+        --exclude-crate pixtuoid_web -D warnings -A hawk::unnecessary_restricted_visibility "$@"
 
 # Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
 # (1) build every item's docs, private ones included, with EVERY rustdoc
