@@ -394,8 +394,8 @@ def test_the_openclaw_degraded_watch_tells_a_vanished_field_from_a_missing_type(
             check(re.search(rf"\.{f}\b", plugin) is not None,
                   f"the watch pins `{f}`, which openclaw_plugin.js no longer reads")
             if literal is not None:
-                check(literal in plugin,
-                      f"the watch pins {literal}, which openclaw_plugin.js no longer compares")
+                check(re.search(rf"\.{f}\s*[!=]==\s*{re.escape(literal)}", plugin) is not None,
+                      f"the watch pins `{f}` {literal}, which openclaw_plugin.js no longer compares")
 
     real = d.fetch
     try:
@@ -406,9 +406,12 @@ def test_the_openclaw_degraded_watch_tells_a_vanished_field_from_a_missing_type(
         names = "export type PluginHookName =\n" + "".join(f'  | "{h}"\n' for h in hooks)
 
         def member(f: str, literal: str | None, drop_literal: bool) -> str:
-            union = "unknown" if literal is None else (
-                '"other"' if drop_literal else f'{literal} | "other"')
-            return f"  {f}?: {union};\n"
+            """A literal's union wraps one member per line, as upstream's formatter
+            does once the line passes its width."""
+            if literal is None:
+                return f"  {f}?: unknown;\n"
+            union = ['"other"'] if drop_literal else [literal, '"other"']
+            return f"  {f}?:\n" + "".join(f"    | {u}\n" for u in union[:-1]) + f"    | {union[-1]};\n"
 
         def document(omit: tuple[str, str] | None = None,
                      drop_literal: tuple[str, str] | None = None,

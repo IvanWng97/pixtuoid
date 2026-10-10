@@ -30,12 +30,11 @@ const SENTINEL: &str = "@pixtuoid-openclaw-plugin";
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 
-/// The OpenClaw gateway hook events pixtuoid depends on — the SINGLE source of
-/// truth, pinned to the plugin's `HOOKS` array and `decode_openclaw_hook_payload`'s
-/// arms by the consistency test below, and emitted into the drift surface by
-/// `drift_surface.rs` (which is why a const with no prod caller is test-gated
-/// rather than deleted). A rename upstream makes that hook silently stop firing,
-/// since the plugin registers by name.
+/// The OpenClaw gateway hook events the plugin FORWARDS, pinned to its `HOOKS`
+/// array and `decode_openclaw_hook_payload`'s arms by the consistency test below,
+/// and emitted into the drift surface by `drift_surface.rs` (which is why a const
+/// with no prod caller is test-gated rather than deleted). A rename upstream makes
+/// that hook silently stop firing, since the plugin registers by name.
 #[cfg(test)]
 pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
     "gateway_start",
@@ -46,11 +45,10 @@ pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
     "agent_end",
 ];
 
-/// The hooks the plugin registers but never forwards, pinned to its
-/// `OBSERVED_HOOKS` and emitted into the drift surface beside
-/// [`OPENCLAW_EVENTS`]: a rename upstream silently stops them too.
+/// The hooks the plugin registers only to stamp `agent_end`'s verdict, pinned to its
+/// `VERDICT_HOOKS` and emitted into the drift surface beside [`OPENCLAW_EVENTS`].
 #[cfg(test)]
-pub(crate) const OPENCLAW_OBSERVED: &[&str] = &["model_call_ended"];
+pub(crate) const OPENCLAW_VERDICT_HOOKS: &[&str] = &["model_call_ended"];
 
 const MANIFEST: &str = r#"{
   "id": "pixtuoid",
@@ -680,26 +678,34 @@ mod tests {
                 "plugin HOOKS is missing the registered event `{ev}`"
             );
         }
-        let array = |name: &str| -> std::collections::HashSet<&'static str> {
-            PLUGIN_TEMPLATE
-                .split_once(&format!("const {name} = ["))
-                .and_then(|(_, rest)| rest.split_once("];"))
-                .map(|(inner, _)| inner)
-                .unwrap_or_else(|| panic!("plugin defines a {name} array"))
-                .split(',')
-                .map(|s| s.trim().trim_matches('"'))
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
+        // The names of the array `[…]` or object `{ name: handler, … }` `name` binds.
+        let names =
+            |name: &str, open: &str, close: &str| -> std::collections::HashSet<&'static str> {
+                PLUGIN_TEMPLATE
+                    .split_once(&format!("const {name} = {open}"))
+                    .and_then(|(_, rest)| rest.split_once(close))
+                    .map(|(inner, _)| inner)
+                    .unwrap_or_else(|| panic!("plugin defines {name}"))
+                    .split(',')
+                    .map(|s| {
+                        s.split(':')
+                            .next()
+                            .unwrap_or_default()
+                            .trim()
+                            .trim_matches('"')
+                    })
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            };
         assert_eq!(
-            array("HOOKS"),
+            names("HOOKS", "[", "];"),
             OPENCLAW_EVENTS.iter().copied().collect(),
             "plugin HOOKS drifted from OPENCLAW_EVENTS"
         );
         assert_eq!(
-            array("OBSERVED_HOOKS"),
-            OPENCLAW_OBSERVED.iter().copied().collect(),
-            "plugin OBSERVED_HOOKS drifted from OPENCLAW_OBSERVED"
+            names("VERDICT_HOOKS", "{", "};"),
+            OPENCLAW_VERDICT_HOOKS.iter().copied().collect(),
+            "plugin VERDICT_HOOKS drifted from OPENCLAW_VERDICT_HOOKS"
         );
         for ev in OPENCLAW_EVENTS {
             let payload = json!({ "type": ev, "gatewayPort": 18789 });
@@ -1333,10 +1339,10 @@ mod tests {
     }
 
     #[test]
-    fn openclaw_observed_pins_the_exact_registered_set() {
+    fn openclaw_verdict_hooks_pin_the_exact_registered_set() {
         crate::install::assert_event_roster(
-            "OPENCLAW_OBSERVED",
-            OPENCLAW_OBSERVED,
+            "OPENCLAW_VERDICT_HOOKS",
+            OPENCLAW_VERDICT_HOOKS,
             &["model_call_ended"],
         );
     }

@@ -112,8 +112,8 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
         }],
         "agent_end" => {
             // The plugin's `errored` is the run's verdict, and `success` is not:
-            // upstream builds `success` as `!aborted && !promptError`, so a user
-            // CANCELLING a turn reads `false` and a failed provider `true` — and
+            // upstream builds it as `!aborted && !promptError`, and neither a user
+            // CANCELLING a turn nor a failed provider is a prompt error — and
             // Degraded is sticky (no TTL heals it). A missing field is no evidence
             // of an error.
             let failed = obj.get("errored").and_then(Value::as_bool) == Some(true);
@@ -259,17 +259,19 @@ mod tests {
         );
     }
 
-    /// A provider failure ends its run `success: true` upstream; the plugin's
-    /// `errored` carries it.
+    /// `success` says nothing of a provider failure; the plugin's `errored` does.
     #[test]
-    fn a_failed_provider_degrades_the_gateway_though_the_run_succeeded() {
-        assert_eq!(
-            decode(json!({"type": "agent_end", "runId": "r", "sessionId": "s",
-                          "success": true, "errored": true})),
-            vec![DaemonPresenceUpdate::RunFailed {
-                run_key: "r".into()
-            }]
-        );
+    fn errored_alone_decides_a_failed_run() {
+        for success in [true, false] {
+            assert_eq!(
+                decode(json!({"type": "agent_end", "runId": "r", "sessionId": "s",
+                              "success": success, "errored": true})),
+                vec![DaemonPresenceUpdate::RunFailed {
+                    run_key: "r".into()
+                }],
+                "success: {success}"
+            );
+        }
     }
 
     #[test]

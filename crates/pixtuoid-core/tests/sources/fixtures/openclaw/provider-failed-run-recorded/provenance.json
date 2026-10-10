@@ -1,0 +1,12 @@
+{
+  "origin": "recorded",
+  "cli": "openclaw",
+  "version": "2026.9.9 (bcfc888)",
+  "captured": "2026-10-10",
+  "command": "scripts/lib/capture-openclaw-provider-failed.sh — a throwaway OpenClaw home whose only provider is a closed loopback port, the plugin `pixtuoid connect openclaw` installs there, `openclaw gateway run`, one `openclaw agent -m <prompt>` turn, then SIGTERM",
+  "note": "A failed provider, from real bytes: the gateway retries the attempt, and every attempt's `agent_end` arrives `success:false` with no upstream `error` (so it reads like a cancel) and the plugin's `errored:true`, read off the attempt's last `model_call_ended`. No model call was made: the provider refuses at connect. cli and version were set by hand: the recorder probes the driver script's `--version`.",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 46
+  }
+}

@@ -39,7 +39,7 @@ fn surface() -> Value {
         json!(
             [
                 crate::install::openclaw::OPENCLAW_EVENTS,
-                crate::install::openclaw::OPENCLAW_OBSERVED,
+                crate::install::openclaw::OPENCLAW_VERDICT_HOOKS,
             ]
             .concat()
         ),

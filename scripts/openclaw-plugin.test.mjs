@@ -25,8 +25,8 @@ const EXPECTED_HOOKS = [
   "before_agent_run",
   "agent_end",
 ];
-// Must match `OPENCLAW_OBSERVED`: registered, never forwarded.
-const OBSERVED_HOOKS = ["model_call_ended"];
+// Must match `OPENCLAW_VERDICT_HOOKS`: registered, never forwarded.
+const VERDICT_HOOKS = ["model_call_ended"];
 // OpenClaw's own default — the plugin's last-resort fallback.
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -96,9 +96,9 @@ async function recorded(outFile, n) {
   }
 }
 
-test("registers exactly the six presence hooks and the observed ones", async (t) => {
+test("registers exactly the six presence hooks and the verdict ones", async (t) => {
   const { plugin } = await renderPlugin(t);
-  assert.deepEqual([...register(plugin).keys()], [...EXPECTED_HOOKS, ...OBSERVED_HOOKS]);
+  assert.deepEqual([...register(plugin).keys()], [...EXPECTED_HOOKS, ...VERDICT_HOOKS]);
 });
 
 test("the decision hook passes EXPLICITLY and the observers are void", async (t) => {
@@ -113,8 +113,11 @@ test("the decision hook passes EXPLICITLY and the observers are void", async (t)
   decision.reason = "a consumer stamped this";
   const next = handlers.get("before_agent_run")({ runId: "r2" }, {});
   assert.deepEqual(Object.keys(next), ["outcome"], "each decision must be a fresh object");
-  for (const hook of [...EXPECTED_HOOKS, ...OBSERVED_HOOKS].filter((h) => h !== "before_agent_run")) {
+  for (const hook of EXPECTED_HOOKS.filter((h) => h !== "before_agent_run")) {
     assert.equal(handlers.get(hook)({}, {}), undefined, `${hook} must be a void observer`);
+  }
+  for (const hook of VERDICT_HOOKS) {
+    assert.equal(handlers.get(hook)({}, {}), undefined, `${hook} must return nothing`);
   }
 });
 
@@ -275,15 +278,15 @@ for (const [raw, want, why] of [
   });
 }
 
-test("agent_end forwards the errored discriminator, never the error string", { skip: !POSIX }, async (t) => {
+test("agent_end forwards the errored verdict, never the error string", { skip: !POSIX }, async (t) => {
   // Upstream builds `success` as `!aborted && !promptError`, so success:false alone
-  // cannot tell a user CANCELLING a turn from a provider outage. Only a prompt error
+  // cannot tell a user CANCELLING a turn from a prompt error. Only a prompt error
   // carries `error`, so its PRESENCE is the signal; the string can embed prompt
   // content and must never leave the gateway.
   const { outFile, plugin } = await renderPlugin(t);
   const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
   handlers.get("agent_end")(
-    { runId: "r1", sessionId: "s1", success: false, error: "Provider 500: upstream down" },
+    { runId: "r1", sessionId: "s1", success: false, error: "context overflow: my secret prompt" },
     {},
   );
   handlers.get("agent_end")({ runId: "r2", sessionId: "s1", success: false }, {});
@@ -297,7 +300,7 @@ test("agent_end forwards the errored discriminator, never the error string", { s
   for (const row of rows) {
     assert.equal(row.error, undefined, "the error STRING must never be forwarded");
     assert.ok(
-      !JSON.stringify(row).includes("upstream down"),
+      !JSON.stringify(row).includes("my secret prompt"),
       `no error text may leak: ${JSON.stringify(row)}`,
     );
   }
@@ -330,9 +333,9 @@ test("the shim is spawned with the source-attribution flag", { skip: !POSIX }, a
   assert.deepEqual(argv, ["--source openclaw"], "the shim must be told which source it speaks for");
 });
 
-// Upstream ends a run whose provider failed `success: true` — only a prompt error
-// fails it — so the run's LAST model call decides: a provider failure degrades, a
-// retry or fallback that then completes heals, and the user's own abort is no failure.
+// A failed provider's `agent_end` carries no `error` — it is no prompt error — so the
+// run's LAST model call decides: a provider failure degrades, a later call in the run
+// that completes clears it, and the user's own abort is none.
 test("a run's last model call decides errored, and the call itself is never forwarded", { skip: !POSIX }, async (t) => {
   const { outFile, plugin } = await renderPlugin(t);
   const handlers = register(plugin, { config: { gateway: { port: 18789 } } });

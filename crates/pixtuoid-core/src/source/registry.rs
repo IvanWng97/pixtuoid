@@ -646,7 +646,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
 const OPENCLAW: SourceDescriptor = SourceDescriptor {
     name: openclaw::SOURCE_NAME,
     label_prefix: "ok",
-    verified_version: "2026.7.1",
+    verified_version: "2026.9.9",
     version_probe: Some(&["openclaw", "--version"]),
     home_env: None,
     kind: SourceKind::Daemon {

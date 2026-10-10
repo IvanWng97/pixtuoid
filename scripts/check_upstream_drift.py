@@ -192,7 +192,7 @@ OPENCLAW_HOOK_TYPES_URL = (
 # What openclaw_plugin.js stamps `errored` from — Degraded's only trigger: each
 # upstream type's fields it reads, and the union literal it compares one against.
 OPENCLAW_DEGRADED_FIELDS: dict[str, tuple[tuple[str, str | None], ...]] = {
-    "PluginHookAgentEndEvent": (("success", None), ("error", None)),
+    "PluginHookAgentEndEvent": (("runId", None), ("success", None), ("error", None)),
     "PluginHookModelCallBaseEvent": (("runId", None),),
     "PluginHookModelCallEndedEvent": (("outcome", '"error"'), ("failureKind", '"aborted"')),
 }
@@ -2053,7 +2053,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 members = _strip_nested(body)
                 for field, literal in fields:
                     m = re.search(
-                        rf"(?:^|[;,\n])\s*(?:readonly\s+)?{field}\??\s*:([^;,\n]*)", members
+                        rf"(?:^|[;,\n])\s*(?:readonly\s+)?{field}\??\s*:([^;]*)", members
                     )
                     if m is None:
                         lost = f"no longer declares `{field}`"
