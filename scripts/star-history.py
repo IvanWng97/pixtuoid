@@ -56,7 +56,7 @@ query($owner: String!, $name: String!, $first: Int!, $after: String) {
 Point = tuple[dt.date, int]
 
 WIDTH, HEIGHT = 640, 320
-# One chart pixel — coarser than a label glyph needs, finer than the README banner's sprites.
+# One chart pixel — coarser than a label glyph needs.
 PX = 4
 COUNT_PX, LABEL_PX = 3, 2
 # The window the city stands in; the wall around it carries the axes and the header.

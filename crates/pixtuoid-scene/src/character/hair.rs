@@ -454,4 +454,63 @@ mod tests {
         assert!(flaws.is_empty(), "{flaws:#?}");
         assert!(dressed > 0, "the bundled pack dresses its characters");
     }
+
+    /// `banner.golden` is the README banner's cutaway art as the office draws
+    /// it: the coworker holding a coffee, dressed in `crop`, and the sleeping
+    /// cat. `scripts/gen-banner.py` only lays it out, so the banner cannot drift
+    /// from the pack or from [`dress`]; `just gen-banner` rewrites it.
+    #[test]
+    #[cfg(feature = "cutaway-assets")]
+    fn the_readme_banner_art_is_the_office_s_own() {
+        use std::fmt::Write as _;
+        const BANNER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/character/banner.golden");
+        const KEYS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let pack = crate::pack::test_office();
+        let four = Density::new(4).expect("nonzero");
+        let coffee = &pack.variants_of(Piece::HoldingCoffee)[&four];
+        let body = coffee.first();
+        let head = coffee.head(0).expect("the coworker's head is marked");
+        let style = pack.hairstyle("crop", four);
+        assert!(style.is_some(), "the pack draws `crop` at 4x");
+        let figure = dress(
+            body,
+            &Dress::of(body, head, style),
+            style,
+            &[],
+            pack.character_outline(),
+        );
+        let cat = &pack.variants_of(Piece::CatSleep)[&four];
+        let art = std::iter::once(("coworker", coffee.frame_ms(), &figure))
+            .chain(cat.frames().iter().map(|f| ("cat", cat.frame_ms(), f)));
+        let (mut keys, mut frames) = (Vec::<Rgb>::new(), String::new());
+        for (name, ms, f) in art {
+            writeln!(frames, "@frame {name} {ms}").expect("a String takes every write");
+            for y in 0..f.height() {
+                let row: Vec<String> = (0..f.width())
+                    .map(|x| match f.get(x, y).copied().flatten() {
+                        None => ".".to_owned(),
+                        Some(c) => {
+                            let i = keys.iter().position(|&k| k == c).unwrap_or_else(|| {
+                                keys.push(c);
+                                keys.len() - 1
+                            });
+                            KEYS.chars().nth(i).expect("a key per colour").to_string()
+                        }
+                    })
+                    .collect();
+                writeln!(frames, "{}", row.join(" ")).expect("a String takes every write");
+            }
+        }
+        let palette: Vec<String> = keys
+            .iter()
+            .zip(KEYS.chars())
+            .map(|(c, k)| format!("{k}=#{:02x}{:02x}{:02x}", c.r, c.g, c.b))
+            .collect();
+        let golden = format!("@palette {}\n{frames}", palette.join(" "));
+        let pinned = snapbox::Data::read_from(
+            std::path::Path::new(BANNER),
+            Some(snapbox::data::DataFormat::Text),
+        );
+        snapbox::assert_data_eq!(golden, pinned.raw());
+    }
 }

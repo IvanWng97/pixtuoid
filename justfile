@@ -288,7 +288,7 @@ lint:
     pids=(); fail=0
     run fmt     just fmt-check          & pids+=($!)
     run genart  just gen-art-check       & pids+=($!)
-    run genhero just gen-hero-check      & pids+=($!)
+    run genbanner just gen-banner-check  & pids+=($!)
     run machete just machete            & pids+=($!)
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
@@ -821,9 +821,9 @@ site-e2e: gen-wasm site-demos
 # and check the committed copies (each `*-check` header says against what).
 
 # No gen-media: media renders from main in media-regen.yml, never in a PR.
-[doc('Regenerate what a look-changing PR commits (sprites + icons + README sections + cutaway golden)')]
+[doc('Regenerate what a look-changing PR commits (sprites + banner + icons + README sections + cutaway golden)')]
 [group('gen')]
-gen: gen-art gen-hero gen-icons gen-readme gen-cutaway-golden
+gen: gen-art gen-banner gen-icons gen-readme gen-cutaway-golden
 
 [doc("Regenerate the bundled pack's generated sprites (every @Nx variant + the 1x pieces it owns) from scripts/gen-art.py")]
 [group('gen')]
@@ -837,17 +837,19 @@ gen-art-check:
     python3 scripts/gen-art.py --selftest
     python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
 
-[doc("Regenerate the README's hero (docs/images/hero/) from scripts/gen-hero.py")]
+# After gen-art: the golden is the pack's art as the office draws it.
+[doc("Regenerate the README's banner: its art golden from the pack, then docs/images/banner/ from scripts/gen-banner.py")]
 [group('gen')]
-gen-hero:
-    python3 scripts/gen-hero.py docs/images/hero
+gen-banner:
+    SNAPSHOTS=overwrite just test -p pixtuoid-scene --lib the_readme_banner_art_is_the_office_s_own
+    python3 scripts/gen-banner.py docs/images/banner
 
-# Stdlib-only, so `lint` runs it too.
-[doc('Fail if the committed README hero differs from what scripts/gen-hero.py draws')]
+# Stdlib-only, so `lint` runs it too; the golden's own drift is a test.
+[doc('Fail if the committed README banner differs from what scripts/gen-banner.py draws')]
 [group('gen')]
-gen-hero-check:
-    python3 scripts/gen-hero.py --selftest
-    python3 scripts/gen-hero.py --check docs/images/hero
+gen-banner-check:
+    python3 scripts/gen-banner.py --selftest
+    python3 scripts/gen-banner.py --check docs/images/banner
 
 # Not in `gen`: it downloads its pinned fonts.
 [doc("Regenerate the scene's Fusion Pixel faces + their licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fonts.py")]
@@ -973,7 +975,7 @@ gen-wasm-check:
 
 [doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
-gen-check: compare-selftest gen-readme-check gen-art-check gen-icons-check
+gen-check: compare-selftest gen-readme-check gen-art-check gen-banner-check gen-icons-check
 
 # The icons also land in the site's committed assets and change only with their
 # source, so their drift stays a gate.

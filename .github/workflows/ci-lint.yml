@@ -193,8 +193,8 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Generated sprites, icons and hero, README sections, the comparator
-        run: just gen-readme-check gen-art-check gen-hero-check gen-icons-check compare-selftest
+      - name: Generated sprites, icons and banner, README sections, the comparator
+        run: just gen-readme-check gen-art-check gen-banner-check gen-icons-check compare-selftest
       # gen-icons-check's overlays; smoke uploads the media ones as gen-check-diffs.
       - name: Upload drift overlays
         if: always()
