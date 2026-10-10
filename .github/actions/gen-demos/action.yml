@@ -15,13 +15,11 @@ runs:
 
     - if: steps.cache.outputs.cache-hit != 'true'
       uses: ./.github/actions/setup-alsa
-    - name: Install ffmpeg and gifsicle
-      if: steps.cache.outputs.cache-hit != 'true'
-      shell: bash
-      run: |
-        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-        sudo apt-get "${apt_opts[@]}" update
-        sudo apt-get "${apt_opts[@]}" install -y --no-install-recommends ffmpeg gifsicle
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: ./.github/actions/apt-install
+      with:
+        packages: ffmpeg gifsicle
+        recommends: 'false'
     - name: Render the demos
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash

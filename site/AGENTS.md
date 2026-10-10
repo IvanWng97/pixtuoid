@@ -8,7 +8,7 @@ docs, demo media all flow in from outside `site/`. Parent guide: the workspace
 > **You are in the Astro consumer, not the Rust producer.** Rust house rules
 > (`cargo`/`clippy`, `just preflight`, the crate CI gates) do not apply to a
 > site-only change. The gates here are `just site-check` (+ `just site-fmt`)
-> and `just site-e2e`.
+> and `just site-e2e`; the pre-push hook still runs `just preflight`.
 
 ## Cross-boundary build inputs (the coupling that bites)
 
@@ -105,7 +105,8 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   not switch to the default `swap` (Ubuntu cold visits reflow past the CLS
   budget; `font-layout.spec.ts` reproduces it deliberately).
 - **npm**: `audit` runs LAST in `verify` (a live advisory would short-circuit
-  the checks below it — #847/#849) but FIRST in `pages.yml` (that one ships).
+  the checks below it — #847/#849); CI runs it when a PR changes
+  `package.json` or `package-lock.json`, and daily in `audit.yml`.
   npm 12 pinned (`packageManager` + `engine-strict`); install scripts
   fail-closed (`strict-allow-scripts`, exact-version `allowScripts`, explicit
   `fsevents` denial) — review with `npm install-scripts ls`.

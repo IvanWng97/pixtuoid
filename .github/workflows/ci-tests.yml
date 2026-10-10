@@ -31,7 +31,7 @@ jobs:
             timeout: 25
           # Track windows-latest deliberately: this gate catches hosted-image
           # changes. It runs the Windows pipes and atomic-write retries the Linux
-          # entry compiles out, and the full tier measures their coverage.
+          # entry compiles out, and the full tier uploads their coverage.
           - platform: windows
             runner: windows-latest
             flag: windows
@@ -59,21 +59,16 @@ jobs:
       - uses: ./.github/actions/setup-gpu
       - uses: ./.github/actions/setup-cargo-just
         with:
-          components: ${{ inputs.full && 'llvm-tools-preview' || '' }}
+          components: llvm-tools-preview
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      # Coverage instruments the whole build, so it is the full tier's: a PR's
-      # pushes run the plain suite, and the queue and main measure coverage.
-      - name: Unit tests + JUnit XML
-        id: tests
-        if: ${{ !inputs.full }}
-        run: just test --workspace --profile ci
       - name: Install cargo-llvm-cov
-        if: ${{ inputs.full }}
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        id: coverage
-        if: ${{ inputs.full }}
+      # Both tiers run the instrumented suite: rust-cache keys a job's cache on
+      # the job and toolchain, not the build, and a PR restores what main's full
+      # tier saved, so a plain PR build recompiled the whole graph.
+      - name: Unit tests under coverage + JUnit XML
+        id: tests
         run: just coverage
       - name: Upload coverage to Codecov
         if: ${{ inputs.full }}
@@ -89,7 +84,7 @@ jobs:
           token: ${{ secrets.MERGIFY_TOKEN }}
           report_path: target/nextest/ci/junit.xml
           job_name: ${{ matrix.platform }}-test
-          test_step_outcome: ${{ inputs.full && steps.coverage.outcome || steps.tests.outcome }}
+          test_step_outcome: ${{ steps.tests.outcome }}
 
   snapshots:
     name: snapshot hygiene

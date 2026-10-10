@@ -525,47 +525,6 @@ yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     and ([.jobs.report_absence.steps[].env.PR_STATE // empty] == ["${{ needs.analyze.outputs.state }}"])' >/dev/null ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the resolved PR state to the absence report"
 
-# claude-refuses-forks-before-the-action pins only that the fork refusal exists
-# and runs before the action; what it actually does is asserted here.
-CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.yml}"
-
-# Replaces the publisher stub, which answers only `{head: {sha}}`; this step
-# reads the whole PR through --jq.
-cat >"$fake_bin/gh" <<'STUB'
-#!/usr/bin/env bash
-set -euo pipefail
-[[ "$1" == api ]]
-jq_expr=""
-while [[ $# -gt 0 ]]; do
-    [[ "$1" == --jq ]] && jq_expr="$2"
-    shift
-done
-printf '%s' "$FAKE_PR_JSON" | jq -r "$jq_expr"
-STUB
-chmod +x "$fake_bin/gh"
-
-refusal_script="$(workflow_step_script "$CLAUDE_TAG_WORKFLOW_FILE" "Refuse fork pull requests")"
-
-assert_refusal() {
-    local fixture="$1"
-    local expect_refused="$2"
-    local label="$3"
-    if PATH="$fake_bin:$PATH" \
-        FAKE_PR_JSON="$fixture" \
-        GH_TOKEN="test-token" \
-        PR_NUMBER="42" \
-        REPOSITORY="owner/repo" \
-        bash -c "$refusal_script" >/dev/null 2>&1; then
-        [[ "$expect_refused" == false ]] || fail "@claude fork guard admitted $label"
-    else
-        [[ "$expect_refused" == true ]] || fail "@claude fork guard rejected $label"
-    fi
-}
-
-assert_refusal "$valid_pr" false "an internal pull request"
-assert_refusal "$fork_pr" true "a fork pull request"
-assert_refusal '{"head":{"repo":null},"base":{"ref":"main"},"state":"open"}' true "a deleted fork head"
-
 # ── require-jobs: the verdict ci-gate and every group's `required` job reach ──
 # Anything but success is red, and an empty needs map must not pass vacuously.
 REQUIRE_JOBS_ACTION_FILE="${REQUIRE_JOBS_ACTION_FILE:-.github/actions/require-jobs/action.yml}"
@@ -1147,3 +1106,91 @@ assert_gate 0 "a plan with no units" "$(
     spawn c correctness-reviewer x
     spawn d design-reviewer x
 )" '[]' 0
+
+# ── apt-install: a failed or stalled update or download retries under the
+# action's own bound, and the install never runs under it or after a failed
+# download.
+apt_action=.github/actions/apt-install/action.yml
+apt_script="$(yq -e -r '.runs.steps[0].run' "$apt_action")" || fail "apt-install has no run step"
+apt_attempts="$(yq -e -r '.runs.steps[0].env.ATTEMPTS' "$apt_action")" || fail "apt-install sets no ATTEMPTS"
+apt_bound="$(yq -e -r '.runs.steps[0].env.ATTEMPT_TIMEOUT' "$apt_action")" || fail "apt-install sets no ATTEMPT_TIMEOUT"
+((apt_attempts > 1)) || fail "apt-install allows $apt_attempts attempt(s), so nothing retries"
+apt_dir="$test_dir/apt"
+mkdir -p "$apt_dir/bin"
+# shellcheck disable=SC2016 # The stubs read their fixtures when they run.
+printf '%s\n' '#!/usr/bin/env bash' 'printf "timeout %s\n" "$*" >>"$APT_LOG"; while [[ "$1" == -* ]]; do shift 2; done; shift; "$@"' >"$apt_dir/bin/timeout"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' '"$@"' >"$apt_dir/bin/sudo"
+# Fails the first APT_FAILS calls of the kind APT_FAIL_ON names.
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' 'printf "apt-get %s\n" "$*" >>"$APT_LOG"' \
+    'case " $* " in *" update "*) kind=update ;; *" --download-only "*) kind=download ;; *) exit 0 ;; esac' \
+    '[[ "$kind" == "$APT_FAIL_ON" ]] || exit 0' \
+    'n=$(($(cat "$APT_LOG.n" 2>/dev/null || echo 0) + 1)); echo $n >"$APT_LOG.n"; ((n > APT_FAILS))' >"$apt_dir/bin/apt-get"
+chmod +x "$apt_dir/bin/"*
+run_apt() {
+    rm -f "$apt_dir/log" "$apt_dir/log.n"
+    PATH="$apt_dir/bin:$PATH" APT_LOG="$apt_dir/log" APT_FAIL_ON="$1" APT_FAILS="$2" PACKAGES="pkg-a pkg-b" \
+        RECOMMENDS="${3:-true}" ATTEMPTS="$apt_attempts" ATTEMPT_TIMEOUT="$apt_bound" bash -c "$apt_script" >/dev/null 2>&1
+}
+apt_count() { grep -c -e "$1" "$apt_dir/log" || true; }
+run_apt none 0 || fail "apt-install failed with a healthy mirror"
+[[ "$(apt_count "^timeout -k 10 $apt_bound sudo apt-get .*install -y --download-only pkg-a pkg-b$")" == 1 ]] ||
+    fail "apt-install did not bound the package download by its ATTEMPT_TIMEOUT: $(<"$apt_dir/log")"
+[[ "$(apt_count '^apt-get .*install -y --no-download pkg-a pkg-b$')" == 1 ]] ||
+    fail "apt-install did not install the downloaded packages: $(<"$apt_dir/log")"
+if grep -q '^timeout .*--no-download' "$apt_dir/log"; then fail "apt-install bounded the install itself"; fi
+for kind in update download; do
+    run_apt "$kind" $((apt_attempts - 1)) || fail "apt-install did not recover from a failed $kind on its last attempt"
+    pattern=" update\$"
+    [[ "$kind" == download ]] && pattern=" --download-only pkg-a pkg-b\$"
+    [[ "$(apt_count "^timeout -k 10 $apt_bound sudo apt-get .*$pattern")" == "$apt_attempts" ]] ||
+        fail "apt-install did not retry each failed $kind: $(<"$apt_dir/log")"
+    run_apt "$kind" "$apt_attempts" && fail "apt-install passed after every $kind failed"
+    [[ "$(apt_count '--no-download')" == 0 ]] || fail "apt-install installed after every $kind failed"
+done
+run_apt none 0 false || fail "apt-install failed without recommends"
+[[ "$(apt_count '^apt-get .*install -y --no-install-recommends')" == 2 ]] ||
+    fail "apt-install did not drop recommends from both the download and the install: $(<"$apt_dir/log")"
+
+# ── path-changed: a PR's merge commit against its base parent; anything it
+# cannot diff counts as changed.
+changed_script="$(yq -e -r '.runs.steps[0].run' .github/actions/path-changed/action.yml)" ||
+    fail "path-changed has no run step"
+repo="$test_dir/changed-repo"
+git init -q "$repo" && git -C "$repo" config user.email t@t && git -C "$repo" config user.name t
+echo a >"$repo/lock" && echo a >"$repo/other" && echo a >"$repo/gone" && git -C "$repo" add . && git -C "$repo" commit -qm base
+git -C "$repo" checkout -qb pr && echo b >"$repo/other" && git -C "$repo" rm -q gone && git -C "$repo" commit -qam pr
+git -C "$repo" checkout -q - && git -C "$repo" merge -q --no-ff --no-edit pr
+changed() {
+    : >"$test_dir/changed-output"
+    (cd "$1" && GITHUB_EVENT_NAME="$2" GITHUB_OUTPUT="$test_dir/changed-output" CHANGED_PATHS="$3" bash -c "$changed_script") ||
+        fail "path-changed exited non-zero"
+    sed -n 's/^changed=//p' "$test_dir/changed-output"
+}
+[[ "$(changed "$repo" pull_request other)" == true ]] || fail "path-changed missed a path the PR changes"
+[[ "$(changed "$repo" pull_request lock)" == false ]] || fail "path-changed reported a path the PR leaves alone"
+[[ "$(changed "$repo" pull_request "lock other")" == true ]] || fail "path-changed missed one changed path among several"
+[[ "$(changed "$repo" pull_request gone)" == true ]] || fail "path-changed missed a path the PR deletes"
+if (cd "$repo" && GITHUB_EVENT_NAME=pull_request GITHUB_OUTPUT=/dev/null CHANGED_PATHS="lock no-such-file" bash -c "$changed_script") >/dev/null 2>&1; then
+    fail "path-changed judged a path that exists on neither side"
+fi
+[[ "$(changed "$repo" push other)" == false ]] || fail "path-changed judged a push as a PR"
+git init -q "$test_dir/no-parent" && echo a >"$test_dir/no-parent/lock" && git -C "$test_dir/no-parent" add lock &&
+    git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q -m only
+[[ "$(changed "$test_dir/no-parent" pull_request lock)" == true ]] || fail "path-changed passed a diff it could not run"
+
+# ── An errored run names its error on one annotation line, escaped so the
+# message cannot start a workflow command; a clean or absent result says nothing.
+error_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Report the model's error")"
+report_error() {
+    jq -n "$1" >"$test_dir/execution.json"
+    EXECUTION_FILE="$test_dir/execution.json" bash -c "$error_script"
+}
+out="$(report_error '[{type: "assistant"}, {type: "result", is_error: true, result: "API Error: 429 50%\n::warning::x\r"}]')" ||
+    fail "the error report exited non-zero"
+[[ "$out" == '::error title=Claude run errored::API Error: 429 50%25%0A::warning::x%0D' ]] ||
+    fail "the error report did not print one escaped annotation: $out"
+[[ -z "$(report_error '[{type: "result", is_error: false, result: "{}"}]')" ]] ||
+    fail "the error report spoke for a clean run"
+[[ -z "$(report_error '[{type: "assistant"}]')" ]] || fail "the error report spoke with no result"

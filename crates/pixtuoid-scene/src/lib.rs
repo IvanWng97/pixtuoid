@@ -26,6 +26,8 @@
 // Scoped to this PUBLISHED crate, not `[workspace.lints]` — the binary crates'
 // `pub` items aren't a semver surface.
 #![warn(missing_docs)]
+// AGENTS.md's Errors rule, as a lint: no `unwrap()` outside tests.
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
 
 #[doc(hidden)]
 pub mod anim;

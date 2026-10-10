@@ -44,12 +44,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 2
           persist-credentials: false
       # No setup-cargo-just: nothing compiles here, so the runner's preinstalled
       # cargo is enough — but cargo-deny DOES shell out to `cargo metadata`.
       - uses: taiki-e/install-action@cargo-deny
       - uses: ./.github/actions/setup-just
       - run: just deny
+      - uses: ./.github/actions/path-changed
+        id: lockfile
+        with:
+          # deny.toml decides the verdict as much as the graph does.
+          paths: Cargo.lock deny.toml
+      - if: steps.lockfile.outputs.changed == 'true'
+        run: just deny-advisories
 
   machete:
     name: unused deps

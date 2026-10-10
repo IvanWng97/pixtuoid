@@ -323,63 +323,6 @@
     - .jobs.exempt.strategy.matrix.lens |= .[:1]
     - .jobs.review.with.lenses = "[\"correctness\", \"design\", \"security\"]"
 
-# ── claude.yml: the only Claude job with contents:write
-
-- id: claude-review-events-need-a-same-repo-head
-  file: .github/workflows/claude.yml
-  why: >-
-    The job checks out without a ref, and on these two events that ref is the
-    PR's merge ref, so an arm without the same-repo check stages a fork's files —
-    its AGENTS.md files among them — as the agent's own instructions.
-  assert: |
-    . as $workflow
-    | [.jobs[] | select(any(.steps[]?; (.uses // "") | startswith("anthropics/claude-code-action@")))] as $jobs
-    | (($jobs[0].if // "") | gsub("\r?\n[ \t]*"; " ") | split(" || ")) as $arms
-    | ($jobs | length == 1)
-      and (["pull_request_review", "pull_request_review_comment"]
-           | map(select(. as $event | $workflow.on | has($event)))
-           | all(. as $event
-                 | [$arms[] | select(contains("github.event_name == '\($event)'"))]
-                 | length > 0
-                   and all(contains("github.event.pull_request.head.repo.full_name == github.repository"))))
-  break:
-    - |
-      .jobs.claude.if |= sub(
-        "github.event_name == 'pull_request_review' && github.event.pull_request.head.repo.full_name == github.repository";
-        "github.event_name == 'pull_request_review'")
-    - |
-      .jobs.claude.if |= sub(
-        "github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository";
-        "github.event_name == 'pull_request_review_comment'")
-    - |
-      .jobs.claude.if += " || (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))"
-    - del(.jobs.claude.if)
-    - .jobs.second = .jobs.claude
-
-- id: claude-refuses-forks-before-the-action
-  file: .github/workflows/claude.yml
-  why: >-
-    An issue_comment payload's `issue.pull_request` holds only URLs, no head, so
-    no `if:` can tell a fork's PR from a same-repo one, and the action's tag
-    mode checks the PR head out regardless; the refusal has to be a step that
-    runs before the action stages that tree (#799).
-  assert: |
-    [.jobs[] | select(any(.steps[]?; (.uses // "") | startswith("anthropics/claude-code-action@")))] as $jobs
-    | ($jobs | length == 1)
-      and ((.on | has("issue_comment") | not)
-           or (($jobs[0].steps | to_entries) as $steps
-               | ([$steps[] | select((.value.if // "") | contains("issue_comment"))
-                            | select((.value.run // "") | contains("head.repo.full_name"))
-                            | .key] | min) as $refusal
-               | ([$steps[] | select((.value.uses // "") | startswith("anthropics/claude-code-action@"))
-                            | .key] | min) as $action
-               | $refusal != null and $refusal < $action))
-  break:
-    - .jobs.claude.steps |= (.[1:] + .[:1])
-    - del(.jobs.claude.steps[0])
-    - .jobs.claude.steps[0].if = "${{ always() }}"
-    - .jobs.second = .jobs.claude
-
 # ── Scopes that only look narrow
 
 - id: cache-cleanup-stays-inert
@@ -608,6 +551,50 @@
     - (.jobs[] | select(has("if")) | .if) |= sub("github.repository_id == '[0-9]+'"; "github.repository == 'IvanWng97/pixtuoid'")
     - (.jobs[] | select(has("if")) | .if) |= sub("( && )?github.repository_id == '[0-9]+'"; "")
     - '.jobs.ungated = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
+
+- id: publishers-need-the-release-environment
+  file: [.github/workflows/release-plz.yml, .github/workflows/release.yml]
+  why: >-
+    The crates.io and npm Trusted Publisher records name environment
+    `release`, whose required reviewer is the only approval a publish gets; a
+    publishing job without it either fails to mint or, once a record drops the
+    environment, publishes unapproved.
+  assert: |
+    [.jobs[] | select(.permissions["id-token"] == "write")
+             | select(any(.steps[]?; ((.uses // "") | startswith("release-plz/action@")) or ((.run // "") | test("npm publish"))))]
+    | length > 0 and all(.[]; .environment == "release")
+  break:
+    - del(.jobs[].environment)
+    - (.jobs[] | select(has("environment")) | .environment) = "staging"
+
+- id: credential-jobs-restore-no-cache
+  file: .github/workflows/release-plz.yml
+  why: >-
+    Both release-plz jobs compile with RELEASE_PLZ_TOKEN in scope, and
+    `release` with the publish OIDC claim too; a restored cache is written by
+    any main run, so it would hand that code to a credential-holding build
+    (zizmor cache-poisoning).
+  assert: |
+    [.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just")]
+    | length > 0 and all(.[]; (.with["enable-cache"] // "") == "false")
+  break:
+    - (.jobs.release.steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with) |= del(.["enable-cache"])
+    - (.jobs["release-pr"].steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["enable-cache"]) = "true"
+
+- id: release-attests-before-publishing
+  file: .github/workflows/release.yml
+  why: >-
+    softprops publishes the draft once its assets are attached, so an
+    attestation after it can fail with the release already public and its
+    binaries unattested.
+  assert: |
+    .jobs.release.steps as $steps
+    | ([$steps | to_entries[] | select((.value.uses // "") | startswith("actions/attest")) | .key] | min) as $attest
+    | ([$steps | to_entries[] | select((.value.uses // "") | startswith("softprops/action-gh-release@")) | .key] | min) as $publish
+    | $attest != null and $publish != null and $attest < $publish
+  break:
+    - .jobs.release.steps |= ([.[] | select((.uses // "") | startswith("actions/attest") | not)] + [.[] | select((.uses // "") | startswith("actions/attest"))])
+    - .jobs.release.steps |= map(select((.uses // "") | startswith("actions/attest") | not))
 
 - id: release-publishes-after-ci-gate
   file: .github/workflows/release-plz.yml

@@ -306,6 +306,22 @@ jobs:
             --settings '{"permissions":{"blockReadsOutsideWorkingDirectories":true},"claudeMdExcludes":["**/.claude-review/**"]}'
             --json-schema ${{ steps.schema.outputs.json }}
 
+      # show_full_output stays off, so a run that ends on an API error (is_error
+      # on the result) would fail with no reason in the log; that one message
+      # carries no tool output. Encoded as @actions/core encodes command data
+      # (actions/toolkit packages/core/src/command.ts:103-108 @fa980c41), so it
+      # stays on the one `::error` line and cannot start a workflow command.
+      - name: Report the model's error
+        if: failure() && steps.claude.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          jq -r '[.[] | select(.type == "result" and .is_error == true)] | last // empty
+            | (.result // "no message") | .[:2000]
+            | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A")
+            | "::error title=Claude run errored::\(.)"' "$EXECUTION_FILE"
+
       # Holds the run, not the model's account of it, to the shell's plan: from
       # the action's message log, each unit's completed unit-reviewer passes,
       # both lens reviewers and a verifier per kept finding.

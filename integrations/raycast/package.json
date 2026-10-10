@@ -77,5 +77,8 @@
     "gen:contract": "json2ts -i contract/source-status.schema.json -o src/contract.ts && json2ts -i contract/outcome-row.schema.json -o src/contract-outcome.ts",
     "publish": "npx @raycast/api@latest publish",
     "test": "node --test \"test/*.test.mjs\""
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
   }
 }

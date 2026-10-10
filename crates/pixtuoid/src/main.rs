@@ -1,5 +1,6 @@
-// The lib's rule, for the same reason (see its crate root).
+// The lib's rules, for the same reasons (see its crate root).
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
 
 use std::io::Write;
 

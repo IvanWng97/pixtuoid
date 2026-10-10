@@ -117,12 +117,10 @@ jobs:
         if: matrix.cross
         uses: taiki-e/install-action@cross
 
-      - name: Install musl-tools
-        if: contains(matrix.target, 'musl')
-        run: |
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_opts[@]}" update
-          sudo apt-get "${apt_opts[@]}" install -y musl-tools
+      - if: contains(matrix.target, 'musl')
+        uses: ./.github/actions/apt-install
+        with:
+          packages: musl-tools
 
       - name: Build
         run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}"
@@ -233,6 +231,16 @@ jobs:
           cd artifacts
           sha256sum -- *.tar.gz *.deb *.zip > sha256sums.txt
 
+      # Before the release goes public, so a failed attestation leaves a draft,
+      # never a published release without provenance.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            artifacts/*.deb
+            artifacts/*.zip
+
       # release-plz created this release as a DRAFT carrying the changelog, so
       # the version is never visible without its binaries. Passing neither
       # `body` nor `prerelease` keeps what release-plz wrote (the action retains
@@ -253,14 +261,6 @@ jobs:
             artifacts/*.zip
             artifacts/sha256sums.txt
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            artifacts/*.tar.gz
-            artifacts/*.deb
-            artifacts/*.zip
-
   npm:
     name: publish to npm
     # The full build matrix gates this one: an npm publish is irreversible (no
@@ -269,6 +269,9 @@ jobs:
     needs: [check, build, deb]
     # Never publish a pre-release to npm — tester tags build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}
+    # Its required reviewer is the publish approval, and the npm Trusted
+    # Publisher records name it, so no other job can publish.
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

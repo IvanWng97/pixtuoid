@@ -23,13 +23,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 2
           persist-credentials: false
-      - uses: ./.github/actions/setup-site-node
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: site
       - run: npm run format:check
       - run: npm run lint
       - run: npm run check
       - run: npm run knip
       - run: npm run test:unit
+      - uses: ./.github/actions/path-changed
+        id: lockfile
+        with:
+          # package.json holds the audit script and its level.
+          paths: site/package-lock.json site/package.json
+      # LAST: it resolves advisories live (#846/#848).
+      - if: steps.lockfile.outputs.changed == 'true'
+        run: npm run audit
 
   check:
     name: demos · build · e2e
@@ -47,7 +58,9 @@ jobs:
           # checkout silently falls back to Cargo.toml
           fetch-depth: 0
           persist-credentials: false
-      - uses: ./.github/actions/setup-site-node
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: site
       # The one rust-cache for gen-demos and gen-wasm
       # (`site-build-composites-leave-rust-cache-to-the-job`).
       - uses: ./.github/actions/setup-cargo-just
@@ -66,7 +79,10 @@ jobs:
       # Only e2e needs Playwright's Chromium (lighthouse rides chrome-launcher's
       # system Chrome) and the diagram renders in-process, so Chromium lands here,
       # not in the composite pages.yml also runs.
+      # --with-deps runs its own apt-get update and install
+      # (playwright-core registry/dependencies.ts), outside apt-install's bound.
       - run: npx playwright install --with-deps chromium chromium-headless-shell
+        timeout-minutes: 10
       - run: npm run e2e
       - run: npm run lighthouse
       # The run logs carry only failing scores, not element-level violations.

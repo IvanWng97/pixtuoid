@@ -46,7 +46,7 @@ pixel painter, attach a cropped snapshot and self-critique:
 
 - [ ] I read the relevant `AGENTS.md` (root + the nested one for the crate I touched).
 - [ ] New behavior has a test (this repo is TDD-first).
-- [ ] No `unwrap()` in non-test code; errors propagate via `anyhow`/`thiserror`.
+- [ ] Errors propagate via `anyhow`/`thiserror`.
 - [ ] No new `println!`/`eprintln!` on a production path (use `tracing`).
 - [ ] Docs updated in the same commit if I changed module structure, architecture, or public API (`AGENTS.md` / `README.md`).
 - [ ] Checked against [`REVIEW.md`](https://github.com/IvanWng97/pixtuoid/blob/main/REVIEW.md#common), the rules the review bots apply.
