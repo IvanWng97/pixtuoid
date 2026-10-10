@@ -406,8 +406,8 @@ pub(crate) mod test_flash {
         pub(crate) setup: [SystemTime; 2],
         pub(crate) start: SystemTime,
         pub(crate) end: SystemTime,
-        /// Its catches and darks, the last return to dark included.
-        pub(crate) changes: usize,
+        /// Where its catches and darks begin, the last return to dark included.
+        pub(crate) changes: Vec<SystemTime>,
     }
 
     pub(crate) fn starved_stutter() -> Stutter {
@@ -452,7 +452,7 @@ pub(crate) mod test_flash {
             setup,
             start,
             end: *changed.last().expect("a burst"),
-            changes: changed.len(),
+            changes: changed,
         }
     }
 

@@ -969,7 +969,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 current,
                 pixels,
                 self.session.dirty().clone(),
-                self.session.flash(),
+                self.session.flashes(),
                 now,
             );
             let raster = self.session.floor(current).map(|floor| &floor.raster);

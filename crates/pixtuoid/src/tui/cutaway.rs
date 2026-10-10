@@ -17,7 +17,7 @@ use std::time::{Instant, SystemTime};
 use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::Dirty;
-use pixtuoid_scene::flash::{FlashHold, FlashPhase, Flashes};
+use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::layout::Size;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
@@ -218,7 +218,7 @@ impl TileCutaway {
         self.fitted.map(|f| f.fit.logical())
     }
 
-    /// Show `floor`'s `frame`, which flashes `flash`, as `fitted`; it may
+    /// Show `floor`'s `frame`, which shows `flashes`, as `fitted`; it may
     /// differ from that floor's last only within `dirty`. Queue the tiles it
     /// changed once the protocol's cadence allows; until then they stay owed.
     /// A frame the flash hold keeps back is not sent, so the terminal keeps
@@ -229,12 +229,11 @@ impl TileCutaway {
         floor: usize,
         frame: &RgbBuffer,
         dirty: Dirty,
-        flash: FlashPhase,
+        flashes: Flashes,
         now: SystemTime,
     ) {
         let fresh = self.shown.replace(Shown::Floor(floor)) != Some(Shown::Floor(floor));
         let dirty = if fresh { Dirty::All } else { dirty };
-        let flashes = [flash; 2];
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&dirty);
             self.image_behind = true;

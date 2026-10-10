@@ -286,7 +286,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
             shown = shot;
         }
         let at = format!("a frame each {frame:?} from +{offset:?}");
-        assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+        assert_each_phase_holds_the_floor(&changed, stutter.changes.len(), &at);
     }
 }
 
