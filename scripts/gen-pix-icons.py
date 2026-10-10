@@ -417,9 +417,14 @@ def main():
 
     # An orphaned committed file (its manifest entry removed, or another format)
     # is invisible to the loop above, which only ever iterates ICONS; both output
-    # dirs hold icons alone, so a write deletes it and a check fails on it.
+    # dirs hold icons alone, so a write deletes it and a check fails on it. A
+    # dotfile is the OS's (Finder's .DS_Store), never committed.
     for label, out_dir, ext in OUTPUTS:
-        orphans = sorted(p for p in out_dir.iterdir() if p.is_file() and (p.stem not in ICONS or p.suffix != f".{ext}"))
+        orphans = sorted(
+            p
+            for p in out_dir.iterdir()
+            if p.is_file() and not p.name.startswith(".") and (p.stem not in ICONS or p.suffix != f".{ext}")
+        )
         if check and orphans:
             stale.append(f"{label}: orphaned {', '.join(p.name for p in orphans)}")
         elif not check:
