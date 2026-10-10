@@ -83,8 +83,8 @@ pub(super) const fn top_margin(buf_h: u16) -> u16 {
 }
 
 const fn cubicle_aisle_h(usable_h: u16) -> u16 {
-    const SHARE_DIVISOR: u16 = 10;
-    let share = usable_h / SHARE_DIVISOR;
+    const CUBICLE_AISLE_PCT: u16 = 10;
+    let share = pct(usable_h, CUBICLE_AISLE_PCT);
     if share > MIN_CUBICLE_AISLE_H {
         share
     } else {
@@ -160,9 +160,8 @@ pub fn min_layout_size() -> Size {
 const _: () = assert!(COUCH_GAP_GROWTH_BASE_H > MIN_LAYOUT_H);
 
 const fn couch_to_desk_extra(buf_h: u16) -> u16 {
-    /// Buffer rows past the base per extra row of gap.
-    const ROWS_PER_EXTRA: u16 = 20;
-    buf_h.saturating_sub(COUCH_GAP_GROWTH_BASE_H) / ROWS_PER_EXTRA
+    const BUF_ROWS_PER_GAP_ROW: u16 = 20;
+    buf_h.saturating_sub(COUCH_GAP_GROWTH_BASE_H) / BUF_ROWS_PER_GAP_ROW
 }
 
 /// Buffer height at which the couch-to-desk gap starts growing. It equalled the
@@ -219,11 +218,11 @@ impl FloorPlan {
         let has_pantry = geom.has_pantry();
         let mid_x = pct(buf_w, geom.mid_x_pct());
 
-        const ROUTING_MARGIN: u16 = 2;
-        // Large counter + a routing margin each side, else the compact fallback.
+        const COUNTER_SIDE_CLEARANCE: u16 = 2;
+        // Large counter + a routing clearance each side, else the compact fallback.
         // Width-only, so the size is known before the split prices the pantry against it.
         let pantry_counter_size: Size =
-            if has_pantry && mid_x >= PANTRY_COUNTER_LARGE_W + 2 * ROUTING_MARGIN {
+            if has_pantry && mid_x >= PANTRY_COUNTER_LARGE_W + 2 * COUNTER_SIDE_CLEARANCE {
                 super::LARGE_COUNTER
             } else {
                 super::COMPACT_COUNTER
@@ -486,7 +485,6 @@ pub(super) fn compute_with_seed(
             .into_iter()
             .flat_map(|mr| {
                 const MIN_PLANTED_SIDE: u16 = 30;
-                // Insets from the room's north-west and south-west corners.
                 const WEST_INSET: u16 = 5;
                 const TALL_NORTH_INSET: u16 = 6;
                 const FLOWER_SOUTH_INSET: u16 = 7;
@@ -738,10 +736,6 @@ fn place_wall_decor(
     desk_art: &[(Point, Size)],
     pod_decor: &[PodDecorItem],
 ) -> Vec<WallDecorItem> {
-    /// Where a wall-hung piece's anchor sits, up the wall from the floor's top edge.
-    const WALL_DECOR_ABOVE_TOP_MARGIN: u16 = 12;
-    /// The whiteboard's hint is a 1/N share of the usable height below the top margin.
-    const WHITEBOARD_HINT_DIVISOR: u16 = 3;
     let FloorPlan {
         buf_w,
         top_margin,
@@ -770,7 +764,7 @@ fn place_wall_decor(
             kind: WallDecor::Bookshelf,
             pos: Point {
                 x: bookshelf_x,
-                y: top_margin.saturating_sub(WALL_DECOR_ABOVE_TOP_MARGIN),
+                y: top_margin.saturating_sub(furniture_def(Furniture::Bookshelf).visual.h),
             },
         });
     }
@@ -778,6 +772,7 @@ fn place_wall_decor(
         kind: WallDecor::ExitSign,
         pos,
     }));
+    const WHITEBOARD_HINT_DIVISOR: u16 = 3;
     // The hint is not a slot: unsnapped it drops the board on a desk row
     // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
     let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
@@ -832,7 +827,7 @@ fn place_wall_decor(
             kind: WallDecor::MeetingScreen,
             pos: Point {
                 x: sx,
-                y: top_margin.saturating_sub(WALL_DECOR_ABOVE_TOP_MARGIN),
+                y: top_margin.saturating_sub(furniture_def(Furniture::MeetingScreen).visual.h),
             },
         });
     }
@@ -862,14 +857,14 @@ fn bookshelf_x(
     let x = pct(buf_w, BOOKSHELF_X_PCT);
     match (meeting_screen_x, meeting_room) {
         (Some(sx), Some(mr)) => {
-            // The ONE flush slot: screen east edge + a 2-px gap, so the two grounds'
+            // The ONE flush slot: screen east edge + both grounds' wall-decor pads, so the two
             // pads merge with no strandable apron cell. Every arm below derives from it.
-            let flush_east = sx + screen_w + 2;
+            let flush_east = sx + screen_w + 2 * WALL_DECOR_STAMP_PAD_PX;
             // The drain term applies only where room 0 HOSTS its trio: with no sofa,
             // pushing the shelf east hangs it over a desk pod's pad, sealing the gap.
             if let Some(sofa_pad_east) = mr.sofa_east_drain_edge() {
-                /// Past the sofa's drain edge by the shelf's OWN 1-px ground pad
-                /// (mask.rs stamps wall decor with pad=1, NOT `OBSTACLE_PAD_PX`) + a
+                /// Past the sofa's drain edge by the shelf's OWN ground pad
+                /// ([`WALL_DECOR_STAMP_PAD_PX`], NOT `OBSTACLE_PAD_PX`) + a
                 /// ≥2-px walkable channel + slack.
                 const BOOKSHELF_DRAIN_GAP: u16 = 5;
                 let spread = x.max(flush_east).max(sofa_pad_east + BOOKSHELF_DRAIN_GAP);
@@ -954,7 +949,15 @@ fn place_lounge(couch: Point, door: Point) -> Lounge {
     };
     let side_table = Point {
         x: flanks.side_table_x,
-        y: couch.y + 2,
+        // On the couch's own base row.
+        y: super::placement::centre_y_standing_on(
+            super::placement::sort_row_at(
+                Pivot::Center,
+                couch,
+                furniture_def(Furniture::Couch).visual.h,
+            ),
+            furniture_def(Furniture::LoungeSideTable).visual.h,
+        ),
     };
     let fish_tank = {
         let def = furniture_def(Furniture::FishTank);
@@ -1029,8 +1032,8 @@ fn settle_plant(
     band: &Bounds,
     floor_seed: u64,
 ) -> Option<PlantItem> {
-    // 12 = two appliance widths: clears any single corner appliance without wandering
-    // out of the authored corner region.
+    // Clears any single corner appliance without wandering out of the authored corner
+    // region.
     const MAX_PLANT_NUDGE_PX: u16 = 12;
     /// How far into the nudge budget the seeded first try may reach — the budget and its
     /// inward direction are the ladder's own, so no new clearance rule and no new container.

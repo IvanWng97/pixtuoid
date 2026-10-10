@@ -347,6 +347,11 @@ pub(crate) const OBSTACLE_PAD_PX: u16 = 2;
 /// so the gate can never assume a different pad than the mask actually stamps.
 pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
 
+/// The mask pad around wall decor's ground: these pieces overhang nothing solid,
+/// and an [`OBSTACLE_PAD_PX`] band every side inflated the blocked rect back to
+/// the full sprite width.
+pub(super) const WALL_DECOR_STAMP_PAD_PX: u16 = 1;
+
 /// The north wall+window band's visual bottom sits this many px ABOVE
 /// `top_margin`; the rows in between render as carpet apron, not wall, so the
 /// mask blocks only down to the band bottom. The renderer derives
