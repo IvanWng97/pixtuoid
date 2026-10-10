@@ -577,8 +577,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
     run_outcome(result, renderer.restore_terminal(), fired)
 }
 
-/// A quit signal outranks a failed teardown: a closed terminal fails its own
-/// restore, and the process must still die by the signal (the exit status a
+/// A signal that ended the loop outranks a failed teardown, which a closed
+/// terminal causes: the process still dies by the signal (the exit status a
 /// supervisor reads) rather than by an error to a dead stderr.
 fn run_outcome(
     result: Result<()>,
@@ -648,8 +648,8 @@ mod frame_out_tests {
 
     /// A terminal that left: the restore fails, and nothing may write to it
     /// again, or ratatui's Drop `eprintln!`s on the dead stderr and panics.
-    /// Unix-only: see `teardown_tests`' console-API note, which has no writer
-    /// see a byte under `windows-test`.
+    /// Unix-only: under `windows-test` the console API takes these commands and
+    /// no writer sees a byte (see `teardown_tests`' note).
     #[cfg(unix)]
     #[test]
     fn a_failed_restore_leaves_ratatui_nothing_to_retry_on_drop() {

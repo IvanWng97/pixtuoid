@@ -311,8 +311,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.jank.due_at(at);
     }
 
-    /// Hold each frame's output in `out`, the terminal backend's own handle, and
-    /// present it whole.
+    /// Hold each frame's output in `out` and present it whole. For the terminal
+    /// painter, `out` is the handle its backend writes through
+    /// ([`Self::restore_terminal`] abandons it).
     pub(crate) fn present_through(&mut self, out: crate::tui::FrameOut) {
         self.frame_out = Some(out);
     }

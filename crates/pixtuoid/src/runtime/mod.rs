@@ -266,7 +266,7 @@ impl QuitSignal {
 /// handlers installed at [`arm`](Self::arm): armed before a painter sets up what its exit
 /// undoes (the TUI's terminal modes, the floating window's saved geometry, the
 /// kitty shared-memory unlink), so no signal can land in between and kill the
-/// process by its default disposition. A signal arriving as SIG_IGN stays
+/// process by its default disposition. A signal inherited as SIG_IGN stays
 /// unarmed: a handler would replace the ignore that `nohup`, or a
 /// non-job-control shell for a background job (POSIX Shell §2.12), gave a run
 /// meant to outlive its terminal.
@@ -296,8 +296,8 @@ impl QuitArms {
     }
 }
 
-/// One arm, its handler installed at the call. `None` when the signal arrived
-/// ignored or its registration failed: an arm resolving on a non-event would
+/// One arm, its handler installed at the call. `None` when the signal was inherited
+/// as ignored or its registration failed: an arm resolving on a non-event would
 /// tear the painter down.
 #[cfg(unix)]
 fn arm_signal((kind, name): (tokio::signal::unix::SignalKind, &'static str)) -> Option<QuitArm> {
