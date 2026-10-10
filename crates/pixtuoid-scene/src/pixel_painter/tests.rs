@@ -3629,6 +3629,85 @@ fn a_bubble_hangs_over_its_speakers_badge_in_both_looks() {
     );
 }
 
+/// A pet and an agent sharing a sort row paint the agent on top in both looks,
+/// so a pointer over both names the agent in both.
+#[test]
+fn a_pet_tied_with_an_agent_sorts_under_them_in_both_looks() {
+    use crate::display::{HoverTarget, PieceKind};
+    use crate::layout::{Bounds, Pivot, Point};
+    use pixtuoid_core::sprite::format::Piece as PackPiece;
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::South, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let office = crate::display::Office {
+        layout: &layout,
+        pack: &pack,
+        theme,
+        scale: crate::render_scale::RenderScale::ONE,
+    };
+    let (body, row) = crate::display::compose::tests::list_at(&frame, office, 12)
+        .pieces()
+        .iter()
+        .find_map(|p| match p.kind {
+            PieceKind::Character { body, .. } => Some((body, p.span.depth)),
+            _ => None,
+        })
+        .expect("the sitter");
+    let anim_name = PackPiece::CatWalk;
+    let h = crate::pack::densest_frame(&pack, anim_name, 0, crate::render_scale::RenderScale::ONE)
+        .logical
+        .1;
+    let x = u16::midpoint(body.x0, body.x1);
+    let pos = (0..layout.buf_h)
+        .map(|y| Point { x, y })
+        .find(|&pos| sort_row_at(Pivot::Center, pos, h) == row)
+        .expect("a pet position standing on the sitter's row");
+    let cat = crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos,
+        flip: false,
+        anim_name,
+        frame_idx: 0,
+        effects: Vec::new(),
+    };
+    let pet = cat.target();
+    frame.pet = Some(cat);
+    let agent = HoverTarget::Agent(frame.agents[0].agent_id);
+    let cell = Bounds {
+        x: pos.x,
+        y: pos.y,
+        width: 1,
+        height: 1,
+    };
+    let mut scene = SceneState::uniform(16);
+    for a in &frame.agents {
+        scene.agents.insert(a.agent_id, a.clone());
+    }
+    let classic = paint_drawn(
+        &OwnedSimStores::new(),
+        &scene,
+        &layout,
+        &pack,
+        SystemTime::UNIX_EPOCH,
+        &frame,
+    )
+    .hovers;
+    let cutaway = crate::display::compose::tests::list_at(&frame, office, 12);
+    for (look, hovers) in [("classic", &classic), ("cutaway", cutaway.hovers())] {
+        let listed: Vec<_> = hovers.listed().iter().map(|h| &h.target).collect();
+        assert!(
+            listed.contains(&&pet) && listed.contains(&&agent),
+            "{look}: premise: both are hoverable"
+        );
+        assert_eq!(
+            hovers.at(cell),
+            Some(&agent),
+            "{look} paints the agent last"
+        );
+    }
+}
+
 /// Two gateways of one source are two hovers, each naming its own instance,
 /// in paint order.
 #[test]

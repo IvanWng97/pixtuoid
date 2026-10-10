@@ -550,9 +550,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
         if !std::ptr::eq(self.chrome.theme, theme) {
             self.chrome.theme = theme;
-            for pf in self.session.floors_mut() {
-                pf.raster.reset_sprite_cache();
-            }
         }
     }
 

@@ -232,7 +232,9 @@ fn push_bubbles(
 }
 
 /// The pet and the gateway mascots, each a figure sorted on its feet's row
-/// as the classic sorts it, with what rides on it straight after.
+/// as the classic sorts it, with what rides on it straight after. Pushed before
+/// the characters: a tie on the row keeps push order, and people paint (and
+/// hover) over creatures, as in the classic.
 fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
     let Office {
         pack, theme, scale, ..
@@ -552,6 +554,7 @@ fn collect_pieces(
         outside,
     );
     let mut host_text = crate::display::text::HostRuns::default();
+    push_creatures(frame, office, &mut order);
     let carried = push_characters(
         frame,
         office,
@@ -559,7 +562,6 @@ fn collect_pieces(
         (&mut order, &mut host_text.badges),
     );
     host_text.bubbles = push_bubbles(frame, office, &host_text.badges, &mut order);
-    push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }

@@ -128,11 +128,8 @@ pub(crate) struct Piece {
     pub(crate) shadow: Option<crate::ground::Contact>,
     /// Two pieces with one span and one fingerprint paint the same pixels over
     /// the same pixels under them, so a caller can keep a piece whose pair did
-    /// not change without painting it. One that
-    /// [`reads_under`](PieceKind::reads_under) changes with what lies under it,
-    /// so repainting it starts from a repaint of that. Compare it only within
-    /// one layout, theme, pack, scale and ambient: it does not capture a change
-    /// to those.
+    /// not change without painting it. Compare it only within one layout,
+    /// theme, pack, scale and ambient: it does not capture a change to those.
     pub(crate) fingerprint: u64,
 }
 
@@ -376,10 +373,7 @@ impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
     /// ([`PieceKind::Window`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas repaints under it")
-    )]
+    #[cfg(test)]
     pub(crate) fn reads_under(&self) -> bool {
         matches!(self, PieceKind::WallSeg { .. })
     }
@@ -387,10 +381,7 @@ impl PieceKind {
     /// Whether two builds of one office always give it one fingerprint: what a
     /// cache of the room at rest may hold. The rest change with the sky, the
     /// hour's lights or the people.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas caches the room at rest")
-    )]
+    #[cfg(test)]
     pub(crate) fn is_static(&self) -> bool {
         match self {
             PieceKind::WallSeg { .. }

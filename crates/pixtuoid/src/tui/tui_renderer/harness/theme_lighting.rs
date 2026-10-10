@@ -23,6 +23,27 @@ fn theme_switch_recolors_floor() {
     );
 }
 
+/// The sprite cache keys on the resolved theme, so a switch needs no flush: a
+/// renderer that rendered under the old theme paints the new one pixel-for-pixel
+/// as a fresh one would.
+#[test]
+fn theme_switch_paints_as_a_fresh_renderer_would() {
+    let scene = scene_with(vec![active("/t/fresh.jsonl", 0, "Edit x", t0())], 16);
+    let now = t0();
+    let mut switched = build(100, 40, vec![]);
+    switched.render(&scene, pack(), now).unwrap();
+    switched.set_theme(dark_theme());
+    switched.render(&scene, pack(), now).unwrap();
+    let mut fresh = build(100, 40, vec![]);
+    fresh.set_theme(dark_theme());
+    fresh.render(&scene, pack(), now).unwrap();
+    assert_eq!(
+        switched.buf().expect("a frame").as_slice(),
+        fresh.buf().expect("a frame").as_slice(),
+        "a stale cached sprite survived the theme switch"
+    );
+}
+
 #[test]
 fn set_theme_with_same_theme_is_a_noop() {
     let scene = scene_with(vec![idle("/t/same.jsonl", 0, t0())], 16);

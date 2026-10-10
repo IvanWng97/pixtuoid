@@ -4630,10 +4630,10 @@ mod tests {
                 _ => None,
             })
             .expect("the sitter");
-        // centred on the sitter's bottom row, so its feet sort south of theirs
+        // centred a row below the sitter's, so its feet sort south of theirs
         let at = Point {
             x: u16::midpoint(body.x0, body.x1),
-            y: body.y1,
+            y: body.y1 + 1,
         };
         let cat = crate::sim::PetPlacement {
             kind: crate::pet::PetKind::Cat,
@@ -4647,7 +4647,7 @@ mod tests {
         frame.pet = Some(cat);
         let cell = Bounds {
             x: at.x,
-            y: at.y,
+            y: body.y1,
             width: 1,
             height: 1,
         };
