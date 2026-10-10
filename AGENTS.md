@@ -120,7 +120,7 @@ Repo skills (committed): `local-review`, `beautify-decoration`,
 
 ## Architecture invariants (load-bearing)
 
-1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window/audio-device deps** (compiler-enforced by crate boundary; `just arch`). New render targets are thin painters over `pixtuoid_scene::look::render`.
+1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window/audio-device deps** (compiler-enforced by crate boundary; `just arch` holds their dep set to the allowlist in `deny-arch.toml`, so a new crate fails until it is listed). New render targets are thin painters over `pixtuoid_scene::look::render`.
 2. **Agent events flow through ONE channel** `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag drives hook-wins dedup — producers tag their own events. Daemon presence rides a separate `AgentId`-free channel (`PresenceMsg { key: DaemonInstanceKey, delta }`) and never enters `Reducer::apply`.
 3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli) step 3 and `source/acp.rs`'s header.
 4. **Hook install writes through symlinks** (`resolve_symlink` in `install/io.rs`) — critical for stow-managed configs; Windows keeps the bounded rename-retry.

@@ -242,35 +242,26 @@ deny:
 deny-advisories:
     cargo deny check advisories
 
-# Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay
-# terminal/window/audio-device-free.
+# Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene depend
+# on exactly the crates deny-arch.toml lists.
 [group('rust')]
 arch:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The backend-agnostic layers — neither may pull a terminal, window OR
-    # audio-device crate (the regex below is the list); the binary's painters +
-    # audio gateway own those. The
-    # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
-    # level too (a transitive pull-in via a feature would slip past the boundary).
-    # `--target all` + `--all-features` are LOAD-BEARING, not thoroughness: cargo
-    # tree defaults to the runner's own triple under default features, so a
-    # `[target.'cfg(windows)'.dependencies] crossterm` in pixtuoid-core resolved
-    # green on macOS AND on the ubuntu CI runner — invariant #1 broken on Windows
-    # behind a passing gate, and `just check-windows` compiles it happily because
-    # the dep is legitimate for that target. `--target all` is metadata-only (it
-    # installs nothing), and features are additive, so `--all-features` holds
-    # every dep any feature combination can pull.
-    for crate in pixtuoid-core pixtuoid-scene; do
-        # Capture first so a cargo-tree ERROR (e.g. a crate rename) kills the
-        # recipe via set -e, instead of reading as "no match" inside the if —
-        # which would print the green line without having checked anything.
-        deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
-        if grep -qE '^(ratatui|crossterm|winit|wgpu|rodio|cpal)' <<<"$deps"; then
-            echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (AGENTS.md invariant #1)"; exit 1
-        fi
-    done
-    echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window/audio-device-free"
+    # The crate boundary already makes this a COMPILER fact; the allowlist pins
+    # it at the dep-tree level too (a transitive pull-in via a feature would slip
+    # past the boundary), and a crate nobody listed fails instead of passing
+    # unseen, as a denylist's omission does. deny-arch.toml says how it sees
+    # every feature and target, the point a bare `cargo tree` misses.
+    cargo deny --config deny-arch.toml check bans
+    # A gate that cannot fail is no gate: the same list minus one crate must.
+    trimmed="$(mktemp)"
+    trap 'rm -f "$trimmed"' EXIT
+    grep -v '^    "serde",$' deny-arch.toml >"$trimmed"
+    if out="$(cargo deny --config "$trimmed" check bans 2>&1)" || ! grep -Fq "crate 'serde = " <<<"$out"; then
+        echo "ARCH SELFTEST: deny-arch.toml without serde did not fail on serde"; exit 1
+    fi
+    echo "arch: pixtuoid-core + pixtuoid-scene depend only on deny-arch.toml's crates"
 
 # Fast, independent lint checks in parallel.
 [group('rust')]

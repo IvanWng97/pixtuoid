@@ -21,7 +21,6 @@ jobs:
           components: rustfmt
           enable-cache: 'false'
       - run: just fmt-check
-      - run: just arch
 
   clippy:
     name: clippy
@@ -51,6 +50,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-deny
       - uses: ./.github/actions/setup-just
       - run: just deny
+      - run: just arch
       - uses: ./.github/actions/path-changed
         id: lockfile
         with:
