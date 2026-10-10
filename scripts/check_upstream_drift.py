@@ -189,6 +189,10 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
+# What openclaw_plugin.js stamps `errored` from — Degraded's only trigger.
+OPENCLAW_AGENT_END_EVENT = "PluginHookAgentEndEvent"
+OPENCLAW_AGENT_END_FIELDS = ("success", "error")
+
 # The inventory is SPLIT (the CLI publishes v1 `permission.asked`, declared in
 # v1/permission.ts; core's v2 tools `permission.v2.asked`, in permission.ts), so
 # the union is the document and one fetch failure must not read as a vanish. No
@@ -2032,6 +2036,27 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
                         f"the plugin registers a hook OpenClaw never fires (no presence)."
                     )
+            body = _braced_body(
+                text, rf"(?m)^export\s+type\s+{OPENCLAW_AGENT_END_EVENT}\s*=\s*\{{"
+            )
+            if body is None:
+                report.add_blind(
+                    f"OpenClaw's `{OPENCLAW_AGENT_END_EVENT}` declaration",
+                    "src/plugins/hook-types.ts",
+                    "The agent_end field watch was SKIPPED.",
+                )
+            else:
+                members = _strip_nested(body)
+                for field in OPENCLAW_AGENT_END_FIELDS:
+                    if not re.search(
+                        rf"(?:^|[;,\n])\s*(?:readonly\s+)?{field}\??\s*:", members
+                    ):
+                        report.add_breaking(
+                            f"OpenClaw's `{OPENCLAW_AGENT_END_EVENT}` no longer declares "
+                            f"`{field}` (src/plugins/hook-types.ts) — openclaw_plugin.js "
+                            f"stamps `errored` from it, so a failed run never degrades "
+                            f"the mascot."
+                        )
 
     if ours.openclaw_gateway_port is not None:
         text = fetch_anchored(OPENCLAW_PATHS_URL, "OpenClaw config/paths", report)

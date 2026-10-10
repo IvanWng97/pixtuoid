@@ -383,6 +383,92 @@ def test_two_declarations_are_probe_health_not_a_first_match() -> None:
         d.fetch = real
 
 
+def test_the_openclaw_agent_end_watch_tells_a_vanished_field_from_a_missing_type() -> None:
+    """The hook-name sweep stays green while a field the plugin stamps `errored`
+    from vanishes, and Degraded silently becomes unreachable."""
+    event = d.OPENCLAW_AGENT_END_EVENT
+    fields = d.OPENCLAW_AGENT_END_FIELDS
+    check(bool(fields), "the watch pins at least one agent_end field")
+    plugin = (d.REPO / "crates/pixtuoid/src/install/openclaw_plugin.js").read_text()
+    for f in fields:
+        check(re.search(rf"\.{f}\b", plugin) is not None,
+              f"the watch pins `{f}`, which openclaw_plugin.js no longer reads")
+
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        hooks = sorted(d.read_our_names(rep0).openclaw or ())
+        check(bool(hooks), "the fragment supplies the openclaw hook set")
+        # The anchor and every registered hook, so only the event type varies.
+        names = "export type PluginHookName =\n" + "".join(f'  | "{h}"\n' for h in hooks)
+
+        def document(declared: tuple[str, ...], decoy: str) -> str:
+            """`decoy` also sits in a comment, a nested object and the next type:
+            the three spellings a whole-document match takes for a declaration."""
+            return (
+                names
+                + f"export type {event} = {{\n  runId?: string;\n"
+                + f"  /*\n  {decoy}?: string;\n  */\n"
+                + f"  detail?: {{\n    {decoy}?: string;\n  }};\n"
+                + "".join(f"  {f}?: unknown;\n" for f in declared)
+                + "};\n"
+                + f"export type PluginHookBeforeAgentFinalizeEvent = {{\n  {decoy}?: string;\n}};\n"
+            )
+
+        def drive(doc: str) -> d.Report:
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.OPENCLAW_HOOK_TYPES_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        def on_event(lines: list[str]) -> list[str]:
+            return [x for x in lines if event in x]
+
+        for victim in fields:
+            intact = drive(document(fields, victim))
+            check(
+                not intact.breaking and not on_event(intact.blind),
+                f"`{victim}` declared -> silent; breaking={intact.breaking} "
+                f"blind={on_event(intact.blind)}",
+            )
+            gone = drive(document(tuple(f for f in fields if f != victim), victim))
+            check(
+                len(gone.breaking) == 1
+                and f"`{victim}`" in gone.breaking[0]
+                and not on_event(gone.blind),
+                f"`{victim}` gone -> one breaking line naming it; "
+                f"breaking={gone.breaking} blind={on_event(gone.blind)}",
+            )
+
+        one_line = drive(
+            names
+            + f"export type {event} = {{ "
+            + "; ".join(f"readonly {f}?: unknown" for f in ("runId", *fields))
+            + " };\n"
+        )
+        check(
+            not one_line.breaking and not on_event(one_line.blind),
+            f"a one-line restyle is not a vanish; breaking={one_line.breaking} "
+            f"blind={on_event(one_line.blind)}",
+        )
+
+        renamed = drive(
+            document(fields, "x").replace(f"type {event} =", f"type {event}V2 =")
+        )
+        check(
+            not renamed.breaking and len(on_event(renamed.blind)) == 1,
+            f"a missing `{event}` is probe health, never drift; "
+            f"breaking={renamed.breaking} blind={renamed.blind}",
+        )
+    finally:
+        d.fetch = real
+
+
 def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
     """Two one-line edits reopen the gate with every other test still green:
     dropping `also=` makes the half-anchor check SKIP rather than fail, and
