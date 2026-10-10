@@ -21,14 +21,14 @@ const check = process.argv.includes('--check');
 let readme = readFileSync(readmePath, 'utf8');
 const errors = [];
 
-// Every feature `pix` must resolve to a committed pixel-icon PNG. PixIcon.astro
+// Every feature `pix` must resolve to a committed pixel-icon SVG. PixIcon.astro
 // throws at build ONLY for roster-rendered icons; a channel-bearing feature
 // reaches this README `<img>` but never PixIcon, so a typo'd `pix` would ship a
 // 404 image past every other check.
 for (const f of features) {
-  if (f.pix && !existsSync(join(root, 'docs', 'images', 'pix-icons', `${f.pix}.png`))) {
+  if (f.pix && !existsSync(join(root, 'docs', 'images', 'pix-icons', `${f.pix}.svg`))) {
     errors.push(
-      `feature "${f.name}" declares pix "${f.pix}" but docs/images/pix-icons/${f.pix}.png is missing — ` +
+      `feature "${f.name}" declares pix "${f.pix}" but docs/images/pix-icons/${f.pix}.svg is missing — ` +
         `add "${f.pix}" to gen-pix-icons.py's ICONS and run \`just gen-icons\`.`
     );
   }
@@ -68,21 +68,21 @@ function regenSection(label, start, end, body) {
 // `"featured": false` (the inverse of install.json's opt-IN `readme:true`).
 // GitHub gives the empty-header icon column almost no width and forces
 // `max-width:100%` on the <img>, so without explicit dimensions the icon
-// collapses to an illegible blob; pin width/height from the PNG's own IHDR.
-// Returns null if the PNG is missing — the existsSync guard above already
+// collapses to an illegible blob; pin width/height from the SVG's own.
+// Returns null if the SVG is missing — the existsSync guard above already
 // reports that with an actionable message, so don't pre-empt it with an ENOENT.
-const pngWH = (pix) => {
-  const p = join(root, 'docs', 'images', 'pix-icons', `${pix}.png`);
+const svgWH = (pix) => {
+  const p = join(root, 'docs', 'images', 'pix-icons', `${pix}.svg`);
   if (!existsSync(p)) return null;
-  const b = readFileSync(p);
-  return [b.readUInt32BE(16), b.readUInt32BE(20)];
+  const m = readFileSync(p, 'utf8').match(/<svg[^>]* width="(\d+)" height="(\d+)"/);
+  return m && [Number(m[1]), Number(m[2])];
 };
 const pixDims = (pix) => {
-  const wh = pngWH(pix);
+  const wh = svgWH(pix);
   return wh ? ` width="${wh[0]}" height="${wh[1]}"` : '';
 };
 const iconCell = (f) =>
-  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.png" alt=""${pixDims(f.pix)}>` : cell(f.icon);
+  f.pix ? `<img src="docs/images/pix-icons/${cell(f.pix)}.svg" alt=""${pixDims(f.pix)}>` : cell(f.icon);
 const featuredFeatures = features.filter((f) => f.featured !== false);
 const featureRows = featuredFeatures.map(
   (f) => `| ${iconCell(f)} | **${cell(f.name)}** | ${cell(f.desc)} |`
@@ -93,7 +93,7 @@ const featureRows = featuredFeatures.map(
 // non-breaking-space "glue": real, text-measured content the collapse can't
 // undo. Pad the icon HEADER only, so it doesn't inflate each row's max-content.
 const NBSP_PX = 4; // a README-font &nbsp; ≈ 4px
-const maxIconW = Math.max(...featuredFeatures.map((f) => pngWH(f.pix)?.[0] ?? 0));
+const maxIconW = Math.max(...featuredFeatures.map((f) => svgWH(f.pix)?.[0] ?? 0));
 const iconHeader = '&nbsp;'.repeat(Math.ceil(maxIconW / NBSP_PX) + 2);
 regenSection(
   'Features table',

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the site's pixel-icon PNGs (site/src/assets/pix-icons/) plus the
-root README's pre-scaled variants (docs/images/pix-icons/).
+root README's SVG variants (docs/images/pix-icons/).
 
 Single color source: the bundled sprite pack's palette
 (crates/pixtuoid-scene/sprites/default/pack.toml) — an icon grid may only use
@@ -8,17 +8,17 @@ keys defined there, so the icons can never drift off the office's own colors.
 An icon is either extracted verbatim from a pack sprite ("sprite") or authored
 here as a pixel grid ("grid"). The site's 1x RGBA PNGs are integer-upscaled by
 PixIcon.astro with image-rendering: pixelated; GitHub strips that CSS, so the
-README instead embeds a SEPARATE, pre-scaled variant per icon.
+README instead embeds an SVG per icon, crisp at any pixel density.
 
 Usage:
   .venv/bin/python3 scripts/gen-pix-icons.py          # (re)generate (just gen-icons)
   .venv/bin/python3 scripts/gen-pix-icons.py --check  # exit 1 on drift
 
---check decode-compares pixels rather than raw PNG bytes: a raw-byte compare is
-Pillow-version-fragile (re-encoding the identical pixels can change the
-compressed bytes), which would make the gate flaky across machines/CI. It also
-diffs each output directory's listing against ICONS.keys() so an orphaned PNG
-fails loudly.
+--check decode-compares the PNGs' pixels rather than their raw bytes: a raw-byte
+compare is Pillow-version-fragile (re-encoding the identical pixels can change
+the compressed bytes), which would make the gate flaky across machines/CI. The
+SVGs are text and compare as such. It also diffs each output directory's listing
+against ICONS.keys() so an orphaned file fails loudly.
 """
 
 import io
@@ -31,14 +31,15 @@ from pathlib import Path
 
 from PIL import Image
 
+from readme_pixels import sprite_path
+
 ROOT = Path(__file__).resolve().parent.parent
 PACK = ROOT / "crates/pixtuoid-scene/sprites/default"
 OUT = ROOT / "site/src/assets/pix-icons"
 README_OUT = ROOT / "docs/images/pix-icons"
-# Nearest-neighbor upscale factor for the README variants: GitHub's markdown
-# renderer strips <img> sizing/CSS, so these must be pre-scaled pixels.
-# gen-readme.mjs pins each <img> to the resulting IHDR dimensions and derives the
-# icon-column padding from the widest one; bump this to resize README icons.
+# CSS pixels per icon pixel in the README: each SVG's width/height. gen-readme.mjs
+# pins each <img> to them and derives the icon-column padding from the widest
+# one; bump this to resize README icons.
 README_SCALE = 2
 COMPARE = ROOT / "scripts/compare-screenshots.py"
 DIFF_DIR = ROOT / "target/gen-check-diff"
@@ -342,7 +343,28 @@ def render(icon_name, rows, pal):
 
 
 # The label disambiguates the two outputs: both dirs are basenamed "pix-icons".
-OUTPUTS = [("site", OUT), ("readme", README_OUT)]
+OUTPUTS = [("site", OUT, "png"), ("readme", README_OUT, "svg")]
+
+
+def svg(rows, pal):
+    """`rows` as an SVG of README_SCALE CSS pixels per icon pixel, one path per colour."""
+    h, w = len(rows), len(rows[0])
+    hexes = {k: "#%02x%02x%02x" % rgb for k, rgb in pal.items() if rgb is not None}
+    body = sprite_path([[k if pal[k] is not None else "." for k in row] for row in rows], 0, 0, 1, hexes)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w * README_SCALE}" height="{h * README_SCALE}" '
+        f'viewBox="0 0 {w} {h}" shape-rendering="crispEdges">{body}</svg>\n'
+    )
+
+
+def emit_svg(name, text, check, stale):
+    out = README_OUT / f"{name}.svg"
+    if check:
+        if not out.exists() or out.read_text(encoding="utf-8") != text:
+            stale.append(f"readme/{name} ({'differs' if out.exists() else 'missing'})")
+    else:
+        out.write_text(text, encoding="utf-8")
+        print(f"wrote {out.relative_to(ROOT)}")
 
 
 def emit(name, img, label, out_dir, check, work, stale):
@@ -376,7 +398,7 @@ def emit(name, img, label, out_dir, check, work, stale):
 def main():
     check = "--check" in sys.argv[1:]
     pal = load_palette()
-    for _, out_dir in OUTPUTS:
+    for _, out_dir, _ in OUTPUTS:
         out_dir.mkdir(parents=True, exist_ok=True)
     stale = []
     work = Path(tempfile.mkdtemp(prefix="gen-pix-icons-"))
@@ -388,21 +410,18 @@ def main():
                 else [r.split() for r in spec["grid"]]
             )
             img = render(name, rows, pal)
-            readme_img = img.resize(
-                (img.width * README_SCALE, img.height * README_SCALE), Image.Resampling.NEAREST
-            )
             emit(name, img, "site", OUT, check, work, stale)
-            emit(name, readme_img, "readme", README_OUT, check, work, stale)
+            emit_svg(name, svg(rows, pal), check, stale)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    # An orphaned committed PNG (its manifest entry removed) is invisible to the
-    # loop above, which only ever iterates ICONS; both output dirs hold icons
-    # alone, so a write deletes it and a check fails on it.
-    for label, out_dir in OUTPUTS:
-        orphans = sorted(p for p in out_dir.glob("*.png") if p.stem not in ICONS)
+    # An orphaned committed file (its manifest entry removed, or another format)
+    # is invisible to the loop above, which only ever iterates ICONS; both output
+    # dirs hold icons alone, so a write deletes it and a check fails on it.
+    for label, out_dir, ext in OUTPUTS:
+        orphans = sorted(p for p in out_dir.iterdir() if p.is_file() and (p.stem not in ICONS or p.suffix != f".{ext}"))
         if check and orphans:
-            stale.append(f"{label}: orphaned {', '.join(p.stem for p in orphans)}")
+            stale.append(f"{label}: orphaned {', '.join(p.name for p in orphans)}")
         elif not check:
             for p in orphans:
                 p.unlink()
