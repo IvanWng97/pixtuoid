@@ -26,7 +26,7 @@ use tokio::time::MissedTickBehavior;
 use tui_renderer::TuiRenderer;
 
 use crate::panels::{FloorNav, KeyCtx, apply_key_action, dispatch_key, ui_state};
-use crate::runtime::{QuitArms, SceneRx};
+use crate::runtime::{QuitArms, QuitSignal, SceneRx};
 use pixtuoid_scene::hit::HitAction;
 use pixtuoid_scene::{pet, theme};
 
@@ -181,6 +181,11 @@ impl FrameOut {
         }
     }
 
+    /// Drop every later write: the terminal is gone.
+    fn abandon(&self) {
+        self.held().out = Box::new(std::io::sink());
+    }
+
     /// Write what was held since [`Self::begin`] in one write, and flush.
     ///
     /// # Errors
@@ -272,7 +277,6 @@ pub(crate) fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
-    // No shared-memory object outlives a quit the process can catch (SIGKILL aside), whatever the terminal read.
     #[cfg(all(feature = "graphics", unix))]
     crate::graphics::shm::unlink_all();
     unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
@@ -303,10 +307,18 @@ fn unwind_after<W: std::io::Write>(
 /// # Errors
 ///
 /// If restoring the terminal modes or showing the cursor fails.
-pub(crate) fn teardown_terminal(term: &mut Term) -> Result<()> {
+pub(crate) fn teardown_terminal(term: &mut Term, out: &FrameOut) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
     let cursor = term.show_cursor();
+    if cursor.is_err() {
+        // `Terminal`'s Drop shows the cursor again while its flag says hidden and
+        // `eprintln!`s the failure, which panics on a stderr that left with the
+        // terminal. The flag clears only on a successful show, so aim the writer
+        // at a sink and show once more.
+        out.abandon();
+        let _ = term.show_cursor();
+    }
     modes?;
     cursor?;
     Ok(())
@@ -445,7 +457,7 @@ pub(crate) fn frame_tick() -> Duration {
 /// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
 /// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
 /// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
-pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
+pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
     let TuiSession {
         mut scene_rx,
         pack,
@@ -472,6 +484,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         stdout(),
         crate::term::query_sync_output(crate::term::SYNC_OUTPUT_PROBE_TIMEOUT),
     );
+    let abandon_handle = out.clone();
     let term = setup_terminal(out.clone(), &arms)?;
     let quit = arms.signalled();
     tokio::pin!(quit);
@@ -489,6 +502,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     let tick = frame_tick();
     renderer.scheduled_every(tick);
+    let mut fired = None;
     let result: Result<()> = (async {
         let mut frames = frame_clock(tick);
         let mut events = EventStream::new();
@@ -550,7 +564,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     ),
                     _ => {}
                 },
-                () = &mut quit => break,
+                signal = &mut quit => {
+                    fired = Some(signal);
+                    break;
+                }
             }
         }
         Ok(())
@@ -558,8 +575,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     .await;
 
     renderer.finish_pacing();
-    teardown_terminal(&mut renderer.terminal)?;
-    result
+    teardown_terminal(&mut renderer.terminal, &abandon_handle)?;
+    result.map(|()| fired)
 }
 
 /// The TUI loop's frame clock, one tick per `period`. A frame that overran
@@ -585,6 +602,8 @@ mod frame_out_tests {
     #[derive(Default)]
     struct Seen {
         writes: Vec<Vec<u8>>,
+        /// Every write call, the failed ones too.
+        attempts: usize,
         full: bool,
     }
 
@@ -597,6 +616,7 @@ mod frame_out_tests {
     impl Write for Tty {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             let mut seen = self.seen();
+            seen.attempts += 1;
             if seen.full {
                 return Err(std::io::ErrorKind::WouldBlock.into());
             }
@@ -606,6 +626,36 @@ mod frame_out_tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    /// A terminal that left: the restore fails, and nothing may write to it
+    /// again, or ratatui's Drop `eprintln!`s on the dead stderr and panics.
+    #[test]
+    fn a_failed_restore_leaves_ratatui_nothing_to_retry_on_drop() {
+        use ratatui::{
+            Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect,
+        };
+        let tty = Tty::default();
+        let out = FrameOut::new(tty.clone(), false);
+        let mut term = Terminal::with_options(
+            CrosstermBackend::new(out.clone()),
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(0, 0, 4, 4)),
+            },
+        )
+        .expect("a fixed viewport needs no size query");
+        term.hide_cursor().expect("hidden");
+        tty.seen().full = true;
+
+        assert!(super::teardown_terminal(&mut term, &out).is_err());
+        let attempts = tty.seen().attempts;
+        drop(term);
+
+        assert_eq!(
+            tty.seen().attempts,
+            attempts,
+            "the Drop wrote to the dead terminal"
+        );
     }
 
     fn frame(out: &mut FrameOut, parts: &[&[u8]]) -> std::io::Result<()> {

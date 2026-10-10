@@ -270,3 +270,43 @@ fn disconnected_codex_rollout_is_dropped_by_the_gate() {
         r.out
     );
 }
+
+/// A quit signal ends a headless run through its unwind (the loop logs its
+/// shutdown) and then the kernel's own verdict: the process dies BY the signal,
+/// so a parent shell reads an interrupt rather than a clean exit.
+#[test]
+fn a_quit_signal_unwinds_a_headless_run_then_ends_it_by_that_signal() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let home = tempfile::tempdir().expect("home");
+    let out = tempfile::NamedTempFile::new().expect("stdout file");
+    let err = tempfile::NamedTempFile::new().expect("stderr file");
+    let child = common::isolated(&["run", "--headless"], home.path())
+        .args(["--log-level", "info"])
+        .env("PIXTUOID_SOCKET", home.path().join("hook.sock"))
+        .stdout(out.reopen().expect("stdout handle"))
+        .stderr(err.reopen().expect("stderr handle"))
+        .spawn()
+        .expect("spawn pixtuoid run --headless");
+    let mut child = Reaped(child);
+
+    // The first summary line prints from inside the loop, past the arming.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !std::fs::read_to_string(out.path()).is_ok_and(|s| s.contains("agents=[")) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the loop never started"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // SAFETY: signalling a child this test spawned and still owns.
+    unsafe {
+        libc::kill(child.0.id().cast_signed(), libc::SIGTERM);
+    }
+    let status = child.0.wait().expect("wait");
+
+    let stderr = std::fs::read_to_string(err.path()).unwrap_or_default();
+    assert!(stderr.contains("shutting down"), "no unwind ran:\n{stderr}");
+    assert_eq!(status.signal(), Some(libc::SIGTERM), "status {status:?}");
+}
