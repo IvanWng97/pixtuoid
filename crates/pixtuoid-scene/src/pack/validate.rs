@@ -1,5 +1,3 @@
-//! What a loaded pack draws as its author may not have meant: a pack that can't
-//! draw at all does not load ([`PackError`](pixtuoid_core::sprite::error::PackError)).
 //! Test-only: the bundled pack must have no finding.
 
 use std::collections::BTreeSet;
@@ -50,7 +48,7 @@ pub(crate) struct HairOverhang {
 }
 
 /// What a loaded pack draws as its author may not have meant: a pack that
-/// can't draw at all does not load ([`PackError`]).
+/// can't draw at all does not load ([`PackError`](pixtuoid_core::sprite::error::PackError)).
 #[derive(Debug, Default)]
 pub(crate) struct ValidationReport {
     /// One per character animation.
@@ -254,7 +252,7 @@ fn overhangs(layer: &Sprite, body: &Frame, head: HeadMark) -> bool {
 }
 /// Every piece the painters loop on the beat, each with the frame its loop
 /// starts at: the looping fixtures, the appliances' busy loops
-/// ([`appliance_frame_index`]), the typists (`pose::typing_frame`), and every
+/// ([`appliance_frame_index`](super::lookup::appliance_frame_index)), the typists (`pose::typing_frame`), and every
 /// creature pose that is not a walk.
 fn looped_animations() -> Vec<(Piece, usize)> {
     let appliances =
