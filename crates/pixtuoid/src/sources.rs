@@ -260,7 +260,7 @@ fn connect_target(
 ) -> Result<ConnectOutcome> {
     write_flags(cfg, target.is_none().then_some((sid, true)))?;
     Ok(match target {
-        Some(t) => ConnectOutcome::Installed(install::install_target(t, None, None)?),
+        Some(t) => ConnectOutcome::Installed(install::install_target(t, None)?),
         None => ConnectOutcome::FlagOnly,
     })
 }

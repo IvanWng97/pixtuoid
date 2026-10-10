@@ -282,23 +282,20 @@ fn is_drive_relative(p: &std::path::Path) -> bool {
     !p.has_root() && matches!(p.components().next(), Some(std::path::Component::Prefix(_)))
 }
 
-/// An explicit path always wins — `--hook-path` first, then the `PIXTUOID_HOOK` env
-/// override — and the returned bool reports that, so `install_target` EMBEDS it rather
-/// than discarding the user's choice for a bare PATH-resolved name. A `locate` failure is
-/// fatal only for targets that EMBED the path (`BinaryStrategy::EmbedAbsolute`); the
-/// bare-name/PATH ones fall back to it so a fresh-machine install still succeeds.
+/// The [`io::HOOK_OVERRIDE_ENV`] override always wins, and the returned bool reports
+/// that, so `install_target` EMBEDS it rather than discarding the user's choice for a
+/// bare PATH-resolved name. A `locate` failure is fatal only for targets that EMBED the
+/// path (`BinaryStrategy::EmbedAbsolute`); the bare-name/PATH ones fall back to it so a
+/// fresh-machine install still succeeds.
 fn resolve_hook_binary_from(
     t: &Target,
-    hook_path: Option<PathBuf>,
     env_hook: Option<PathBuf>,
     locate: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<(PathBuf, bool)> {
-    // Both are EXPLICIT paths that get EMBEDDED into the config, where a relative path
-    // would resolve against the CLI's cwd at hook time and hooks would never fire.
-    let explicit = hook_path
-        .map(|p| (p, "--hook-path"))
-        .or(env_hook.map(|p| (p, io::HOOK_OVERRIDE_ENV)));
-    if let Some((p, origin)) = explicit {
+    // An EXPLICIT path gets EMBEDDED into the config, where a relative path would
+    // resolve against the CLI's cwd at hook time and hooks would never fire.
+    if let Some(p) = env_hook {
+        let origin = io::HOOK_OVERRIDE_ENV;
         if is_drive_relative(&p) {
             bail!(
                 "{origin} {} is drive-relative (a drive prefix with no root, like C:foo.exe) \
@@ -358,17 +355,24 @@ pub(crate) struct InstallReport {
 /// stays intact here; it serializes pixtuoid only against pixtuoid, since the agent CLI
 /// itself cannot honor this lock. Reads and writes go through the guard's PINNED
 /// resolution — re-resolving `path` splits the round across two files on a symlink retarget.
-pub(crate) fn install_target(
+pub(crate) fn install_target(t: &Target, config: Option<PathBuf>) -> Result<InstallReport> {
+    install_target_from(
+        t,
+        config,
+        pixtuoid_core::platform::path_env(io::HOOK_OVERRIDE_ENV),
+    )
+}
+
+/// [`install_target`] with its [`io::HOOK_OVERRIDE_ENV`] read injected.
+fn install_target_from(
     t: &Target,
     config: Option<PathBuf>,
-    hook_path: Option<PathBuf>,
+    env_hook: Option<PathBuf>,
 ) -> Result<InstallReport> {
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let env_hook = pixtuoid_core::platform::path_env(io::HOOK_OVERRIDE_ENV);
-    let (binary, explicit_hook) =
-        resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
+    let (binary, explicit_hook) = resolve_hook_binary_from(t, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;
     // Lost-update TOCTOU: two concurrent pixtuoid runs would otherwise interleave
     // read(A)→write(B)→write(A), and A's rename clobbers B's change.

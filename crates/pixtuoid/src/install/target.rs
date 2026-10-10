@@ -40,7 +40,7 @@ pub struct Target {
     /// never reads.
     pub default_config_path: fn() -> Result<PathBuf>,
     /// Build the command string written into config from the resolved binary.
-    /// `explicit` (the user passed `--hook-path`) always wins over a bare
+    /// `explicit` (the user set `PIXTUOID_HOOK`) always wins over a bare
     /// PATH-resolved name. Usually this IS the verbatim command written for every
     /// event, but a target's `merge_install` MAY append a per-entry suffix —
     /// CodeWhale bakes ` --event <name>` onto each entry, so its `hook_command`
@@ -92,6 +92,10 @@ pub struct HostRegistration {
     pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,
+    /// A note naming the hooks a pixtuoid from before the plugin merged into the
+    /// CLI's own settings, and how to remove them: no CLI command can, and
+    /// pixtuoid keeps no editor for that file.
+    pub leftovers: fn() -> Option<String>,
 }
 
 /// What [`HostRegistration::unregister`] found.
