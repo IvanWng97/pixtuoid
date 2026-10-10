@@ -3,7 +3,7 @@
 //! A recolored frame is stable for as long as its palette inputs are: hair/skin
 //! are `agent_id`-seeded (fixed for the agent's lifetime), and the OUTFIT is
 //! keyed on the agent's cwd — mutable mid-lifetime via a cwd backfill, which
-//! [`FrameCache::note_outfit_seed`] detects. With that one invalidation, caching
+//! `FrameCache::note_outfit_seed` detects. With that one invalidation, caching
 //! is safe.
 
 use std::collections::HashMap;
@@ -50,7 +50,7 @@ impl FrameCache {
     /// already-cached poses keep the stale outfit for the agent's lifetime while
     /// new poses render the healed one. Callers pass the exact seed the palette
     /// derives (`sim::outfit_seed_for`).
-    pub fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
+    pub(crate) fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
         match self.outfit_seeds.entry(id) {
             Entry::Occupied(mut e) => {
                 if *e.get() != seed {

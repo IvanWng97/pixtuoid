@@ -1,12 +1,12 @@
 //! Pure-pixel paint pass — no ratatui types, no terminal I/O.
 //!
 //! The classic's paint of a [`SimFrame`] the sim already stepped, which
-//! [`look::render`](crate::look::render) calls. The whole public surface is on
-//! the published crate's api golden, so widen it deliberately.
+//! [`look::render`](crate::look::render) calls.
 
 use std::collections::HashMap;
 
 use crate::pack::OfficeArt;
+use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
@@ -14,7 +14,7 @@ use crate::display::{Badge, Hover, HoverTarget, Hovers, TextRun};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station, sort_row_at};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station};
 use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
 
@@ -256,7 +256,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     let contacts = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
     paint_shadows(
         ctx.buf,
-        ctx.shadows.cells(contacts, 1),
+        ctx.shadows.cells(contacts, Density::ONE),
         shadow_strength,
         ctx.theme.office.shadow,
     );
@@ -282,7 +282,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     for d in drawables {
         paint_drawable(&d.kind, &mut ctx.drawable_ctx());
         let Some(hover) = d.hover else { continue };
-        // Badged where hoverable: both need its frame drawn.
+        // Badged where hoverable: a badge, like a hover, needs its frame drawn.
         if let DrawableKind::Character {
             agent,
             label_anchor,
@@ -355,8 +355,7 @@ fn enqueue_characters<'a>(
     }
 }
 
-/// The office pet, y-sorted at its anim's south row, since the anims differ in
-/// height.
+/// The office pet, sorted on its [`sort_row`](crate::sim::PetPlacement::sort_row).
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: &'a crate::sim::PetPlacement,
@@ -365,7 +364,7 @@ fn enqueue_pet<'a>(
     let pos = pet.pos;
     let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
     drawables.push(Drawable {
-        sort_row: sort_row_at(Pivot::Center, pos, size.h),
+        sort_row: pet.sort_row,
         layer: Layer::Creature,
         hover: Some(Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
@@ -385,7 +384,7 @@ fn enqueue_gateway_mascots<'a>(
 ) {
     for m in mascots {
         drawables.push(Drawable {
-            sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
+            sort_row: m.sort_row,
             layer: Layer::Creature,
             hover: m.target().map(|target| {
                 Hover::figure(

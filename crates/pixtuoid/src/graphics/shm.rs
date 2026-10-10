@@ -158,7 +158,7 @@ fn unlink(name: &str) {
 }
 
 /// Unlink every object this process still holds: at teardown, and in the
-/// unwind, so none outlives the process.
+/// unwind, so none outlives a quit [`QuitArms`](crate::runtime::QuitArms) catches.
 pub(crate) fn unlink_all() {
     ledger().drain();
 }
@@ -266,6 +266,23 @@ mod tests {
         };
         ledger.hold(huge, t0 + READ_WITHIN * 2);
         assert!(ledger.held.is_empty() && ledger.bytes == 0, "over the cap");
+    }
+
+    /// An object is late only PAST [`READ_WITHIN`]: at the deadline the
+    /// terminal has had exactly its window, and still keeps it.
+    #[test]
+    fn an_object_is_late_only_past_its_deadline() {
+        let mut ledger = Ledger::default();
+        let t0 = Instant::now();
+        let mut hold_at = |at| {
+            let name = next_name();
+            ledger.hold(Held { name, at, len: 1 }, at);
+            ledger.held.len()
+        };
+        hold_at(t0);
+        assert_eq!(hold_at(t0 + READ_WITHIN), 2, "at the deadline");
+        let past = t0 + READ_WITHIN + Duration::from_nanos(1);
+        assert_eq!(hold_at(past), 2, "past it, the first goes");
     }
 
     #[test]

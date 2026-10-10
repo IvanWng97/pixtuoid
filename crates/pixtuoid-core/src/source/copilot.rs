@@ -50,7 +50,7 @@ pub fn copilot_home() -> PathBuf {
 /// The session id = the **parent directory name** of `events.jsonl`
 /// (`…/session-state/<sessionId>/events.jsonl`). The filename stem is the
 /// constant `events`, so — unlike CC/Codex — the id is the containing dir.
-pub fn copilot_id_from_path(path: &Path) -> String {
+pub(crate) fn copilot_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(|p| p.file_name())
         .and_then(|s| s.to_str())

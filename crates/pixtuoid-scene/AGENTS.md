@@ -31,8 +31,8 @@ row" vocabulary across the crate for zero behavior change.)
 
 The rules the bundled pack (`sprites/default/`) is drawn to. A pack that breaks
 one does not load (`PackError`, and `pack::ArtError` for what the office reads
-off its art); `pack::validate_pack` warns of art that loads but is not as
-authored, and `the_bundled_pack_passes_its_own_validation` fails on a warning.
+off its art); the test-only `pack::validate::validate_pack` finds art that loads but is
+not as authored, and `the_bundled_pack_passes_its_own_validation` fails on a finding.
 
 Characters are recolored per agent by palette key: whatever a pack draws with `B`
 (shirt), `H` (hair), `S` (skin) or `P` (pants) takes each agent's colors, and
@@ -52,9 +52,9 @@ graphics protocol, SIXEL or iTerm2's inline images: it takes the
 densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
-A variant plays its base's `frame_ms` and `stride`, and validation warns
-on one that sets them apart (a single-frame base's `frame_ms`, which nothing
-steps, excepted); it also warns on a looping animation whose
+A variant plays its base's `frame_ms` and `stride`, and validation reports
+one that sets them apart (a single-frame base's `frame_ms`, which nothing
+steps, excepted); it also reports a looping animation whose
 `frame_ms` is not a whole number of the office's beats.
 
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
@@ -95,7 +95,7 @@ frame's. Every agent wears one of the pack's styles, picked by name from its id,
 so a pack ships the same styles at every density it dresses. The layers take
 the agent's recolor as the body does. A frame whose view its style leaves out is
 drawn bare, as is a variant frame with no head mark, and a layer reaching past
-the frame's sides is cut off: validation warns of each, and fails a style
+the frame's sides is cut off: validation reports each, and a style
 at a density the pack draws no character at.
 
 `[characters] outline = "<key>"` draws one line round every marked variant

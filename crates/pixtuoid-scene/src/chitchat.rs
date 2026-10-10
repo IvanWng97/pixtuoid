@@ -12,7 +12,7 @@ use crate::layout::WaypointKind;
 
 /// Total duration of a single chitchat exchange — the speaking turns fill it
 /// exactly, with no trailing silent gap.
-pub const CHITCHAT_TOTAL_MS: u64 = TURNS * TURN_MS;
+pub(crate) const CHITCHAT_TOTAL_MS: u64 = TURNS * TURN_MS;
 
 const TURN_MS: u64 = 1_500;
 
@@ -203,7 +203,7 @@ fn chitchat_venue(kind: WaypointKind) -> ChitchatVenue {
 /// meeting-only `room_id` field. Finds the group anchor ITSELF from the waypoint
 /// slice: a caller-supplied index invites the bug that merged island standers
 /// into the couch's conversation.
-pub fn venue_wp_idx(
+pub(crate) fn venue_wp_idx(
     kind: WaypointKind,
     wp_idx: usize,
     waypoints: &[crate::layout::Waypoint],
@@ -218,7 +218,7 @@ pub fn venue_wp_idx(
 }
 
 /// Whether agents at this waypoint kind can start a chitchat.
-pub fn supports_chitchat(kind: WaypointKind) -> bool {
+pub(crate) fn supports_chitchat(kind: WaypointKind) -> bool {
     chitchat_venue(kind) != ChitchatVenue::None
 }
 
@@ -245,7 +245,7 @@ pub struct Visitor {
 
 /// Expire old conversations, start/refresh one per venue that has ≥2 agents,
 /// and return the active speech bubbles for this frame.
-pub fn update_and_collect(
+pub(crate) fn update_and_collect(
     state: &mut HashMap<VenueKey, ActiveChitchat>,
     floor_idx: usize,
     visitors: &[Visitor],

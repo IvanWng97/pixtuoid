@@ -258,8 +258,8 @@ mod tests {
 
     #[test]
     fn detect_installed_probes_the_data_root_not_the_config_file() {
-        let root = std::env::temp_dir().join("pixtuoid-kimi-detect-test");
-        let _ = std::fs::remove_dir_all(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("kimi");
         temp_env::with_var("KIMI_CODE_HOME", Some(&root), || {
             assert!(!detect_installed(), "an absent data root must not detect");
 
@@ -269,8 +269,6 @@ mod tests {
                 "an existing data root must detect even with no config.toml"
             );
         });
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

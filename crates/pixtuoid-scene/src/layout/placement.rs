@@ -13,7 +13,7 @@ use super::{Bounds, Point, Size};
 
 /// How a `(w, h)` box is positioned relative to its `pos`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pivot {
+pub(crate) enum Pivot {
     /// `pos` is the box CENTER. Top-left = `pos - size/2`; the y-sort row is the
     /// box's south (front) edge. Most furniture.
     Center,
@@ -25,7 +25,7 @@ pub enum Pivot {
 /// Top-left corner of a `(w, h)` box anchored at `pos`. Used for BOTH the mask
 /// footprint rect (pass the footprint size) and the sprite blit origin (pass the
 /// visual size), so blocked ground and painted sprite can't diverge.
-pub fn anchored_top_left(pivot: Pivot, pos: Point, w: u16, h: u16) -> Point {
+pub(crate) fn anchored_top_left(pivot: Pivot, pos: Point, w: u16, h: u16) -> Point {
     match pivot {
         Pivot::Center => Point {
             x: pos.x.saturating_sub(w / 2),
@@ -78,7 +78,7 @@ pub(super) fn overlaps_within_clearance(
 /// The sort row of a sprite of height `h` placed at `pos`: its south
 /// (front) base row. Derived from [`anchored_top_left`] so it can NEVER drift
 /// from where the sprite actually blits (`origin.y + h - 1`).
-pub fn sort_row_at(pivot: Pivot, pos: Point, h: u16) -> u16 {
+pub(crate) fn sort_row_at(pivot: Pivot, pos: Point, h: u16) -> u16 {
     anchored_top_left(pivot, pos, 0, h)
         .y
         .saturating_add(h.saturating_sub(1))

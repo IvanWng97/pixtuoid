@@ -410,6 +410,29 @@ mod tests {
         );
     }
 
+    /// A symlink planted at `<sock>.lock` must not get its target opened,
+    /// created or locked.
+    #[test]
+    fn the_bind_lock_refuses_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("pixtuoid.sock");
+        let lock = socket_sibling(&sock, "lock");
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "theirs").unwrap();
+        std::os::unix::fs::symlink(&victim, &lock).unwrap();
+        assert!(acquire_bind_lock(&sock).is_err(), "a symlinked lock binds");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "theirs");
+
+        let dangling = dir.path().join("absent");
+        std::fs::remove_file(&lock).unwrap();
+        std::os::unix::fs::symlink(&dangling, &lock).unwrap();
+        assert!(acquire_bind_lock(&sock).is_err());
+        assert!(
+            !dangling.exists(),
+            "a dangling symlink's target was created"
+        );
+    }
+
     #[test]
     fn ensure_private_dir_rejects_a_regular_file() {
         let tmp = tempfile::TempDir::new().expect("tempdir");

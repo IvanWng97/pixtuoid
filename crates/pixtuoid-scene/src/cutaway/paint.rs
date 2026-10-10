@@ -570,10 +570,10 @@ fn paint_ground_shadows(
     // a shadow off the writable art darkens none of it, so a repaint of a few
     // rects builds only theirs
     let (art_xs, art_ys) = pen.writable_art(buf);
-    let per = pen.art(1).0;
+    let per = pen.density();
     let near = shadows.filter(|c| {
         let ((x0, y0), (x1, y1)) = c.bounds();
-        let cells = |a: u16, b: u16| a.saturating_mul(per)..b.saturating_mul(per);
+        let cells = |a: u16, b: u16| a.saturating_mul(per.get())..b.saturating_mul(per.get());
         let (cx, cy) = (cells(x0, x1), cells(y0, y1));
         cx.start < art_xs.end
             && art_xs.start < cx.end
@@ -925,7 +925,7 @@ fn paint_rug(
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let d = pen.art(1).0;
+    let d = pen.density().get();
     let (x0, y0, w, h) = (
         pen.art(rug.x).0,
         pen.art(rug.y).0,
@@ -1392,7 +1392,7 @@ fn paint_clock(
         }
     };
     let (hour, minute) = reading.turns();
-    let d = pen.art(1).0;
+    let d = pen.density().get();
     let side = pen.art(crate::layout::CLOCK.w).0;
     if d == 1 {
         // The classic's [`CLOCK`](crate::layout::CLOCK) face: the centre pin, the
@@ -1447,7 +1447,7 @@ fn paint_runner(
         pen.art(b.width).0,
         pen.art(b.height).0,
     );
-    let pitch = i32::from(pen.art(1).0) * crate::layout::roster::RUNNER_LATTICE_STRIDE;
+    let pitch = i32::from(pen.density().get()) * crate::layout::roster::RUNNER_LATTICE_STRIDE;
     let px = |buf: &mut RgbBuffer, x: u16, y: u16, c| {
         pen.fill(
             buf,
@@ -1558,6 +1558,7 @@ mod tests {
         quiet_board, showing, sit_down, sit_down_as, sit_down_in,
     };
     use crate::display::compose::{compose_at, ground_shadow, push_windows};
+    use crate::display::pen::test_density;
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
     use crate::layout::{FixtureKind, SceneLayout};
@@ -1874,7 +1875,8 @@ mod tests {
         use crate::display::text::advance;
         use crate::display::{TextRole, TextSpan};
         use pixtuoid_core::sprite::Rgb;
-        let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
+        let pen =
+            Pen::new(RenderScale::new(4).expect("nonzero"), test_density(4)).expect("4 divides 4");
         let (first, second) = ("I日b", "I");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
         for (align, plate, role) in [
@@ -1967,7 +1969,7 @@ mod tests {
     /// normal theme.
     fn carpet(layout: &SceneLayout, s: u16, d: u16) -> (Pen, RgbBuffer) {
         let scale = RenderScale::new(s).expect("nonzero");
-        let pen = Pen::new(scale, d).expect("d divides s");
+        let pen = Pen::new(scale, test_density(d)).expect("d divides s");
         let mut buf = RgbBuffer::filled(
             scale.to_buffer(layout.buf_w),
             scale.to_buffer(layout.buf_h),
@@ -2041,7 +2043,8 @@ mod tests {
     #[test]
     fn a_1x_rug_is_the_classic_rug() {
         let theme = &crate::theme::NORMAL;
-        let pen = Pen::new(RenderScale::new(1).expect("nonzero"), 1).expect("1 divides 1");
+        let pen =
+            Pen::new(RenderScale::new(1).expect("nonzero"), test_density(1)).expect("1 divides 1");
         for (width, height) in [(18, 24), (22, 7), (3, 3)] {
             let rug = crate::layout::Bounds {
                 x: 2,
@@ -2065,7 +2068,7 @@ mod tests {
     /// `shadows` at noon, drawn at scale `s` from art at density `d`.
     fn shadowed(s: u16, d: u16, shadows: &[crate::ground::Contact]) -> RgbBuffer {
         let scale = RenderScale::new(s).expect("nonzero");
-        let pen = Pen::new(scale, d).expect("d divides s");
+        let pen = Pen::new(scale, test_density(d)).expect("d divides s");
         let mut buf = RgbBuffer::filled(scale.to_buffer(12), scale.to_buffer(12), WEST);
         for y in 0..buf.height() {
             for x in buf.width() / 2..buf.width() {
@@ -2100,7 +2103,7 @@ mod tests {
     /// rounds to its nearest stop, where flooring would drop it.
     #[test]
     fn a_shadow_short_of_one_stop_still_darkens_the_ground() {
-        let pen = Pen::new(RenderScale::ONE, 1).expect("d divides s");
+        let pen = Pen::new(RenderScale::ONE, test_density(1)).expect("d divides s");
         let mut buf = RgbBuffer::filled(12, 12, WEST);
         paint_ground_shadows(
             std::iter::once(seam_shadow()),
@@ -2249,7 +2252,7 @@ mod tests {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let scale = RenderScale::from(pack.max_density_variant());
         let pen = Pen::for_pack(scale, &pack);
-        let d = pen.art(1).0;
+        let d = pen.density();
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -2257,7 +2260,7 @@ mod tests {
             scale,
         };
         let rows = crate::layout::window_rows(layout.wall_band_h());
-        let k = scale.get() / d;
+        let k = scale.get() / d.get();
         // Noon, the sun at dusk, a full moon up, a new moon down.
         for (day, hour) in [(1, 12), (2, 18), (2, 22), (17, 0)] {
             let now = crate::localclock::on_day(day, hour);
@@ -2307,7 +2310,7 @@ mod tests {
                 assert_eq!(span.depth, 0, "a window sorts at the very back");
                 paint_window(view, *frame, pen, &mut buf);
             }
-            let density = pixtuoid_core::sprite::format::Density::new(d).expect("nonzero");
+            let density = pen.density();
             let band = (layout.buf_w, layout.wall_band_h());
             let wall = crate::outside::Wall {
                 size: band,
@@ -2379,7 +2382,7 @@ mod tests {
             pen,
             &mut buf,
         );
-        let k = scale.get() / pen.art(1).0;
+        let k = scale.get() / pen.density().get();
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let mut posts = 0;
         for post in crate::layout::window_posts(layout.buf_w) {
@@ -2807,7 +2810,7 @@ mod tests {
         paint_list(&list, &mut cache, &mut night);
         let lights: Vec<&crate::display::light::LightView> =
             list.lights().iter().map(|l| &*l.view).collect();
-        let k = scale.get() / Pen::for_pack(scale, &pack).art(1).0;
+        let k = scale.get() / Pen::for_pack(scale, &pack).density().get();
         let walls: Vec<Span> = list
             .pieces()
             .iter()
@@ -4502,15 +4505,20 @@ mod tests {
         }
     }
 
-    /// A cat and two gateways of one source, the second degraded and nearer
-    /// the viewer, so it sorts last.
+    /// A cat and two gateways of one source, the second degraded and in hand,
+    /// so it sorts last on a row no feet stand on.
     fn creatures() -> (SceneLayout, SimFrame) {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let mut frame = empty_frame(&layout);
         let (cat, lobster) = (Point { x: 40, y: 70 }, Point { x: 110, y: 70 });
+        let row = |at, piece, frame| {
+            let h = crate::sim::pack_frame_size(&test_office(), piece, frame).h;
+            crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h)
+        };
         frame.pet = Some(crate::sim::PetPlacement {
             kind: crate::pet::PetKind::Cat,
             pos: cat,
+            sort_row: row(cat, PackPiece::CatWalk, 1),
             flip: true,
             anim_name: PackPiece::CatWalk,
             frame_idx: 1,
@@ -4518,7 +4526,7 @@ mod tests {
         });
         frame.mascots = vec![crate::sim::MascotPlacement {
             pos: lobster,
-            size: crate::layout::Size { w: 14, h: 12 },
+            sort_row: row(lobster, PackPiece::LobsterWalk, 0),
             anim_name: PackPiece::LobsterWalk,
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
@@ -4535,6 +4543,7 @@ mod tests {
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
+            sort_row: u16::MAX,
             key: crate::creatures::openclaw_key("18790"),
             degraded: true,
             effects: Vec::new(),
@@ -4638,6 +4647,11 @@ mod tests {
         let cat = crate::sim::PetPlacement {
             kind: crate::pet::PetKind::Cat,
             pos: at,
+            sort_row: crate::layout::sort_row_at(
+                crate::layout::Pivot::Center,
+                at,
+                crate::sim::pack_frame_size(&pack, PackPiece::CatWalk, 0).h,
+            ),
             flip: false,
             anim_name: PackPiece::CatWalk,
             frame_idx: 0,
@@ -4715,12 +4729,11 @@ mod tests {
     }
 
     /// The pet and the gateway mascots stand as figures: each paints only
-    /// inside its span at every density, sorts on its feet's row as the
-    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
-    /// what rides on it straight after it; a degraded gateway's art is greyed.
+    /// inside its span at every density, sorts on the row the sim gave it,
+    /// faces as the sim turns it, grounds its shadow, and has what rides on it
+    /// straight after it; a degraded gateway's art is greyed.
     #[test]
     fn creatures_stand_as_figures_with_their_riders_after_them() {
-        use crate::layout::{Pivot, sort_row_at};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_office();
         let (layout, frame) = creatures();
@@ -4729,6 +4742,11 @@ mod tests {
             frame.pet.as_ref().map_or(0, |p| p.effects.len()),
             frame.mascots[0].effects.len(),
             0,
+        ];
+        let rows = [
+            frame.pet.as_ref().map(|p| p.sort_row),
+            Some(frame.mascots[0].sort_row),
+            Some(frame.mascots[1].sort_row),
         ];
         for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
@@ -4750,7 +4768,12 @@ mod tests {
             // The pet faces west; a mascot never turns.
             let facing = [Flip::Horizontal, Flip::None, Flip::None];
             let sickly = [false, false, true];
-            for (((&i, ridden), flip), sick) in creatures.iter().zip(riders).zip(facing).zip(sickly)
+            for ((((&i, ridden), flip), sick), row) in creatures
+                .iter()
+                .zip(riders)
+                .zip(facing)
+                .zip(sickly)
+                .zip(rows)
             {
                 let p = &pieces[i];
                 let PieceKind::Creature {
@@ -4774,10 +4797,11 @@ mod tests {
                     "at scale {s} {} casts no shadow",
                     art.sprite.name()
                 );
-                let h = crate::pack::densest_frame(&pack, art.sprite, art.frame, RenderScale::ONE)
-                    .logical
-                    .1;
-                assert_eq!(p.span.depth, sort_row_at(Pivot::Center, at, h));
+                assert_eq!(
+                    Some(p.span.depth),
+                    row,
+                    "at scale {s} {at:?} sorts off its row"
+                );
                 assert_eq!(
                     stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
                     None,
@@ -5428,7 +5452,7 @@ mod tests {
                         .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
                         .collect();
                     // Art pixels of this art, on the pen's grid.
-                    let k = f32::from(pen.art(1).0) / f32::from(desk.density.get());
+                    let k = f32::from(pen.density().get()) / f32::from(desk.density.get());
                     (!hits.is_empty()).then(|| {
                         let n = hits.len() as f32;
                         (
@@ -5448,7 +5472,7 @@ mod tests {
                 .map(|l| l.view.peak())
                 .collect();
             assert_eq!(lamps.len(), bulbs.len(), "one pool a bulb");
-            let near = f32::from(pen.art(1).0);
+            let near = f32::from(pen.density().get());
             for bulb in &bulbs {
                 assert!(
                     lamps
@@ -5482,7 +5506,7 @@ mod tests {
             w: 4,
             idx: 0,
         };
-        let view = WindowView::new(bay, desk.y..desk.y + 4, pen.art(1).0, |cell| {
+        let view = WindowView::new(bay, desk.y..desk.y + 4, pen.density(), |cell| {
             let (x, y) = at(cell.at);
             painted.get(x, y)
         });

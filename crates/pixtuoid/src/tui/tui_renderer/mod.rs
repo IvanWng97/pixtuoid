@@ -311,7 +311,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.jank.due_at(at);
     }
 
-    /// Hold each frame's output in `out` and present it whole.
+    /// Hold each frame's output in `out` and present it whole. For the terminal
+    /// painter, `out` is the handle its backend writes through
+    /// ([`Self::restore_terminal`] abandons it).
     pub(crate) fn present_through(&mut self, out: crate::tui::FrameOut) {
         self.frame_out = Some(out);
     }
@@ -1039,6 +1041,18 @@ where
 {
     pub fn frame_buffer(&self) -> &ratatui::buffer::Buffer {
         self.terminal.backend().borrow().buffer()
+    }
+}
+
+impl TuiRenderer<ratatui::backend::CrosstermBackend<crate::tui::FrameOut>> {
+    /// [`crate::tui::teardown_terminal`], abandoning the writer this renderer
+    /// presents through ([`Self::present_through`]) when the restore fails.
+    ///
+    /// # Errors
+    ///
+    /// If restoring the terminal modes or showing the cursor fails.
+    pub(crate) fn restore_terminal(&mut self) -> anyhow::Result<()> {
+        crate::tui::teardown_terminal(&mut self.terminal, self.frame_out.as_ref())
     }
 }
 

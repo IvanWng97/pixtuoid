@@ -5,6 +5,7 @@
 //! layout cell per art cell block. A look stays whole down to [`LOOK_SOLID`].
 
 use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::sprite::format::Density;
 
 use crate::display::Span;
 use crate::display::pen::Pen;
@@ -15,7 +16,7 @@ use crate::effects::look::{
 use crate::effects::{Effect, EffectKind};
 
 /// The density this module's own looks are drawn at.
-const LOOK_DENSITY: u16 = 4;
+const LOOK_DENSITY: Density = Density::new(4).expect("nonzero");
 
 /// A point on the art grid, which a look may hang past the buffer's top or
 /// west edge.
@@ -42,7 +43,7 @@ impl Riding {
     /// The logical cells it paints, sorted with the figure it rides on at
     /// `depth` in `layer`; `None` when it paints nothing this frame.
     pub(crate) fn span(&self, depth: u16, layer: crate::display::Layer) -> Option<Span> {
-        let d = i32::from(self.pen.art(1).0);
+        let d = i32::from(self.pen.density().get());
         let mut cells: Option<(i32, i32, i32, i32)> = None;
         self.look(&mut |at, size, _, _| {
             let (x1, y1) = (at.x + size - 1, at.y + size - 1);
@@ -67,13 +68,13 @@ impl Riding {
     /// share of it covered.
     pub(crate) fn look(&self, emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32)) {
         let (e, inks) = (self.effect, &self.inks);
-        let d = self.pen.art(1).0;
+        let d = self.pen.density();
         match self.head {
             Some(head) if d == LOOK_DENSITY => return dense_look(e, head, inks, emit),
-            Some(head) if d == 1 && base_look(e, head, inks, emit) => return,
+            Some(head) if d == Density::ONE && base_look(e, head, inks, emit) => return,
             _ => {}
         }
-        let d = i32::from(d);
+        let d = i32::from(d.get());
         plot_effect(&e, inks, &mut |x, y, c, alpha| {
             let at = ArtPoint {
                 x: i32::from(x) * d,
@@ -196,7 +197,7 @@ fn dense_look(
     inks: &Inks,
     emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
 ) {
-    let d = i32::from(LOOK_DENSITY);
+    let d = i32::from(LOOK_DENSITY.get());
     let centred = |glyph: &[&str]| head.x - glyph_w(glyph) / 2;
     match e.kind {
         EffectKind::SleepZ => {
