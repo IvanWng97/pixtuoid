@@ -567,6 +567,20 @@
     - del(.jobs[].environment)
     - (.jobs[] | select(has("environment")) | .environment) = "staging"
 
+- id: credential-jobs-restore-no-cache
+  file: .github/workflows/release-plz.yml
+  why: >-
+    Both release-plz jobs compile with RELEASE_PLZ_TOKEN in scope, and
+    `release` with the publish OIDC claim too; a restored cache is written by
+    any main run, so it would hand that code to a credential-holding build
+    (zizmor cache-poisoning).
+  assert: |
+    [.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just")]
+    | length > 0 and all(.[]; (.with["enable-cache"] // "") == "false")
+  break:
+    - (.jobs.release.steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with) |= del(.["enable-cache"])
+    - (.jobs["release-pr"].steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["enable-cache"]) = "true"
+
 - id: release-attests-before-publishing
   file: .github/workflows/release.yml
   why: >-

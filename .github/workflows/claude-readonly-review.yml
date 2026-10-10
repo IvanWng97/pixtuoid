@@ -308,8 +308,9 @@ jobs:
 
       # show_full_output stays off, so a run that ends on an API error (is_error
       # on the result) would fail with no reason in the log; that one message
-      # carries no tool output. Encoded per GitHub's annotation escaping, so it
-      # cannot start a workflow command.
+      # carries no tool output. Encoded as @actions/core encodes command data
+      # (actions/toolkit packages/core/src/command.ts:103-108 @fa980c41), so it
+      # stays on the one `::error` line and cannot start a workflow command.
       - name: Report the model's error
         if: failure() && steps.claude.outputs.execution_file != ''
         env:
