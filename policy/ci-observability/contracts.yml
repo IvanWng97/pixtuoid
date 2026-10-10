@@ -416,6 +416,7 @@
     - .github/workflows/ci-builds.yml
     - .github/workflows/ci-tests.yml
     - .github/workflows/site.yml
+    - .github/workflows/raycast.yml
   why: >-
     ci.yml's gate sees a group only through the call's result, and GitHub does
     not document how a called workflow's jobs roll up into it. The `required`

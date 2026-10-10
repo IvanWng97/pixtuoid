@@ -39,7 +39,7 @@ use window::{FloatingApp, FloatingEvent};
 /// # Errors
 ///
 /// If the sprite pack cannot be loaded, the tokio runtime or the winit event loop cannot be built, the event loop exits with an error, or the window or its GPU fails to start or is lost.
-pub(crate) fn run(cfg: RunConfig) -> Result<()> {
+pub(crate) fn run(cfg: RunConfig) -> Result<Option<crate::runtime::QuitSignal>> {
     let RunConfig {
         socket,
         projects_root,
@@ -85,8 +85,10 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
         crate::runtime::QuitArms::arm().signalled()
     };
     let quit_proxy = proxy.clone();
+    let fired = std::sync::Arc::new(std::sync::OnceLock::new());
+    let fired_by = std::sync::Arc::clone(&fired);
     rt.spawn(async move {
-        quit.await;
+        let _ = fired_by.set(quit.await);
         let _ = quit_proxy.send_event(FloatingEvent::Quit);
     });
 
@@ -121,7 +123,8 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
     if let Some(failure) = app.into_failure() {
         return Err(failure);
     }
-    ran.context("running the floating window event loop")
+    ran.context("running the floating window event loop")?;
+    Ok(fired.get().copied())
 }
 
 /// Everything the pipeline needs, held by [`FloatingApp`] until `resumed` can

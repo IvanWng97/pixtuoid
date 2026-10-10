@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::{HostRegistration, MergeOutcome, Unregistered};
@@ -36,6 +37,7 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
     is_registered,
+    leftover_hooks,
 };
 
 /// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
@@ -184,14 +186,48 @@ fn is_registered() -> Result<bool> {
 
 /// The plugin's `enabledPlugins` value: `Some(false)` is installed but disabled.
 fn plugin_entry() -> Result<Option<bool>> {
-    let settings = settings_path()?;
-    let content = io::read_config(&settings)?;
+    Ok(read_settings(&settings_path()?)?["enabledPlugins"][plugin_id()].as_bool())
+}
+
+/// `Null` for a missing or empty file.
+fn read_settings(settings: &Path) -> Result<Value> {
+    let content = io::read_config(settings)?;
     if content.trim().is_empty() {
-        return Ok(None);
+        return Ok(Value::Null);
     }
-    let doc: Value = serde_json::from_str(&content)
-        .with_context(|| format!("parsing {}", settings.display()))?;
-    Ok(doc["enabledPlugins"][plugin_id()].as_bool())
+    serde_json::from_str(&content).with_context(|| format!("parsing {}", settings.display()))
+}
+
+fn leftover_hooks() -> Option<String> {
+    leftover_hooks_in(&settings_path().ok()?)
+}
+
+/// Releases before the plugin merged their hooks into this settings file, keyed
+/// on [`SENTINEL_KEY`]; Claude Code runs a plugin's copy of a handler beside a
+/// settings file's (code.claude.com/docs/en/hooks), hence "twice". A file that
+/// doesn't parse reports none: Claude Code skips it too
+/// (code.claude.com/docs/en/settings).
+fn leftover_hooks_in(settings: &Path) -> Option<String> {
+    let doc = read_settings(settings).ok()?;
+    let events: Vec<&str> = doc
+        .get("hooks")?
+        .as_object()?
+        .iter()
+        .filter(|(_, list)| {
+            list.as_array()
+                .is_some_and(|l| l.iter().any(|e| merge::is_flat_managed(e, SENTINEL_KEY)))
+        })
+        .map(|(event, _)| event.as_str())
+        .collect();
+    (!events.is_empty()).then(|| {
+        format!(
+            "{} still holds the hooks an older pixtuoid wrote for {}: Claude Code runs \
+             them while disconnected, and twice beside the plugin — delete each entry \
+             marked \"{SENTINEL_KEY}\": true",
+            crate::display_path(settings),
+            crate::strip_control_chars(&events.join(", "))
+        )
+    })
 }
 
 fn marketplace_listed(json_out: &str) -> Result<bool> {
@@ -245,8 +281,8 @@ fn run_claude(args: &[&std::ffi::OsStr]) -> Result<String> {
 
 /// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
 /// carries, so CC PATH-resolves it and a binary upgrade applies without a
-/// rewrite. An explicit `--hook-path` overrides that — the user passed it precisely
-/// because the binary is off-PATH — and is single-quoted, since CC runs shell-form
+/// rewrite. [`io::HOOK_OVERRIDE_ENV`] overrides that — the user set it precisely because
+/// the binary is off-PATH — and is single-quoted, since CC runs shell-form
 /// commands through a shell.
 ///
 /// Windows: exec form requires the absolute PE path (shell-form goes through
@@ -277,9 +313,9 @@ pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     }
 }
 
-/// The inner hook object of a CC settings entry. `exec_form` adds the empty `args` key
-/// that makes CC spawn the PE directly instead of through a shell; the `_pixtuoid`
-/// sentinel and `matcher` live on the OUTER entry, not here.
+/// The inner hook object of a hooks.json entry. `exec_form` adds the empty `args` key
+/// that makes CC spawn the PE directly instead of through a shell; `matcher` lives
+/// on the OUTER entry, not here.
 pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
     if exec_form {
         json!({ "type": "command", "command": cmd, "args": [] })
@@ -379,7 +415,6 @@ fn managed_entry(hook_command: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::SENTINEL_KEY;
 
     #[test]
     fn settings_path_honors_claude_config_dir() {
@@ -405,6 +440,66 @@ mod tests {
                 "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
             );
         });
+    }
+
+    fn leftovers_in(settings: Option<&str>) -> Option<String> {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        if let Some(s) = settings {
+            std::fs::write(&path, s).unwrap();
+        }
+        leftover_hooks_in(&path)
+    }
+
+    #[test]
+    fn leftover_hooks_names_each_event_a_pre_plugin_install_still_holds() {
+        let theirs =
+            json!({ "matcher": "Bash", "hooks": [{ "type": "command", "command": "lint" }] });
+        let ours = json!({
+            SENTINEL_KEY: true,
+            "matcher": ".*",
+            "hooks": [{ "type": "command", "command": "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'" }],
+        });
+        let settings = json!({
+            "enabledPlugins": { "pixtuoid@pixtuoid": true },
+            "hooks": {
+                "PreToolUse": [theirs, ours],
+                "Stop": [ours],
+                "PostToolUse": [theirs],
+            },
+        });
+        let note = leftovers_in(Some(&settings.to_string())).expect("two events still hold ours");
+        assert!(note.contains("PreToolUse, Stop"), "{note}");
+        assert!(
+            !note.contains("PostToolUse"),
+            "only the user's hook there: {note}"
+        );
+        assert!(
+            note.contains(r#""_pixtuoid": true"#),
+            "names the removal step: {note}"
+        );
+        assert!(note.contains("settings.json"), "names the file: {note}");
+    }
+
+    #[test]
+    fn leftover_hooks_reports_none_without_a_sentinel_entry() {
+        for settings in [
+            None,
+            Some(""),
+            Some("{not json"),
+            Some("[]"),
+            Some(r#"{"enabledPlugins":{"pixtuoid@pixtuoid":true}}"#),
+            Some(r#"{"hooks":{}}"#),
+            Some(r#"{"hooks":[]}"#),
+            Some(r#"{"hooks":{"Stop":[]}}"#),
+            Some(r#"{"hooks":{"Stop":{"_pixtuoid":true}}}"#),
+            Some(r#"{"hooks":{"Stop":[{"_pixtuoid":false,"hooks":[]}]}}"#),
+            Some(
+                r#"{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#,
+            ),
+        ] {
+            assert_eq!(leftovers_in(settings), None, "{settings:?}");
+        }
     }
 
     #[test]

@@ -46,7 +46,7 @@ impl BadgeTone {
 /// The source's badge hue for a name-badge label, or `None` when the label has
 /// no `LABEL_SEP` prefix (a bare-prefix / cwd-less label like `cx`) or the
 /// prefix is unregistered.
-pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
+pub(crate) fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
     text.split_once(LABEL_SEP)
         .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }

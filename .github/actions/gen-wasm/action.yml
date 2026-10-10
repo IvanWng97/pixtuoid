@@ -12,10 +12,15 @@ runs:
         ver=$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3 }' "$GITHUB_WORKSPACE/Cargo.lock")
         test -n "$ver"
         echo "version=$ver" >> "$GITHUB_OUTPUT"
-    - uses: taiki-e/install-action@v2
+    # The pinned install-action knows only the wasm-bindgen versions released
+    # by its own date, and Cargo.lock moves on its own lane: a fallback keeps a
+    # lock bump from reddening this step. cargo-install, not the default
+    # cargo-binstall, which gets the job token and runs prebuilt third-party
+    # binaries in a job whose artifact is deployed (install-action README, Security).
+    - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
       with:
         tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
-        fallback: none
+        fallback: cargo-install
 
     # Not via taiki-e/install-action: binaryen is not in its TOOLS.md (checked).
     - name: Install wasm-opt

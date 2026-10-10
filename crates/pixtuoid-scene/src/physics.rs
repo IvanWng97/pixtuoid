@@ -1,6 +1,6 @@
 //! Pure physics model for character walking.
 //!
-//! Imports only `pixtuoid_core::AgentId`. No router, no layout, no terminal deps.
+//! Imports only `pixtuoid_core::AgentId` and `layout::Point`. No router, no terminal deps.
 //! All kinematics are f32; screen is ≤ ~4096 px → ≤ ~57k octile, well
 //! within f32's 24-bit mantissa.
 
@@ -9,7 +9,7 @@ use pixtuoid_core::AgentId;
 
 /// Why is this walk happening? Determines which cruise speed is used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WalkIntent {
+pub(crate) enum WalkIntent {
     /// Agent spawned, walking door → desk. Brisk commute speed.
     Entry,
     /// Session ended, walking desk → door. Brisk commute speed.
@@ -24,35 +24,35 @@ pub enum WalkIntent {
 
 /// Cruise speed for Entry / Exit walks (octile/ms), tuned to keep the effective
 /// average walk pace ≈ 4 s while making duration distance-proportional.
-pub const V_CRUISE_COMMUTE: f32 = 0.36;
+pub(crate) const V_CRUISE_COMMUTE: f32 = 0.36;
 /// Cruise speed for WanderOut / WanderBack walks (octile/ms) — ambling, tuned in
 /// proportion to [`V_CRUISE_COMMUTE`] to preserve the commute-vs-wander contrast.
-pub const V_CRUISE_WANDER: f32 = 0.25;
+pub(crate) const V_CRUISE_WANDER: f32 = 0.25;
 /// Cruise speed for SnapBack walks (octile/ms) — faster than commute, since the
 /// agent visibly *hurries* back. Paired with the higher [`WALK_ACCEL_SNAPBACK`]
 /// so short (accel-limited) and far (cruise-limited) snap-backs both stay brisk.
-pub const V_CRUISE_SNAPBACK: f32 = 0.65;
+pub(crate) const V_CRUISE_SNAPBACK: f32 = 0.65;
 /// Shared acceleration/deceleration constant (octile/ms²), tuned for a ~0.55 s
 /// accel ramp (`t_a = v/a`).
-pub const WALK_ACCEL: f32 = 6.5e-4;
+pub(crate) const WALK_ACCEL: f32 = 6.5e-4;
 /// Acceleration for SnapBack walks (octile/ms²) — ~3× [`WALK_ACCEL`]. Short
 /// snap-backs are acceleration-limited (`T = 2·√(L/a)`, cruise-independent), so
 /// the urgent return has to *accelerate harder* to stay snappy.
-pub const WALK_ACCEL_SNAPBACK: f32 = 2.0e-3;
+pub(crate) const WALK_ACCEL_SNAPBACK: f32 = 2.0e-3;
 
 /// Minimum per-agent speed multiplier.
-pub const SPEED_MULT_MIN: f32 = 0.85;
+pub(crate) const SPEED_MULT_MIN: f32 = 0.85;
 /// Maximum per-agent speed multiplier.
-pub const SPEED_MULT_MAX: f32 = 1.20;
+pub(crate) const SPEED_MULT_MAX: f32 = 1.20;
 
 /// Minimum arrival settle pause (ms).
-pub const PAUSE_MS_MIN: u64 = 200;
+pub(crate) const PAUSE_MS_MIN: u64 = 200;
 /// Maximum arrival settle pause (ms).
-pub const PAUSE_MS_MAX: u64 = 400;
+pub(crate) const PAUSE_MS_MAX: u64 = 400;
 
 /// Frozen kinematic profile for one walk leg, computed once at walk-start.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct WalkProfile {
+pub(crate) struct WalkProfile {
     /// Accel → cruise → decel total time, **excluding** arrival pause.
     pub duration_ms: u64,
     /// Per-agent arrival settle before the pose flips to seated/at-waypoint.
@@ -70,7 +70,7 @@ pub struct WalkProfile {
 ///
 /// Uses bits 24..34 of the agent's hash — disjoint from `personality_for`
 /// (bits 0..14) and from the low-16 bits used by `stale_resume_gap_ms`.
-pub fn speed_mult(agent_id: AgentId) -> f32 {
+pub(crate) fn speed_mult(agent_id: AgentId) -> f32 {
     // Finalize with splitmix64 before slicing so distinct agents get distinct
     // speeds (raw FNV-1a doesn't avalanche the high bits).
     let z = pixtuoid_core::id::splitmix64(agent_id.raw());
@@ -83,7 +83,7 @@ pub fn speed_mult(agent_id: AgentId) -> f32 {
 ///
 /// Uses bits 40..52 of the agent's hash — a disjoint window from `speed_mult`,
 /// so a fast walker is not always a brief pauser.
-pub fn pause_ms_for(agent_id: AgentId) -> u64 {
+pub(crate) fn pause_ms_for(agent_id: AgentId) -> u64 {
     let z = pixtuoid_core::id::splitmix64(agent_id.raw());
     let bits = (z >> 40) & 0xFFF;
     // f64 (not f32 like speed_mult): the output is a u64 ms count, so f64 keeps
@@ -143,7 +143,11 @@ pub(crate) struct Gait {
 /// Freeze a [`WalkProfile`] for one walk leg over `path_len_octile`, with cruise
 /// speed picked by `intent` and per-agent speed/pause personality seeded from
 /// `agent_id`.
-pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId) -> WalkProfile {
+pub(crate) fn walk_profile(
+    path_len_octile: u32,
+    intent: WalkIntent,
+    agent_id: AgentId,
+) -> WalkProfile {
     let v_base = match intent {
         WalkIntent::SnapBack => V_CRUISE_SNAPBACK,
         WalkIntent::Entry | WalkIntent::Exit => V_CRUISE_COMMUTE,
@@ -189,7 +193,7 @@ pub(crate) fn walk_profile_for(path_len_octile: u32, gait: Gait) -> WalkProfile 
 
 /// Fixed-point resolution of `walk_progress`: it returns `t_x1000 ∈ [0, 1000]`
 /// (progress scaled by this, so integer math carries three fractional digits).
-pub const PROGRESS_SCALE: u16 = 1000;
+pub(crate) const PROGRESS_SCALE: u16 = 1000;
 
 /// Pure linear interpolation along the walk segment `from → to` at
 /// `t_x1000` (0..=[`PROGRESS_SCALE`]).
@@ -239,7 +243,7 @@ pub(crate) fn leg_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> 
 /// - `elapsed_ms < duration_ms`: physics kinematics (accel/cruise/decel).
 /// - `elapsed_ms >= duration_ms`: saturates at the scale (also covers pause window).
 /// - Zero-length profile: always returns the scale.
-pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
+pub(crate) fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     if p.path_len_octile == 0 || elapsed_ms >= p.duration_ms {
         return PROGRESS_SCALE;
     }
@@ -280,7 +284,7 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
 
 /// Returns `true` when the full walk **and** its arrival pause have elapsed —
 /// the pose flips to seated/at-waypoint only after the settle beat completes.
-pub fn walk_arrived(p: &WalkProfile, elapsed_ms: u64) -> bool {
+pub(crate) fn walk_arrived(p: &WalkProfile, elapsed_ms: u64) -> bool {
     elapsed_ms >= p.duration_ms + p.pause_ms
 }
 
