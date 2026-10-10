@@ -238,9 +238,8 @@ impl Jank {
         }
     }
 
-    /// The window that `now` closes. Its span, not frames × interval, is
-    /// what a rate covers: a painter may record fewer frames than its interval
-    /// fits.
+    /// The window that `now` closes; `span_ms` is its real time, which a rate
+    /// is taken over.
     fn summarize(&self, now: Instant) {
         let mut sorted = self.micros;
         let window = &mut sorted[..self.len];
