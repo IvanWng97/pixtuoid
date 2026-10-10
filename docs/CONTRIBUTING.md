@@ -310,8 +310,9 @@ resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
 A Dependabot PR is not reviewed: [`claude-review.yml`](../.github/workflows/claude-review.yml)'s
-`exempt` job posts each lens's status when every commit is Dependabot's and the
-PR only moves versions in its manifests or an action's `uses:` pin, with no
+`exempt` job posts the `claude-review` status when every commit is
+Dependabot's and the PR only moves versions in its manifests or an action's
+`uses:` pin, with no
 package, install script or source new to it. Anything else gets `pending`, and
 a maintainer comments `/claude-review`.
 

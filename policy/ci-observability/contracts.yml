@@ -161,9 +161,9 @@
 - id: reviewer-absence-runs-on-failure
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    report_absence posts the failure statuses exactly when analyze or publish
+    report_absence posts the failure status exactly when analyze or publish
     failed, and an `if:` with no status function gets an implicit `success()`,
-    which skips it then: the PR waits on statuses no run will post.
+    which skips it then: the PR waits on a status no run will post.
   assert: |
     .jobs.report_absence.if == "${{ !cancelled() && needs.publish.result != 'success' }}"
   break:
@@ -241,7 +241,7 @@
 - id: reviewer-writers-only-comment-and-status
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish comments and sets each lens's status, report_absence only sets them,
+    publish comments and sets the review's status, report_absence only sets it,
     and any action in either, a checkout included, runs with that scope: an
     action reads `github.token` without being passed it
     (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
@@ -278,7 +278,7 @@
 - id: exemption-needs-a-dependabot-pr
   file: .github/workflows/claude-review.yml
   why: >-
-    exempt posts the statuses main requires in place of a review, so an `if:`
+    exempt posts the status main requires in place of a review, so an `if:`
     admitting any PR but Dependabot's own from this repository, or a scope past
     reading and posting a status, lets that PR merge unreviewed.
   assert: |

@@ -267,7 +267,7 @@ assert_threads() {
 valid_review='{"summary":"No correctness findings.","findings":[]}'
 run_publisher "$valid_review" ||
     fail "Claude publisher rejected a valid zero-finding review"
-assert_status '.state == "success" and .sha == "abc123"' "a published review passes every lens at the reviewed head"
+assert_status '.state == "success" and .sha == "abc123"' "a published review passes the status at the reviewed head"
 [[ -s "$published_comment" ]] ||
     fail "Claude publisher posted no review body"
 [[ "$(<"$published_comment")" == *"**Findings: 0**"* ]] ||
@@ -745,6 +745,8 @@ assert_exempt() {
     local got
     got="$(jq -sr 'map(select(.context == "claude-review")) | last | .state // "none"' "$fixtures/statuses.jsonl")"
     [[ "$got" == "$want" ]] || fail "the exemption posted $got, not $want, on $label"
+    jq -se 'map(.context) | unique | . == [] or . == ["claude-review"]' "$fixtures/statuses.jsonl" >/dev/null ||
+        fail "the exemption posted a context main does not require on $label: $(<"$fixtures/statuses.jsonl")"
 }
 file_row() { jq -cn --arg f "$1" --arg s "${2:-modified}" --arg p "${3:-@@ -1 +1 @@}" '{filename: $f, status: $s, patch: $p}'; }
 
