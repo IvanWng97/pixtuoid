@@ -272,7 +272,7 @@ impl OfficeRenderer {
         cursor: (f64, f64),
         at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
-        self.session.hit_at(unit_bounds(unit_at(cursor, at)))
+        hit_in(&self.session, cursor, at)
     }
 
     /// Where the last frame may differ from the one on screen before it.
@@ -326,8 +326,16 @@ fn under<'a>(
     if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
         Under::Corner
     } else {
-        Under::Office(session.hit_at(unit_bounds(unit_at(cursor, at))))
+        Under::Office(hit_in(session, cursor, at))
     }
+}
+
+fn hit_in(
+    session: &OfficeSession,
+    cursor: (f64, f64),
+    at: PixelFit,
+) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
+    session.hit_at(unit_bounds(unit_at(cursor, at)))
 }
 
 /// What a press on `under` affords, as its cursor, in CSS UI 3's names

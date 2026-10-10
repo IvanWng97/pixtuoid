@@ -264,6 +264,7 @@ impl FloatingApp {
             self.petting.as_ref(),
             self.ui.now(),
         );
+        // winit re-applies a window's cursor when the pointer re-enters, on every platform.
         if icon != self.cursor_icon {
             self.cursor_icon = icon;
             window.set_cursor(icon);
