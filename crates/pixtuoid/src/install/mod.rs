@@ -350,11 +350,7 @@ pub(crate) struct InstallReport {
     pub post_install_hint: Option<&'static str>,
 }
 
-/// Install pixtuoid hooks into `t`'s config, returning a structured report. The ConfigLock
-/// round (read→merge→write) is the load-bearing write authority (invariant #4) and
-/// stays intact here; it serializes pixtuoid only against pixtuoid, since the agent CLI
-/// itself cannot honor this lock. Reads and writes go through the guard's PINNED
-/// resolution — re-resolving `path` splits the round across two files on a symlink retarget.
+/// Install pixtuoid hooks into `t`'s config, returning a structured report.
 pub(crate) fn install_target(t: &Target, config: Option<PathBuf>) -> Result<InstallReport> {
     install_target_from(
         t,
@@ -363,7 +359,11 @@ pub(crate) fn install_target(t: &Target, config: Option<PathBuf>) -> Result<Inst
     )
 }
 
-/// [`install_target`] with its [`io::HOOK_OVERRIDE_ENV`] read injected.
+/// [`install_target`] with its [`io::HOOK_OVERRIDE_ENV`] read injected. The ConfigLock
+/// round (read→merge→write) is the load-bearing write authority (invariant #4) and
+/// stays intact here; it serializes pixtuoid only against pixtuoid, since the agent CLI
+/// itself cannot honor this lock. Reads and writes go through the guard's PINNED
+/// resolution — re-resolving `path` splits the round across two files on a symlink retarget.
 fn install_target_from(
     t: &Target,
     config: Option<PathBuf>,

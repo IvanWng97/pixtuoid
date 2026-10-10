@@ -16,7 +16,7 @@ export interface SourceStatus {
   connected: boolean;
   cli_present: boolean;
   /**
-   * A health/issue summary (install-broken / decode-drift), or `null` when n/a.
+   * The source's worst install or decode issue as one line, or `null` if none.
    */
   health?: string | null;
 }

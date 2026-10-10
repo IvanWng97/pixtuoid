@@ -37,7 +37,7 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
     is_registered,
-    leftovers: leftover_hooks,
+    leftover_hooks,
 };
 
 /// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
@@ -198,13 +198,17 @@ fn read_settings(settings: &Path) -> Result<Value> {
     serde_json::from_str(&content).with_context(|| format!("parsing {}", settings.display()))
 }
 
+fn leftover_hooks() -> Option<String> {
+    leftover_hooks_in(&settings_path().ok()?)
+}
+
 /// Releases before the plugin merged their hooks into this settings file, keyed
 /// on [`SENTINEL_KEY`]; Claude Code runs a plugin's copy of a handler beside a
 /// settings file's (code.claude.com/docs/en/hooks), hence "twice". A file that
-/// doesn't parse reports none.
-fn leftover_hooks() -> Option<String> {
-    let settings = settings_path().ok()?;
-    let doc = read_settings(&settings).ok()?;
+/// doesn't parse reports none: Claude Code skips it too
+/// (code.claude.com/docs/en/settings).
+fn leftover_hooks_in(settings: &Path) -> Option<String> {
+    let doc = read_settings(settings).ok()?;
     let events: Vec<&str> = doc
         .get("hooks")?
         .as_object()?
@@ -220,7 +224,7 @@ fn leftover_hooks() -> Option<String> {
             "{} still holds the hooks an older pixtuoid wrote for {}: Claude Code runs \
              them while disconnected, and twice beside the plugin — delete each entry \
              marked \"{SENTINEL_KEY}\": true",
-            crate::display_path(&settings),
+            crate::display_path(settings),
             crate::strip_control_chars(&events.join(", "))
         )
     })
@@ -440,10 +444,11 @@ mod tests {
 
     fn leftovers_in(settings: Option<&str>) -> Option<String> {
         let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
         if let Some(s) = settings {
-            std::fs::write(dir.path().join("settings.json"), s).unwrap();
+            std::fs::write(&path, s).unwrap();
         }
-        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(dir.path()), leftover_hooks)
+        leftover_hooks_in(&path)
     }
 
     #[test]

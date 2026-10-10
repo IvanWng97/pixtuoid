@@ -259,6 +259,32 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
     assert_eq!(live.len(), rows.len());
 }
 
+/// A disconnected Claude Code row still names the hooks an older pixtuoid
+/// left firing: they run whatever the row says.
+#[test]
+fn a_disconnected_row_names_hooks_that_still_fire() {
+    let cfg = tempfile::tempdir().unwrap();
+    std::fs::write(
+        cfg.path().join("settings.json"),
+        r#"{"hooks":{"Stop":[{"_pixtuoid":true,"matcher":".*","hooks":[]}]}}"#,
+    )
+    .unwrap();
+    let rows = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(cfg.path()), || {
+        build_rows(&HashSet::new(), "")
+    });
+    let cc = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
+    assert_ne!(cc.state, ConnState::Connected);
+    assert!(
+        cc.health
+            .as_deref()
+            .is_some_and(|h| h.contains("pixtuoid doctor")),
+        "{:?}",
+        cc.health
+    );
+    let cx = rows.iter().find(|r| r.source_id == "codex").unwrap();
+    assert_eq!(cx.health, None, "a disconnected row shows nothing else");
+}
+
 #[test]
 fn build_rows_honors_the_connected_set() {
     let mut set = HashSet::new();

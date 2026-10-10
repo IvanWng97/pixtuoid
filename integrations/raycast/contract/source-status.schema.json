@@ -17,7 +17,7 @@
       "type": "boolean"
     },
     "health": {
-      "description": "A health/issue summary (install-broken / decode-drift), or `null` when n/a.",
+      "description": "The source's worst install or decode issue as one line, or `null` if none.",
       "type": [
         "string",
         "null"

@@ -95,7 +95,7 @@ pub struct HostRegistration {
     /// A note naming the hooks a pixtuoid from before the plugin merged into the
     /// CLI's own settings, and how to remove them: no CLI command can, and
     /// pixtuoid keeps no editor for that file.
-    pub leftovers: fn() -> Option<String>,
+    pub leftover_hooks: fn() -> Option<String>,
 }
 
 /// What [`HostRegistration::unregister`] found.
