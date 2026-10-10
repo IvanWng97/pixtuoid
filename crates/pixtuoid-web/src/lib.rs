@@ -28,7 +28,7 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::flash::{FlashHold, FlashPhase, ScreenClock};
+use pixtuoid_scene::flash::{FlashHold, ScreenClock};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
@@ -159,8 +159,8 @@ pub struct Office {
     /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
     weather: WeatherPolicy,
-    /// The flash the page shows: the frame `step` leaves is the one it draws.
-    flash: FlashHold<FlashPhase, (u16, u16)>,
+    /// The flashes the page shows: the frame `step` leaves is the one it draws.
+    flash: FlashHold<(u16, u16)>,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -234,14 +234,14 @@ impl Office {
         // — load-bearing: the looped script REUSES agent ids, and a returning cast
         // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
-        let flash = self.session.flash();
+        let flashes = self.session.flashes();
         let shape = (buf_w, buf_h);
-        if self.flash.holds(flash, shape) {
+        if self.flash.holds(flashes, shape) {
             return;
         }
         self.expand_rgba();
         // The page draws what `step` leaves in the same task, straight after.
-        self.flash.shown(flash, shape);
+        self.flash.shown(flashes, shape);
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
@@ -260,9 +260,10 @@ impl Office {
     }
 
     /// Hire one more agent: a new coworker walks into the background office,
-    /// works a few spells, and heads out ~70s later. Refused (`false`) before
-    /// the first `step` (no clock yet), while `MAX_LIVE` hires are already
-    /// alive, and when the canvas-sized office has no free desk. Never throws.
+    /// works a few spells, and heads out `script::HIRE_STAY_MS` later. Refused
+    /// (`false`) before the first `step` (no clock yet), while `MAX_LIVE` hires
+    /// are already alive, and when the canvas-sized office has no free desk.
+    /// Never throws.
     pub fn hire(&mut self) -> bool {
         let Some(base) = self.last_now else {
             return false;
@@ -377,9 +378,9 @@ impl Office {
         pixtuoid_scene::audio::dsp::SAMPLE_RATE
     }
 
-    /// Zero-copy pointer/length into the looping bed samples for stem `idx`
-    /// (0=Pad … 6=Rain, `LoopStem::ALL` order). RE-READ after warmup completes
-    /// AND whenever a tick reports `swapped`.
+    /// Zero-copy pointer/length into the looping bed samples for stem `idx`, in
+    /// [`LoopStem::ALL`](pixtuoid_scene::audio::mixer::LoopStem::ALL) order.
+    /// RE-READ after warmup completes AND whenever a tick reports `swapped`.
     pub fn audio_loop_ptr(&self, idx: usize) -> *const f32 {
         self.audio
             .as_ref()
@@ -390,8 +391,7 @@ impl Office {
     }
 
     /// Zero-copy pointer/length into a one-shot buffer: `pool` is the wire index
-    /// (0=keystroke, 1=raindrop, 2=door chime, 3=printer, 4=vending), `idx` the
-    /// pool slot.
+    /// [`OneShotPool::from_wire`] reads, `idx` the pool slot.
     pub fn audio_oneshot_ptr(&self, pool: u8, idx: usize) -> *const f32 {
         self.audio.as_ref().map_or(std::ptr::null(), |a| {
             OneShotPool::from_wire(pool)
@@ -448,7 +448,8 @@ impl Office {
         }
     }
 
-    /// Copy in loop stem `idx` (`LoopStem::ALL` order). Same `false` contract as
+    /// Copy in loop stem `idx` ([`LoopStem::ALL`](pixtuoid_scene::audio::mixer::LoopStem::ALL)
+    /// order). Same `false` contract as
     /// `audio_adopt_oneshot`.
     pub fn audio_adopt_loop(&mut self, idx: usize, samples: &[f32]) -> bool {
         match self.adopting.as_mut() {
@@ -755,7 +756,7 @@ fn push_board_segments(
 mod tests {
     use super::*;
     use crate::script::cast_id;
-    use pixtuoid_scene::flash::ManualClock;
+    use pixtuoid_scene::flash::{Flashes, ManualClock};
 
     /// `Office::new`'s error arm constructs a `JsError`, so unwrap via match.
     fn office() -> Office {
@@ -922,12 +923,12 @@ mod tests {
         let (mut probe, _) = storm_on_screen();
         let mut phase = |ms: u64| {
             probe.step(ms as f64, 160, 96);
-            probe.session.flash()
+            probe.session.flashes()
         };
         let t0 = T0_MS as u64;
         let start = (t0..t0 + MINUTE_MS)
             .step_by(FULL_TICK_MS as usize)
-            .find(|&ms| phase(ms) != FlashPhase::default())
+            .find(|&ms| phase(ms) != Flashes::default())
             .expect("a storm strikes within a minute");
         let (mut was, mut changes) = (phase(start), vec![start]);
         let end = (start + 1..start + MINUTE_MS)
@@ -937,7 +938,7 @@ mod tests {
                     changes.push(ms);
                     was = now;
                 }
-                now == FlashPhase::default()
+                now == Flashes::default()
             })
             .expect("a strike ends within a minute");
         Strike { changes, end }
@@ -1319,7 +1320,7 @@ mod tests {
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
         use pixtuoid_scene::layout::SceneLayout;
-        // The site renders BUF_H=130; this width seats the full cast plus at
+        // The site renders `BUF_H` rows; this width seats the full cast plus at
         // least one spare. The free-desk count is DERIVED, not a size literal —
         // the density pass re-tunes desks-per-buffer out from under a literal.
         let (w, h) = (192u32, 130u32);

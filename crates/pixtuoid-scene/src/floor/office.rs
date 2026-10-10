@@ -507,19 +507,6 @@ impl OfficeSession {
         }
     }
 
-    /// What of the last frame flashes: the floor showing's; nothing in a
-    /// slide.
-    pub fn flash(&self) -> crate::flash::FlashPhase {
-        match self.slide {
-            Some(_) => crate::flash::FlashPhase::default(),
-            None => self
-                .views
-                .get(self.nav.current())
-                .map(FloorView::flash)
-                .unwrap_or_default(),
-        }
-    }
-
     /// A frame drew no office (a painter's too-small screen): the floor
     /// showing keeps nothing of its last, so its audio hears an empty floor
     /// and a pointer hits nothing.
@@ -535,8 +522,8 @@ impl OfficeSession {
         &self.views[self.nav.current()].last_occupied
     }
 
-    /// What each of the last frame's two sides flashes: a slide's leaving and
-    /// arriving floors, else the floor showing's twice.
+    /// What the last frame flashes: a slide's leaving and arriving floors',
+    /// else the floor showing's.
     pub fn flashes(&self) -> crate::flash::Flashes {
         let of = |floor: usize| {
             self.views
@@ -545,8 +532,10 @@ impl OfficeSession {
                 .unwrap_or_default()
         };
         match (&self.slide, self.nav.transition()) {
-            (Some(_), Some(tr)) => [of(tr.from_floor), of(tr.to_floor)],
-            _ => [of(self.nav.current()); 2],
+            (Some(_), Some(tr)) => {
+                crate::flash::Flashes::of_slide(of(tr.from_floor), of(tr.to_floor))
+            }
+            _ => crate::flash::Flashes::of_floor(of(self.nav.current())),
         }
     }
 
