@@ -55,6 +55,13 @@ API_NIGHTLY := "nightly-2026-07-22"
 # churning goldens.
 API_PUBLIC_API := "0.52.0"
 
+# The cargo-hawk `hawk` runs, and the exact rustc it links (its
+# rust-toolchain.toml): hawk refuses any other, so a bump moves both, and the
+# installer's hash with them.
+HAWK_VERSION := "0.1.15"
+HAWK_RUST := "1.99.0"
+HAWK_INSTALLER_SHA256 := "4e1b85fc15d3d4efa9b3bd7c62620655cc5504b7164272292043e3794f54111f"
+
 # The non-linux triples `doc-check` renders, one per OS release.yml ships.
 # rustdoc links nothing, so a triple's std is all it needs while no dependency on
 # it builds C (`cargo doc` still runs build scripts).
@@ -303,6 +310,7 @@ lint:
     run composites just actionlint-composites & pids+=($!)
     run zizmor  just zizmor              & pids+=($!)
     run ci-obs  just ci-observability     & pids+=($!)
+    run hawkpin just hawk-pin-check      & pids+=($!)
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
@@ -485,6 +493,50 @@ _api-toolchain:
     rustup toolchain list | grep -q '{{ API_NIGHTLY }}' && exit 0
     echo "installing {{ API_NIGHTLY }} (api-surface needs nightly rustdoc JSON)…" >&2
     rustup toolchain install {{ API_NIGHTLY }} --profile minimal
+
+# Report-only: findings are warnings, so it fails only when hawk cannot run.
+# `pixtuoid_web`'s `pub` surface is the wasm exports the site's JS calls,
+# outside the workspace: hawk's `--exclude-crate` case.
+# `unnecessary_restricted_visibility` (`pub(crate)` → private) goes past
+# AGENTS.md's Visibility rule.
+[doc('Report `pub` items no other workspace crate needs (cargo-hawk, advisory); forwards args, e.g. --fix')]
+[group('rust')]
+hawk *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # rustup's proxy cargo, so `+{{ HAWK_RUST }}` selects the toolchain (see `check-windows`).
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    bin="$PWD/target/cargo-hawk-{{ HAWK_VERSION }}"
+    if [ ! -x "$bin/cargo-hawk" ]; then
+        installer="$(mktemp)"
+        trap 'rm -f "$installer"' EXIT
+        curl --proto '=https' --tlsv1.2 -fsSL -o "$installer" \
+            "https://github.com/astral-sh/hawk/releases/download/{{ HAWK_VERSION }}/cargo-hawk-installer.sh"
+        # The installer pins each archive's hash; this pins the installer.
+        echo "{{ HAWK_INSTALLER_SHA256 }}  $installer" | shasum -a 256 -c - >/dev/null
+        CARGO_HAWK_UNMANAGED_INSTALL="$bin" sh "$installer" >&2
+    fi
+    rustup toolchain list | grep -q '^{{ HAWK_RUST }}-' \
+        || rustup toolchain install {{ HAWK_RUST }} --profile minimal --no-self-update >&2
+    PATH="$bin:$PATH" cargo +{{ HAWK_RUST }} hawk check --target-dir target/hawk \
+        --exclude-crate pixtuoid_web -A hawk::unnecessary_restricted_visibility "$@"
+
+# cargo refuses to build a crate below its `rust-version`, so a bump past
+# HAWK_RUST would break `hawk` only after the merge, in its advisory job.
+[doc("Fail when HAWK_RUST is below a workspace crate's rust-version")]
+[group('rust')]
+hawk-pin-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    floors="$(cargo metadata --no-deps --format-version 1 \
+        | jq -er '[.packages[].rust_version | values] | if length > 0 then .[] else error("no rust-version") end')"
+    below() { [ "$({ printf '%s\n' "$floors"; echo "$1"; } | sort -V | tail -n 1)" != "$1" ]; }
+    # The negative control: a comparison that cannot fire would pass any pin.
+    below 0 || { echo "hawk-pin-check: its comparison passed version 0, so it cannot fire" >&2; exit 2; }
+    if below {{ HAWK_RUST }}; then
+        echo "error: HAWK_RUST {{ HAWK_RUST }} is below a crate's rust-version ($(sort -V <<<"$floors" | tail -n 1)): bump HAWK_VERSION to a hawk built on one at least that new" >&2
+        exit 1
+    fi
 
 # Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
 # (1) build every item's docs, private ones included, with EVERY rustdoc

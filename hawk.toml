@@ -1,0 +1,13 @@
+# `just hawk`'s shipped binaries. Listed rather than hawk's every-binary
+# default, so a dev-only binary added later can't keep a `pub` alive for itself;
+# a shipped one reports false findings until it is listed here.
+
+[[production]]
+package = "pixtuoid"
+bin = "pixtuoid"
+reason = "the shipped binary"
+
+[[production]]
+package = "pixtuoid-hook"
+bin = "pixtuoid-hook"
+reason = "the hook shim the agent CLIs run"

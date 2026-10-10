@@ -135,6 +135,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       - run: just ci-observability
+      - run: just hawk-pin-check
       - run: just json-schemas
       - run: just links
       - run: just drift-selftest
