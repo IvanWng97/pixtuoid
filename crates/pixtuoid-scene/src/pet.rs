@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 /// Duration (ms) the pet stays frozen in place after being petted.
-pub const PET_DURATION_MS: u64 = 2000;
+pub(crate) const PET_DURATION_MS: u64 = 2000;
 
 /// State for the "pet the animal" interaction — render-side only, not a data
 /// model concern.
@@ -127,7 +127,7 @@ impl Pet {
     clippy::cast_possible_truncation,
     reason = "a hash picks through `crate::spread`, alike on every target"
 )]
-pub fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
+pub(crate) fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
     pets.get(crate::spread(floor_seed, pets.len()))
 }
 

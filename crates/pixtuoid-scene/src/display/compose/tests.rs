@@ -595,7 +595,7 @@ fn the_floor_indicator_stays_in_its_cell() {
     let densities = pack.density_variants();
     assert!(!densities.is_empty(), "the pack draws a density");
     for d in densities {
-        let pen = Pen::new(RenderScale::from(*d), d.get()).expect("d divides itself");
+        let pen = Pen::new(RenderScale::from(*d), *d).expect("d divides itself");
         for (floor, floors) in [(0, 1), (11, 12), (98, 99)] {
             let floor = crate::floor::FloorMeta::for_floor(floor, floors);
             let run = TextRun::indicator(door, floor, &crate::theme::NORMAL);

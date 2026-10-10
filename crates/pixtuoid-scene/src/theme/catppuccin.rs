@@ -4,7 +4,7 @@ use super::*;
 
 /// Catppuccin Mocha — warm pastels on dark chocolate.
 /// Based on <https://github.com/catppuccin/catppuccin>
-pub static CATPPUCCIN: Theme = Theme {
+pub(crate) static CATPPUCCIN: Theme = Theme {
     name: "catppuccin",
     kind: ThemeKind::Dark,
     surface: SurfaceColors {

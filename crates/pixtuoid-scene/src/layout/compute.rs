@@ -6,7 +6,7 @@ use super::*;
 
 /// Counter width that marks the LARGE (detailed kitchen) pantry sprite;
 /// consumers test `>= PANTRY_COUNTER_LARGE_W` rather than the bare literal.
-pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
+pub(crate) const PANTRY_COUNTER_LARGE_W: u16 = 32;
 
 /// Horizontal seat offsets for a 3-across sofa, relative to the middle-seat
 /// anchor — shared by the lounge couch and the meeting sofas.

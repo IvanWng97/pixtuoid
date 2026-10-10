@@ -32,13 +32,13 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-gpu
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
+      - uses: ./.github/actions/setup-rust
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main # v2.9.2
         with:
           prefix-key: v1-rust
-      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest
       - uses: ./.github/actions/setup-just
       - name: Validate tag commit is on main
         # A release tag pushed at an arbitrary (unreviewed) commit must not build +
@@ -98,11 +98,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main # v2.9.2
         with:
           prefix-key: v1-rust
           # One key for the pair: a re-run of a failed deb leg (aarch64, the one
@@ -115,7 +115,9 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        uses: taiki-e/install-action@cross
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cross
 
       - if: contains(matrix.target, 'musl')
         uses: ./.github/actions/apt-install
@@ -174,11 +176,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main # v2.9.2
         with:
           prefix-key: v1-rust
           # Paired with the build job's shared-key — the rationale lives there.
@@ -188,10 +190,14 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        uses: taiki-e/install-action@cross
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cross
 
       - name: Install cargo-deb
-        uses: taiki-e/install-action@cargo-deb
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-deb
 
       - name: Build
         run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}"
