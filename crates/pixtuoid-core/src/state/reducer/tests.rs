@@ -21,6 +21,8 @@ fn rename_classification_and_upgradability_cover_each_provenance() {
     use crate::state::{LabelProvenance, SlotLabel};
     for (label, source, expect) in [
         ("cx", "codex", LabelProvenance::PrefixFallback),
+        ("c\u{7}x\u{202e}", "codex", LabelProvenance::PrefixFallback),
+        ("cc\u{7}", "claude-code", LabelProvenance::PrefixFallback),
         ("cc·repo", "claude-code", LabelProvenance::Renamed),
         ("code-explorer", "claude-code", LabelProvenance::Renamed),
         ("cc#3", "claude-code", LabelProvenance::Renamed),

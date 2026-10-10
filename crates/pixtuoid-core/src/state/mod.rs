@@ -182,7 +182,7 @@ pub(crate) enum LabelProvenance {
 
 /// An [`AgentSlot`]'s display label + the provenance it was minted with.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(from = "SlotLabelWire")]
+#[serde(from = "SlotLabelRaw")]
 pub struct SlotLabel {
     #[serde(with = "arc_str_serde")]
     text: Arc<str>,
@@ -192,14 +192,14 @@ pub struct SlotLabel {
 /// [`SlotLabel`]'s serde shape, so a deserialized label mints through
 /// [`SlotLabel::new`] too.
 #[derive(Deserialize)]
-struct SlotLabelWire {
+struct SlotLabelRaw {
     text: String,
     provenance: LabelProvenance,
 }
 
-impl From<SlotLabelWire> for SlotLabel {
-    fn from(wire: SlotLabelWire) -> Self {
-        Self::new(wire.text, wire.provenance)
+impl From<SlotLabelRaw> for SlotLabel {
+    fn from(raw: SlotLabelRaw) -> Self {
+        Self::new(raw.text, raw.provenance)
     }
 }
 

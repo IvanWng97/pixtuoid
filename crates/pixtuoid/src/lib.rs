@@ -59,23 +59,12 @@ pub mod dev {
     pub use crate::tui::tui_renderer::TuiRenderer;
 }
 
-/// Strip control characters (Cc) and bidi controls from an untrusted string
-/// before it reaches a terminal: such a value can carry control bytes that
-/// reposition the cursor or inject escapes, or reorder the text shown. One
-/// chokepoint, so the policy can't drift across its call sites.
-///
-/// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
-/// emits its own SGR for level coloring, so a sink-side filter could not tell
-/// our escapes from an injected one. Its untrusted values are stripped where
-/// they ENTER a record instead — here by this fn's callers, and in the core
-/// crate by `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of
-/// this predicate pinned to it by
-/// `the_bidi_table_matches_pixtuoid_cores_display_safe`.
-pub(crate) fn strip_control_chars(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control() && !is_bidi_control(*c))
-        .collect()
-}
+/// The chokepoint every untrusted string the binary sends to a terminal is
+/// stripped through. The non-TUI `tracing` stream cannot be filtered at the
+/// SINK: the subscriber emits its own SGR for level coloring, so a sink-side
+/// filter could not tell our escapes from an injected one. Its untrusted values
+/// are stripped where they ENTER a record instead.
+pub(crate) use pixtuoid_core::source::decoder::strip_control_chars;
 
 /// `s` stripped line by line, the lines rejoined with `sep`, so a multi-line
 /// message keeps its shape.
@@ -192,19 +181,6 @@ pub(crate) fn output_within(
         }
     }
     child.wait_with_output().ok()
-}
-
-/// The Unicode Bidi_Control characters. `char::is_control` covers only category
-/// Cc; these are Cf and slip through — yet they REORDER displayed text in a
-/// terminal (the "Trojan Source" class, CVE-2021-42574).
-fn is_bidi_control(c: char) -> bool {
-    matches!(
-        c,
-        '\u{061C}'                    // ALM
-            | '\u{200E}'..='\u{200F}' // LRM, RLM
-            | '\u{202A}'..='\u{202E}' // LRE, RLE, PDF, LRO, RLO
-            | '\u{2066}'..='\u{2069}' // LRI, RLI, FSI, PDI
-    )
 }
 
 /// Test-only `tracing` capture for asserting on what reaches the log sink.
@@ -560,72 +536,6 @@ mod tests {
             "{text:?}"
         );
         assert!(text.contains("\nCaused by:\n"), "{text:?}");
-    }
-
-    #[test]
-    fn strips_c0_and_c1_controls() {
-        assert_eq!(strip_control_chars("a\x1b[31mb\x07c"), "a[31mbc");
-        assert_eq!(strip_control_chars("x\u{0085}y"), "xy"); // C1 NEL
-    }
-
-    #[test]
-    fn strips_trojan_source_bidi_controls() {
-        assert_eq!(strip_control_chars("safe\u{202E}gpj.exe"), "safegpj.exe");
-        for c in [
-            '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
-            '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
-        ] {
-            assert_eq!(
-                strip_control_chars(&format!("a{c}b")),
-                "ab",
-                "U+{:04X} not stripped",
-                c as u32
-            );
-        }
-    }
-
-    #[test]
-    fn keeps_ordinary_text_and_non_bidi_unicode() {
-        let s = "hello wörld café 日本語 🦞";
-        assert_eq!(strip_control_chars(s), s);
-    }
-
-    /// Round-trip one probe name through `pixtuoid-core`'s copy of the predicate,
-    /// via `decode_hook_payload`'s unsupported-event error.
-    fn core_display_safe(name: &str) -> String {
-        let v = serde_json::json!({"hook_event_name": name, "session_id": "s"});
-        let e = pixtuoid_core::source::decoder::decode_hook_payload(v)
-            .expect_err("an unregistered hook_event_name must be refused");
-        let pixtuoid_core::source::decoder::DecodeError::Unsupported { event, .. } = e else {
-            panic!("an unregistered hook_event_name must be Unsupported, got {e:?}");
-        };
-        event
-    }
-
-    #[test]
-    fn the_bidi_table_matches_pixtuoid_cores_display_safe() {
-        // Two per-crate copies of one security table (core's is `pub(crate)`), so
-        // pin them BEHAVIOURALLY: sweep every codepoint either side could
-        // plausibly gain or lose — the Cc block and its boundaries, DEL/C1, and
-        // the Cf neighbourhoods on both sides of each bidi range.
-        let candidates = (0x00..=0x20u32)
-            .chain(0x7E..=0xA1)
-            .chain(0x061A..=0x061E)
-            .chain(0x200B..=0x2010)
-            .chain(0x2028..=0x2030)
-            .chain(0x2065..=0x206F);
-        for cp in candidates {
-            let Some(c) = char::from_u32(cp) else {
-                continue;
-            };
-            let probe = format!("PixtuoidParity{c}Probe");
-            assert_eq!(
-                strip_control_chars(&probe),
-                core_display_safe(&probe),
-                "U+{cp:04X}: the binary's strip_control_chars and pixtuoid-core's \
-                 display_safe disagree — the two Cf/Cc tables have drifted apart",
-            );
-        }
     }
 
     #[cfg(unix)]

@@ -284,15 +284,17 @@ fn hook_source(
     Cow<'static, str>,
     Option<&'static crate::source::registry::SourceDescriptor>,
 ) {
-    let name = obj
+    let raw = obj
         .get("_pixtuoid_source")
         .and_then(|s| s.as_str())
         .unwrap_or(crate::source::claude_code::SOURCE_NAME);
-    match crate::source::registry::descriptor_for(name) {
+    // Any same-user socket writer can stamp any name, and the drift breadcrumbs
+    // write `source` as a raw `%` field. Looked up AFTER sanitizing, so the
+    // name and its row always agree.
+    let name = display_safe(raw);
+    match crate::source::registry::descriptor_for(&name) {
         Some(desc) => (Cow::Borrowed(desc.name), Some(desc)),
-        // Any same-user socket writer can stamp a name the registry lacks, and
-        // the drift breadcrumbs write `source` as a raw `%` field.
-        None => (Cow::Owned(display_safe(name)), None),
+        None => (Cow::Owned(name), None),
     }
 }
 
@@ -695,9 +697,12 @@ pub(crate) fn display_safe(s: &str) -> String {
     ellipsize(&strip_control_chars(s), MAX_DECODED_FIELD_CHARS)
 }
 
-/// `s` without control characters (Cc) or bidi controls. The binary's
-/// `strip_control_chars` is a COPY — keep the two in step.
-pub(crate) fn strip_control_chars(s: &str) -> String {
+/// `s` without control characters (Cc) or the Bidi_Control set: untrusted text
+/// on its way to a terminal can carry bytes that reposition the cursor or inject
+/// escapes, or reorder the text shown. The one predicate every crate strips
+/// with. `#[doc(hidden)]`: workspace-internal, not stable API.
+#[doc(hidden)]
+pub fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
         .collect()
@@ -752,6 +757,34 @@ mod tests {
             DecodeError::missing("cursor", "cwd").to_string(),
             "cursor payload has no cwd"
         );
+    }
+
+    #[test]
+    fn strips_c0_and_c1_controls() {
+        assert_eq!(strip_control_chars("a\x1b[31mb\x07c"), "a[31mbc");
+        assert_eq!(strip_control_chars("x\u{0085}y"), "xy"); // C1 NEL
+    }
+
+    #[test]
+    fn strips_trojan_source_bidi_controls() {
+        assert_eq!(strip_control_chars("safe\u{202E}gpj.exe"), "safegpj.exe");
+        for c in [
+            '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+            '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+        ] {
+            assert_eq!(
+                strip_control_chars(&format!("a{c}b")),
+                "ab",
+                "U+{:04X} not stripped",
+                c as u32
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_ordinary_text_and_non_bidi_unicode() {
+        let s = "hello wörld café 日本語 🦞";
+        assert_eq!(strip_control_chars(s), s);
     }
 
     #[test]
@@ -1331,6 +1364,28 @@ mod tests {
         for shown in ["source=ev]0;xil ", &format!("source={capped} ")] {
             assert!(out.contains(shown), "missing {shown:?} in:\n{out}");
         }
+    }
+
+    /// A stamp that sanitizes to a registered name decodes as that source,
+    /// never as the same name with no registry row.
+    #[test]
+    fn a_stamp_that_sanitizes_to_a_registered_name_gets_its_row() {
+        for name in crate::source::registry::registered_source_names() {
+            let stamped = json!({"_pixtuoid_source": format!("\u{7}{name}\u{202e}")});
+            let (source, desc) = hook_source(stamped.as_object().expect("an object"));
+            assert_eq!(source, name);
+            assert_eq!(desc.map(|d| d.name), Some(name));
+        }
+        let daemon = decode_hook_payload(json!({
+            "_pixtuoid_source": "open\u{7}claw",
+            "hook_event_name": "SessionStart",
+            "session_id": "x",
+            "cwd": "/tmp/x"
+        }));
+        assert!(
+            daemon.as_ref().is_ok_and(Vec::is_empty),
+            "a daemon stamp decodes to nothing: {daemon:?}"
+        );
     }
 
     #[test]

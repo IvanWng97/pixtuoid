@@ -88,6 +88,9 @@ fn stale_threshold_with_caps(
 /// time — a bare-prefix Rename always lands on a slot whose source is already
 /// set, so the slot's prefix is the right yardstick.
 fn classify_rename(label: &str, source: &str) -> crate::state::SlotLabel {
+    // The text the label will hold, so a prefix padded with controls stays
+    // upgradable.
+    let label = crate::source::decoder::strip_control_chars(label);
     let prefix = label_prefix_for(source);
     if !prefix.is_empty() && label == prefix {
         crate::state::SlotLabel::prefix_fallback(label)
