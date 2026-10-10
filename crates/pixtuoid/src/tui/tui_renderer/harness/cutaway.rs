@@ -4,8 +4,6 @@ use super::*;
 use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
-use std::io::Write;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A cell whose natural scale is the bundled art's density, so the image is
@@ -15,32 +13,6 @@ const PLACEHOLDER: char = '\u{10EEEE}';
 const TRANSMIT: &str = "\x1b_Ga=T,";
 const SIXEL: &str = "\x1bP9;1q";
 const ITERM2: &str = "\x1b]1337;File=";
-
-/// The terminal's side of the transmits; set `fail` to make it refuse writes
-/// as a full terminal does (`WouldBlock`), or `slow` to make a flush take that
-/// long on a screen clock.
-#[derive(Clone, Default)]
-struct Wire {
-    bytes: Arc<Mutex<Vec<u8>>>,
-    fail: Arc<AtomicBool>,
-    slow: Arc<Mutex<Option<(pixtuoid_scene::flash::ManualClock, Duration)>>>,
-}
-
-impl Write for Wire {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.fail.load(Ordering::Relaxed) {
-            return Err(std::io::ErrorKind::WouldBlock.into());
-        }
-        self.bytes.lock().expect("lock").extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        if let Some((screen, latency)) = &*self.slow.lock().expect("lock") {
-            screen.advance(*latency);
-        }
-        Ok(())
-    }
-}
 
 impl Wire {
     /// What arrived since the last take.

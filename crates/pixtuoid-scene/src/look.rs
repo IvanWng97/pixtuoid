@@ -82,8 +82,8 @@ pub struct Rendered<'r> {
     pub layout: Arc<SceneLayout>,
     /// Waypoints with an occupant: the appliance audio cues' feed.
     pub occupied_waypoints: HashSet<usize>,
-    /// What of the frame flashes, for a painter's hold.
-    pub flash: crate::flash::FlashPhase,
+    /// What of the frame flashes, which its session's `flashes()` reports.
+    pub(crate) flash: crate::flash::FlashPhase,
 }
 
 /// The frame entry's `tracing` span names, for a profiler's subscriber.

@@ -36,7 +36,7 @@ pub struct CanvasFrame<'a> {
     /// Where it may differ from the canvas's previous frame.
     pub dirty: Dirty,
     /// What of it flashes.
-    pub flash: crate::flash::FlashPhase,
+    pub(crate) flash: crate::flash::FlashPhase,
     /// Why it painted whole, when it did.
     pub repaint: Option<Repaint>,
 }

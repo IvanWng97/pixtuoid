@@ -12,7 +12,7 @@ use crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS;
 /// What of a floor's frame flashes: which of a strike's levels lights it, and
 /// whether a starved neon tube is catching. Two frames flash alike iff equal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct FlashPhase {
+pub(crate) struct FlashPhase {
     // The sky's flash level's bits: a strike's levels are exact constants.
     strike: u32,
     stutter: bool,

@@ -1170,7 +1170,6 @@ impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Rende
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 pub struct pixtuoid_scene::look::Rendered<'r>
 pub pixtuoid_scene::look::Rendered::dirty: crate::cutaway::canvas::Dirty
-pub pixtuoid_scene::look::Rendered::flash: crate::flash::FlashPhase
 pub pixtuoid_scene::look::Rendered::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 pub pixtuoid_scene::look::Rendered::occupied_waypoints: std::collections::hash::set::HashSet<usize>
 pub pixtuoid_scene::look::Rendered::pixels: &'r pixtuoid_core::sprite::RgbBuffer

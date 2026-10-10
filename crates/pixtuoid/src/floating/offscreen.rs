@@ -669,7 +669,7 @@ mod tests {
         }
     }
 
-    /// When a slide to the floor above starts, against the frames
+    /// When a slide starts, against the frames
     /// [`assert_a_slide_holds_the_floor`] names.
     #[derive(Debug, Clone, Copy)]
     enum Slide {
@@ -681,27 +681,33 @@ mod tests {
         Ending,
     }
 
-    /// In `window` sliding as `slide` says, the phase from `changes[0]`
-    /// holds the floor from `late`, its first frame a quarter floor before
-    /// `changes[1]`: `held`, the next phase's first frame, waits, and the
-    /// first frame the floor after `late` shows.
-    fn assert_a_slide_holds_the_floor(window: &mut Window, changes: [SystemTime; 2], slide: Slide) {
+    /// In `window` sliding to floor `to` as `slide` says, the phase from
+    /// `changes[0]` holds the floor from `late`, its first frame a quarter
+    /// floor before `changes[1]`: `held`, the next phase's first frame,
+    /// waits, and the first frame the floor after `late` shows.
+    fn assert_a_slide_holds_the_floor(
+        window: &mut Window,
+        changes: [SystemTime; 2],
+        slide: Slide,
+        to: usize,
+    ) {
         let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
         // A phase apart: a starved tube catches only across a step no longer
         // than its shortest catch.
         let [before, late] = changes.map(|change| change - floor / 4);
         let held = changes[1];
+        let from = window.renderer.nav().current();
         let length = Duration::from_millis(
-            pixtuoid_scene::floor::FloorTransition::new(0, 1, held).duration_ms,
+            pixtuoid_scene::floor::FloorTransition::new(from, to, held).duration_ms,
         );
         let (starts, showing) = match slide {
-            Slide::Starting => (late, [Some(0), None]),
+            Slide::Starting => (late, [Some(from), None]),
             Slide::Under => (before, [None, None]),
-            Slide::Ending => (held - length, [None, Some(1)]),
+            Slide::Ending => (held - length, [None, Some(to)]),
         };
         let [_, at_late, at_held, at_after] = [before, late, held, late + floor].map(|now| {
             if starts < now {
-                window.renderer.navigate(1, starts);
+                window.renderer.navigate(to, starts);
             }
             (window.present(now), window.renderer.nav().showing())
         });
@@ -731,6 +737,7 @@ mod tests {
                 &mut window,
                 [strike.changes[0], strike.changes[1]],
                 slide,
+                1,
             );
         }
     }
@@ -749,8 +756,29 @@ mod tests {
                 &mut window,
                 [stutter.changes[0], stutter.changes[1]],
                 slide,
+                1,
             );
         }
+    }
+
+    /// A starved neon's catch holds the floor as a slide arrives at its
+    /// floor, on the first frame after the slide, which shows that floor
+    /// whole.
+    #[test]
+    fn a_stutter_phase_holds_the_floor_as_a_slide_arrives_at_it() {
+        let stutter = crate::test_flash::starved_stutter();
+        let mut window = Window::with_a_floor_above(stutter.weather);
+        let [emptied, starved] = stutter.setup;
+        // The ground floor empties, and starves while the window is upstairs.
+        window.present(emptied);
+        window.renderer.navigate(1, emptied);
+        window.present(starved);
+        assert_a_slide_holds_the_floor(
+            &mut window,
+            [stutter.changes[0], stutter.changes[1]],
+            Slide::Ending,
+            0,
+        );
     }
 
     /// A press acts on what the frame on screen shows under it: an agent's

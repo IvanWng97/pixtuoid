@@ -166,80 +166,60 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     d
 }
 
-/// A `TestBackend` whose flush, once `slow` is set, takes that long on a test
-/// screen clock: a write that lands late.
-pub(super) struct Slow {
-    pub(super) inner: TestBackend,
-    pub(super) slow: Option<(pixtuoid_scene::flash::ManualClock, Duration)>,
+/// The terminal's side of a [`FrameOut`](crate::tui::FrameOut); set `fail` to
+/// make it refuse writes as a full terminal does (`WouldBlock`), or `slow` to
+/// make a flush take that long on a screen clock.
+#[derive(Clone, Default)]
+pub(super) struct Wire {
+    pub(super) bytes: Arc<std::sync::Mutex<Vec<u8>>>,
+    pub(super) fail: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) slow: Arc<std::sync::Mutex<Option<(pixtuoid_scene::flash::ManualClock, Duration)>>>,
 }
 
-impl Backend for Slow {
-    type Error = <TestBackend as Backend>::Error;
-    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
-    where
-        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
-    {
-        self.inner.draw(content)
+impl std::io::Write for Wire {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.fail.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        self.bytes.lock().expect("lock").extend_from_slice(buf);
+        Ok(buf.len())
     }
-    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
-        self.inner.hide_cursor()
-    }
-    fn show_cursor(&mut self) -> Result<(), Self::Error> {
-        self.inner.show_cursor()
-    }
-    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
-        self.inner.get_cursor_position()
-    }
-    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
-        &mut self,
-        position: P,
-    ) -> Result<(), Self::Error> {
-        self.inner.set_cursor_position(position)
-    }
-    fn clear(&mut self) -> Result<(), Self::Error> {
-        self.inner.clear()
-    }
-    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
-        self.inner.clear_region(clear_type)
-    }
-    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
-        self.inner.size()
-    }
-    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
-        self.inner.window_size()
-    }
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        if let Some((screen, latency)) = &self.slow {
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some((screen, latency)) = &*self.slow.lock().expect("lock") {
             screen.advance(*latency);
         }
-        self.inner.flush()
+        Ok(())
     }
 }
 
-/// A half-block renderer over a `cols`×`rows` terminal, its flashes held on a
-/// screen clock the test moves.
+/// A half-block renderer over a `cols`×`rows` terminal, presenting each
+/// frame through a [`Wire`] as the TUI does through its terminal, its
+/// flashes held on a screen clock the test moves.
 pub(super) fn half_blocks_on_screen(
     cols: u16,
     rows: u16,
-) -> (TuiRenderer<Slow>, pixtuoid_scene::flash::ManualClock) {
+) -> (
+    TuiRenderer<TestBackend>,
+    pixtuoid_scene::flash::ManualClock,
+    Wire,
+) {
     let screen = pixtuoid_scene::flash::ManualClock::default();
-    let backend = Slow {
-        inner: TestBackend::new(cols, rows),
-        slow: None,
-    };
     let mut r = TuiRenderer::new(
-        Terminal::new(backend).expect("test backend"),
+        Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         vec![],
         pack_arc(),
     );
+    let wire = Wire::default();
+    // Synchronized, so every frame writes, and a refusing wire refuses it.
+    r.present_through(crate::tui::FrameOut::new(wire.clone(), true));
     r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
-    (r, screen)
+    (r, screen, wire)
 }
 
 /// What a [`half_blocks_on_screen`] renderer's terminal shows.
-pub(super) fn flushed(r: &TuiRenderer<Slow>) -> &ratatui::buffer::Buffer {
-    r.terminal.backend().inner.buffer()
+pub(super) fn flushed(r: &TuiRenderer<TestBackend>) -> &ratatui::buffer::Buffer {
+    r.terminal.backend().buffer()
 }
 
 pub(super) fn two_floor_scene() -> SceneState {
