@@ -166,16 +166,16 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     d
 }
 
-/// A backend that forwards every call to `inner`, its [`Tap`] bending the
-/// three a test needs: what a draw carries, a flush, and the window's pixel
-/// size. One forwarder, so a `Backend` method ratatui defaults (`append_lines`)
+/// A backend that forwards every call to `inner`, its [`Tap`] seeing what a
+/// draw carries and a flush, and answering the window's pixel size. One forwarder, so a `Backend` method ratatui defaults (`append_lines`)
 /// can't silently skip `inner` in one copy.
-pub(super) struct Delegating<B, T> {
+pub(super) struct Tapped<B, T> {
     pub(super) inner: B,
     pub(super) tap: T,
 }
 
-/// What a [`Delegating`] backend lets a test bend; each defaults to forwarding.
+/// What a [`Tapped`] backend lets a test see or answer; each defaults to
+/// forwarding.
 pub(super) trait Tap<B: Backend> {
     /// Sees each draw's cells before `inner` does.
     fn on_draw(&mut self, _cells: &[(u16, u16, &ratatui::buffer::Cell)]) {}
@@ -186,7 +186,7 @@ pub(super) trait Tap<B: Backend> {
     }
 }
 
-impl<B: Backend, T: Tap<B>> Backend for Delegating<B, T> {
+impl<B: Backend, T: Tap<B>> Backend for Tapped<B, T> {
     type Error = B::Error;
     fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
     where
@@ -232,7 +232,7 @@ impl<B: Backend, T: Tap<B>> Backend for Delegating<B, T> {
     }
 }
 
-impl<T> std::borrow::Borrow<TestBackend> for Delegating<TestBackend, T> {
+impl<T> std::borrow::Borrow<TestBackend> for Tapped<TestBackend, T> {
     fn borrow(&self) -> &TestBackend {
         &self.inner
     }
@@ -240,8 +240,7 @@ impl<T> std::borrow::Borrow<TestBackend> for Delegating<TestBackend, T> {
 
 /// A `TestBackend` whose flush, once `tap` holds a screen clock and a latency,
 /// advances that clock by the latency: a write that lands late.
-pub(super) type Slow =
-    Delegating<TestBackend, Option<(pixtuoid_scene::flash::ManualClock, Duration)>>;
+pub(super) type Slow = Tapped<TestBackend, Option<(pixtuoid_scene::flash::ManualClock, Duration)>>;
 
 impl Tap<TestBackend> for Option<(pixtuoid_scene::flash::ManualClock, Duration)> {
     fn on_flush(&mut self) {
@@ -270,11 +269,6 @@ pub(super) fn half_blocks_on_screen(
     );
     r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
     (r, screen)
-}
-
-/// What a [`half_blocks_on_screen`] renderer's terminal shows.
-pub(super) fn flushed(r: &TuiRenderer<Slow>) -> &ratatui::buffer::Buffer {
-    r.terminal.backend().inner.buffer()
 }
 
 pub(super) fn two_floor_scene() -> SceneState {

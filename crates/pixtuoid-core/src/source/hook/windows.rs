@@ -72,9 +72,17 @@ impl OwnerOnlySd {
         })
     }
 
-    /// Only ever read by CreateNamedPipeW, for the duration of that call.
-    fn attributes_ptr(&self) -> *mut c_void {
-        std::ptr::from_ref(&self.attrs).cast_mut().cast()
+    /// A hook pipe instance under this descriptor. `first` claims
+    /// `first_pipe_instance`: ONLY the initial bind may, so a taken name surfaces
+    /// as the typed `SocketBusy`. The recreate + next-instance must NOT claim it
+    /// — the in-flight instance still holds it, and re-claiming fails
+    /// ACCESS_DENIED.
+    fn create_pipe(&self, name: &str, first: bool) -> std::io::Result<NamedPipeServer> {
+        let attrs: *mut c_void = std::ptr::from_ref(&self.attrs).cast_mut().cast();
+        // SAFETY: `attrs` is the well-formed SECURITY_ATTRIBUTES whose descriptor
+        // `self` owns, and the borrow of `self` outlives the call; the kernel
+        // copies the descriptor during CreateNamedPipeW, so nothing borrows past it.
+        unsafe { hook_pipe_options(first).create_with_security_attributes_raw(name, attrs) }
     }
 }
 
@@ -96,23 +104,6 @@ pub(super) struct Listener {
     sd: OwnerOnlySd,
 }
 
-/// `first` claims `first_pipe_instance`: ONLY the initial bind may, so a taken
-/// name surfaces as the typed `SocketBusy`. The recreate + next-instance must
-/// NOT claim it — the in-flight instance still holds it, and re-claiming fails
-/// ACCESS_DENIED.
-///
-/// SAFETY: `attributes_ptr` must point at a well-formed `SECURITY_ATTRIBUTES`
-/// whose `lpSecurityDescriptor` is valid for the duration of the call; the kernel
-/// copies the descriptor during `CreateNamedPipeW`, so nothing borrows past it.
-unsafe fn create_hook_pipe(
-    name: &str,
-    attributes_ptr: *mut c_void,
-    first: bool,
-) -> std::io::Result<NamedPipeServer> {
-    // SAFETY: forwarded from this fn's contract.
-    unsafe { hook_pipe_options(first).create_with_security_attributes_raw(name, attributes_ptr) }
-}
-
 fn hook_pipe_options(first: bool) -> ServerOptions {
     let mut opts = ServerOptions::new();
     opts.first_pipe_instance(first)
@@ -129,13 +120,7 @@ impl Listener {
         // The server stays DUPLEX (tokio default): the shim's client opens
         // read+write, so an inbound-only pipe would reject it with
         // ACCESS_DENIED — a silent event drop.
-        //
-        // SAFETY: sd outlives the call (it moves into Self below) and
-        // attributes_ptr points at its well-formed SECURITY_ATTRIBUTES whose
-        // lpSecurityDescriptor is the valid converted descriptor; the kernel
-        // copies the descriptor during CreateNamedPipeW, so nothing borrows
-        // past the call.
-        let server = match unsafe { create_hook_pipe(&name, sd.attributes_ptr(), true) } {
+        let server = match sd.create_pipe(&name, true) {
             Ok(s) => s,
             // ERROR_ACCESS_DENIED is almost always another instance holding
             // first_pipe_instance on this name — the one recoverable bind
@@ -174,24 +159,17 @@ impl Listener {
             if let Err(e) = self.server.connect().await {
                 // A failed instance isn't guaranteed reusable — recreate it.
                 warn!(error = %e, "hook pipe connect error; recreating instance");
-                // SAFETY: same contract as the bind site — `self.sd` outlives
-                // the call and the kernel copies the descriptor during
-                // CreateNamedPipeW, so nothing borrows past it.
-                self.server =
-                    unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
-                        .with_context(|| {
-                            format!("re-creating hook pipe after connect error at {}", self.name)
-                        })?;
+                self.server = self.sd.create_pipe(&self.name, false).with_context(|| {
+                    format!("re-creating hook pipe after connect error at {}", self.name)
+                })?;
                 continue;
             }
             // Create the NEXT instance BEFORE handing this one off: in the gap
             // between handoff and re-create, clients get ERROR_PIPE_BUSY or
             // NotFound depending on timing.
-            //
-            // SAFETY: same contract as the bind site — `self.sd` outlives the
-            // call and the kernel copies the descriptor during
-            // CreateNamedPipeW, so nothing borrows past it.
-            let next = unsafe { create_hook_pipe(&self.name, self.sd.attributes_ptr(), false) }
+            let next = self
+                .sd
+                .create_pipe(&self.name, false)
                 .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
             let conn = std::mem::replace(&mut self.server, next);
             let tx = tx.clone();
@@ -279,15 +257,13 @@ mod tests {
         sddl
     }
 
-    /// One protected ACE, for the owner alone, read back off the kernel object
-    /// — the create path dropping the descriptor reads the default DACL here.
+    /// One protected ACE, for the owner alone, read back off the pipe `bind`
+    /// creates: a bind that drops the descriptor reads the default DACL here.
     #[tokio::test]
     async fn the_hook_pipe_is_owner_only() {
-        let sd = OwnerOnlySd::new().expect("descriptor");
         let name = format!(r"\\.\pipe\pixtuoid-sd-{}", std::process::id());
-        // SAFETY: `sd` outlives the call.
-        let server = unsafe { create_hook_pipe(&name, sd.attributes_ptr(), true) }.expect("pipe");
-        let sddl = dacl_sddl(&server);
+        let listener = Listener::bind(Path::new(&name)).await.expect("bind");
+        let sddl = dacl_sddl(&listener.server);
         let (flags, aces) = sddl.split_once('(').expect("an ACE");
         assert!(flags.starts_with("D:") && flags.contains('P'), "{sddl}");
         assert_eq!(aces.matches('(').count(), 0, "one ACE: {sddl}");

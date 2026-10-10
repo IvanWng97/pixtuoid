@@ -392,19 +392,22 @@ mod tests {
     /// A run opens a file of its own, owner-only, named so name order is start
     /// order, and runs past [`RUN_LOG_RETAIN`] go, the new one, a recent one and
     /// a quiet live one staying.
+    /// A run's file in `dir`, last written `age` before `now`.
+    fn aged(dir: &Path, name: &str, now: SystemTime, age: Duration) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, "x\n").unwrap();
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(now - age).unwrap();
+        path
+    }
+
     #[test]
     fn a_run_logs_to_its_own_file_and_tidies_the_runs_before_it() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("pixtuoid").join("logs");
         let now = SystemTime::now();
         std::fs::create_dir_all(&dir).unwrap();
-        let aged = |name: &str, age: Duration| {
-            let path = dir.join(name);
-            std::fs::write(&path, "x\n").unwrap();
-            let f = std::fs::File::options().write(true).open(&path).unwrap();
-            f.set_modified(now - age).unwrap();
-            path
-        };
+        let aged = |name: &str, age: Duration| aged(&dir, name, now, age);
         let stale = aged(
             &run_file_name(now - RUN_LOG_RETAIN * 2, 1),
             RUN_LOG_RETAIN * 2,
@@ -452,16 +455,10 @@ mod tests {
     /// absolute age pins the week its doc cites.
     #[test]
     fn a_run_is_kept_for_a_week() {
-        const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+        const DAY: Duration = Duration::from_hours(24);
         let dir = tempfile::tempdir().unwrap();
         let now = SystemTime::now();
-        let aged = |name: &str, age: Duration| {
-            let path = dir.path().join(name);
-            std::fs::write(&path, "x\n").unwrap();
-            let f = std::fs::File::options().write(true).open(&path).unwrap();
-            f.set_modified(now - age).unwrap();
-            path
-        };
+        let aged = |name: &str, age: Duration| aged(dir.path(), name, now, age);
         let six_days = aged(&run_file_name(now - DAY * 6, 1), DAY * 6);
         let eight_days = aged(&run_file_name(now - DAY * 8, 2), DAY * 8);
         prune_runs(dir.path(), now);

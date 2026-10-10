@@ -83,20 +83,20 @@ fn each_strike_phase_holds_the_floor_on_screen_in_half_blocks() {
         let now = strike.start - lead(frame) + offset;
         screen.at(now);
         r.render(&scene, pack(), now).expect("render");
-        let cells = crate::tui::renderer::scene_rect(flushed(&r).area);
-        let mut shown = flushed(&r).clone();
+        let cells = crate::tui::renderer::scene_rect(r.frame_buffer().area);
+        let mut shown = r.frame_buffer().clone();
         let mut changed = Vec::new();
         for now in crate::test_flash::frames_after(now, frame, strike.end + lead(frame)) {
             screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             let differ = cells
                 .positions()
-                .filter(|&p| flushed(&r)[p] != shown[p])
+                .filter(|&p| r.frame_buffer()[p] != shown[p])
                 .count();
             if 2 * differ > cells.area() as usize {
                 changed.push(now);
             }
-            shown = flushed(&r).clone();
+            shown = r.frame_buffer().clone();
         }
         let at = format!("a frame each {frame:?} from +{offset:?}");
         assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
@@ -124,15 +124,15 @@ fn a_held_frame_leaves_the_terminal_and_its_hit_targets_alone() {
             screen.at(at);
             r.render(&scene, pack(), at).expect("render");
         }
-        let before = flushed(&r).clone();
+        let before = r.frame_buffer().clone();
         let layout = r.cached_layout().map(|l| l as *const SceneLayout);
         screen.at(held);
         r.render(&scene, pack(), held).expect("render");
-        assert_eq!(*flushed(&r), before, "sliding {sliding}: held");
+        assert_eq!(*r.frame_buffer(), before, "sliding {sliding}: held");
         assert_eq!(r.cached_layout().map(|l| l as *const SceneLayout), layout);
         screen.at(shown);
         r.render(&scene, pack(), shown).expect("render");
-        assert_ne!(*flushed(&r), before, "sliding {sliding}: shown");
+        assert_ne!(*r.frame_buffer(), before, "sliding {sliding}: shown");
         assert_eq!(r.transition().is_some(), sliding);
     }
 }
@@ -162,12 +162,12 @@ fn a_resized_terminal_is_never_held_in_half_blocks() {
             .backend_mut()
             .inner
             .resize(resized.width, resized.height);
-        let mut stale = flushed(&r).clone();
+        let mut stale = r.frame_buffer().clone();
         stale.resize(resized);
         screen.at(held);
         r.render(&scene, pack(), held).expect("render");
-        assert_eq!(flushed(&r).area, resized);
-        assert_ne!(*flushed(&r), stale, "sliding {sliding}: drawn");
+        assert_eq!(r.frame_buffer().area, resized);
+        assert_ne!(*r.frame_buffer(), stale, "sliding {sliding}: drawn");
     }
 }
 
@@ -193,7 +193,7 @@ fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     r.render(&scene, pack(), first).expect("render");
     let landed = screen.now();
     r.terminal.backend_mut().tap = None;
-    let before = flushed(&r).clone();
+    let before = r.frame_buffer().clone();
     assert!(
         second.duration_since(first).expect("in order") >= floor,
         "the frame clock says the floor has passed"
@@ -201,14 +201,14 @@ fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     screen.at(second);
     r.render(&scene, pack(), second).expect("render");
     assert_eq!(
-        *flushed(&r),
+        *r.frame_buffer(),
         before,
         "held until the slow flush's phase shows the floor"
     );
     let shown = std::time::UNIX_EPOCH + landed + floor;
     screen.at(shown);
     r.render(&scene, pack(), shown).expect("render");
-    assert_ne!(*flushed(&r), before, "shown once it has");
+    assert_ne!(*r.frame_buffer(), before, "shown once it has");
 }
 
 /// A pause freezes the frame clock inside a hold; the screen clock runs on,
@@ -228,16 +228,16 @@ fn a_pause_inside_a_hold_never_wedges_the_half_blocks() {
         screen.at(at);
         r.render(&scene, pack(), at).expect("render");
     }
-    let before = flushed(&r).clone();
+    let before = r.frame_buffer().clone();
     screen.at(paused);
     r.render(&scene, pack(), paused).expect("render");
-    assert_eq!(*flushed(&r), before, "held");
+    assert_eq!(*r.frame_buffer(), before, "held");
     r.set_theme(dark_theme());
     screen.at(late);
     screen.advance(floor);
     r.render(&scene, pack(), paused).expect("render");
     assert_ne!(
-        *flushed(&r),
+        *r.frame_buffer(),
         before,
         "the paused frame was flushed once the hold ran out"
     );
@@ -263,13 +263,13 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
             screen.at(at);
             r.render(&scene, pack(), at).expect("render");
         }
-        let cells = crate::tui::renderer::scene_rect(flushed(&r).area);
+        let cells = crate::tui::renderer::scene_rect(r.frame_buffer().area);
         let tube: Vec<ratatui::layout::Position> = cells
             .positions()
             .filter(|p| neon_tube(p.x - cells.x, 2 * (p.y - cells.y)))
             .collect();
         let snapshot = |r: &TuiRenderer<Slow>| -> Vec<ratatui::buffer::Cell> {
-            tube.iter().map(|&p| flushed(r)[p].clone()).collect()
+            tube.iter().map(|&p| r.frame_buffer()[p].clone()).collect()
         };
         let now = stutter.start - lead(frame) + offset;
         screen.at(now);

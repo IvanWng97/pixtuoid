@@ -52,7 +52,7 @@ impl Wire {
 
 /// A terminal whose window reports each cell at its `tap` [`CellSize`], as a
 /// real one's does.
-type Window = Delegating<TestBackend, CellSize>;
+type Window = Tapped<TestBackend, CellSize>;
 
 impl Window {
     fn new(cols: u16, rows: u16) -> Self {
@@ -1318,7 +1318,7 @@ fn no_image_is_drawn_over_text() {
 
 /// A backend that marks on its `tap` wire where each flush of cells lands
 /// among the transmits.
-type Logged = Delegating<Window, Wire>;
+type Logged = Tapped<Window, Wire>;
 
 const FLUSH: &str = "<flush>";
 

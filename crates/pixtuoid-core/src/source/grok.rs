@@ -1554,8 +1554,11 @@ mod tests {
     fn cwd_slug_form_reads_the_dot_cwd_file() {
         // The >255-byte encoded form is `{slug}-{blake3_hex16}`, never absolute
         // after decoding, so upstream records the real cwd in a `.cwd` sibling.
-        let tmp = std::env::temp_dir().join(format!("pixtuoid-grok-cwd-{}", std::process::id()));
-        let group = tmp.join("sessions").join("deep-project-a1b2c3d4e5f60718");
+        let tmp = tempfile::tempdir().unwrap();
+        let group = tmp
+            .path()
+            .join("sessions")
+            .join("deep-project-a1b2c3d4e5f60718");
         let session = group.join("0197fa30-sess");
         std::fs::create_dir_all(&session).unwrap();
         std::fs::write(group.join(".cwd"), "/very/deep/project\n").unwrap();
@@ -1566,7 +1569,6 @@ mod tests {
         );
         std::fs::remove_file(group.join(".cwd")).unwrap();
         assert_eq!(grok_cwd_from_path(&p), None);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
