@@ -701,8 +701,8 @@ assert_detect false "a branch merely naming the prefix" "$(pr_heads "feat/${dete
 assert_detect false "a direct push with no PR" "$(pr_heads)"
 assert_detect error "an API failure" error
 
-# ── claude-review.yml's Dependabot exemption: posts a lens's status only for a
-# bump that changes Dependabot's manifests and nothing else.
+# ── claude-review.yml's Dependabot exemption: posts the `claude-review` status
+# only for a bump that changes Dependabot's manifests and nothing else.
 exempt_script="$(workflow_step_script .github/workflows/claude-review.yml "Exempt a Dependabot bump")"
 exempt_dir="$test_dir/exempt"
 exempt_bin="$exempt_dir/bin"
