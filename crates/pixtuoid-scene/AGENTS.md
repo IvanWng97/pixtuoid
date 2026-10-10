@@ -31,8 +31,8 @@ row" vocabulary across the crate for zero behavior change.)
 
 The rules the bundled pack (`sprites/default/`) is drawn to. A pack that breaks
 one does not load (`PackError`, and `pack::ArtError` for what the office reads
-off its art); `pack::validate_pack` warns of art that loads but is not as
-authored, and `the_bundled_pack_passes_its_own_validation` fails on a warning.
+off its art); the test-only `pack::validate_pack` finds art that loads but is
+not as authored, and `the_bundled_pack_passes_its_own_validation` fails on a finding.
 
 Characters are recolored per agent by palette key: whatever a pack draws with `B`
 (shirt), `H` (hair), `S` (skin) or `P` (pants) takes each agent's colors, and

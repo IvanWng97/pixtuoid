@@ -2455,7 +2455,7 @@ mod validation_floor_tests {
     }
 
     /// A variant timed apart from its base is reported, each field its own
-    /// warning; one that keeps its base's timing, or leaves the stride to it,
+    /// finding; one that keeps its base's timing, or leaves the stride to it,
     /// is not, and nor is a single-frame base's `frame_ms`, which nothing steps.
     #[test]
     fn a_variant_timed_apart_from_its_base_is_reported() {
@@ -2862,7 +2862,7 @@ mod validation_floor_tests {
     }
 
     /// `report`'s findings past those of the same pack undressed.
-    fn hair_counts(report: &ValidationReport) -> usize {
+    fn hair_finding_count(report: &ValidationReport) -> usize {
         let bare =
             validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &PackContract::default());
         report.finding_count() - bare.finding_count()
@@ -2890,7 +2890,7 @@ mod validation_floor_tests {
                 frame: 0
             }]
         );
-        assert_eq!(hair_counts(&report), 1);
+        assert_eq!(hair_finding_count(&report), 1);
 
         let undressed = hair_findings(&dressed_pack(bald, "", &[]));
         assert!(undressed.unmarked_heads.is_empty(), "no style to dress it");
@@ -2909,7 +2909,7 @@ mod validation_floor_tests {
                 name: "standing@2x".into(),
             }]
         );
-        assert_eq!(hair_counts(&report), 1);
+        assert_eq!(hair_finding_count(&report), 1);
     }
 
     #[test]
@@ -2929,7 +2929,7 @@ mod validation_floor_tests {
                 }],
                 "{what}"
             );
-            assert_eq!(hair_counts(&report), 1);
+            assert_eq!(hair_finding_count(&report), 1);
         }
         for (hair, what) in [
             (
@@ -2949,7 +2949,7 @@ mod validation_floor_tests {
         let four = "[hairstyles.\"mop@4x\"]\nfront={ over=\"o.sprite\" }\n";
         let report = hair_findings(&dressed_pack(FRONT_BODY, four, &[hair]));
         assert_eq!(report.orphan_hairstyles, vec!["mop@4x".to_string()]);
-        assert_eq!(hair_counts(&report), 1);
+        assert_eq!(hair_finding_count(&report), 1);
     }
 }
 

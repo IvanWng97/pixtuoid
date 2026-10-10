@@ -36,7 +36,7 @@ use crate::pathfind::Router;
 /// character anchoring, hit-testing and label placement. `now`/`layout` stay
 /// separate args — frame inputs, not engine state.
 #[derive(Debug)]
-pub struct RouteCtx<'a> {
+pub(crate) struct RouteCtx<'a> {
     /// The A* router for this frame.
     pub router: &'a mut dyn Router,
     /// Live occupancy overlay (shared, read-only here).

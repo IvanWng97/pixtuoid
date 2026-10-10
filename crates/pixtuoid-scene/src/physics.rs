@@ -1,6 +1,6 @@
 //! Pure physics model for character walking.
 //!
-//! Imports only `pixtuoid_core::AgentId`. No router, no layout, no terminal deps.
+//! Imports only `pixtuoid_core::AgentId` and `layout::Point`. No router, no layout, no terminal deps.
 //! All kinematics are f32; screen is ≤ ~4096 px → ≤ ~57k octile, well
 //! within f32's 24-bit mantissa.
 

@@ -227,7 +227,7 @@ impl OfficeMood {
 /// design: a walkout isn't the mood.
 ///
 /// Its text is ASCII and each lamp one cell, so a roll keeps every column in
-/// place (pinned by the TUI's `every_l2_face_is_one_terminal_column_per_char`).
+/// place (pinned by `every_l2_face_is_one_cell_per_char`).
 pub(crate) fn board_mood_segments(counts: StateCounts, lit: bool) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
