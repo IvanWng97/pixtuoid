@@ -23,7 +23,7 @@ const ITERM2: &str = "\x1b]1337;File=";
 struct Wire {
     bytes: Arc<Mutex<Vec<u8>>>,
     fail: Arc<AtomicBool>,
-    slow: Arc<Mutex<Option<(pixtuoid_scene::flash::ManualClock, Duration)>>>,
+    slow: Arc<Mutex<Option<Latency>>>,
 }
 
 impl Write for Wire {
@@ -35,8 +35,8 @@ impl Write for Wire {
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        if let Some((screen, latency)) = &*self.slow.lock().expect("lock") {
-            screen.advance(*latency);
+        if let Some(latency) = &*self.slow.lock().expect("lock") {
+            latency.land();
         }
         Ok(())
     }
@@ -922,7 +922,6 @@ fn a_held_frame_after_a_failed_write_stamps_nothing() {
 #[test]
 fn a_slow_writes_phase_holds_the_floor_from_when_it_lands() {
     use crate::test_flash::storm_strike;
-    const SLOW: Duration = Duration::from_millis(60);
     let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
     let strike = storm_strike();
     let [first, second] = [strike.changes[0], strike.changes[1]];
@@ -933,7 +932,10 @@ fn a_slow_writes_phase_holds_the_floor_from_when_it_lands() {
     let scene = office();
     screen.at(first - 2 * floor);
     r.render(&scene, pack(), first - 2 * floor).expect("render");
-    *wire.slow.lock().expect("lock") = Some((screen.clone(), SLOW));
+    *wire.slow.lock().expect("lock") = Some(Latency {
+        screen: screen.clone(),
+        by: SLOW,
+    });
     screen.at(first);
     r.render(&scene, pack(), first).expect("render");
     let landed = screen.now();

@@ -389,9 +389,6 @@ mod tests {
         );
     }
 
-    /// A run opens a file of its own, owner-only, named so name order is start
-    /// order, and runs past [`RUN_LOG_RETAIN`] go, the new one, a recent one and
-    /// a quiet live one staying.
     /// A run's file in `dir`, last written `age` before `now`.
     fn aged(dir: &Path, name: &str, now: SystemTime, age: Duration) -> PathBuf {
         let path = dir.join(name);
@@ -401,6 +398,9 @@ mod tests {
         path
     }
 
+    /// A run opens a file of its own, owner-only, named so name order is start
+    /// order, and runs past [`RUN_LOG_RETAIN`] go, the new one, a recent one and
+    /// a quiet live one staying.
     #[test]
     fn a_run_logs_to_its_own_file_and_tidies_the_runs_before_it() {
         let root = tempfile::tempdir().unwrap();

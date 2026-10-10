@@ -166,9 +166,9 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     d
 }
 
-/// A backend that forwards every call to `inner`, its [`Tap`] seeing what a
-/// draw carries and a flush, and answering the window's pixel size. One forwarder, so a `Backend` method ratatui defaults (`append_lines`)
-/// can't silently skip `inner` in one copy.
+/// A backend that forwards every call to `inner`, its [`Tap`] seeing each
+/// draw's cells and each flush, and answering the window's pixel size.
+/// `append_lines` is forwarded too: ratatui defaults it to a no-op.
 pub(super) struct Tapped<B, T> {
     pub(super) inner: B,
     pub(super) tap: T,
@@ -238,14 +238,28 @@ impl<T> std::borrow::Borrow<TestBackend> for Tapped<TestBackend, T> {
     }
 }
 
-/// A `TestBackend` whose flush, once `tap` holds a screen clock and a latency,
-/// advances that clock by the latency: a write that lands late.
-pub(super) type Slow = Tapped<TestBackend, Option<(pixtuoid_scene::flash::ManualClock, Duration)>>;
+/// The slow-write twins' latency, one value so both painters test one model.
+pub(super) const SLOW: Duration = Duration::from_millis(60);
 
-impl Tap<TestBackend> for Option<(pixtuoid_scene::flash::ManualClock, Duration)> {
+/// A write that lands `by` late on the `screen` clock.
+pub(super) struct Latency {
+    pub(super) screen: pixtuoid_scene::flash::ManualClock,
+    pub(super) by: Duration,
+}
+
+impl Latency {
+    pub(super) fn land(&self) {
+        self.screen.advance(self.by);
+    }
+}
+
+/// A `TestBackend` whose flush lands late once `tap` holds a [`Latency`].
+pub(super) type Slow = Tapped<TestBackend, Option<Latency>>;
+
+impl Tap<TestBackend> for Option<Latency> {
     fn on_flush(&mut self) {
-        if let Some((screen, latency)) = self {
-            screen.advance(*latency);
+        if let Some(latency) = self {
+            latency.land();
         }
     }
 }

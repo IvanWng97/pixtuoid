@@ -177,7 +177,6 @@ fn a_resized_terminal_is_never_held_in_half_blocks() {
 #[test]
 fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     use crate::test_flash::storm_strike;
-    const SLOW: Duration = Duration::from_millis(60);
     let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
     let strike = storm_strike();
     let [first, second] = [strike.changes[0], strike.changes[1]];
@@ -188,7 +187,10 @@ fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
     screen.at(first - 2 * floor);
     r.render(&scene, pack(), first - 2 * floor).expect("render");
-    r.terminal.backend_mut().tap = Some((screen.clone(), SLOW));
+    r.terminal.backend_mut().tap = Some(Latency {
+        screen: screen.clone(),
+        by: SLOW,
+    });
     screen.at(first);
     r.render(&scene, pack(), first).expect("render");
     let landed = screen.now();

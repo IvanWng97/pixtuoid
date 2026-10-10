@@ -449,7 +449,7 @@ command = "/hand/written/pixtuoid-hook"
             assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
         });
 
-        // A non-existent dir falls back, matching upstream codex's own gate.
+        // A non-existent dir falls back, where upstream errors; `resolve_codex_home` says why.
         let missing = tmp.path().join("missing");
         temp_env::with_var("CODEX_HOME", Some(&missing), || {
             assert!(

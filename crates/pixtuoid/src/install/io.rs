@@ -608,7 +608,8 @@ mod tests {
 
     #[test]
     fn resolve_symlink_nonexistent_returns_as_is() {
-        let path = PathBuf::from("/tmp/pixtuoid-test-nonexistent-xyz");
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("missing");
         assert_eq!(resolve_symlink(&path), path);
     }
 

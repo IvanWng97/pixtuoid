@@ -205,6 +205,13 @@ mod tests {
         for first in [true, false] {
             let opts = format!("{:?}", hook_pipe_options(first));
             assert!(opts.contains("reject_remote_clients: true"), "{opts}");
+        }
+    }
+
+    #[test]
+    fn the_first_instance_is_claimed_only_when_asked() {
+        for first in [true, false] {
+            let opts = format!("{:?}", hook_pipe_options(first));
             assert!(
                 opts.contains(&format!("first_pipe_instance: {first}")),
                 "{opts}"
