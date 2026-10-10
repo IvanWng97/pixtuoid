@@ -40,8 +40,9 @@ pub struct Target {
     /// never reads.
     pub default_config_path: fn() -> Result<PathBuf>,
     /// Build the command string written into config from the resolved binary.
-    /// `explicit` (the user set `PIXTUOID_HOOK`) always wins over a bare
-    /// PATH-resolved name. Usually this IS the verbatim command written for every
+    /// `explicit` (the user set
+    /// [`HOOK_OVERRIDE_ENV`](crate::install::io::HOOK_OVERRIDE_ENV)) always wins
+    /// over a bare PATH-resolved name. Usually this IS the verbatim command written for every
     /// event, but a target's `merge_install` MAY append a per-entry suffix —
     /// CodeWhale bakes ` --event <name>` onto each entry, so its `hook_command`
     /// returns a per-source BASE that `merge_install` extends.

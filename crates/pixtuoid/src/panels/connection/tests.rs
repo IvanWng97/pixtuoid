@@ -269,8 +269,13 @@ fn a_disconnected_row_names_hooks_that_still_fire() {
         r#"{"hooks":{"Stop":[{"_pixtuoid":true,"matcher":".*","hooks":[]}]}}"#,
     )
     .unwrap();
+    // Codex drift a connected row would report.
+    let log = format!(
+        "ts  WARN {}: source=codex kind=unknown_event name=OtherHook",
+        pixtuoid_core::source::drift::TARGET
+    );
     let rows = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(cfg.path()), || {
-        build_rows(&HashSet::new(), "")
+        build_rows(&HashSet::new(), &log)
     });
     let cc = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
     assert_ne!(cc.state, ConnState::Connected);

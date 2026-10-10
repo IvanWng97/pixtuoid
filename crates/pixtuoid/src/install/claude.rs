@@ -202,30 +202,65 @@ fn leftover_hooks() -> Option<String> {
     leftover_hooks_in(&settings_path().ok()?)
 }
 
-/// Releases before the plugin merged their hooks into this settings file, keyed
-/// on [`SENTINEL_KEY`]; Claude Code runs a plugin's copy of a handler beside a
-/// settings file's (code.claude.com/docs/en/hooks), hence "twice". A file that
-/// doesn't parse reports none: Claude Code skips it too
+/// The hooks a release before the plugin merged into this settings file, keyed on
+/// the sentinel it stamped on each entry.
+struct Leftover {
+    sentinel: &'static str,
+    writer: &'static str,
+    effect: &'static str,
+}
+
+const LEFTOVERS: [Leftover; 2] = [
+    Leftover {
+        sentinel: SENTINEL_KEY,
+        writer: "an older pixtuoid",
+        // Claude Code runs a plugin's copy of a handler beside a settings file's
+        // (code.claude.com/docs/en/hooks).
+        effect: "Claude Code runs them while disconnected, and twice beside the plugin",
+    },
+    Leftover {
+        // v0.1.0–v0.3.0's (v0.3.0 crates/ascii-agents/src/install/merge.rs:3).
+        sentinel: "_ascii_agents",
+        writer: "ascii-agents (pixtuoid before 0.4)",
+        // A hook that can't start is a non-blocking error the transcript shows as a
+        // `<hook name> hook error` notice (code.claude.com/docs/en/hooks).
+        effect: "they run `ascii-agents-hook`, which pixtuoid no longer ships, so each \
+                 of those events shows a hook error",
+    },
+];
+
+/// A file that doesn't parse reports none: Claude Code skips it too
 /// (code.claude.com/docs/en/settings).
 fn leftover_hooks_in(settings: &Path) -> Option<String> {
     let doc = read_settings(settings).ok()?;
-    let events: Vec<&str> = doc
-        .get("hooks")?
-        .as_object()?
+    let hooks = doc.get("hooks")?.as_object()?;
+    let clauses: Vec<String> = LEFTOVERS
         .iter()
-        .filter(|(_, list)| {
-            list.as_array()
-                .is_some_and(|l| l.iter().any(|e| merge::is_flat_managed(e, SENTINEL_KEY)))
+        .filter_map(|l| {
+            let events: Vec<&str> = hooks
+                .iter()
+                .filter(|(_, list)| {
+                    list.as_array()
+                        .is_some_and(|es| es.iter().any(|e| merge::is_flat_managed(e, l.sentinel)))
+                })
+                .map(|(event, _)| event.as_str())
+                .collect();
+            (!events.is_empty()).then(|| {
+                format!(
+                    "the hooks {} wrote for {}: {} — delete each entry marked \"{}\": true",
+                    l.writer,
+                    crate::strip_control_chars(&events.join(", ")),
+                    l.effect,
+                    l.sentinel
+                )
+            })
         })
-        .map(|(event, _)| event.as_str())
         .collect();
-    (!events.is_empty()).then(|| {
+    (!clauses.is_empty()).then(|| {
         format!(
-            "{} still holds the hooks an older pixtuoid wrote for {}: Claude Code runs \
-             them while disconnected, and twice beside the plugin — delete each entry \
-             marked \"{SENTINEL_KEY}\": true",
+            "{} still holds {}",
             crate::display_path(settings),
-            crate::strip_control_chars(&events.join(", "))
+            clauses.join("; and ")
         )
     })
 }
@@ -281,7 +316,7 @@ fn run_claude(args: &[&std::ffi::OsStr]) -> Result<String> {
 
 /// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
 /// carries, so CC PATH-resolves it and a binary upgrade applies without a
-/// rewrite. `PIXTUOID_HOOK` overrides that — the user set it precisely because
+/// rewrite. [`io::HOOK_OVERRIDE_ENV`] overrides that — the user set it precisely because
 /// the binary is off-PATH — and is single-quoted, since CC runs shell-form
 /// commands through a shell.
 ///
@@ -479,6 +514,38 @@ mod tests {
             "names the removal step: {note}"
         );
         assert!(note.contains("settings.json"), "names the file: {note}");
+    }
+
+    #[test]
+    fn leftover_hooks_name_the_failing_ones_ascii_agents_left_apart_from_ours() {
+        // v0.3.0's writer: crates/ascii-agents/src/install/merge.rs:3,41-44, and
+        // the bare command from its install/mod.rs:13.
+        let ascii = json!({
+            "_ascii_agents": true,
+            "matcher": ".*",
+            "hooks": [{ "type": "command", "command": "ascii-agents-hook" }],
+        });
+        let ours = json!({ SENTINEL_KEY: true, "matcher": ".*", "hooks": [] });
+        let only_ascii = json!({ "hooks": { "SessionStart": [ascii], "SessionEnd": [ascii] } });
+        let note = leftovers_in(Some(&only_ascii.to_string())).expect("ascii-agents' hooks");
+        assert!(note.contains("SessionStart, SessionEnd"), "{note}");
+        assert!(note.contains("hook error"), "they fail: {note}");
+        assert!(!note.contains("twice"), "they never reach pixtuoid: {note}");
+        assert!(
+            note.contains(r#""_ascii_agents": true"#),
+            "names the removal step: {note}"
+        );
+
+        let both = json!({ "hooks": { "Stop": [ours], "SessionStart": [ascii] } });
+        let note = leftovers_in(Some(&both.to_string())).expect("both releases' hooks");
+        let (pix, ascii) = note
+            .split_once("; and ")
+            .unwrap_or_else(|| panic!("one clause per release: {note}"));
+        assert!(pix.contains("for Stop:") && pix.contains("twice"), "{note}");
+        assert!(
+            ascii.contains("for SessionStart:") && ascii.contains("hook error"),
+            "{note}"
+        );
     }
 
     #[test]

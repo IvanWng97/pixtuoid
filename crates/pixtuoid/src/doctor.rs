@@ -299,7 +299,7 @@ impl SourceDiagnostics {
             return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
         }
         if self.leftover_hooks.is_some() {
-            return Some(LEFTOVER_HOOKS_HEALTH.into());
+            return Some("⚠ an older pixtuoid's hooks still fire — run `pixtuoid doctor`".into());
         }
         let n = self.drift.total();
         if n > 0 {
@@ -309,13 +309,14 @@ impl SourceDiagnostics {
     }
 }
 
-const LEFTOVER_HOOKS_HEALTH: &str =
-    "⚠ an older pixtuoid's hooks still fire — run `pixtuoid doctor`";
-
 /// A disconnected source's health: nothing of it runs but hooks that fire
 /// anyway.
 pub(crate) fn leftover_hooks_health(source: &str) -> Option<String> {
-    leftover_hooks(source).map(|_| LEFTOVER_HOOKS_HEALTH.to_string())
+    SourceDiagnostics {
+        leftover_hooks: leftover_hooks(source),
+        ..Default::default()
+    }
+    .summary()
 }
 
 fn leftover_hooks(source: &str) -> Option<String> {
@@ -328,8 +329,8 @@ fn leftover_hooks(source: &str) -> Option<String> {
 /// installed, NOT gated on the connected flag — the report must surface a stale
 /// broken install even on a disconnected source. `config` injects a config root
 /// (`None` in prod) so an install-broken verdict is exercisable through the SAME
-/// root both the `has_hooks` gate and `verify_target` read; the leftover-hook read
-/// the CLI's own settings instead.
+/// root both the `has_hooks` gate and `verify_target` read; the leftover-hook probe
+/// always reads the CLI's own settings.
 pub(crate) fn diagnose(
     source: &str,
     log: &str,
