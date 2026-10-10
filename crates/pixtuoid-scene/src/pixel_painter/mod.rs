@@ -1,8 +1,7 @@
 //! Pure-pixel paint pass — no ratatui types, no terminal I/O.
 //!
 //! The classic's paint of a [`SimFrame`] the sim already stepped, which
-//! [`look::render`](crate::look::render) calls. The whole public surface is on
-//! the published crate's api golden, so widen it deliberately.
+//! [`look::render`](crate::look::render) calls.
 
 use std::collections::HashMap;
 

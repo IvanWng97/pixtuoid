@@ -4,6 +4,8 @@
 
 mod density;
 mod lookup;
+#[cfg(test)]
+pub(crate) mod validate;
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU16;
@@ -11,10 +13,7 @@ use std::num::NonZeroU16;
 use enum_map::EnumMap;
 use pixtuoid_core::sprite::Sprite;
 use pixtuoid_core::sprite::error::PackError;
-use pixtuoid_core::sprite::format::{
-    Density, IconArt, Pack, PackContract, Piece, ValidationReport, load_pack_from_strings,
-    validate_pack_animations,
-};
+use pixtuoid_core::sprite::format::{Density, IconArt, Pack, Piece, load_pack_from_strings};
 use strum::VariantArray as _;
 
 use crate::display::Icon;
@@ -378,42 +377,6 @@ fn face_reach(dial: &Sprite) -> Option<f32> {
     Some(w as f32 / 2.0 - first as f32)
 }
 
-/// Every piece the painters loop on the beat, each with the frame its loop
-/// starts at: the looping fixtures, the appliances' busy loops
-/// ([`appliance_frame_index`]), the typists (`pose::typing_frame`), and every
-/// creature pose that is not a walk.
-fn looped_animations() -> Vec<(Piece, usize)> {
-    let appliances =
-        [Piece::VendingMachine, Piece::Printer].map(|p| (p, lookup::APPLIANCE_IDLE_FRAMES));
-    let creatures = Piece::VARIANTS
-        .iter()
-        .copied()
-        .filter(|p| p.kind() == pixtuoid_core::sprite::format::PieceKind::Creature);
-    [
-        Piece::FishTank,
-        Piece::WaterCooler,
-        Piece::Typing,
-        Piece::TypingBack,
-    ]
-    .into_iter()
-    .chain(creatures)
-    .map(|p| (p, 0))
-    .chain(appliances)
-    .collect()
-}
-
-/// [`validate_pack_animations`], against the loops this crate's painters play
-/// on the Full beat.
-pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(
-        pack,
-        &PackContract {
-            loops: &looped_animations(),
-            beat_ms: crate::anim::FULL_TICK_MS,
-        },
-    )
-}
-
 /// The bundled art, for unit tests: parsed once per process, since the parse
 /// dominates a test that loads it per frame; each caller gets its own copy.
 #[cfg(test)]
@@ -533,6 +496,7 @@ mod comments;
 
 #[cfg(test)]
 mod tests {
+    use super::validate::validate_pack;
     use super::*;
     use crate::display::pen::test_density;
     use crate::render_scale::RenderScale;
@@ -603,14 +567,13 @@ mod tests {
         }
     }
 
-    /// Art that loads but warns draws other than its author meant, so the
-    /// bundled pack warns of nothing.
+    /// Art that loads but draws other than its author meant is a finding, so
+    /// the bundled pack has none.
     #[test]
     fn the_bundled_pack_passes_its_own_validation() {
         let pack = test_default_pack();
         let report = validate_pack(&pack);
-        assert!(!report.has_errors(), "{report:?}");
-        assert_eq!(report.warning_count(), 0, "{report:?}");
+        assert_eq!(report.finding_count(), 0, "{report:?}");
     }
 
     /// A desk's front is its own art, cut down: on the desk's canvas, every
@@ -746,8 +709,7 @@ mod tests {
             "at their base alone"
         );
         let report = validate_pack(&pack);
-        assert!(!report.has_errors(), "{report:?}");
-        assert_eq!(report.warning_count(), 0, "{report:?}");
+        assert_eq!(report.finding_count(), 0, "{report:?}");
         let undrawn = undrawn(&toml, &srcs);
         assert!(undrawn.is_empty(), "undrawn sprites: {undrawn:?}");
     }

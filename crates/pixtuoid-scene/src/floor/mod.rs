@@ -414,7 +414,7 @@ impl PerFloor {
 
 /// Resolve an occupied-waypoint index to its [`WaypointKind`](crate::layout::WaypointKind)
 /// against `layout` — the ONE authored form of the audio cue tracker's kind lookup.
-pub fn waypoint_kind_of(
+pub(crate) fn waypoint_kind_of(
     layout: Option<&crate::layout::SceneLayout>,
     idx: usize,
 ) -> Option<crate::layout::WaypointKind> {

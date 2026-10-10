@@ -60,7 +60,7 @@ pub(crate) fn sheet_fall_dist(slot: &AgentSlot, now: SystemTime) -> Option<u16> 
 
 /// Compact human form for the dossier row: `9.5K` / `2.4M` / `816` —
 /// one decimal under 10 of the unit, none above.
-pub fn compact_tokens(tokens: u64) -> String {
+pub(crate) fn compact_tokens(tokens: u64) -> String {
     const K: u64 = 1_000;
     const M: u64 = 1_000_000;
     match tokens {
