@@ -107,7 +107,7 @@ struct Replay {
 
 /// `Child::drop` neither kills nor waits, so any panic between spawn and the
 /// explicit kill would orphan a `run --headless` loop — which exits only on
-/// Ctrl-C — reparented to init and writing to an already-deleted temp file.
+/// a quit signal or when its reader leaves — reparented to init and writing to an already-deleted temp file.
 struct Reaped(std::process::Child);
 
 impl Drop for Reaped {

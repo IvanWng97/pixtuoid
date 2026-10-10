@@ -250,8 +250,7 @@ impl QuitSignal {
     }
 
     /// Deliver the signal again under its default disposition. Returns only
-    /// where the platform has no such signal (Windows: the console event ends
-    /// the process once the handler thread, parked by tokio, is torn down).
+    /// where the platform has no such signal.
     pub(crate) fn reraise(self) {
         #[cfg(unix)]
         // SAFETY: resetting a disposition and raising the signal that already
@@ -263,8 +262,8 @@ impl QuitSignal {
     }
 }
 
-/// `QUIT_SIGNALS` (on Windows, Ctrl-C and console close), their handlers
-/// installed at [`arm`](Self::arm): armed before a painter sets up what its exit
+/// The platform's quit signals (`QUIT_SIGNALS`; `windows_arms` on Windows), their
+/// handlers installed at [`arm`](Self::arm): armed before a painter sets up what its exit
 /// undoes (the TUI's terminal modes, the floating window's saved geometry, the
 /// kitty shared-memory unlink), so no signal can land in between and kill the
 /// process by its default disposition. A signal arriving as SIG_IGN stays
@@ -276,7 +275,7 @@ pub(crate) struct QuitArms(Vec<QuitArm>);
 impl QuitArms {
     pub(crate) fn arm() -> Self {
         #[cfg(unix)]
-        let arms = QUIT_SIGNALS.into_iter().filter_map(quit_signal).collect();
+        let arms = QUIT_SIGNALS.into_iter().filter_map(arm_signal).collect();
         #[cfg(not(unix))]
         let arms = windows_arms();
         Self(arms)
@@ -301,9 +300,9 @@ impl QuitArms {
 /// ignored or its registration failed: an arm resolving on a non-event would
 /// tear the painter down.
 #[cfg(unix)]
-fn quit_signal((kind, name): (tokio::signal::unix::SignalKind, &'static str)) -> Option<QuitArm> {
+fn arm_signal((kind, name): (tokio::signal::unix::SignalKind, &'static str)) -> Option<QuitArm> {
     let raw = kind.as_raw_value();
-    if arrived_ignored(raw) {
+    if inherited_ignored(raw) {
         return None;
     }
     match tokio::signal::unix::signal(kind) {
@@ -323,7 +322,7 @@ fn quit_signal((kind, name): (tokio::signal::unix::SignalKind, &'static str)) ->
 }
 
 #[cfg(unix)]
-fn arrived_ignored(raw: std::os::raw::c_int) -> bool {
+fn inherited_ignored(raw: std::os::raw::c_int) -> bool {
     // SAFETY: a null `act` only reads the current disposition into `old`.
     unsafe {
         let mut old: libc::sigaction = std::mem::zeroed();
@@ -331,33 +330,33 @@ fn arrived_ignored(raw: std::os::raw::c_int) -> bool {
     }
 }
 
-/// Ctrl-C and console close, the Windows twin of SIGHUP. The close handler has
-/// [a few seconds](https://learn.microsoft.com/en-us/windows/console/handlerroutine)
+/// Ctrl-C, Ctrl-Break and console close (the Windows twin of SIGHUP). Raw mode
+/// turns Ctrl-C into a key, but "CTRL+BREAK is always treated as a signal"
+/// (<https://learn.microsoft.com/en-us/windows/console/ctrl-c-and-ctrl-break-signals>),
+/// and the close handler has [a few seconds](https://learn.microsoft.com/en-us/windows/console/handlerroutine)
 /// before the OS ends the process, which a painter's teardown fits.
 #[cfg(not(unix))]
 fn windows_arms() -> Vec<QuitArm> {
-    use tokio::signal::windows::{ctrl_c, ctrl_close};
+    use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close};
     let mut arms: Vec<QuitArm> = Vec::new();
-    match ctrl_c() {
-        Ok(mut sig) => arms.push(Box::pin(async move {
-            sig.recv().await;
-            QuitSignal()
-        })),
-        Err(e) => tracing::error!(
-            error = %e,
-            "Ctrl-C handler registration failed — an external Ctrl-C will not quit cleanly"
-        ),
+    macro_rules! arm {
+        ($register:expr, $name:literal) => {
+            match $register {
+                Ok(mut sig) => arms.push(Box::pin(async move {
+                    sig.recv().await;
+                    QuitSignal()
+                })),
+                Err(e) => tracing::error!(
+                    error = %e,
+                    signal = $name,
+                    "console handler registration failed — an external signal will not quit cleanly"
+                ),
+            }
+        };
     }
-    match ctrl_close() {
-        Ok(mut sig) => arms.push(Box::pin(async move {
-            sig.recv().await;
-            QuitSignal()
-        })),
-        Err(e) => tracing::error!(
-            error = %e,
-            "console-close handler registration failed — closing the console will not quit cleanly"
-        ),
-    }
+    arm!(ctrl_c(), "Ctrl-C");
+    arm!(ctrl_break(), "Ctrl-Break");
+    arm!(ctrl_close(), "console close");
     arms
 }
 
@@ -766,8 +765,7 @@ mod tests {
 mod quit_arms {
     use super::{QUIT_SIGNALS, QuitArms, QuitSignal};
 
-    /// A test never reads ambient state: `nextest --debugger` hands the
-    /// process SIG_IGN for SIGINT and SIGQUIT.
+    /// A test never reads ambient state.
     fn default_dispositions() {
         for (kind, _) in QUIT_SIGNALS {
             // SAFETY: resetting a disposition before any arm exists.
@@ -813,7 +811,7 @@ mod quit_arms {
     }
 
     #[tokio::test]
-    async fn a_signal_that_arrived_ignored_stays_ignored() {
+    async fn a_signal_inherited_as_ignored_stays_ignored() {
         for (kind, name) in QUIT_SIGNALS {
             let raw = kind.as_raw_value();
             // SAFETY: process-wide disposition; the test raises only this signal.
@@ -834,8 +832,15 @@ mod quit_arms {
         }
     }
 
+    #[tokio::test]
+    async fn a_registration_the_runtime_refuses_arms_nothing() {
+        use tokio::signal::unix::SignalKind;
+        assert!(super::arm_signal((SignalKind::from_raw(libc::SIGKILL), "SIGKILL")).is_none());
+    }
+
     /// The kernel's own verdict on a re-raised signal, read from a child that
-    /// raises it: a fork, because the raise ends the process.
+    /// raises it: a fork, because the raise ends the process. The child starts
+    /// with the signal ignored, so only `reraise`'s own reset can end it.
     #[test]
     fn reraise_ends_the_process_by_the_signal() {
         for raw in [libc::SIGTERM, libc::SIGHUP] {
@@ -845,6 +850,7 @@ mod quit_arms {
                 let pid = libc::fork();
                 assert!(pid >= 0, "fork");
                 if pid == 0 {
+                    libc::signal(raw, libc::SIG_IGN);
                     QuitSignal(raw).reraise();
                     libc::_exit(0);
                 }

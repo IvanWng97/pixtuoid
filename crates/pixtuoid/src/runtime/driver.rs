@@ -1,7 +1,7 @@
 //! The async runtime glue: builds the tokio runtime, spawns the reducer
 //! task + sources, binds the hook socket, and drives either the TUI or the
-//! headless summary loop until Ctrl-C (or, headless, until the summary's
-//! reader leaves).
+//! headless summary loop until a quit signal ([`super::QuitArms`]) or, headless,
+//! until the summary's reader leaves.
 //!
 //! `run` and `run_async` are structurally unreachable by a headless test (a
 //! real tokio runtime + `block_on` + the quit arms + socket bind), so this file is
@@ -292,10 +292,6 @@ async fn headless_loop(
     scene_rx: SceneRx,
     health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
 ) -> Result<Option<QuitSignal>> {
-    // ONE armed set for the loop's lifetime, armed before the first poll: a
-    // fresh listener per select! iteration would drop the subscription while the
-    // sleep arm runs, and tokio's process-global handler suppresses default
-    // termination, so a signal landing in that gap would be lost.
     headless_loop_with_signal(
         scene_rx,
         health_rx,

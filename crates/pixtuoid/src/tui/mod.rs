@@ -307,11 +307,11 @@ fn unwind_after<W: std::io::Write>(
 /// # Errors
 ///
 /// If restoring the terminal modes or showing the cursor fails.
-pub(crate) fn teardown_terminal(term: &mut Term, out: &FrameOut) -> Result<()> {
+pub(crate) fn teardown_terminal(term: &mut Term, out: Option<&FrameOut>) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
     let cursor = term.show_cursor();
-    if cursor.is_err() {
+    if let (Err(_), Some(out)) = (&cursor, out) {
         // `Terminal`'s Drop shows the cursor again while its flag says hidden and
         // `eprintln!`s the failure, which panics on a stderr that left with the
         // terminal. The flag clears only on a successful show, so aim the writer
@@ -484,7 +484,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
         stdout(),
         crate::term::query_sync_output(crate::term::SYNC_OUTPUT_PROBE_TIMEOUT),
     );
-    let abandon_handle = out.clone();
     let term = setup_terminal(out.clone(), &arms)?;
     let quit = arms.signalled();
     tokio::pin!(quit);
@@ -575,8 +574,27 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
     .await;
 
     renderer.finish_pacing();
-    teardown_terminal(&mut renderer.terminal, &abandon_handle)?;
-    result.map(|()| fired)
+    run_outcome(result, renderer.restore_terminal(), fired)
+}
+
+/// A quit signal outranks a failed teardown: a closed terminal fails its own
+/// restore, and the process must still die by the signal (the exit status a
+/// supervisor reads) rather than by an error to a dead stderr.
+fn run_outcome(
+    result: Result<()>,
+    teardown: Result<()>,
+    fired: Option<QuitSignal>,
+) -> Result<Option<QuitSignal>> {
+    match (fired, teardown) {
+        (Some(signal), Err(e)) => {
+            tracing::warn!(error = ?e, "terminal restore failed after a quit signal");
+            result.map(|()| Some(signal))
+        }
+        (_, teardown) => {
+            teardown?;
+            result.map(|()| fired)
+        }
+    }
 }
 
 /// The TUI loop's frame clock, one tick per `period`. A frame that overran
@@ -630,6 +648,9 @@ mod frame_out_tests {
 
     /// A terminal that left: the restore fails, and nothing may write to it
     /// again, or ratatui's Drop `eprintln!`s on the dead stderr and panics.
+    /// Unix-only: see `teardown_tests`' console-API note, which has no writer
+    /// see a byte under `windows-test`.
+    #[cfg(unix)]
     #[test]
     fn a_failed_restore_leaves_ratatui_nothing_to_retry_on_drop() {
         use ratatui::{
@@ -647,7 +668,7 @@ mod frame_out_tests {
         term.hide_cursor().expect("hidden");
         tty.seen().full = true;
 
-        assert!(super::teardown_terminal(&mut term, &out).is_err());
+        assert!(super::teardown_terminal(&mut term, Some(&out)).is_err());
         let attempts = tty.seen().attempts;
         drop(term);
 
@@ -656,6 +677,18 @@ mod frame_out_tests {
             attempts,
             "the Drop wrote to the dead terminal"
         );
+    }
+
+    #[test]
+    fn a_quit_signal_outranks_a_failed_teardown() {
+        let signal = crate::runtime::QuitSignal::test();
+        let failed = || Err(anyhow::anyhow!("EIO"));
+        assert_eq!(
+            super::run_outcome(Ok(()), failed(), Some(signal)).expect("the signal wins"),
+            Some(signal)
+        );
+        assert!(super::run_outcome(Ok(()), failed(), None).is_err());
+        assert!(super::run_outcome(failed(), Ok(()), None).is_err());
     }
 
     fn frame(out: &mut FrameOut, parts: &[&[u8]]) -> std::io::Result<()> {
