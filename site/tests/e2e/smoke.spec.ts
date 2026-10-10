@@ -1603,6 +1603,8 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover', a
 test('no horizontal overflow at phone widths (mobile pan guard)', async ({ browser }) => {
   // `body { overflow-x: hidden }` masks the desktop scrollbar, so a full-width block whose ::before glow pokes past the viewport
   // is INVISIBLE on desktop yet PANS on mobile — and a pseudo-element dodges every querySelectorAll('*') scan.
+  // What overflows instead scrolls inside a doc's own scroller, which config/rehype-scroll-focus.mjs makes a tab stop.
+  let scrollersSeen = 0;
   for (const [path, width] of [
     ['./', 320], // iPhone SE — the narrowest supported
     ['./', 360],
@@ -1640,8 +1642,20 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
       innerW,
       `${path} at ${width}px: window.innerWidth expanded to ${innerW}px (${innerW - width}px past the device width — over-wide content grew the emulated viewport)`
     ).toBeLessThanOrEqual(width);
+    const scrollers = await page.evaluate(() =>
+      [...document.querySelectorAll('article.prose *')]
+        .filter(
+          (e) => /auto|scroll/.test(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth
+        )
+        .map((e) => ({ tag: e.tagName.toLowerCase(), tabIndex: (e as HTMLElement).tabIndex }))
+    );
+    scrollersSeen += scrollers.length;
+    for (const s of scrollers) {
+      expect(s.tabIndex, `${path} at ${width}px: a ${s.tag} scroller is not a tab stop`).toBe(0);
+    }
     await context.close();
   }
+  expect(scrollersSeen, 'no doc scroller to hold to the tab-stop check').toBeGreaterThan(0);
 });
 
 test('the hero copy clears the floating nav at phone viewports (vertical overlap guard)', async ({
