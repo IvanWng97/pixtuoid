@@ -54,7 +54,7 @@ pub type SessionEndChecker = fn(&[u8]) -> bool;
 /// supplies one (see `claude_code::cc_activity_recency` for the write that made
 /// mtime lie); every other source keeps the mtime proxy until such a write is
 /// OBSERVED on its wire — supplying one is a per-source wire fact, not a policy.
-pub type ActivityRecency = fn(&[u8]) -> TailActivity;
+pub(crate) type ActivityRecency = fn(&[u8]) -> TailActivity;
 
 fn no_activity_recency(_tail: &[u8]) -> TailActivity {
     TailActivity::Unknown
@@ -65,7 +65,7 @@ fn no_activity_recency(_tail: &[u8]) -> TailActivity {
 /// transcript lines carry NO cwd anywhere — the cwd lives in the URL-encoded
 /// group-dir name — so without this every grok registration would start
 /// empty-cwd and ride the reducer's unknown-cwd reap.
-pub type CwdDeriver = fn(&Path) -> Option<PathBuf>;
+pub(crate) type CwdDeriver = fn(&Path) -> Option<PathBuf>;
 
 fn no_cwd_from_path(_p: &Path) -> Option<PathBuf> {
     None
@@ -77,7 +77,7 @@ fn no_cwd_from_path(_p: &Path) -> Option<PathBuf> {
 /// load-bearing, not merely absent: it lets the head scan stop at the first
 /// `cwd` instead of reading on for a label that can never arrive. **omp** is
 /// the one override; see its `omp_head_title`.
-pub type HeadLabel = fn(&serde_json::Value) -> Option<String>;
+pub(crate) type HeadLabel = fn(&serde_json::Value) -> Option<String>;
 
 #[derive(Clone, Copy)]
 struct SourceDecoders {

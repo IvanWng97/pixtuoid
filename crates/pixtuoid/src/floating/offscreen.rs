@@ -1,7 +1,7 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
 //! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
+//! `pixtuoid_scene::floor::OfficeSession` across frames so walks stay continuous.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;

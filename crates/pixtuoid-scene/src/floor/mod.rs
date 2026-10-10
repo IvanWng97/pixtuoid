@@ -286,8 +286,7 @@ impl CoffeeState {
     }
 
     /// Force a carrier with a chosen fetch stamp (overwrites) — a seeding seam;
-    /// production detection goes through `record`, which
-    /// never restamps.
+    /// production detection goes through `record`.
     pub fn insert(&mut self, id: AgentId, fetched_at: SystemTime) {
         self.0.insert(id, fetched_at);
     }

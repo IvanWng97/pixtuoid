@@ -1434,61 +1434,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sky::WeatherPol
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sky::WeatherPolicy
 pub fn pixtuoid_scene::sky::hour_is_day(f32) -> bool
 pub mod pixtuoid_scene::theme
-pub enum pixtuoid_scene::theme::ThemeKind
-pub pixtuoid_scene::theme::ThemeKind::Dark
-pub pixtuoid_scene::theme::ThemeKind::Light
-impl core::clone::Clone for pixtuoid_scene::theme::ThemeKind
-pub fn pixtuoid_scene::theme::ThemeKind::clone(&self) -> pixtuoid_scene::theme::ThemeKind
-impl core::cmp::Eq for pixtuoid_scene::theme::ThemeKind
-impl core::cmp::PartialEq for pixtuoid_scene::theme::ThemeKind
-pub fn pixtuoid_scene::theme::ThemeKind::eq(&self, &pixtuoid_scene::theme::ThemeKind) -> bool
-impl core::fmt::Debug for pixtuoid_scene::theme::ThemeKind
-pub fn pixtuoid_scene::theme::ThemeKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::theme::ThemeKind
-impl core::marker::StructuralPartialEq for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Freeze for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Send for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Sync for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Unpin for pixtuoid_scene::theme::ThemeKind
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::ThemeKind
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::ThemeKind
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::ThemeKind
-pub struct pixtuoid_scene::theme::ApplianceColors
-impl core::clone::Clone for pixtuoid_scene::theme::ApplianceColors
-pub fn pixtuoid_scene::theme::ApplianceColors::clone(&self) -> pixtuoid_scene::theme::ApplianceColors
-impl core::fmt::Debug for pixtuoid_scene::theme::ApplianceColors
-pub fn pixtuoid_scene::theme::ApplianceColors::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::Send for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::Sync for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::Unpin for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::ApplianceColors
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::ApplianceColors
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::ApplianceColors
-pub struct pixtuoid_scene::theme::EffectColors
-impl core::clone::Clone for pixtuoid_scene::theme::EffectColors
-pub fn pixtuoid_scene::theme::EffectColors::clone(&self) -> pixtuoid_scene::theme::EffectColors
-impl core::fmt::Debug for pixtuoid_scene::theme::EffectColors
-pub fn pixtuoid_scene::theme::EffectColors::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::theme::EffectColors
-impl core::marker::Send for pixtuoid_scene::theme::EffectColors
-impl core::marker::Sync for pixtuoid_scene::theme::EffectColors
-impl core::marker::Unpin for pixtuoid_scene::theme::EffectColors
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::EffectColors
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::EffectColors
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::EffectColors
-pub struct pixtuoid_scene::theme::FurnitureColors
-impl core::clone::Clone for pixtuoid_scene::theme::FurnitureColors
-pub fn pixtuoid_scene::theme::FurnitureColors::clone(&self) -> pixtuoid_scene::theme::FurnitureColors
-impl core::fmt::Debug for pixtuoid_scene::theme::FurnitureColors
-pub fn pixtuoid_scene::theme::FurnitureColors::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::Send for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::Sync for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::Unpin for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::FurnitureColors
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::FurnitureColors
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::FurnitureColors
 pub struct pixtuoid_scene::theme::LightingColors
 pub pixtuoid_scene::theme::LightingColors::desk_lamp: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::moon_core: pixtuoid_core::sprite::Rgb

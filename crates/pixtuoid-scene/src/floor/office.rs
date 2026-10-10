@@ -153,18 +153,6 @@ impl FloorNav {
         true
     }
 
-    /// The floor above, of `n_floors`, while no slide is under way.
-    #[cfg(test)]
-    pub(crate) fn up(&self, n_floors: usize) -> Option<usize> {
-        (self.transition.is_none() && self.current + 1 < n_floors).then_some(self.current + 1)
-    }
-
-    /// The floor below, while no slide is under way.
-    #[cfg(test)]
-    pub(crate) fn down(&self) -> Option<usize> {
-        (self.transition.is_none() && self.current > 0).then(|| self.current - 1)
-    }
-
     /// End a slide at once on its destination, of `n_floors`: a cancel (a
     /// resize) must not silently revert a navigation.
     pub(crate) fn cancel(&mut self, n_floors: usize) {

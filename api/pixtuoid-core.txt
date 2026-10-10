@@ -547,9 +547,6 @@ impl core::marker::Unpin for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::jsonl::ProbeSnapshot
-pub type pixtuoid_core::source::jsonl::ActivityRecency = fn(&[u8]) -> pixtuoid_core::source::decoder::TailActivity
-pub type pixtuoid_core::source::jsonl::CwdDeriver = fn(&std::path::Path) -> core::option::Option<std::path::PathBuf>
-pub type pixtuoid_core::source::jsonl::HeadLabel = fn(&serde_json::value::Value) -> core::option::Option<alloc::string::String>
 pub type pixtuoid_core::source::jsonl::IdDeriver = fn(&std::path::Path) -> alloc::string::String
 pub type pixtuoid_core::source::jsonl::LabelDeriver = fn(&std::path::Path, &str, &std::path::Path) -> alloc::string::String
 pub type pixtuoid_core::source::jsonl::LineDecoder = fn(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>

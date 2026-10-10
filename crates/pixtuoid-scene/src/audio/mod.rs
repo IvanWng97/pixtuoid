@@ -31,12 +31,13 @@ pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
 use crate::tally::StateCounts;
 
-/// Fixed RNG seeds for the four ambient-synth voices, in ONE place because both
-/// painters MUST seed identically — a per-crate copy silently desyncs the two
-/// soundtracks on the next edit. `BUILD_SEED` seeds the build-time noise; the
-/// rest seed the per-tick keystroke / rain-drop schedulers and their picker.
+/// The build-time noise seed, in ONE place because both painters MUST seed
+/// identically — a per-crate copy silently desyncs the two soundtracks on the
+/// next edit.
 #[doc(hidden)]
 pub const BUILD_SEED: u64 = 0xC0FF_EE01;
+// `AudioEngine::new`'s seeds for the per-tick keystroke / rain-drop schedulers
+// and their picker.
 pub(crate) const TYPING_SEED: u64 = 0xBEEF;
 pub(crate) const DROP_SEED: u64 = 0xFACE;
 pub(crate) const PICK_SEED: u64 = 0xDEAD;

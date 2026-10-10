@@ -18,7 +18,7 @@ pub(crate) use tokyo_night::TOKYO_NIGHT;
 /// one or the other (e.g. ceiling halos read as soft glow on dark themes
 /// but as dirt smears on light themes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThemeKind {
+pub(crate) enum ThemeKind {
     /// A light-background theme.
     Light,
     /// A dark-background theme.
@@ -148,7 +148,7 @@ pub struct LightingColors {
 
 /// Desk, rug, aquarium, and token-meter furniture colors.
 #[derive(Debug, Clone)]
-pub struct FurnitureColors {
+pub(crate) struct FurnitureColors {
     /// Desk/table wood surface.
     pub(crate) wood_top: Rgb,
     /// Desk/table wood edge trim (darker).
@@ -187,7 +187,7 @@ pub struct FurnitureColors {
 
 /// Transient effect cues (glow, sleep z, steam, dust, bubble).
 #[derive(Debug, Clone)]
-pub struct EffectColors {
+pub(crate) struct EffectColors {
     /// Lit monitor bezel on an active screen.
     pub(crate) monitor_frame_lit: Rgb,
     /// A powered-but-quiet screen's glass — a back-turned desk shows it after dark whether or not anyone is at it.
@@ -269,7 +269,7 @@ pub struct UiColors {
 /// Corridor appliance colors (vending machine, printer, coat rack) — each
 /// theme supplies its own harmonized set.
 #[derive(Debug, Clone)]
-pub struct ApplianceColors {
+pub(crate) struct ApplianceColors {
     /// Vending machine chassis (the dark box body).
     pub(crate) vending_body: Rgb,
     /// Vending front sign / accent strip — the theme's signature accent.

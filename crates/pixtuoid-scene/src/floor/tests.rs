@@ -1886,19 +1886,16 @@ fn a_frame_is_a_function_of_its_instant_and_tier() {
     }
 }
 
-/// A floor key slides one floor at a time and never during a slide; a slide
-/// lands on its destination when it finishes, is dropped when its floor goes,
-/// and a cancel lands it at once.
+/// A slide never begins during one; it lands on its destination when it
+/// finishes, is dropped when its floor goes, and a cancel lands it at once.
 #[test]
 fn floor_nav_slides_lands_and_clamps() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let done = t0 + Duration::from_secs(2);
     let mut nav = FloorNav::default();
-    assert_eq!((nav.up(3), nav.down()), (Some(1), None));
     assert!(!nav.navigate(0, t0), "no floor slides to itself");
     assert!(nav.navigate(1, t0));
     assert!(!nav.navigate(2, t0), "no slide begins during one");
-    assert_eq!((nav.up(3), nav.down()), (None, None));
     nav.settle(3, t0);
     assert_eq!(
         (nav.current(), nav.transition().is_some()),
@@ -2229,7 +2226,6 @@ fn an_office_session_follows_its_floors_down() {
         office.footer_floor(&one).is_none(),
         "one floor has no breadcrumb"
     );
-    assert_eq!(office.nav().up(office.n_floors()), None, "no floor above");
 }
 
 /// A lifted agent hangs where the pointer is, in front of the room; set
