@@ -272,7 +272,7 @@ pub(crate) fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
-    // No shared-memory object outlives the process, whatever the terminal read.
+    // No shared-memory object outlives a quit the process can catch (SIGKILL aside), whatever the terminal read.
     #[cfg(all(feature = "graphics", unix))]
     crate::graphics::shm::unlink_all();
     unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
@@ -389,7 +389,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                     }));
                 }
                 Some(HitAction::Open(url)) => {
-                    let _ = open::that(url);
+                    crate::panels::open_url(url);
                 }
                 None => {}
             }

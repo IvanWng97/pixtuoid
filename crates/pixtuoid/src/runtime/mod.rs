@@ -221,10 +221,11 @@ pub(crate) fn unseen_deaths<'a>(deaths: &'a [SourceDeath], seen: &mut usize) -> 
 /// A boxed quit arm.
 type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-/// SIGINT and SIGTERM, their handlers installed at [`arm`](Self::arm): armed
-/// before a painter sets up what its exit undoes (the TUI's terminal modes, the
-/// floating window's saved geometry), so neither signal can land in between and
-/// kill the process by its default disposition.
+/// SIGINT, SIGTERM and, on unix, SIGHUP (the terminal window closing) and SIGQUIT,
+/// their handlers installed at [`arm`](Self::arm): armed before a painter sets up
+/// what its exit undoes (the TUI's terminal modes, the floating window's saved
+/// geometry, the kitty shared-memory unlink), so no signal can land in between
+/// and kill the process by its default disposition.
 pub(crate) struct QuitArms {
     ctrl_c: QuitArm<std::io::Result<()>>,
     terminate: QuitArm<()>,
@@ -235,13 +236,13 @@ impl QuitArms {
         Self {
             ctrl_c: pin_ctrl_c(),
             #[cfg(unix)]
-            terminate: Box::pin(terminate_signal()),
+            terminate: Box::pin(terminate_signals()),
             #[cfg(not(unix))]
             terminate: Box::pin(std::future::pending()),
         }
     }
 
-    /// Either signal's arrival. Pin it ONCE outside a loop: a per-iteration
+    /// Any armed signal's arrival. Pin it ONCE outside a loop: a per-iteration
     /// future drops the subscription mid-gap.
     pub(crate) async fn signalled(self) {
         let Self { ctrl_c, terminate } = self;
@@ -277,11 +278,30 @@ fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
     Box::pin(tokio::signal::ctrl_c())
 }
 
-/// The SIGTERM arm. A registration failure and a closed stream both park on
-/// `pending`: resolving a quit arm on a non-event would tear the painter down.
+/// The non-SIGINT arms, each handler installed at the call. A registration
+/// failure and a closed stream both park on `pending`: resolving a quit arm on
+/// a non-event would tear the painter down.
 #[cfg(unix)]
-fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
-    let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+fn terminate_signals() -> impl std::future::Future<Output = ()> + Send {
+    use tokio::signal::unix::SignalKind;
+    let term = quit_signal(SignalKind::terminate(), "SIGTERM");
+    let hangup = quit_signal(SignalKind::hangup(), "SIGHUP");
+    let quit = quit_signal(SignalKind::quit(), "SIGQUIT");
+    async move {
+        tokio::select! {
+            () = term => {}
+            () = hangup => {}
+            () = quit => {}
+        }
+    }
+}
+
+#[cfg(unix)]
+fn quit_signal(
+    kind: tokio::signal::unix::SignalKind,
+    name: &'static str,
+) -> impl std::future::Future<Output = ()> + Send {
+    let sig = tokio::signal::unix::signal(kind);
     async move {
         match sig {
             Ok(mut s) => {
@@ -292,7 +312,8 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
             Err(e) => {
                 tracing::error!(
                     error = %e,
-                    "SIGTERM handler registration failed — an external SIGTERM will not quit cleanly"
+                    signal = name,
+                    "signal handler registration failed — an external signal will not quit cleanly"
                 );
                 std::future::pending::<()>().await;
             }
@@ -711,14 +732,16 @@ mod quit_arms {
         unsafe {
             libc::raise(libc::SIGINT);
             libc::raise(libc::SIGTERM);
+            libc::raise(libc::SIGHUP);
+            libc::raise(libc::SIGQUIT);
         }
         ctrl_c.await.expect("the SIGINT arm resolves");
         terminate.await;
     }
 
     #[tokio::test]
-    async fn either_signal_alone_is_a_quit() {
-        for signal in [libc::SIGINT, libc::SIGTERM] {
+    async fn any_one_signal_alone_is_a_quit() {
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
             let mut quit = Box::pin(QuitArms::arm().signalled());
             assert!(
                 tokio::time::timeout(std::time::Duration::from_millis(100), &mut quit)
