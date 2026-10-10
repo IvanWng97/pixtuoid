@@ -448,6 +448,64 @@ mod tests {
         assert_eq!(order, ["x", "x"], "runs read oldest first");
     }
 
+    /// The tidy-up test ages its runs off [`RUN_LOG_RETAIN`] itself, so only an
+    /// absolute age pins the week its doc cites.
+    #[test]
+    fn a_run_is_kept_for_a_week() {
+        const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+        let dir = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let aged = |name: &str, age: Duration| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "x\n").unwrap();
+            let f = std::fs::File::options().write(true).open(&path).unwrap();
+            f.set_modified(now - age).unwrap();
+            path
+        };
+        let six_days = aged(&run_file_name(now - DAY * 6, 1), DAY * 6);
+        let eight_days = aged(&run_file_name(now - DAY * 8, 2), DAY * 8);
+        prune_runs(dir.path(), now);
+        assert!(six_days.exists(), "a run inside the week stays");
+        assert!(!eight_days.exists(), "a run past the week goes");
+    }
+
+    /// No runs directory yet is a fresh install, read as an empty log.
+    #[test]
+    fn a_missing_runs_dir_reads_as_an_empty_log() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            read_runs(&root.path().join("logs"), LOG_READ_BYTES),
+            (String::new(), None)
+        );
+    }
+
+    /// A runs directory that can't be listed makes the drift counts
+    /// meaningless, so it warns. Unix only, where opendir(3) documents ENOTDIR
+    /// for a file.
+    #[cfg(unix)]
+    #[test]
+    fn an_unlistable_runs_dir_warns() {
+        let root = tempfile::tempdir().unwrap();
+        let not_a_dir = root.path().join("file");
+        std::fs::write(&not_a_dir, "x").unwrap();
+        let (text, warning) = read_runs(&not_a_dir, LOG_READ_BYTES);
+        assert_eq!(text, "");
+        assert!(
+            warning.is_some_and(|w| w.contains("log unreadable")),
+            "an unlistable runs dir must not read as a clean log"
+        );
+    }
+
+    /// A run that died mid-line still ends where it ended: the next run's
+    /// first line starts a line of its own.
+    #[test]
+    fn a_run_cut_mid_line_does_not_join_the_next() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("1.log"), "a1\na2").unwrap();
+        std::fs::write(dir.path().join("2.log"), "b1\n").unwrap();
+        assert_eq!(read_runs(dir.path(), u64::MAX).0, "a1\na2\nb1\n");
+    }
+
     #[test]
     fn run_file_names_sort_by_start() {
         let t = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_000_000);
@@ -472,6 +530,11 @@ mod tests {
             read_runs(dir.path(), 6),
             ("b2\nc1\n".to_string(), None),
             "a cut on a line start keeps that line"
+        );
+        assert_eq!(
+            read_runs(dir.path(), 9),
+            ("b1\nb2\nc1\n".to_string(), None),
+            "a run the budget fits exactly is not cut"
         );
         assert_eq!(
             read_runs(dir.path(), u64::MAX).0,

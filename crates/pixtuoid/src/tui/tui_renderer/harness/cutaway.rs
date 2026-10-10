@@ -50,18 +50,15 @@ impl Wire {
     }
 }
 
-/// A terminal whose window reports each cell `cell` pixels big, as a real
-/// one's does.
-struct Window {
-    inner: TestBackend,
-    cell: CellSize,
-}
+/// A terminal whose window reports each cell at its `tap` [`CellSize`], as a
+/// real one's does.
+type Window = Delegating<TestBackend, CellSize>;
 
 impl Window {
     fn new(cols: u16, rows: u16) -> Self {
         Self {
             inner: TestBackend::new(cols, rows),
-            cell: CELL,
+            tap: CELL,
         }
     }
 
@@ -72,61 +69,24 @@ impl Window {
     /// Zoom the font to `cell`, the window keeping its cells: only the pixels
     /// change.
     fn zoom(&mut self, cell: CellSize) {
-        self.cell = cell;
+        self.tap = cell;
     }
 }
 
-impl std::borrow::Borrow<TestBackend> for Window {
-    fn borrow(&self) -> &TestBackend {
-        &self.inner
-    }
-}
-
-impl ratatui::backend::Backend for Window {
-    type Error = <TestBackend as ratatui::backend::Backend>::Error;
-    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
-    where
-        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
-    {
-        self.inner.draw(content)
-    }
-    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
-        self.inner.hide_cursor()
-    }
-    fn show_cursor(&mut self) -> Result<(), Self::Error> {
-        self.inner.show_cursor()
-    }
-    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
-        self.inner.get_cursor_position()
-    }
-    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+impl Tap<TestBackend> for CellSize {
+    fn window_size(
         &mut self,
-        position: P,
-    ) -> Result<(), Self::Error> {
-        self.inner.set_cursor_position(position)
-    }
-    fn clear(&mut self) -> Result<(), Self::Error> {
-        self.inner.clear()
-    }
-    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
-        self.inner.clear_region(clear_type)
-    }
-    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
-        self.inner.size()
-    }
-    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
-        let columns_rows = self.inner.size()?;
-        let cell = self.cell;
+        inner: &mut TestBackend,
+    ) -> Result<ratatui::backend::WindowSize, <TestBackend as ratatui::backend::Backend>::Error>
+    {
+        let columns_rows = ratatui::backend::Backend::size(inner)?;
         Ok(ratatui::backend::WindowSize {
             columns_rows,
             pixels: ratatui::layout::Size::new(
-                columns_rows.width * cell.w,
-                columns_rows.height * cell.h,
+                columns_rows.width * self.w,
+                columns_rows.height * self.h,
             ),
         })
-    }
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        self.inner.flush()
     }
 }
 
@@ -1356,60 +1316,20 @@ fn no_image_is_drawn_over_text() {
     }
 }
 
-/// A backend that marks on `wire` where each flush of cells lands
+/// A backend that marks on its `tap` wire where each flush of cells lands
 /// among the transmits.
-struct Logged {
-    inner: Window,
-    wire: Wire,
-}
+type Logged = Delegating<Window, Wire>;
 
 const FLUSH: &str = "<flush>";
 
-impl ratatui::backend::Backend for Logged {
-    type Error = <TestBackend as ratatui::backend::Backend>::Error;
-    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
-    where
-        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
-    {
-        let cells: Vec<_> = content.collect();
+impl Tap<Window> for Wire {
+    fn on_draw(&mut self, cells: &[(u16, u16, &ratatui::buffer::Cell)]) {
         if !cells.is_empty() {
-            self.wire
-                .bytes
+            self.bytes
                 .lock()
                 .expect("lock")
                 .extend_from_slice(FLUSH.as_bytes());
         }
-        self.inner.draw(cells.into_iter())
-    }
-    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
-        self.inner.hide_cursor()
-    }
-    fn show_cursor(&mut self) -> Result<(), Self::Error> {
-        self.inner.show_cursor()
-    }
-    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
-        self.inner.get_cursor_position()
-    }
-    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
-        &mut self,
-        position: P,
-    ) -> Result<(), Self::Error> {
-        self.inner.set_cursor_position(position)
-    }
-    fn clear(&mut self) -> Result<(), Self::Error> {
-        self.inner.clear()
-    }
-    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
-        self.inner.clear_region(clear_type)
-    }
-    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
-        self.inner.size()
-    }
-    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
-        self.inner.window_size()
-    }
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        self.inner.flush()
     }
 }
 
@@ -1424,7 +1344,7 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
         let wire = Wire::default();
         let backend = Logged {
             inner: Window::new(120, 40),
-            wire: wire.clone(),
+            tap: wire.clone(),
         };
         let mut r = TuiRenderer::new(
             Terminal::new(backend).expect("terminal"),

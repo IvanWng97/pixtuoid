@@ -109,15 +109,17 @@ unsafe fn create_hook_pipe(
     attributes_ptr: *mut c_void,
     first: bool,
 ) -> std::io::Result<NamedPipeServer> {
+    // SAFETY: forwarded from this fn's contract.
+    unsafe { hook_pipe_options(first).create_with_security_attributes_raw(name, attributes_ptr) }
+}
+
+fn hook_pipe_options(first: bool) -> ServerOptions {
     let mut opts = ServerOptions::new();
-    if first {
-        opts.first_pipe_instance(true);
-    }
-    opts.reject_remote_clients(true)
+    opts.first_pipe_instance(first)
+        .reject_remote_clients(true)
         .pipe_mode(PipeMode::Byte)
         .in_buffer_size(IN_BUFFER_SIZE);
-    // SAFETY: forwarded from this fn's contract.
-    unsafe { opts.create_with_security_attributes_raw(name, attributes_ptr) }
+    opts
 }
 
 impl Listener {
@@ -204,5 +206,94 @@ impl Listener {
                 .await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SE_KERNEL_OBJECT,
+    };
+    use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+
+    /// No API reads `PIPE_REJECT_REMOTE_CLIENTS` back off a pipe — neither
+    /// [`GetNamedPipeInfo`](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-getnamedpipeinfo)
+    /// nor [`GetNamedPipeHandleState`](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-getnamedpipehandlestatew)
+    /// reports it — so the options are read where they are built.
+    #[test]
+    fn the_hook_pipe_rejects_remote_clients() {
+        for first in [true, false] {
+            let opts = format!("{:?}", hook_pipe_options(first));
+            assert!(opts.contains("reject_remote_clients: true"), "{opts}");
+            assert!(
+                opts.contains(&format!("first_pipe_instance: {first}")),
+                "{opts}"
+            );
+        }
+    }
+
+    /// The DACL the kernel holds for the created pipe, as SDDL.
+    fn dacl_sddl(server: &NamedPipeServer) -> String {
+        let mut psd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        // SAFETY: a live pipe handle; every out-pointer this call doesn't fill
+        // is null, as documented optional, and `psd` is a live out-pointer.
+        let rc = unsafe {
+            GetSecurityInfo(
+                server.as_raw_handle(),
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut psd,
+            )
+        };
+        assert_eq!(rc, 0, "GetSecurityInfo");
+        let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+        // SAFETY: `psd` is the descriptor read above; both out-pointers are live.
+        let ok = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                psd,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(
+            ok, 0,
+            "ConvertSecurityDescriptorToStringSecurityDescriptorW"
+        );
+        // SAFETY: `text` is the NUL-terminated string the conversion allocated.
+        let sddl = String::from_utf16_lossy(unsafe {
+            std::slice::from_raw_parts(text, (0..).take_while(|&i| *text.add(i) != 0).count())
+        });
+        // SAFETY: both were LocalAlloc'd by the calls above, freed once here.
+        unsafe {
+            LocalFree(text.cast());
+            LocalFree(psd);
+        }
+        sddl
+    }
+
+    /// One protected ACE, for the owner alone, read back off the kernel object
+    /// — the create path dropping the descriptor reads the default DACL here.
+    #[tokio::test]
+    async fn the_hook_pipe_is_owner_only() {
+        let sd = OwnerOnlySd::new().expect("descriptor");
+        let name = format!(r"\\.\pipe\pixtuoid-sd-{}", std::process::id());
+        // SAFETY: `sd` outlives the call.
+        let server = unsafe { create_hook_pipe(&name, sd.attributes_ptr(), true) }.expect("pipe");
+        let sddl = dacl_sddl(&server);
+        let (flags, aces) = sddl.split_once('(').expect("an ACE");
+        assert!(flags.starts_with("D:") && flags.contains('P'), "{sddl}");
+        assert_eq!(aces.matches('(').count(), 0, "one ACE: {sddl}");
+        assert!(
+            aces.starts_with("A;;") && aces.ends_with(";;;OW)"),
+            "{sddl}"
+        );
     }
 }

@@ -434,8 +434,8 @@ mod tests {
 
     #[test]
     fn grok_home_takes_env_unconditionally_even_when_missing() {
-        let missing = std::env::temp_dir().join("pixtuoid-grok-home-missing-xyz");
-        let _ = std::fs::remove_dir_all(&missing);
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing");
         assert_eq!(
             resolve_grok_home(Some(missing.clone()), PathBuf::from("/home/u")),
             missing
@@ -450,13 +450,11 @@ mod tests {
 
     #[test]
     fn codex_home_uses_env_when_it_points_at_an_existing_dir() {
-        let tmp = std::env::temp_dir().join("pixtuoid-codex-home-exists-test");
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve_codex_home(Some(tmp.clone()), PathBuf::from("/home/u")),
-            tmp
+            resolve_codex_home(Some(tmp.path().to_path_buf()), PathBuf::from("/home/u")),
+            tmp.path()
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -501,8 +499,8 @@ mod tests {
     fn codex_home_falls_back_to_dot_codex_when_env_unset_or_missing_dir() {
         let expected = PathBuf::from("/home/u").join(".codex");
         assert_eq!(resolve_codex_home(None, PathBuf::from("/home/u")), expected);
-        let missing = std::env::temp_dir().join("pixtuoid-codex-home-missing-xyz");
-        let _ = std::fs::remove_dir_all(&missing);
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing");
         assert_eq!(
             resolve_codex_home(Some(missing.clone()), PathBuf::from("/home/u")),
             expected

@@ -166,20 +166,38 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     d
 }
 
-/// A `TestBackend` whose flush, once `slow` is set, takes that long on a test
-/// screen clock: a write that lands late.
-pub(super) struct Slow {
-    pub(super) inner: TestBackend,
-    pub(super) slow: Option<(pixtuoid_scene::flash::ManualClock, Duration)>,
+/// A backend that forwards every call to `inner`, its [`Tap`] bending the
+/// three a test needs: what a draw carries, a flush, and the window's pixel
+/// size. One forwarder, so a `Backend` method ratatui defaults (`append_lines`)
+/// can't silently skip `inner` in one copy.
+pub(super) struct Delegating<B, T> {
+    pub(super) inner: B,
+    pub(super) tap: T,
 }
 
-impl Backend for Slow {
-    type Error = <TestBackend as Backend>::Error;
+/// What a [`Delegating`] backend lets a test bend; each defaults to forwarding.
+pub(super) trait Tap<B: Backend> {
+    /// Sees each draw's cells before `inner` does.
+    fn on_draw(&mut self, _cells: &[(u16, u16, &ratatui::buffer::Cell)]) {}
+    /// Runs before `inner` flushes.
+    fn on_flush(&mut self) {}
+    fn window_size(&mut self, inner: &mut B) -> Result<ratatui::backend::WindowSize, B::Error> {
+        inner.window_size()
+    }
+}
+
+impl<B: Backend, T: Tap<B>> Backend for Delegating<B, T> {
+    type Error = B::Error;
     fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
     where
         I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
     {
-        self.inner.draw(content)
+        let cells: Vec<_> = content.collect();
+        self.tap.on_draw(&cells);
+        self.inner.draw(cells.into_iter())
+    }
+    fn append_lines(&mut self, n: u16) -> Result<(), Self::Error> {
+        self.inner.append_lines(n)
     }
     fn hide_cursor(&mut self) -> Result<(), Self::Error> {
         self.inner.hide_cursor()
@@ -206,13 +224,30 @@ impl Backend for Slow {
         self.inner.size()
     }
     fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
-        self.inner.window_size()
+        self.tap.window_size(&mut self.inner)
     }
     fn flush(&mut self) -> Result<(), Self::Error> {
-        if let Some((screen, latency)) = &self.slow {
+        self.tap.on_flush();
+        self.inner.flush()
+    }
+}
+
+impl<T> std::borrow::Borrow<TestBackend> for Delegating<TestBackend, T> {
+    fn borrow(&self) -> &TestBackend {
+        &self.inner
+    }
+}
+
+/// A `TestBackend` whose flush, once `tap` holds a screen clock and a latency,
+/// advances that clock by the latency: a write that lands late.
+pub(super) type Slow =
+    Delegating<TestBackend, Option<(pixtuoid_scene::flash::ManualClock, Duration)>>;
+
+impl Tap<TestBackend> for Option<(pixtuoid_scene::flash::ManualClock, Duration)> {
+    fn on_flush(&mut self) {
+        if let Some((screen, latency)) = self {
             screen.advance(*latency);
         }
-        self.inner.flush()
     }
 }
 
@@ -225,7 +260,7 @@ pub(super) fn half_blocks_on_screen(
     let screen = pixtuoid_scene::flash::ManualClock::default();
     let backend = Slow {
         inner: TestBackend::new(cols, rows),
-        slow: None,
+        tap: None,
     };
     let mut r = TuiRenderer::new(
         Terminal::new(backend).expect("test backend"),

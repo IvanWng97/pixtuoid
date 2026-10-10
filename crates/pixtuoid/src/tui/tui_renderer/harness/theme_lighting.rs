@@ -188,11 +188,11 @@ fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
     screen.at(first - 2 * floor);
     r.render(&scene, pack(), first - 2 * floor).expect("render");
-    r.terminal.backend_mut().slow = Some((screen.clone(), SLOW));
+    r.terminal.backend_mut().tap = Some((screen.clone(), SLOW));
     screen.at(first);
     r.render(&scene, pack(), first).expect("render");
     let landed = screen.now();
-    r.terminal.backend_mut().slow = None;
+    r.terminal.backend_mut().tap = None;
     let before = flushed(&r).clone();
     assert!(
         second.duration_since(first).expect("in order") >= floor,
