@@ -24,10 +24,9 @@ pub(super) const PLANT_OBSTACLE_CLEARANCE_PX: u16 = 3;
 /// the spawn threshold never routes around furniture.
 pub(super) const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
 
-const COUCH_X_PCT: u16 = 35;
-const COUCH_BELOW_TOP_MARGIN: u16 = 3;
-
 fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point {
+    const COUCH_X_PCT: u16 = 35;
+    const COUCH_BELOW_TOP_MARGIN: u16 = 3;
     // `west_clear_x` is the divider wall's east edge — the westmost seat's ground must
     // stay east of it (== band start with no wall, so the clamp is a no-op).
     let seat_reach =
@@ -832,8 +831,6 @@ fn place_wall_decor(
     wall_decor
 }
 
-const BOOKSHELF_X_PCT: u16 = 18;
-
 /// The bookshelf's wall slot — flush east of the meeting screen, spread further past
 /// the sofa's drain edge, or back to flush when that spread would pierce the divider.
 fn bookshelf_x(
@@ -843,6 +840,7 @@ fn bookshelf_x(
     meeting_screen_x: Option<u16>,
     meeting_room: Option<&MeetingRoom>,
 ) -> u16 {
+    const BOOKSHELF_X_PCT: u16 = 18;
     let x = pct(buf_w, BOOKSHELF_X_PCT);
     match (meeting_screen_x, meeting_room) {
         (Some(sx), Some(mr)) => {
@@ -860,7 +858,7 @@ fn bookshelf_x(
                 if spread + bookshelf_w < mr.bounds.x + mr.bounds.width {
                     spread
                 } else {
-                    // Falls back to FLUSH, NOT the pct-18 anchor, which at these widths
+                    // Falls back to FLUSH, NOT the `BOOKSHELF_X_PCT` anchor, which at these widths
                     // opens a strandable gap OVER the sofa pad.
                     flush_east
                 }

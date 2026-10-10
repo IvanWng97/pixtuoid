@@ -174,6 +174,12 @@ fn the_claim_scanner_fires_on_an_orphan_and_stays_silent_on_a_real_one() {
         claims_in("/// Pinned by the shared harness. Its `fixture_name` differs.").is_empty(),
         "a sentence end closes the claim before a later name"
     );
+    for stop in ['.', ',', ';', ':', '\n'] {
+        assert!(
+            claims_in(&format!("/// Pinned by e2e{stop} see `fixture_name`")).is_empty(),
+            "{stop:?} closes the claim inside the qualifier bound"
+        );
+    }
     // The qualifier counts the spaces either side of it.
     let qualified = |len: usize| format!("/// pinned by {} `qualified_name`", "x".repeat(len - 2));
     assert_eq!(
