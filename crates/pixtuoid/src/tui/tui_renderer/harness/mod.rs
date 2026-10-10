@@ -238,9 +238,6 @@ impl<T> std::borrow::Borrow<TestBackend> for Tapped<TestBackend, T> {
     }
 }
 
-/// The slow-write twins' latency, one value so both painters test one model.
-pub(super) const SLOW: Duration = Duration::from_millis(60);
-
 /// A write that lands `by` late on the `screen` clock.
 pub(super) struct Latency {
     pub(super) screen: pixtuoid_scene::flash::ManualClock,
