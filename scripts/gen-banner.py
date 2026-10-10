@@ -162,6 +162,18 @@ def test_only_the_dark_banner_glows() -> None:
         check(sorted(set(lit)) == sorted(want), f"{theme}: the figures glow only where GLOW says: {sorted(set(lit))}")
 
 
+def test_stale_flags_an_edited_or_missing_banner_and_passes_fresh_ones() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = pathlib.Path(tmp)
+        edited, missing = write_banners(out)
+        check(stale(out) == [], f"fresh banners are not stale: {stale(out)}")
+        edited.write_text(edited.read_text(encoding="utf-8") + " ", encoding="utf-8")
+        missing.unlink()
+        check(stale(out) == [edited.name, missing.name], f"an edited and a missing banner are both stale: {stale(out)}")
+
+
 def test_every_banner_pixel_has_a_colour() -> None:
     for theme in THEMES:
         svg = render_svg(theme)
