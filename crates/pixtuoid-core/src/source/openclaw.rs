@@ -111,15 +111,12 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
             run_key: run_key(obj),
         }],
         "agent_end" => {
-            // `success` alone is NOT enough for Degraded: upstream builds it as
-            // `!aborted && !promptError` and sets `error` only beside a prompt error
-            // (openclaw 2026.9.8, the embedded runner's `agent_end`), so a user
-            // CANCELLING a turn reads `false` too — and Degraded is sticky (no TTL
-            // heals it). The plugin's `errored` (the mere PRESENCE of upstream's
-            // `error`, as a bare boolean because the string can embed prompt content)
-            // separates the two. A missing field is no evidence of an error.
-            let failed = obj.get("success").and_then(Value::as_bool) == Some(false)
-                && obj.get("errored").and_then(Value::as_bool) == Some(true);
+            // The plugin's `errored` is the run's verdict, and `success` is not:
+            // upstream builds `success` as `!aborted && !promptError`, so a user
+            // CANCELLING a turn reads `false` and a failed provider `true` — and
+            // Degraded is sticky (no TTL heals it). A missing field is no evidence
+            // of an error.
+            let failed = obj.get("errored").and_then(Value::as_bool) == Some(true);
             let run_key = run_key(obj);
             vec![if failed {
                 DaemonPresenceUpdate::RunFailed { run_key }
@@ -258,6 +255,19 @@ mod tests {
             ),
             vec![DaemonPresenceUpdate::RunFailed {
                 run_key: "run_1".into()
+            }]
+        );
+    }
+
+    /// A provider failure ends its run `success: true` upstream; the plugin's
+    /// `errored` carries it.
+    #[test]
+    fn a_failed_provider_degrades_the_gateway_though_the_run_succeeded() {
+        assert_eq!(
+            decode(json!({"type": "agent_end", "runId": "r", "sessionId": "s",
+                          "success": true, "errored": true})),
+            vec![DaemonPresenceUpdate::RunFailed {
+                run_key: "r".into()
             }]
         );
     }

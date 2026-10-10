@@ -46,6 +46,12 @@ pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
     "agent_end",
 ];
 
+/// The hooks the plugin registers but never forwards, pinned to its
+/// `OBSERVED_HOOKS` and emitted into the drift surface beside
+/// [`OPENCLAW_EVENTS`]: a rename upstream silently stops them too.
+#[cfg(test)]
+pub(crate) const OPENCLAW_OBSERVED: &[&str] = &["model_call_ended"];
+
 const MANIFEST: &str = r#"{
   "id": "pixtuoid",
   "name": "Pixtuoid",
@@ -674,20 +680,26 @@ mod tests {
                 "plugin HOOKS is missing the registered event `{ev}`"
             );
         }
-        let hooks_block = PLUGIN_TEMPLATE
-            .split_once("const HOOKS = [")
-            .and_then(|(_, rest)| rest.split_once("];"))
-            .map(|(inner, _)| inner)
-            .expect("plugin defines a HOOKS array");
-        let registered: std::collections::HashSet<&str> = hooks_block
-            .split(',')
-            .map(|s| s.trim().trim_matches('"'))
-            .filter(|s| !s.is_empty())
-            .collect();
-        let expected: std::collections::HashSet<&str> = OPENCLAW_EVENTS.iter().copied().collect();
+        let array = |name: &str| -> std::collections::HashSet<&'static str> {
+            PLUGIN_TEMPLATE
+                .split_once(&format!("const {name} = ["))
+                .and_then(|(_, rest)| rest.split_once("];"))
+                .map(|(inner, _)| inner)
+                .unwrap_or_else(|| panic!("plugin defines a {name} array"))
+                .split(',')
+                .map(|s| s.trim().trim_matches('"'))
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
         assert_eq!(
-            registered, expected,
+            array("HOOKS"),
+            OPENCLAW_EVENTS.iter().copied().collect(),
             "plugin HOOKS drifted from OPENCLAW_EVENTS"
+        );
+        assert_eq!(
+            array("OBSERVED_HOOKS"),
+            OPENCLAW_OBSERVED.iter().copied().collect(),
+            "plugin OBSERVED_HOOKS drifted from OPENCLAW_OBSERVED"
         );
         for ev in OPENCLAW_EVENTS {
             let payload = json!({ "type": ev, "gatewayPort": 18789 });
@@ -1317,6 +1329,15 @@ mod tests {
         assert_eq!(
             hook_command(Path::new("/opt/bin/pixtuoid-hook"), false).unwrap(),
             "/opt/bin/pixtuoid-hook"
+        );
+    }
+
+    #[test]
+    fn openclaw_observed_pins_the_exact_registered_set() {
+        crate::install::assert_event_roster(
+            "OPENCLAW_OBSERVED",
+            OPENCLAW_OBSERVED,
+            &["model_call_ended"],
         );
     }
 

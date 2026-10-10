@@ -34,7 +34,16 @@ fn surface() -> Value {
     registered.insert("grok", json!(crate::install::grok::GROK_EVENTS));
     registered.insert("hermes", json!(crate::install::hermes::HERMES_EVENTS));
     registered.insert("kimi", json!(crate::install::kimi::KIMI_EVENTS));
-    registered.insert("openclaw", json!(crate::install::openclaw::OPENCLAW_EVENTS));
+    registered.insert(
+        "openclaw",
+        json!(
+            [
+                crate::install::openclaw::OPENCLAW_EVENTS,
+                crate::install::openclaw::OPENCLAW_OBSERVED,
+            ]
+            .concat()
+        ),
+    );
     registered.insert("reasonix", json!(crate::install::reasonix::REASONIX_EVENTS));
 
     // SHIPPED, not decoded or registered: values that ride the artifacts we

@@ -94,6 +94,31 @@ function notePort(ev, ctx) {
   }
 }
 
+// Whether each run's LATEST model call failed, by runId. Upstream ends a run whose
+// provider failed `success: true` — only a prompt error fails it — so
+// `model_call_ended` (openclaw src/agents/embedded-agent-runner/run/
+// attempt.model-diagnostic-lifecycle.ts) is the provider's only failure signal;
+// a retry or fallback that then completes overwrites it.
+const lastCallFailed = new Map();
+
+// A run upstream ends without `agent_end` never clears its entry, so past this
+// many the ledger drops the run whose last call is oldest.
+export const MAX_TRACKED_RUNS = 64;
+
+function noteModelCall(ev) {
+  try {
+    if (!ev || typeof ev.runId !== "string") return;
+    lastCallFailed.delete(ev.runId);
+    // The user's own abort is no provider failure.
+    lastCallFailed.set(ev.runId, ev.outcome === "error" && ev.failureKind !== "aborted");
+    if (lastCallFailed.size > MAX_TRACKED_RUNS) {
+      lastCallFailed.delete(lastCallFailed.keys().next().value);
+    }
+  } catch (_) {
+    // never throw into the gateway
+  }
+}
+
 function forward(type, ev, ctx) {
   try {
     notePort(ev, ctx);
@@ -111,14 +136,17 @@ function forward(type, ev, ctx) {
     // — where pixtuoid never observed gateway_start — can still adopt the live pid
     // for its abrupt-down watch. The plugin runs IN the gateway process.
     payload._pid = process.pid;
-    // `success: false` alone cannot call a gateway degraded: upstream builds it as
-    // `!aborted && !promptError`, so a user CANCELLING a turn is indistinguishable
-    // from the provider being down. Only a prompt error carries `error`, so its
-    // mere PRESENCE is the discriminator — forwarded as a bare boolean because the
-    // error STRING can embed prompt content.
-    if (type === "agent_end" && payload.success === false) {
-      payload.errored =
-        (ev && ev.error !== undefined) || (ctx && ctx.error !== undefined);
+    // The run's verdict. `success: false` alone cannot call a gateway degraded:
+    // upstream builds it as `!aborted && !promptError`, so a user CANCELLING a turn
+    // reads `false` too, and only a prompt error carries `error` — its mere
+    // PRESENCE, as a bare boolean because the string can embed prompt content. A
+    // provider failure is no prompt error, so the run's last model call adds it.
+    if (type === "agent_end") {
+      const promptError =
+        payload.success === false &&
+        ((ev && ev.error !== undefined) || (ctx && ctx.error !== undefined));
+      payload.errored = promptError || lastCallFailed.get(payload.runId) === true;
+      lastCallFailed.delete(payload.runId);
     }
 
     const proc = spawn(HOOK_PATH, ["--source", "openclaw"], {
@@ -144,6 +172,9 @@ const HOOKS = [
   "agent_end",
 ];
 
+// Registered but never forwarded: each only feeds the verdict `agent_end` carries.
+const OBSERVED_HOOKS = ["model_call_ended"];
+
 // The ONE awaited DECISION hook among them (see the never-block note above).
 const DECISION_HOOK = "before_agent_run";
 
@@ -168,6 +199,15 @@ export default {
           forward(h, ev, ctx);
           // NEVER derived from the detached spawn.
           return h === DECISION_HOOK ? pass() : undefined;
+        });
+      } catch (_) {
+        /* unknown hook name on this OpenClaw version — skip, never throw */
+      }
+    }
+    for (const h of OBSERVED_HOOKS) {
+      try {
+        api.on(h, (ev) => {
+          noteModelCall(ev);
         });
       } catch (_) {
         /* unknown hook name on this OpenClaw version — skip, never throw */

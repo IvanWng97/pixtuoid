@@ -151,6 +151,16 @@ echo "[9b] agent_end success:false, errored:false -> idle (a cancel is no degrad
 send_a '{"type":"agent_end","runId":"r4","success":false,"errored":false}'
 expect idle idle-cancelled
 
+# A failed provider ends its run `success: true` upstream; the plugin's `errored`
+# carries the failure, read off the run's last `model_call_ended`.
+echo "[9c] before_agent_run -> busy"
+send_a '{"type":"before_agent_run","runId":"r5"}'
+expect busy busy-provider
+
+echo "[9d] agent_end success:true, errored:true -> degraded (a failed provider)"
+send_a '{"type":"agent_end","runId":"r5","success":true,"errored":true}'
+expect degraded degraded-provider
+
 # `PidSeen` adoption is None-ONLY, and the shim stamps a resolved _pid onto every
 # event lacking one — so [5]'s gateway_start already armed current_pid, and a bare
 # session_start here would adopt nothing. gateway_stop is used purely as the
