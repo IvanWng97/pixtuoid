@@ -231,8 +231,8 @@ fn push_bubbles(
     bubbles
 }
 
-/// The pet and the gateway mascots, each a figure sorted on its feet's row
-/// as the classic sorts it, with what rides on it straight after.
+/// The pet and the gateway mascots, each a figure sorted on the row the sim
+/// gave it, with what rides on it straight after.
 fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
     let Office {
         pack, theme, scale, ..
@@ -241,6 +241,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
         let flip = if p.flip { Flip::Horizontal } else { Flip::None };
         (
             p.pos,
+            p.sort_row,
             p.anim_name,
             p.frame_idx,
             flip,
@@ -252,6 +253,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
     let mascots = frame.mascots.iter().map(|m| {
         (
             m.pos,
+            m.sort_row,
             m.anim_name,
             m.frame_idx,
             Flip::None,
@@ -260,9 +262,8 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             m.target(),
         )
     });
-    for (at, sprite, frame_idx, flip, degraded, effects, who) in pet.chain(mascots) {
+    for (at, depth, sprite, frame_idx, flip, degraded, effects, who) in pet.chain(mascots) {
         let (w, h) = crate::pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE).logical;
-        let depth = crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h);
         let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(depth)
             .with_layer(Layer::Figure);
