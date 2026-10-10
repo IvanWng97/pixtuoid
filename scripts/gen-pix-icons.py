@@ -458,7 +458,8 @@ def selftest():
         expect(stale() == [f"readme: orphaned {name}.png"], "an icon in the other format is an orphan")
         (site / "gone.png").write_bytes(b"")
         (readme / "gone.svg").write_bytes(b"")
-        expect(stale() == ["site: orphaned gone.png", f"readme: orphaned gone.svg, {name}.png"], "a removed icon's files are orphans")
+        readme_orphans = ", ".join(sorted(["gone.svg", f"{name}.png"]))
+        expect(stale() == ["site: orphaned gone.png", f"readme: orphaned {readme_orphans}"], "a removed icon's files are orphans")
         generate(site, readme, check=False, icons=one)
         left = {p.name for d in (site, readme) for p in d.iterdir()}
         expect(left == {f"{name}.png", f"{name}.svg", ".DS_Store"}, "a write deletes the orphans and keeps the dotfiles")
