@@ -95,7 +95,7 @@ jobs:
       - run: just _hawk-toolchain
       # hawk's own target dir, deps only. Saved from main alone, so a queue
       # batch restores it and no draft PR spends the 10 GB quota on a copy.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v1-rust
           workspaces: ". -> target/hawk"
