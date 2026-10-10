@@ -83,9 +83,10 @@ pub(super) const fn top_margin(buf_h: u16) -> u16 {
 }
 
 const fn cubicle_aisle_h(usable_h: u16) -> u16 {
-    let tenth = usable_h / 10;
-    if tenth > MIN_CUBICLE_AISLE_H {
-        tenth
+    const SHARE_DIVISOR: u16 = 10;
+    let share = usable_h / SHARE_DIVISOR;
+    if share > MIN_CUBICLE_AISLE_H {
+        share
     } else {
         MIN_CUBICLE_AISLE_H
     }
@@ -159,7 +160,9 @@ pub fn min_layout_size() -> Size {
 const _: () = assert!(COUCH_GAP_GROWTH_BASE_H > MIN_LAYOUT_H);
 
 const fn couch_to_desk_extra(buf_h: u16) -> u16 {
-    buf_h.saturating_sub(COUCH_GAP_GROWTH_BASE_H) / 20
+    /// Buffer rows past the base per extra row of gap.
+    const ROWS_PER_EXTRA: u16 = 20;
+    buf_h.saturating_sub(COUCH_GAP_GROWTH_BASE_H) / ROWS_PER_EXTRA
 }
 
 /// Buffer height at which the couch-to-desk gap starts growing. It equalled the
@@ -216,13 +219,15 @@ impl FloorPlan {
         let has_pantry = geom.has_pantry();
         let mid_x = pct(buf_w, geom.mid_x_pct());
 
-        // Large counter + a 2-px routing margin each side, else the compact fallback.
+        const ROUTING_MARGIN: u16 = 2;
+        // Large counter + a routing margin each side, else the compact fallback.
         // Width-only, so the size is known before the split prices the pantry against it.
-        let pantry_counter_size: Size = if has_pantry && mid_x >= PANTRY_COUNTER_LARGE_W + 4 {
-            super::LARGE_COUNTER
-        } else {
-            super::COMPACT_COUNTER
-        };
+        let pantry_counter_size: Size =
+            if has_pantry && mid_x >= PANTRY_COUNTER_LARGE_W + 2 * ROUTING_MARGIN {
+                super::LARGE_COUNTER
+            } else {
+                super::COMPACT_COUNTER
+            };
 
         // CONTENT-FIT, donating the surplus below ALL-OR-NOTHING: a partial donation would
         // cram the trio to its fit gate to buy rows the island still couldn't use.
@@ -439,6 +444,8 @@ pub(super) fn compute_with_seed(
         &home_desks,
     );
 
+    /// How far inside the desk band's west and east edges the corridor plants stand.
+    const BAND_INSET: u16 = 4;
     // NOT the pantry (a plant + pad blocks the only bridge to the cubicle area), NOT the
     // cubicle top strip (the narrow wall-to-couch gap), NOT a meeting interior (seals the
     // door).
@@ -447,7 +454,7 @@ pub(super) fn compute_with_seed(
             kind: PlantKind::Flower,
             pos: Point {
                 // Its pot clear of the divider, which a doorway may cut down to here.
-                x: (plan.pod_grid.band.x + 4).max(
+                x: (plan.pod_grid.band.x + BAND_INSET).max(
                     plan.lounge_west_clear
                         + furniture_def(PlantKind::Flower.furniture()).visual.w / 2,
                 ),
@@ -462,7 +469,7 @@ pub(super) fn compute_with_seed(
         PlantItem {
             kind: PlantKind::Succulent,
             pos: Point {
-                x: plan.pod_grid.band.x + plan.pod_grid.band.width.saturating_sub(4),
+                x: plan.pod_grid.band.x + plan.pod_grid.band.width.saturating_sub(BAND_INSET),
                 y: corridor_centre_y(
                     &plan.cubicle_aisle,
                     furniture_def(PlantKind::Succulent.furniture()).visual.h,
@@ -478,22 +485,27 @@ pub(super) fn compute_with_seed(
             .map(|r| r.bounds)
             .into_iter()
             .flat_map(|mr| {
-                if mr.width < 30 || mr.height < 30 {
+                const MIN_PLANTED_SIDE: u16 = 30;
+                // Insets from the room's north-west and south-west corners.
+                const WEST_INSET: u16 = 5;
+                const TALL_NORTH_INSET: u16 = 6;
+                const FLOWER_SOUTH_INSET: u16 = 7;
+                if mr.width < MIN_PLANTED_SIDE || mr.height < MIN_PLANTED_SIDE {
                     Vec::new()
                 } else {
                     vec![
                         PlantItem {
                             kind: PlantKind::Tall,
                             pos: Point {
-                                x: mr.x + 5,
-                                y: mr.y + 6,
+                                x: mr.x + WEST_INSET,
+                                y: mr.y + TALL_NORTH_INSET,
                             },
                         },
                         PlantItem {
                             kind: PlantKind::Flower,
                             pos: Point {
-                                x: mr.x + 5,
-                                y: mr.y + mr.height.saturating_sub(7),
+                                x: mr.x + WEST_INSET,
+                                y: mr.y + mr.height.saturating_sub(FLOWER_SOUTH_INSET),
                             },
                         },
                     ]
@@ -505,11 +517,13 @@ pub(super) fn compute_with_seed(
     // Two Ficus spots — greeting plant west of the elevator, and the lounge's west flank.
     // On a narrower band each seals a top-strip pocket, hence the ROOMY gate.
     if plan.pod_grid.band.width >= ROOMY_BAND_MIN_W {
+        const FICUS_WEST_OF_DOOR: u16 = 5;
+        const FICUS_BELOW_TOP_MARGIN: u16 = 5;
         plant_candidates.push(PlantItem {
             kind: PlantKind::Ficus,
             pos: Point {
-                x: door.x.saturating_sub(5),
-                y: plan.top_margin + 5,
+                x: door.x.saturating_sub(FICUS_WEST_OF_DOOR),
+                y: plan.top_margin + FICUS_BELOW_TOP_MARGIN,
             },
         });
         if lounge.is_some() {
@@ -724,6 +738,10 @@ fn place_wall_decor(
     desk_art: &[(Point, Size)],
     pod_decor: &[PodDecorItem],
 ) -> Vec<WallDecorItem> {
+    /// Where a wall-hung piece's anchor sits, up the wall from the floor's top edge.
+    const WALL_DECOR_ABOVE_TOP_MARGIN: u16 = 12;
+    /// The whiteboard's hint is a 1/N share of the usable height below the top margin.
+    const WHITEBOARD_HINT_DIVISOR: u16 = 3;
     let FloorPlan {
         buf_w,
         top_margin,
@@ -752,7 +770,7 @@ fn place_wall_decor(
             kind: WallDecor::Bookshelf,
             pos: Point {
                 x: bookshelf_x,
-                y: top_margin.saturating_sub(12),
+                y: top_margin.saturating_sub(WALL_DECOR_ABOVE_TOP_MARGIN),
             },
         });
     }
@@ -760,12 +778,12 @@ fn place_wall_decor(
         kind: WallDecor::ExitSign,
         pos,
     }));
-    // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
+    // The hint is not a slot: unsnapped it drops the board on a desk row
     // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
     let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
     let hint = Point {
         x: plan.lounge_west_clear,
-        y: top_margin + usable_h / 3,
+        y: top_margin + usable_h / WHITEBOARD_HINT_DIVISOR,
     };
     let pod_pieces: Vec<Fixture> = pod_decor_fixtures(pod_decor).collect();
     // A pod's own whiteboard in the same columns would read as the board's twin.
@@ -814,7 +832,7 @@ fn place_wall_decor(
             kind: WallDecor::MeetingScreen,
             pos: Point {
                 x: sx,
-                y: top_margin.saturating_sub(12),
+                y: top_margin.saturating_sub(WALL_DECOR_ABOVE_TOP_MARGIN),
             },
         });
     }
@@ -944,11 +962,12 @@ fn place_lounge(couch: Point, door: Point) -> Lounge {
         // One clear floor column of breathing room past the lamp shade's east edge; a
         // center-pinned east edge is (w-1)/2 past the anchor.
         const LAMP_TANK_GAP: u16 = 2;
+        const TANK_ABOVE_COUCH: u16 = 4;
         let lamp_east = floor_lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
         let cx = lamp_east + LAMP_TANK_GAP + half_w;
         (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= door.x).then_some(Point {
             x: cx,
-            y: couch.y.saturating_sub(4),
+            y: couch.y.saturating_sub(TANK_ABOVE_COUCH),
         })
     };
     Lounge {
@@ -1729,12 +1748,13 @@ fn compute_waypoints(
             room_id: None,
         });
     }
+    const PRINTER_CORNER_INSET: u16 = 10;
     // Slid west from its corner, a pod's stride at most, into the gap between
     // two pods' seats when a south-row sitter stands over it, and off the
     // vending machine's columns.
     let printer = (0..=pod_grid.stride_x)
         .map(|dx| Point {
-            x: (right_x + right_w).saturating_sub(10 + dx),
+            x: (right_x + right_w).saturating_sub(PRINTER_CORNER_INSET + dx),
             y: corridor_centre_y(cubicle_aisle, furniture_def(Furniture::Printer).visual.h),
         })
         .find(|&p| {

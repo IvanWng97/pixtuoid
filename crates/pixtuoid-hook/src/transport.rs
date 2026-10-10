@@ -243,7 +243,7 @@ mod peer {
 }
 
 // No in-process tests for `send_line` ON PURPOSE: it spawns a watchdog that
-// exit(0)s the whole process ~200ms later, which would kill sibling tests under
+// exit(0)s the whole process a `WRITE_TIMEOUT` later, which would kill sibling tests under
 // `cargo test`'s shared-process runner. Its coverage lives at the child-process
 // level (tests/shim.rs and its Windows twin tests/shim_pipe.rs), where
 // exit-is-the-contract is observable, not fatal.
