@@ -566,8 +566,7 @@ mod tests {
     /// to pass on the screen clock, though its frame's own clock says it has.
     #[test]
     fn a_slow_presents_phase_holds_the_floor_from_when_it_lands() {
-        use crate::test_flash::storm_strike;
-        const SLOW: Duration = Duration::from_millis(60);
+        use crate::test_flash::{SLOW, storm_strike};
         let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
         let strike = storm_strike();
         let [first, second] = [strike.changes[0], strike.changes[1]];
