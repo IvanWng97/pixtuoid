@@ -325,9 +325,9 @@ struct PaneSky<'a> {
 
 impl PaneSky<'_> {
     /// The colour of grid cell `g`, `glass_dy` cells down this pane's glass.
-    /// A cell is sampled at its centre, in units with a unit's own centre on
-    /// its integer, so at one cell to the unit a cell samples where it stands.
-    /// A star is the one cell at its unit's centre.
+    /// A cell is sampled at its centre
+    /// ([`layout_point`](crate::display::pen::layout_point)). A star is the one
+    /// cell at its unit's centre.
     fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
         let v = self.view;
         let d = self.d;
@@ -438,6 +438,11 @@ mod tests {
         };
         assert_eq!(vis(5, 0), 0.0);
         assert_eq!(vis(20, 0), 0.0);
+        let rising = vis(5, 10);
+        assert!(
+            rising > 0.0 && rising < 1.0,
+            "ten minutes after sunrise the disc is partly faded: {rising}"
+        );
         let morning: Vec<f32> = (0..=180).map(|m| vis(5, m)).collect();
         assert!(morning.is_sorted(), "{morning:?}");
         let evening: Vec<f32> = (0..=180).map(|m| vis(17, m)).collect();
