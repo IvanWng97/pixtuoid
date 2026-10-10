@@ -28,11 +28,10 @@ runs:
         UPDATE_RETRY_SECONDS: '30'
       run: |
         set -euo pipefail
-        # rustup retries network errors itself and leaves one case to the caller:
-        # a release-day manifest mid-publish, which fails its checksum
-        # (rustup src/dist/download.rs; dtolnay/rust-toolchain retries the same
-        # two phrases). Any other failure exits with rustup's status.
+        # A release-day manifest mid-publish fails its checksum
+        # (rust-lang/rustup#3390): the one failure dtolnay/rust-toolchain retries.
         log="$(mktemp)"
+        trap 'rm -f "$log"' EXIT
         for ((attempt = 1; ; attempt++)); do
           status=0
           rustup update --no-self-update 2>&1 | tee "$log" || status="${PIPESTATUS[0]}"

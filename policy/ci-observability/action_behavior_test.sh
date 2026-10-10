@@ -1198,18 +1198,18 @@ rust_attempts="$(yq -e -r '.runs.steps[0].env.UPDATE_ATTEMPTS' "$rust_action")" 
 ((rust_attempts > 1)) || fail "setup-rust allows $rust_attempts attempt(s), so nothing retries"
 rust_dir="$test_dir/rust"
 mkdir -p "$rust_dir/bin"
-# Fails the first RUST_FAILS `update` calls with RUST_MESSAGE on stderr and status 7.
+# Fails the first FAKE_RUSTUP_FAILS `update` calls with FAKE_RUSTUP_MESSAGE on stderr and status 7.
 # shellcheck disable=SC2016 # The stub reads its fixtures when it runs.
-printf '%s\n' '#!/usr/bin/env bash' 'printf "rustup %s\n" "$*" >>"$RUST_LOG"' \
+printf '%s\n' '#!/usr/bin/env bash' 'printf "rustup %s\n" "$*" >>"$FAKE_RUSTUP_LOG"' \
     '[[ "$1" == update ]] || exit 0' \
-    'n=$(($(cat "$RUST_LOG.n" 2>/dev/null || echo 0) + 1)); echo $n >"$RUST_LOG.n"' \
-    '((n > RUST_FAILS)) || { printf "%s\n" "$RUST_MESSAGE" >&2; exit 7; }' >"$rust_dir/bin/rustup"
+    'n=$(($(cat "$FAKE_RUSTUP_LOG.n" 2>/dev/null || echo 0) + 1)); echo $n >"$FAKE_RUSTUP_LOG.n"' \
+    '((n > FAKE_RUSTUP_FAILS)) || { printf "%s\n" "$FAKE_RUSTUP_MESSAGE" >&2; exit 7; }' >"$rust_dir/bin/rustup"
 chmod +x "$rust_dir/bin/rustup"
 race_message='warning: component manifest checksum failed for x
 info: this is likely due to an ongoing update of the official release server, please try again later'
 run_rust() {
     rm -f "$rust_dir/log" "$rust_dir/log.n"
-    PATH="$rust_dir/bin:$PATH" RUST_LOG="$rust_dir/log" RUST_FAILS="$1" RUST_MESSAGE="$2" COMPONENTS="${3:-}" TARGETS="${4:-}" \
+    PATH="$rust_dir/bin:$PATH" FAKE_RUSTUP_LOG="$rust_dir/log" FAKE_RUSTUP_FAILS="$1" FAKE_RUSTUP_MESSAGE="$2" COMPONENTS="${3:-}" TARGETS="${4:-}" \
         UPDATE_ATTEMPTS="$rust_attempts" UPDATE_RETRY_SECONDS=0 bash -c "$rust_script" >/dev/null 2>&1
 }
 rust_count() { grep -c -e "$1" "$rust_dir/log" || true; }
