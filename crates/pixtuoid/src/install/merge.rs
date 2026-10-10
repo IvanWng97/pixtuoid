@@ -52,8 +52,7 @@ pub(crate) fn parse_toml_or_empty(content: &str) -> anyhow::Result<toml::Value> 
 /// Merge managed hook entries into `doc`: for each `event`, drop any prior
 /// managed entry (keyed on `sentinel`) and push a fresh one built by
 /// `make_entry`. The entry SHAPE stays the caller's — the merge treats the entry
-/// opaquely, keying only on the sentinel, so Claude's nested
-/// `{matcher, hooks:[…]}` group rides through unchanged.
+/// opaquely, keying only on the sentinel.
 pub(crate) fn flat_json_merge_install(
     doc: Value,
     events: &[&str],
@@ -135,7 +134,7 @@ pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value
     doc
 }
 
-fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
+pub(crate) fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
     entry.get(sentinel).and_then(|v| v.as_bool()) == Some(true)
 }
 

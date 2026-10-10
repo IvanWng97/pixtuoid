@@ -1,8 +1,8 @@
 use super::*;
 use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
 
-/// Claude's settings-shaped JSON merge without its plugin registration, for the
-/// tests of the config-write path itself.
+/// Claude's hooks-file merge without its plugin registration or presence probe,
+/// for the tests of the config-write path itself.
 const CLAUDE_FILE: Target = Target {
     host: None,
     presence_probe: None,
@@ -137,28 +137,12 @@ fn abs_fixture(unix: &str, windows: &str) -> PathBuf {
 }
 
 #[test]
-fn resolve_hook_binary_explicit_path_wins() {
+fn resolve_hook_binary_env_override_wins() {
     let p = abs_fixture("/x/hook", r"C:\x\hook");
-    let got = resolve_hook_binary_from(&CLAUDE_FILE, Some(p.clone()), None, || {
-        panic!("locate must not be called when --hook-path is given")
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, Some(p.clone()), || {
+        panic!("locate must not be called when PIXTUOID_HOOK is set")
     });
     assert_eq!(got.unwrap(), (p, true));
-}
-
-#[test]
-fn resolve_hook_binary_absolutizes_a_relative_explicit_path() {
-    // An embedded relative path would resolve against the CLI's cwd at hook time
-    // and silently never fire from other dirs.
-    let (got, explicit) = resolve_hook_binary_from(
-        &CLAUDE_FILE,
-        Some(PathBuf::from("target/debug/pixtuoid-hook")),
-        None,
-        || unreachable!("explicit path must win"),
-    )
-    .unwrap();
-    assert!(explicit);
-    assert!(got.is_absolute(), "expected absolutized path, got {got:?}");
-    assert!(got.ends_with("target/debug/pixtuoid-hook"));
 }
 
 #[cfg(unix)]
@@ -167,7 +151,7 @@ fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
     // Regression: a fresh-machine connect hard-failed when pixtuoid-hook wasn't
     // yet on PATH. Routed through the injected seam (env_hook: None) so an ambient
     // PIXTUOID_HOOK on the dev machine can't short-circuit the staged failure.
-    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, None, || {
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, || {
         Err(anyhow::anyhow!("could not locate"))
     });
     assert_eq!(got.unwrap(), (PathBuf::from("pixtuoid-hook"), false));
@@ -178,7 +162,7 @@ fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
 #[cfg(windows)]
 #[test]
 fn resolve_hook_binary_claude_errors_when_unresolvable_on_windows() {
-    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, None, || {
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, || {
         Err(anyhow::anyhow!("could not locate"))
     });
     assert!(got.is_err(), "exec form requires a real resolved .exe");
@@ -186,17 +170,16 @@ fn resolve_hook_binary_claude_errors_when_unresolvable_on_windows() {
 
 #[test]
 fn resolve_hook_binary_codex_errors_when_unresolvable() {
-    let got = resolve_hook_binary_from(&CODEX, None, None, || {
-        Err(anyhow::anyhow!("could not locate"))
-    });
+    let got = resolve_hook_binary_from(&CODEX, None, || Err(anyhow::anyhow!("could not locate")));
     assert!(got.is_err());
 }
 
 #[test]
-fn resolve_hook_binary_env_override_routes_through_the_explicit_arm() {
+fn resolve_hook_binary_absolutizes_a_relative_env_override() {
+    // An embedded relative path would resolve against the CLI's cwd at hook time
+    // and silently never fire from other dirs.
     let (got, explicit) = resolve_hook_binary_from(
         &CODEX,
-        None,
         Some(PathBuf::from("target/debug/pixtuoid-hook")),
         || unreachable!("the env override must win over locate"),
     )
@@ -210,20 +193,10 @@ fn resolve_hook_binary_env_override_routes_through_the_explicit_arm() {
 }
 
 #[test]
-fn resolve_hook_binary_cli_flag_outranks_env_override() {
-    let cli = abs_fixture("/cli/hook", r"C:\cli\hook");
-    let env = abs_fixture("/env/hook", r"C:\env\hook");
-    let got = resolve_hook_binary_from(&CLAUDE_FILE, Some(cli.clone()), Some(env), || {
-        unreachable!("an explicit path must win over locate")
-    });
-    assert_eq!(got.unwrap(), (cli, true));
-}
-
-#[test]
 fn resolve_hook_binary_no_overrides_uses_locate() {
     let located = abs_fixture("/located/hook", r"C:\located\hook");
     let expect = located.clone();
-    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, None, || Ok(located));
+    let got = resolve_hook_binary_from(&CLAUDE_FILE, None, || Ok(located));
     assert_eq!(got.unwrap(), (expect, false));
 }
 
@@ -263,32 +236,16 @@ fn is_drive_relative_only_matches_prefix_without_root() {
 // per-drive cwd at hook time — hence the hard error.
 #[cfg(windows)]
 #[test]
-fn resolve_hook_binary_rejects_a_drive_relative_explicit_path() {
-    let err = resolve_hook_binary_from(
-        &CLAUDE_FILE,
-        Some(PathBuf::from(r"C:rel\hook.exe")),
-        None,
-        || unreachable!("the explicit path must win"),
-    )
+fn resolve_hook_binary_rejects_a_drive_relative_env_override() {
+    let err = resolve_hook_binary_from(&CODEX, Some(PathBuf::from(r"C:rel\hook.exe")), || {
+        unreachable!("the env override must win")
+    })
     .unwrap_err();
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("drive-relative") && msg.contains("absolute path"),
-        "got: {msg}"
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn resolve_hook_binary_rejects_a_drive_relative_env_override() {
-    let err =
-        resolve_hook_binary_from(&CODEX, None, Some(PathBuf::from(r"C:rel\hook.exe")), || {
-            unreachable!("the env override must win")
-        })
-        .unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("PIXTUOID_HOOK") && msg.contains("drive-relative"),
+        msg.contains("PIXTUOID_HOOK")
+            && msg.contains("drive-relative")
+            && msg.contains("absolute path"),
         "the error must name the seam that supplied the bad path: {msg}"
     );
 }
@@ -340,7 +297,7 @@ fn install_target_claude_writes_the_hook_command() {
     let cfg = tmp.path().join("settings.json");
     std::fs::write(&cfg, "{}\n").unwrap();
 
-    install_target(
+    install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -355,7 +312,7 @@ fn install_target_claude_writes_the_hook_command() {
             .is_some_and(|c| c.contains("pixtuoid-hook"))
     );
 
-    install_target(
+    install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -369,7 +326,7 @@ fn install_target_fails_fast_while_the_config_lock_is_held() {
     // write, can't safely read/decide mid-flight of another writer.
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    install_target(
+    install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -377,7 +334,7 @@ fn install_target_fails_fast_while_the_config_lock_is_held() {
     .unwrap();
 
     let _guard = io::lock_config(&cfg).unwrap();
-    let err = install_target(
+    let err = install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -390,7 +347,7 @@ fn install_target_fails_fast_while_the_config_lock_is_held() {
 fn uninstall_target_fails_fast_while_the_config_lock_is_held() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    install_target(
+    install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -408,7 +365,7 @@ fn install_target_reports_installed_then_up_to_date() {
     let cfg = tmp.path().join("settings.json");
     std::fs::write(&cfg, "{}\n").unwrap();
 
-    let r = install_target(
+    let r = install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -416,7 +373,7 @@ fn install_target_reports_installed_then_up_to_date() {
     .unwrap();
     assert!(matches!(r.outcome, InstallOutcome::Installed));
 
-    let r2 = install_target(
+    let r2 = install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -426,7 +383,7 @@ fn install_target_reports_installed_then_up_to_date() {
     // A semantic no-op never rewrites: a hand-formatted file keeps its bytes.
     let formatted = std::fs::read_to_string(&cfg).unwrap().replace("\n", "\n\n");
     std::fs::write(&cfg, &formatted).unwrap();
-    install_target(
+    install_target_from(
         &CLAUDE_FILE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -437,11 +394,11 @@ fn install_target_reports_installed_then_up_to_date() {
 
 #[test]
 fn install_target_explicit_hook_suppresses_path_warning() {
-    // An explicit --hook-path embeds the absolute path, so PATH resolution never
+    // An explicit PIXTUOID_HOOK embeds the absolute path, so PATH resolution never
     // happens and the expectation is deterministic — unlike the no-hook case.
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    let r = install_target(
+    let r = install_target_from(
         &CLAUDE_FILE,
         Some(cfg),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -488,7 +445,7 @@ fn install_target_round_trips_every_registered_target() {
                     let cfg = plugin_hooks_path(tmp.path());
                     let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
 
-                    let r = install_target(t, Some(cfg.clone()), hook()).unwrap();
+                    let r = install_target_from(t, Some(cfg.clone()), hook()).unwrap();
                     assert!(
                         matches!(r.outcome, InstallOutcome::Installed),
                         "{}: first install must write hooks",
@@ -496,7 +453,7 @@ fn install_target_round_trips_every_registered_target() {
                     );
                     assert!(cfg.exists(), "{}: install wrote a config", t.name);
 
-                    let r2 = install_target(t, Some(cfg.clone()), hook()).unwrap();
+                    let r2 = install_target_from(t, Some(cfg.clone()), hook()).unwrap();
                     assert!(
                         matches!(r2.outcome, InstallOutcome::AlreadyUpToDate),
                         "{}: re-install must be a no-op (sentinel idempotency)",
@@ -537,7 +494,7 @@ fn config_present_target_file_is_absent_before_then_present_after_install() {
             "{}: config_present must be FALSE before any write",
             t.name
         );
-        install_target(
+        install_target_from(
             t,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -572,7 +529,7 @@ fn openclaw_is_present_is_false_before_then_true_after_install() {
         let exe = std::env::current_exe().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("openclaw.json");
-        install_target(&OPENCLAW, Some(cfg), Some(exe)).unwrap();
+        install_target_from(&OPENCLAW, Some(cfg), Some(exe)).unwrap();
 
         assert!(
             is_present(&OPENCLAW),
@@ -590,7 +547,7 @@ fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("config.toml");
 
-    let r = install_target(
+    let r = install_target_from(
         &CODEX,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -626,7 +583,7 @@ fn install_on_a_malformed_config_errors_without_rewriting() {
         std::fs::write(&cfg, malformed).unwrap();
         let before = std::fs::read_to_string(&cfg).unwrap();
 
-        let err = install_target(
+        let err = install_target_from(
             t,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -667,7 +624,7 @@ fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
             std::fs::write(&cfg, "{ not valid json,,, ").unwrap();
             let before = std::fs::read_to_string(&cfg).unwrap();
 
-            let err = install_target(
+            let err = install_target_from(
                 &OPENCLAW,
                 Some(cfg.clone()),
                 Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -703,7 +660,7 @@ fn verify_target_is_sound_after_a_real_install_for_every_target() {
                 for &t in target::TARGETS {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = plugin_hooks_path(tmp.path());
-                    install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                    install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
                     let v = verify_target(t, Some(cfg));
                     assert!(
                         v.is_sound(),
@@ -722,7 +679,7 @@ fn verify_target_flags_a_missing_shim_binary() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
     let ghost = tmp.path().join("ghost-pixtuoid-hook");
-    install_target(&CLAUDE_FILE, Some(cfg.clone()), Some(ghost)).unwrap();
+    install_target_from(&CLAUDE_FILE, Some(cfg.clone()), Some(ghost)).unwrap();
     let v = verify_target(&CLAUDE_FILE, Some(cfg));
     assert!(!v.is_sound());
     assert!(
@@ -773,7 +730,7 @@ fn verify_target_flags_a_non_executable_shim() {
     std::fs::write(&shim, b"#!/bin/sh\n").unwrap();
     std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-    install_target(&CODEX, Some(cfg.clone()), Some(shim)).unwrap();
+    install_target_from(&CODEX, Some(cfg.clone()), Some(shim)).unwrap();
     let v = verify_target(&CODEX, Some(cfg));
     assert!(!v.is_sound());
     assert!(
@@ -808,7 +765,7 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cfg = tmp.path().join("config");
-                install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
                 assert!(
                     verify_target(t, Some(cfg.clone())).is_sound(),
                     "{}: a fresh install must verify sound",
@@ -863,7 +820,7 @@ fn verify_target_flags_a_stale_code_artifact_for_every_extra_artifacts_target() 
                 for (idx, _) in make(&exe).unwrap().iter().enumerate() {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = tmp.path().join("config");
-                    install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                    install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
                     let (p, _) = make(&exe).unwrap().swap_remove(idx);
                     let mut body = std::fs::read_to_string(&p).unwrap();
                     body.push_str("\n// drifted\n");
@@ -1035,7 +992,7 @@ fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target(
                 std::fs::copy(std::env::current_exe().unwrap(), &shim).unwrap();
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cfg = tmp.path().join("config");
-                install_target(t, Some(cfg.clone()), Some(shim.clone())).unwrap();
+                install_target_from(t, Some(cfg.clone()), Some(shim.clone())).unwrap();
                 assert!(
                     verify_target(t, Some(cfg.clone())).is_sound(),
                     "{}: a fresh install with a real shim must verify sound",
@@ -1078,7 +1035,7 @@ fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cfg = tmp.path().join("config");
-                install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
 
                 let (victim, want) = make(&exe).unwrap().into_iter().next().unwrap();
                 std::fs::remove_file(&victim).unwrap();
@@ -1088,7 +1045,7 @@ fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
                     t.name
                 );
 
-                let r = install_target(t, Some(cfg), Some(exe.clone())).unwrap();
+                let r = install_target_from(t, Some(cfg), Some(exe.clone())).unwrap();
                 assert!(
                     matches!(r.outcome, InstallOutcome::AlreadyUpToDate),
                     "{}: config already current — the heal must fire despite the no-op",
@@ -1122,7 +1079,7 @@ fn verify_target_flags_a_missing_event() {
     let exe = std::env::current_exe().unwrap();
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    install_target(&CLAUDE_FILE, Some(cfg.clone()), Some(exe)).unwrap();
+    install_target_from(&CLAUDE_FILE, Some(cfg.clone()), Some(exe)).unwrap();
     let mut v: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
     v["hooks"].as_object_mut().unwrap().remove("SessionEnd");
@@ -1145,7 +1102,7 @@ fn a_disconnected_source_is_gated_out_of_the_broken_check() {
     let exe = std::env::current_exe().unwrap();
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("settings.json");
-    install_target(&CLAUDE_FILE, Some(cfg.clone()), Some(exe)).unwrap();
+    install_target_from(&CLAUDE_FILE, Some(cfg.clone()), Some(exe)).unwrap();
     uninstall_target(&CLAUDE_FILE, Some(cfg.clone())).unwrap();
     let content = io::read_config(&cfg).unwrap();
     assert!(
@@ -1165,7 +1122,7 @@ fn verify_target_flags_codewhale_disabled() {
     let exe = std::env::current_exe().unwrap();
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("config.toml");
-    install_target(&target::CODEWHALE, Some(cfg.clone()), Some(exe)).unwrap();
+    install_target_from(&target::CODEWHALE, Some(cfg.clone()), Some(exe)).unwrap();
     let content = std::fs::read_to_string(&cfg)
         .unwrap()
         .replace("enabled = true", "enabled = false");
@@ -1260,7 +1217,7 @@ fn every_target_that_writes_a_config_names_us_in_it() {
                 for t in crate::install::TARGETS {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = plugin_hooks_path(tmp.path());
-                    install_target(t, Some(cfg.clone()), Some(hook.clone()))
+                    install_target_from(t, Some(cfg.clone()), Some(hook.clone()))
                         .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
                     let content = std::fs::read_to_string(&cfg)
                         .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
@@ -1295,7 +1252,7 @@ fn kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe() {
     let hook = tmp.path().join("HOOK-shim");
     std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
     let cfg = tmp.path().join("kimi-cfg");
-    install_target(&target::KIMI, Some(cfg.clone()), Some(hook)).expect("kimi install");
+    install_target_from(&target::KIMI, Some(cfg.clone()), Some(hook)).expect("kimi install");
     let content = std::fs::read_to_string(&cfg).expect("config readable");
     assert!(
         content.contains("PIXTUOID_SOURCE=kimi"),
@@ -1393,7 +1350,7 @@ fn claude_install_registers_the_plugin() {
         let hooks = plugin_hooks_path(tmp.path());
         // An executable that exists, so verify has only the plugin to judge.
         let hook = Some(std::env::current_exe().unwrap());
-        let r = install_target(&CLAUDE, Some(hooks.clone()), hook.clone()).unwrap();
+        let r = install_target_from(&CLAUDE, Some(hooks.clone()), hook.clone()).unwrap();
         assert!(matches!(r.outcome, InstallOutcome::Installed));
 
         let root = tmp.path().join("marketplace");
@@ -1417,7 +1374,7 @@ fn claude_install_registers_the_plugin() {
 
         // A re-install with nothing to change still re-registers, which heals a
         // plugin the user removed in Claude Code.
-        let r2 = install_target(&CLAUDE, Some(hooks), hook).unwrap();
+        let r2 = install_target_from(&CLAUDE, Some(hooks), hook).unwrap();
         assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
         let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
         assert_eq!(
@@ -1433,7 +1390,7 @@ fn claude_verify_flags_an_unregistered_plugin() {
     with_fake_claude(|_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
-        install_target(
+        install_target_from(
             &CLAUDE,
             Some(hooks.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1457,7 +1414,7 @@ fn claude_uninstall_removes_the_marketplace_only_when_listed() {
     with_fake_claude(|fake| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
-        install_target(
+        install_target_from(
             &CLAUDE,
             Some(hooks.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1492,7 +1449,7 @@ fn a_disconnect_that_deregisters_a_stranded_plugin_reports_a_removal() {
     with_fake_claude(|_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
-        install_target(
+        install_target_from(
             &CLAUDE,
             Some(hooks.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
@@ -1579,7 +1536,7 @@ fn claude_install_fails_when_registering_fails_and_leaves_no_hooks() {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
-        assert!(install_target(&CLAUDE, Some(hooks.clone()), hook).is_err());
+        assert!(install_target_from(&CLAUDE, Some(hooks.clone()), hook).is_err());
         assert!(
             !has_hooks(&CLAUDE, Some(hooks)),
             "a failed connect must not read as connected"
@@ -1592,17 +1549,17 @@ fn a_failed_registration_restores_the_hooks_it_found() {
     let tmp = tempfile::TempDir::new().unwrap();
     let hooks = plugin_hooks_path(tmp.path());
     let old = Some(PathBuf::from("/fake/old/pixtuoid-hook"));
-    with_fake_claude(|_| install_target(&CLAUDE, Some(hooks.clone()), old.clone()).unwrap());
+    with_fake_claude(|_| install_target_from(&CLAUDE, Some(hooks.clone()), old.clone()).unwrap());
     let before = std::fs::read_to_string(&hooks).unwrap();
     with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
-        assert!(install_target(&CLAUDE, Some(hooks.clone()), old).is_err());
+        assert!(install_target_from(&CLAUDE, Some(hooks.clone()), old).is_err());
         assert_eq!(
             std::fs::read_to_string(&hooks).unwrap(),
             before,
             "a re-registration that wrote nothing takes nothing back"
         );
         let new = Some(PathBuf::from("/fake/new/pixtuoid-hook"));
-        assert!(install_target(&CLAUDE, Some(hooks.clone()), new).is_err());
+        assert!(install_target_from(&CLAUDE, Some(hooks.clone()), new).is_err());
         assert_eq!(
             std::fs::read_to_string(&hooks).unwrap(),
             before,
@@ -1617,7 +1574,7 @@ fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
-        install_target(&CLAUDE, Some(hooks.clone()), hook).unwrap();
+        install_target_from(&CLAUDE, Some(hooks.clone()), hook).unwrap();
         assert!(uninstall_target(&CLAUDE, Some(hooks.clone())).is_err());
         assert!(!has_hooks(&CLAUDE, Some(hooks)), "the plugin is left inert");
     });
