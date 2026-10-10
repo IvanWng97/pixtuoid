@@ -58,8 +58,8 @@ pub(crate) struct SimStores<'a> {
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
     pub creatures: &'a mut HashMap<CreatureKey, CreatureWalk>,
-    /// What a pointer holds on this floor, or just set down.
-    pub grip: &'a mut Option<crate::interact::Grip>,
+    /// What a pointer holds on this floor, and set down since its last step.
+    pub grip: &'a mut crate::interact::Grip,
 }
 
 /// A theme-free glow decision for a character sprite. Sim decides WHETHER a
@@ -111,6 +111,19 @@ pub struct CharacterPlacement {
     pub seated: bool,
 }
 
+/// The row a figure in a pointer's hand sorts on: in front of the whole room.
+const IN_HAND_ROW: u16 = u16::MAX;
+
+/// The row a creature centred at `pos` sorts on, its frame `h` tall since the
+/// anims differ in height: its south row, or [`IN_HAND_ROW`] in hand.
+fn creature_row(pos: Point, h: u16, in_hand: bool) -> u16 {
+    if in_hand {
+        IN_HAND_ROW
+    } else {
+        crate::layout::sort_row_at(Pivot::Center, pos, h)
+    }
+}
+
 /// The office pet this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct PetPlacement {
@@ -118,6 +131,8 @@ pub(crate) struct PetPlacement {
     pub(crate) kind: PetKind,
     /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
+    /// The row it sorts on, both painters' ([`creature_row`]).
+    pub(crate) sort_row: u16,
     /// Whether to mirror the sprite horizontally.
     pub(crate) flip: bool,
     /// The sprite animation to draw.
@@ -144,8 +159,8 @@ impl PetPlacement {
 pub(crate) struct MascotPlacement {
     /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
-    /// The frame `pos` was fitted for.
-    pub(crate) size: Size,
+    /// The row it sorts on, both painters' ([`creature_row`]).
+    pub(crate) sort_row: u16,
     /// The sprite animation to draw.
     pub(crate) anim_name: Piece,
     /// The frame within `anim_name`.
@@ -296,7 +311,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let timing = floor.motion.timing(now);
     let beat = timing.beat;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
-    let held_agent = take_grip(stores, layout, now);
+    take_grip(stores, &agents, layout, now);
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
@@ -316,6 +331,14 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     // Only a wanderer stands at a waypoint, and at rest none wanders.
     let wanderers = if beat.is_rest() { &[][..] } else { &agents[..] };
     for agent in wanderers {
+        // A lifted one stands nowhere its timeline says.
+        if stores
+            .walks
+            .get(&agent.agent_id)
+            .is_some_and(|w| w.lifted.is_some())
+        {
+            continue;
+        }
         let Some(pose) = pose::derive(agent, now, layout) else {
             continue;
         };
@@ -361,7 +384,6 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     history: &mut *stores.history,
                     walks: &mut *stores.walks,
                     wanders: !beat.is_rest(),
-                    held: held_agent,
                 },
             );
             (a.agent_id, p)
@@ -437,42 +459,59 @@ pub(crate) fn pack_frame_size(pack: &OfficeArt, anim: Piece, frame_idx: usize) -
     }
 }
 
-/// Carry out the floor's grip before anything steps: a creature held follows
-/// the pointer and one set down lands, an agent set down starts home; a hold
-/// stays for the next step, a drop is spent. The agent held, if one is.
+/// Carry out the floor's grip before anything steps: each figure set down
+/// lands, in the order set down, a creature to rest and an agent to walk
+/// home; the one held follows the pointer. A hold stays for the next step
+/// until its figure is gone or on its way out.
 fn take_grip(
     stores: &mut SimStores<'_>,
+    agents: &[AgentSlot],
     layout: &SceneLayout,
     now: SystemTime,
-) -> Option<(AgentId, Point)> {
+) {
     use crate::interact::{Figure, Grip};
-    let grip = stores.grip.take()?;
-    let (Grip::Held { figure, at } | Grip::Dropped { figure, at }) = &grip;
-    let (figure, at) = (figure.clone(), *at);
-    let held = matches!(grip, Grip::Held { .. });
-    if held {
-        *stores.grip = Some(grip);
-    }
-    let creature = match figure {
-        Figure::Agent(id) if held => return Some((id, at)),
-        Figure::Agent(id) => {
-            // One gone mid-carry has nothing to walk home.
-            if let Some(walk) = stores.walks.get_mut(&id) {
-                walk.dropped = Some(crate::walk::Dropped::At(at));
+    let Grip { dropped, held } = std::mem::take(&mut *stores.grip);
+    // Whether `figure` stays in hand: held at `at` while it can be, else set
+    // down there.
+    let mut grip = |figure: &Figure, at: Point, held: bool| {
+        let creature = match figure {
+            Figure::Agent(id) => {
+                let here = agents
+                    .iter()
+                    .any(|a| a.agent_id == *id && a.exiting_at.is_none());
+                return match stores.walks.get_mut(id) {
+                    Some(walk) if here && held => {
+                        walk.carry(at);
+                        true
+                    }
+                    // One walking out leaves the hand where the grip has it;
+                    // one lifted on its way out was never in it.
+                    Some(walk) if here || walk.carried() => {
+                        walk.set_down(at);
+                        false
+                    }
+                    // One gone mid-carry has nothing to walk home.
+                    _ => false,
+                };
             }
-            return None;
-        }
-        Figure::Pet(kind) => CreatureKey::Pet(kind),
-        Figure::Mascot(key) => CreatureKey::Mascot(key),
-    };
-    if let Some(walk) = stores.creatures.get_mut(&creature) {
-        if held {
+            Figure::Pet(kind) => CreatureKey::Pet(*kind),
+            Figure::Mascot(key) => CreatureKey::Mascot(key.clone()),
+        };
+        let Some(walk) = stores.creatures.get_mut(&creature) else {
+            return false;
+        };
+        if held && !walk.leaving() {
             walk.carry(at);
+            true
         } else {
             walk.set_down(at, layout, now);
+            false
         }
+    };
+    for (figure, at) in &dropped {
+        grip(figure, *at, false);
     }
-    None
+    stores.grip.held = held.filter(|(figure, at)| grip(figure, *at, true));
 }
 
 /// The floor's pet this tick, walking the people's walker: a pet being
@@ -531,15 +570,12 @@ fn pet_placement(
             )
         }
     };
-    let pos = on_canvas(
-        layout,
-        Pivot::Center,
-        at,
-        pack_frame_size(pack, anim_name, frame_idx),
-    );
+    let size = pack_frame_size(pack, anim_name, frame_idx);
+    let pos = on_canvas(layout, Pivot::Center, at, size);
     Some(PetPlacement {
         kind,
         pos,
+        sort_row: creature_row(pos, size.h, walk.carried()),
         flip,
         anim_name,
         frame_idx,
@@ -584,6 +620,8 @@ struct DrawnMascot {
     on_roster: bool,
     /// Its gateway's runs in flight.
     runs: u32,
+    /// [`CreatureWalk::carried`].
+    carried: bool,
 }
 
 /// Every gateway mascot in the scene's daemon roster, walking the people's
@@ -644,6 +682,7 @@ fn mascot_placements(
                 key,
                 stance,
                 runs: presence.in_flight_runs.len() as u32,
+                carried: walk.carried(),
             });
         }
     }
@@ -679,6 +718,7 @@ fn mascot_placements(
                 degraded: false,
                 on_roster: false,
                 runs: 0,
+                carried: walk.carried(),
             });
         }
     }
@@ -692,6 +732,7 @@ fn mascot_placements(
                  degraded,
                  on_roster,
                  runs,
+                 carried,
              }| {
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
@@ -712,7 +753,7 @@ fn mascot_placements(
                 let pos = on_canvas(ground.layout, Pivot::Center, at, size);
                 Some(MascotPlacement {
                     pos,
-                    size,
+                    sort_row: creature_row(pos, size.h, carried),
                     anim_name,
                     frame_idx,
                     key,
@@ -969,9 +1010,8 @@ pub(crate) fn resolve_characters(
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        // A figure in hand is in front of the whole room.
                         sort_row: if held {
-                            u16::MAX
+                            IN_HAND_ROW
                         } else {
                             top_left.y + WALKING_Y_OFF
                         },

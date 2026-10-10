@@ -47,7 +47,7 @@ jobs:
         working-directory: site
         run: npm run check
       - uses: ./.github/actions/gen-wasm
-      - uses: withastro/action@v6
+      - uses: withastro/action@3eafd002e65cc31b4f0eae0bb05450d521562247 # v6.1.3
         # the ticker's build-time merged-PR fetch: unauthenticated quota on
         # shared runner IPs is routinely exhausted -> silent canned-reel fallback
         env:

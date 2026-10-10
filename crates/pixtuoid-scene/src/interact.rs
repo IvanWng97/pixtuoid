@@ -101,12 +101,38 @@ impl GripFloor {
     }
 }
 
-/// A figure a pointer holds on a floor, or has just set down, which the
-/// floor's next step carries out.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Grip {
-    Held { figure: Figure, at: Point },
-    Dropped { figure: Figure, at: Point },
+/// A pointer's grip on one floor, which the floor's next step carries out:
+/// every figure it set down since that step, oldest first, then the one it
+/// holds. Lossless, so however many gestures come between two steps, each
+/// drop lands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Grip {
+    pub(crate) dropped: Vec<(Figure, Point)>,
+    pub(crate) held: Option<(Figure, Point)>,
+}
+
+impl Grip {
+    /// `gesture`, after those before it. A carry or a drop moves the figure
+    /// in hand, if any; a hand holds one, so a lift sets down one still in it.
+    pub(crate) fn push(&mut self, gesture: &Gesture) {
+        match gesture {
+            Gesture::Lift { figure, at } => {
+                self.dropped.extend(self.held.take());
+                self.held = Some((figure.clone(), *at));
+            }
+            &Gesture::Carry(to) => {
+                if let Some((_, at)) = &mut self.held {
+                    *at = to;
+                }
+            }
+            &Gesture::Drop(to) => {
+                if let Some((figure, _)) = self.held.take() {
+                    self.dropped.push((figure, to));
+                }
+            }
+            Gesture::Click(_) => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -305,6 +331,38 @@ mod tests {
             p.up(Some(pt(30, 30))),
             None,
             "and its release, late, does nothing"
+        );
+    }
+
+    /// A floor's grip loses no drop between two steps and holds one figure:
+    /// a stray carry or drop moves nothing, and a lift over a figure still
+    /// in hand sets that one down where it is.
+    #[test]
+    fn a_grip_keeps_every_drop_and_holds_one_figure() {
+        let (a, b) = (Figure::Pet(PetKind::Cat), Figure::Pet(PetKind::Dog));
+        let mut grip = Grip::default();
+        grip.push(&Gesture::Lift {
+            figure: a.clone(),
+            at: pt(1, 1),
+        });
+        grip.push(&Gesture::Carry(pt(2, 2)));
+        grip.push(&Gesture::Drop(pt(3, 3)));
+        grip.push(&Gesture::Carry(pt(9, 9)));
+        grip.push(&Gesture::Drop(pt(9, 9)));
+        grip.push(&Gesture::Lift {
+            figure: b.clone(),
+            at: pt(4, 4),
+        });
+        grip.push(&Gesture::Lift {
+            figure: a.clone(),
+            at: pt(5, 5),
+        });
+        assert_eq!(
+            grip,
+            Grip {
+                dropped: vec![(a.clone(), pt(3, 3)), (b, pt(4, 4))],
+                held: Some((a, pt(5, 5))),
+            }
         );
     }
 

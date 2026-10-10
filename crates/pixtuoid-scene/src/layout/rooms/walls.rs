@@ -24,7 +24,7 @@ use std::ops::Range;
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
 /// wall, in px. The glass face is drawn from it, so the face and the blocked
 /// ground can never drift apart.
-pub const WALL_THICK_H: u16 = 6;
+pub(crate) const WALL_THICK_H: u16 = 6;
 /// Thickness of a vertical (N-S) interior wall, in px — its blocked footprint
 /// width AND its drawn width. They are EQUAL by design: seen edge-on, the width
 /// you draw IS the wall's real floor thickness, so a walker collides with what
@@ -32,7 +32,7 @@ pub const WALL_THICK_H: u16 = 6;
 /// pad — that decoupling drifted into feet-in-wall on the east and phantom
 /// blocked floor on the west. The coarse-router clearance is now the X-only
 /// `mask::WALL_ROUTING_MARGIN_X`, stamped at mask time.
-pub const WALL_THICK_V: u16 = 4;
+pub(crate) const WALL_THICK_V: u16 = 4;
 
 /// North-end walk-behind overhang for a FREE vertical terminus (a segment whose
 /// north end is NOT on a joint — e.g. the run below a door): the top rows of the

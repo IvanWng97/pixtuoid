@@ -82,7 +82,7 @@ fn agent_call_delegates(args: Option<&Value>) -> bool {
 /// # Errors
 ///
 /// If the payload is not an object, lacks `event`, names an unhandled event, or lacks a non-empty `cwd` (a subagent event needs a non-empty `agent_id` instead).
-pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;

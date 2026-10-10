@@ -123,7 +123,7 @@ impl ApproachSides {
 
 /// Approach sides for the home desk. Canonical: exclude the south front (the
 /// monitor faces the viewer; the agent sits behind it), so reachable from N/E/W.
-pub const DESK_APPROACH: ApproachSides = ApproachSides {
+pub(crate) const DESK_APPROACH: ApproachSides = ApproachSides {
     n: true,
     s: false,
     e: true,
@@ -174,12 +174,12 @@ pub struct FurnitureDef {
     /// Where `footprint` sits inside the VISUAL box horizontally. Every current row
     /// is `Center`; the field exists so a future sideways-overhanging piece declares
     /// `Start`/`End` instead of needing a new stamp path.
-    pub ground_x: GroundAlign,
+    pub(crate) ground_x: GroundAlign,
     /// Where `footprint` sits inside the VISUAL box vertically: `End` for the
     /// overhang canopy/panel/column pieces AND the desk (invariant #6, the
     /// walk-behind shape), `Center` for the meeting sofa body + floor lamp.
     /// Resolves to a pixel offset from `visual − footprint` at stamp time.
-    pub ground_y: GroundAlign,
+    pub(crate) ground_y: GroundAlign,
 }
 
 impl FurnitureDef {
@@ -711,7 +711,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
 /// INTENT and resolves its offset from `visual − footprint` at stamp time, so it
 /// can NEVER drift when a sprite is resized — the point of this type over a `dx`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroundAlign {
+pub(crate) enum GroundAlign {
     /// Flush to the box's LOW edge — North (y) / West (x): offset 0.
     Start,
     /// Centered ON the sprite center (== the placement `pos` for a `Center` pivot);
@@ -762,18 +762,18 @@ pub(crate) const DESK_GROUND_H: u16 = match desk_furniture_def().footprint {
 
 /// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row,
 /// kept because the desk is per-agent rather than a `WaypointKind`.
-pub const fn desk_furniture_def() -> FurnitureDef {
+pub(crate) const fn desk_furniture_def() -> FurnitureDef {
     furniture_def(Furniture::Desk)
 }
 
 /// Vertical offset baked into the walking / waypoint sprite top-left
 /// (`p.y - WALKING_Y_OFF`) — the standing sprite height, owned here so
 /// [`seated_foot_cell`] and the top-left invert each other by construction.
-pub const WALKING_Y_OFF: u16 = 12;
+pub(crate) const WALKING_Y_OFF: u16 = 12;
 /// Vertical offset of the back-view seat sprite top-left (`pos.y - SEAT_RENDER_Y_OFF`).
 /// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF` px south of `pos`,
 /// where `walking_top_left` lands exactly on `back_couch_top_left`.
-pub const SEAT_RENDER_Y_OFF: u16 = 7;
+pub(crate) const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// How far south of their seat a sitter on seated furniture (couch, sofa,
 /// meeting chair) sorts.
@@ -824,7 +824,7 @@ pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
 
 /// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
-pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
+pub(crate) fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     let y_off = match facing {
         Facing::North => DESK_WALK_Y_OFF_BACK,
         Facing::South | Facing::East | Facing::West => DESK_WALK_Y_OFF,
@@ -843,7 +843,7 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
 /// blocked `S` (meeting sofa, desk) makes that leg the "sit down" motion rather
 /// than pathfinding. The `Desk` arm hardcodes `Facing::South` — a future caller
 /// must pass the facing.
-pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
+pub(crate) fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
     if !furniture_def(kind).occupies_pos {
         return None;
     }

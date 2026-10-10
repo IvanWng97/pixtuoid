@@ -82,6 +82,9 @@ CodSpeed skip drafts. The jobs:
 - **site** — `site.yml`: format, lint, types, knip and unit tests on every push; the demo-reading test, e2e and
   Lighthouse on a build with freshly built wasm, so a Rust change that breaks
   a wasm export the page calls fails before it deploys.
+- **raycast** — `raycast.yml`: contract-types freshness, `ray build` and `ray lint`, `tsc`, `npm test` and
+  `eslint`, run by `ci.yml` only on a PR that changes `integrations/raycast`, the workflow, `setup-npm` or
+  `site/package.json`; any other push skips them and `ci-gate` still passes.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
@@ -91,7 +94,7 @@ CodSpeed skip drafts. The jobs:
   workflows' own shell) and
   `just fixture-pii` (gitleaks over the committed capture tree); the
   capture-tree rules ride `just test` instead.
-- **zizmor** — workflow/action security: symbolic-or-SHA pins,
+- **zizmor** — workflow/action security: SHA pins (`actions/*` may float on a major),
   credential-dropping checkouts, exact inline suppressions.
 - **The automatic Claude review** rides `claude-readonly-review.yml`: on the
   trusted default branch, a read-only model reads the PR diff, its head files,

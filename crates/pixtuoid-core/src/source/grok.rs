@@ -40,7 +40,9 @@ use crate::source::{AgentEvent, ToolDetail};
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{GrokSource, live_grok_session_ids};
+pub use native::GrokSource;
+#[cfg(feature = "native")]
+pub(crate) use native::live_grok_session_ids;
 
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
@@ -87,7 +89,7 @@ pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
 /// # Errors
 ///
 /// If the payload is not an object, lacks `hookEventName`, carries none of `sessionId`, `cwd` or `workspaceRoot`, names an unrecognized event, or is a subagent event without `subagentId`.
-pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
@@ -362,7 +364,7 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 /// # Errors
 ///
 /// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
-pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &grok_id_from_path(Path::new(path)));
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
         return Ok(vec![]);
@@ -559,7 +561,7 @@ pub(crate) fn is_updates_jsonl(p: &Path) -> bool {
 /// Session id from a transcript path: the PARENT-DIR name, the filename stem
 /// being the constant `updates`. Equal to every hook event's `sessionId`, so
 /// the two transports coalesce.
-pub fn grok_id_from_path(path: &Path) -> String {
+pub(crate) fn grok_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(|d| d.file_name())
         .map(|n| n.to_string_lossy().into_owned())
