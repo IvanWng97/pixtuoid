@@ -2,7 +2,6 @@
 //! foreground. `resolve_pid` (slot cache → per-source probe) → `ancestor_walk`
 //! (pid → the first *focusable* ancestor, i.e. the terminal GUI app) → per-OS
 //! `activate`. App-level only by design — no tab/pane precision.
-//! Spec: docs/superpowers/specs/2026-07-10-focus-jump-design.md.
 //!
 //! ONE failure rule (user-directed, no fallbacks): any miss — no pid, walk
 //! reaches pid 1, remote agent, activation denied, unsupported compositor — is a
@@ -81,8 +80,8 @@ pub(crate) struct FocusPaths<'a> {
 }
 
 /// Resolve the agent's OS pid. Precedence: the slot's cached pid (hook-family
-/// sources) → the transcript-family point queries (CC registry / Codex fd probe)
-/// → None. Two click-time recycle guards on the cached path: an EXITING slot
+/// sources) → its transcript-family source's point query (the match below) →
+/// None. Two click-time recycle guards on the cached path: an EXITING slot
 /// refuses outright (its process is going or gone), and a cached start marker
 /// must match the kernel's CURRENT marker for that pid — a mismatch means the
 /// pid was recycled after an abrupt death (a missing read means gone on unix;
@@ -94,7 +93,7 @@ pub(crate) fn resolve_pid(
     table: &impl ProcessTable,
 ) -> Option<i32> {
     if slot.exiting_at.is_some() {
-        tracing::debug!(agent = %slot.label, "focus: refused — agent is exiting");
+        tracing::debug!(agent = ?&*slot.label, "focus: refused — agent is exiting");
         return None;
     }
     if let Some(cached) = slot.pid {
@@ -102,7 +101,7 @@ pub(crate) fn resolve_pid(
             && table.start_time(cached.pid) != Some(stamped)
         {
             tracing::debug!(
-                agent = %slot.label,
+                agent = ?&*slot.label,
                 pid = cached.pid,
                 "focus: refused — cached pid gone or recycled (start marker mismatch)"
             );
@@ -164,15 +163,15 @@ pub(crate) fn focus_agent(
     activate: impl FnOnce(i32) -> bool,
 ) {
     let Some(pid) = resolve_pid(slot, paths, table) else {
-        tracing::debug!(agent = %slot.label, "focus: no pid resolved");
+        tracing::debug!(agent = ?&*slot.label, "focus: no pid resolved");
         return;
     };
     let Some(app_pid) = ancestor_walk(table, pid) else {
-        tracing::debug!(agent = %slot.label, pid, "focus: no focusable ancestor");
+        tracing::debug!(agent = ?&*slot.label, pid, "focus: no focusable ancestor");
         return;
     };
     if !activate(app_pid) {
-        tracing::debug!(agent = %slot.label, app_pid, "focus: activation declined");
+        tracing::debug!(agent = ?&*slot.label, app_pid, "focus: activation declined");
     }
 }
 

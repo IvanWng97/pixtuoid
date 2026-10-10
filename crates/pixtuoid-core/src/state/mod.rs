@@ -182,33 +182,50 @@ pub(crate) enum LabelProvenance {
 
 /// An [`AgentSlot`]'s display label + the provenance it was minted with.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "SlotLabelWire")]
 pub struct SlotLabel {
     #[serde(with = "arc_str_serde")]
     text: Arc<str>,
     provenance: LabelProvenance,
 }
 
+/// [`SlotLabel`]'s serde shape, so a deserialized label mints through
+/// [`SlotLabel::new`] too.
+#[derive(Deserialize)]
+struct SlotLabelWire {
+    text: String,
+    provenance: LabelProvenance,
+}
+
+impl From<SlotLabelWire> for SlotLabel {
+    fn from(wire: SlotLabelWire) -> Self {
+        Self::new(wire.text, wire.provenance)
+    }
+}
+
 impl SlotLabel {
-    pub(crate) fn new(text: impl Into<Arc<str>>, provenance: LabelProvenance) -> Self {
+    /// The one mint: it strips control and bidi characters, since a label's
+    /// text is a wire cwd basename or a model-authored name.
+    pub(crate) fn new(text: impl AsRef<str>, provenance: LabelProvenance) -> Self {
         Self {
-            text: text.into(),
+            text: crate::source::decoder::strip_control_chars(text.as_ref()).into(),
             provenance,
         }
     }
 
-    pub(crate) fn ordinal_ghost(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn ordinal_ghost(text: impl AsRef<str>) -> Self {
         Self::new(text, LabelProvenance::OrdinalGhost)
     }
 
-    pub(crate) fn prefix_fallback(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn prefix_fallback(text: impl AsRef<str>) -> Self {
         Self::new(text, LabelProvenance::PrefixFallback)
     }
 
-    pub(crate) fn cwd_derived(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn cwd_derived(text: impl AsRef<str>) -> Self {
         Self::new(text, LabelProvenance::CwdDerived)
     }
 
-    pub(crate) fn renamed(text: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn renamed(text: impl AsRef<str>) -> Self {
         Self::new(text, LabelProvenance::Renamed)
     }
 

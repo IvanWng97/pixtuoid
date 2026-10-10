@@ -210,9 +210,6 @@ pub(crate) async fn reducer_task(
     // Disabled once the presence channel closes (all senders dropped) so its
     // `recv() -> None` branch can't busy-loop the select.
     let mut presence_open = true;
-    // `&'static str`, NOT the raw wire name: `_pixtuoid_source` arrives verbatim
-    // from socket JSON with no registry check and no length cap, so keying on it
-    // lets a long-lived `run` accumulate an entry per distinct name seen.
     let mut gate_logged: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));

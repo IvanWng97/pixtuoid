@@ -20,10 +20,12 @@
 //! A decoder ending in a bare `_ => vec![]` is silent even when the line does
 //! arrive; grep the decoders for that shape rather than keeping a list here.
 //!
-//! `source` is a static registry name (safe). The free-form values
-//! (`name`/`field`/`tool`/`detail`) are untrusted wire content, made display-safe
-//! HERE at emission: the non-TUI `tracing` stream writes to RAW stderr, which no
-//! cell buffer clips and no presenter sanitizes, and is on by default at `warn`.
+//! `source` is a registry name, or an unregistered hook source made display-safe
+//! where [`decode_hook_payload`](super::decoder::decode_hook_payload) reads it.
+//! The free-form values (`name`/`field`/`tool`/`detail`) are untrusted wire
+//! content, made display-safe HERE at emission: the non-TUI `tracing` stream
+//! writes to RAW stderr, which no cell buffer clips and no presenter sanitizes,
+//! and is on by default at `warn`.
 
 /// The `tracing` target every drift breadcrumb shares; consumers key on it.
 pub const TARGET: &str = "pixtuoid::drift";

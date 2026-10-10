@@ -3,6 +3,7 @@
 //! dispatched out to its own source module before the shared field requirements
 //! apply.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -272,15 +273,27 @@ pub(crate) fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
     u64::try_from(secs).ok()
 }
 
-/// The CLI a hook envelope belongs to — read ONLY from the shim-owned
-/// `_pixtuoid_source`. CC's public `source` field carries the SessionStart REASON
-/// (startup/resume/clear/compact), so reading it would namespace the agent under
-/// "startup" and split it from the claude-code-keyed tool/JSONL/SessionEnd events:
-/// an un-reapable ghost.
-fn hook_source(obj: &serde_json::Map<String, Value>) -> &str {
-    obj.get("_pixtuoid_source")
+/// The CLI a hook envelope belongs to, and its registry row — read ONLY from the
+/// shim-owned `_pixtuoid_source`. CC's public `source` field carries the
+/// SessionStart REASON (startup/resume/clear/compact), so reading it would
+/// namespace the agent under "startup" and split it from the
+/// claude-code-keyed tool/JSONL/SessionEnd events: an un-reapable ghost.
+fn hook_source(
+    obj: &serde_json::Map<String, Value>,
+) -> (
+    Cow<'static, str>,
+    Option<&'static crate::source::registry::SourceDescriptor>,
+) {
+    let name = obj
+        .get("_pixtuoid_source")
         .and_then(|s| s.as_str())
-        .unwrap_or(crate::source::claude_code::SOURCE_NAME)
+        .unwrap_or(crate::source::claude_code::SOURCE_NAME);
+    match crate::source::registry::descriptor_for(name) {
+        Some(desc) => (Cow::Borrowed(desc.name), Some(desc)),
+        // Any same-user socket writer can stamp a name the registry lacks, and
+        // the drift breadcrumbs write `source` as a raw `%` field.
+        None => (Cow::Owned(display_safe(name)), None),
+    }
 }
 
 /// Envelopes that decode to NOTHING, quietly. A DAEMON source's payloads ride the
@@ -439,15 +452,14 @@ pub fn decode_hook_payload(v: Value) -> DecodeResult<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::not_an_object("hook"))?;
-    let source = hook_source(obj);
-    let desc = crate::source::registry::descriptor_for(source);
-    if decodes_to_nothing(source, obj, desc) {
+    let (source, desc) = hook_source(obj);
+    if decodes_to_nothing(&source, obj, desc) {
         return Ok(vec![]);
     }
     if let Some(evs) = source_owned_arms(desc, &v)? {
         return Ok(evs);
     }
-    shared_hook_arms(obj, source, desc)
+    shared_hook_arms(obj, &source, desc)
 }
 
 /// The shared CC-shaped arms, for every source whose row has no claiming decoder.
@@ -674,17 +686,21 @@ pub const MAX_DECODED_FIELD_CHARS: usize = 80;
 #[doc(hidden)]
 pub const ELLIPSIS: char = '\u{2026}';
 
-/// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap
+/// Make an untrusted wire value safe to DISPLAY: [`strip_control_chars`], then cap
 /// at [`MAX_DECODED_FIELD_CHARS`]. For the HUMAN sinks that are NOT cell buffers —
 /// the [`super::drift`] breadcrumbs and [`DecodeError`]'s wire strings, whose
 /// `tracing` writes to raw stderr, which no cell-clipping or presenter sanitize
-/// covers. The binary's `strip_control_chars` is a COPY — keep the two in step.
+/// covers.
 pub(crate) fn display_safe(s: &str) -> String {
-    let stripped: String = s
-        .chars()
+    ellipsize(&strip_control_chars(s), MAX_DECODED_FIELD_CHARS)
+}
+
+/// `s` without control characters (Cc) or bidi controls. The binary's
+/// `strip_control_chars` is a COPY — keep the two in step.
+pub(crate) fn strip_control_chars(s: &str) -> String {
+    s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
-        .collect();
-    ellipsize(&stripped, MAX_DECODED_FIELD_CHARS)
+        .collect()
 }
 
 /// The Unicode Bidi_Control characters — category Cf, so `char::is_control` (Cc
@@ -1296,6 +1312,25 @@ mod tests {
             AgentId::from_parts("some-future-cli", "s-1"),
             "unknown source keys under its own namespace, not claude-code's"
         );
+    }
+
+    /// An unregistered `_pixtuoid_source` names the drift breadcrumb's
+    /// `source`, a `%` field the log writes raw.
+    #[test]
+    fn an_unregistered_hook_source_reaches_the_drift_log_display_safe() {
+        let long = "y".repeat(MAX_DECODED_FIELD_CHARS + 1);
+        let out = capture_logs(|| {
+            for name in ["ev\u{1b}]0;x\u{7}\u{202e}il", &long] {
+                let _ = decode_hook_payload(json!({"session_id": "s", "_pixtuoid_source": name}));
+            }
+        });
+        for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
+            assert!(!out.contains(raw), "{raw:?} reached the log raw:\n{out}");
+        }
+        let capped = format!("{}{ELLIPSIS}", "y".repeat(MAX_DECODED_FIELD_CHARS));
+        for shown in ["source=ev]0;xil ", &format!("source={capped} ")] {
+            assert!(out.contains(shown), "missing {shown:?} in:\n{out}");
+        }
     }
 
     #[test]

@@ -1215,7 +1215,7 @@ impl Reducer {
                 }
                 tracing::info!(
                     agent_id = ?id,
-                    label = %slot.label,
+                    label = ?&*slot.label,
                     age_secs = age.as_secs(),
                     threshold_secs = threshold.as_secs(),
                     "stale agent — marking exiting"

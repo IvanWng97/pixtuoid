@@ -681,3 +681,37 @@ fn desks_full_warn_escapes_the_wire_session_id_and_cwd() {
         );
     }
 }
+
+/// The stale sweep names the slot by its label, whose basename is a wire cwd's.
+#[test]
+fn stale_sweep_log_carries_no_raw_control_from_a_cwd_label() {
+    use crate::source::{AgentEvent, Transport};
+    use crate::test_capture::capture_logs;
+    use crate::{AgentId, Reducer, SceneState};
+    use std::time::{Duration, SystemTime};
+    let mut scene = SceneState::uniform(1);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("claude-code", "s");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: "/re\u{1b}]0;pwned\u{7}\u{202e}po".into(),
+            parent_id: None,
+        },
+        SystemTime::UNIX_EPOCH,
+        Transport::Hook,
+    );
+    let past = super::stale_threshold(&scene.agents[&id]) + Duration::from_secs(1);
+    let out = capture_logs(|| r.tick(&mut scene, SystemTime::UNIX_EPOCH + past));
+    assert!(out.contains("stale agent"), "got {out:?}");
+    assert!(out.contains("cc·re]0;pwnedpo"), "got {out:?}");
+    for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
+        assert!(
+            !out.contains(raw),
+            "{raw:?} must not reach the log raw: {out:?}"
+        );
+    }
+}

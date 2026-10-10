@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::AgentId;
 use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::SceneState;
 use pixtuoid_core::state::reducer::Reducer;
+use pixtuoid_core::state::{SceneState, SlotLabel};
 
 use crate::{act_start, sess_end, start};
 
@@ -102,6 +102,66 @@ fn session_start_label_caps_a_pathologically_long_cwd_basename() {
         &*direct_label, &*upgraded_label,
         "register_slot must mint the same capped label as the backfill upgrade"
     );
+}
+
+/// Every mint path: register_slot's and the backfill's cwd basename, a Rename
+/// (grok's model-authored subagent description), and a deserialized snapshot.
+#[test]
+fn every_label_mint_strips_c0_controls_and_bidi_overrides() {
+    const HOSTILE: &str = "re\u{1b}]0;x\u{7}\u{202e}po";
+    const SHOWN: &str = "re]0;xpo";
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::now();
+    let session_start = |id, cwd: &str| AgentEvent::SessionStart {
+        agent_id: id,
+        source: "claude-code".into(),
+        session_id: "s".into(),
+        cwd: PathBuf::from(cwd),
+        parent_id: None,
+    };
+    let cwd = format!("/tmp/{HOSTILE}");
+
+    let direct = AgentId::from_transcript_path("/p/direct.jsonl");
+    r.apply(&mut scene, session_start(direct, &cwd), t0, Transport::Hook);
+
+    let upgraded = AgentId::from_transcript_path("/p/upgraded.jsonl");
+    act_start(
+        &mut r,
+        &mut scene,
+        upgraded,
+        Some("t-1"),
+        Some("Bash: ls"),
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        session_start(upgraded, &cwd),
+        t0,
+        Transport::Hook,
+    );
+
+    let renamed = AgentId::from_transcript_path("/p/renamed.jsonl");
+    start(&mut r, &mut scene, renamed);
+    r.apply(
+        &mut scene,
+        AgentEvent::Rename {
+            agent_id: renamed,
+            label: HOSTILE.into(),
+        },
+        t0,
+        Transport::Hook,
+    );
+
+    let label = |id| scene.agents.get(&id).unwrap().label.to_string();
+    assert_eq!(label(direct), format!("cc·{SHOWN}"));
+    assert_eq!(label(upgraded), format!("cc·{SHOWN}"));
+    assert_eq!(label(renamed), SHOWN);
+    let snapshot: SlotLabel =
+        serde_json::from_value(serde_json::json!({"text": HOSTILE, "provenance": "Renamed"}))
+            .expect("a SlotLabel deserializes");
+    assert_eq!(&*snapshot, SHOWN);
 }
 
 #[test]

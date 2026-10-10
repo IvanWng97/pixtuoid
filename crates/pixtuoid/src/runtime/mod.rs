@@ -139,8 +139,8 @@ pub(crate) fn resolve_boot_caps(
     }
 }
 
-// The headless stdout summary derives labels / tool detail / Notification reason
-// from untrusted transcript+hook input, so a crafted ANSI/OSC escape would otherwise
+// The headless stdout summary prints tool detail / Notification reason from
+// untrusted transcript+hook input, so a crafted ANSI/OSC escape would otherwise
 // reach the user's terminal verbatim (the TUI is immune — ratatui neutralizes escapes
 // in its cell buffer).
 use crate::strip_control_chars as sanitize_line;
@@ -162,13 +162,13 @@ fn summarize(scene: &SceneState) -> String {
                     format!("waiting({})", sanitize_line(reason))
                 }
             };
-            format!("{}@{}:{}", sanitize_line(&a.label), a.desk_index.0, state)
+            format!("{}@{}:{}", a.label, a.desk_index.0, state)
         })
         .collect();
     // Daemon-style sources (the OpenClaw gateway lobster) render as wandering mascots,
     // not desk agents — surface them here too so headless is a complete window onto the
-    // scene. The source name is a registry id (controlled), but sanitize it like every
-    // other field on this stdout path.
+    // scene. The source name is a registry id (controlled), but sanitize it like the
+    // wire-derived fields on this stdout path.
     let daemons: Vec<String> = scene
         .daemons()
         .map(|(source, instance, p)| {
