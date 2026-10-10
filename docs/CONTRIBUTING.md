@@ -354,7 +354,9 @@ before re-litigating.
   defect this change introduced is FIXED in it, since a clean-up left for
   later rarely lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
   After round 2 a fold takes only what [the merge gate](#the-merge-gate)
-  confirms blocks the merge, and a non-blocking finding is a FOLLOW-UP: a
+  confirms blocks the merge, and a text-only fix (a comment, a doc or a
+  user-visible string, no behavior) to a line this change introduced; any
+  other non-blocking finding is a FOLLOW-UP: a
   review moves on once only non-blocking suggestions remain
   ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
   issue confirmed in a fold STOPS the loop: revert the fold and re-land
