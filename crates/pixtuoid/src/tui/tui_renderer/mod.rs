@@ -993,8 +993,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 hovers,
                 star,
                 geometry: Some(geometry),
-                // The cutaway holds its own tiles; the terminal's text draws.
-                held: false,
             };
             let over = Over {
                 text: text.map(|t| (t, hovered)),
