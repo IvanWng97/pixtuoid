@@ -79,6 +79,16 @@ pub(crate) fn run(cfg: RunConfig) -> Result<()> {
         .build()
         .context("building the floating event loop")?;
     let proxy = event_loop.create_proxy();
+    let quit = {
+        // The unix handlers register with the runtime's signal driver.
+        let _in_rt = rt.enter();
+        crate::runtime::QuitArms::arm().signalled()
+    };
+    let quit_proxy = proxy.clone();
+    rt.spawn(async move {
+        quit.await;
+        let _ = quit_proxy.send_event(FloatingEvent::Quit);
+    });
 
     // After every fallible `?` boot step: `app` owns the audio device thread (see
     // `crate::audio::AudioController::new`).

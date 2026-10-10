@@ -218,6 +218,88 @@ pub(crate) fn unseen_deaths<'a>(deaths: &'a [SourceDeath], seen: &mut usize) -> 
     &deaths[start..]
 }
 
+/// A boxed quit arm.
+type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+
+/// SIGINT and SIGTERM, their handlers installed at [`arm`](Self::arm): armed
+/// before a painter sets up what its exit undoes (the TUI's terminal modes, the
+/// floating window's saved geometry), so neither signal can land in between and
+/// kill the process by its default disposition.
+pub(crate) struct QuitArms {
+    ctrl_c: QuitArm<std::io::Result<()>>,
+    terminate: QuitArm<()>,
+}
+
+impl QuitArms {
+    pub(crate) fn arm() -> Self {
+        Self {
+            ctrl_c: pin_ctrl_c(),
+            #[cfg(unix)]
+            terminate: Box::pin(terminate_signal()),
+            #[cfg(not(unix))]
+            terminate: Box::pin(std::future::pending()),
+        }
+    }
+
+    /// Either signal's arrival. Pin it ONCE outside a loop: a per-iteration
+    /// future drops the subscription mid-gap.
+    pub(crate) async fn signalled(self) {
+        let Self { ctrl_c, terminate } = self;
+        let ctrl_c = async {
+            if let Err(e) = ctrl_c.await {
+                tracing::error!(
+                    error = %e,
+                    "SIGINT handler registration failed — an external Ctrl-C will not quit cleanly"
+                );
+                // A quit arm resolving on a non-event would tear the painter down.
+                std::future::pending::<()>().await;
+            }
+        };
+        tokio::select! {
+            () = ctrl_c => {}
+            () = terminate => {}
+        }
+    }
+}
+
+/// The SIGINT arm. On unix the handler is installed at the call, not the first
+/// poll as `tokio::signal::ctrl_c` does.
+fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
+    #[cfg(unix)]
+    {
+        let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
+        Box::pin(async move {
+            sig?.recv().await;
+            Ok(())
+        })
+    }
+    #[cfg(not(unix))]
+    Box::pin(tokio::signal::ctrl_c())
+}
+
+/// The SIGTERM arm. A registration failure and a closed stream both park on
+/// `pending`: resolving a quit arm on a non-event would tear the painter down.
+#[cfg(unix)]
+fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
+    let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+    async move {
+        match sig {
+            Ok(mut s) => {
+                if s.recv().await.is_none() {
+                    std::future::pending::<()>().await;
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "SIGTERM handler registration failed — an external SIGTERM will not quit cleanly"
+                );
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,5 +695,38 @@ mod tests {
         cs.set("claude-code", false);
         assert!(!cs.is_connected("claude-code"));
         assert_eq!(cs.snapshot(), HashSet::from(["codex".to_string()]));
+    }
+}
+
+/// Armed quit arms catch a signal raised before they are first polled — the
+/// window between arming and the loop that listens.
+#[cfg(all(test, unix))]
+mod quit_arms {
+    use super::QuitArms;
+
+    #[tokio::test]
+    async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
+        let QuitArms { ctrl_c, terminate } = QuitArms::arm();
+        // SAFETY: raising a signal this process handles from here on.
+        unsafe {
+            libc::raise(libc::SIGINT);
+            libc::raise(libc::SIGTERM);
+        }
+        ctrl_c.await.expect("the SIGINT arm resolves");
+        terminate.await;
+    }
+
+    #[tokio::test]
+    async fn either_signal_alone_is_a_quit() {
+        for signal in [libc::SIGINT, libc::SIGTERM] {
+            let quit = QuitArms::arm().signalled();
+            // SAFETY: raising a signal this process handles from here on.
+            unsafe {
+                libc::raise(signal);
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(5), quit)
+                .await
+                .unwrap_or_else(|_| panic!("signal {signal} did not quit"));
+        }
     }
 }

@@ -18,9 +18,13 @@ of a rate is the machine's.
 tooltip opens over each figure and fixture it crosses and moves with it; the
 pty alone takes it, a live run's pointer being the user's.
 
+`--floating` runs `pixtuoid floating` instead: a real window, at the size and
+zoom its config saved, whose scale is whatever that size fits.
+
 Usage:
     just pace-check [--live] [--scale classic|4|16] [--graphics kitty|sixel|iterm2]
                     [--run storm|dusk] [--secs N] [--hover]
+    just pace-check --floating [--run storm|dusk] [--secs N]
 """
 
 import argparse
@@ -112,16 +116,21 @@ def run_pty(argv, env, geometry, secs, hover):
     os.close(fd)
 
 
+def run_for(child, secs):
+    """Let `child` run `secs`, then end it as a user's kill would: SIGTERM, which
+    the binary quits on, writing its last summary."""
+    try:
+        child.wait(timeout=secs)
+    except subprocess.TimeoutExpired:
+        child.send_signal(signal.SIGTERM)
+        child.wait()
+
+
 def run_live(argv, env, secs):
     # The binary draws to the terminal, by its device's name, whatever this
     # script's own output is redirected to.
     with open(os.ttyname(0), "wb", buffering=0) as tty:
-        child = subprocess.Popen(argv, env=env, stdout=tty, stderr=tty)
-        try:
-            child.wait(timeout=secs)
-        except subprocess.TimeoutExpired:
-            child.send_signal(signal.SIGTERM)
-            child.wait()
+        run_for(subprocess.Popen(argv, env=env, stdout=tty, stderr=tty), secs)
 
 
 FIELD = re.compile(r'(\w+)=("[^"]*"|\S+)')
@@ -153,12 +162,20 @@ def causes(log):
 def main():
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     ap.add_argument("--live", action="store_true")
-    ap.add_argument("--scale", choices=SCALES, default="16")
-    ap.add_argument("--graphics", choices=["kitty", "sixel", "iterm2"], default="kitty")
+    ap.add_argument("--floating", action="store_true")
+    # `None` until resolved below, so `--floating` can refuse an explicit one.
+    ap.add_argument("--scale", choices=SCALES)
+    ap.add_argument("--graphics", choices=["kitty", "sixel", "iterm2"])
     ap.add_argument("--run", choices=["storm", "dusk"], default="storm")
     ap.add_argument("--secs", type=float, default=200.0)
     ap.add_argument("--hover", action="store_true")
     args = ap.parse_args()
+    if args.floating:
+        terminal_only = [f"--{k}" for k in ("live", "scale", "graphics", "hover") if getattr(args, k)]
+        if terminal_only:
+            sys.exit(f"pace-check: {' '.join(terminal_only)} picks a terminal run, and --floating runs a window")
+    args.scale = args.scale or "16"
+    args.graphics = args.graphics or "kitty"
     if args.hover and args.live:
         sys.exit("pace-check: --hover drives the pty's pointer; live, hover by hand")
     if args.live and not os.isatty(0):
@@ -177,7 +194,9 @@ def main():
     )
     graphics = "off" if args.scale == "classic" else args.graphics
     argv = [str(BIN), "--log-level", "info", "run", "--graphics", graphics]
-    if args.live:
+    if args.floating:
+        run_for(subprocess.Popen([str(BIN), "--log-level", "info", "floating"], env=env), args.secs)
+    elif args.live:
         run_live(argv, env, args.secs)
     else:
         # No pty answers the probe: a terminal the environment names plans
@@ -193,9 +212,13 @@ def main():
     if not windows:
         sys.exit(f"pace-check: no `frame pacing` summary in {log}")
     w0 = windows[0]
-    wanted = ("classic", "1") if args.scale == "classic" else (args.graphics, args.scale)
-    if (w0.get("look"), w0.get("scale")) != wanted:
-        sys.exit(f"pace-check: ran {w0.get('look')} x{w0.get('scale')}, not {wanted[0]} x{wanted[1]}: {log}")
+    if args.floating:
+        if w0.get("look") != "floating":
+            sys.exit(f"pace-check: ran {w0.get('look')}, not floating: {log}")
+    else:
+        wanted = ("classic", "1") if args.scale == "classic" else (args.graphics, args.scale)
+        if (w0.get("look"), w0.get("scale")) != wanted:
+            sys.exit(f"pace-check: ran {w0.get('look')} x{w0.get('scale')}, not {wanted[0]} x{wanted[1]}: {log}")
     # The verdict reads these; a binary that logs none, or whose loop gives
     # no frame its due, must not PASS.
     if any(k not in w for w in windows for k in ("scheduled", "hitch_ms", "interval_ms")):
@@ -212,7 +235,7 @@ def main():
     if not ran_s:
         sys.exit(f"pace-check: the summaries schedule no time to rate: {log}")
     rate = hitch_ms / ran_s
-    terminal = w0.get("terminal") if args.live else "pty"
+    terminal = "window" if args.floating else w0.get("terminal") if args.live else "pty"
     print(
         f"{w0.get('look')} x{w0.get('scale')} tmux={w0.get('tmux')} terminal={terminal} sync={w0.get('sync')} "
         f"run={args.run} hover={args.hover} load={load:.2f}: {frames} frames, hitch rate {rate:.2f} ms/s "
