@@ -283,9 +283,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
         ));
         let Some(pen) = Pen::new(
             scale,
-            crate::pack::densest_frame(pack, sprite, frame_idx, scale)
-                .density
-                .get(),
+            crate::pack::densest_frame(pack, sprite, frame_idx, scale).density,
         ) else {
             continue;
         };
@@ -515,7 +513,7 @@ fn signs(office: Office<'_>, runs: &[TextRun]) -> Vec<(Span, PieceKind)> {
 /// a pointer names a run the cutaway drew.
 pub(crate) fn run_box(run: &TextRun, pen: Pen) -> Bounds {
     let r = run_rect(run, pen);
-    let d = pen.art(1).0;
+    let d = pen.density().get();
     let (x, y) = (pen.logical(r.x), pen.logical(r.y));
     Bounds {
         x,
@@ -1247,7 +1245,7 @@ fn riders(
     inks: crate::effects::look::Inks,
 ) -> Vec<crate::display::effects::Riding> {
     let d = key.frame.density.get();
-    let Some(pen) = Pen::new(scale, d) else {
+    let Some(pen) = Pen::new(scale, key.frame.density) else {
         return Vec::new();
     };
     // A dressed frame's head is its mark's column on its crest; the base
@@ -1414,11 +1412,7 @@ pub(crate) fn push_windows(
         theme,
         scale,
     } = office;
-    let Some(density) =
-        pixtuoid_core::sprite::format::Density::new(Pen::for_pack(scale, pack).art(1).0)
-    else {
-        return;
-    };
+    let density = Pen::for_pack(scale, pack).density();
     let wall = crate::outside::Wall {
         size: (layout.buf_w, layout.wall_band_h()),
         bays: layout.window_bays().collect(),

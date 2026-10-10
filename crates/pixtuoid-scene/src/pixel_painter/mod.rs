@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use crate::pack::OfficeArt;
+use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
@@ -256,7 +257,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     let contacts = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
     paint_shadows(
         ctx.buf,
-        ctx.shadows.cells(contacts, 1),
+        ctx.shadows.cells(contacts, Density::ONE),
         shadow_strength,
         ctx.theme.office.shadow,
     );
