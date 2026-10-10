@@ -329,7 +329,7 @@ pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
 pub(crate) fn snap_point_where(
     mask: &WalkableMask,
     p: Point,
-    fits: impl Fn(Point) -> bool,
+    mut fits: impl FnMut(Point) -> bool,
 ) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();

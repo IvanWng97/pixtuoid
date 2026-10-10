@@ -308,6 +308,11 @@ impl CreatureWalk {
         self.stance(now).is_some_and(|s| s.walking.is_some())
     }
 
+    /// Whether a pointer holds it.
+    pub(crate) fn carried(&self) -> bool {
+        matches!(self.phase, Phase::Carried { .. })
+    }
+
     /// Whether it has walked out.
     pub(crate) fn gone(&self) -> bool {
         matches!(self.phase, Phase::Gone)

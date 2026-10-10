@@ -4508,9 +4508,14 @@ mod tests {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let mut frame = empty_frame(&layout);
         let (cat, lobster) = (Point { x: 40, y: 70 }, Point { x: 110, y: 70 });
+        let row = |at, piece, frame| {
+            let h = crate::sim::pack_frame_size(&test_office(), piece, frame).h;
+            crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h)
+        };
         frame.pet = Some(crate::sim::PetPlacement {
             kind: crate::pet::PetKind::Cat,
             pos: cat,
+            sort_row: row(cat, PackPiece::CatWalk, 1),
             flip: true,
             anim_name: PackPiece::CatWalk,
             frame_idx: 1,
@@ -4518,7 +4523,7 @@ mod tests {
         });
         frame.mascots = vec![crate::sim::MascotPlacement {
             pos: lobster,
-            size: crate::layout::Size { w: 14, h: 12 },
+            sort_row: row(lobster, PackPiece::LobsterWalk, 0),
             anim_name: PackPiece::LobsterWalk,
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
@@ -4535,6 +4540,7 @@ mod tests {
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
+            sort_row: row(sick, PackPiece::LobsterWalk, 0),
             key: crate::creatures::openclaw_key("18790"),
             degraded: true,
             effects: Vec::new(),
@@ -4638,6 +4644,11 @@ mod tests {
         let cat = crate::sim::PetPlacement {
             kind: crate::pet::PetKind::Cat,
             pos: at,
+            sort_row: crate::layout::sort_row_at(
+                crate::layout::Pivot::Center,
+                at,
+                crate::sim::pack_frame_size(&pack, PackPiece::CatWalk, 0).h,
+            ),
             flip: false,
             anim_name: PackPiece::CatWalk,
             frame_idx: 0,
@@ -4715,12 +4726,11 @@ mod tests {
     }
 
     /// The pet and the gateway mascots stand as figures: each paints only
-    /// inside its span at every density, sorts on its feet's row as the
-    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
-    /// what rides on it straight after it; a degraded gateway's art is greyed.
+    /// inside its span at every density, sorts on the row the sim gave it,
+    /// faces as the sim turns it, grounds its shadow, and has what rides on it
+    /// straight after it; a degraded gateway's art is greyed.
     #[test]
     fn creatures_stand_as_figures_with_their_riders_after_them() {
-        use crate::layout::{Pivot, sort_row_at};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_office();
         let (layout, frame) = creatures();
@@ -4729,6 +4739,11 @@ mod tests {
             frame.pet.as_ref().map_or(0, |p| p.effects.len()),
             frame.mascots[0].effects.len(),
             0,
+        ];
+        let rows = [
+            frame.pet.as_ref().map(|p| p.sort_row),
+            Some(frame.mascots[0].sort_row),
+            Some(frame.mascots[1].sort_row),
         ];
         for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
@@ -4750,7 +4765,12 @@ mod tests {
             // The pet faces west; a mascot never turns.
             let facing = [Flip::Horizontal, Flip::None, Flip::None];
             let sickly = [false, false, true];
-            for (((&i, ridden), flip), sick) in creatures.iter().zip(riders).zip(facing).zip(sickly)
+            for ((((&i, ridden), flip), sick), row) in creatures
+                .iter()
+                .zip(riders)
+                .zip(facing)
+                .zip(sickly)
+                .zip(rows)
             {
                 let p = &pieces[i];
                 let PieceKind::Creature {
@@ -4774,10 +4794,11 @@ mod tests {
                     "at scale {s} {} casts no shadow",
                     art.sprite.name()
                 );
-                let h = crate::pack::densest_frame(&pack, art.sprite, art.frame, RenderScale::ONE)
-                    .logical
-                    .1;
-                assert_eq!(p.span.depth, sort_row_at(Pivot::Center, at, h));
+                assert_eq!(
+                    Some(p.span.depth),
+                    row,
+                    "at scale {s} {at:?} sorts off its row"
+                );
                 assert_eq!(
                     stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
                     None,

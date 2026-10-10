@@ -111,6 +111,19 @@ pub struct CharacterPlacement {
     pub seated: bool,
 }
 
+/// The row a figure in a pointer's hand sorts on: in front of the whole room.
+const IN_HAND_ROW: u16 = u16::MAX;
+
+/// The row a creature centred at `pos` sorts on, its frame `h` tall since the
+/// anims differ in height: its south row, or [`IN_HAND_ROW`] in hand.
+fn creature_row(pos: Point, h: u16, in_hand: bool) -> u16 {
+    if in_hand {
+        IN_HAND_ROW
+    } else {
+        crate::layout::sort_row_at(Pivot::Center, pos, h)
+    }
+}
+
 /// The office pet this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct PetPlacement {
@@ -118,6 +131,8 @@ pub(crate) struct PetPlacement {
     pub(crate) kind: PetKind,
     /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
+    /// The row it sorts on, both painters' ([`creature_row`]).
+    pub(crate) sort_row: u16,
     /// Whether to mirror the sprite horizontally.
     pub(crate) flip: bool,
     /// The sprite animation to draw.
@@ -144,8 +159,8 @@ impl PetPlacement {
 pub(crate) struct MascotPlacement {
     /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
-    /// The frame `pos` was fitted for.
-    pub(crate) size: Size,
+    /// The row it sorts on, both painters' ([`creature_row`]).
+    pub(crate) sort_row: u16,
     /// The sprite animation to draw.
     pub(crate) anim_name: Piece,
     /// The frame within `anim_name`.
@@ -549,15 +564,12 @@ fn pet_placement(
             )
         }
     };
-    let pos = on_canvas(
-        layout,
-        Pivot::Center,
-        at,
-        pack_frame_size(pack, anim_name, frame_idx),
-    );
+    let size = pack_frame_size(pack, anim_name, frame_idx);
+    let pos = on_canvas(layout, Pivot::Center, at, size);
     Some(PetPlacement {
         kind,
         pos,
+        sort_row: creature_row(pos, size.h, walk.carried()),
         flip,
         anim_name,
         frame_idx,
@@ -602,6 +614,8 @@ struct DrawnMascot {
     on_roster: bool,
     /// Its gateway's runs in flight.
     runs: u32,
+    /// [`CreatureWalk::carried`].
+    carried: bool,
 }
 
 /// Every gateway mascot in the scene's daemon roster, walking the people's
@@ -662,6 +676,7 @@ fn mascot_placements(
                 key,
                 stance,
                 runs: presence.in_flight_runs.len() as u32,
+                carried: walk.carried(),
             });
         }
     }
@@ -697,6 +712,7 @@ fn mascot_placements(
                 degraded: false,
                 on_roster: false,
                 runs: 0,
+                carried: walk.carried(),
             });
         }
     }
@@ -710,6 +726,7 @@ fn mascot_placements(
                  degraded,
                  on_roster,
                  runs,
+                 carried,
              }| {
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
@@ -730,7 +747,7 @@ fn mascot_placements(
                 let pos = on_canvas(ground.layout, Pivot::Center, at, size);
                 Some(MascotPlacement {
                     pos,
-                    size,
+                    sort_row: creature_row(pos, size.h, carried),
                     anim_name,
                     frame_idx,
                     key,
@@ -987,9 +1004,8 @@ pub(crate) fn resolve_characters(
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        // A figure in hand is in front of the whole room.
                         sort_row: if held {
-                            u16::MAX
+                            IN_HAND_ROW
                         } else {
                             top_left.y + WALKING_Y_OFF
                         },

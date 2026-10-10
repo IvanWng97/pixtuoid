@@ -2384,6 +2384,99 @@ fn a_lifted_agent_reserves_no_cell() {
     assert!(session.floor().ctx.overlay.is_empty(), "walking home");
 }
 
+/// A pet in hand is in front of the whole room, as an agent in hand is: held
+/// over a sitter's head, it is what the pointer finds there.
+#[test]
+fn a_lifted_pet_is_in_front_of_the_room() {
+    use crate::display::HoverTarget;
+    use crate::hit::SceneHit;
+    use crate::interact::{Figure, Gesture};
+    use crate::layout::{Bounds, Point};
+    let pack = Arc::new(crate::pack::test_office());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let mut scene = make_scene(1, 4);
+    let id = *scene.agents.keys().next().expect("one agent");
+    // At work, so it stays in its chair.
+    for slot in scene.agents.values_mut() {
+        slot.state = ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: pixtuoid_core::state::ToolKind::Edit,
+        };
+    }
+    let cat = crate::pet::Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "Mochi".into(),
+    };
+    let size = Size { w: 160, h: 96 };
+    let render = |session: &mut FloorSession, look, now| {
+        session
+            .render(
+                look,
+                crate::look::RenderInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs {
+                            pet: Some(&cat),
+                            petting: None,
+                        },
+                    },
+                    theme,
+                    size,
+                    place: crate::look::Place::default(),
+                    debug_walkable: false,
+                },
+            )
+            .expect("lays out");
+    };
+    let cell = |at: Point| Bounds {
+        x: at.x,
+        y: at.y,
+        width: 1,
+        height: 1,
+    };
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_060);
+    for look in [
+        crate::look::Look::Classic,
+        crate::look::Look::Cutaway {
+            scale: crate::render_scale::RenderScale::new(4).expect("nonzero"),
+            text: crate::look::WorldText::Baked,
+        },
+    ] {
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        render(&mut session, look, now);
+        let head = (0..size.h)
+            .flat_map(|y| (0..size.w).map(move |x| Point { x, y }))
+            .find(|&p| {
+                matches!(
+                    session.hit_at(cell(p)),
+                    Some(SceneHit::Figure(HoverTarget::Agent(a))) if *a == id
+                )
+            })
+            .expect("the sitter is drawn");
+        session.floor_mut().grip(&Gesture::Lift {
+            figure: Figure::Pet(crate::pet::PetKind::Cat),
+            at: head,
+        });
+        // Every frame of the carry, so it never flickers behind.
+        for paint in 1..=crate::anim::PAINT_FPS {
+            session.floor_mut().grip(&Gesture::Carry(head));
+            render(&mut session, look, now + FRAME * paint);
+            assert!(
+                matches!(
+                    session.hit_at(cell(head)),
+                    Some(SceneHit::Figure(HoverTarget::Pet(_)))
+                ),
+                "{look:?} paint {paint}, in hand over {head:?}: {:?}",
+                session.hit_at(cell(head))
+            );
+        }
+    }
+}
+
 /// A lifted pet hangs where the pointer is; set down, it rests on the floor
 /// there.
 #[test]

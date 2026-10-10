@@ -14,7 +14,7 @@ use crate::display::{Badge, Hover, HoverTarget, Hovers, TextRun};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station, sort_row_at};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station};
 use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
 
@@ -282,7 +282,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     for d in drawables {
         paint_drawable(&d.kind, &mut ctx.drawable_ctx());
         let Some(hover) = d.hover else { continue };
-        // Badged where hoverable: both need its frame drawn.
+        // Badged where hoverable: a badge, like a hover, needs its frame drawn.
         if let DrawableKind::Character {
             agent,
             label_anchor,
@@ -355,8 +355,7 @@ fn enqueue_characters<'a>(
     }
 }
 
-/// The office pet, y-sorted at its anim's south row, since the anims differ in
-/// height.
+/// The office pet, sorted on its [`sort_row`](crate::sim::PetPlacement::sort_row).
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: &'a crate::sim::PetPlacement,
@@ -365,7 +364,7 @@ fn enqueue_pet<'a>(
     let pos = pet.pos;
     let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
     drawables.push(Drawable {
-        sort_row: sort_row_at(Pivot::Center, pos, size.h),
+        sort_row: pet.sort_row,
         layer: Layer::Figure,
         hover: Some(Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
@@ -385,7 +384,7 @@ fn enqueue_gateway_mascots<'a>(
 ) {
     for m in mascots {
         drawables.push(Drawable {
-            sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
+            sort_row: m.sort_row,
             layer: Layer::Figure,
             hover: m.target().map(|target| {
                 Hover::figure(
