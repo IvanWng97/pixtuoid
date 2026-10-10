@@ -372,38 +372,11 @@ impl PieceKind {
 
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
-    /// ([`PieceKind::Window`]).
+    /// ([`PieceKind::Window`]). The oracle the span-bounds tests tell the two
+    /// apart by.
     #[cfg(test)]
     pub(crate) fn reads_under(&self) -> bool {
         matches!(self, PieceKind::WallSeg { .. })
-    }
-
-    /// Whether two builds of one office always give it one fingerprint: what a
-    /// cache of the room at rest may hold. The rest change with the sky, the
-    /// hour's lights or the people.
-    #[cfg(test)]
-    pub(crate) fn is_static(&self) -> bool {
-        match self {
-            PieceKind::WallSeg { .. }
-            | PieceKind::Hung { .. }
-            | PieceKind::Chair { .. }
-            | PieceKind::Prop { .. }
-            | PieceKind::PropBand { .. }
-            | PieceKind::Table { .. } => true,
-            // Frames that play, the elevator opening, the sign's levels, the time.
-            PieceKind::Animated { .. }
-            | PieceKind::Door { .. }
-            | PieceKind::Neon { .. }
-            | PieceKind::Clock { .. }
-            | PieceKind::Window { .. }
-            | PieceKind::Desk { .. }
-            | PieceKind::DeskFront { .. }
-            | PieceKind::DeskProp(_)
-            | PieceKind::Creature { .. }
-            | PieceKind::Character { .. }
-            | PieceKind::Effect(_)
-            | PieceKind::Text { .. } => false,
-        }
     }
 }
 

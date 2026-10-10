@@ -337,7 +337,7 @@ fn enqueue_characters<'a>(
         let pose = crate::character::SpritePose::of(p, agent, ctx.theme);
         drawables.push(Drawable {
             sort_row: p.sort_row,
-            layer: Layer::Person,
+            layer: Layer::Character,
             hover: Some(Hover::figure(
                 Pivot::TopLeft,
                 p.top_left,

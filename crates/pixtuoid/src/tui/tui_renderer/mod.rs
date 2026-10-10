@@ -550,9 +550,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
-        if !std::ptr::eq(self.chrome.theme, theme) {
-            self.chrome.theme = theme;
-        }
+        self.chrome.theme = theme;
     }
 
     /// Which weather every floor shows from the next frame on.

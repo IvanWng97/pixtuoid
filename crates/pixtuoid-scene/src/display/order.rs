@@ -23,7 +23,7 @@ pub(crate) enum Layer {
     /// paints it.
     Creature,
     /// A character.
-    Person,
+    Character,
     /// A fixture that hides a figure at its row, and a glass wall band, which
     /// composites over whoever stands behind it.
     Over,
@@ -152,7 +152,7 @@ mod tests {
                 Span::new(x, y, w, h, below).with_layer(match layer {
                     0 => Layer::Under,
                     1 => Layer::Creature,
-                    2 => Layer::Person,
+                    2 => Layer::Character,
                     _ => Layer::Over,
                 })
             },
