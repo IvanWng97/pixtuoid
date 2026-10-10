@@ -16,15 +16,6 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use pixtuoid_scene::theme;
 use ratatui::layout::Rect;
 
-/// The one URL launcher both painters call: `open::that` blocks on Linux until the
-/// browser exits (`xdg-open`), freezing frames, input and the quit arm on the event
-/// loop. A failed launch only logs: the click does nothing on screen.
-pub(crate) fn open_url(url: &str) {
-    if let Err(e) = open::that_detached(url) {
-        tracing::warn!(error = %e, url = ?url, "opening a url failed");
-    }
-}
-
 /// How many rows at the bottom of a surface of cells the status footer owns.
 pub(crate) const FOOTER_ROWS: u16 = 1;
 
@@ -239,7 +230,7 @@ pub(crate) fn modal_mouse(
         if !on_url {
             return ModalMouse::Inert;
         }
-        open_url(&widgets::release_url(env!("CARGO_PKG_VERSION")));
+        crate::open_url(&widgets::release_url(env!("CARGO_PKG_VERSION")));
         return ModalMouse::Took;
     }
     if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open {

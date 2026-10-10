@@ -389,7 +389,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                     }));
                 }
                 Some(HitAction::Open(url)) => {
-                    crate::panels::open_url(url);
+                    crate::open_url(url);
                 }
                 None => {}
             }

@@ -343,7 +343,7 @@ impl FloatingApp {
                 });
             }
             Some(HitAction::Open(url)) => {
-                crate::panels::open_url(url);
+                crate::open_url(url);
             }
             None => {}
         }
