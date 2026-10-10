@@ -20,15 +20,15 @@ use crate::walk::{
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::Pose;
-pub use pure::{
-    ENTRY_ANIMATION_MS, derive, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms,
-    takes_trip, waypoint_index_for_cycle,
-};
 pub(crate) use pure::{
-    STALE_RESUME_GAP_BASE_MS, WANDER_DWELL_EST_MS, derive_state_only, stale_resume_gap_ms,
+    ENTRY_ANIMATION_MS, STALE_RESUME_GAP_BASE_MS, WANDER_DWELL_EST_MS, derive, derive_state_only,
+    dwell_ms, stale_resume_gap_ms,
 };
 #[cfg(test)]
 pub(crate) use pure::{aimless_wander_seed, pick_aimless_dest};
+pub use pure::{
+    est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
+};
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
 pub(crate) use pure::{SpotClaims, distance_at, resolve_wander_target, typing_frame, walk_frame};
@@ -102,12 +102,12 @@ impl PoseHistory {
         Self::default()
     }
     /// Record where an agent was visually placed this frame.
-    pub fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
+    pub(crate) fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
         self.last.insert(agent_id, (anchor, now));
     }
     /// Drop entries for agents no longer in `scene`. Without this, every AgentId
     /// ever rendered leaks an entry for the process lifetime, per floor.
-    pub fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
+    pub(crate) fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
         self.last.retain(|id, _| scene.agents.contains_key(id));
     }
     /// Whether an entry exists for `agent_id`.

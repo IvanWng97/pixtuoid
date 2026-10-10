@@ -233,7 +233,7 @@ enum Entry {
 /// A palette of single-character keys, each with an index and a color: its
 /// own, or a ramp step of another key's.
 ///
-/// A pack holds its frames as these indices ([`Sprite::recolorable`]), so
+/// A pack holds its frames as these indices ([`Sprite::recolorable_at`]), so
 /// replacing a key's color recolors exactly the pixels drawn with that key and
 /// every ramp of it, even where another key has the same color.
 #[derive(Debug, Clone, Default)]
@@ -245,13 +245,13 @@ pub struct Palette {
 
 impl Palette {
     /// A palette with no keys.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Map `key` to `pixel` (opaque `Some(rgb)` or transparent `None`). A key
     /// that was a ramp becomes this fixed color.
-    pub fn insert(&mut self, key: char, pixel: Pixel) {
+    pub(crate) fn insert(&mut self, key: char, pixel: Pixel) {
         self.set(key, Entry::Color(pixel));
     }
 
@@ -261,7 +261,7 @@ impl Palette {
     /// It resolves only while `of` has a color of its own: a ramp of an
     /// undefined key or of another ramp is undefined, so resolution never
     /// chains or cycles.
-    pub fn insert_ramp(&mut self, key: char, of: char, level: i8) {
+    pub(crate) fn insert_ramp(&mut self, key: char, of: char, level: i8) {
         self.set(key, Entry::Ramp { of, level });
     }
 
@@ -278,7 +278,7 @@ impl Palette {
     }
 
     /// Look up `key`: `None` if it is undefined, a ramp that does not resolve
-    /// included ([`insert_ramp`](Self::insert_ramp)), else `Some(pixel)` (the
+    /// included (`insert_ramp`), else `Some(pixel)` (the
     /// pixel itself may be transparent).
     pub fn get(&self, key: char) -> Option<Pixel> {
         self.resolve(self.entry(key)?)
@@ -448,10 +448,10 @@ pub enum HeadView {
 
 impl HeadView {
     /// Every view.
-    pub const ALL: [HeadView; 4] = [Self::Front, Self::Back, Self::Side, Self::Crown];
+    pub(crate) const ALL: [HeadView; 4] = [Self::Front, Self::Back, Self::Side, Self::Crown];
 
     /// The name a head mark (`head.<name>`) and a `[hairstyles]` table call it by.
-    pub fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Front => "front",
             Self::Back => "back",
@@ -461,12 +461,12 @@ impl HeadView {
     }
 
     /// The view called `name`, if there is one.
-    pub fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|v| v.name() == name)
     }
 
     /// Its place in [`HeadView::ALL`].
-    pub fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         self as usize
     }
 }
@@ -481,12 +481,12 @@ pub struct HeadMark {
     /// The mark's column.
     pub x: u16,
     /// The mark's row.
-    pub y: u16,
+    pub(crate) y: u16,
 }
 
 impl HeadMark {
     /// The head `mark` places, where it is a `head.<view>` mark.
-    pub fn of(mark: &Mark) -> Option<Self> {
+    pub(crate) fn of(mark: &Mark) -> Option<Self> {
         let view = HeadView::from_name(mark.name().strip_prefix(HEAD_MARK)?)?;
         Some(Self {
             view,
@@ -602,7 +602,8 @@ impl Sprite {
 
     /// Frame `idx` as the palette indices a recolor resolves; `None` past the
     /// last frame.
-    pub fn recolorable(&self, idx: usize) -> Option<RecolorableFrame<'_>> {
+    #[cfg(test)]
+    pub(crate) fn recolorable(&self, idx: usize) -> Option<RecolorableFrame<'_>> {
         Some(RecolorableFrame {
             indexed: self.indexed.get(idx)?,
             palette: &self.palette,
@@ -610,7 +611,7 @@ impl Sprite {
     }
 }
 
-/// One frame of a [`Sprite`] as palette indices, from [`Sprite::recolorable`].
+/// One frame of a [`Sprite`] as palette indices, from [`Sprite::recolorable_at`].
 #[derive(Debug, Clone, Copy)]
 pub struct RecolorableFrame<'a> {
     indexed: &'a IndexedFrame,

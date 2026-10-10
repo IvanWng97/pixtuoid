@@ -10,11 +10,8 @@ impl<T: core::clone::Clone> pixtuoid_core::grid::Grid<T>
 pub fn pixtuoid_core::grid::Grid<T>::filled(u16, u16, T) -> Self
 impl<T: core::marker::Copy> pixtuoid_core::grid::Grid<T>
 pub fn pixtuoid_core::grid::Grid<T>::get_or(&self, u16, u16, T) -> T
-pub fn pixtuoid_core::grid::Grid<T>::resize_fill(&mut self, u16, u16, T)
 impl<T> pixtuoid_core::grid::Grid<T>
-pub fn pixtuoid_core::grid::Grid<T>::as_mut_slice(&mut self) -> &mut [T]
 pub fn pixtuoid_core::grid::Grid<T>::as_slice(&self) -> &[T]
-pub fn pixtuoid_core::grid::Grid<T>::from_vec(u16, u16, alloc::vec::Vec<T>) -> Self
 pub fn pixtuoid_core::grid::Grid<T>::get(&self, u16, u16) -> core::option::Option<&T>
 pub fn pixtuoid_core::grid::Grid<T>::set(&mut self, u16, u16, T)
 impl<T> pixtuoid_core::grid::Grid<T>
@@ -146,7 +143,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::codex::C
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::codex::CodexSource
 pub const pixtuoid_core::source::codex::SOURCE_NAME: &str
 pub fn pixtuoid_core::source::codex::codex_home() -> std::path::PathBuf
-pub fn pixtuoid_core::source::codex::codex_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::codex::decode_codex_line(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::copilot
 pub struct pixtuoid_core::source::copilot::CopilotSource
@@ -166,7 +162,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::copilot::CopilotSource
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::copilot::CopilotSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::copilot::CopilotSource
 pub const pixtuoid_core::source::copilot::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::copilot::copilot_home() -> std::path::PathBuf
 pub fn pixtuoid_core::source::copilot::decode_copilot_line(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::cursor
 pub const pixtuoid_core::source::cursor::SOURCE_NAME: &str
@@ -279,11 +274,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::daemon::PresenceMsg
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::daemon::PresenceMsg
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::PresenceMsg
 pub struct pixtuoid_core::source::daemon::PresenceTtl
-pub pixtuoid_core::source::daemon::PresenceTtl::busy_decay_ms: u64
-pub pixtuoid_core::source::daemon::PresenceTtl::down_remove_ms: u64
-pub pixtuoid_core::source::daemon::PresenceTtl::presence_ttl_ms: u64
-impl pixtuoid_core::source::daemon::PresenceTtl
-pub const pixtuoid_core::source::daemon::PresenceTtl::DEFAULT: pixtuoid_core::source::daemon::PresenceTtl
 impl core::clone::Clone for pixtuoid_core::source::daemon::PresenceTtl
 pub fn pixtuoid_core::source::daemon::PresenceTtl::clone(&self) -> pixtuoid_core::source::daemon::PresenceTtl
 impl core::cmp::Eq for pixtuoid_core::source::daemon::PresenceTtl
@@ -353,7 +343,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::decoder::TailActivity
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::decoder::TailActivity
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::decoder::TailActivity
 pub fn pixtuoid_core::source::decoder::decode_hook_payload(serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
-pub type pixtuoid_core::source::decoder::CwdExtractor = fn(&serde_json::value::Value) -> core::option::Option<std::path::PathBuf>
 pub type pixtuoid_core::source::decoder::DecodeResult<T> = core::result::Result<T, pixtuoid_core::source::decoder::DecodeError>
 pub type pixtuoid_core::source::decoder::IdDeriver = fn(&std::path::Path) -> alloc::string::String
 pub type pixtuoid_core::source::decoder::LineDecoder = fn(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
@@ -390,7 +379,7 @@ impl core::marker::Unpin for pixtuoid_core::source::drift::DriftKind
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::drift::DriftKind
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::drift::DriftKind
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::drift::DriftKind
-pub struct pixtuoid_core::source::drift::UnknownDriftKind(pub alloc::string::String)
+pub struct pixtuoid_core::source::drift::UnknownDriftKind(_)
 impl core::clone::Clone for pixtuoid_core::source::drift::UnknownDriftKind
 pub fn pixtuoid_core::source::drift::UnknownDriftKind::clone(&self) -> pixtuoid_core::source::drift::UnknownDriftKind
 impl core::cmp::Eq for pixtuoid_core::source::drift::UnknownDriftKind
@@ -438,9 +427,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::grok::GrokSource
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::grok::GrokSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::grok::GrokSource
 pub const pixtuoid_core::source::grok::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::grok::grok_cwd_from_path(&std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub fn pixtuoid_core::source::grok::grok_home() -> std::path::PathBuf
-pub fn pixtuoid_core::source::grok::grok_session_ended(&[u8]) -> bool
 pub mod pixtuoid_core::source::hermes
 pub const pixtuoid_core::source::hermes::SOURCE_NAME: &str
 pub fn pixtuoid_core::source::hermes::hermes_home() -> core::option::Option<std::path::PathBuf>
@@ -477,7 +464,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::hook::HookSocketListen
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::hook::HookSocketListener
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::hook::HookSocketListener
 pub struct pixtuoid_core::source::hook::SocketBusy
-pub pixtuoid_core::source::hook::SocketBusy::path: std::path::PathBuf
 impl core::error::Error for pixtuoid_core::source::hook::SocketBusy
 impl core::fmt::Debug for pixtuoid_core::source::hook::SocketBusy
 pub fn pixtuoid_core::source::hook::SocketBusy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -533,10 +519,6 @@ pub struct pixtuoid_core::source::jsonl::JsonlWatcher
 impl pixtuoid_core::source::jsonl::JsonlWatcher
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::new(std::path::PathBuf, alloc::string::String, pixtuoid_core::source::decoder::LineDecoder, pixtuoid_core::source::jsonl::SessionEndChecker) -> Self
 pub async fn pixtuoid_core::source::jsonl::JsonlWatcher::run(self, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
-pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_activity_recency(self, pixtuoid_core::source::jsonl::ActivityRecency) -> Self
-pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_cwd_deriver(self, pixtuoid_core::source::jsonl::CwdDeriver) -> Self
-pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_head_label(self, pixtuoid_core::source::jsonl::HeadLabel) -> Self
-pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_id_deriver(self, pixtuoid_core::source::decoder::IdDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_initial_window(self, core::time::Duration) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_label_deriver(self, pixtuoid_core::source::jsonl::LabelDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_liveness_probe(self, pixtuoid_core::source::jsonl::LivenessProbe) -> Self
@@ -552,10 +534,6 @@ impl !core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::jsonl::
 impl !core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::jsonl::JsonlWatcher
 pub struct pixtuoid_core::source::jsonl::ProbeSnapshot
 pub pixtuoid_core::source::jsonl::ProbeSnapshot::pid_of: std::collections::hash::map::HashMap<alloc::string::String, i32>
-impl pixtuoid_core::source::jsonl::ProbeSnapshot
-pub fn pixtuoid_core::source::jsonl::ProbeSnapshot::contains(&self, &str) -> bool
-pub fn pixtuoid_core::source::jsonl::ProbeSnapshot::ids(&self) -> impl core::iter::traits::iterator::Iterator<Item = &alloc::string::String>
-pub fn pixtuoid_core::source::jsonl::ProbeSnapshot::is_empty(&self) -> bool
 impl core::clone::Clone for pixtuoid_core::source::jsonl::ProbeSnapshot
 pub fn pixtuoid_core::source::jsonl::ProbeSnapshot::clone(&self) -> pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::default::Default for pixtuoid_core::source::jsonl::ProbeSnapshot
@@ -621,7 +599,6 @@ impl !core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::manager::S
 pub mod pixtuoid_core::source::omp
 pub struct pixtuoid_core::source::omp::OmpSource
 pub pixtuoid_core::source::omp::OmpSource::profile_sessions_roots: alloc::vec::Vec<std::path::PathBuf>
-pub pixtuoid_core::source::omp::OmpSource::sessions_root: std::path::PathBuf
 impl pixtuoid_core::source::omp::OmpSource
 pub fn pixtuoid_core::source::omp::OmpSource::default_paths() -> Self
 impl core::fmt::Debug for pixtuoid_core::source::omp::OmpSource
@@ -637,7 +614,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::omp::OmpSource
 impl !core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::omp::OmpSource
 impl !core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::omp::OmpSource
 pub const pixtuoid_core::source::omp::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::omp::decode_omp_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::omp::decode_omp_line(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::omp::omp_agent_dir() -> std::path::PathBuf
 pub fn pixtuoid_core::source::omp::omp_extensions_dir() -> std::path::PathBuf
@@ -1411,7 +1387,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Pack
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Pack
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pack
 pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
-pub const pixtuoid_core::sprite::format::PACK_MANIFEST: &str
 pub fn pixtuoid_core::sprite::format::density_variant_name(&str, pixtuoid_core::sprite::format::Density) -> alloc::string::String
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 #[non_exhaustive] pub enum pixtuoid_core::sprite::HeadView
@@ -1419,11 +1394,6 @@ pub pixtuoid_core::sprite::HeadView::Back
 pub pixtuoid_core::sprite::HeadView::Crown
 pub pixtuoid_core::sprite::HeadView::Front
 pub pixtuoid_core::sprite::HeadView::Side
-impl pixtuoid_core::sprite::HeadView
-pub const pixtuoid_core::sprite::HeadView::ALL: [pixtuoid_core::sprite::HeadView; 4]
-pub fn pixtuoid_core::sprite::HeadView::from_name(&str) -> core::option::Option<Self>
-pub fn pixtuoid_core::sprite::HeadView::index(self) -> usize
-pub fn pixtuoid_core::sprite::HeadView::name(self) -> &'static str
 impl core::clone::Clone for pixtuoid_core::sprite::HeadView
 pub fn pixtuoid_core::sprite::HeadView::clone(&self) -> pixtuoid_core::sprite::HeadView
 impl core::cmp::Eq for pixtuoid_core::sprite::HeadView
@@ -1472,9 +1442,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Frame
 #[non_exhaustive] pub struct pixtuoid_core::sprite::HeadMark
 pub pixtuoid_core::sprite::HeadMark::view: pixtuoid_core::sprite::HeadView
 pub pixtuoid_core::sprite::HeadMark::x: u16
-pub pixtuoid_core::sprite::HeadMark::y: u16
-impl pixtuoid_core::sprite::HeadMark
-pub fn pixtuoid_core::sprite::HeadMark::of(&pixtuoid_core::sprite::Mark) -> core::option::Option<Self>
 impl core::clone::Clone for pixtuoid_core::sprite::HeadMark
 pub fn pixtuoid_core::sprite::HeadMark::clone(&self) -> pixtuoid_core::sprite::HeadMark
 impl core::cmp::Eq for pixtuoid_core::sprite::HeadMark
@@ -1518,9 +1485,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Mark
 pub struct pixtuoid_core::sprite::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
-pub fn pixtuoid_core::sprite::Palette::insert(&mut self, char, pixtuoid_core::sprite::Pixel)
-pub fn pixtuoid_core::sprite::Palette::insert_ramp(&mut self, char, char, i8)
-pub fn pixtuoid_core::sprite::Palette::new() -> Self
 impl core::clone::Clone for pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::clone(&self) -> pixtuoid_core::sprite::Palette
 impl core::default::Default for pixtuoid_core::sprite::Palette
@@ -1611,7 +1575,6 @@ pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::
 pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
 pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
-pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 pub fn pixtuoid_core::sprite::Sprite::recolorable_at(&self, usize) -> pixtuoid_core::sprite::RecolorableFrame<'_>
 pub fn pixtuoid_core::sprite::Sprite::stride(&self) -> core::option::Option<core::num::nonzero::NonZeroU16>
 pub fn pixtuoid_core::sprite::Sprite::wrap(&self, usize) -> usize
@@ -1853,7 +1816,6 @@ pub pixtuoid_core::state::DaemonPresence::last_seen: std::time::SystemTime
 pub pixtuoid_core::state::DaemonPresence::liveness: pixtuoid_core::state::DaemonLiveness
 impl pixtuoid_core::state::DaemonPresence
 pub fn pixtuoid_core::state::DaemonPresence::display_state(&self) -> pixtuoid_core::state::DaemonState
-pub fn pixtuoid_core::state::DaemonPresence::is_busy(&self) -> bool
 impl core::clone::Clone for pixtuoid_core::state::DaemonPresence
 pub fn pixtuoid_core::state::DaemonPresence::clone(&self) -> pixtuoid_core::state::DaemonPresence
 impl core::fmt::Debug for pixtuoid_core::state::DaemonPresence
@@ -2038,7 +2000,6 @@ pub fn pixtuoid_core::walkable::OccupancyOverlay::add(&mut self, u16, u16, u16, 
 pub fn pixtuoid_core::walkable::OccupancyOverlay::blocks(&self, u16, u16) -> bool
 pub fn pixtuoid_core::walkable::OccupancyOverlay::clear(&mut self)
 pub fn pixtuoid_core::walkable::OccupancyOverlay::is_empty(&self) -> bool
-pub fn pixtuoid_core::walkable::OccupancyOverlay::len(&self) -> usize
 pub fn pixtuoid_core::walkable::OccupancyOverlay::new() -> Self
 pub fn pixtuoid_core::walkable::OccupancyOverlay::signature(&self) -> u64
 impl core::clone::Clone for pixtuoid_core::walkable::OccupancyOverlay
@@ -2374,11 +2335,8 @@ impl<T: core::clone::Clone> pixtuoid_core::grid::Grid<T>
 pub fn pixtuoid_core::grid::Grid<T>::filled(u16, u16, T) -> Self
 impl<T: core::marker::Copy> pixtuoid_core::grid::Grid<T>
 pub fn pixtuoid_core::grid::Grid<T>::get_or(&self, u16, u16, T) -> T
-pub fn pixtuoid_core::grid::Grid<T>::resize_fill(&mut self, u16, u16, T)
 impl<T> pixtuoid_core::grid::Grid<T>
-pub fn pixtuoid_core::grid::Grid<T>::as_mut_slice(&mut self) -> &mut [T]
 pub fn pixtuoid_core::grid::Grid<T>::as_slice(&self) -> &[T]
-pub fn pixtuoid_core::grid::Grid<T>::from_vec(u16, u16, alloc::vec::Vec<T>) -> Self
 pub fn pixtuoid_core::grid::Grid<T>::get(&self, u16, u16) -> core::option::Option<&T>
 pub fn pixtuoid_core::grid::Grid<T>::set(&mut self, u16, u16, T)
 impl<T> pixtuoid_core::grid::Grid<T>
@@ -2407,7 +2365,6 @@ pub fn pixtuoid_core::walkable::OccupancyOverlay::add(&mut self, u16, u16, u16, 
 pub fn pixtuoid_core::walkable::OccupancyOverlay::blocks(&self, u16, u16) -> bool
 pub fn pixtuoid_core::walkable::OccupancyOverlay::clear(&mut self)
 pub fn pixtuoid_core::walkable::OccupancyOverlay::is_empty(&self) -> bool
-pub fn pixtuoid_core::walkable::OccupancyOverlay::len(&self) -> usize
 pub fn pixtuoid_core::walkable::OccupancyOverlay::new() -> Self
 pub fn pixtuoid_core::walkable::OccupancyOverlay::signature(&self) -> u64
 impl core::clone::Clone for pixtuoid_core::walkable::OccupancyOverlay
@@ -2426,9 +2383,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::walkable::Occupancy
 pub struct pixtuoid_core::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
-pub fn pixtuoid_core::sprite::Palette::insert(&mut self, char, pixtuoid_core::sprite::Pixel)
-pub fn pixtuoid_core::sprite::Palette::insert_ramp(&mut self, char, char, i8)
-pub fn pixtuoid_core::sprite::Palette::new() -> Self
 impl core::clone::Clone for pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::clone(&self) -> pixtuoid_core::sprite::Palette
 impl core::default::Default for pixtuoid_core::sprite::Palette
@@ -2580,7 +2534,6 @@ pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::
 pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
 pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
-pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 pub fn pixtuoid_core::sprite::Sprite::recolorable_at(&self, usize) -> pixtuoid_core::sprite::RecolorableFrame<'_>
 pub fn pixtuoid_core::sprite::Sprite::stride(&self) -> core::option::Option<core::num::nonzero::NonZeroU16>
 pub fn pixtuoid_core::sprite::Sprite::wrap(&self, usize) -> usize

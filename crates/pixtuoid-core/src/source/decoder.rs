@@ -112,7 +112,7 @@ impl DecodeError {
 /// source's transcript (a foreign-shaped line — e.g. a codex-style
 /// `payload.cwd` inside a CC transcript — must not label the session with a
 /// foreign, identity-bearing cwd).
-pub type CwdExtractor = fn(&Value) -> Option<PathBuf>;
+pub(crate) type CwdExtractor = fn(&Value) -> Option<PathBuf>;
 
 /// Derives the opaque session-id string a transcript PATH keys its agent on —
 /// what the JSONL watcher's first-sight `SessionStart` carries, and therefore

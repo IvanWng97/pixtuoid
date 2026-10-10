@@ -528,8 +528,6 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
     let transcript = root.join(format!("rollout-2026-05-29T22-36-52-{uuid}.jsonl"));
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    // NO `.with_id_deriver`: the `codex` registry row IS the derivation. Wiring
-    // it here would pass even if the row and the watcher default diverged.
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
     });

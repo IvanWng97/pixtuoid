@@ -82,13 +82,13 @@ impl ToolIdKey {
 #[derive(Debug)]
 pub struct HookDecoding {
     /// The per-session AgentId key strategy, read by the shared arms only.
-    pub id_key: IdKey,
+    pub(crate) id_key: IdKey,
     /// The per-call tool id's wire name, read by the shared arms only.
     pub tool_id_key: ToolIdKey,
     /// The source's own decoder, dispatched FIRST — before any shared field
     /// requirement — so an alien envelope (no `session_id` at all) can still
     /// decode. `None` = ride the shared arms only.
-    pub custom: Option<HookCustom>,
+    pub(crate) custom: Option<HookCustom>,
 }
 
 /// Reducer-facing capability flags — stable facts about the source's wire
@@ -100,22 +100,22 @@ pub struct SourceCaps {
     /// a JSONL end marker — best-effort counts; "none of any kind" is the bar
     /// for `false`)? When false, the stale-sweep is the ONLY reaper a closed
     /// session ever gets.
-    pub has_exit_signal: bool,
+    pub(crate) has_exit_signal: bool,
     /// Does a live-but-swept session WALK BACK IN on the user's next prompt (a
     /// `UserPromptSubmit`-class event re-emitting `SessionStart`)? The safety
     /// precondition for the short idle reaper: its only false positive (a live
     /// session idle past the window) must self-heal.
-    pub resurrects_on_prompt: bool,
+    pub(crate) resurrects_on_prompt: bool,
     /// Are subagent delegations invisible on this source's event stream (a
     /// window in which the PARENT's own stream goes quiet)? When true, a Delegating slot's
     /// `last_event_at` freezes for the whole delegation, so the reducer gives it
     /// the Waiting-class stale window instead of sweeping mid-delegation.
-    pub delegations_are_hook_silent: bool,
+    pub(crate) delegations_are_hook_silent: bool,
 }
 
 impl SourceCaps {
     /// All-false caps for a `Daemon` source: it creates no `AgentSlot`s to reap.
-    pub const INERT_DAEMON: SourceCaps = SourceCaps {
+    pub(crate) const INERT_DAEMON: SourceCaps = SourceCaps {
         has_exit_signal: false,
         resurrects_on_prompt: false,
         delegations_are_hook_silent: false,
@@ -124,7 +124,7 @@ impl SourceCaps {
     /// The short-idle-reaper policy, derived: only safe when the sweep is the
     /// sole reaper (`!has_exit_signal`) AND the false positive self-heals
     /// (`resurrects_on_prompt`).
-    pub fn short_idle_reap(&self) -> bool {
+    pub(crate) fn short_idle_reap(&self) -> bool {
         !self.has_exit_signal && self.resurrects_on_prompt
     }
 }
@@ -159,7 +159,7 @@ pub struct SourceDescriptor {
     pub home_env: Option<&'static str>,
     /// What KIND of source this is. Consumers read through the accessors so the
     /// enum shape stays an internal detail.
-    pub kind: SourceKind,
+    pub(crate) kind: SourceKind,
 }
 
 /// The transcript half of an `Agent` row. Bundling the fns makes the
@@ -168,28 +168,31 @@ pub struct SourceDescriptor {
 #[derive(Debug)]
 pub struct Transcript {
     /// JSONL line decoder.
-    pub line_decoder: LineDecoder,
+    pub(crate) line_decoder: LineDecoder,
     /// How this source's transcript PATH becomes the session id its
     /// `SessionStart` is keyed on. Read by the JSONL watcher AND by the offline
     /// `harness::Drive` — ONE derivation, so a driven transcript keys exactly as
     /// production does. `default_id_from_path` is the path-keyed default.
-    pub id_from_path: IdDeriver,
+    pub(crate) id_from_path: IdDeriver,
     /// WHICH `.jsonl` files under this source's root are its transcripts. Read
     /// by the JSONL watcher AND by any offline driver that WALKS a tree — a
     /// census over the unfiltered set counts files production never reads.
     /// `accept_all_paths` is the admit-everything default.
-    pub path_filter: PathFilter,
+    #[cfg_attr(
+        not(any(feature = "native", feature = "harness")),
+        expect(dead_code, reason = "only a tree walk reads it")
+    )]
+    pub(crate) path_filter: PathFilter,
     /// First-sight cwd extractor for the walker's transcript head scan. The
     /// walker dispatches by the SCANNED source, so one source's shape is never
     /// tried against another's transcript.
-    pub cwd_extractor: CwdExtractor,
+    pub(crate) cwd_extractor: CwdExtractor,
 }
 
 /// How focus-jump resolves this source's OS pid — a DATA-only capability: this
 /// const table compiles to wasm, so a native-only probe FN POINTER can never
 /// live here (the probes stay in the BINARY's `focus::resolve_pid`). ONE source
-/// of truth for the hook stamp gate, the click-time probe dispatch and the
-/// doctor report bucketing.
+/// of truth for the hook stamp gate and the doctor report bucketing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusChannel {
     /// The shim RESOLVES the CLI's pid into `_pid` by walking past the runner's
@@ -211,7 +214,8 @@ pub enum FocusChannel {
 
 impl FocusChannel {
     /// Whether a hook-envelope `_pid` stamp is trustworthy for this source.
-    pub fn accepts_stamp(self) -> bool {
+    #[cfg(feature = "native")]
+    pub(crate) fn accepts_stamp(self) -> bool {
         matches!(self, FocusChannel::ShimStamp | FocusChannel::PluginStamp)
     }
 }
@@ -260,18 +264,19 @@ impl SourceDescriptor {
     }
 
     /// The first-sight cwd extractor (`None` for a hook-only agent or a daemon).
-    pub fn cwd_extractor(&self) -> Option<CwdExtractor> {
+    pub(crate) fn cwd_extractor(&self) -> Option<CwdExtractor> {
         self.transcript().map(|t| t.cwd_extractor)
     }
 
     /// The transcript path→session-id derivation (`None` without a transcript).
-    pub fn id_deriver(&self) -> Option<IdDeriver> {
+    pub(crate) fn id_deriver(&self) -> Option<IdDeriver> {
         self.transcript().map(|t| t.id_from_path)
     }
 
     /// Which `.jsonl` files are this source's transcripts (`None` without a
     /// transcript tree to walk).
-    pub fn path_filter(&self) -> Option<PathFilter> {
+    #[cfg(any(feature = "native", feature = "harness"))]
+    pub(crate) fn path_filter(&self) -> Option<PathFilter> {
         self.transcript().map(|t| t.path_filter)
     }
 
@@ -293,7 +298,7 @@ impl SourceDescriptor {
     }
 
     /// Reducer capability flags — an INERT all-false default for a daemon.
-    pub fn caps(&self) -> SourceCaps {
+    pub(crate) fn caps(&self) -> SourceCaps {
         match &self.kind {
             SourceKind::Agent { caps, .. } => *caps,
             SourceKind::Daemon { .. } => SourceCaps::INERT_DAEMON,
@@ -301,7 +306,7 @@ impl SourceDescriptor {
     }
 
     /// The daemon's presence decoder (`None` for an agent source).
-    pub fn presence_decoder(&self) -> Option<PresenceDecoder> {
+    pub(crate) fn presence_decoder(&self) -> Option<PresenceDecoder> {
         match &self.kind {
             SourceKind::Daemon { presence_decoder } => Some(*presence_decoder),
             SourceKind::Agent { .. } => None,
@@ -366,7 +371,8 @@ pub fn id_deriver_for(source: &str) -> IdDeriver {
 /// two-reader shape as [`id_deriver_for`]: an offline driver that walks a tree
 /// must select the SAME files or its census counts what production never reads.
 /// Admits everything for an unregistered source name.
-pub fn path_filter_for(source: &str) -> PathFilter {
+#[cfg(any(feature = "native", feature = "harness"))]
+pub(crate) fn path_filter_for(source: &str) -> PathFilter {
     descriptor_for(source)
         .and_then(|d| d.path_filter())
         .unwrap_or(accept_all_paths)
@@ -1037,6 +1043,7 @@ mod tests {
         );
     }
 
+    #[cfg(any(feature = "native", feature = "harness"))]
     #[test]
     fn path_filter_for_rejects_each_sources_own_foreign_siblings() {
         use std::path::Path;

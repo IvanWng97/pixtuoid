@@ -31,7 +31,7 @@ pub struct Theme {
     /// Theme id — the `--theme` value and the registry lookup key.
     pub name: &'static str,
     /// Light vs dark classification.
-    pub kind: ThemeKind,
+    pub(crate) kind: ThemeKind,
     /// Room-shell colors (walls, carpet, window frame).
     pub surface: SurfaceColors,
     /// Office-fixture colors (cubicles, runner, skyline, clock, shadow).
@@ -39,15 +39,15 @@ pub struct Theme {
     /// Sky, sun/moon, and interior-light colors.
     pub lighting: LightingColors,
     /// Furniture colors (desks, rugs, aquarium, token-meter paper).
-    pub furniture: FurnitureColors,
+    pub(crate) furniture: FurnitureColors,
     /// Transient-effect cue colors (glow, sleep z, steam, dust, bubble).
-    pub effects: EffectColors,
+    pub(crate) effects: EffectColors,
     /// Name-badge, tooltip, and neon-brand UI colors.
     pub ui: UiColors,
     /// Per-tool monitor-glow hues.
     pub tool_glow: ToolGlowColors,
     /// Corridor-appliance colors (vending, printer, coat rack).
-    pub appliance: ApplianceColors,
+    pub(crate) appliance: ApplianceColors,
     /// Per-CLI agent-badge hues.
     pub source: SourceColors,
 }
@@ -86,15 +86,15 @@ pub struct SurfaceColors {
 #[derive(Debug, Clone)]
 pub struct OfficeColors {
     /// Frosted-glass room-divider highlight / gradient base.
-    pub room_wall_trim_light: Rgb,
+    pub(crate) room_wall_trim_light: Rgb,
     /// Room-divider door jambs + dark trim (also the aquarium frame).
-    pub room_wall_trim_dark: Rgb,
+    pub(crate) room_wall_trim_dark: Rgb,
     /// Corridor runner-rug base.
-    pub runner_base: Rgb,
+    pub(crate) runner_base: Rgb,
     /// Corridor runner-rug stripe.
-    pub runner_stripe: Rgb,
+    pub(crate) runner_stripe: Rgb,
     /// Corridor runner-rug edge border.
-    pub runner_edge: Rgb,
+    pub(crate) runner_edge: Rgb,
     /// Neon wall-board panel background.
     pub neon_panel_bg: Rgb,
     /// City-skyline building, shaded side.
@@ -106,41 +106,41 @@ pub struct OfficeColors {
     /// Unlit city-skyline window.
     pub city_dark_window: Rgb,
     /// Wall-clock rim.
-    pub clock_rim: Rgb,
+    pub(crate) clock_rim: Rgb,
     /// Wall-clock face.
-    pub clock_face: Rgb,
+    pub(crate) clock_face: Rgb,
     /// Wall-clock hands.
-    pub clock_hand: Rgb,
+    pub(crate) clock_hand: Rgb,
     /// Drop-shadow tint under sprites and furniture.
-    pub shadow: Rgb,
+    pub(crate) shadow: Rgb,
 }
 
 /// Sky gradients, sun/moon disc, light spill, and night tint.
 #[derive(Debug, Clone)]
 pub struct LightingColors {
     /// Daytime window-sky gradient near the horizon.
-    pub day_sky_a: Rgb,
+    pub(crate) day_sky_a: Rgb,
     /// Daytime window-sky gradient near the top.
-    pub day_sky_b: Rgb,
+    pub(crate) day_sky_b: Rgb,
     /// Night window-sky gradient near the horizon.
     pub night_sky_a: Rgb,
     /// Night window-sky gradient near the top.
     pub night_sky_b: Rgb,
     /// Twilight (dawn/dusk) warm-shift near the horizon.
-    pub twilight_a: Rgb,
+    pub(crate) twilight_a: Rgb,
     /// Twilight (dawn/dusk) warm-shift near the top.
-    pub twilight_b: Rgb,
+    pub(crate) twilight_b: Rgb,
     /// Warm sunlight spill on the floor and walls.
-    pub sun_spill: Rgb,
+    pub(crate) sun_spill: Rgb,
     /// Lounge floor-lamp glow halo.
-    pub floor_lamp_halo: Rgb,
+    pub(crate) floor_lamp_halo: Rgb,
     /// Per-desk task-lamp light — WARM in every theme, or the night's warm-against-cold read is lost.
     pub desk_lamp: Rgb,
     /// Night-time interior darkening tint.
-    pub night_tint: Rgb,
+    pub(crate) night_tint: Rgb,
     /// The sun disc's core color — the halo ring reuses this SAME hue at lower
     /// alpha, and it must read warm.
-    pub sun_core: Rgb,
+    pub(crate) sun_core: Rgb,
     /// The moon disc's core color (lit side; the dark limb is the fixed
     /// `MOON_SHADOW`, not per-theme). Must read cool.
     pub moon_core: Rgb,
@@ -150,73 +150,73 @@ pub struct LightingColors {
 #[derive(Debug, Clone)]
 pub struct FurnitureColors {
     /// Desk/table wood surface.
-    pub wood_top: Rgb,
+    pub(crate) wood_top: Rgb,
     /// Desk/table wood edge trim (darker).
-    pub wood_trim: Rgb,
+    pub(crate) wood_trim: Rgb,
     /// Lounge area-rug field (main fill).
-    pub rug_field: Rgb,
+    pub(crate) rug_field: Rgb,
     /// Lounge area-rug border trim.
-    pub rug_trim: Rgb,
+    pub(crate) rug_trim: Rgb,
     /// Lounge area-rug accent detail.
-    pub rug_accent: Rgb,
+    pub(crate) rug_accent: Rgb,
     /// Coffee-table magazine cover.
-    pub magazine: Rgb,
+    pub(crate) magazine: Rgb,
     /// Coffee-table magazine spine/trim.
-    pub magazine_trim: Rgb,
+    pub(crate) magazine_trim: Rgb,
     /// Chair wood trim.
-    pub chair_trim: Rgb,
+    pub(crate) chair_trim: Rgb,
     /// Desk coffee-cup body.
-    pub coffee_cup: Rgb,
+    pub(crate) coffee_cup: Rgb,
     /// Desk coffee-cup shaded side.
-    pub coffee_cup_shadow: Rgb,
+    pub(crate) coffee_cup_shadow: Rgb,
     /// Aquarium water body (deep) + its lit surface row.
-    pub tank_water: Rgb,
+    pub(crate) tank_water: Rgb,
     /// Aquarium surface highlight line; also the water-cooler glug bubble.
-    pub tank_water_line: Rgb,
+    pub(crate) tank_water_line: Rgb,
     /// The two fish (frame/cabinet reuse `room_wall_trim_dark` / `wood_*`).
-    pub tank_fish: Rgb,
+    pub(crate) tank_fish: Rgb,
     /// The second aquarium fish (kept off the lobster's carapace reds).
-    pub tank_fish_alt: Rgb,
+    pub(crate) tank_fish_alt: Rgb,
     /// Aquarium plant.
-    pub tank_plant: Rgb,
+    pub(crate) tank_plant: Rgb,
     /// Token-meter paper tower: the sheet face.
-    pub paper: Rgb,
+    pub(crate) paper: Rgb,
     /// Token-meter paper ream-shading (the every-other-row band).
-    pub paper_shade: Rgb,
+    pub(crate) paper_shade: Rgb,
 }
 
 /// Transient effect cues (glow, sleep z, steam, dust, bubble).
 #[derive(Debug, Clone)]
 pub struct EffectColors {
     /// Lit monitor bezel on an active screen.
-    pub monitor_frame_lit: Rgb,
+    pub(crate) monitor_frame_lit: Rgb,
     /// A powered-but-quiet screen's glass — a back-turned desk shows it after dark whether or not anyone is at it.
-    pub monitor_idle: Rgb,
+    pub(crate) monitor_idle: Rgb,
     /// Floating "z" of a sleeping agent.
-    pub sleep_z: Rgb,
+    pub(crate) sleep_z: Rgb,
     /// Steam wisp off a fresh coffee cup.
-    pub coffee_steam: Rgb,
+    pub(crate) coffee_steam: Rgb,
     /// Dust puff kicked up while walking.
-    pub walking_dust: Rgb,
+    pub(crate) walking_dust: Rgb,
     /// Overhead bubble on a waiting agent.
-    pub waiting_bubble: Rgb,
+    pub(crate) waiting_bubble: Rgb,
 }
 
 /// Per-tool monitor-glow hues (the screen glow while a tool runs).
 #[derive(Debug, Clone)]
 pub struct ToolGlowColors {
     /// Glow while an Edit/Write tool runs.
-    pub edit: Rgb,
+    pub(crate) edit: Rgb,
     /// Glow while a Read tool runs.
-    pub read: Rgb,
+    pub(crate) read: Rgb,
     /// Glow while a Bash tool runs.
-    pub bash: Rgb,
+    pub(crate) bash: Rgb,
     /// Glow while an Agent/subagent tool runs.
     pub agent: Rgb,
     /// Glow while a Grep/search tool runs.
-    pub grep: Rgb,
+    pub(crate) grep: Rgb,
     /// Glow for any other tool.
-    pub default: Rgb,
+    pub(crate) default: Rgb,
 }
 
 impl ToolGlowColors {
@@ -258,12 +258,12 @@ pub struct UiColors {
     /// swatch.
     pub neon_brand: Rgb,
     /// Neon wall-board ★ star-CTA accent.
-    pub neon_star: Rgb,
+    pub(crate) neon_star: Rgb,
     /// The neon sign's hue while an agent waits on the user. The hue change IS the
     /// signal, so it must read as a different light from [`Self::neon_brand`]
     /// (`the_neon_alert_hue_is_a_different_light_in_every_theme`) — which a
     /// theme's `label_waiting` is not always.
-    pub neon_alert: Rgb,
+    pub(crate) neon_alert: Rgb,
 }
 
 /// Corridor appliance colors (vending machine, printer, coat rack) — each
@@ -271,27 +271,27 @@ pub struct UiColors {
 #[derive(Debug, Clone)]
 pub struct ApplianceColors {
     /// Vending machine chassis (the dark box body).
-    pub vending_body: Rgb,
+    pub(crate) vending_body: Rgb,
     /// Vending front sign / accent strip — the theme's signature accent.
-    pub vending_panel: Rgb,
+    pub(crate) vending_panel: Rgb,
     /// Four distinct drink-bottle colors behind the glass.
-    pub vending_drinks: [Rgb; 4],
+    pub(crate) vending_drinks: [Rgb; 4],
     /// Warm small detail (coin-slot trim).
-    pub vending_trim: Rgb,
+    pub(crate) vending_trim: Rgb,
     /// Darkest recess / slot.
-    pub vending_dark: Rgb,
+    pub(crate) vending_dark: Rgb,
     /// Printer chassis — a light neutral.
-    pub printer_body: Rgb,
+    pub(crate) printer_body: Rgb,
     /// Printer lid / top — darker.
-    pub printer_top: Rgb,
+    pub(crate) printer_top: Rgb,
     /// Scanner glass — a cool tint.
-    pub printer_glass: Rgb,
+    pub(crate) printer_glass: Rgb,
     /// Paper stack — near-white.
-    pub printer_paper: Rgb,
+    pub(crate) printer_paper: Rgb,
     /// Output tray — mid neutral.
-    pub printer_tray: Rgb,
+    pub(crate) printer_tray: Rgb,
     /// Three hanging coats on the coat rack.
-    pub coats: [Rgb; 3],
+    pub(crate) coats: [Rgb; 3],
 }
 
 /// Per-source badge hues — one color per registered source, drawn as a leading
@@ -304,36 +304,37 @@ pub struct SourceColors {
     /// Codex badge hue.
     pub codex: Rgb,
     /// Reasonix badge hue.
-    pub reasonix: Rgb,
+    pub(crate) reasonix: Rgb,
     /// Antigravity badge hue.
-    pub antigravity: Rgb,
+    pub(crate) antigravity: Rgb,
     /// CodeWhale badge hue.
-    pub codewhale: Rgb,
+    pub(crate) codewhale: Rgb,
     /// OpenCode badge hue.
-    pub opencode: Rgb,
+    pub(crate) opencode: Rgb,
     /// Copilot badge hue.
-    pub copilot: Rgb,
+    pub(crate) copilot: Rgb,
     /// Cursor badge hue.
-    pub cursor: Rgb,
+    pub(crate) cursor: Rgb,
     /// OpenClaw daemon badge hue.
-    pub openclaw: Rgb,
+    pub(crate) openclaw: Rgb,
     /// Hermes badge hue.
-    pub hermes: Rgb,
+    pub(crate) hermes: Rgb,
     /// omp badge hue.
-    pub omp: Rgb,
+    pub(crate) omp: Rgb,
     /// Grok badge hue.
-    pub grok: Rgb,
+    pub(crate) grok: Rgb,
     /// Kimi badge hue.
-    pub kimi: Rgb,
+    pub(crate) kimi: Rgb,
     /// DeepSeek Harness badge hue.
-    pub dsh: Rgb,
+    pub(crate) dsh: Rgb,
 }
 
 impl SourceColors {
     /// All badge hues in declaration order — the ONE enumeration the legibility
     /// guard and the count-pin test share, so a new source can't silently escape
     /// the per-theme distinctness check.
-    pub fn all(&self) -> [Rgb; 14] {
+    #[cfg(test)]
+    pub(crate) fn all(&self) -> [Rgb; 14] {
         [
             self.claude_code,
             self.codex,

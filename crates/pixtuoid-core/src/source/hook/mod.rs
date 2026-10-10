@@ -37,7 +37,7 @@ pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 #[derive(Debug)]
 pub struct SocketBusy {
     /// The socket/pipe path a live owner already holds.
-    pub path: PathBuf,
+    pub(crate) path: PathBuf,
 }
 
 impl std::fmt::Display for SocketBusy {

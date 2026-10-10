@@ -284,7 +284,7 @@ pub struct SceneLayout {
     /// [`Self::home_desk`]).
     pub home_desks: Vec<Point>,
     /// Facing per home desk, parallel to [`Self::home_desks`].
-    pub desk_facings: Vec<Facing>,
+    pub(crate) desk_facings: Vec<Facing>,
     /// Named stops (lounge seats, appliances, meeting slots) agents walk to.
     pub waypoints: Vec<Waypoint>,
     /// Placed potted plants.
@@ -293,9 +293,7 @@ pub struct SceneLayout {
     pub wall_decor: Vec<WallDecorItem>,
     /// Decor items placed in the aisles between 2×2 desk pods.
     pub pod_decor: Vec<PodDecorItem>,
-    /// The lounge vignette as ONE unit — `None` when it doesn't fit. Read the
-    /// individual pieces via the accessors ([`Self::couch_sprite_center`],
-    /// [`Self::floor_lamp`], …).
+    /// The lounge vignette as ONE unit — `None` when it doesn't fit.
     pub lounge: Option<Lounge>,
     /// The office entry door's top-left cell, in the window wall's last slot.
     pub door: Point,
@@ -312,7 +310,7 @@ pub struct SceneLayout {
     /// The openings the wall resolver cut into `room_walls` — the painter
     /// draws door frames from these instead of re-inferring gaps from
     /// segment adjacency.
-    pub doorways: Vec<Doorway>,
+    pub(crate) doorways: Vec<Doorway>,
     /// `room_walls` as the mask stamps them and the painters draw them, their
     /// doorways framed: built once, here.
     pub(crate) wall_pieces: Vec<WallPiece>,
@@ -321,14 +319,14 @@ pub struct SceneLayout {
     pub top_margin: u16,
     /// The full-width horizontal corridor below the desk pods — the A\* router's
     /// preferred zone and the pet/mascot path; `None` when it doesn't fit.
-    pub corridor: Option<Bounds>,
+    pub(crate) corridor: Option<Bounds>,
     /// Per-pixel walkability mask — the ground footprint every obstacle stamps,
     /// the surface routing runs over.
     pub walkable: WalkableMask,
     /// Coarse-cell reachable component (the walkable area an agent can A\*-route
     /// to) — consumed by `approach_point` to prefer a *reachable* approach side
     /// over a merely-walkable-but-walled-off one.
-    pub reachable: ReachSet,
+    pub(crate) reachable: ReachSet,
 }
 
 /// Integer percentage of `v`, floor semantics. Computed in u32: a bare
@@ -374,7 +372,7 @@ pub(crate) const DESK_LEG_ROWS: u16 = 2;
 
 /// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
 /// only `DESK_FOOT_H` deep.
-pub const DESK_H: u16 = 6;
+pub(crate) const DESK_H: u16 = 6;
 
 const _: () = assert!(
     DESK_H + 2 == DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS,
@@ -457,12 +455,12 @@ const MIN_DUAL_MEETING_H: u16 = 80;
 pub(crate) const POD_SIDE: u16 = 2;
 /// Gap between two desks inside the same pod — big enough that each desk
 /// reads as its own workstation, not a merged blob.
-pub const INTRA_POD_GAP_X: u16 = 12;
+pub(crate) const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
 /// [`INTRA_POD_GAP_X`]); sets the pod's inner height. Rows step by
 /// `DESK_H + this`, and that STEP must stay EVEN or the pod's two rows land on
 /// different half-block parities — so retuning either side needs both checked.
-pub const INTRA_POD_GAP_Y: u16 = 6;
+pub(crate) const INTRA_POD_GAP_Y: u16 = 6;
 const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct. Deliberately > the N-S gap: screens are
@@ -556,7 +554,7 @@ impl SceneLayout {
     }
 
     /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).
-    pub fn desk_facing_at(&self, pos: Point) -> Facing {
+    pub(crate) fn desk_facing_at(&self, pos: Point) -> Facing {
         self.home_desks
             .iter()
             .position(|&d| d == pos)
@@ -577,7 +575,7 @@ impl SceneLayout {
     /// The visible top window-wall band height in px (`compute` names the same
     /// quantity `top_wall_h`). Post-construction render sites read it here so
     /// the derivation lives once.
-    pub fn wall_band_h(&self) -> u16 {
+    pub(crate) fn wall_band_h(&self) -> u16 {
         self.top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
     }
 
@@ -589,37 +587,40 @@ impl SceneLayout {
 
     /// Couch sprite centre (middle of the 3 seats) — `Some` iff the lounge
     /// vignette fits.
-    pub fn couch_sprite_center(&self) -> Option<Point> {
+    #[cfg(test)]
+    pub(crate) fn couch_sprite_center(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.couch_center)
     }
 
     /// The lounge floor lamp — `Some` iff the vignette fits.
-    pub fn floor_lamp(&self) -> Option<Point> {
+    pub(crate) fn floor_lamp(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.floor_lamp)
     }
 
     /// The lounge side table — `Some` iff the vignette fits.
-    pub fn lounge_side_table(&self) -> Option<Point> {
+    #[cfg(test)]
+    pub(crate) fn lounge_side_table(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.side_table)
     }
 
     /// The aquarium centre — `Some` only when the vignette fits AND the
     /// east-clearance gate against the elevator door passes.
-    pub fn fish_tank(&self) -> Option<Point> {
+    #[cfg(test)]
+    pub(crate) fn fish_tank(&self) -> Option<Point> {
         self.lounge.as_ref().and_then(|l| l.fish_tank)
     }
 
     /// The pantry counter's size, or the `COMPACT_COUNTER` fallback
     /// when no pantry exists — `approach_point`'s signature needs SOME
     /// size even on pantry-less floors, where it is never consulted.
-    pub fn pantry_counter_size(&self) -> Size {
+    pub(crate) fn pantry_counter_size(&self) -> Size {
         self.pantry.map_or(COMPACT_COUNTER, |p| p.counter_size)
     }
 
     /// Where an agent's sprite RENDERS when it visits furniture `kind` at `pos`
     /// (the walk goal for an obstacle, the seat cell for a seat), on the side
     /// nearest `origin` facing `facing`.
-    pub fn stand_point(
+    pub(crate) fn stand_point(
         &self,
         kind: WaypointKind,
         pos: Point,
@@ -640,7 +641,7 @@ impl SceneLayout {
     /// A\*'s goal cell when an agent at `origin` visits furniture `kind` at
     /// `pos` facing `facing`. Callers MUST honor its `== pos` "no valid
     /// approach" sentinel — skip the furniture this cycle rather than route to it.
-    pub fn approach_point(
+    pub(crate) fn approach_point(
         &self,
         kind: Furniture,
         pos: Point,

@@ -371,9 +371,9 @@ pub(crate) fn wall_pieces(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Doorway {
     /// One endpoint of the opening (pixel-space).
-    pub start: Point,
+    pub(crate) start: Point,
     /// The other endpoint (pixel-space).
-    pub end: Point,
+    pub(crate) end: Point,
 }
 
 /// Doorway width in ABSOLUTE pixels — NOT a percentage, which shrinks to nothing

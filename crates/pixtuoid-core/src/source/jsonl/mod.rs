@@ -95,8 +95,7 @@ struct SourceDecoders {
 ///
 /// Every id in the watcher must be derived from a path folded through
 /// [`walk::id_path`], or the consumer computes it in a different id-space than
-/// the producer. That invariant used to be a comment, and 3 of 7 call sites
-/// drifted un-folded under it (#832, #861). The fn pointer now lives in a module the sibling
+/// the producer. The fn pointer lives in a module the sibling
 /// `walk`/`liveness`/`unclaim` modules are not inside, so an un-folded
 /// derivation is a compile error rather than a review catch.
 mod folded {
@@ -252,14 +251,14 @@ impl JsonlWatcher {
 
     /// Supply this source's [`ActivityRecency`] — what the first-sight gate
     /// measures the initial window against, in place of the file mtime.
-    pub fn with_activity_recency(mut self, recency: ActivityRecency) -> Self {
+    pub(crate) fn with_activity_recency(mut self, recency: ActivityRecency) -> Self {
         self.activity_recency = recency;
         self
     }
 
-    /// Test-only seam: shrinks the 60s `scan_root` poll backstop so the poll
-    /// arm is testable without waiting a minute per tick. Production never
-    /// calls this; the default stays [`DEFAULT_POLL_INTERVAL`].
+    /// Test-only seam: shrinks the `scan_root` poll backstop so the poll arm is
+    /// testable without waiting a [`DEFAULT_POLL_INTERVAL`] per tick.
+    /// Production never calls this.
     #[doc(hidden)]
     pub fn with_poll_interval(mut self, interval: Duration) -> Self {
         self.poll_interval = interval;
@@ -275,15 +274,6 @@ impl JsonlWatcher {
         self
     }
 
-    /// Override the [`IdDeriver`] the source's registry row supplies. No
-    /// in-tree source needs this — the row IS each CLI's derivation, and
-    /// overriding it here would re-open the drift the row closed. It exists for
-    /// a watcher over a source with no row (a test harness naming its own).
-    pub fn with_id_deriver(mut self, id_derive: IdDeriver) -> Self {
-        self.id_derive = folded::FoldedDeriver::new(id_derive);
-        self
-    }
-
     /// Override the display-label derivation (default: the source-prefixed cwd
     /// basename via [`LabelDeriver`]). Needed by the sources whose transcript
     /// PATH names the agent better than its cwd does — **CC** (subagents) and
@@ -295,20 +285,20 @@ impl JsonlWatcher {
 
     /// Derive a first-sight cwd from the transcript PATH when the content
     /// head-scan yields none (default: never). See [`CwdDeriver`].
-    pub fn with_cwd_deriver(mut self, cwd_derive: CwdDeriver) -> Self {
+    pub(crate) fn with_cwd_deriver(mut self, cwd_derive: CwdDeriver) -> Self {
         self.cwd_derive = cwd_derive;
         self
     }
 
     /// Name the session from ONE decoded head line, ahead of the cwd-basename
     /// deriver (default: never). See [`HeadLabel`].
-    pub fn with_head_label(mut self, head_label: HeadLabel) -> Self {
+    pub(crate) fn with_head_label(mut self, head_label: HeadLabel) -> Self {
         self.head_label = Some(head_label);
         self
     }
 
-    /// Override the [`PathFilter`] the source's registry row supplies. Like
-    /// [`Self::with_id_deriver`], no in-tree source needs it.
+    /// Override the [`PathFilter`] the source's registry row supplies; no
+    /// in-tree source needs it.
     pub fn with_path_filter(mut self, path_filter: PathFilter) -> Self {
         self.path_filter = path_filter;
         self

@@ -21,7 +21,6 @@ use crate::footer::FooterFloor;
 /// One floor of a painter's office: its raster and sim stores, and what its
 /// last frame laid out, occupied and flashed, so a painter reads the frame it
 /// just drew.
-#[doc(hidden)]
 #[derive(Debug)]
 pub(crate) struct FloorView {
     pub(super) floor: PerFloor,
@@ -135,7 +134,7 @@ impl FloorNav {
     }
 
     /// The one floor on screen: none during a slide.
-    pub fn showing(&self) -> Option<usize> {
+    pub(crate) fn showing(&self) -> Option<usize> {
         self.transition.is_none().then_some(self.current)
     }
 
@@ -146,7 +145,7 @@ impl FloorNav {
 
     /// Slide to `target`, unless it is the floor showing or a slide is under
     /// way; whether a slide began.
-    pub fn navigate(&mut self, target: usize, now: SystemTime) -> bool {
+    pub(crate) fn navigate(&mut self, target: usize, now: SystemTime) -> bool {
         if target == self.current || self.transition.is_some() {
             return false;
         }
@@ -155,18 +154,20 @@ impl FloorNav {
     }
 
     /// The floor above, of `n_floors`, while no slide is under way.
-    pub fn up(&self, n_floors: usize) -> Option<usize> {
+    #[cfg(test)]
+    pub(crate) fn up(&self, n_floors: usize) -> Option<usize> {
         (self.transition.is_none() && self.current + 1 < n_floors).then_some(self.current + 1)
     }
 
     /// The floor below, while no slide is under way.
-    pub fn down(&self) -> Option<usize> {
+    #[cfg(test)]
+    pub(crate) fn down(&self) -> Option<usize> {
         (self.transition.is_none() && self.current > 0).then(|| self.current - 1)
     }
 
     /// End a slide at once on its destination, of `n_floors`: a cancel (a
     /// resize) must not silently revert a navigation.
-    pub fn cancel(&mut self, n_floors: usize) {
+    pub(crate) fn cancel(&mut self, n_floors: usize) {
         if let Some(tr) = self.transition.take() {
             self.current = tr.to_floor.min(n_floors.max(1) - 1);
         }
@@ -175,7 +176,7 @@ impl FloorNav {
     /// The navigation over `n_floors` at `now`: a slide to or from a floor
     /// gone is dropped, a finished one lands, and the floor showing stays in
     /// the building.
-    pub fn settle(&mut self, n_floors: usize, now: SystemTime) {
+    pub(crate) fn settle(&mut self, n_floors: usize, now: SystemTime) {
         self.transition
             .take_if(|tr| tr.from_floor >= n_floors || tr.to_floor >= n_floors);
         if let Some(tr) = self.transition.take_if(|tr| tr.is_done(now)) {
@@ -227,8 +228,11 @@ fn floor_world<'a>(
 
 /// The footer's floor breadcrumb for floor `current` of `n_floors`, among
 /// `total_agents`; `None` in a one-floor office.
-#[doc(hidden)]
-pub fn footer_floor(current: usize, n_floors: usize, total_agents: usize) -> Option<FooterFloor> {
+pub(crate) fn footer_floor(
+    current: usize,
+    n_floors: usize,
+    total_agents: usize,
+) -> Option<FooterFloor> {
     (n_floors > 1).then_some(FooterFloor {
         current: current + 1,
         total_floors: n_floors,
@@ -600,8 +604,11 @@ impl OfficeSession {
         super::project_floor_scene(scene, self.footer_floor_index())
     }
 
-    /// Whether the floor showing's last frame changes between beats:
-    /// [`FloorSession::moves_off_beat`](super::FloorSession::moves_off_beat).
+    /// Whether the floor showing's last frame changes between beats: someone
+    /// walks, or the sign's or the room's light is mid-fade. Everything else a
+    /// painter draws holds one frame per beat
+    /// (`both_painters_paint_one_frame_per_beat`), so a painter may sleep to the
+    /// next beat only while this is false.
     pub fn moves_off_beat(&self) -> bool {
         self.views
             .get(self.nav.current())

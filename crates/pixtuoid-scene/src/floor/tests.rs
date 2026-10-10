@@ -541,7 +541,7 @@ fn coffee_record_stamps_only_new_carriers_and_evict_follows_the_scene() {
     let id = AgentId::from_parts("claude-code", "coffee-test");
     let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let t1 = t0 + std::time::Duration::from_secs(60);
-    let mut coffee = CoffeeState::new();
+    let mut coffee = CoffeeState::default();
     coffee.record([id], t0);
     assert_eq!(coffee.map().get(&id), Some(&t0), "a new carrier is stamped");
     coffee.record([id], t1);
@@ -559,7 +559,7 @@ fn coffee_record_stamps_only_new_carriers_and_evict_follows_the_scene() {
 fn coffee_second_trip_after_steam_window_restamps() {
     let id = AgentId::from_parts("claude-code", "coffee-refetch");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut coffee = CoffeeState::new();
+    let mut coffee = CoffeeState::default();
     coffee.record([id], t0);
     let within = t0 + Duration::from_secs(CoffeeState::STEAM_WINDOW_SECS - 1);
     coffee.record([id], within);
@@ -584,7 +584,7 @@ fn coffee_record_keeps_stamp_on_a_backward_clock_step() {
     // regression because their `duration_since` never errs.
     let id = AgentId::from_parts("claude-code", "coffee-backclock");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut coffee = CoffeeState::new();
+    let mut coffee = CoffeeState::default();
     coffee.record([id], t0);
     coffee.record([id], t0 - Duration::from_secs(10));
     assert_eq!(
@@ -1002,7 +1002,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(4, 16);
     let occupied = std::collections::HashSet::new();
-    let mut obs = AudioObserver::new();
+    let mut obs = AudioObserver::default();
     let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
     let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
@@ -1026,7 +1026,7 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(4, 16); // agents live on floor 0
     let printer = |i: usize| (i == 0 || i == 1).then_some(crate::layout::WaypointKind::Printer);
-    let mut obs = AudioObserver::new();
+    let mut obs = AudioObserver::default();
 
     let _ = obs.frame(
         &scene,
@@ -1063,7 +1063,7 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     let empty = make_scene(0, 16);
     let one = make_scene(1, 16);
     let occ = std::collections::HashSet::new();
-    let mut obs = AudioObserver::new();
+    let mut obs = AudioObserver::default();
 
     let _ = obs.frame(&empty, &occ, |_| None, FloorMeta::ground(), now);
     let arrival = obs.frame(&one, &occ, |_| None, FloorMeta::ground(), now);

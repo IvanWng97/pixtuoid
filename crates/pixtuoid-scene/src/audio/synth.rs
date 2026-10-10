@@ -1,7 +1,6 @@
 //! The procedural sound recipes. Every constant is a measured/ratified value
-//! from the Phase 0 audition spec (docs/superpowers/specs/
-//! 2026-07-16-ambient-sound-phase0/); change them THERE first (re-audition),
-//! then mirror here. All functions are PURE sample-buffer generators (mono f32
+//! from the Phase 0 audition (the `procedural-lofi` skill); re-audition a
+//! change there first, then mirror it here. All functions are PURE sample-buffer generators (mono f32
 //! @ 44_100 Hz) run once at startup — playback never synthesizes.
 
 use super::dsp::{NoiseStream, SAMPLE_RATE, bandpass, lowpass, shaped_noise_loop};
@@ -39,7 +38,7 @@ fn normalize(buf: &mut [f32], peak: f32) {
 /// One mechanical-keyboard stroke — the BRIGHT office clack, most of its energy
 /// in 1-4kHz. The ASMR-lore deep thock measured OPPOSITE to the owner's
 /// reference, so don't retune this darker.
-pub fn keystroke(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn keystroke(rng: &mut NoiseStream) -> Vec<f32> {
     let d = 0.05;
     let n = n_samples(d);
     let f_lo = 1250.0 + 450.0 * rng.unit();
@@ -82,7 +81,7 @@ fn midi_freq(m: f32) -> f32 {
 }
 
 /// Door chime — a DESCENDING ding-dong (E5 → C5), warm harmonic bells.
-pub fn door_chime() -> Vec<f32> {
+pub(crate) fn door_chime() -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(2.0)];
     let tau = std::f32::consts::TAU;
     for &(at, m, g) in &[(0.0f32, 76.0f32, 0.8f32), (0.42, 72.0, 1.0)] {
@@ -104,7 +103,7 @@ pub fn door_chime() -> Vec<f32> {
     out
 }
 
-pub fn printer_whir(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn printer_whir(rng: &mut NoiseStream) -> Vec<f32> {
     let dur = 1.5;
     let n = n_samples(dur);
     let mut buf = vec![0.0f32; n];
@@ -151,7 +150,7 @@ pub fn printer_whir(rng: &mut NoiseStream) -> Vec<f32> {
 }
 
 /// Vending machine: mechanism click → beat → the can DROPS.
-pub fn vending_drop(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn vending_drop(rng: &mut NoiseStream) -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(0.7)];
     let cn = n_samples(0.03);
     let raw_c: Vec<f32> = (0..cn).map(|_| rng.norm()).collect();
@@ -205,14 +204,14 @@ const GENTLE_RAIN_BANDS: [(f32, f32, f32); 9] = [
 const BED_LOOP_SAMPLES: usize = 1 << 19;
 
 /// The rain WASH only — audible foreground drops are scattered at runtime from
-/// [`rain_drop`]'s pool, so rain never repeats.
+/// `rain_drop`'s pool, so rain never repeats.
 pub fn rain_bed(rng: &mut NoiseStream) -> Vec<f32> {
     shaped_noise_loop(BED_LOOP_SAMPLES, &GENTLE_RAIN_BANDS, rng)
 }
 
 /// One audible raindrop for the runtime scatter pool: dull plop on wood/soil,
 /// water plip, or bright ping on metal/glass.
-pub fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
     let d = 0.10;
     let n = n_samples(d);
     let kind = rng.unit();
@@ -248,7 +247,7 @@ const CRACKLE_POPS_PER_SEC: f32 = 0.18;
 /// The vinyl/room texture bed: tape hiss + a faint warm room hum + sparse soft
 /// crackle. Its crackle is per-boot random ON PURPOSE — unpitched, so variation
 /// is a feature; everything melodic is frozen in `score`.
-pub fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
     let n = BED_LOOP_SAMPLES;
     let raw: Vec<f32> = (0..n).map(|_| rng.norm()).collect();
     let hiss = lowpass(&raw, 3800.0);
@@ -380,7 +379,7 @@ fn hat(rng: &mut NoiseStream, open: bool) -> Vec<f32> {
 }
 
 #[cfg(test)]
-pub fn stem_pad() -> Vec<f32> {
+pub(crate) fn stem_pad() -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     let mut buf = vec![0.0f32; n_samples(score::loop_secs())];
     for bar in 0..score::LOOP_BARS {
@@ -412,7 +411,7 @@ pub fn stem_pad() -> Vec<f32> {
 }
 
 #[cfg(test)]
-pub fn stem_sparkle() -> Vec<f32> {
+pub(crate) fn stem_sparkle() -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(score::loop_secs())];
     for &(beats, note, vel) in &score::SPARKLE_SCORE {
         place(&mut buf, &ep_pluck(note, 1.6, vel), beats * beat_s(), 1.0);
@@ -423,7 +422,7 @@ pub fn stem_sparkle() -> Vec<f32> {
 }
 
 #[cfg(test)]
-pub fn stem_keys() -> Vec<f32> {
+pub(crate) fn stem_keys() -> Vec<f32> {
     let mut buf = vec![0.0f32; n_samples(score::loop_secs())];
     for &(beats, note, vel) in &score::KEYS_SCORE {
         place(&mut buf, &ep_pluck(note, 0.9, vel), beats * beat_s(), 1.0);
@@ -436,7 +435,7 @@ pub fn stem_keys() -> Vec<f32> {
 /// Kick/snare/swung-hat groove. Hat velocities are the frozen score's; each
 /// hit's NOISE content is fresh per call.
 #[cfg(test)]
-pub fn stem_drums(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn stem_drums(rng: &mut NoiseStream) -> Vec<f32> {
     let swing = 0.10 * beat_s();
     let mut buf = vec![0.0f32; n_samples(score::loop_secs())];
     for bar in 0..score::LOOP_BARS {
@@ -601,7 +600,7 @@ const NIGHT_PAD_SUB_GAIN: f32 = 3.2;
 /// Night pad: chords + the SUB-BASS floor in ONE buffer, so the harmonic floor
 /// moves as one — the FROZEN anchor predates the bass stem and keeps its pins.
 #[cfg(test)]
-pub fn night_pad() -> Vec<f32> {
+pub(crate) fn night_pad() -> Vec<f32> {
     night_pad_core(
         &score::NIGHT_CHORDS,
         night_bar_s(),
@@ -699,13 +698,13 @@ fn events_stem_voiced(
 }
 
 #[cfg(test)]
-pub fn night_keys() -> Vec<f32> {
+pub(crate) fn night_keys() -> Vec<f32> {
     let (dur, cutoff, peak) = lane_recipe(Mood::Night, 2);
     night_events_stem(&score::NIGHT_KEYS, dur, cutoff, peak)
 }
 
 #[cfg(test)]
-pub fn night_sparkle() -> Vec<f32> {
+pub(crate) fn night_sparkle() -> Vec<f32> {
     let (dur, cutoff, peak) = lane_recipe(Mood::Night, 1);
     night_events_stem(&score::NIGHT_SPARKLE, dur, cutoff, peak)
 }
@@ -721,7 +720,7 @@ fn drum_hit(rng: &mut NoiseStream, kind: score::DrumKind) -> Vec<f32> {
 }
 
 #[cfg(test)]
-pub fn night_drums(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn night_drums(rng: &mut NoiseStream) -> Vec<f32> {
     let (cutoff, drive, peak) = lane_recipe(Mood::Night, 3);
     drums_core(
         score::night_loop_secs(),
@@ -759,7 +758,7 @@ const NIGHT_TEXTURE_SPLICE_S: f32 = 0.03;
 /// kick-duck BAKED IN — pre-multiplying the frozen kick envelope keeps it
 /// phase-locked with the drums by construction, no runtime sidechain machinery.
 #[cfg(test)]
-pub fn night_texture(rng: &mut NoiseStream) -> Vec<f32> {
+pub(crate) fn night_texture(rng: &mut NoiseStream) -> Vec<f32> {
     night_texture_core(score::night_loop_secs(), &score::NIGHT_KICK_TIMES, rng)
 }
 

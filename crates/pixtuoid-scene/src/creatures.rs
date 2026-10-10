@@ -515,7 +515,7 @@ pub struct GatewayCard {
 impl GatewayCard {
     /// `key`'s card in `scene`; `None` where it is absent or its source has no
     /// mascot.
-    pub fn of(scene: &SceneState, key: &DaemonInstanceKey) -> Option<Self> {
+    pub(crate) fn of(scene: &SceneState, key: &DaemonInstanceKey) -> Option<Self> {
         let def = gateway_mascot_def(key.source())?;
         let presence = scene.daemon(key.source(), key.instance())?;
         let state = presence.display_state();

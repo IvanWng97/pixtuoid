@@ -2,7 +2,7 @@
 //! the frame shows, then a click or a drag. A painter turns its own events
 //! into [`Pointer::down`] / [`Pointer::moved`] / [`Pointer::up`] in layout
 //! units and carries out the [`Gesture`]s; what a click does is
-//! [`SceneHit::action`]'s, and a drag lifts the figure under the press.
+//! `SceneHit::action`'s, and a drag lifts the figure under the press.
 
 use std::time::SystemTime;
 
@@ -39,7 +39,7 @@ pub enum Figure {
 
 impl Figure {
     /// The figure `target` shows.
-    pub fn of(target: &HoverTarget) -> Self {
+    pub(crate) fn of(target: &HoverTarget) -> Self {
         match target {
             HoverTarget::Agent(id) => Self::Agent(*id),
             &HoverTarget::Pet(PetHover { kind, .. }) => Self::Pet(kind),
@@ -88,7 +88,7 @@ pub struct GripFloor(Option<usize>);
 impl GripFloor {
     /// The floor `gesture` goes to as `nav` shows them; `None` for a click,
     /// or with nothing lifted.
-    pub fn of(&mut self, gesture: &Gesture, nav: &crate::floor::FloorNav) -> Option<usize> {
+    pub(crate) fn of(&mut self, gesture: &Gesture, nav: &crate::floor::FloorNav) -> Option<usize> {
         match gesture {
             Gesture::Lift { .. } => {
                 self.0 = nav.showing();

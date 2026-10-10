@@ -29,7 +29,7 @@ pub const SOURCE_NAME: &str = "codex";
 /// Trailing canonical UUID (`8-4-4-4-12`) of a `rollout-<ts>-<UUID>.jsonl`
 /// filename. Equals the hook payload's `session_id`, so hook and JSONL events
 /// coalesce. Falls back to the full stem if no trailing UUID is present.
-pub fn codex_id_from_path(path: &Path) -> String {
+pub(crate) fn codex_id_from_path(path: &Path) -> String {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     // `.get()` (not `&stem[..]`): this runs on every file under the watched
     // tree, and a byte split landing mid-codepoint would panic.
@@ -129,7 +129,7 @@ pub(crate) const TURN_CONTEXT: &str = "turn_context";
 const SANDBOX_PERMISSIONS_FIELD: &str = "sandbox_permissions";
 const REQUIRE_ESCALATED: &str = "require_escalated";
 
-/// The escalation pair this decoder keys on. Exported because the check is a
+/// The escalation pair this decoder keys on. Listed because the check is a
 /// BOOLEAN: a rename makes it silently `false`, and `false` is a legitimate
 /// answer, so no breadcrumb can exist here — the upstream watch is the only
 /// signal. Pinned by `escalated_function_call_is_waiting`.

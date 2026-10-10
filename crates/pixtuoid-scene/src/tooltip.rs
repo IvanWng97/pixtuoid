@@ -58,8 +58,8 @@ impl TipTone {
 /// One tone-tagged text run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TipSpan {
-    pub text: String,
-    pub tone: TipTone,
+    pub(crate) text: String,
+    pub(crate) tone: TipTone,
 }
 
 impl TipSpan {
@@ -94,7 +94,7 @@ pub enum TipAnchor {
 /// A tooltip: its rows, top to bottom, and where it opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tooltip {
-    pub rows: Vec<TipRow>,
+    pub(crate) rows: Vec<TipRow>,
     pub anchor: TipAnchor,
 }
 
@@ -171,12 +171,12 @@ const CARD_PAD: u16 = 1;
 /// The fewest cells between a heading's two runs.
 const HEADING_GAP: u16 = 2;
 /// The narrowest an agent's card is, in cells.
-pub const MIN_CARD_W: u16 = 20;
+pub(crate) const MIN_CARD_W: u16 = 20;
 /// The line a [`TipRow::Rule`] draws, a cell at a time.
 const RULE: &str = "\u{2500}";
 
 /// Where a card of `card` cells opens by the pointer at `pointer` inside
-/// `area`, all in cells: an agent's card (at least [`MIN_CARD_W`] wide) below
+/// `area`, all in cells: an agent's card (at least `MIN_CARD_W` wide) below
 /// the pointer, flipping above when it would cross the bottom; a label
 /// above, flipping below when it would cross the top; either just right of
 /// the pointer, flipping left when it would cross the right edge. The card

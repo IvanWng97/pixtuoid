@@ -10,8 +10,8 @@ use crate::state::{ActivityState, AgentSlot, SceneState, ToolKind, fsm, scope};
 
 #[doc(hidden)]
 pub use crate::state::correlation::{
-    CHILD_END_LEDGER_TTL, CHILD_END_RELINK_TTL, DRAINED_TASK_TOMBSTONE_TTL,
-    HOOK_SESSION_END_TOMBSTONE_TTL, HOOK_WINS_WINDOW, PROOF_OF_LIFE_TTL,
+    CHILD_END_LEDGER_TTL, CHILD_END_RELINK_TTL, HOOK_SESSION_END_TOMBSTONE_TTL, HOOK_WINS_WINDOW,
+    PROOF_OF_LIFE_TTL,
 };
 
 /// How long to keep an exiting agent's slot alive after `SessionEnd` so the

@@ -5,7 +5,7 @@
 //! seam — its hooks are in-process TS extension modules — so the hook plane
 //! is a pixtuoid-owned bridge extension
 //! (`pixtuoid/src/install/omp_extension.ts`) whose payloads
-//! [`decode_omp_hook_payload`] claims (#951). Wire shape: upstream
+//! `decode_omp_hook_payload` claims (#951). Wire shape: upstream
 //! `packages/coding-agent/src/session/` (transcript) and `src/extensibility/`
 //! (extension events).
 
@@ -871,7 +871,7 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// # Errors
 ///
 /// Never: a malformed or unknown payload decodes to `vec![]`; the `Result` is the hook-decoder signature.
-pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
     };

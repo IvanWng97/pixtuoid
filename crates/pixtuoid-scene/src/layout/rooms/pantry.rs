@@ -48,9 +48,9 @@ pub struct PantryRoom {
     /// Size of the pantry counter sprite: `LARGE_COUNTER` when the pantry is
     /// wide enough, else `COMPACT_COUNTER`. The renderer reads this to
     /// pick which sprite to paint (`pantry` vs `pantry_small`).
-    pub counter_size: Size,
+    pub(crate) counter_size: Size,
     /// Kitchen-island body centre.
-    pub kitchen_island: Option<Point>,
+    pub(crate) kitchen_island: Option<Point>,
 }
 
 /// Vertical position of the pantry counter as a percent of the room height.
@@ -135,10 +135,9 @@ impl PantryRoom {
 
     /// The water cooler's sprite box against the pantry's east side, clear of
     /// the counter, or `None` when the room can't fit it or it gives way
-    /// (`clear_of`). THE one authority `paint_water_cooler` AND the binary's
-    /// hover hit-test both read, so the drawn sprite and its hover box can't
-    /// drift across the crate boundary.
-    pub fn water_cooler_rect(&self) -> Option<Bounds> {
+    /// (`clear_of`). THE one authority `paint_water_cooler` AND the hover
+    /// roster both read, so the drawn sprite and its hover box can't drift.
+    pub(crate) fn water_cooler_rect(&self) -> Option<Bounds> {
         /// Columns between the cooler's east edge and the room's.
         const EAST_GAP: u16 = 3;
         /// Rows from the room's top to just past the cooler's base.
@@ -161,7 +160,7 @@ impl PantryRoom {
     /// or `None` when the room can't fit it or it gives way (`clear_of`). Shared
     /// placement authority for `paint_trash_bin` and the hover hit-test — see
     /// [`Self::water_cooler_rect`].
-    pub fn trash_bin_rect(&self) -> Option<Bounds> {
+    pub(crate) fn trash_bin_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Gated first: `b.height - 14` must not run below the gate.
         if b.height <= 20 {

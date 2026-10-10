@@ -82,7 +82,7 @@ pub struct CharacterPlacement {
     /// Index into [`SimFrame::agents`] for this character.
     pub agent_idx: usize,
     /// The row it sorts on (breath-independent).
-    pub sort_row: u16,
+    pub(crate) sort_row: u16,
     /// The sprite animation to blit (e.g. `"seated"`, `"walking"`).
     pub anim_name: Piece,
     /// The frame within `anim_name` to draw this tick.
@@ -92,23 +92,23 @@ pub struct CharacterPlacement {
     /// Where its name badge hangs: the top-centre of the frame `top_left` was
     /// fitted for, without the breath, held clear of the art of the desk it sits
     /// at.
-    pub label_anchor: Point,
+    pub(crate) label_anchor: Point,
     /// Whether to mirror the sprite horizontally.
-    pub flip_x: bool,
+    pub(crate) flip_x: bool,
     /// The glow decision for this character (paint maps it to a color).
-    pub glow: CharacterGlow,
+    pub(crate) glow: CharacterGlow,
     /// What rides on it this tick, in paint order.
     pub(crate) effects: Vec<Effect>,
     /// Whether `top_left` takes the idle breath: a figure at rest does, a walker's
     /// stride is its own motion.
-    pub breathes: bool,
+    pub(crate) breathes: bool,
     /// The home desk this placement is SEATED AT, in logical units — `None` for
     /// anyone not sitting at one (walking, at a waypoint, standing). Carried
     /// because `top_left` is already PROJECTED and cannot yield it back.
-    pub seat_desk: Option<Point>,
+    pub(crate) seat_desk: Option<Point>,
     /// Whether this figure sits on furniture — a desk's chair, a couch, a sofa
     /// or a meeting chair — which grounds it in place of a shadow.
-    pub seated: bool,
+    pub(crate) seated: bool,
 }
 
 /// The office pet this tick.
@@ -223,26 +223,26 @@ pub struct SimFrame {
     /// The authoritative routed pose per home-desk agent this tick (`None` =
     /// no renderable pose). Unread by paint BY DESIGN;
     /// `floor::FloorSession::step` is the lib-side consumer.
-    pub poses: HashMap<AgentId, Option<Pose>>,
+    pub(crate) poses: HashMap<AgentId, Option<Pose>>,
     /// Per-desk "occupant is actually seated right now" (drives screen glow +
     /// ceiling halos; exiting agents absent by construction).
-    pub seated_agents: HashMap<FloorLocalDeskIndex, bool>,
+    pub(crate) seated_agents: HashMap<FloorLocalDeskIndex, bool>,
     /// Fully resolved character sprites for this tick, in agent order.
     pub characters: Vec<CharacterPlacement>,
     /// Smoothed indoor-lighting level from `VacancyDim::tick`.
-    pub indoor_scale: f32,
+    pub(crate) indoor_scale: f32,
     /// The neon sign's light from `NeonState::tick`.
     pub(crate) neon: crate::floor::NeonLevels,
     /// Whether that light is a starved tube's catch.
     pub(crate) neon_stutter: bool,
     /// Active speech bubbles after this tick's venue update.
-    pub chitchat_bubbles: Vec<ChitchatBubble>,
+    pub(crate) chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agents observed walking back with coffee this tick — the caller
     /// persists them into its `CoffeeState`.
-    pub new_coffee_carriers: Vec<AgentId>,
+    pub(crate) new_coffee_carriers: Vec<AgentId>,
     /// Waypoint indices with an occupant this tick — drives the appliance
     /// feedback animations.
-    pub occupied_waypoints: std::collections::HashSet<usize>,
+    pub(crate) occupied_waypoints: std::collections::HashSet<usize>,
     /// The office pet this tick; `None` on a floor without one, or where
     /// [`FloorInputs::pets`] brings none.
     pub(crate) pet: Option<PetPlacement>,

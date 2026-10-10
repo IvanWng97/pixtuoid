@@ -1429,7 +1429,7 @@ fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)
 }
 
 /// The file a pack directory's manifest is read from.
-pub const PACK_MANIFEST: &str = "pack.toml";
+pub(crate) const PACK_MANIFEST: &str = "pack.toml";
 
 /// A `Pack` from in-memory strings: its manifest and each frame file it names.
 ///
@@ -1441,8 +1441,7 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
 }
 
 /// The one-frame sprite [`fill_pack_manifest`] draws every piece it adds in.
-#[doc(hidden)]
-pub const FILLER_SPRITE: (&str, &str) = ("filler.sprite", "@frame 0\n~");
+pub(crate) const FILLER_SPRITE: (&str, &str) = ("filler.sprite", "@frame 0\n~");
 
 /// The palette keys [`fill_pack_manifest`] adds: the filler's, then one per
 /// [`Material`] and the character outline's.
@@ -1455,8 +1454,7 @@ const FILLER_KEYS: [char; 9] = ['~', '^', '`', '|', '{', '}', '<', '>', '='];
 /// # Errors
 ///
 /// If `pack_toml` is not TOML.
-#[doc(hidden)]
-pub fn fill_pack_manifest(pack_toml: &str) -> Result<String> {
+pub(crate) fn fill_pack_manifest(pack_toml: &str) -> Result<String> {
     use toml::{Table, Value};
     let mut manifest: Table = pack_toml
         .parse()

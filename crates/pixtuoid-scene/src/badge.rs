@@ -33,7 +33,7 @@ impl BadgeTone {
     /// This tone's theme color role — the SINGLE authority every label painter
     /// shares. The `hovered` near-white highlight is deliberately NOT a
     /// `BadgeTone`; it stays a per-painter surface choice.
-    pub fn rgb(self, theme: &Theme) -> Rgb {
+    pub(crate) fn rgb(self, theme: &Theme) -> Rgb {
         match self {
             BadgeTone::Exiting => theme.ui.label_exiting,
             BadgeTone::Active => theme.ui.label_active,

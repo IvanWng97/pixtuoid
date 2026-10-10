@@ -709,7 +709,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// A refused frame steps nothing, but the door's clamp still keeps time, as
-    /// [`step_floor`](pixtuoid_scene::floor::step_floor) keeps it for a stepped one.
+    /// `step_floor` keeps it for a stepped one.
     fn rest_floor(&mut self, now: SystemTime) {
         if let Some((floor, _)) = self.session.floor_mut(self.session.nav().current()) {
             floor.ctx.recompute_door_anim_max_ms(now);
