@@ -990,6 +990,7 @@ gen-icons-check:
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
+    .venv/bin/python3 scripts/gen-pix-icons.py --selftest
     .venv/bin/python3 scripts/gen-pix-icons.py --check
 
 # scripts/gen-media.py's docstring says what `--check` compares. The README's

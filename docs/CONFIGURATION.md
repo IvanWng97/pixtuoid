@@ -26,7 +26,7 @@ kind = "dog"        # name omitted → "Office Dog"
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
+| `theme` | `"normal"` | Color theme — `pixtuoid run --help` lists the built-in themes. |
 | `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
 | `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. Terminal graphics need macOS or Linux; on Windows `run` and `doctor` stay classic. `pixtuoid doctor` shows what your terminal supports. |
 | `motion` | `"auto"` | How much of the office's ambient life moves — flickers, twinkles, idle wandering, lightning. `full` moves all of it; `calm` plays it at a quarter of the pace, with a quarter of the repaints; `still` holds it still and flashes no lightning, for reduced motion. Agents still walk where they're going. `auto` is `full`, except `calm` over SIXEL or iTerm2 graphics, inside tmux or over ssh; the floating window's `auto` is `full`. An unknown value is ignored with a warning. |

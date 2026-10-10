@@ -1,8 +1,8 @@
 """The README's pixel art kit: the office palette, a dot-matrix font and the sprite pack, drawn as SVG path runs.
 
 Shared by `star-history.py` (the star chart), `bmc-button.py` (the Buy Me a
-Coffee button) and `gen-banner.py` (the README banner); their selftests exercise
-it.
+Coffee button), `gen-banner.py` (the README banner) and `gen-pix-icons.py` (the
+README's pix icons); their selftests exercise it.
 """
 
 from __future__ import annotations

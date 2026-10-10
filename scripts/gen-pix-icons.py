@@ -11,8 +11,9 @@ PixIcon.astro with image-rendering: pixelated; GitHub strips that CSS, so the
 README instead embeds an SVG per icon, crisp at any pixel density.
 
 Usage:
-  .venv/bin/python3 scripts/gen-pix-icons.py          # (re)generate (just gen-icons)
-  .venv/bin/python3 scripts/gen-pix-icons.py --check  # exit 1 on drift
+  .venv/bin/python3 scripts/gen-pix-icons.py             # (re)generate (just gen-icons)
+  .venv/bin/python3 scripts/gen-pix-icons.py --check     # exit 1 on drift
+  .venv/bin/python3 scripts/gen-pix-icons.py --selftest  # the drift gate fails when it should
 
 --check decode-compares the PNGs' pixels rather than their raw bytes: a raw-byte
 compare is Pillow-version-fragile (re-encoding the identical pixels can change
@@ -31,10 +32,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from readme_pixels import sprite_path
+from readme_pixels import PACK_DIR, load_pack, sprite_path
 
 ROOT = Path(__file__).resolve().parent.parent
-PACK = ROOT / "crates/pixtuoid-scene/sprites/default"
 OUT = ROOT / "site/src/assets/pix-icons"
 README_OUT = ROOT / "docs/images/pix-icons"
 # CSS pixels per icon pixel in the README: each SVG's width/height. gen-readme.mjs
@@ -298,7 +298,7 @@ ICONS = {
 
 
 def load_palette():
-    with open(PACK / "pack.toml", "rb") as f:
+    with open(PACK_DIR / "pack.toml", "rb") as f:
         pack = tomllib.load(f)
     pal = {}
     for key, hexval in pack["palette"].items():
@@ -311,7 +311,7 @@ def load_palette():
 
 def sprite_rows(name, frame=0):
     rows, in_frame = [], False
-    for line in (PACK / name).read_text(encoding="utf-8").splitlines():
+    for line in (PACK_DIR / name).read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -342,29 +342,27 @@ def render(icon_name, rows, pal):
     return img
 
 
-# The label disambiguates the two outputs: both dirs are basenamed "pix-icons".
-OUTPUTS = [("site", OUT, "png"), ("readme", README_OUT, "svg")]
-
-
-def svg(rows, pal):
+def svg(rows, hexes):
     """`rows` as an SVG of README_SCALE CSS pixels per icon pixel, one path per colour."""
     h, w = len(rows), len(rows[0])
-    hexes = {k: "#%02x%02x%02x" % rgb for k, rgb in pal.items() if rgb is not None}
-    body = sprite_path([[k if pal[k] is not None else "." for k in row] for row in rows], 0, 0, 1, hexes)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w * README_SCALE}" height="{h * README_SCALE}" '
-        f'viewBox="0 0 {w} {h}" shape-rendering="crispEdges">{body}</svg>\n'
+        f'viewBox="0 0 {w} {h}" shape-rendering="crispEdges">{sprite_path(rows, 0, 0, 1, hexes)}</svg>\n'
     )
 
 
-def emit_svg(name, text, check, stale):
-    out = README_OUT / f"{name}.svg"
+def shown(path):
+    return path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+
+
+def emit_svg(name, text, out_dir, check, stale):
+    out = out_dir / f"{name}.svg"
     if check:
         if not out.exists() or out.read_text(encoding="utf-8") != text:
             stale.append(f"readme/{name} ({'differs' if out.exists() else 'missing'})")
     else:
         out.write_text(text, encoding="utf-8")
-        print(f"wrote {out.relative_to(ROOT)}")
+        print(f"wrote {shown(out)}")
 
 
 def emit(name, img, label, out_dir, check, work, stale):
@@ -392,46 +390,90 @@ def emit(name, img, label, out_dir, check, work, stale):
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         out.write_bytes(buf.getvalue())
-        print(f"wrote {out.relative_to(ROOT)} ({img.width}x{img.height})")
+        print(f"wrote {shown(out)} ({img.width}x{img.height})")
 
 
-def main():
-    check = "--check" in sys.argv[1:]
+def generate(site_dir, readme_dir, check, icons=ICONS):
+    """Write `icons` into both dirs, or with `check` list what differs from a fresh render."""
     pal = load_palette()
-    for _, out_dir, _ in OUTPUTS:
+    hexes = load_pack(PACK_DIR, ()).palette
+    # The label disambiguates the two outputs: both dirs are basenamed "pix-icons".
+    outputs = [("site", site_dir, "png"), ("readme", readme_dir, "svg")]
+    for _, out_dir, _ in outputs:
         out_dir.mkdir(parents=True, exist_ok=True)
     stale = []
     work = Path(tempfile.mkdtemp(prefix="gen-pix-icons-"))
     try:
-        for name, spec in ICONS.items():
+        for name, spec in icons.items():
             rows = (
                 sprite_rows(spec["sprite"])
                 if "sprite" in spec
                 else [r.split() for r in spec["grid"]]
             )
-            img = render(name, rows, pal)
-            emit(name, img, "site", OUT, check, work, stale)
-            emit_svg(name, svg(rows, pal), check, stale)
+            emit(name, render(name, rows, pal), "site", site_dir, check, work, stale)
+            emit_svg(name, svg(rows, hexes), readme_dir, check, stale)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
     # An orphaned committed file (its manifest entry removed, or another format)
-    # is invisible to the loop above, which only ever iterates ICONS; both output
-    # dirs hold icons alone, so a write deletes it and a check fails on it. A
-    # dotfile is the OS's (Finder's .DS_Store), never committed.
-    for label, out_dir, ext in OUTPUTS:
+    # is invisible to the loop above, which only ever iterates `icons`; both
+    # output dirs hold icons alone, so a write deletes it and a check fails on
+    # it. A dotfile is the OS's (Finder's .DS_Store), never committed.
+    for label, out_dir, ext in outputs:
         orphans = sorted(
             p
             for p in out_dir.iterdir()
-            if p.is_file() and not p.name.startswith(".") and (p.stem not in ICONS or p.suffix != f".{ext}")
+            if p.is_file() and not p.name.startswith(".") and (p.stem not in icons or p.suffix != f".{ext}")
         )
         if check and orphans:
             stale.append(f"{label}: orphaned {', '.join(p.name for p in orphans)}")
         elif not check:
             for p in orphans:
                 p.unlink()
-                print(f"deleted {p.relative_to(ROOT)}")
+                print(f"deleted {shown(p)}")
+    return stale
 
+
+def selftest():
+    """A drift gate that cannot fail is no gate: each kind of drift fails, a dotfile does not."""
+    name = next(iter(ICONS))
+    fails = []
+    with tempfile.TemporaryDirectory() as tmp:
+        site, readme = Path(tmp, "site"), Path(tmp, "readme")
+        one = {name: ICONS[name]}
+
+        def stale():
+            return generate(site, readme, check=True, icons=one)
+
+        def expect(cond, what):
+            if not cond:
+                fails.append(f"{what}: {stale()}")
+
+        generate(site, readme, check=False, icons=one)
+        expect(stale() == [], "a fresh write is not stale")
+        for d in (site, readme):
+            (d / ".DS_Store").write_bytes(b"")
+        expect(stale() == [], "a dotfile is no orphan")
+        (readme / f"{name}.png").write_bytes(b"")
+        expect(stale() == [f"readme: orphaned {name}.png"], "an icon in the other format is an orphan")
+        generate(site, readme, check=False, icons=one)
+        expect(not (readme / f"{name}.png").exists() and (readme / ".DS_Store").exists(), "a write deletes the orphan and keeps the dotfile")
+        out = readme / f"{name}.svg"
+        out.write_text(out.read_text(encoding="utf-8") + " ", encoding="utf-8")
+        expect(stale() == [f"readme/{name} (differs)"], "an edited SVG differs")
+        out.unlink()
+        expect(stale() == [f"readme/{name} (missing)"], "a deleted SVG is missing")
+    for f in fails:
+        print(f"FAIL: {f}", file=sys.stderr)
+    print(f"gen-pix-icons selftest: {'FAIL' if fails else 'ok'}")
+    return 1 if fails else 0
+
+
+def main():
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
+    check = "--check" in sys.argv[1:]
+    stale = generate(OUT, README_OUT, check)
     if stale:
         sys.exit(f"gen-pix-icons --check: {', '.join(stale)} — run just gen-icons")
     if check:
