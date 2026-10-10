@@ -50,8 +50,8 @@ pub(crate) enum WanderPhase {
 pub(crate) struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
     pub phase: WanderPhase,
-    /// Physics walk progress 0–1000, meaningful ONLY in `WalkingOut`/
-    /// `WalkingBack` (0 otherwise).
+    /// Physics walk progress, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE),
+    /// meaningful ONLY in `WalkingOut`/`WalkingBack` (0 otherwise).
     pub t_x1000: u16,
     /// The current trip's destination cell (the walk `to` / waypoint `dest`).
     pub dest: Point,
@@ -432,7 +432,7 @@ pub(crate) fn advance_wander(
 }
 
 enum WalkLegStatus {
-    /// Still walking: the physics progress `t_x1000` (0..1000).
+    /// Still walking: the physics progress `t_x1000`, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE).
     InFlight(u16),
     /// The walk and its pause have completed; `walk_total` = `duration_ms +
     /// pause_ms`.
@@ -555,7 +555,8 @@ pub(crate) struct LegPlan {
 
 /// Freeze one walk leg's timing profile. Measuring the ROUTED (not raw)
 /// polyline is load-bearing: the duration must cover the whole path or `t`
-/// reaches 1000 before the sprite arrives and it pops.
+/// reaches [`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE) before the sprite
+/// arrives and it pops.
 pub(crate) fn snapshot_leg_profile(
     router: &mut dyn Router,
     mask: &WalkableMask,

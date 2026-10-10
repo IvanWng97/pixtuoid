@@ -52,7 +52,7 @@ flowchart TB
   OC["OpenClaw gateway<br/>(daemon source)"]
 
   subgraph hook["pixtuoid-hook (shim)"]
-    SH["enrich + forward<br/>200ms timeout · exit 0"]
+    SH["enrich + forward<br/>WRITE_TIMEOUT-bounded · exit 0"]
   end
 
   subgraph core["pixtuoid-core (headless)"]
@@ -67,7 +67,7 @@ flowchart TB
     D -->|"(Hook, AgentEvent)"| R
     J -->|"(Jsonl, AgentEvent)"| R
     R --> S
-    AP -.->|"PresenceMsg{source, delta}<br/>sibling channel"| S
+    AP -.->|"PresenceMsg{key, delta}<br/>sibling channel"| S
     R -.->|"scope tree:<br/>cascade ↓ · liveness ↑"| R
   end
 
@@ -101,8 +101,8 @@ flowchart TB
    `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag drives
    **hook-wins dedup**, so a hook and its transcript echo don't double-count.
 3. **Reduce.** `Reducer::apply` folds events into a `SceneState` (stale
-   sweeps on a 1 Hz tick) and publishes a fresh `Arc<SceneState>` on a
-   `watch` channel after every change.
+   sweeps on the driver's `SWEEP_TICK_INTERVAL_SECS` tick) and publishes a
+   fresh `Arc<SceneState>` on a `watch` channel after every change.
 4. **Render.** The renderer borrows the latest scene (O(1), no lock), paints
    it through the engine's terminal-agnostic pixel pass, then flushes pixel
    rows as half-block (`▀`) terminal cells.

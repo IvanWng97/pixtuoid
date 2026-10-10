@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::format::Piece;
 
-use super::{DESK_FOOT_H, DESK_H, DESK_W, Pivot, Point, Size};
+use super::{DESK_FOOT_H, DESK_H, DESK_W, OBSTACLE_PAD_PX, Pivot, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -316,10 +316,11 @@ pub enum Furniture {
     /// already-blocked window band.
     MeetingScreen,
     /// The meeting-sofa BODY — the obstacle the mask stamps once per room (its
-    /// seats are the [`Furniture::MeetingSofa`] rows). Both axes are sized so
-    /// `footprint + 2·OBSTACLE_PAD` lands exactly on the sprite; the width is
-    /// narrower than the sprite ON PURPOSE, because a full-width footprint plus
-    /// pad disconnects the narrowest meeting room. Its strip is CENTERED, not
+    /// seats are the [`Furniture::MeetingSofa`] rows). Its footprint is the
+    /// sprite less the obstacle pad on every side, so footprint plus pad lands
+    /// exactly on the sprite; the width is narrower than the sprite ON
+    /// PURPOSE, because a full-width footprint plus pad disconnects the narrowest
+    /// meeting room. Its strip is CENTERED, not
     /// south-anchored: seat settle clearance and narrowest-room connectivity are
     /// both tuned to it sitting on the sofa pos.
     MeetingSofaBody,
@@ -628,12 +629,18 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 14, h: 12 },
             ..DECOR
         },
-        Furniture::MeetingSofaBody => FurnitureDef {
-            footprint: Some(Size { w: 16, h: 3 }),
-            visual: Size { w: 20, h: 7 },
-            ground_y: GroundAlign::Center,
-            ..DECOR
-        },
+        Furniture::MeetingSofaBody => {
+            const VISUAL: Size = Size { w: 20, h: 7 };
+            FurnitureDef {
+                footprint: Some(Size {
+                    w: VISUAL.w - 2 * OBSTACLE_PAD_PX,
+                    h: VISUAL.h - 2 * OBSTACLE_PAD_PX,
+                }),
+                visual: VISUAL,
+                ground_y: GroundAlign::Center,
+                ..DECOR
+            }
+        }
         Furniture::MeetingTable => FurnitureDef {
             footprint: Some(Size { w: 11, h: 5 }),
             visual: Size { w: 11, h: 5 },
