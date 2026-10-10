@@ -296,7 +296,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// Report the frames since the last pacing summary, at exit.
     pub(crate) fn finish_pacing(&self) {
-        self.jank.finish();
+        self.jank.finish(std::time::Instant::now());
     }
 
     /// The interval the loop now schedules frames at: what a frame's pacing

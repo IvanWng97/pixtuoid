@@ -233,7 +233,7 @@ impl FloatingApp {
     /// reports its spread.
     fn quit(&self, event_loop: &ActiveEventLoop) {
         self.persist_geometry();
-        self.jank.finish();
+        self.jank.finish(Instant::now());
         event_loop.exit();
     }
 

@@ -719,7 +719,13 @@ mod quit_arms {
     #[tokio::test]
     async fn either_signal_alone_is_a_quit() {
         for signal in [libc::SIGINT, libc::SIGTERM] {
-            let quit = QuitArms::arm().signalled();
+            let mut quit = Box::pin(QuitArms::arm().signalled());
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut quit)
+                    .await
+                    .is_err(),
+                "signalled() resolved with no signal raised"
+            );
             // SAFETY: raising a signal this process handles from here on.
             unsafe {
                 libc::raise(signal);
