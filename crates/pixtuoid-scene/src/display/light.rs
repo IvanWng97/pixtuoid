@@ -277,6 +277,7 @@ pub(crate) fn tint_of(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::display::pen::test_density;
     use crate::layout::Point;
     use crate::lighting::Light;
     use crate::render_scale::RenderScale;
@@ -294,7 +295,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn pen() -> Pen {
-        Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4")
+        Pen::new(RenderScale::new(4).expect("nonzero"), test_density(4)).expect("4 divides 4")
     }
 
     fn inputs(emitter: Emitter, tint: Option<Rgb>, ambient: Ambient) -> ViewInputs {

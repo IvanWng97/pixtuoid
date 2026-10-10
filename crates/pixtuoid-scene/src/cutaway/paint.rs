@@ -570,10 +570,10 @@ fn paint_ground_shadows(
     // a shadow off the writable art darkens none of it, so a repaint of a few
     // rects builds only theirs
     let (art_xs, art_ys) = pen.writable_art(buf);
-    let per = pen.density().get();
+    let per = pen.density();
     let near = shadows.filter(|c| {
         let ((x0, y0), (x1, y1)) = c.bounds();
-        let cells = |a: u16, b: u16| a.saturating_mul(per)..b.saturating_mul(per);
+        let cells = |a: u16, b: u16| a.saturating_mul(per.get())..b.saturating_mul(per.get());
         let (cx, cy) = (cells(x0, x1), cells(y0, y1));
         cx.start < art_xs.end
             && art_xs.start < cx.end
@@ -1558,6 +1558,7 @@ mod tests {
         quiet_board, showing, sit_down, sit_down_as, sit_down_in,
     };
     use crate::display::compose::{compose_at, ground_shadow, push_windows};
+    use crate::display::pen::test_density;
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
     use crate::layout::{FixtureKind, SceneLayout};
@@ -1874,7 +1875,8 @@ mod tests {
         use crate::display::text::advance;
         use crate::display::{TextRole, TextSpan};
         use pixtuoid_core::sprite::Rgb;
-        let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
+        let pen =
+            Pen::new(RenderScale::new(4).expect("nonzero"), test_density(4)).expect("4 divides 4");
         let (first, second) = ("I日b", "I");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
         for (align, plate, role) in [
@@ -1967,7 +1969,7 @@ mod tests {
     /// normal theme.
     fn carpet(layout: &SceneLayout, s: u16, d: u16) -> (Pen, RgbBuffer) {
         let scale = RenderScale::new(s).expect("nonzero");
-        let pen = Pen::new(scale, d).expect("d divides s");
+        let pen = Pen::new(scale, test_density(d)).expect("d divides s");
         let mut buf = RgbBuffer::filled(
             scale.to_buffer(layout.buf_w),
             scale.to_buffer(layout.buf_h),
@@ -2041,7 +2043,8 @@ mod tests {
     #[test]
     fn a_1x_rug_is_the_classic_rug() {
         let theme = &crate::theme::NORMAL;
-        let pen = Pen::new(RenderScale::new(1).expect("nonzero"), 1).expect("1 divides 1");
+        let pen =
+            Pen::new(RenderScale::new(1).expect("nonzero"), test_density(1)).expect("1 divides 1");
         for (width, height) in [(18, 24), (22, 7), (3, 3)] {
             let rug = crate::layout::Bounds {
                 x: 2,
@@ -2065,7 +2068,7 @@ mod tests {
     /// `shadows` at noon, drawn at scale `s` from art at density `d`.
     fn shadowed(s: u16, d: u16, shadows: &[crate::ground::Contact]) -> RgbBuffer {
         let scale = RenderScale::new(s).expect("nonzero");
-        let pen = Pen::new(scale, d).expect("d divides s");
+        let pen = Pen::new(scale, test_density(d)).expect("d divides s");
         let mut buf = RgbBuffer::filled(scale.to_buffer(12), scale.to_buffer(12), WEST);
         for y in 0..buf.height() {
             for x in buf.width() / 2..buf.width() {
@@ -2100,7 +2103,7 @@ mod tests {
     /// rounds to its nearest stop, where flooring would drop it.
     #[test]
     fn a_shadow_short_of_one_stop_still_darkens_the_ground() {
-        let pen = Pen::new(RenderScale::ONE, 1).expect("d divides s");
+        let pen = Pen::new(RenderScale::ONE, test_density(1)).expect("d divides s");
         let mut buf = RgbBuffer::filled(12, 12, WEST);
         paint_ground_shadows(
             std::iter::once(seam_shadow()),
@@ -2257,7 +2260,7 @@ mod tests {
             scale,
         };
         let rows = crate::layout::window_rows(layout.wall_band_h());
-        let k = scale.get() / d;
+        let k = scale.get() / d.get();
         // Noon, the sun at dusk, a full moon up, a new moon down.
         for (day, hour) in [(1, 12), (2, 18), (2, 22), (17, 0)] {
             let now = crate::localclock::on_day(day, hour);
@@ -2307,7 +2310,7 @@ mod tests {
                 assert_eq!(span.depth, 0, "a window sorts at the very back");
                 paint_window(view, *frame, pen, &mut buf);
             }
-            let density = pixtuoid_core::sprite::format::Density::new(d.get()).expect("nonzero");
+            let density = pen.density();
             let band = (layout.buf_w, layout.wall_band_h());
             let wall = crate::outside::Wall {
                 size: band,

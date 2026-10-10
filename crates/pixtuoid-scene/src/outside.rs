@@ -2,7 +2,6 @@
 //! weather on the panes — drawn onto one window's [`WindowView`] at a time on
 //! a painter's grid, which holds no cell on the window's joinery.
 
-use std::num::NonZeroU16;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -36,7 +35,7 @@ pub(crate) struct WindowView {
     /// The window's height in units, its frame included.
     h: u16,
     glass_box: Bounds,
-    d: NonZeroU16,
+    d: Density,
     /// The window's box row by row from its top-left, `None` on its joinery
     /// ([`window_frame`]).
     px: Vec<Option<Rgb>>,
@@ -48,7 +47,7 @@ impl WindowView {
     pub(crate) fn new(
         bay: WindowBay,
         rows: Range<u16>,
-        d: NonZeroU16,
+        d: Density,
         mut base: impl FnMut(Cell) -> Rgb,
     ) -> Self {
         let h = rows.end.saturating_sub(rows.start);
@@ -127,7 +126,7 @@ impl WindowView {
         }
     }
 
-    pub(crate) fn d(&self) -> NonZeroU16 {
+    pub(crate) fn d(&self) -> Density {
         self.d
     }
 
@@ -318,16 +317,11 @@ impl OutsideCache {
         if let Some(last) = &self.last
             && last.key == drawn
         {
-            crate::clouds::Clouds::draw_ahead(
-                moment,
-                glass,
-                density.as_nonzero(),
-                &mut self.clouds,
-            );
+            crate::clouds::Clouds::draw_ahead(moment, glass, density, &mut self.clouds);
             return last.views.clone();
         }
         let outside = Outside::of(&drawn, pack, theme, &mut self.clouds);
-        crate::clouds::Clouds::draw_ahead(moment, glass, density.as_nonzero(), &mut self.clouds);
+        crate::clouds::Clouds::draw_ahead(moment, glass, density, &mut self.clouds);
         if let Some(last) = &mut self.last
             && last.painted == outside
         {
@@ -359,7 +353,7 @@ pub(crate) struct Outside {
     run_x0: u16,
     weather: GlassWeather,
     rows: Range<u16>,
-    d: NonZeroU16,
+    d: Density,
     bays: Vec<WindowBay>,
 }
 
@@ -403,7 +397,7 @@ impl Outside {
             clouds: crate::clouds::Clouds::of(
                 &outlook,
                 (run.end - run.start, glass_h),
-                density.as_nonzero(),
+                density,
                 &panes,
                 clouds,
             ),
@@ -417,7 +411,7 @@ impl Outside {
             run_x0: run.start,
             weather,
             rows,
-            d: density.as_nonzero(),
+            d: density,
             bays,
         }
     }
@@ -444,7 +438,7 @@ impl Outside {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::display::pen::nz;
+    use crate::display::pen::test_density;
     use crate::sky::{Sky, Weather};
     use pixtuoid_core::sprite::RgbBuffer;
 
@@ -592,7 +586,7 @@ pub(crate) mod tests {
     fn a_view_holds_the_glass_and_none_of_the_joinery() {
         let h = ROWS.end - ROWS.start;
         for d in [1, 2, 4] {
-            let view = WindowView::new(bay(), ROWS, nz(d), |_| Rgb { r: 1, g: 2, b: 3 });
+            let view = WindowView::new(bay(), ROWS, test_density(d), |_| Rgb { r: 1, g: 2, b: 3 });
             let glass: std::collections::HashSet<_> = view.cells().map(|(at, _)| at).collect();
             let joinery: std::collections::HashSet<_> = view.joinery().collect();
             for ay in ROWS.start * d..ROWS.end * d {
@@ -614,7 +608,8 @@ pub(crate) mod tests {
     fn no_write_reaches_the_joinery() {
         const INK: Rgb = Rgb { r: 9, g: 9, b: 9 };
         for d in [1, 4] {
-            let mut view = WindowView::new(bay(), ROWS, nz(d), |_| Rgb { r: 1, g: 2, b: 3 });
+            let mut view =
+                WindowView::new(bay(), ROWS, test_density(d), |_| Rgb { r: 1, g: 2, b: 3 });
             let joinery: Vec<_> = view.joinery().collect();
             view.paint(|_, _| INK);
             let glass = view.glass_size();
@@ -631,7 +626,7 @@ pub(crate) mod tests {
     #[test]
     fn a_glass_offset_counts_from_the_glass() {
         let d = 4;
-        let mut view = WindowView::new(bay(), ROWS, nz(d), |_| Rgb { r: 0, g: 0, b: 0 });
+        let mut view = WindowView::new(bay(), ROWS, test_density(d), |_| Rgb { r: 0, g: 0, b: 0 });
         let mut seen = None;
         view.paint_glass_at((0, 0), |cell, c| {
             seen = Some(cell);
@@ -679,11 +674,7 @@ pub(crate) mod tests {
                         w: crate::layout::WINDOW_W,
                         idx: 0,
                     };
-                    let bare = WindowView::new(bay, rows.clone(), d.as_nonzero(), |_| Rgb {
-                        r: 0,
-                        g: 0,
-                        b: 0,
-                    });
+                    let bare = WindowView::new(bay, rows.clone(), d, |_| Rgb { r: 0, g: 0, b: 0 });
                     assert_eq!(
                         outside.through(bay).joinery().collect::<Vec<_>>(),
                         bare.joinery().collect::<Vec<_>>(),

@@ -22,7 +22,7 @@ pub(crate) fn paint_wall(
     pen: Pen,
 ) {
     let (at, size) = piece.visual();
-    let mut glass = Glass::of(trim, piece, pen.density().get());
+    let mut glass = Glass::of(trim, piece, pen.density());
     let band = ArtRect {
         x: pen.art(at.x),
         y: pen.art(rows.start),

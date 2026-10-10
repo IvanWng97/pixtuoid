@@ -3,9 +3,8 @@
 //! cells to the layout unit, so each painter draws one design at its own
 //! density.
 
-use std::num::NonZeroU16;
-
 use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::sprite::format::Density;
 
 use crate::anim::Beat;
 use crate::atmosphere::Moment;
@@ -385,7 +384,7 @@ impl GlassWeather {
     /// The marks on the glass of the window `idx`th in the run, `glass` units
     /// big, on a grid `d` cells to the unit. A streak is one cell wide and
     /// `d` cells per unit long; a flake is a square half a unit across.
-    fn marks(&self, idx: u16, glass: Size, d: NonZeroU16) -> Vec<Mark> {
+    fn marks(&self, idx: u16, glass: Size, d: Density) -> Vec<Mark> {
         let mut marks = Vec::new();
         if glass.w == 0 || glass.h == 0 {
             return marks;
@@ -401,7 +400,7 @@ impl GlassWeather {
 mod tests {
     use super::*;
     use crate::anim::Motion;
-    use crate::display::pen::nz;
+    use crate::display::pen::test_density;
     use crate::localclock::at_hour;
     use crate::sky::Sky;
     use crate::sky::{TRANSITION_MS, WEATHER_CYCLE_MS};
@@ -449,7 +448,7 @@ mod tests {
         for w in Weather::ALL {
             for tick in [0, 37, 1234, 99_999] {
                 for d in [1, 2, 3, 4] {
-                    for m in glass_weather(Motion::Full, w, tick).marks(3, glass, nz(d)) {
+                    for m in glass_weather(Motion::Full, w, tick).marks(3, glass, test_density(d)) {
                         assert!(
                             m.x < glass.w * d && m.y < glass.h * d,
                             "{w:?} {tick} {d}: {m:?}"
@@ -467,7 +466,7 @@ mod tests {
             for w in Weather::ALL {
                 assert_eq!(
                     !glass_weather(motion, w, 0)
-                        .marks(0, glass, nz(4))
+                        .marks(0, glass, test_density(4))
                         .is_empty(),
                     w.falls(),
                     "{motion:?} {w:?}"
@@ -484,7 +483,8 @@ mod tests {
         let glass = Size { w: 20, h: 13 };
         let now = at_hour(12);
         for w in [Weather::Rain, Weather::Snow] {
-            let still = |tick| glass_weather(Motion::Still, w, tick).marks(0, glass, nz(4));
+            let still =
+                |tick| glass_weather(Motion::Still, w, tick).marks(0, glass, test_density(4));
             let full = still(0);
             assert!(!full.is_empty(), "{w:?} vanished at rest");
             assert_eq!(still(37), still(99_999), "{w:?} moved at rest");
@@ -497,7 +497,7 @@ mod tests {
                     0.0,
                     Motion::Still.timing(now),
                 ))
-                .marks(0, glass, nz(4))
+                .marks(0, glass, test_density(4))
             };
             let shares: Vec<Vec<Mark>> = (0..=STEPS)
                 .map(|k| coming_in(f32::from(k) / f32::from(STEPS)))
@@ -519,7 +519,8 @@ mod tests {
     fn equal_keys_place_equal_marks_and_the_tick_moves_them() {
         let glass = Size { w: 20, h: 13 };
         for w in [Weather::Rain, Weather::Snow] {
-            let marks = |tick| glass_weather(Motion::Full, w, tick).marks(1, glass, nz(4));
+            let marks =
+                |tick| glass_weather(Motion::Full, w, tick).marks(1, glass, test_density(4));
             assert_eq!(marks(5_000), marks(5_000), "{w:?}");
             assert_ne!(marks(5_000), marks(6_000), "{w:?}");
         }
@@ -531,7 +532,10 @@ mod tests {
     fn a_streak_is_one_cell_wide_and_a_unit_per_unit_long() {
         let glass = Size { w: 20, h: 13 };
         let rain = glass_weather(Motion::Full, Weather::Rain, 0);
-        let (marks, one) = (rain.marks(0, glass, nz(4)), rain.marks(0, glass, nz(1)));
+        let (marks, one) = (
+            rain.marks(0, glass, test_density(4)),
+            rain.marks(0, glass, test_density(1)),
+        );
         assert_eq!(marks.len(), one.len() * 4);
         let columns: std::collections::BTreeSet<u16> = marks.iter().map(|m| m.x).collect();
         assert!(columns.len() <= usize::try_from(RAIN.count).expect("small"));
@@ -680,8 +684,9 @@ mod tests {
                 for h in [28, 56, tallest_glass()] {
                     let glass = Size { w: 20, h };
                     for idx in 0..WINDOWS {
-                        let marks =
-                            |policy| glass_at(motion, policy, opens).marks(idx, glass, nz(1));
+                        let marks = |policy| {
+                            glass_at(motion, policy, opens).marks(idx, glass, test_density(1))
+                        };
                         assert!(
                             marks(WeatherPolicy::Clock) == marks(WeatherPolicy::Forced(next)),
                             "{motion:?} {next:?} at {opens} on window {idx}, glass {h} tall"
@@ -736,7 +741,7 @@ mod tests {
         let marks = glass_weather(Motion::Full, Weather::Storm, 12_345).marks(
             0,
             Size { w: 18, h: 28 },
-            nz(1),
+            test_density(1),
         );
         assert!(!marks.is_empty());
         for m in marks {
@@ -779,7 +784,7 @@ mod tests {
             "the glass on the dither's phase at d=1: a key from its corner would pass"
         );
         for d in [1, 4] {
-            let mut view = WindowView::new(bay, rows.clone(), nz(d), |_| BARE);
+            let mut view = WindowView::new(bay, rows.clone(), test_density(d), |_| BARE);
             weather.paint(&mut view);
             let mut took = [0; 2];
             for (at, c) in view.cells() {

@@ -2,7 +2,7 @@ use crate::anim::Beat;
 use std::collections::HashMap;
 
 use super::*;
-use crate::display::pen::{ArtPx, layout_point, nz};
+use crate::display::pen::{ArtPx, layout_point, test_density};
 use crate::layout::WINDOW_W;
 use crate::sky::{Sky, Weather};
 
@@ -357,7 +357,7 @@ fn is_whole_cell(light: &Light) -> bool {
 #[test]
 fn a_light_sampled_between_cells_stays_inside_its_bounds() {
     const D: u16 = 4;
-    let at = |a: u16| layout_point(ArtPx(a), nz(D));
+    let at = |a: u16| layout_point(ArtPx(a), test_density(D));
     for e in every_shape() {
         let ((x0, y0), (x1, y1)) = e.bounds();
         // A whole-cell shape lights exactly its bounds' cells; a continuous
@@ -401,7 +401,7 @@ fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
         }
         for y in 0..48 * D {
             for x in 0..64 * D {
-                let at = |a: u16| layout_point(ArtPx(a), nz(D));
+                let at = |a: u16| layout_point(ArtPx(a), test_density(D));
                 assert_eq!(
                     e.level_at_f(at(x), at(y)).is_some(),
                     e.level_at(x / D, y / D).is_some(),

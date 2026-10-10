@@ -10,7 +10,6 @@
 //! stands is a share of the glass, plane by plane, so a short window crops its
 //! towers and a tall one shows them whole over more sky.
 
-use std::num::NonZeroU16;
 use std::ops::RangeInclusive;
 
 use crate::pack::OfficeArt;
@@ -566,7 +565,7 @@ impl CityStrip {
 
     /// What of this city stands before the sky at a window cell on a grid `d`
     /// cells to the unit, the run's west end at column `run_x0`.
-    pub(crate) fn front(&self, run_x0: u16, d: NonZeroU16) -> impl Fn(Cell) -> Option<Rgb> + '_ {
+    pub(crate) fn front(&self, run_x0: u16, d: Density) -> impl Fn(Cell) -> Option<Rgb> + '_ {
         let x0 = run_x0.saturating_mul(d.get());
         move |cell| self.at(cell.at.0.wrapping_sub(x0), cell.glass_offset.1)
     }
@@ -599,7 +598,7 @@ fn hash(n: u32) -> u32 {
 mod tests {
     use super::*;
     use crate::atmosphere::Moment;
-    use crate::display::pen::nz;
+    use crate::display::pen::test_density;
 
     use crate::anim::{Beat, Motion};
 
@@ -645,10 +644,11 @@ mod tests {
                 theme,
                 density,
             );
-            let front = strip.front(run_x0, nz(d));
-            let view = crate::outside::WindowView::new(bay, rows.clone(), nz(d), |cell| {
-                front(cell).unwrap_or(SKY)
-            });
+            let front = strip.front(run_x0, test_density(d));
+            let view =
+                crate::outside::WindowView::new(bay, rows.clone(), test_density(d), |cell| {
+                    front(cell).unwrap_or(SKY)
+                });
             let mut buildings = 0;
             for (at, c) in view.cells() {
                 let (ax, ay) = (at.0 - bay.x * d, at.1 - rows.start * d);
