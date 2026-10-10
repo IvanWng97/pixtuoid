@@ -1,4 +1,4 @@
 {
   "origin": "composed",
-  "note": "Kept for ONE envelope now that mid-attach-recorded holds the real shape: `agent_end` with success=false, which the plugin always sends with `errored` (true here: upstream's `error`, set only beside a prompt error). A run that fails is the half no capture has produced: `--timeout-ms 1` returns success=true, and so does a gateway in a throwaway OPENCLAW_HOME whose provider refuses every connection (openclaw 2026.9.8) — a provider failure is no prompt error. The no-gateway_start half is recorded next door."
+  "note": "Kept for ONE field now that mid-attach-recorded holds the real shape: `agent_end` with success=false. A run that fails is the half no capture has produced — `--timeout-ms 1` returns success=true, and the honest ways to break a run (bogus provider, killed model) all mean writing to someone's real openclaw config. The no-gateway_start half is recorded next door."
 }
