@@ -253,7 +253,7 @@ fn snap_back_origin_is_frozen_across_frames() {
     let slot = active_slot(now0, now0 - Duration::from_secs(60));
     let desk = l.home_desks[0];
     // Far from the desk so the pre-fix integer-pixel drift surfaces inside the
-    // 8-frame window; a snap near SNAP_BACK_MIN_DIST=8 could delay the first
+    // 8-frame window; a snap near SNAP_BACK_MIN_DIST could delay the first
     // drift past the window and false-pass on broken code.
     let prev0 = Point {
         x: desk.x + 50,
@@ -689,7 +689,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let l = layout();
     let slot = active_slot(now, now - Duration::from_secs(60));
     let desk = l.home_desks[0];
-    // Manhattan 28 from the CHAIR (≥ SNAP_BACK_MIN_DIST=8) so the snap-back arms.
+    // Far from the CHAIR (≥ SNAP_BACK_MIN_DIST) so the snap-back arms.
     let prev = Point {
         x: desk.x + 20,
         y: desk.y + 18,
@@ -1628,6 +1628,281 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     assert!(
         max_step <= MAX_FRAME_STEP_PX,
         "exit-from-wander walk to door teleported: max frame jump {max_step}px"
+    );
+}
+
+/// One agent on a real floor, painted a frame at a time, a pointer acting on
+/// it through the floor's grip: the largest per-axis jump of its sprite
+/// between two painted frames, from its first.
+struct Hand {
+    pack: Arc<crate::pack::OfficeArt>,
+    scene: pixtuoid_core::SceneState,
+    id: AgentId,
+    session: crate::floor::FloorSession,
+    now: SystemTime,
+    layout: Option<Arc<SceneLayout>>,
+    /// Its sprite's top-left last paint, `None` where it was not drawn.
+    drawn: Option<Point>,
+    /// Where the pointer holds it.
+    at: Option<Point>,
+    max_step: i32,
+}
+
+impl Hand {
+    fn new(slot: AgentSlot, now: SystemTime) -> Self {
+        let pack = Arc::new(crate::pack::test_office());
+        let mut scene = pixtuoid_core::SceneState::uniform(4);
+        let id = slot.agent_id;
+        scene.agents.insert(id, slot);
+        let mut hand = Self {
+            session: crate::floor::FloorSession::new(Arc::clone(&pack)),
+            pack,
+            scene,
+            id,
+            now,
+            layout: None,
+            drawn: None,
+            at: None,
+            max_step: 0,
+        };
+        hand.paint();
+        hand
+    }
+
+    fn layout(&self) -> Arc<SceneLayout> {
+        Arc::clone(self.layout.as_ref().expect("painted"))
+    }
+
+    fn slot(&mut self) -> &mut AgentSlot {
+        self.scene.agents.get_mut(&self.id).expect("its slot")
+    }
+
+    fn grip(&mut self, gesture: crate::interact::Gesture) {
+        self.session.floor_mut().grip(&gesture);
+    }
+
+    /// The next paint, carrying it on if a pointer holds it.
+    fn paint(&mut self) -> Option<Pose> {
+        if let Some(at) = self.at {
+            self.grip(crate::interact::Gesture::Carry(at));
+        }
+        let stepped = self
+            .session
+            .step(
+                crate::floor::FloorInputs {
+                    scene: &self.scene,
+                    pack: &self.pack,
+                    now: self.now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
+                crate::layout::Size { w: 160, h: 96 },
+            )
+            .expect("lays out");
+        self.now += Duration::from_millis(PAINT_FRAME_MS);
+        let idx = stepped
+            .frame
+            .agents
+            .iter()
+            .position(|a| a.agent_id == self.id);
+        let drawn = stepped
+            .frame
+            .characters
+            .iter()
+            .find(|c| Some(c.agent_idx) == idx)
+            .map(|c| c.top_left);
+        if let (Some(a), Some(b)) = (self.drawn, drawn) {
+            let step = (i32::from(a.x) - i32::from(b.x))
+                .abs()
+                .max((i32::from(a.y) - i32::from(b.y)).abs());
+            self.max_step = self.max_step.max(step);
+        }
+        self.drawn = drawn;
+        self.layout = Some(stepped.layout);
+        stepped.frame.poses.get(&self.id).copied().flatten()
+    }
+
+    /// Lifted by its feet, as drawn.
+    fn lift(&mut self) {
+        let tl = self.drawn.expect("drawn to be lifted");
+        let at = Point {
+            x: tl.x + crate::layout::CHARACTER_SPRITE_W / 2,
+            y: tl.y + crate::layout::WALKING_Y_OFF,
+        };
+        self.grip(crate::interact::Gesture::Lift {
+            figure: crate::interact::Figure::Agent(self.id),
+            at,
+        });
+        self.at = Some(at);
+        self.paint();
+    }
+
+    /// Carried to `to`, `step` px a paint.
+    fn carry_to(&mut self, to: Point, step: u16) {
+        while let Some(at) = self.at.filter(|&at| at != to) {
+            let toward = |a: u16, b: u16| match a.cmp(&b) {
+                std::cmp::Ordering::Less => a + step.min(b - a),
+                std::cmp::Ordering::Greater => a - step.min(a - b),
+                std::cmp::Ordering::Equal => a,
+            };
+            self.at = Some(Point {
+                x: toward(at.x, to.x),
+                y: toward(at.y, to.y),
+            });
+            self.paint();
+        }
+    }
+
+    /// Set down where it is held.
+    fn drop_it(&mut self) {
+        let at = self.at.take().expect("in hand");
+        self.grip(crate::interact::Gesture::Drop(at));
+    }
+
+    /// Painted until it is no longer drawn, or `paints` run out: how many drew it.
+    fn paint_out(&mut self, paints: u32) -> u32 {
+        let mut drawn = 0;
+        for _ in 0..paints {
+            self.paint();
+            if self.drawn.is_none() {
+                break;
+            }
+            drawn += 1;
+        }
+        drawn
+    }
+
+    /// Painted until it sits at its desk, at most `paints`.
+    fn paint_until_seated(&mut self, paints: u32) -> bool {
+        (0..paints).any(|_| {
+            matches!(
+                self.paint(),
+                Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping)
+            )
+        })
+    }
+
+    /// Reachable open floor, well clear of `from`'s and the door's, that it is
+    /// carried to.
+    fn far_floor(&self, from: Point) -> Point {
+        let l = self.layout();
+        let cheb = |a: Point, b: Point| a.x.abs_diff(b.x).max(a.y.abs_diff(b.y));
+        let (w, h) = (l.walkable.width(), l.walkable.height());
+        let far = (0..w)
+            .step_by(4)
+            .flat_map(|x| (0..h).step_by(4).map(move |y| Point { x, y }))
+            .filter(|&p| {
+                l.walkable.is_walkable(p.x, p.y)
+                    && l.reachable.reaches(p)
+                    && l.is_visually_clear(p)
+                    && cheb(p, l.door_threshold) > 2 * MAX_FRAME_STEP_PX as u16
+            })
+            .max_by_key(|&p| cheb(p, from))
+            .expect("open floor");
+        assert!(
+            cheb(far, from) > 2 * MAX_FRAME_STEP_PX as u16,
+            "setup: {far:?} must be far from {from:?} for a pop to show"
+        );
+        far
+    }
+}
+
+/// An idle agent long settled at its desk, lifted and carried far off.
+fn carried_off(now: SystemTime) -> Hand {
+    let mut hand = Hand::new(entry_slot(now - Duration::from_secs(120)), now);
+    hand.lift();
+    let held = hand.at.expect("in hand");
+    let far = hand.far_floor(held);
+    hand.carry_to(far, 4);
+    // Past `HISTORY_RECENT_MS`, so no stale walk can stand in for the hold.
+    for _ in 0..HISTORY_RECENT_MS / PAINT_FRAME_MS * 3 {
+        hand.paint();
+    }
+    hand
+}
+
+#[test]
+fn an_agent_whose_session_ends_in_hand_walks_out_from_it() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut hand = carried_off(now);
+    let end = hand.now;
+    hand.slot().exiting_at = Some(end);
+    assert!(hand.paint_out(600) > 20, "it walks out");
+    assert!(
+        hand.max_step <= MAX_FRAME_STEP_PX,
+        "max frame jump {}px (> {MAX_FRAME_STEP_PX})",
+        hand.max_step
+    );
+}
+
+#[test]
+fn an_agent_whose_session_ends_as_it_is_set_down_walks_out_from_there() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut hand = carried_off(now);
+    hand.drop_it();
+    let end = hand.now;
+    hand.slot().exiting_at = Some(end);
+    assert!(hand.paint_out(600) > 20, "it walks out");
+    assert!(
+        hand.max_step <= MAX_FRAME_STEP_PX,
+        "max frame jump {}px (> {MAX_FRAME_STEP_PX})",
+        hand.max_step
+    );
+}
+
+/// Lifted on its way in and set down at its desk, it sits: the walk in it
+/// was lifted off never resumes.
+#[test]
+fn an_agent_lifted_on_its_way_in_never_resumes_it() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut hand = Hand::new(entry_slot(now), now);
+    for _ in 0..10 {
+        hand.paint();
+    }
+    hand.lift();
+    let l = hand.layout();
+    let desk = l.home_desks[0];
+    hand.carry_to(desk_leg_endpoint(desk, &l).0, 8);
+    hand.drop_it();
+    assert!(hand.paint_until_seated(600), "home, it sits");
+    for _ in 0..600 {
+        hand.paint();
+    }
+    assert!(
+        hand.max_step <= MAX_FRAME_STEP_PX,
+        "max frame jump {}px (> {MAX_FRAME_STEP_PX})",
+        hand.max_step
+    );
+}
+
+/// A session that ends in hand walks the agent out of it: back before it is
+/// through the door, it walks in from where it is, not into the hand, and the
+/// next end walks it out again.
+#[test]
+fn an_agent_back_from_an_exit_in_hand_walks_in_from_where_it_is() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut hand = carried_off(now);
+    let end = hand.now;
+    hand.slot().exiting_at = Some(end);
+    for _ in 0..15 {
+        hand.paint();
+    }
+    let back = hand.now;
+    let slot = hand.slot();
+    slot.exiting_at = None;
+    slot.state_started_at = back;
+    for _ in 0..30 {
+        hand.paint();
+    }
+    hand.drop_it();
+    assert!(hand.paint_until_seated(900), "home, it sits");
+    let end = hand.now;
+    hand.slot().exiting_at = Some(end);
+    assert!(hand.paint_out(600) > 20, "it walks out again");
+    assert!(
+        hand.max_step <= MAX_FRAME_STEP_PX,
+        "max frame jump {}px (> {MAX_FRAME_STEP_PX})",
+        hand.max_step
     );
 }
 

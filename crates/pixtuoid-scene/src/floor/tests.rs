@@ -110,7 +110,6 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
     let mut walk = WalkState::default();
-    // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
     walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
@@ -2310,6 +2309,79 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
         .map(|tenth| step(&mut session, t0 + Duration::from_millis(200 + 100 * tenth)))
         .find_map(|s| s.frame.poses[&id].filter(|p| !matches!(p, Pose::Walking { .. })));
     assert_eq!(sat, Some(Pose::SeatedIdle), "home, it sits");
+}
+
+/// A lifted agent stands at no waypoint, whatever its timeline says: in hand,
+/// or walking home, it reserves no cell another's route steps around.
+#[test]
+fn a_lifted_agent_reserves_no_cell() {
+    use crate::interact::{Figure, Gesture};
+    use crate::layout::Point;
+    use crate::pose::Pose;
+    let pack = Arc::new(crate::pack::test_office());
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let size = Size { w: 160, h: 96 };
+    let layout = crate::layout::SceneLayout::compute_with_seed(
+        size.w,
+        size.h,
+        None,
+        FloorMeta::ground().floor_seed,
+    )
+    .expect("lays out");
+    let at_waypoint = |slot: &AgentSlot, now| {
+        matches!(
+            crate::pose::derive(slot, now, &layout),
+            Some(Pose::AtWaypoint { .. })
+        )
+    };
+    // Long enough at its waypoint to be lifted, set down and walk a step.
+    let stays = Duration::from_millis(500);
+    let mut scene = make_scene(8, 8);
+    let (id, t) = scene
+        .agents
+        .values()
+        .find_map(|a| {
+            (1..3_000u64)
+                .map(|tenth| t0 + Duration::from_millis(100 * tenth))
+                .find(|&t| at_waypoint(a, t) && at_waypoint(a, t + stays))
+                .map(|t| (a.agent_id, t))
+        })
+        .expect("a timeline stands someone at a waypoint");
+    scene.agents.retain(|&a, _| a == id);
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let step = |session: &mut FloorSession, now| {
+        session
+            .step(
+                FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                size,
+            )
+            .expect("lays out")
+    };
+    step(&mut session, t);
+    assert!(
+        !session.floor().ctx.overlay.is_empty(),
+        "standing there, it reserves its cell"
+    );
+    let at = Point { x: 40, y: 70 };
+    session.floor_mut().grip(&Gesture::Lift {
+        figure: Figure::Agent(id),
+        at,
+    });
+    step(&mut session, t + Duration::from_millis(100));
+    assert!(session.floor().ctx.overlay.is_empty(), "in hand");
+    session.floor_mut().grip(&Gesture::Drop(at));
+    let home = step(&mut session, t + Duration::from_millis(200));
+    assert!(
+        matches!(home.frame.poses[&id], Some(Pose::Walking { .. })),
+        "set down, it walks home"
+    );
+    assert!(session.floor().ctx.overlay.is_empty(), "walking home");
 }
 
 /// A lifted pet hangs where the pointer is; set down, it rests on the floor

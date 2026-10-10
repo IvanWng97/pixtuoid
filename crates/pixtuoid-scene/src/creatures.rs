@@ -18,7 +18,7 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 
 use crate::anim::{FULL_TICK_MS, Timing, elapsed_ms};
 use crate::layout::{Point, SceneLayout};
-use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable};
+use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable, snap_point_where};
 use crate::pet::PetKind;
 use crate::physics::{
     Gait, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
@@ -75,20 +75,25 @@ fn walkable_target(layout: &SceneLayout, seed: u64, n: u64) -> Point {
         // answers with the coarse cell's CENTRE, so a clear draw can still rest
         // on decor. Snapping is idempotent, which makes every downstream
         // `snap(dest)` an identity — the walk lands exactly where the rest is.
-        if let Some(cand) = snap_point_to_walkable(&layout.walkable, last) {
-            // Walkable is not enough: a cell under a desk's overhang is walkable
-            // by invariant #6 and painted over anyway, and a creature RESTS here
-            // between walks. Walking through one stays fine.
-            // And reachable: a creature walks there, and A* from the door's
-            // ground cannot reach a pocket the walls close off.
-            if layout.is_visually_clear(cand) && layout.reachable.reaches(cand) {
-                return cand;
-            }
+        if let Some(cand) = snap_point_to_walkable(&layout.walkable, last)
+            && rests_at(layout, cand)
+        {
+            return cand;
         }
     }
     // Snapped like the loop's answers, so the idempotence above holds for EVERY
     // return and not just the ones a draw found.
     snap_point_to_walkable(&layout.walkable, layout.door_threshold).unwrap_or(last)
+}
+
+/// Whether a creature may rest at walkable `p`.
+fn rests_at(layout: &SceneLayout, p: Point) -> bool {
+    // Walkable is not enough: a cell under a desk's overhang is walkable by
+    // invariant #6 and painted over anyway, and a creature RESTS here between
+    // walks. Walking through one stays fine.
+    // And reachable: a creature walks there, and A* from the door's ground
+    // cannot reach a pocket the walls close off.
+    layout.is_visually_clear(p) && layout.reachable.reaches(p)
 }
 
 /// Full ticks per walk cycle at a pet's cruise.
@@ -308,8 +313,8 @@ impl CreatureWalk {
         matches!(self.phase, Phase::Gone)
     }
 
-    /// Turn and walk out to `exit` from wherever it is at `now`; with no way
-    /// there it is simply gone.
+    /// Turn and walk out to `exit` from wherever it is at `now`, set down
+    /// first if in hand; with no way there it is simply gone.
     pub(crate) fn leave(
         &mut self,
         exit: Point,
@@ -317,6 +322,9 @@ impl CreatureWalk {
         ground: &mut Ground<'_>,
         now: SystemTime,
     ) {
+        if let Phase::Carried { at } = self.phase {
+            self.set_down(at, ground.layout, now);
+        }
         self.phase = match self.stance(now) {
             Some(Stance { at, .. }) => {
                 Walk::plan(at, exit, roam.gait, ground, now).map_or(Phase::Gone, Phase::Leaving)
@@ -346,20 +354,17 @@ impl CreatureWalk {
 
     /// Lifted, at `at`.
     pub(crate) fn carry(&mut self, at: Point) {
-        if !self.leaving() {
-            self.phase = Phase::Carried { at };
-        }
+        self.phase = Phase::Carried { at };
     }
 
-    /// Set down near `at`, from `now`: on the walkable floor its legs reach,
-    /// else at its latest draw, where a roam would have taken it; it rests
-    /// there, and roams on from it.
+    /// Set down near `at`, from `now`: on the nearest floor it [rests
+    /// on](rests_at), else at its latest draw, where a roam would have taken
+    /// it; it rests there, and roams on from it.
     pub(crate) fn set_down(&mut self, at: Point, layout: &SceneLayout, now: SystemTime) {
         if !matches!(self.phase, Phase::Carried { .. }) {
             return;
         }
-        let at = crate::pathfind::snap_point_to_walkable(&layout.walkable, at)
-            .filter(|&p| layout.reachable.reaches(p))
+        let at = snap_point_where(&layout.walkable, at, |p| rests_at(layout, p))
             .unwrap_or_else(|| walkable_target(layout, self.seed, self.roams));
         self.phase = Phase::Resting {
             at,
@@ -608,6 +613,53 @@ mod tests {
         let at = walk.stance(now).expect("rests").at;
         assert!(layout.reachable.reaches(at), "{at:?}");
         assert_eq!(at, walkable_target(&layout, 7, 0));
+    }
+
+    /// One set down on a desk, a plant, a sofa or a table rests beside it, on
+    /// floor no art paints over, as a roam's rest does.
+    #[test]
+    fn a_creature_set_down_on_furniture_rests_beside_it() {
+        use crate::layout::FixtureKind;
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut checked = 0u32;
+        for (w, h) in [(160, 96), (192, 80), (240, 180)] {
+            let layout = SceneLayout::compute(w, h, None).expect("layout fits");
+            for f in layout.fixtures() {
+                if !matches!(
+                    f.kind,
+                    FixtureKind::Desk(_)
+                        | FixtureKind::Plant { .. }
+                        | FixtureKind::MeetingSofa { .. }
+                        | FixtureKind::MeetingTable { .. }
+                        | FixtureKind::LoungeCouch
+                ) {
+                    continue;
+                }
+                let on = Point {
+                    x: f.visual.x + f.visual.width / 2,
+                    y: f.visual.y + f.visual.height / 2,
+                };
+                let mut walk = CreatureWalk::at_home(&layout, 7, now);
+                walk.carry(on);
+                walk.set_down(on, &layout, now);
+                let at = walk.stance(now).expect("rests").at;
+                let what = format!("{w}x{h} {:?} at {on:?}: rests at {at:?}", f.kind);
+                assert!(
+                    layout.is_visually_clear(at) && layout.reachable.reaches(at),
+                    "{what}, under art or out of reach"
+                );
+                let reach = f.visual.width.max(f.visual.height);
+                assert!(
+                    at.x.abs_diff(on.x) <= reach && at.y.abs_diff(on.y) <= reach,
+                    "{what}, not beside it"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 20,
+            "the sweep must reach furniture, saw {checked}"
+        );
     }
     use crate::anim::{Motion, PAINT_FPS};
     use crate::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
@@ -1377,6 +1429,80 @@ mod tests {
                 .values()
                 .all(|w| !w.leaving()),
             "no stale walk out is left"
+        );
+    }
+
+    /// A mascot in hand when its gateway dies walks out from where it would
+    /// have been set down, and out of the hand: back up, it walks in again
+    /// rather than into the hand.
+    #[test]
+    fn a_carried_mascot_walks_out_of_the_hand_when_its_gateway_dies() {
+        use crate::interact::{Figure, Gesture};
+        let mut office = Office::new(192, 80);
+        let mut up = SceneState::default();
+        gateway(&mut up, "18789", DaemonLiveness::UP, 0, 0);
+        let mut ms = 60_000;
+        office.frame(&up, None, None, ms);
+        let layout = office
+            .session
+            .floor_mut()
+            .ctx
+            .frame_layout(192, 80, office.floor.floor_seed)
+            .expect("lays out");
+        // Over a desk, on ground no leg stands on.
+        let (over, reach) = layout
+            .fixtures()
+            .filter(|f| matches!(f.kind, crate::layout::FixtureKind::Desk(_)))
+            .find_map(|f| {
+                let b = f.visual;
+                (b.x..b.x + b.width)
+                    .flat_map(|x| (b.y..b.y + b.height).map(move |y| Point { x, y }))
+                    .find(|&p| !layout.reachable.reaches(p))
+                    .map(|p| (p, b.width.max(b.height)))
+            })
+            .expect("a desk stands on ground no leg reaches");
+        let figure = Figure::Mascot(openclaw_key("18789"));
+        office
+            .session
+            .floor_mut()
+            .grip(&Gesture::Lift { figure, at: over });
+        ms += PAINT_MS;
+        assert_eq!(
+            lobsters(&office.frame(&up, None, None, ms))[0].1,
+            Piece::LobsterRest,
+            "in hand"
+        );
+
+        let mut down = SceneState::default();
+        gateway(&mut down, "18789", DaemonLiveness::Down, 0, ms);
+        ms += PAINT_MS;
+        let out = lobsters(&office.frame(&down, None, None, ms));
+        let [(pos, anim)] = out[..] else {
+            panic!("it walks out, not vanishes: {out:?}");
+        };
+        assert_eq!(anim, Piece::LobsterWalk, "it walks out");
+        assert!(
+            pos.x.abs_diff(over.x) <= reach && pos.y.abs_diff(over.y) <= reach,
+            "from the floor beside the desk: {pos:?} vs {over:?}"
+        );
+
+        let delay = mascot_enter_delay(mascot_seed(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            &DaemonInstanceId::new("18789").expect("non-empty"),
+        ));
+        let back = ms + PAINT_MS;
+        let mut again = SceneState::default();
+        gateway(&mut again, "18789", DaemonLiveness::UP, back, back);
+        for ms in (back..=back + delay).step_by(PAINT_MS as usize) {
+            office.session.floor_mut().grip(&Gesture::Carry(over));
+            office.frame(&again, None, None, ms);
+        }
+        office.session.floor_mut().grip(&Gesture::Carry(over));
+        let first = lobsters(&office.frame(&again, None, None, back + delay + PAINT_MS));
+        assert_eq!(
+            first.first().map(|&(_, anim)| anim),
+            Some(Piece::LobsterWalk),
+            "back up, it walks in again, not into the hand: {first:?}"
         );
     }
 

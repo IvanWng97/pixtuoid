@@ -296,7 +296,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let timing = floor.motion.timing(now);
     let beat = timing.beat;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
-    let held_agent = take_grip(stores, layout, now);
+    take_grip(stores, &agents, layout, now);
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
@@ -316,6 +316,14 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     // Only a wanderer stands at a waypoint, and at rest none wanders.
     let wanderers = if beat.is_rest() { &[][..] } else { &agents[..] };
     for agent in wanderers {
+        // A lifted one stands nowhere its timeline says.
+        if stores
+            .walks
+            .get(&agent.agent_id)
+            .is_some_and(|w| w.lifted.is_some())
+        {
+            continue;
+        }
         let Some(pose) = pose::derive(agent, now, layout) else {
             continue;
         };
@@ -361,7 +369,6 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     history: &mut *stores.history,
                     walks: &mut *stores.walks,
                     wanders: !beat.is_rest(),
-                    held: held_agent,
                 },
             );
             (a.agent_id, p)
@@ -437,42 +444,53 @@ pub(crate) fn pack_frame_size(pack: &OfficeArt, anim: Piece, frame_idx: usize) -
     }
 }
 
-/// Carry out the floor's grip before anything steps: a creature held follows
-/// the pointer and one set down lands, an agent set down starts home; a hold
-/// stays for the next step, a drop is spent. The agent held, if one is.
+/// Carry out the floor's grip before anything steps: the figure held follows
+/// the pointer, and one set down lands, a creature to rest and an agent to
+/// walk home. A hold stays for the next step until its figure is gone or on
+/// its way out; a drop is spent.
 fn take_grip(
     stores: &mut SimStores<'_>,
+    agents: &[AgentSlot],
     layout: &SceneLayout,
     now: SystemTime,
-) -> Option<(AgentId, Point)> {
+) {
     use crate::interact::{Figure, Grip};
-    let grip = stores.grip.take()?;
+    let Some(grip) = stores.grip.take() else {
+        return;
+    };
     let (Grip::Held { figure, at } | Grip::Dropped { figure, at }) = &grip;
     let (figure, at) = (figure.clone(), *at);
     let held = matches!(grip, Grip::Held { .. });
-    if held {
-        *stores.grip = Some(grip);
-    }
     let creature = match figure {
-        Figure::Agent(id) if held => return Some((id, at)),
         Figure::Agent(id) => {
-            // One gone mid-carry has nothing to walk home.
-            if let Some(walk) = stores.walks.get_mut(&id) {
-                walk.dropped = Some(crate::walk::Dropped::At(at));
+            // One gone mid-carry has nothing to walk home, and one walking out
+            // leaves from where it was held.
+            let here = agents
+                .iter()
+                .any(|a| a.agent_id == id && a.exiting_at.is_none());
+            let Some(walk) = stores.walks.get_mut(&id).filter(|_| here) else {
+                return;
+            };
+            if held {
+                walk.carry(at);
+                *stores.grip = Some(grip);
+            } else {
+                walk.set_down(at);
             }
-            return None;
+            return;
         }
         Figure::Pet(kind) => CreatureKey::Pet(kind),
         Figure::Mascot(key) => CreatureKey::Mascot(key),
     };
-    if let Some(walk) = stores.creatures.get_mut(&creature) {
-        if held {
-            walk.carry(at);
-        } else {
-            walk.set_down(at, layout, now);
-        }
+    let Some(walk) = stores.creatures.get_mut(&creature) else {
+        return;
+    };
+    if held && !walk.leaving() {
+        walk.carry(at);
+        *stores.grip = Some(grip);
+    } else {
+        walk.set_down(at, layout, now);
     }
-    None
 }
 
 /// The floor's pet this tick, walking the people's walker: a pet being

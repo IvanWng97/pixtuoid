@@ -54,7 +54,7 @@ pub(crate) use windows::{
 pub(crate) use windows::{WINDOW_W, window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{
-    COARSE_CELL_SIZE, CoarseGrid, cell_anchor, cell_center, cell_walkable, snap,
+    COARSE_CELL_SIZE, CoarseGrid, cell_anchor, cell_center, cell_walkable, snap, snap_where,
 };
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
