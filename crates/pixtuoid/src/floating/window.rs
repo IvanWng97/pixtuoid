@@ -180,7 +180,7 @@ impl FloatingApp {
             // Until `resumed` names the platform: presenting every frame is
             // safe on any.
             screen: super::compose::Screen::new(false),
-            jank: crate::jank::Jank::new(Instant::now()),
+            jank: crate::jank::Jank::new(),
             motion,
             renderer,
             audio_ctl,

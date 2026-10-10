@@ -194,7 +194,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             terminal,
             session: OfficeSession::new(Arc::clone(&pack)),
             pack,
-            jank: crate::jank::Jank::new(std::time::Instant::now()),
+            jank: crate::jank::Jank::new(),
             frame_out: None,
             redraw_owed: false,
             refusing: false,

@@ -121,7 +121,8 @@ pub(crate) struct Jank {
     scheduled: u32,
     /// When the schedule asked for the next frame recorded.
     due: Option<Instant>,
-    since: Instant,
+    /// When this window began: `None` until the first frame starts it.
+    since: Option<Instant>,
     painter: Painter,
     /// The interval the loop schedules frames at.
     interval: Duration,
@@ -143,7 +144,7 @@ pub(crate) struct Painter {
 }
 
 impl Jank {
-    pub(crate) fn new(now: Instant) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             micros: [0; RING],
             len: 0,
@@ -153,7 +154,7 @@ impl Jank {
             hitch: Duration::ZERO,
             scheduled: 0,
             due: None,
-            since: now,
+            since: None,
             painter: Painter::default(),
             interval: Duration::from_millis(PAINT_FRAME_MS),
         }
@@ -214,7 +215,10 @@ impl Jank {
                 report!(debug, "frame slow", total, present, send, note);
             }
         }
-        if now.duration_since(self.since) >= WINDOW {
+        let since = *self
+            .since
+            .get_or_insert_with(|| now.checked_sub(total).unwrap_or(now));
+        if now.duration_since(since) >= WINDOW {
             self.summarize(now);
             self.len = 0;
             self.next = 0;
@@ -222,7 +226,7 @@ impl Jank {
             self.over = 0;
             self.hitch = Duration::ZERO;
             self.scheduled = 0;
-            self.since = now;
+            self.since = Some(now);
         }
     }
 
@@ -251,7 +255,9 @@ impl Jank {
         let hitch_ms = self.hitch.as_secs_f64() * 1000.0;
         let scheduled = self.scheduled;
         let interval_ms = self.interval.as_secs_f64() * 1000.0;
-        let span_ms = now.saturating_duration_since(self.since).as_secs_f64() * 1000.0;
+        let span_ms = self.since.map_or(0.0, |since| {
+            now.saturating_duration_since(since).as_secs_f64() * 1000.0
+        });
         let Painter {
             look,
             scale,
@@ -293,7 +299,7 @@ mod tests {
     fn a_frame_over_twice_the_interval_is_reported() {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
-            let mut jank = Jank::new(t0);
+            let mut jank = Jank::new();
             jank.record(
                 Duration::from_millis(PAINT_FRAME_MS),
                 Duration::ZERO,
@@ -337,7 +343,7 @@ mod tests {
     fn a_frame_past_its_scheduled_interval_is_slow() {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
-            let mut jank = Jank::new(t0);
+            let mut jank = Jank::new();
             jank.scheduled_every(Duration::from_millis(125));
             jank.record(Duration::from_millis(100), Duration::ZERO, None, None, t0);
             jank.record(Duration::from_millis(150), Duration::ZERO, None, None, t0);
@@ -358,7 +364,7 @@ mod tests {
         let t0 = Instant::now();
         let ms = Duration::from_millis;
         let logged = crate::test_capture::capture(|| {
-            let mut jank = Jank::new(t0);
+            let mut jank = Jank::new();
             jank.scheduled_every(ms(33));
             for (due, at) in [(0, 5), (33, 60), (66, 110), (132, 133)] {
                 jank.due_at(t0 + ms(due));
@@ -388,7 +394,7 @@ mod tests {
     fn a_closed_window_reports_its_spread_and_starts_afresh() {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
-            let mut jank = Jank::new(t0);
+            let mut jank = Jank::new();
             jank.painted_by(Painter {
                 look: "kitty",
                 scale: 16,
@@ -432,12 +438,27 @@ mod tests {
     fn an_unfinished_window_is_reported_at_exit() {
         let t0 = Instant::now();
         let logged = crate::test_capture::capture(|| {
-            let mut jank = Jank::new(t0);
+            let mut jank = Jank::new();
             jank.record(Duration::from_millis(10), Duration::ZERO, None, None, t0);
             jank.finish(t0);
         });
         assert!(logged.contains("frame pacing"), "{logged}");
         assert!(logged.contains("frames=1"), "{logged}");
+    }
+
+    /// The first window's span starts at its first frame, not at the boot
+    /// before it, which a rate over it would count as frames on time.
+    #[test]
+    fn the_first_span_starts_at_the_first_frame() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = Jank::new();
+            jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(5000));
+            jank.finish(t0 + ms(6000));
+        });
+        let span = ms(1001).as_secs_f64() * 1000.0;
+        assert!(logged.contains(&format!("span_ms={span:?} ")), "{logged}");
     }
 
     /// A summary names the span it covers, what the fluency gate rates its
@@ -448,8 +469,10 @@ mod tests {
         let t0 = Instant::now();
         let ms = Duration::from_millis;
         let logged = crate::test_capture::capture(|| {
-            let mut jank = Jank::new(t0);
-            jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(125));
+            let mut jank = Jank::new();
+            // A 1 ms frame shown at 1 ms: the window begins at `t0`.
+            jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(1));
+            jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(126));
             jank.record(ms(1), Duration::ZERO, None, None, t0 + WINDOW);
             jank.record(ms(1), Duration::ZERO, None, None, t0 + WINDOW + ms(250));
             jank.finish(t0 + WINDOW + ms(2500));
