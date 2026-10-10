@@ -79,8 +79,9 @@ pub(crate) struct FloatingApp {
     /// Whether the pointer last hovered something, so a move off it redraws
     /// once to drop its tooltip.
     hovered: bool,
-    /// The cursor last set, so it is set only when it changes.
-    cursor_icon: winit::window::CursorIcon,
+    /// The cursor last set, so it is set only when it changes; `None` once
+    /// the pointer leaves, whatever the OS showed meanwhile.
+    cursor_icon: Option<winit::window::CursorIcon>,
     /// The last petting, played while it lasts.
     petting: Option<pixtuoid_scene::pet::PetState>,
     /// Where a clicked agent's transcript roots are, for its focus jump:
@@ -196,7 +197,7 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
-            cursor_icon: winit::window::CursorIcon::Default,
+            cursor_icon: None,
             zoom: cfg.zoom,
             overlays: super::overlays::OverlayLayers::default(),
             window: None,
@@ -264,9 +265,8 @@ impl FloatingApp {
             self.petting.as_ref(),
             self.ui.now(),
         );
-        // winit re-applies a window's cursor when the pointer re-enters, on every platform.
-        if icon != self.cursor_icon {
-            self.cursor_icon = icon;
+        if self.cursor_icon != Some(icon) {
+            self.cursor_icon = Some(icon);
             window.set_cursor(icon);
         }
     }
@@ -734,6 +734,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.cursor_in = false;
+                self.cursor_icon = None;
                 self.rehover();
             }
             // Its release goes elsewhere now: a figure in hand is set down.
