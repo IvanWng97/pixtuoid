@@ -317,9 +317,10 @@ pub enum Furniture {
     MeetingScreen,
     /// The meeting-sofa BODY — the obstacle the mask stamps once per room (its
     /// seats are the [`Furniture::MeetingSofa`] rows). Both axes are sized so
-    /// `footprint + 2·OBSTACLE_PAD` lands exactly on the sprite; the width is
-    /// narrower than the sprite ON PURPOSE, because a full-width footprint plus
-    /// pad disconnects the narrowest meeting room. Its strip is CENTERED, not
+    /// the footprint plus twice [`OBSTACLE_PAD_PX`](crate::layout::OBSTACLE_PAD_PX)
+    /// lands exactly on the sprite; the width is narrower than the sprite ON
+    /// PURPOSE, because a full-width footprint plus pad disconnects the narrowest
+    /// meeting room. Its strip is CENTERED, not
     /// south-anchored: seat settle clearance and narrowest-room connectivity are
     /// both tuned to it sitting on the sofa pos.
     MeetingSofaBody,

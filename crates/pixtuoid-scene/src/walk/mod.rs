@@ -50,8 +50,8 @@ pub enum WanderPhase {
 pub struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
     pub phase: WanderPhase,
-    /// Physics walk progress 0–1000, meaningful ONLY in `WalkingOut`/
-    /// `WalkingBack` (0 otherwise).
+    /// Physics walk progress, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE),
+    /// meaningful ONLY in `WalkingOut`/`WalkingBack` (0 otherwise).
     pub t_x1000: u16,
     /// The current trip's destination cell (the walk `to` / waypoint `dest`).
     pub dest: Point,

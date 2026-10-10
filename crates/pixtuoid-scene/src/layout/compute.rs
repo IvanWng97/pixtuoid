@@ -43,7 +43,7 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
 pub(super) const DESK_BAND_MIN_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
 
 /// The Y twin. The y-clamp adds a third term, `couch_to_desk_extra`, which is 0
-/// everywhere below `COUCH_GAP_GROWTH_BASE_H` — pinned by the `const` assert there.
+/// everywhere below `COUCH_GAP_GROWTH_BASE_H` — pinned by the const assert there.
 pub(super) const DESK_BAND_MIN_H: u16 = INTER_POD_AISLE_Y / 2 + DESK_GROUND_H;
 
 /// The 1px column between the left rooms and the cubicle band — `right_x` steps
@@ -66,11 +66,14 @@ pub(super) const fn band_h(buf_h: u16) -> u16 {
     usable.saturating_sub(cubicle_aisle_h(usable))
 }
 
-/// The north wall band's depth — 30% of the buffer, never under `MIN_TOP_MARGIN`.
+const TOP_MARGIN_PCT: u16 = 30;
+
+/// The north wall band's depth — [`TOP_MARGIN_PCT`] percent of the buffer, never
+/// under [`MIN_TOP_MARGIN`].
 pub(super) const fn top_margin(buf_h: u16) -> u16 {
-    let pct30 = pct(buf_h, 30);
-    if pct30 > MIN_TOP_MARGIN {
-        pct30
+    let share = pct(buf_h, TOP_MARGIN_PCT);
+    if share > MIN_TOP_MARGIN {
+        share
     } else {
         MIN_TOP_MARGIN
     }

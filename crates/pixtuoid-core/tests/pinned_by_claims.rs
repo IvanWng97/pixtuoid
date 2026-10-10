@@ -53,6 +53,10 @@ fn flatten_wrapped_comments(src: &str) -> String {
         .replace("\n//", " ")
 }
 
+/// How far a claim's name may trail "pinned by" ("pinned by the TUI's `x`")
+/// and still be the claim's.
+const QUALIFIER_MAX: usize = 24;
+
 /// The identifier a `Pinned by` claim names, if the line makes one.
 ///
 /// Matched on text with comment leaders collapsed to a space first: a claim
@@ -63,10 +67,12 @@ fn claims_in(text: &str) -> Vec<String> {
     let mut rest = text;
     while let Some(idx) = rest.find("inned by") {
         rest = &rest[idx + "inned by".len()..];
-        let after = rest.trim_start_matches([' ', '\n', '[']);
-        let Some(body) = after.strip_prefix('`') else {
+        let Some(tick) = rest.find('`') else { break };
+        let qualifier = &rest[..tick];
+        if qualifier.len() > QUALIFIER_MAX || qualifier.contains(['.', ',', ';', ':', '\n']) {
             continue;
-        };
+        }
+        let body = &rest[tick + 1..];
         let Some(end) = body.find('`') else { continue };
         let name = &body[..end];
         if name.len() >= 4
@@ -158,7 +164,21 @@ fn the_claim_scanner_fires_on_an_orphan_and_stays_silent_on_a_real_one() {
         "an INDENTED wrapped claim is a live shape in the tree — \
          a column-0-anchored collapse skips it silently"
     );
+    assert_eq!(
+        claims_in("/// in place (pinned by the TUI's `qualified_name`)."),
+        ["qualified_name"],
+        "a short qualifier before the name is still the same claim"
+    );
     assert!(claims_in("/// Pinned by the shared harness.").is_empty());
+    assert!(
+        claims_in("/// Pinned by the shared harness. Its `fixture_name` differs.").is_empty(),
+        "a sentence end closes the claim before a later name"
+    );
+    assert!(
+        claims_in("/// Pinned by every test that renders a frame through `render_name`.")
+            .is_empty(),
+        "a name past the qualifier bound is no longer the claim's"
+    );
     assert!(
         claims_in("/// Pinned by `CONST_NAME`").is_empty(),
         "a SCREAMING const is not a function name"

@@ -24,9 +24,11 @@ pixtuoid-core  = { path = "../pixtuoid-core", version = "0.19.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.19.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
-# Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway profile — capability
-# query, cell-size query, and the four protocol encoders. In the ratatui org,
-# so it tracks ratatui's own releases. `default-features = false` is
+# Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway profile — only its
+# terminal query (`picker::cap_parser` and the `picker::ProtocolType` it
+# filters by): the capability and cell-size query, the reply parser, and tmux's
+# passthrough wrapping; the encoders are ours (`src/graphics/`). In the ratatui
+# org, so it tracks ratatui's own releases. `default-features = false` is
 # LOAD-BEARING: the default set turns on `chafa-dyn`, which dynamically links
 # libchafa.so and needs it at RUNTIME too — that would break the musl/cross
 # Linux prebuilds exactly the way ALSA already does (see the `audio` feature).

@@ -184,7 +184,7 @@ pub enum Pose {
         from: Point,
         /// Leg end point (layout pixels).
         to: Point,
-        /// Progress along the leg, 0..=1000 (thousandths).
+        /// Progress along the leg, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE).
         t_x1000: u16,
         /// How far into the whole leg the walker is, in octile units: the
         /// tenths of a layout pixel A* measures by.
