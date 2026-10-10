@@ -20,7 +20,7 @@ const SEED_SNAP_CELLS: u16 = 3;
 /// seed — i.e. the agent's connected walkable component. Built once per layout
 /// from a known in-component seed (the door, or a home desk).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReachSet {
+pub(crate) struct ReachSet {
     /// Coarse-cell reachability; the grid dims are `mask` dims / `COARSE_CELL_SIZE`.
     grid: Grid<bool>,
 }
@@ -29,7 +29,7 @@ impl ReachSet {
     /// Coarse BFS over `CoarseGrid::neighbors` from `seed`'s cell (snapped to the
     /// nearest walkable cell when `seed` lands on a blocked one). An
     /// empty/degenerate mask yields an all-unreachable set.
-    pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
+    pub(crate) fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
         let cell_w = mask.width() / COARSE_CELL_SIZE;
         let cell_h = mask.height() / COARSE_CELL_SIZE;
         let mut grid = Grid::filled(cell_w, cell_h, false);
@@ -63,7 +63,7 @@ impl ReachSet {
     /// NEVER a false positive:
     /// `reaches(p) ⇒ A* can route to p`, so `approach_point` can safely drop any
     /// side `reaches` rejects.
-    pub fn reaches(&self, p: Point) -> bool {
+    pub(crate) fn reaches(&self, p: Point) -> bool {
         self.grid
             .get_or(p.x / COARSE_CELL_SIZE, p.y / COARSE_CELL_SIZE, false)
     }

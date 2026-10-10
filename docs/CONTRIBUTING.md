@@ -69,6 +69,9 @@ CodSpeed skip drafts. The jobs:
 - **msrv** — the workspace compiles on its declared `rust-version`.
 - **packaging-build** (full tier) — a clean `cargo install --locked` on both
   Homebrew bottle platforms.
+- **hawk** (full tier) — `just hawk` fails on a `pub` item no other workspace
+  crate's code needs. It builds on `HAWK_RUST`, so a `rust-version` bump past
+  that fails here until `HAWK_VERSION` moves to a hawk built on a newer rustc.
 - **coverage** — every tier runs the suite instrumented; the full tier
   uploads it to Codecov, whose statuses are informational.
 - **GitGuardian Security Checks** — the GitGuardian app's secret scan, a

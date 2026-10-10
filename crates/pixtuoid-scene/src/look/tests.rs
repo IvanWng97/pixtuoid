@@ -139,7 +139,8 @@ fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
             inputs(&scene, &pack, t0 + Duration::from_millis(ms)),
         )
         .expect("lays out");
-        (r.dirty, (r.pixels.width(), r.pixels.height()))
+        let px = floor.raster.pixels().expect("drawn");
+        (r.dirty, (px.width(), px.height()))
     };
     let classic_size = (SIZE.w, SIZE.h);
     let cutaway_size = (scale.to_buffer(SIZE.w), scale.to_buffer(SIZE.h));
@@ -250,10 +251,8 @@ fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
             scale: RenderScale::new(4).expect("nonzero"),
             text,
         };
-        let pixels = render(&mut floor, office.stores(), look, inputs(&scene, &pack, t0))
-            .expect("lays out")
-            .pixels
-            .clone();
+        render(&mut floor, office.stores(), look, inputs(&scene, &pack, t0)).expect("lays out");
+        let pixels = floor.raster.pixels().expect("drawn").clone();
         (floor, pixels)
     };
     let (baked, baked_px) = frame(WorldText::Baked);

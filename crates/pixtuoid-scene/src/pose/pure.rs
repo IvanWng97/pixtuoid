@@ -72,7 +72,7 @@ pub(crate) fn travelled_on(from: Point, to: Point, t_x1000: u16) -> u32 {
 /// attempt an entry walk and (via `FloorCtx::door_anim_max_ms`) drive door-open
 /// cosmetics. NOT the walk duration — the walk completes when
 /// `physics::walk_arrived` returns true.
-pub const ENTRY_ANIMATION_MS: u64 = 4000;
+pub(crate) const ENTRY_ANIMATION_MS: u64 = 4000;
 
 /// Per-agent stale-resume gap (ms): above this `now - last_advanced_at`,
 /// `walk::advance_wander` treats the floor as off-screen/paused and
@@ -96,7 +96,7 @@ fn jittered_dwell(window: DwellWindow, agent_id: AgentId, tag: u64) -> u64 {
 /// Absolute dwell (ms) an agent lingers at a waypoint, per spot kind, with
 /// per-agent jitter. A sofa / meeting seat is a long lounge; a vending grab
 /// is quick.
-pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
+pub(crate) fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
     jittered_dwell(furniture_def(kind.furniture()).dwell, agent_id, PHI3_GAMMA)
 }
 
@@ -162,7 +162,7 @@ pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: 
 
 /// The pose an agent renders this frame — the output of pose derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pose {
+pub(crate) enum Pose {
     /// Seated at the desk, idle.
     SeatedIdle,
     /// Seated at desk, awake but not typing — the agent recently finished a
@@ -222,7 +222,7 @@ impl Pose {
 /// Priority, first match wins: exit override (walk to the door, then `None`
 /// once the window passes) → entry override (door → desk, regardless of state
 /// changes) → the state-driven pose.
-pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
+pub(crate) fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
     // The target is `door_threshold` (the on-floor point below the door), not

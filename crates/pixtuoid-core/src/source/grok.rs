@@ -32,9 +32,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use crate::AgentId;
-use crate::source::decoder::{
-    MAX_DECODED_FIELD_CHARS, ellipsize, generic_tool_display, parsed_tail_lines,
-};
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize, generic_tool_display};
 use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
@@ -58,7 +56,7 @@ const XAI_MODEL_AUTO_SWITCHED: &str = "model_auto_switched";
 const XAI_TURN_COMPLETED: &str = "turn_completed";
 const XAI_HOOK_EXECUTION: &str = "hook_execution";
 
-/// The xAI extension tags this decoder turns into events. Exported for the
+/// The xAI extension tags this decoder turns into events. Listed for the
 /// drift surface: the arm below ends `_ => Ok(vec![])`, so a renamed tag decodes
 /// to nothing with no breadcrumb to say so, and the upstream watch is the only
 /// signal. Pinned to the arms by
@@ -73,7 +71,7 @@ pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_HOOK_EXECUTION,
 ];
 
-/// The method namespace itself, exported for the same reason: it gates the whole
+/// The method namespace itself, listed for the same reason: it gates the whole
 /// xAI block, so its rename silences every tag at once.
 #[cfg(test)]
 pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
@@ -536,8 +534,9 @@ fn spawn_is_blocking(args: Option<&Value>) -> bool {
 /// "session_end"}` line our own installed hook causes. The per-line parse must
 /// stay STRUCTURAL — a substring scan would false-positive on a tool result
 /// QUOTING this marker inside a JSON string.
-pub fn grok_session_ended(tail: &[u8]) -> bool {
-    parsed_tail_lines(tail).any(|v| {
+#[cfg(feature = "native")]
+pub(crate) fn grok_session_ended(tail: &[u8]) -> bool {
+    crate::source::decoder::parsed_tail_lines(tail).any(|v| {
         v.get("method").and_then(|m| m.as_str()) == Some(XAI_SESSION_UPDATE_METHOD)
             && v.pointer("/params/update/sessionUpdate")
                 .and_then(|t| t.as_str())
@@ -573,7 +572,8 @@ pub(crate) fn grok_id_from_path(path: &Path) -> String {
 /// exactly — URL-decode the name and accept it only when it looks absolute;
 /// otherwise it is the `{slug}-{blake3_hex16}` long-path form, whose original
 /// cwd upstream records in a sibling `.cwd` file.
-pub fn grok_cwd_from_path(path: &Path) -> Option<PathBuf> {
+#[cfg(feature = "native")]
+pub(crate) fn grok_cwd_from_path(path: &Path) -> Option<PathBuf> {
     let group = path.parent()?.parent()?;
     let name = group.file_name()?.to_str()?;
     if let Some(decoded) = percent_decode(name) {
@@ -588,8 +588,10 @@ pub fn grok_cwd_from_path(path: &Path) -> Option<PathBuf> {
 }
 
 /// A `.cwd` file holds one path, so the cap only guards a planted file.
+#[cfg(feature = "native")]
 const MAX_CWD_FILE_BYTES: u64 = 4096;
 
+#[cfg(feature = "native")]
 fn read_bounded(path: &Path, cap: u64) -> Option<String> {
     use std::io::Read;
     let f = std::fs::File::open(path).ok()?;
@@ -600,6 +602,7 @@ fn read_bounded(path: &Path, cap: u64) -> Option<String> {
 
 /// Pure `%XX` percent-decoding. Upstream's `urlencoding::encode` never emits
 /// `+` for a space, so `+` passes through literally.
+#[cfg(feature = "native")]
 fn percent_decode(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -1149,7 +1152,7 @@ mod tests {
         assert_eq!(extract_grok_cwd(&json!({"cwd": "/Users/dev/proj"})), None);
     }
 
-    #[cfg(not(windows))]
+    #[cfg(all(feature = "native", not(windows)))]
     #[test]
     fn a_drive_letter_group_dir_is_not_absolute_off_windows() {
         // `C:/proj` percent-encoded: only the `cfg!(windows)` arm may accept a
@@ -1500,6 +1503,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn session_ended_checker_matches_only_the_structural_marker() {
         let end_line = serde_json::to_string(&xai_line(json!({
@@ -1523,6 +1527,7 @@ mod tests {
         assert!(grok_session_ended(torn.as_bytes()));
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn session_ended_checker_is_immune_to_quoted_content() {
         let quoted = serde_json::to_string(&acp_line(json!({
@@ -1541,6 +1546,7 @@ mod tests {
         assert_eq!(grok_id_from_path(p), "0197fa30-sess");
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn cwd_decodes_from_the_urlencoded_group_dir() {
         let p = Path::new(
@@ -1552,6 +1558,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn cwd_slug_form_reads_the_dot_cwd_file() {
         // The >255-byte encoded form is `{slug}-{blake3_hex16}`, never absolute
@@ -1573,6 +1580,7 @@ mod tests {
         assert_eq!(grok_cwd_from_path(&p), None);
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn percent_decode_handles_escapes_and_rejects_malformed() {
         assert_eq!(percent_decode("%2Fa%20b"), Some("/a b".into()));

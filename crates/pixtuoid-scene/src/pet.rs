@@ -25,7 +25,7 @@ impl PetState {
     }
 
     /// Milliseconds since the pet was clicked, saturating to 0 on a backward clock.
-    pub fn elapsed_ms(&self, now: SystemTime) -> u64 {
+    pub(crate) fn elapsed_ms(&self, now: SystemTime) -> u64 {
         // `is_active` above deliberately does NOT use this helper: its
         // backward-clock fallback is `PET_DURATION_MS+1` (treat-as-expired),
         // not saturate-to-0.
@@ -92,7 +92,7 @@ impl PetKind {
     }
 
     /// Whether this kind curls up to sleep near idle agents (cat yes, dog no).
-    pub fn sleeps_near_idle(self) -> bool {
+    pub(crate) fn sleeps_near_idle(self) -> bool {
         match self {
             PetKind::Cat => true,
             PetKind::Dog => false,

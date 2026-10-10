@@ -25,15 +25,17 @@ pub struct ProbeSnapshot {
 
 impl ProbeSnapshot {
     /// The ids this probe saw alive.
-    pub fn ids(&self) -> impl Iterator<Item = &String> {
+    #[cfg(test)]
+    pub(crate) fn ids(&self) -> impl Iterator<Item = &String> {
         self.pid_of.keys()
     }
     /// Was `id` alive at probe time?
-    pub fn contains(&self, id: &str) -> bool {
+    pub(crate) fn contains(&self, id: &str) -> bool {
         self.pid_of.contains_key(id)
     }
     /// Did the probe see nothing alive? Distinct from a FAILED probe, which is `None`.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.pid_of.is_empty()
     }
 
@@ -159,8 +161,6 @@ pub(super) async fn probe_admits(
     ctx: &WatchCtx<'_>,
 ) -> bool {
     let live = ctx.live.lock().await;
-    // Through `walk::id_path`, never raw: the producer side folds every path
-    // before deriving, so an unfolded id here would query a different id-space.
     !live.is_empty() && live.contains(&decoders.id_derive.id_for(path))
 }
 
@@ -343,8 +343,6 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     let claimed: Vec<PathBuf> = {
         let seen = ctx.seen.lock().await;
         seen.keys()
-            // Folded via `walk::id_path` like every other derivation seam — a
-            // raw key matches nothing and the `seen` entry never releases.
             .filter(|p| decoders.id_derive.id_for(p) == id)
             .cloned()
             .collect()

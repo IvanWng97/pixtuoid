@@ -540,7 +540,7 @@ fn coffee_record_stamps_only_new_carriers_and_evict_follows_the_scene() {
     let id = AgentId::from_parts("claude-code", "coffee-test");
     let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let t1 = t0 + std::time::Duration::from_secs(60);
-    let mut coffee = CoffeeState::new();
+    let mut coffee = CoffeeState::default();
     coffee.record([id], t0);
     assert_eq!(coffee.map().get(&id), Some(&t0), "a new carrier is stamped");
     coffee.record([id], t1);
@@ -558,7 +558,7 @@ fn coffee_record_stamps_only_new_carriers_and_evict_follows_the_scene() {
 fn coffee_second_trip_after_steam_window_restamps() {
     let id = AgentId::from_parts("claude-code", "coffee-refetch");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut coffee = CoffeeState::new();
+    let mut coffee = CoffeeState::default();
     coffee.record([id], t0);
     let within = t0 + Duration::from_secs(CoffeeState::STEAM_WINDOW_SECS - 1);
     coffee.record([id], within);
@@ -583,7 +583,7 @@ fn coffee_record_keeps_stamp_on_a_backward_clock_step() {
     // regression because their `duration_since` never errs.
     let id = AgentId::from_parts("claude-code", "coffee-backclock");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut coffee = CoffeeState::new();
+    let mut coffee = CoffeeState::default();
     coffee.record([id], t0);
     coffee.record([id], t0 - Duration::from_secs(10));
     assert_eq!(
@@ -1001,7 +1001,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(4, 16);
     let occupied = std::collections::HashSet::new();
-    let mut obs = AudioObserver::new();
+    let mut obs = AudioObserver::default();
     let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
     let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
@@ -1025,7 +1025,7 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(4, 16); // agents live on floor 0
     let printer = |i: usize| (i == 0 || i == 1).then_some(crate::layout::WaypointKind::Printer);
-    let mut obs = AudioObserver::new();
+    let mut obs = AudioObserver::default();
 
     let _ = obs.frame(
         &scene,
@@ -1062,7 +1062,7 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     let empty = make_scene(0, 16);
     let one = make_scene(1, 16);
     let occ = std::collections::HashSet::new();
-    let mut obs = AudioObserver::new();
+    let mut obs = AudioObserver::default();
 
     let _ = obs.frame(&empty, &occ, |_| None, FloorMeta::ground(), now);
     let arrival = obs.frame(&one, &occ, |_| None, FloorMeta::ground(), now);
@@ -1886,19 +1886,16 @@ fn a_frame_is_a_function_of_its_instant_and_tier() {
     }
 }
 
-/// A floor key slides one floor at a time and never during a slide; a slide
-/// lands on its destination when it finishes, is dropped when its floor goes,
-/// and a cancel lands it at once.
+/// A slide never begins during one; it lands on its destination when it
+/// finishes, is dropped when its floor goes, and a cancel lands it at once.
 #[test]
 fn floor_nav_slides_lands_and_clamps() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let done = t0 + Duration::from_secs(2);
     let mut nav = FloorNav::default();
-    assert_eq!((nav.up(3), nav.down()), (Some(1), None));
     assert!(!nav.navigate(0, t0), "no floor slides to itself");
     assert!(nav.navigate(1, t0));
     assert!(!nav.navigate(2, t0), "no slide begins during one");
-    assert_eq!((nav.up(3), nav.down()), (None, None));
     nav.settle(3, t0);
     assert_eq!(
         (nav.current(), nav.transition().is_some()),
@@ -2191,8 +2188,8 @@ fn a_frame_without_the_office_forgets_the_last() {
     assert!(office.heard_occupied().is_empty());
 }
 
-/// An office whose upper floor empties shows one floor: the count, the
-/// breadcrumb and the way up all follow the live scene, not the views kept.
+/// An office whose upper floor empties shows one floor: the count and the
+/// breadcrumb follow the live scene, not the views kept.
 #[test]
 fn an_office_session_follows_its_floors_down() {
     let pack = Arc::new(crate::pack::test_office());
@@ -2229,7 +2226,6 @@ fn an_office_session_follows_its_floors_down() {
         office.footer_floor(&one).is_none(),
         "one floor has no breadcrumb"
     );
-    assert_eq!(office.nav().up(office.n_floors()), None, "no floor above");
 }
 
 /// A lifted agent hangs where the pointer is, in front of the room; set

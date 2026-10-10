@@ -55,6 +55,13 @@ API_NIGHTLY := "nightly-2026-07-22"
 # churning goldens.
 API_PUBLIC_API := "0.52.0"
 
+# The cargo-hawk `hawk` runs, and the exact rustc it links (its
+# rust-toolchain.toml): hawk refuses any other, so a bump moves both, and the
+# installer's hash with them.
+HAWK_VERSION := "0.1.15"
+HAWK_RUST := "1.99.0"
+HAWK_INSTALLER_SHA256 := "4e1b85fc15d3d4efa9b3bd7c62620655cc5504b7164272292043e3794f54111f"
+
 # The non-linux triples `doc-check` renders, one per OS release.yml ships.
 # rustdoc links nothing, so a triple's std is all it needs while no dependency on
 # it builds C (`cargo doc` still runs build scripts).
@@ -485,6 +492,36 @@ _api-toolchain:
     rustup toolchain list | grep -q '{{ API_NIGHTLY }}' && exit 0
     echo "installing {{ API_NIGHTLY }} (api-surface needs nightly rustdoc JSON)…" >&2
     rustup toolchain install {{ API_NIGHTLY }} --profile minimal
+
+# `pixtuoid_web`'s `pub` surface is the wasm exports the site's JS calls,
+# outside the workspace: hawk's `--exclude-crate` case.
+[doc('Fail on a `pub` item no other workspace crate needs (cargo-hawk; the full tier gates on it); forwards args, e.g. --fix')]
+[group('rust')]
+hawk *args: _hawk-toolchain
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # rustup's proxy cargo, so `+{{ HAWK_RUST }}` selects the toolchain (see `check-windows`).
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    bin="$PWD/target/cargo-hawk-{{ HAWK_VERSION }}"
+    if [ ! -x "$bin/cargo-hawk" ]; then
+        installer="$(mktemp)"
+        trap 'rm -f "$installer"' EXIT
+        curl --proto '=https' --tlsv1.2 -fsSL -o "$installer" \
+            "https://github.com/astral-sh/hawk/releases/download/{{ HAWK_VERSION }}/cargo-hawk-installer.sh"
+        # The installer pins each archive's hash; this pins the installer.
+        echo "{{ HAWK_INSTALLER_SHA256 }}  $installer" | shasum -a 256 -c - >/dev/null
+        CARGO_HAWK_UNMANAGED_INSTALL="$bin" sh "$installer" >&2
+    fi
+    # The `-A`: AGENTS.md's Visibility rule stops at `pub(crate)`, never private.
+    PATH="$bin:$PATH" cargo +{{ HAWK_RUST }} hawk check --target-dir target/hawk \
+        --exclude-crate pixtuoid_web -D warnings -A hawk::unnecessary_restricted_visibility "$@"
+
+[private]
+_hawk-toolchain:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rustup toolchain list | grep -q '^{{ HAWK_RUST }}-' \
+        || rustup toolchain install {{ HAWK_RUST }} --profile minimal --no-self-update >&2
 
 # Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
 # (1) build every item's docs, private ones included, with EVERY rustdoc

@@ -429,7 +429,7 @@ fn cc_subagent_hooks_reject_missing_or_empty_agent_id() {
 #[cfg(windows)]
 #[test]
 fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
-    use pixtuoid_core::source::codex::codex_id_from_path;
+    use pixtuoid_core::source::{codex, registry};
     let uuid = "019e7762-9ded-7e33-be41-946ecf105bf4";
     let rollout =
         format!(r"C:\Users\Me\.codex\sessions\2026\06\08\rollout-2026-06-08T22-36-52-{uuid}.jsonl");
@@ -444,7 +444,10 @@ fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
     }))
     .agent_id();
 
-    let watcher = AgentId::from_parts("codex", &codex_id_from_path(std::path::Path::new(&rollout)));
+    let watcher = AgentId::from_parts(
+        codex::SOURCE_NAME,
+        &registry::id_deriver_for(codex::SOURCE_NAME)(std::path::Path::new(&rollout)),
+    );
 
     assert_eq!(
         child, watcher,

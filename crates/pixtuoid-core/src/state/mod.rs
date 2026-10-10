@@ -531,7 +531,8 @@ impl DaemonPresence {
     }
 
     /// Whether the mascot renders as Busy (alive, not degraded, ≥1 run in flight).
-    pub fn is_busy(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_busy(&self) -> bool {
         self.display_state() == DaemonState::Busy
     }
 }

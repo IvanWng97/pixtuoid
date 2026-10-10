@@ -59,8 +59,7 @@ pub const CHILD_END_RELINK_TTL: Duration = Duration::from_secs(300);
 /// (`DEFAULT_POLL_INTERVAL`);
 /// a `tool_use_id` is never legitimately re-dispatched, so generosity costs
 /// only the tombstone's map entry.
-#[doc(hidden)]
-pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
+pub(crate) const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 
 /// How long an [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) vouch exempts its slot from the
 /// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
