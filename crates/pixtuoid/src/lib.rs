@@ -295,7 +295,7 @@ pub(crate) mod test_flash {
 
     use pixtuoid_core::state::{MAX_FLOORS, SceneState};
     use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
-    use pixtuoid_scene::flash::FlashPhase;
+    use pixtuoid_scene::flash::Flashes;
     use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
     use pixtuoid_scene::look::{Look, Place, RenderInputs};
     use pixtuoid_scene::pack::OfficeArt;
@@ -323,7 +323,7 @@ pub(crate) mod test_flash {
 
     /// What an empty floor's frame flashes at `at`, rendered on `session` as a
     /// painter renders it.
-    fn rendered_flash(session: &mut FloorSession, floor: FloorMeta, at: SystemTime) -> FlashPhase {
+    fn rendered_flash(session: &mut FloorSession, floor: FloorMeta, at: SystemTime) -> Flashes {
         let scene = SceneState::new([8; MAX_FLOORS]);
         session.render(
             Look::Classic,
@@ -341,7 +341,7 @@ pub(crate) mod test_flash {
                 debug_walkable: false,
             },
         );
-        session.flash()
+        session.flashes()
     }
 
     /// A forced storm's first strike after local noon, on a Full floor.
@@ -365,7 +365,7 @@ pub(crate) mod test_flash {
         let start = (0..MINUTE_MS)
             .step_by(FULL_TICK_MS as usize)
             .map(|n| noon + ms(n))
-            .find(|&at| phase(at) != FlashPhase::default())
+            .find(|&at| phase(at) != Flashes::default())
             .expect("a storm strikes within a minute");
         let mut changes = vec![start];
         let mut was = phase(start);
@@ -377,7 +377,7 @@ pub(crate) mod test_flash {
                     changes.push(at);
                     was = now;
                 }
-                now == FlashPhase::default()
+                now == Flashes::default()
             })
             .expect("a strike ends within a minute");
         Strike {

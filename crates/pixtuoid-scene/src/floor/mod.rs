@@ -610,8 +610,8 @@ impl FloorSession {
 
     /// What of the last [`render`](Self::render)'s frame flashes; nothing
     /// before the first, or when it could not lay out.
-    pub fn flash(&self) -> crate::flash::FlashPhase {
-        self.view.flash()
+    pub fn flashes(&self) -> crate::flash::Flashes {
+        crate::flash::Flashes::of_floor(self.view.flash())
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves of the
@@ -1150,7 +1150,7 @@ impl FloorTransition {
     }
 }
 
-/// How many floors are needed to seat all agents?
+/// The floors `scene`'s agents sit on: one past the highest, at least one.
 pub fn num_floors(scene: &SceneState) -> usize {
     scene
         .agents

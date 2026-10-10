@@ -96,7 +96,7 @@ pub(crate) struct TileCutaway {
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
     /// The flashes the terminal shows.
-    flash: FlashHold<Flashes, Option<Fitted>>,
+    flash: FlashHold<Option<Fitted>>,
     /// This frame's written transmits, counted as shown once the frame
     /// lands ([`Self::landed`]).
     landing: Option<Landing>,

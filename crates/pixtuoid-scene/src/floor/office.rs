@@ -522,8 +522,8 @@ impl OfficeSession {
         &self.views[self.nav.current()].last_occupied
     }
 
-    /// What each of the last frame's two sides flashes: a slide's leaving and
-    /// arriving floors, else the floor showing's twice.
+    /// What the last frame flashes: a slide's leaving and arriving floors',
+    /// else the floor showing's.
     pub fn flashes(&self) -> crate::flash::Flashes {
         let of = |floor: usize| {
             self.views
@@ -532,8 +532,10 @@ impl OfficeSession {
                 .unwrap_or_default()
         };
         match (&self.slide, self.nav.transition()) {
-            (Some(_), Some(tr)) => [of(tr.from_floor), of(tr.to_floor)],
-            _ => [of(self.nav.current()); 2],
+            (Some(_), Some(tr)) => {
+                crate::flash::Flashes::of_slide(of(tr.from_floor), of(tr.to_floor))
+            }
+            _ => crate::flash::Flashes::of_floor(of(self.nav.current())),
         }
     }
 

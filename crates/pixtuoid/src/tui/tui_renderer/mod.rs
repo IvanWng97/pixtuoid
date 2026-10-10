@@ -70,7 +70,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     debug_walkable: bool,
     chrome: Chrome,
     /// The flashes the half-blocks show; the cutaway holds its own.
-    flash: pixtuoid_scene::flash::FlashHold<pixtuoid_scene::flash::Flashes, ratatui::layout::Size>,
+    flash: pixtuoid_scene::flash::FlashHold<ratatui::layout::Size>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
     #[cfg(feature = "graphics")]
     cutaway: Option<crate::tui::cutaway::TileCutaway>,

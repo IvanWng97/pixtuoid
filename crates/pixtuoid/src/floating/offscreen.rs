@@ -22,7 +22,7 @@ pub struct OfficeRenderer {
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
     /// The flashes the window shows.
-    flash: FlashHold<Flashes, (u32, u32)>,
+    flash: FlashHold<(u32, u32)>,
     /// The flashes the last [`render_live`](Self::render_live) handed out,
     /// and the window it was for.
     rendered: (Flashes, (u32, u32)),
