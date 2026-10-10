@@ -388,6 +388,10 @@ pub(crate) mod test_flash {
         }
     }
 
+    /// How late each painter's slow twin lands its frame: one value, so the
+    /// half-block, cutaway and floating twins test one model.
+    pub(crate) const SLOW: Duration = Duration::from_millis(60);
+
     /// Four frames over `strike`: one long in the dark; one late in its first
     /// phase; one at its second phase's start, inside the floor of the last,
     /// so held; and the first the floor after the last, so shown.
