@@ -7,7 +7,7 @@ use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint}
 use crate::cutaway::wall::paint_wall;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::layout::{Point, Size};
+use crate::layout::{Point, Size, sort_row_at};
 use crate::pack::desk_art_top;
 use crate::pose;
 use crate::sim::anchors::{
@@ -232,10 +232,9 @@ fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
 fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let y_top = 20u16;
-    // `y_top - 3` is the northmost row a routed walker's feet can reach (the
-    // footprint top minus OBSTACLE_PAD_PX + 1); closer rows sit inside the
-    // blocked band no walker ever occupies.
-    let cap_row = y_top - 3;
+    // The northmost row a routed walker's feet can reach; closer rows sit inside
+    // the blocked band no walker ever occupies.
+    let cap_row = y_top - (crate::layout::OBSTACLE_PAD_PX + 1);
     let character = Rgb {
         r: 220,
         g: 40,
@@ -1507,12 +1506,11 @@ fn sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture() {
 
         // Independent oracle: the pre-lift partition, keyed on kind alone.
         let historical = match w.kind {
-            // back_couch_top_left.y + sprite_h(9) = (pos.y - 7) + 9. The chair
-            // shares the front seat top-left + bottom-row geometry by design.
+            // The chair shares the front seat's top-left and bottom row by design.
             WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
                 back_couch_top_left(w.pos, CHARACTER_SPRITE_W).y + 9
             }
-            // waypoint_top_left.y + sprite_h(12) = pos.y — the AtWaypoint default.
+            // The AtWaypoint default.
             WaypointKind::Island => waypoint_top_left(w.pos, CHARACTER_SPRITE_W).y + 12,
             _ => unreachable!("{:?} has a foot cell but no oracle arm — add one", w.kind),
         };
@@ -2712,7 +2710,7 @@ struct OwnedSimStores {
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
     creatures:
         std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
-    grip: Option<crate::interact::Grip>,
+    grip: crate::interact::Grip,
 }
 
 impl OwnedSimStores {
@@ -2723,7 +2721,7 @@ impl OwnedSimStores {
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
             creatures: std::collections::HashMap::new(),
-            grip: None,
+            grip: crate::interact::Grip::default(),
         }
     }
 
@@ -3066,7 +3064,7 @@ fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
     for degraded in [false, true] {
         let mascot = crate::sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
-            size: Size { w: 14, h: 12 },
+            sort_row: 60,
             anim_name: def.walk.piece(),
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
@@ -3229,7 +3227,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
             },
         );
         for m in &frame.mascots {
-            let size = m.size;
+            let size = crate::sim::pack_frame_size(&pack, m.anim_name, m.frame_idx);
             let (Some(x0), Some(y0)) = (
                 m.pos.x.checked_sub(size.w / 2),
                 m.pos.y.checked_sub(size.h / 2),
@@ -3661,7 +3659,10 @@ fn each_mascot_hovers_as_its_own_instance() {
         },
     );
     let mut painted: Vec<_> = frame.mascots.iter().collect();
-    painted.sort_by_key(|m| sort_row_at(Pivot::Center, m.pos, m.size.h));
+    painted.sort_by_key(|m| {
+        let h = crate::sim::pack_frame_size(&pack, m.anim_name, m.frame_idx).h;
+        sort_row_at(Pivot::Center, m.pos, h)
+    });
     let expected: Vec<_> = painted
         .iter()
         .map(|m| HoverTarget::Mascot(m.key.clone()))
@@ -4809,7 +4810,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                         .is_some_and(|p| p.anim_name.name().contains("walk")),
                 );
             for m in &frame.mascots {
-                let Size { w, h } = m.size;
+                let Size { w, h } = crate::sim::pack_frame_size(&pack, m.anim_name, m.frame_idx);
                 if m.pos.x < w / 2
                     || m.pos.x + w.div_ceil(2) > layout.buf_w
                     || m.pos.y < h / 2
