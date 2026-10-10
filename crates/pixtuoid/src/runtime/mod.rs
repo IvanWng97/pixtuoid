@@ -222,7 +222,7 @@ pub(crate) fn unseen_deaths<'a>(deaths: &'a [SourceDeath], seen: &mut usize) -> 
 type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
 /// SIGINT, SIGTERM and, on unix, SIGHUP (the terminal window closing) and SIGQUIT,
-/// their handlers installed at [`arm`](Self::arm): armed before a painter sets up
+/// their handlers installed at [`arm`](Self::arm) (SIGHUP stays ignored when inherited as such): armed before a painter sets up
 /// what its exit undoes (the TUI's terminal modes, the floating window's saved
 /// geometry, the kitty shared-memory unlink), so no signal can land in between
 /// and kill the process by its default disposition.
@@ -285,7 +285,13 @@ fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
 fn terminate_signals() -> impl std::future::Future<Output = ()> + Send {
     use tokio::signal::unix::SignalKind;
     let term = quit_signal(SignalKind::terminate(), "SIGTERM");
-    let hangup = quit_signal(SignalKind::hangup(), "SIGHUP");
+    // A handler installed over an inherited SIG_IGN (`nohup`) would quit a
+    // deliberately detached run.
+    let hangup: QuitArm<()> = if hangup_ignored() {
+        Box::pin(std::future::pending())
+    } else {
+        Box::pin(quit_signal(SignalKind::hangup(), "SIGHUP"))
+    };
     let quit = quit_signal(SignalKind::quit(), "SIGQUIT");
     async move {
         tokio::select! {
@@ -293,6 +299,16 @@ fn terminate_signals() -> impl std::future::Future<Output = ()> + Send {
             () = hangup => {}
             () = quit => {}
         }
+    }
+}
+
+#[cfg(unix)]
+fn hangup_ignored() -> bool {
+    // SAFETY: a null `act` only reads the current disposition into `old`.
+    unsafe {
+        let mut old: libc::sigaction = std::mem::zeroed();
+        libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut old) == 0
+            && old.sa_sigaction == libc::SIG_IGN
     }
 }
 
@@ -757,5 +773,28 @@ mod quit_arms {
                 .await
                 .unwrap_or_else(|_| panic!("signal {signal} did not quit"));
         }
+    }
+
+    /// `nohup` hands the process SIG_IGN for SIGHUP; a handler installed over it
+    /// would quit a deliberately detached run.
+    #[tokio::test]
+    async fn an_inherited_ignored_hangup_stays_ignored() {
+        // SAFETY: process-wide disposition, restored before the test returns.
+        unsafe {
+            libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        }
+        let mut quit = Box::pin(QuitArms::arm().signalled());
+        // SAFETY: SIGHUP is ignored (or handled) from here on.
+        unsafe {
+            libc::raise(libc::SIGHUP);
+        }
+        let resolved = tokio::time::timeout(std::time::Duration::from_millis(200), &mut quit)
+            .await
+            .is_ok();
+        // SAFETY: restoring the default disposition.
+        unsafe {
+            libc::signal(libc::SIGHUP, libc::SIG_DFL);
+        }
+        assert!(!resolved, "an ignored SIGHUP must not quit");
     }
 }
