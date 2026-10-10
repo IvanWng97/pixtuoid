@@ -135,7 +135,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       - run: just ci-observability
-      - run: just hawk-pin-check
       - run: just json-schemas
       - run: just links
       - run: just drift-selftest
@@ -162,6 +161,7 @@ jobs:
       # while the MSRV recipe installs the exact rust-version toolchain.
       - uses: ./.github/actions/setup-just
       - run: just msrv
+      - run: just hawk-pin-check
 
   npm-gen:
     name: npm package generator

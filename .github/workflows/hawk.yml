@@ -12,7 +12,6 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "hawk.toml"
       - "justfile"
       - ".github/workflows/hawk.yml"
   workflow_dispatch:

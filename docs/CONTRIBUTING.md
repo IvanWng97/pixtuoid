@@ -103,7 +103,7 @@ CodSpeed skip drafts. The jobs:
   lens's finding count in its description.
 - **hawk**, advisory (`hawk.yml`, on main and by dispatch) — `just hawk`
   reports each `pub` item no other workspace crate's code needs, as warnings;
-  hygiene's `just hawk-pin-check` fails a `rust-version` bump past `HAWK_RUST`.
+  msrv's `just hawk-pin-check` fails a `rust-version` bump past `HAWK_RUST`.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
