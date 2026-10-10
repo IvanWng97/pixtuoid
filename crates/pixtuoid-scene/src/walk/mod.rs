@@ -421,7 +421,7 @@ pub(crate) fn advance_wander(
     }
 
     // `result.0` == `walk.wander.phase` in every arm, so the frame's
-    // `phase_started_at`/`target` always describe the returned phase.
+    // `dest`/`kind` always describe the returned phase.
     let (phase, t_x1000) = result;
     WanderFrame {
         phase,
