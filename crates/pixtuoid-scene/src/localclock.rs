@@ -34,7 +34,7 @@ fn local(day: u32, h: u32, m: u32) -> SystemTime {
 
 /// Local `h:m` on `day`'s own local date, not the reference day: a run on
 /// today's sky. `None` where that local time doesn't exist.
-pub fn on_date_of(day: SystemTime, h: u32, m: u32) -> Option<SystemTime> {
+pub(crate) fn on_date_of(day: SystemTime, h: u32, m: u32) -> Option<SystemTime> {
     let date = chrono::DateTime::<chrono::Local>::from(day).date_naive();
     let local = chrono::Local.from_local_datetime(&date.and_hms_opt(h, m, 0)?);
     local.single().map(Into::into)
@@ -50,15 +50,17 @@ pub fn at_hour_min(h: u32, m: u32) -> SystemTime {
     local(0, h, m)
 }
 
-/// Local `h:00`, `day` days after the base date — weather and moon phase vary by
-/// day at a fixed hour, so a search over days reaches different sky states. Any
-/// `day` is valid, including past the end of the month.
-pub fn on_day(day: u32, h: u32) -> SystemTime {
+/// [`try_on_day`] where that local time exists.
+#[cfg(test)]
+pub(crate) fn on_day(day: u32, h: u32) -> SystemTime {
     local(day, h, 0)
 }
 
-/// [`on_day`], or `None` where the date is past chrono's calendar, `h` is no hour, or that
-/// local time is skipped or ambiguous.
+/// Local `h:00`, `day` days after the base date — weather and moon phase vary by
+/// day at a fixed hour, so a search over days reaches different sky states. Any
+/// `day` is valid, including past the end of the month; `None` where the date is
+/// past chrono's calendar, `h` is no hour, or that local time is skipped or
+/// ambiguous.
 pub fn try_on_day(day: u32, h: u32) -> Option<SystemTime> {
     try_local(day, h, 0)
 }

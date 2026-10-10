@@ -16,10 +16,10 @@ use super::lookup;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UnmarkedHead {
     /// The animation, e.g. `standing@4x`.
-    pub name: String,
+    pub(crate) name: String,
     /// Its first unmarked frame, counted from 0 in the order the
     /// pack loads them: every `@frame` block of each file its `frames` lists.
-    pub frame: usize,
+    pub(crate) frame: usize,
 }
 
 /// A view a hairstyle leaves out and a head at its density faces: that head is
@@ -27,24 +27,24 @@ pub(crate) struct UnmarkedHead {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MissingHairView {
     /// The style's key, e.g. `mop@4x`.
-    pub style: String,
+    pub(crate) style: String,
     /// The view.
-    pub view: HeadView,
+    pub(crate) view: HeadView,
     /// The first animation, by name, with such a head.
-    pub name: String,
+    pub(crate) name: String,
 }
 
 /// A hairstyle view with a layer reaching past a character frame's sides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HairOverhang {
     /// The style's key, e.g. `mop@4x`.
-    pub style: String,
+    pub(crate) style: String,
     /// The view.
-    pub view: HeadView,
+    pub(crate) view: HeadView,
     /// The first animation, by name, it overhangs.
-    pub name: String,
+    pub(crate) name: String,
     /// That animation's first such frame.
-    pub frame: usize,
+    pub(crate) frame: usize,
 }
 
 /// What a loaded pack draws as its author may not have meant: a pack that
@@ -52,19 +52,19 @@ pub(crate) struct HairOverhang {
 #[derive(Debug, Default)]
 pub(crate) struct ValidationReport {
     /// One per character animation.
-    pub unmarked_heads: Vec<UnmarkedHead>,
+    pub(crate) unmarked_heads: Vec<UnmarkedHead>,
     /// One per hairstyle view.
-    pub missing_hair_views: Vec<MissingHairView>,
+    pub(crate) missing_hair_views: Vec<MissingHairView>,
     /// One per hairstyle view.
-    pub overhanging_hair: Vec<HairOverhang>,
+    pub(crate) overhanging_hair: Vec<HairOverhang>,
     /// Each hairstyle key at a density the pack draws no character at.
-    pub orphan_hairstyles: Vec<String>,
+    pub(crate) orphan_hairstyles: Vec<String>,
     /// Each density variant timed apart from its base: a renderer times a
     /// variant by its base, so the variant's own timing never plays.
-    pub unread_variant_timing: Vec<UnreadTiming>,
+    pub(crate) unread_variant_timing: Vec<UnreadTiming>,
     /// Each of the caller's loops whose frames don't hold whole beats: the
     /// beat skips or stretches one.
-    pub off_beat_loops: Vec<OffBeatLoop>,
+    pub(crate) off_beat_loops: Vec<OffBeatLoop>,
 }
 
 /// A density variant's timing that differs from its base's, which is the
@@ -72,9 +72,9 @@ pub(crate) struct ValidationReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UnreadTiming {
     /// The variant, e.g. `typing@4x`.
-    pub name: String,
+    pub(crate) name: String,
     /// The field it sets apart.
-    pub field: UnreadField,
+    pub(crate) field: UnreadField,
 }
 
 /// The timing field an [`UnreadTiming`] sets apart, with both values.
@@ -100,9 +100,9 @@ pub(crate) enum UnreadField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OffBeatLoop {
     /// The animation.
-    pub name: String,
+    pub(crate) name: String,
     /// Its `frame_ms`.
-    pub frame_ms: u32,
+    pub(crate) frame_ms: u32,
 }
 
 impl ValidationReport {

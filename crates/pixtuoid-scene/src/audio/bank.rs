@@ -18,11 +18,11 @@ pub const KEYSTROKE_POOL: usize = 16;
 pub const DROP_POOL: usize = 12;
 
 /// One-shot playback gains relative to master — loudness-matched unit levels.
-pub const KEYSTROKE_GAIN: f32 = 0.35;
-pub const ONE_SHOT_GAIN: f32 = 0.5;
+pub(crate) const KEYSTROKE_GAIN: f32 = 0.35;
+pub(crate) const ONE_SHOT_GAIN: f32 = 0.5;
 /// Foreground raindrops sit well ABOVE the wash per the reference; the bed
 /// peaks under 1.0, so drops ride at the rain level itself.
-pub const DROP_GAIN: f32 = 0.9;
+pub(crate) const DROP_GAIN: f32 = 0.9;
 
 /// The six TRACK-OWNED loop stems, in registration order. Rain is not here —
 /// it is weather, shared by every mood track.
@@ -202,7 +202,7 @@ impl TrackBeds {
 /// Whether every TRACK-owned stem's live gain has reached exactly 0.0 — the
 /// silence gate a player checks before swapping a mood track's beds. Rain/typing
 /// gains are ignored (track-independent).
-pub fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
+pub(crate) fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
     gains
         .iter()
         .filter(|(s, _)| TRACK_STEMS.contains(s))

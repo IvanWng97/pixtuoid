@@ -18,8 +18,8 @@ use crate::layout::{
     snap_where,
 };
 
-/// Cell size in pixels — the coarse routing-grid edge, re-exported from the
-/// SHARED `layout::coarse` so router coarsening can't drift from reachability
+/// Cell size in pixels — the coarse routing-grid edge, the SHARED
+/// `layout::coarse` one, so router coarsening can't drift from reachability
 /// coarsening.
 pub(crate) const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 
@@ -69,7 +69,7 @@ pub struct AStarRouter {
 
 impl AStarRouter {
     /// Construct an empty router — no cached paths, no preferred zone.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 

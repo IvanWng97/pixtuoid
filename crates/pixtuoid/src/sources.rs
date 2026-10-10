@@ -381,16 +381,6 @@ pub enum ConnState {
     },
 }
 
-impl ConnState {
-    pub fn connected(self) -> bool {
-        match self {
-            ConnState::Connected => true,
-            ConnState::Disconnected => false,
-            ConnState::NoCli { connected } => connected,
-        }
-    }
-}
-
 /// One row = one agent CLI (the union of registry sources + install targets).
 #[derive(Debug, Clone)]
 pub struct ConnectionRow {
@@ -500,8 +490,8 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
 }
 
 /// The wire `connected` is deliberately PRESENT-AND-BOUND (`state == Connected`),
-/// NOT [`ConnState::connected`], which stays `true` for a connected-but-absent
-/// `NoCli` source. Changing it is a `--json`
+/// NOT [`ConnState::NoCli`]'s own `connected`, which stays `true` for a
+/// connected-but-absent source. Changing it is a `--json`
 /// contract change needing `gen-contract`.
 fn status_from_row(r: &ConnectionRow) -> SourceStatus {
     SourceStatus {

@@ -29,16 +29,13 @@ pub struct CutawayCanvas {
 
 /// One frame from [`CutawayCanvas::frame`].
 #[derive(Debug)]
-pub struct CanvasFrame<'a> {
-    /// The whole frame, as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
-    /// paints it.
-    pub buf: &'a RgbBuffer,
+pub struct CanvasFrame {
     /// Where it may differ from the canvas's previous frame.
     pub dirty: Dirty,
     /// What of it flashes.
-    pub flash: crate::flash::FlashPhase,
+    pub(crate) flash: crate::flash::FlashPhase,
     /// Why it painted whole, when it did.
-    pub repaint: Option<Repaint>,
+    pub(crate) repaint: Option<Repaint>,
 }
 
 /// Why a frame painted whole: the first, or which inputs every pixel is
@@ -46,19 +43,19 @@ pub struct CanvasFrame<'a> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Repaint {
     /// Nothing was shown before it.
-    pub first: bool,
+    pub(crate) first: bool,
     /// The office's walls, windows or floor coverings.
-    pub backdrop: bool,
+    pub(crate) backdrop: bool,
     /// The per-agent palettes.
-    pub recolours: bool,
+    pub(crate) recolours: bool,
     /// The render scale.
-    pub scale: bool,
+    pub(crate) scale: bool,
     /// The room's light.
-    pub ambient: bool,
+    pub(crate) ambient: bool,
     /// The carpet's weather tint.
-    pub carpet: bool,
+    pub(crate) carpet: bool,
     /// A strike's lift of the room.
-    pub flash: bool,
+    pub(crate) flash: bool,
 }
 
 impl Repaint {
@@ -217,7 +214,7 @@ impl CutawayCanvas {
             &mut crate::cutaway::paint::CutawayCache,
             &mut crate::outside::OutsideCache,
         ),
-    ) -> CanvasFrame<'_> {
+    ) -> CanvasFrame {
         let layout = &stepped.layout;
         let office = Office {
             layout,
@@ -300,7 +297,6 @@ impl CutawayCanvas {
             host_text,
         });
         CanvasFrame {
-            buf: &self.buf,
             dirty,
             flash: list.flash_phase(),
             repaint,
@@ -510,7 +506,7 @@ mod tests {
                 (&mut cache, &mut outside),
             );
             assert!(
-                shown.buf.as_slice() == full.as_slice(),
+                canvas.buf().as_slice() == full.as_slice(),
                 "step {k}: the canvas shows other than the full render ({:?})",
                 shown.dirty
             );
@@ -1339,7 +1335,7 @@ mod tests {
         );
         assert_eq!(shown.dirty, Dirty::All);
         assert!(
-            shown.buf.as_slice()
+            canvas.buf().as_slice()
                 == full_render(&b.layout, &pack, scale, (&b.frame, clear_ground()), now).as_slice(),
             "the canvas shows other than the new layout"
         );
@@ -1429,7 +1425,7 @@ mod tests {
                         layout: Arc::clone(layout),
                         frame: frame.clone(),
                     };
-                    let shown = canvas.frame(
+                    canvas.frame(
                         &stepped,
                         theme,
                         scale,
@@ -1443,8 +1439,9 @@ mod tests {
                             &mut crate::outside::OutsideCache::default(),
                         ),
                     );
-                    let digest = shown.buf.as_slice().iter().fold(
-                        u64::from(shown.buf.width()) << 16 | u64::from(shown.buf.height()),
+                    let buf = canvas.buf();
+                    let digest = buf.as_slice().iter().fold(
+                        u64::from(buf.width()) << 16 | u64::from(buf.height()),
                         |h, c| {
                             pixtuoid_core::id::splitmix64(
                                 h ^ u64::from_be_bytes([0, 0, 0, 0, 0, c.r, c.g, c.b]),

@@ -72,13 +72,13 @@ impl Face {
     /// The whole-number scale its glyphs draw at to fit `cell`, at least 1:
     /// pixel art scales by whole numbers only (Godot, "Multiple
     /// resolutions": stretch scale mode `integer`).
-    pub fn scale(self, cell: CellPx) -> u16 {
+    pub(crate) fn scale(self, cell: CellPx) -> u16 {
         let unit = self.unit();
         (cell.w / unit.w).min(cell.h / unit.h).max(1)
     }
 
     /// The scale its glyphs draw at in a cell `w` pixels wide, at least 1.
-    pub fn scale_across(self, w: u16) -> u16 {
+    pub(crate) fn scale_across(self, w: u16) -> u16 {
         (w / self.unit().w).max(1)
     }
 
@@ -213,7 +213,7 @@ pub struct GridInk {
 
 /// Paint `grid` in `face` with its top-left at pixel `at`, each cell `cell`
 /// big, its icons in `pack`'s art: every cell's fill, then each glyph centred
-/// at [`Face::scale`], or
+/// at `Face::scale`, or
 /// stretched to the whole cell for box-drawing lines and block elements so
 /// they join; a bold one struck twice a pixel apart, as a terminal without a
 /// bold face does (xterm(1): "the bold font will be produced by

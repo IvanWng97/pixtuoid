@@ -5,7 +5,7 @@
 //! seam — its hooks are in-process TS extension modules — so the hook plane
 //! is a pixtuoid-owned bridge extension
 //! (`pixtuoid/src/install/omp_extension.ts`) whose payloads
-//! [`decode_omp_hook_payload`] claims (#951). Wire shape: upstream
+//! `decode_omp_hook_payload` claims (#951). Wire shape: upstream
 //! `packages/coding-agent/src/session/` (transcript) and `src/extensibility/`
 //! (extension events).
 
@@ -555,7 +555,7 @@ const TITLE_FIELD: &str = "title";
 
 #[cfg(test)]
 /// The `customType` marking a clean teardown — the ONLY structural end omp writes.
-/// Exported for the drift surface because the guard below falls through to
+/// Listed for the drift surface because the guard below falls through to
 /// `_ => vec![]`: rename it upstream and no omp TRANSCRIPT ever ends cleanly,
 /// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
 pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
@@ -590,7 +590,7 @@ const BLOCK_TOOL_CALL: &str = "toolCall";
 const TOOL_ASK: &str = "ask";
 
 #[cfg(test)]
-/// The message-level wire vocabulary this decoder keys on. Exported because each is
+/// The message-level wire vocabulary this decoder keys on. Listed because each is
 /// an equality guard falling through to a silent path: a rename decodes the turn to
 /// nothing, or strands a Wait forever. Pinned by
 /// `the_exported_message_vocabulary_is_exactly_what_the_arms_match`.
@@ -871,7 +871,7 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// # Errors
 ///
 /// Never: a malformed or unknown payload decodes to `vec![]`; the `Result` is the hook-decoder signature.
-pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
     };

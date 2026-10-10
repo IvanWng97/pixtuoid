@@ -77,7 +77,7 @@ const _: () = assert!(!CHITCHAT_LINES.is_empty());
 /// A social venue that hosts at most one conversation at a time. Meeting-room
 /// slots all map to the same `Room`; every other social waypoint is its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VenueKey {
+pub(crate) enum VenueKey {
     /// A whole meeting room's group conversation (all its slots share one venue).
     Room {
         /// Index of the floor the room is on.
@@ -96,7 +96,7 @@ pub enum VenueKey {
 
 /// A live conversation among the agents currently at a venue.
 #[derive(Debug)]
-pub struct ActiveChitchat {
+pub(crate) struct ActiveChitchat {
     /// Current attendees, sorted ascending by raw id for a stable rotation.
     pub(crate) participants: Vec<AgentId>,
     /// When the conversation began — the turn/expiry clock.
@@ -106,7 +106,7 @@ pub struct ActiveChitchat {
 
 impl ActiveChitchat {
     /// Starts a conversation among `participants`.
-    pub fn new(participants: Vec<AgentId>, now: SystemTime) -> Self {
+    pub(crate) fn new(participants: Vec<AgentId>, now: SystemTime) -> Self {
         let ms = crate::anim::epoch_ms(now);
         let mut chat = Self {
             participants: Vec::new(),
@@ -128,14 +128,14 @@ impl ActiveChitchat {
 
     /// Replace the attendee set (sorted + de-duplicated), tracking who is
     /// actually present this frame.
-    pub fn set_participants(&mut self, mut participants: Vec<AgentId>) {
+    pub(crate) fn set_participants(&mut self, mut participants: Vec<AgentId>) {
         participants.sort_by_key(|a| a.raw());
         participants.dedup();
         self.participants = participants;
     }
 
     /// Whether the exchange has run its full `CHITCHAT_TOTAL_MS`.
-    pub fn is_expired(&self, now: SystemTime) -> bool {
+    pub(crate) fn is_expired(&self, now: SystemTime) -> bool {
         self.elapsed_ms(now) >= CHITCHAT_TOTAL_MS
     }
 
@@ -151,7 +151,7 @@ impl ActiveChitchat {
         clippy::cast_possible_truncation,
         reason = "a hash picks through `crate::spread`, alike on every target"
     )]
-    pub fn current_bubble(&self, now: SystemTime) -> Option<(AgentId, &'static str)> {
+    pub(crate) fn current_bubble(&self, now: SystemTime) -> Option<(AgentId, &'static str)> {
         let elapsed = self.elapsed_ms(now);
         if elapsed >= CHITCHAT_TOTAL_MS {
             return None;
@@ -222,25 +222,25 @@ pub(crate) fn supports_chitchat(kind: WaypointKind) -> bool {
     chitchat_venue(kind) != ChitchatVenue::None
 }
 
-/// A single speech bubble ready for the widget layer to render.
+/// A single speech bubble, for the display layer's `TextRun::bubble` to draw.
 #[derive(Debug, Clone, Copy)]
-pub struct ChitchatBubble {
+pub(crate) struct ChitchatBubble {
     /// The quip to render.
-    pub text: &'static str,
+    pub(crate) text: &'static str,
     /// The speaking agent; a painter places the bubble over its drawn frame.
-    pub speaker: AgentId,
+    pub(crate) speaker: AgentId,
 }
 
 /// A chitchat-eligible agent present at a venue this frame. Named (not a tuple)
 /// so the producer and consumer can't transpose the two `usize`-ish fields.
 #[derive(Debug, Clone, Copy)]
-pub struct Visitor {
+pub(crate) struct Visitor {
     /// The visitor's waypoint slot index.
-    pub wp_idx: usize,
+    pub(crate) wp_idx: usize,
     /// The visiting agent.
-    pub agent_id: AgentId,
+    pub(crate) agent_id: AgentId,
     /// `Some(room_id)` for meeting slots, `None` for single-point waypoints.
-    pub room_id: Option<usize>,
+    pub(crate) room_id: Option<usize>,
 }
 
 /// Expire old conversations, start/refresh one per venue that has ≥2 agents,
