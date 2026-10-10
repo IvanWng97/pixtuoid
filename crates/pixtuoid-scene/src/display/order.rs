@@ -19,8 +19,11 @@ use crate::layout::{Bounds, Tie};
 pub(crate) enum Layer {
     /// A fixture a figure at its row sits on or stands in front of.
     Under,
-    /// A character, a pet or a mascot.
-    Figure,
+    /// A pet or a mascot: under a person tied with it on a row, whichever look
+    /// paints it.
+    Creature,
+    /// A character.
+    Character,
     /// A fixture that hides a figure at its row, and a glass wall band, which
     /// composites over whoever stands behind it.
     Over,
@@ -144,11 +147,12 @@ mod tests {
     }
 
     fn any_span() -> impl Strategy<Value = Span> {
-        (0u16..60, 0u16..60, 1u16..12, 1u16..12, 0u16..3, 0u8..3).prop_map(
+        (0u16..60, 0u16..60, 1u16..12, 1u16..12, 0u16..3, 0u8..4).prop_map(
             |(x, y, w, h, below, layer)| {
                 Span::new(x, y, w, h, below).with_layer(match layer {
                     0 => Layer::Under,
-                    1 => Layer::Figure,
+                    1 => Layer::Creature,
+                    2 => Layer::Character,
                     _ => Layer::Over,
                 })
             },

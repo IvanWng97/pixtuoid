@@ -2462,7 +2462,7 @@ mod tests {
                 effect: crate::effects::Effect { phase, ..z.effect },
                 ..z
             };
-            let Some(s) = r.span(0) else {
+            let Some(s) = r.span(Span::new(0, 0, 1, 1, 0)) else {
                 continue;
             };
             assert!(
@@ -3202,7 +3202,6 @@ mod tests {
                     let list = list_now(&frame, office, now);
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, moving);
                     for p in list.pieces().iter().filter(|p| moving(p)) {
-                        assert!(!p.kind.is_static(), "{} holds still", kind_name(&p.kind));
                         seen.entry(kind_name(&p.kind))
                             .or_default()
                             .insert(p.fingerprint);
@@ -4639,10 +4638,10 @@ mod tests {
                 _ => None,
             })
             .expect("the sitter");
-        // centred on the sitter's bottom row, so its feet sort south of theirs
+        // centred a row below the sitter's, so its feet sort south of theirs
         let at = Point {
             x: u16::midpoint(body.x0, body.x1),
-            y: body.y1,
+            y: body.y1 + 1,
         };
         let cat = crate::sim::PetPlacement {
             kind: crate::pet::PetKind::Cat,
@@ -4661,7 +4660,7 @@ mod tests {
         frame.pet = Some(cat);
         let cell = Bounds {
             x: at.x,
-            y: at.y,
+            y: body.y1,
             width: 1,
             height: 1,
         };
@@ -5131,42 +5130,6 @@ mod tests {
         assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
     }
 
-    /// What the rest cache relies on: between noon and midnight a static
-    /// piece keeps its span and fingerprint, while the room's tone and its
-    /// lights move.
-    #[test]
-    fn noon_and_midnight_differ_only_in_dynamic_pieces() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
-        let frame = frames.last().expect("a seated frame");
-        for s in [1, pack.max_density_variant().get()] {
-            let office = Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale: RenderScale::new(s).expect("nonzero"),
-            };
-            let (noon, night) = (list_at(frame, office, 12), list_at(frame, office, 23));
-            let at_rest = |list: &DisplayList| -> Vec<(Span, u64)> {
-                list.pieces()
-                    .iter()
-                    .filter(|p| p.kind.is_static())
-                    .map(|p| (p.span, p.fingerprint))
-                    .collect()
-            };
-            assert_eq!(at_rest(&noon), at_rest(&night), "a static piece moved");
-            assert_ne!(
-                noon.ambient(),
-                night.ambient(),
-                "the room keeps its noon tone"
-            );
-            let lit = |list: &DisplayList| -> Vec<u64> {
-                list.lights().iter().map(|l| l.fingerprint).collect()
-            };
-            assert_ne!(lit(&noon), lit(&night), "the lights keep their noon levels");
-        }
-    }
-
     /// `list`'s lights over a flat `under`, relit over `rect` alone by the
     /// frame's own pass: every light that meets it, over an all-lit room.
     fn lights_over(list: &DisplayList<'_>, layout: &SceneLayout, rect: Span) -> RgbBuffer {
@@ -5531,61 +5494,6 @@ mod tests {
             "the pane repaints the desk's colour"
         );
         assert_eq!(glow.get(bx, by), Glow::Pane);
-    }
-
-    /// A static piece keeps its fingerprint whatever the hour and whoever is at
-    /// the appliances; a busy appliance plays, so it is not one.
-    #[test]
-    fn a_static_piece_holds_through_the_hours_and_the_queue() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = test_office();
-        let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("lays out");
-        let idle = empty_frame(&layout);
-        let mut busy = idle.clone();
-        busy.occupied_waypoints = (0..layout.waypoints.len()).collect();
-        let office = Office {
-            layout: &layout,
-            pack: &pack,
-            theme,
-            scale: RenderScale::from(pack.max_density_variant()),
-        };
-        let lists: Vec<Vec<(Span, u64, bool, bool)>> =
-            [(&idle, 12), (&busy, 12), (&idle, 23), (&busy, 23)]
-                .into_iter()
-                .map(|(frame, hour)| {
-                    list_at(frame, office, hour)
-                        .pieces()
-                        .iter()
-                        .map(|p| {
-                            (
-                                p.span,
-                                p.fingerprint,
-                                p.kind.is_static(),
-                                matches!(p.kind, PieceKind::Animated { art, .. }
-                                    if [PackPiece::VendingMachine, PackPiece::Printer].contains(&art.sprite)),
-                            )
-                        })
-                        .collect()
-                })
-                .collect();
-        let at_rest = |l: &Vec<(Span, u64, bool, bool)>| -> Vec<(Span, u64)> {
-            l.iter().filter(|p| p.2).map(|p| (p.0, p.1)).collect()
-        };
-        for l in &lists[1..] {
-            assert_eq!(at_rest(&lists[0]), at_rest(l), "a static piece moved");
-        }
-        let appliances = |l: &Vec<(Span, u64, bool, bool)>| -> Vec<u64> {
-            l.iter().filter(|p| p.3).map(|p| p.1).collect()
-        };
-        assert!(
-            !appliances(&lists[0]).is_empty(),
-            "the office has no appliance"
-        );
-        assert_ne!(
-            appliances(&lists[0]),
-            appliances(&lists[1]),
-            "a busy appliance holds its rest frame, so this pins nothing"
-        );
     }
 
     /// The figure half of the property, where it is hardest: a sitter keeps

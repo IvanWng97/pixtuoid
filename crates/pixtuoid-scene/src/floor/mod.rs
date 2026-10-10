@@ -677,13 +677,6 @@ impl FloorSession {
         self.view.audio_frame(&mut self.office, scene, floor, now)
     }
 
-    /// Flush the per-floor recolored-sprite cache. Call after a theme change so
-    /// cached AGENT sprites don't render with the old palette; the env base
-    /// fill needs no flush, since `BaseFillCache` keys on the palette.
-    pub fn reset_frame_cache(&mut self) {
-        self.view.floor.raster.reset_sprite_cache();
-    }
-
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
     /// [`step_floor`]. `size` is the layout's logical extent, whatever scale a
     /// painter draws it at. `None` when the size can't lay out.

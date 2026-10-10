@@ -288,13 +288,6 @@ impl Raster {
         }
     }
 
-    /// Flush the classic's recolored sprites, after a theme change.
-    pub fn reset_sprite_cache(&mut self) {
-        if let Some(classic) = &mut self.classic {
-            classic.caches.sprites = crate::frame_cache::FrameCache::new();
-        }
-    }
-
     /// Paint the next cutaway frame whole: the frame-pacing bench's worst case.
     #[doc(hidden)]
     pub fn forget_shown(&mut self) {

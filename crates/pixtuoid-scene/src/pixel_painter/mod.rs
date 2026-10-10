@@ -337,7 +337,7 @@ fn enqueue_characters<'a>(
         let pose = crate::character::SpritePose::of(p, agent, ctx.theme);
         drawables.push(Drawable {
             sort_row: p.sort_row,
-            layer: Layer::Figure,
+            layer: Layer::Character,
             hover: Some(Hover::figure(
                 Pivot::TopLeft,
                 p.top_left,
@@ -365,7 +365,7 @@ fn enqueue_pet<'a>(
     let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
     drawables.push(Drawable {
         sort_row: pet.sort_row,
-        layer: Layer::Figure,
+        layer: Layer::Creature,
         hover: Some(Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
             pos,
@@ -385,7 +385,7 @@ fn enqueue_gateway_mascots<'a>(
     for m in mascots {
         drawables.push(Drawable {
             sort_row: m.sort_row,
-            layer: Layer::Figure,
+            layer: Layer::Creature,
             hover: m.target().map(|target| {
                 Hover::figure(
                     Pivot::Center,

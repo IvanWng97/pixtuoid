@@ -1091,7 +1091,7 @@ mod tests {
                 crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, Motion::Full.beat(now));
             let d = Drawable {
                 sort_row: pos.y,
-                layer: Layer::Figure,
+                layer: Layer::Creature,
                 hover: None,
                 kind: DrawableKind::Pet {
                     pos,
@@ -1234,7 +1234,7 @@ mod tests {
             let mut buf = RgbBuffer::filled(80, 80, black);
             let d = Drawable {
                 sort_row: pos.y,
-                layer: Layer::Figure,
+                layer: Layer::Creature,
                 hover: None,
                 kind: DrawableKind::GatewayMascot {
                     pos,

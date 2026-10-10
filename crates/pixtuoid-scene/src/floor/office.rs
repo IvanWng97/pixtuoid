@@ -409,7 +409,7 @@ impl OfficeSession {
     }
 
     /// Every floor grown so far, for what reaches all of them at once (a
-    /// theme's sprite cache, a resize's routes).
+    /// resize's routes).
     pub fn floors_mut(&mut self) -> impl Iterator<Item = &mut PerFloor> {
         self.views.iter_mut().map(|view| &mut view.floor)
     }
