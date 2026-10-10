@@ -534,6 +534,7 @@ mod comments;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::pen::test_density;
     use crate::render_scale::RenderScale;
     use pixtuoid_core::sprite::format::Density;
 
@@ -739,7 +740,7 @@ mod tests {
             pack.buildings().next().is_some(),
             "the city keeps its buildings"
         );
-        let d = |n| Density::new(n).expect("nonzero");
+        let d = |n| test_density(n);
         assert!(
             pack.buildings().all(|b| b.variant(d(4)).is_none()),
             "at their base alone"
@@ -770,7 +771,7 @@ mod tests {
             pack.buildings().next().is_some(),
             "the bundled pack draws a city"
         );
-        let d = |n| Density::new(n).expect("nonzero");
+        let d = |n| test_density(n);
         for b in pack.buildings() {
             assert!(b.variant(d(4)).is_some(), "{}", b.name());
         }

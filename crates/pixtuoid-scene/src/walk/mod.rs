@@ -62,7 +62,7 @@ pub struct WanderFrame {
     pub phase_started_at: SystemTime,
 }
 
-/// A one-shot walk leg (entry / exit / snap-back).
+/// A one-shot walk leg (entry / exit / snap-back / walk home).
 #[derive(Debug, Clone)]
 pub struct WalkLeg {
     /// Wall-clock instant the leg armed.
@@ -155,13 +155,15 @@ pub struct WanderState {
 /// Walk state for one live agent on one floor.
 #[derive(Debug, Clone)]
 pub struct WalkState {
-    /// The arrival walk, snapshotted once at door-crossing. Carries its own
-    /// `from` because a resurrect that cancels an IN-FLIGHT walkout re-enters
-    /// from wherever the sprite is; a hardcoded door origin teleports it.
+    /// The arrival walk, snapshotted once at door-crossing, or a pointer's
+    /// walk home ([`Lifted::Home`]) once that arrives. Carries its own `from`
+    /// because a resurrect that cancels an IN-FLIGHT walkout re-enters from
+    /// wherever the sprite is; a hardcoded door origin teleports it.
     pub(crate) entry: Option<WalkLeg>,
     /// The walkout, snapshotted once when `exiting_at` fires. `from` is where
-    /// the sprite actually is (wander position if it was out, else the desk
-    /// anchor), so the exit doesn't teleport to the desk.
+    /// the sprite actually is (where a pointer's hold lands it, its wander
+    /// position if it was out, else the desk anchor), so the exit doesn't
+    /// teleport to the desk.
     pub(crate) exit: Option<WalkLeg>,
     /// The state-transition snap-back walk. `from` is the FROZEN origin recorded
     /// when the leg armed, reused every frame so the walk doesn't drift toward
@@ -176,16 +178,18 @@ pub struct WalkState {
     /// [`WalkPathSnapshot`].
     pub(crate) walk_path: Option<WalkPathSnapshot>,
 
-    /// Set down by a pointer, and walking home from there: overrides the
-    /// wander and the state's pose until it arrives.
-    pub(crate) dropped: Option<Dropped>,
+    /// Lifted by a pointer, and walking home after: overrides the wander and
+    /// the state's pose until it arrives.
+    pub(crate) lifted: Option<Lifted>,
 }
 
-/// An agent set down by a pointer.
+/// An agent a pointer lifted.
 #[derive(Debug, Clone)]
-pub(crate) enum Dropped {
-    /// Where, until the next derivation arms the walk home from it.
-    At(Point),
+pub(crate) enum Lifted {
+    /// In hand, its feet at this point.
+    Held(Point),
+    /// Set down here, until the next derivation arms the walk home from it.
+    Dropped(Point),
     /// The walk home.
     Home(WalkLeg),
 }
@@ -210,7 +214,7 @@ impl Default for WalkState {
                 last_advanced_at: SystemTime::UNIX_EPOCH,
             },
             walk_path: None,
-            dropped: None,
+            lifted: None,
         }
     }
 }
@@ -220,6 +224,21 @@ impl WalkState {
     #[doc(hidden)]
     pub fn wander(&self) -> &WanderState {
         &self.wander
+    }
+
+    /// Whether a pointer holds it.
+    pub(crate) fn carried(&self) -> bool {
+        matches!(self.lifted, Some(Lifted::Held(_)))
+    }
+
+    /// In a pointer's hand, its feet at `at`.
+    pub(crate) fn carry(&mut self, at: Point) {
+        self.lifted = Some(Lifted::Held(at));
+    }
+
+    /// Set down at `at`, to walk home from there.
+    pub(crate) fn set_down(&mut self, at: Point) {
+        self.lifted = Some(Lifted::Dropped(at));
     }
 }
 

@@ -10,6 +10,7 @@
 //! the theme's trim.
 
 use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::sprite::format::Density;
 
 use crate::dither::Stepped;
 use crate::layout::WallPiece;
@@ -71,7 +72,7 @@ pub(crate) struct Glass {
     pane: Stepped,
     view: View,
     depth: u16,
-    per_unit: u16,
+    per_unit: Density,
     /// Where each mullion stands along the run, in cells, west or north first:
     /// spread evenly over its [`clear_run`](WallPiece::clear_run), so none
     /// doubles a jamb or a joint's frame.
@@ -80,8 +81,7 @@ pub(crate) struct Glass {
 
 impl Glass {
     /// `piece`'s glass on a grid of `per_unit` cells to a logical unit.
-    pub(crate) fn of(trim: WallTrim, piece: WallPiece, per_unit: u16) -> Self {
-        let per_unit = per_unit.max(1);
+    pub(crate) fn of(trim: WallTrim, piece: WallPiece, per_unit: Density) -> Self {
         let (_, size) = piece.visual();
         let (view, depth) = match piece {
             WallPiece::Horizontal { .. } => (View::Face, size.h),
@@ -91,7 +91,7 @@ impl Glass {
         let len = clear.end - clear.start;
         let panes = ((len + MULLION_STRIDE / 2) / MULLION_STRIDE).max(1);
         let posts = (1..panes)
-            .map(|k| (clear.start + len * k / panes) * per_unit)
+            .map(|k| (clear.start + len * k / panes) * per_unit.get())
             .collect();
         let trim = trim.light;
         let lift = |[r, g, b]: [u8; 3]| Rgb {
@@ -108,7 +108,7 @@ impl Glass {
             post: lift(POST_LIFT),
             pane: Stepped::new(PANE_LIFT + denser),
             view,
-            depth: depth.saturating_mul(per_unit),
+            depth: depth.saturating_mul(per_unit.get()),
             per_unit,
             posts,
         }
@@ -127,7 +127,7 @@ impl Glass {
         // its thickness.
         let glint = self.view == View::Face
             && (along - pane.unwrap_or(&0) + across)
-                .checked_sub(GLINT_AT * self.per_unit)
+                .checked_sub(GLINT_AT * self.per_unit.get())
                 .is_some_and(|c| c == 0 || c == GLINT_GAP);
         if mullion || across + 1 == self.depth {
             self.post
@@ -162,13 +162,13 @@ mod tests {
 
     #[test]
     fn a_pane_is_what_is_behind_it_a_few_stops_lighter() {
-        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 1);
+        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), Density::ONE);
         assert_eq!(glass.over(BEHIND, 3, 5), BEHIND.ramp(PANE_LIFT));
     }
 
     #[test]
     fn the_frame_is_the_themes_whatever_is_behind_it() {
-        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 1);
+        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), Density::ONE);
         let other = Rgb {
             r: 10,
             g: 200,
@@ -187,8 +187,12 @@ mod tests {
     #[test]
     fn a_denser_grid_keeps_the_rhythm_in_logical_units() {
         let (mut one, mut four) = (
-            Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 1),
-            Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), 4),
+            Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), Density::ONE),
+            Glass::of(
+                WallTrim::of(&crate::theme::NORMAL),
+                run(40),
+                crate::display::pen::test_density(4),
+            ),
         );
         // A row below the glints, whose strokes stay one cell wide.
         let row = 10;
@@ -209,7 +213,11 @@ mod tests {
     #[test]
     fn a_face_on_pane_catches_a_glint_in_its_top_corner_at_any_density() {
         for per_unit in [1, 4] {
-            let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), run(40), per_unit);
+            let mut glass = Glass::of(
+                WallTrim::of(&crate::theme::NORMAL),
+                run(40),
+                crate::display::pen::test_density(per_unit),
+            );
             let (x, y) = (GLINT_AT * per_unit - per_unit, per_unit);
             assert_eq!(glass.over(BEHIND, x, y), glass.rim, "at {per_unit}x");
             assert_eq!(
@@ -231,7 +239,7 @@ mod tests {
             jamb_north: false,
             jamb_south: false,
         };
-        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), piece, 1);
+        let mut glass = Glass::of(WallTrim::of(&crate::theme::NORMAL), piece, Density::ONE);
         let depth = piece.visual().1.w;
         for along in 0..40 {
             for across in 1..depth {
@@ -250,7 +258,9 @@ mod tests {
                     .expect("lays out");
                 for &piece in &l.wall_pieces {
                     let run = piece.clear_run();
-                    for &post in &Glass::of(WallTrim::of(&crate::theme::NORMAL), piece, 1).posts {
+                    for &post in
+                        &Glass::of(WallTrim::of(&crate::theme::NORMAL), piece, Density::ONE).posts
+                    {
                         met += 1;
                         assert!(
                             run.start + CLEAR <= post && post + CLEAR < run.end,
