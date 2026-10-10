@@ -158,13 +158,12 @@ impl OfficeRenderer {
         at: PixelFit,
         pressing: Pressing<'_>,
     ) -> Press {
-        if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+        let Under::Office(hit) = under(&self.session, cursor, window, at) else {
             // As any press does: a carry whose release never came ends here.
             self.cancel_pointer();
             return Press::Resize;
-        }
+        };
         let unit = unit_at(cursor, at);
-        let hit = self.session.hit_at(unit_bounds(unit));
         // The slop in this window's units, at least one.
         let slop_px = DRAG_SLOP_DIP * pressing.scale_factor;
         let units = (slop_px / f64::from(at.scale().get().max(1)))
@@ -180,6 +179,28 @@ impl OfficeRenderer {
         match down.pressed {
             Pressed::Something => Press::Pointer,
             Pressed::Bare => Press::Drag,
+        }
+    }
+
+    /// The pointer's shape at `cursor` in a `window`-sized window drawn at
+    /// `at`, under the panels `modal`: a closed hand while it carries a
+    /// figure, else the arrow under a panel, which takes every press, else
+    /// what a press there does ([`cursor_for`]).
+    pub(crate) fn cursor_icon(
+        &self,
+        cursor: (f64, f64),
+        window: (u32, u32),
+        at: PixelFit,
+        modal: &crate::panels::ModalState,
+        petting: Option<&pixtuoid_scene::pet::PetState>,
+        now: std::time::SystemTime,
+    ) -> winit::window::CursorIcon {
+        if self.carrying() {
+            winit::window::CursorIcon::Grabbing
+        } else if modal.any_open() {
+            winit::window::CursorIcon::Default
+        } else {
+            cursor_for(under(&self.session, cursor, window, at), petting, now)
         }
     }
 
@@ -248,7 +269,7 @@ impl OfficeRenderer {
         cursor: (f64, f64),
         at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
-        self.session.hit_at(unit_bounds(unit_at(cursor, at)))
+        hit_in(&self.session, cursor, at)
     }
 
     /// Where the last frame may differ from the one on screen before it.
@@ -279,6 +300,59 @@ impl OfficeRenderer {
             ),
         );
         build_footer(&inputs, budget)
+    }
+}
+
+/// What a press at a window point lands on: the resize corner, else what the
+/// frame on screen shows there. A press and the cursor both read it, so the
+/// cursor shows what a press would do.
+#[derive(Debug, Clone, Copy)]
+enum Under<'a> {
+    Corner,
+    Office(Option<pixtuoid_scene::hit::SceneHit<'a>>),
+}
+
+/// What `cursor` (physical px) is over in a `window`-sized window showing
+/// `session`'s last frame at `at`.
+fn under<'a>(
+    session: &'a OfficeSession,
+    cursor: (f64, f64),
+    window: (u32, u32),
+    at: PixelFit,
+) -> Under<'a> {
+    if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+        Under::Corner
+    } else {
+        Under::Office(hit_in(session, cursor, at))
+    }
+}
+
+fn hit_in(
+    session: &OfficeSession,
+    cursor: (f64, f64),
+    at: PixelFit,
+) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
+    session.hit_at(unit_bounds(unit_at(cursor, at)))
+}
+
+/// What a press on `under` affords, as its cursor, in CSS UI 3's names
+/// (<https://www.w3.org/TR/css-ui-3/#cursor>, which winit's `CursorIcon`
+/// takes): a hand where a click acts, an open hand on a figure a press only
+/// lifts, the resize arrow, else the arrow where a press drags the window.
+fn cursor_for(
+    under: Under<'_>,
+    petting: Option<&pixtuoid_scene::pet::PetState>,
+    now: std::time::SystemTime,
+) -> winit::window::CursorIcon {
+    use pixtuoid_scene::interact::Affordance;
+    use winit::window::CursorIcon;
+    match under {
+        Under::Corner => CursorIcon::NwseResize,
+        Under::Office(hit) => match Affordance::of(hit, petting, now) {
+            Affordance { click: Some(_), .. } => CursorIcon::Pointer,
+            Affordance { lift: Some(_), .. } => CursorIcon::Grab,
+            Affordance { .. } => CursorIcon::Default,
+        },
     }
 }
 
@@ -685,36 +759,8 @@ mod tests {
     #[test]
     fn a_press_hits_what_the_frame_shows_there() {
         use pixtuoid_scene::hit::{HitAction, SceneHit};
-        let pack = std::sync::Arc::new(
-            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
-        );
-        let agent = active_on("/p/a.jsonl", 0, 0);
-        let id = agent.agent_id;
-        let scene = scene_with(vec![agent], 16);
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let window = PhysicalSize::new(960u32, 640u32);
-        let at = window_geometry(window, pack.max_density_variant(), Zoom::default());
-        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
-        renderer
-            .render(
-                at,
-                WindowFrame {
-                    world: FloorInputs {
-                        scene: &scene,
-                        pack: &pack,
-                        now,
-                        floor: FloorMeta::ground(),
-                        pets: PetInputs::default(),
-                    },
-                    theme,
-                    place: pixtuoid_scene::look::Place::default(),
-                },
-            )
-            .expect("a frame");
-        let centre =
-            |u: u16| f64::from(u) * f64::from(at.scale().get()) + f64::from(at.scale().get()) / 2.0;
-        let size = (window.width, window.height);
+        let (mut renderer, at, size, now, id) = one_agent_office();
+        let centre = |u: u16| unit_centre(u, at);
         let (mut hit_agent, mut dragged, mut fixture_drags, mut on_agent) =
             (false, false, false, None);
         for y in 0..at.logical().h {
@@ -762,10 +808,7 @@ mod tests {
         assert!(hit_agent, "no click found the agent the frame drew");
         assert!(dragged, "no bare unit to drag the window by");
         assert!(fixture_drags, "the frame drew no labelled fixture");
-        let corner = (
-            f64::from(window.width) - 1.0,
-            f64::from(window.height) - 1.0,
-        );
+        let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
         assert_eq!(
             renderer.press_at(
                 corner,
@@ -1136,6 +1179,180 @@ mod tests {
             on_floor.contains(&pixtuoid_scene::audio::OneShot::DoorChime),
             "a ground-floor walk-in must chime the floating window: {on_floor:?}"
         );
+    }
+
+    /// The pointer shows what a press there does, in CSS UI 3's names: a
+    /// hand where a click acts, an open hand on a figure a press only lifts,
+    /// the resize arrow in the corner, and the arrow where a press drags the
+    /// window.
+    #[test]
+    fn the_cursor_shows_what_a_press_there_does() {
+        use pixtuoid_core::source::daemon::DaemonInstanceKey;
+        use pixtuoid_core::state::DaemonInstanceId;
+        use pixtuoid_scene::display::{HoverTarget, PetHover};
+        use pixtuoid_scene::hit::SceneHit;
+        use pixtuoid_scene::pet::{PetKind, PetState};
+        use winit::window::CursorIcon;
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let agent = HoverTarget::Agent(pixtuoid_core::AgentId::from_transcript_path("/p/a.jsonl"));
+        let mascot = HoverTarget::Mascot(DaemonInstanceKey::new(
+            "openclaw",
+            DaemonInstanceId::new("18789").expect("non-empty"),
+        ));
+        let pet = HoverTarget::Pet(PetHover {
+            kind: PetKind::Cat,
+            centre: pixtuoid_scene::layout::Point { x: 0, y: 0 },
+            anim: pixtuoid_core::sprite::format::Piece::CatSit,
+        });
+        let playing = PetState {
+            petted_at: now,
+            kind: PetKind::Cat,
+            floor_idx: 0,
+        };
+        for (under, petting, want) in [
+            (Under::Corner, None, CursorIcon::NwseResize),
+            (
+                Under::Office(Some(SceneHit::Figure(&agent))),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Star)),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Coffee)),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&pet))),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&pet))),
+                Some(&playing),
+                CursorIcon::Grab,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&mascot))),
+                None,
+                CursorIcon::Grab,
+            ),
+            (
+                Under::Office(Some(SceneHit::Furniture("plant"))),
+                None,
+                CursorIcon::Default,
+            ),
+            (Under::Office(None), None, CursorIcon::Default),
+        ] {
+            assert_eq!(
+                cursor_for(under, petting, now),
+                want,
+                "{under:?}, petting {}",
+                petting.is_some()
+            );
+        }
+    }
+
+    /// Over the office drawn, the cursor reads what the frame shows: the hand
+    /// on its agent, the resize arrow in the corner, a closed hand while a
+    /// figure is carried, even under a panel, and the arrow under a panel.
+    #[test]
+    fn the_cursor_reads_the_frame_on_screen() {
+        use winit::window::CursorIcon;
+        let (mut renderer, at, size, now, _) = one_agent_office();
+        let closed = closed_modal();
+        let open = crate::panels::ModalState {
+            help_open: true,
+            ..closed_modal()
+        };
+        let icon = |r: &OfficeRenderer, cursor, modal: &crate::panels::ModalState| {
+            r.cursor_icon(cursor, size, at, modal, None, now)
+        };
+        let on_agent = agent_point(&renderer, at, now);
+        assert_eq!(icon(&renderer, on_agent, &closed), CursorIcon::Pointer);
+        assert_eq!(icon(&renderer, on_agent, &open), CursorIcon::Default);
+        let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
+        assert_eq!(icon(&renderer, corner, &closed), CursorIcon::NwseResize);
+        renderer.press_at(
+            on_agent,
+            size,
+            at,
+            Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
+        let away = (on_agent.0 + 10.0 * f64::from(at.scale().get()), on_agent.1);
+        assert!(renderer.pointer_moved(away, at), "the move lifts it");
+        assert_eq!(icon(&renderer, away, &closed), CursorIcon::Grabbing);
+        assert_eq!(icon(&renderer, away, &open), CursorIcon::Grabbing);
+    }
+
+    /// One agent's office drawn in a 960×640 window: the renderer, the fit
+    /// it drew at, the window, the instant, and the agent.
+    fn one_agent_office() -> (
+        OfficeRenderer,
+        PixelFit,
+        (u32, u32),
+        SystemTime,
+        pixtuoid_core::AgentId,
+    ) {
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        let scene = scene_with(vec![agent], 16);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let window = PhysicalSize::new(960u32, 640u32);
+        let at = window_geometry(window, pack.max_density_variant(), Zoom::default());
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer
+            .render(
+                at,
+                WindowFrame {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    place: pixtuoid_scene::look::Place::default(),
+                },
+            )
+            .expect("a frame");
+        (renderer, at, (window.width, window.height), now, id)
+    }
+
+    /// The window px at the centre of layout unit `u` drawn at `at`.
+    fn unit_centre(u: u16, at: PixelFit) -> f64 {
+        f64::from(u) * f64::from(at.scale().get()) + f64::from(at.scale().get()) / 2.0
+    }
+
+    /// A window point on the agent the frame drew.
+    fn agent_point(renderer: &OfficeRenderer, at: PixelFit, now: SystemTime) -> (f64, f64) {
+        use pixtuoid_scene::hit::HitAction;
+        (0..at.logical().h)
+            .flat_map(|y| {
+                (0..at.logical().w).map(move |x| (unit_centre(x, at), unit_centre(y, at)))
+            })
+            .find(|&cursor| {
+                matches!(
+                    renderer
+                        .hit_at(cursor, at)
+                        .and_then(|hit| hit.action(None, now)),
+                    Some(HitAction::Focus(_))
+                )
+            })
+            .expect("the frame drew the agent")
     }
 
     fn closed_modal() -> crate::panels::ModalState {

@@ -1,6 +1,8 @@
 //! What lies on the floor under the room's light, pixel-free: elliptical
 //! shadows.
 
+use pixtuoid_core::sprite::format::Density;
+
 /// A shadow's strength at noon, where a solid's shadow is crispest.
 const NOON_SHADOW: f32 = 0.5;
 /// How much of [`NOON_SHADOW`] night takes away: the lamps' shadows are softer.
@@ -72,7 +74,11 @@ pub(crate) struct Depths {
 
 impl Depths {
     /// `contacts` sampled at each cell's centre, or `None` for no contacts.
-    pub(crate) fn of(contacts: impl Iterator<Item = Contact> + Clone, per: u16) -> Option<Self> {
+    pub(crate) fn of(
+        contacts: impl Iterator<Item = Contact> + Clone,
+        per: Density,
+    ) -> Option<Self> {
+        let per = per.get();
         let cell = |logical: u16| logical.saturating_mul(per);
         let ((x0, y0), (x1, y1)) = contacts.clone().map(Contact::bounds).reduce(|a, b| {
             (
@@ -112,13 +118,13 @@ impl Depths {
 /// with the layout, so the cells are rebuilt only when they do.
 #[derive(Debug, Default)]
 pub(crate) struct DepthsCache {
-    key: Option<(Vec<Contact>, u16)>,
+    key: Option<(Vec<Contact>, Density)>,
     cells: Vec<(u16, u16, f32)>,
 }
 
 impl DepthsCache {
     /// The cells of `contacts` at `per`, rebuilt only when either changed.
-    pub(crate) fn cells(&mut self, contacts: Vec<Contact>, per: u16) -> &[(u16, u16, f32)] {
+    pub(crate) fn cells(&mut self, contacts: Vec<Contact>, per: Density) -> &[(u16, u16, f32)] {
         if self
             .key
             .as_ref()
@@ -181,7 +187,8 @@ mod tests {
     fn overlapping_shadows_keep_the_deeper_at_each_cell() {
         let (a, b) = (Contact::under(2, 6, 5), Contact::under(4, 6, 5));
         for per in [1, 4] {
-            let depths = Depths::of([a, b].into_iter(), per).expect("two contacts");
+            let depths = Depths::of([a, b].into_iter(), crate::display::pen::test_density(per))
+                .expect("two contacts");
             let centre = |c: u16| (f32::from(c) + 0.5) / f32::from(per);
             let mut seen = std::collections::HashSet::new();
             for (x, y, d) in depths.cells() {
@@ -213,7 +220,7 @@ mod tests {
     #[test]
     fn the_depths_cache_rebuilds_only_for_new_contacts() {
         let fresh = |contacts: &[Contact]| -> Vec<(u16, u16, f32)> {
-            Depths::of(contacts.iter().copied(), 1)
+            Depths::of(contacts.iter().copied(), Density::ONE)
                 .expect("contacts")
                 .cells()
                 .collect()
@@ -221,14 +228,18 @@ mod tests {
         let a = [Contact::under(5, 10, 10)];
         let b = [Contact::under(5, 10, 10), Contact::under(30, 6, 20)];
         let mut cache = DepthsCache::default();
-        assert_eq!(cache.cells(a.to_vec(), 1), fresh(&a));
+        assert_eq!(cache.cells(a.to_vec(), Density::ONE), fresh(&a));
         // A rebuild allocates its cells while the old ones still live, so the
         // same address means they were kept.
-        let built = cache.cells(a.to_vec(), 1).as_ptr();
-        assert_eq!(cache.cells(a.to_vec(), 1).as_ptr(), built, "kept");
-        assert_eq!(cache.cells(b.to_vec(), 1), fresh(&b), "rebuilt");
+        let built = cache.cells(a.to_vec(), Density::ONE).as_ptr();
+        assert_eq!(
+            cache.cells(a.to_vec(), Density::ONE).as_ptr(),
+            built,
+            "kept"
+        );
+        assert_eq!(cache.cells(b.to_vec(), Density::ONE), fresh(&b), "rebuilt");
         assert!(
-            cache.cells(Vec::new(), 1).is_empty(),
+            cache.cells(Vec::new(), Density::ONE).is_empty(),
             "no contacts, no shadow"
         );
     }
