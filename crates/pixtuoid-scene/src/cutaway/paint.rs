@@ -2459,7 +2459,7 @@ mod tests {
                 effect: crate::effects::Effect { phase, ..z.effect },
                 ..z
             };
-            let Some(s) = r.span(0) else {
+            let Some(s) = r.span(0, crate::display::Layer::Person) else {
                 continue;
             };
             assert!(

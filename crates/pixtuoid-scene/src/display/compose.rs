@@ -232,9 +232,7 @@ fn push_bubbles(
 }
 
 /// The pet and the gateway mascots, each a figure sorted on its feet's row
-/// as the classic sorts it, with what rides on it straight after. Pushed before
-/// the characters: a tie on the row keeps push order, and people paint (and
-/// hover) over creatures, as in the classic.
+/// as the classic sorts it, with what rides on it straight after.
 fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
     let Office {
         pack, theme, scale, ..
@@ -267,7 +265,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
         let depth = crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h);
         let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(depth)
-            .with_layer(Layer::Figure);
+            .with_layer(Layer::Creature);
         let art = Art {
             sprite,
             frame: frame_idx,
@@ -297,7 +295,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
                 pen,
                 inks: crate::effects::look::Inks::of(theme),
             };
-            if let Some(s) = riding.span(depth) {
+            if let Some(s) = riding.span(depth, Layer::Creature) {
                 order.push((s, PieceKind::Effect(riding)));
             }
         }
@@ -554,7 +552,6 @@ fn collect_pieces(
         outside,
     );
     let mut host_text = crate::display::text::HostRuns::default();
-    push_creatures(frame, office, &mut order);
     let carried = push_characters(
         frame,
         office,
@@ -562,6 +559,7 @@ fn collect_pieces(
         (&mut order, &mut host_text.badges),
     );
     host_text.bubbles = push_bubbles(frame, office, &host_text.badges, &mut order);
+    push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
     }
@@ -1207,7 +1205,7 @@ fn push_characters(
         // Dust lies on the ground under its walker; the rest ride over them.
         let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
             for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
-                if let Some(s) = r.span(span.depth) {
+                if let Some(s) = r.span(span.depth, span.layer) {
                     order.push((s, PieceKind::Effect(*r)));
                 }
             }
@@ -1284,7 +1282,7 @@ fn riders(
 /// neighbour mid-breath. A back-turned sitter and their chair are one piece,
 /// bounding the chair's whole box too.
 fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
-    let body = body.with_depth(depth).with_layer(Layer::Figure);
+    let body = body.with_depth(depth).with_layer(Layer::Person);
     match chair {
         Some(chair) => Span {
             x0: body.x0.min(chair.x0),
@@ -1292,7 +1290,7 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
             y0: body.y0.min(chair.y0),
             y1: body.y1.max(chair.y1),
             depth: body.depth.max(chair.depth),
-            layer: Layer::Figure,
+            layer: Layer::Person,
         },
         None => body,
     }

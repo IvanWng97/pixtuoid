@@ -1173,12 +1173,16 @@ fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
     };
     let mut v = [
         tied(Layer::Over, 3),
-        tied(Layer::Figure, 2),
+        tied(Layer::Person, 2),
+        tied(Layer::Creature, 4),
         tied(Layer::Under, 1),
     ];
     drawable::sort_drawables(&mut v);
     let layers: Vec<Layer> = v.iter().map(|d| d.layer).collect();
-    assert_eq!(layers, [Layer::Under, Layer::Figure, Layer::Over]);
+    assert_eq!(
+        layers,
+        [Layer::Under, Layer::Creature, Layer::Person, Layer::Over]
+    );
 }
 
 /// The layer only breaks a tie: a row north still paints first.
@@ -3444,7 +3448,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
         .map(|c| (c.sort_row, frame.agents[c.agent_idx].agent_id))
         .collect();
     let mut sorted = queued.clone();
-    // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
+    // Every character is a `Layer::Person`, so `sort_drawables` orders them by row alone.
     sorted.sort_by_key(|&(row, _)| row);
     assert_ne!(sorted, queued, "premise: paint order is not the queue's");
     let listed = badged_ids(&hover);

@@ -296,8 +296,8 @@ fn a_tie_maps_to_a_layer_in_the_same_order() {
     let _ = |t: Tie| match t {
         Tie::FigureOver | Tie::FixtureOver => (),
     };
-    assert!(Layer::from(Tie::FigureOver) < Layer::Figure);
-    assert!(Layer::Figure < Layer::from(Tie::FixtureOver));
+    assert!(Layer::from(Tie::FigureOver) < Layer::Creature);
+    assert!(Layer::Person < Layer::from(Tie::FixtureOver));
     for a in TIES {
         for b in TIES {
             assert_eq!(a < b, Layer::from(a) < Layer::from(b), "{a:?} vs {b:?}");
@@ -893,7 +893,7 @@ fn a_desk_sorts_between_a_walker_behind_it_and_one_in_front() {
         };
         (
             walking_top_left(feet, CHARACTER_SPRITE_W).y + WALKING_Y_OFF,
-            Layer::Figure,
+            Layer::Person,
         )
     };
     let south = desk.visual.y + desk.visual.height;

@@ -40,8 +40,8 @@ pub(crate) struct Riding {
 
 impl Riding {
     /// The logical cells it paints, sorted with the figure it rides on at
-    /// `depth`; `None` when it paints nothing this frame.
-    pub(crate) fn span(&self, depth: u16) -> Option<Span> {
+    /// `depth` in `layer`; `None` when it paints nothing this frame.
+    pub(crate) fn span(&self, depth: u16, layer: crate::display::Layer) -> Option<Span> {
         let d = i32::from(self.pen.art(1).0);
         let mut cells: Option<(i32, i32, i32, i32)> = None;
         self.look(&mut |at, size, _, _| {
@@ -58,7 +58,7 @@ impl Riding {
             y0: cell(y0),
             y1: cell(y1),
             depth,
-            layer: crate::display::Layer::Figure,
+            layer,
         };
         Some(span)
     }
