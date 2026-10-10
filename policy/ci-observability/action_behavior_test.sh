@@ -1217,6 +1217,7 @@ run_rust 0 "" || fail "setup-rust failed with a healthy rustup"
 [[ "$(rust_count '^rustup update')" == 1 ]] || fail "setup-rust updated more than once: $(<"$rust_dir/log")"
 [[ "$(rust_count '^rustup toolchain install --profile minimal --no-self-update$')" == 1 ]] ||
     fail "setup-rust did not install the file's toolchain after the update: $(<"$rust_dir/log")"
+[[ "$(rust_count '^rustup component\|^rustup target')" == 0 ]] || fail "setup-rust added components or targets nobody asked for: $(<"$rust_dir/log")"
 run_rust $((rust_attempts - 1)) "$race_message" || fail "setup-rust did not recover from the manifest race on its last attempt"
 [[ "$(rust_count '^rustup update')" == "$rust_attempts" ]] || fail "setup-rust did not retry the manifest race: $(<"$rust_dir/log")"
 status=0
@@ -1232,6 +1233,6 @@ for message in "error: could not download file: network down" "warning: componen
     [[ "$(rust_count '^rustup update')" == 1 && "$(rust_count 'toolchain install')" == 0 ]] ||
         fail "setup-rust retried or went on after \"$message\": $(<"$rust_dir/log")"
 done
-run_rust 0 "" "llvm-tools, rustfmt" "wasm32-unknown-unknown" || fail "setup-rust failed with extra components and targets"
-[[ "$(rust_count '^rustup component add llvm-tools rustfmt$')" == 1 && "$(rust_count '^rustup target add wasm32-unknown-unknown$')" == 1 ]] ||
-    fail "setup-rust did not add the extra components and targets: $(<"$rust_dir/log")"
+run_rust 0 "" "llvm-tools, rustfmt" "wasm32-unknown-unknown,aarch64-apple-darwin" || fail "setup-rust failed with extra components and targets"
+[[ "$(rust_count '^rustup component add llvm-tools rustfmt$')" == 1 && "$(rust_count '^rustup target add wasm32-unknown-unknown aarch64-apple-darwin$')" == 1 ]] ||
+    fail "setup-rust did not split the extra components and targets on commas: $(<"$rust_dir/log")"
