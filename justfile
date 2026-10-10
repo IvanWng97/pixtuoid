@@ -497,7 +497,7 @@ _api-toolchain:
 # outside the workspace: hawk's `--exclude-crate` case.
 [doc('Fail on a `pub` item no other workspace crate needs (cargo-hawk; the full tier gates on it); forwards args, e.g. --fix')]
 [group('rust')]
-hawk *args:
+hawk *args: _hawk-toolchain
     #!/usr/bin/env bash
     set -euo pipefail
     # rustup's proxy cargo, so `+{{ HAWK_RUST }}` selects the toolchain (see `check-windows`).
@@ -512,11 +512,16 @@ hawk *args:
         echo "{{ HAWK_INSTALLER_SHA256 }}  $installer" | shasum -a 256 -c - >/dev/null
         CARGO_HAWK_UNMANAGED_INSTALL="$bin" sh "$installer" >&2
     fi
-    rustup toolchain list | grep -q '^{{ HAWK_RUST }}-' \
-        || rustup toolchain install {{ HAWK_RUST }} --profile minimal --no-self-update >&2
     # The `-A`: AGENTS.md's Visibility rule stops at `pub(crate)`, never private.
     PATH="$bin:$PATH" cargo +{{ HAWK_RUST }} hawk check --target-dir target/hawk \
         --exclude-crate pixtuoid_web -D warnings -A hawk::unnecessary_restricted_visibility "$@"
+
+[private]
+_hawk-toolchain:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rustup toolchain list | grep -q '^{{ HAWK_RUST }}-' \
+        || rustup toolchain install {{ HAWK_RUST }} --profile minimal --no-self-update >&2
 
 # Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
 # (1) build every item's docs, private ones included, with EVERY rustdoc

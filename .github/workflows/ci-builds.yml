@@ -85,6 +85,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-alsa
+      - uses: ./.github/actions/setup-just
+      # Before rust-cache, which keys on every installed toolchain, so a
+      # HAWK_RUST bump starts a new cache instead of hitting the old one.
+      - run: just _hawk-toolchain
       # hawk's own target dir, deps only. Saved from main alone, so a queue
       # batch restores it and no draft PR spends the 10 GB quota on a copy.
       - uses: Swatinem/rust-cache@v2
@@ -92,7 +96,6 @@ jobs:
           prefix-key: v1-rust
           workspaces: ". -> target/hawk"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/setup-just
       - run: just hawk
 
   packaging-linux:
