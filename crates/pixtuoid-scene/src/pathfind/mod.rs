@@ -15,6 +15,7 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 use crate::layout::{
     Bounds, COARSE_CELL_SIZE, CoarseGrid, Point, cell_anchor, cell_center, cell_walkable, snap,
+    snap_where,
 };
 
 /// Cell size in pixels — the coarse routing-grid edge, re-exported from the
@@ -173,8 +174,8 @@ impl PartialOrd for Node {
     }
 }
 
-/// Octile-distance step costs, integer so A* needs no floats — the classic
-/// 14/10 ≈ √2 : 1 ratio. Shared with `pose::octile_distance` so the heuristic
+/// Octile-distance step costs, integer so A* needs no floats — a diagonal
+/// about √2 straights. Shared with `pose::octile_distance` so the heuristic
 /// and the path metric can't drift; [`heuristic`] ignores the preferred-zone
 /// discount, so a zone-biased route is not guaranteed shortest.
 pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
@@ -233,7 +234,7 @@ pub fn find_path(
         return Some(vec![from, to]);
     };
 
-    // A step inside the preferred zone costs 7/10 — a bias, not a hard constraint.
+    // A step inside the preferred zone is discounted — a bias, not a hard constraint.
     const PREFERRED_ZONE_COST_NUM: u32 = 7;
     const PREFERRED_ZONE_COST_DEN: u32 = 10;
 
@@ -321,9 +322,20 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
 /// `reconstruct` overwrites the polyline endpoints with the RAW `from`/`to` — a
 /// caller that needs a guaranteed-walkable endpoint must re-anchor with this.
 pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
+    snap_point_where(mask, p, |_| true)
+}
+
+/// [`snap_point_to_walkable`] to the nearest walkable cell whose point `fits`.
+pub(crate) fn snap_point_where(
+    mask: &WalkableMask,
+    p: Point,
+    mut fits: impl FnMut(Point) -> bool,
+) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
-    let (cx, cy) = snap(mask, &empty, cell_of(p), cell_w, cell_h, MAX_SNAP_RADIUS)?;
+    let (cx, cy) = snap_where(cell_of(p), cell_w, cell_h, MAX_SNAP_RADIUS, |(cx, cy)| {
+        cell_walkable(mask, &empty, cx, cy) && fits(cell_anchor(mask, cx, cy))
+    })?;
     Some(cell_anchor(mask, cx, cy))
 }
 
