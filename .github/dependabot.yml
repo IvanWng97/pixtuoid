@@ -71,12 +71,20 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
     ignore:
-      # This repo pins actions to a FLOATING major (`@v4`), so patch/minor
-      # updates already arrive without a PR. Dependabot reads `@v4` as "version
-      # 4" and, filtered by the cooldown below, would rewrite the self-updating
-      # ref into an exact pin a week OLD — a downgrade (#786). Only majors need
-      # a human.
-      - dependency-name: "*"
+      # `actions/*`, codeql-action and withastro/action float on a major
+      # (`@v4`): patch/minor updates already arrive without a PR, and Dependabot
+      # reads `@v4` as "version 4" and, filtered by the cooldown below, would
+      # rewrite the self-updating ref into an exact pin a week OLD, a downgrade
+      # (#786). Only majors need a human. Every other action is SHA-pinned
+      # (.github/zizmor.yml's hash-pin rows), so a minor/patch bump is the only
+      # way it moves: a new floating action is listed here, else it is hash-pinned.
+      - dependency-name: "actions/*"
+        update-types:
+          ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "github/codeql-action"
+        update-types:
+          ["version-update:semver-patch", "version-update:semver-minor"]
+      - dependency-name: "withastro/action"
         update-types:
           ["version-update:semver-patch", "version-update:semver-minor"]
     cooldown:

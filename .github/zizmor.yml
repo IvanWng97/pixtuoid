@@ -17,8 +17,15 @@ rules:
         # currently the only way to use an action as an immutable release" (GitHub's
         # secure-use reference). A new one gets a row here.
         anthropics/claude-code-action: hash-pin
+        CodSpeedHQ/action: hash-pin
+        codecov/codecov-action: hash-pin
+        dtolnay/rust-toolchain: hash-pin
+        extractions/setup-just: hash-pin
         Mergifyio/gha-mergify-ci: hash-pin
+        moonrepo/setup-rust: hash-pin
         peaceiris/actions-gh-pages: hash-pin
         peter-evans/create-pull-request: hash-pin
         release-plz/action: hash-pin
         softprops/action-gh-release: hash-pin
+        Swatinem/rust-cache: hash-pin
+        taiki-e/install-action: hash-pin

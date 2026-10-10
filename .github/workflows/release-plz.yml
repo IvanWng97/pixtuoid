@@ -93,8 +93,7 @@ jobs:
           done
       # SHA-pinned, unlike this repo's floating majors: the step sees the PAT
       # (release-plz's security.md), and the SHA also pins the release-plz
-      # binary the action installs. Dependabot's minor/patch ignore never
-      # surfaces a `v0.6`; move it by hand.
+      # binary the action installs. Dependabot moves the pin.
       - id: release-plz
         uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
         with:

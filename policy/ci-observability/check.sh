@@ -44,8 +44,19 @@ for ((i = 0; i < count; i++)); do
     # One JSON string per line: a break written as a YAML block spans lines.
     breaks=$(jq -c ".[$i].break | [.] | flatten | .[]" <<<"$contracts")
     expected=$(jq -r ".[$i].expected // \"\"" <<<"$contracts")
-    files=$(jq -r ".[$i].file | [.] | flatten | .[]" <<<"$contracts")
+    # An entry may be a glob, so a file added later is held to the contract
+    # without anyone remembering to list it.
+    files=""
+    while IFS= read -r pattern; do
+        if ! matched=$(compgen -G "$pattern"); then
+            echo "error: $id's file $pattern matches nothing" >&2
+            failed=1
+            continue
+        fi
+        files+="$matched"$'\n'
+    done < <(jq -r ".[$i].file | [.] | flatten | .[]" <<<"$contracts")
     while IFS= read -r file; do
+        [[ -n $file ]] || continue
         # yq's `==` is false for any two maps or arrays, identical ones included,
         # so yq only turns the file into JSON and jq makes every comparison.
         if ! document=$(yq -o=json '.' "$file") || [[ $(jq -s 'length' <<<"$document") != 1 ]]; then

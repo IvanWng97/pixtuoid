@@ -569,6 +569,44 @@
     - (.jobs.release.steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with) |= del(.["enable-cache"])
     - (.jobs["release-pr"].steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["enable-cache"]) = "true"
 
+- id: credential-workflow-jobs-use-only-pinned-actions
+  file: .github/workflows/*.yml
+  why: >-
+    Any step of a job can read the credentials the job holds, and a job with
+    `id-token: write` can mint the OIDC token itself, so a third-party action
+    there must be a commit SHA: a tag can move (.github/zizmor.yml). A job
+    holds credentials through its own or the workflow's `id-token: write`, a
+    `secrets.*` reference in the job, or one in the workflow's `env`. Local
+    actions are held to the same rule by credential-actions-use-only-pinned-actions.
+  assert: |
+    def pinned: test("^\\./|^actions/|@[0-9a-f]{40}$");
+    def oidc: type == "object" and .["id-token"] == "write";
+    (.env // {} | tojson | test("secrets\\.")) as $env_secret
+    | (.permissions | oidc) as $workflow_oidc
+    | [.jobs[]
+       | select($env_secret or (tojson | test("secrets\\."))
+                or (if (.permissions | type) == "object" then .permissions | oidc else $workflow_oidc end))
+       | ([.uses // empty] + [.steps[]?.uses // empty])[]
+       | select(pinned | not)] == []
+  break:
+    - '.jobs.zz = {"permissions": {"id-token": "write"}, "steps": [{"uses": "a/b@v1"}]}'
+    - '.jobs.zz = {"steps": [{"uses": "a/b@v1", "env": {"T": "${{ secrets.X }}"}}]}'
+    - '.env.T = "${{ secrets.X }}" | .jobs.zz = {"steps": [{"uses": "a/b@v1"}]}'
+    - '.permissions = {"id-token": "write"} | .jobs.zz = {"steps": [{"uses": "a/b@v1"}]}'
+    - '.jobs.zz = {"permissions": {"id-token": "write"}, "uses": "a/b/.github/workflows/c.yml@v1"}'
+
+- id: credential-actions-use-only-pinned-actions
+  file: .github/actions/*/action.yml
+  why: >-
+    A credential-holding job runs any local action in its own context, so
+    each one is held to credential-workflow-jobs-use-only-pinned-actions'
+    rule: a step it takes from a third party is a commit SHA, never a tag.
+  assert: |
+    [.runs.steps[]?.uses // empty | select(test("^\\./|^actions/|@[0-9a-f]{40}$") | not)] == []
+  break:
+    - '.runs.steps += [{"uses": "a/b@v1"}]'
+    - '.runs.steps += [{"uses": "a/b@main"}]'
+
 - id: release-attests-before-publishing
   file: .github/workflows/release.yml
   why: >-

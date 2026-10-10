@@ -4,8 +4,8 @@ description: Exercise the Homebrew source-build and install contracts
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: Swatinem/rust-cache@v2
+    - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         prefix-key: v1-rust
         # rust-cache isolates by OS, so one shared-key is safe across platforms.
