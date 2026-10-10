@@ -1,6 +1,7 @@
 //! The procedural sound recipes. Every constant is a measured/ratified value
-//! from the Phase 0 audition (the `procedural-lofi` skill); re-audition a
-//! change there first, then mirror it here. All functions are PURE sample-buffer generators (mono f32
+//! from the Phase 0 audition spec (docs/superpowers/specs/
+//! 2026-07-16-ambient-sound-phase0/); change them THERE first (re-audition),
+//! then mirror here. All functions are PURE sample-buffer generators (mono f32
 //! @ 44_100 Hz) run once at startup — playback never synthesizes.
 
 use super::dsp::{NoiseStream, SAMPLE_RATE, bandpass, lowpass, shaped_noise_loop};
