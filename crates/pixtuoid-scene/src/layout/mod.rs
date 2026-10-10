@@ -19,29 +19,33 @@ mod windows;
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
-pub use compute::{PANTRY_COUNTER_LARGE_W, min_layout_size};
+pub(crate) use compute::PANTRY_COUNTER_LARGE_W;
+pub use compute::min_layout_size;
 pub use decor::{
-    ApproachSides, DESK_APPROACH, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
-    PodDecor, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, WallDecor, WaypointKind, desk_furniture_def,
-    desk_walk_anchor_facing, furniture_def, seated_foot_cell,
+    ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor,
+    WaypointKind, furniture_def,
+};
+pub(crate) use decor::{
+    SEAT_RENDER_Y_OFF, WALKING_Y_OFF, desk_furniture_def, desk_walk_anchor_facing, seated_foot_cell,
 };
 pub(crate) use decor::{repels_plants, seated_sort_row};
-pub use placement::{Pivot, anchored_top_left, sort_row_at};
+pub(crate) use placement::{Pivot, anchored_top_left, sort_row_at};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
 pub(crate) use rooms::pantry::{
     COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
 };
-pub(crate) use rooms::walls::WallPiece;
-pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
+pub use rooms::walls::Doorway;
+pub(crate) use rooms::walls::{WALL_THICK_H, WALL_THICK_V, WallPiece};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
+pub use roster::Station;
 pub(crate) use roster::{
     CLOCK, Depth, Fixture, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_fixtures,
     desk_chair_sort_row, desk_chair_top_left, desk_fixtures, pod_decor_fixtures,
 };
 pub use roster::{
     FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
-    NEON_PANEL_W, Station,
+    NEON_PANEL_W,
 };
 #[cfg(test)]
 pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols, desk_has_cabinet};
@@ -335,7 +339,7 @@ pub(crate) const fn pct(v: u16, n: u16) -> u16 {
 
 /// Padding (px) around every obstacle in the walkable mask, so characters
 /// route AROUND furniture rather than scraping along its edge.
-pub const OBSTACLE_PAD_PX: u16 = 2;
+pub(crate) const OBSTACLE_PAD_PX: u16 = 2;
 
 /// The SMALLER mask pad the waypoint (seat/appliance) stamp uses — a walkable
 /// seat sits IN the open floor and needs no routing buffer. THE single source,
@@ -348,19 +352,19 @@ pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
 /// mask blocks only down to the band bottom. The renderer derives
 /// `top_wall_h = top_margin - this`, so the mask and the visual MUST read this
 /// one source or they drift.
-pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
+pub(crate) const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 
 /// How many pixels of the pantry counter actually sit on the floor: only the
 /// southern base contacts the ground, the receding cabinet tops + backsplash
 /// are overhang (invariant #6), so a character routed behind the counter is
 /// occluded by its own y-sorted sprite.
-pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
+pub(crate) const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
 /// The desk BODY size in SLOT units — the grid-pitch pricing. SLOT ≠ GROUND:
 /// the desk's blocked GROUND is the full sprite width (`decor::DESK_GROUND_W`,
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
-pub const DESK_W: u16 = 10;
+pub(crate) const DESK_W: u16 = 10;
 /// Glass columns offset from the desk sprite's left edge.
 pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 /// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
@@ -438,17 +442,19 @@ pub(crate) fn exit_sign_pos(door: Point) -> Option<Point> {
 pub const CLASSIC_OFFICE_DESKS: usize = 16;
 /// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the named default
 /// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`.
-pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
+#[cfg(test)]
+pub(crate) const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
 /// The desk-grid vertical gap unit (px) — the lounge-waypoint bound in the layout
 /// tests reads it; the pod grid itself prices its own spacing.
-pub const DESK_GAP_Y: u16 = 14;
+#[cfg(test)]
+pub(crate) const DESK_GAP_Y: u16 = 14;
 /// Floor (px) for the layout's `top_margin` — `compute::top_margin`'s
 /// percent-of-buffer derivation never shrinks the north wall band below this.
-pub const MIN_TOP_MARGIN: u16 = 20;
+pub(crate) const MIN_TOP_MARGIN: u16 = 20;
 const MIN_DUAL_MEETING_H: u16 = 80;
 
 /// Number of desks per side in a pod (`POD_SIDE * POD_SIDE` total).
-pub const POD_SIDE: u16 = 2;
+pub(crate) const POD_SIDE: u16 = 2;
 /// Gap between two desks inside the same pod — big enough that each desk
 /// reads as its own workstation, not a merged blob.
 pub const INTRA_POD_GAP_X: u16 = 12;
@@ -461,12 +467,12 @@ const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct. Deliberately > the N-S gap: screens are
 /// landscape, so spread wider horizontally and pack tighter vertically.
-pub const INTER_POD_AISLE_X: u16 = 20;
+pub(crate) const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
 /// `every_home_desk_has_a_reachable_approach_on_its_own_far_side`: the seat's
 /// far-side approach cell collides with the desk in the row above.
-pub const INTER_POD_AISLE_Y: u16 = 18;
+pub(crate) const INTER_POD_AISLE_Y: u16 = 18;
 
 impl SceneLayout {
     /// Returns `None` if the buffer is too small for even one cubicle plus the

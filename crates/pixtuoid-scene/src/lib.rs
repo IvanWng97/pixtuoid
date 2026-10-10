@@ -26,6 +26,9 @@
 // Scoped to this PUBLISHED crate, not `[workspace.lints]` — the binary crates'
 // `pub` items aren't a semver surface.
 #![warn(missing_docs)]
+// The leak-direction twin of `unreachable_pub`: a `pub` item reachable through
+// a signature but not nameable outside the crate.
+#![warn(unnameable_types)]
 // AGENTS.md's Errors rule, as a lint: no `unwrap()` outside tests.
 #![cfg_attr(not(test), warn(clippy::unwrap_used))]
 

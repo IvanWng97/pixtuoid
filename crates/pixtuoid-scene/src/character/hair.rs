@@ -380,7 +380,7 @@ mod tests {
                 );
                 let dropped = !(0..f.height())
                     .any(|y| (0..f.width()).any(|x| f.get(x, y).copied().flatten() == Some(H)));
-                let flagged = !crate::pack::validate_pack(&pack)
+                let flagged = !crate::pack::validate::validate_pack(&pack)
                     .overhanging_hair
                     .is_empty();
                 let below = hy + mark >= side + side;

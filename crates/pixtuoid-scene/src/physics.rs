@@ -1,6 +1,6 @@
 //! Pure physics model for character walking.
 //!
-//! Imports only `pixtuoid_core::AgentId` and `layout::Point`. No router, no layout, no terminal deps.
+//! Imports only `pixtuoid_core::AgentId` and `layout::Point`. No router, no terminal deps.
 //! All kinematics are f32; screen is ≤ ~4096 px → ≤ ~57k octile, well
 //! within f32's 24-bit mantissa.
 
@@ -52,7 +52,7 @@ pub(crate) const PAUSE_MS_MAX: u64 = 400;
 
 /// Frozen kinematic profile for one walk leg, computed once at walk-start.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct WalkProfile {
+pub(crate) struct WalkProfile {
     /// Accel → cruise → decel total time, **excluding** arrival pause.
     pub duration_ms: u64,
     /// Per-agent arrival settle before the pose flips to seated/at-waypoint.

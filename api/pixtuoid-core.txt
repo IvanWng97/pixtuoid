@@ -126,7 +126,6 @@ pub fn pixtuoid_core::source::claude_code::decode_cc_line(&str, &str, serde_json
 pub fn pixtuoid_core::source::claude_code::live_cc_session_ids(&std::path::Path) -> core::option::Option<pixtuoid_core::source::jsonl::ProbeSnapshot>
 pub mod pixtuoid_core::source::codewhale
 pub const pixtuoid_core::source::codewhale::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::codewhale::decode_cw_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::codex
 pub struct pixtuoid_core::source::codex::CodexSource
 pub pixtuoid_core::source::codex::CodexSource::child_end_unclaims: core::option::Option<pixtuoid_core::source::jsonl::ChildEndUnclaims>
@@ -149,7 +148,6 @@ pub const pixtuoid_core::source::codex::SOURCE_NAME: &str
 pub fn pixtuoid_core::source::codex::codex_home() -> std::path::PathBuf
 pub fn pixtuoid_core::source::codex::codex_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::codex::decode_codex_line(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
-pub fn pixtuoid_core::source::codex::live_codex_rollout_ids(&std::path::Path) -> core::option::Option<pixtuoid_core::source::jsonl::ProbeSnapshot>
 pub mod pixtuoid_core::source::copilot
 pub struct pixtuoid_core::source::copilot::CopilotSource
 pub pixtuoid_core::source::copilot::CopilotSource::sessions_root: std::path::PathBuf
@@ -169,11 +167,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::copilot:
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::copilot::CopilotSource
 pub const pixtuoid_core::source::copilot::SOURCE_NAME: &str
 pub fn pixtuoid_core::source::copilot::copilot_home() -> std::path::PathBuf
-pub fn pixtuoid_core::source::copilot::copilot_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::copilot::decode_copilot_line(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::cursor
 pub const pixtuoid_core::source::cursor::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::cursor::decode_cursor_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::daemon
 pub enum pixtuoid_core::source::daemon::DaemonPresenceUpdate
 pub pixtuoid_core::source::daemon::DaemonPresenceUpdate::GatewayDown
@@ -442,16 +438,11 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::grok::GrokSource
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::grok::GrokSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::grok::GrokSource
 pub const pixtuoid_core::source::grok::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::grok::decode_grok_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
-pub fn pixtuoid_core::source::grok::decode_grok_line(&str, &str, serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::grok::grok_cwd_from_path(&std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub fn pixtuoid_core::source::grok::grok_home() -> std::path::PathBuf
-pub fn pixtuoid_core::source::grok::grok_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::grok::grok_session_ended(&[u8]) -> bool
-pub fn pixtuoid_core::source::grok::live_grok_session_ids(&std::path::Path) -> core::option::Option<pixtuoid_core::source::jsonl::ProbeSnapshot>
 pub mod pixtuoid_core::source::hermes
 pub const pixtuoid_core::source::hermes::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::hermes::decode_hermes_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::hermes::hermes_home() -> core::option::Option<std::path::PathBuf>
 pub mod pixtuoid_core::source::hook
 pub struct pixtuoid_core::source::hook::HookRouter
@@ -653,16 +644,13 @@ pub fn pixtuoid_core::source::omp::omp_extensions_dir() -> std::path::PathBuf
 pub fn pixtuoid_core::source::omp::omp_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::omp::omp_profile_sessions_dirs() -> alloc::vec::Vec<std::path::PathBuf>
 pub fn pixtuoid_core::source::omp::omp_sessions_dir() -> std::path::PathBuf
-pub type pixtuoid_core::source::omp::OmpProfileEnumerate = alloc::sync::Arc<(dyn core::ops::function::Fn() -> alloc::vec::Vec<std::path::PathBuf> + core::marker::Send + core::marker::Sync)>
 pub mod pixtuoid_core::source::openclaw
 pub const pixtuoid_core::source::openclaw::SOURCE_NAME: &str
 pub fn pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<pixtuoid_core::source::daemon::DecodedPresence>
 pub mod pixtuoid_core::source::opencode
 pub const pixtuoid_core::source::opencode::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::opencode::decode_oc_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::reasonix
 pub const pixtuoid_core::source::reasonix::SOURCE_NAME: &str
-pub fn pixtuoid_core::source::reasonix::decode_rx_hook_payload(&serde_json::value::Value) -> pixtuoid_core::source::decoder::DecodeResult<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 #[non_exhaustive] pub enum pixtuoid_core::source::AgentEvent
 pub pixtuoid_core::source::AgentEvent::ActivityEnd
 pub pixtuoid_core::source::AgentEvent::ActivityEnd::agent_id: pixtuoid_core::id::AgentId
@@ -1425,7 +1413,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pac
 pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::PACK_MANIFEST: &str
 pub fn pixtuoid_core::sprite::format::density_variant_name(&str, pixtuoid_core::sprite::format::Density) -> alloc::string::String
-pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, pixtuoid_core::sprite::format::Density)
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 #[non_exhaustive] pub enum pixtuoid_core::sprite::HeadView
 pub pixtuoid_core::sprite::HeadView::Back

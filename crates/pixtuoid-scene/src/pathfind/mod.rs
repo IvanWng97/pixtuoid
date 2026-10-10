@@ -20,7 +20,7 @@ use crate::layout::{
 /// Cell size in pixels — the coarse routing-grid edge, re-exported from the
 /// SHARED `layout::coarse` so router coarsening can't drift from reachability
 /// coarsening.
-pub const CELL_SIZE: u16 = COARSE_CELL_SIZE;
+pub(crate) const CELL_SIZE: u16 = COARSE_CELL_SIZE;
 
 /// Abstract pathfinder — routes from `from` to `to` over the supplied mask +
 /// overlay, returning a polyline (first = `from`, last = `to`, intermediate =
@@ -222,7 +222,7 @@ const MAX_SNAP_RADIUS: u16 = 12;
 /// Run A* on the layout's walkability mask + per-frame occupancy. Cells whose
 /// center falls inside `preferred` get a step-cost discount, so paths hug that
 /// zone even when an off-zone diagonal cut would be slightly shorter.
-pub fn find_path(
+pub(crate) fn find_path(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
     preferred: Option<Bounds>,
@@ -320,7 +320,7 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
 /// within `MAX_SNAP_RADIUS`. Distinct from `find_path`'s internal snapping, whose
 /// `reconstruct` overwrites the polyline endpoints with the RAW `from`/`to` — a
 /// caller that needs a guaranteed-walkable endpoint must re-anchor with this.
-pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
+pub(crate) fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
     let (cx, cy) = snap(mask, &empty, cell_of(p), cell_w, cell_h, MAX_SNAP_RADIUS)?;

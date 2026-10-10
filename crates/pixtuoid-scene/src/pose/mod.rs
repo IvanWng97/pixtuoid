@@ -19,12 +19,16 @@ use crate::walk::{
 };
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
+pub use pure::Pose;
 pub use pure::{
-    ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
-    THINKING_WINDOW_SECS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive,
-    derive_state_only, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for,
-    pick_aimless_dest, seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
+    ENTRY_ANIMATION_MS, derive, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms,
+    takes_trip, waypoint_index_for_cycle,
 };
+pub(crate) use pure::{
+    STALE_RESUME_GAP_BASE_MS, WANDER_DWELL_EST_MS, derive_state_only, stale_resume_gap_ms,
+};
+#[cfg(test)]
+pub(crate) use pure::{aimless_wander_seed, pick_aimless_dest};
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
 pub(crate) use pure::{SpotClaims, distance_at, resolve_wander_target, typing_frame, walk_frame};
