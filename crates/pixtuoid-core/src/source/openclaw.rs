@@ -112,10 +112,10 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
         }],
         "agent_end" => {
             // `success` alone is NOT enough for Degraded: upstream builds it as
-            // `!aborted && !promptError`, so a user CANCELLING a turn produces the
-            // same `false` as a provider outage — and Degraded is sticky (no TTL
-            // heals it), which would latch the mascot into "model error" until the
-            // next run. The plugin's `errored` (the mere PRESENCE of upstream's
+            // `!aborted && !promptError` and sets `error` only beside a prompt error
+            // (openclaw 2026.9.8, the embedded runner's `agent_end`), so a user
+            // CANCELLING a turn reads `false` too — and Degraded is sticky (no TTL
+            // heals it). The plugin's `errored` (the mere PRESENCE of upstream's
             // `error`, as a bare boolean because the string can embed prompt content)
             // separates the two. A missing field is no evidence of an error.
             let failed = obj.get("success").and_then(Value::as_bool) == Some(false)

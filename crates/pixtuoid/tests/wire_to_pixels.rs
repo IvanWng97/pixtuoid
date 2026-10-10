@@ -537,8 +537,8 @@ fn a_gateway_we_never_saw_start_still_materializes_from_its_session_wire() {
     assert_eq!(
         openclaw_state("gateway-mid-attach-failed-run", &["session_end"]),
         DaemonState::Degraded,
-        "agent_end with a reported error (success:false, errored:true) is the model \
-         backend breaking, not the gateway dying"
+        "agent_end with a reported error (success:false, errored:true) degrades the \
+         gateway, it doesn't down it"
     );
 }
 
