@@ -1210,10 +1210,12 @@ info: this is likely due to an ongoing update of the official release server, pl
 run_rust() {
     rm -f "$rust_dir/log" "$rust_dir/log.n"
     PATH="$rust_dir/bin:$PATH" FAKE_RUSTUP_LOG="$rust_dir/log" FAKE_RUSTUP_FAILS="$1" FAKE_RUSTUP_MESSAGE="$2" COMPONENTS="${3:-}" TARGETS="${4:-}" \
-        UPDATE_ATTEMPTS="$rust_attempts" UPDATE_RETRY_SECONDS=0 bash -c "$rust_script" >/dev/null 2>&1
+        UPDATE_ATTEMPTS="$rust_attempts" UPDATE_RETRY_SECONDS=0 bash -c "$rust_script" >/dev/null 2>"$rust_dir/err"
 }
 rust_count() { grep -c -e "$1" "$rust_dir/log" || true; }
 run_rust 0 "" || fail "setup-rust failed with a healthy rustup"
+# An empty list expands unbound under bash 3.2, which warns and still exits 0.
+[[ ! -s "$rust_dir/err" ]] || fail "setup-rust wrote to stderr on a healthy run: $(<"$rust_dir/err")"
 [[ "$(rust_count '^rustup update')" == 1 ]] || fail "setup-rust updated more than once: $(<"$rust_dir/log")"
 [[ "$(rust_count '^rustup toolchain install --profile minimal --no-self-update$')" == 1 ]] ||
     fail "setup-rust did not install the file's toolchain after the update: $(<"$rust_dir/log")"
