@@ -58,8 +58,8 @@ pub(crate) struct SimStores<'a> {
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
     pub creatures: &'a mut HashMap<CreatureKey, CreatureWalk>,
-    /// What a pointer holds on this floor, or just set down.
-    pub grip: &'a mut Option<crate::interact::Grip>,
+    /// What a pointer holds on this floor, and set down since its last step.
+    pub grip: &'a mut crate::interact::Grip,
 }
 
 /// A theme-free glow decision for a character sprite. Sim decides WHETHER a
@@ -459,10 +459,10 @@ pub(crate) fn pack_frame_size(pack: &OfficeArt, anim: Piece, frame_idx: usize) -
     }
 }
 
-/// Carry out the floor's grip before anything steps: the figure held follows
-/// the pointer, and one set down lands, a creature to rest and an agent to
-/// walk home. A hold stays for the next step until its figure is gone or on
-/// its way out; a drop is spent.
+/// Carry out the floor's grip before anything steps: each figure set down
+/// lands, in the order set down, a creature to rest and an agent to walk
+/// home; the one held follows the pointer. A hold stays for the next step
+/// until its figure is gone or on its way out.
 fn take_grip(
     stores: &mut SimStores<'_>,
     agents: &[AgentSlot],
@@ -470,42 +470,48 @@ fn take_grip(
     now: SystemTime,
 ) {
     use crate::interact::{Figure, Grip};
-    let Some(grip) = stores.grip.take() else {
-        return;
-    };
-    let (Grip::Held { figure, at } | Grip::Dropped { figure, at }) = &grip;
-    let (figure, at) = (figure.clone(), *at);
-    let held = matches!(grip, Grip::Held { .. });
-    let creature = match figure {
-        Figure::Agent(id) => {
-            // One gone mid-carry has nothing to walk home, and one walking out
-            // leaves from where it was held.
-            let here = agents
-                .iter()
-                .any(|a| a.agent_id == id && a.exiting_at.is_none());
-            let Some(walk) = stores.walks.get_mut(&id).filter(|_| here) else {
-                return;
-            };
-            if held {
-                walk.carry(at);
-                *stores.grip = Some(grip);
-            } else {
-                walk.set_down(at);
+    let Grip { dropped, held } = std::mem::take(&mut *stores.grip);
+    // Whether `figure` stays in hand: held at `at` while it can be, else set
+    // down there.
+    let mut grip = |figure: &Figure, at: Point, held: bool| {
+        let creature = match figure {
+            Figure::Agent(id) => {
+                let here = agents
+                    .iter()
+                    .any(|a| a.agent_id == *id && a.exiting_at.is_none());
+                return match stores.walks.get_mut(id) {
+                    Some(walk) if here && held => {
+                        walk.carry(at);
+                        true
+                    }
+                    // One walking out leaves the hand where the grip has it;
+                    // one lifted on its way out was never in it.
+                    Some(walk) if here || walk.carried() => {
+                        walk.set_down(at);
+                        false
+                    }
+                    // One gone mid-carry has nothing to walk home.
+                    _ => false,
+                };
             }
-            return;
+            Figure::Pet(kind) => CreatureKey::Pet(*kind),
+            Figure::Mascot(key) => CreatureKey::Mascot(key.clone()),
+        };
+        let Some(walk) = stores.creatures.get_mut(&creature) else {
+            return false;
+        };
+        if held && !walk.leaving() {
+            walk.carry(at);
+            true
+        } else {
+            walk.set_down(at, layout, now);
+            false
         }
-        Figure::Pet(kind) => CreatureKey::Pet(kind),
-        Figure::Mascot(key) => CreatureKey::Mascot(key),
     };
-    let Some(walk) = stores.creatures.get_mut(&creature) else {
-        return;
-    };
-    if held && !walk.leaving() {
-        walk.carry(at);
-        *stores.grip = Some(grip);
-    } else {
-        walk.set_down(at, layout, now);
+    for (figure, at) in &dropped {
+        grip(figure, *at, false);
     }
+    stores.grip.held = held.filter(|(figure, at)| grip(figure, *at, true));
 }
 
 /// The floor's pet this tick, walking the people's walker: a pet being

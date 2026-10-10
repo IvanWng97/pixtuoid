@@ -1755,8 +1755,23 @@ impl Hand {
 
     /// Set down where it is held.
     fn drop_it(&mut self) {
-        let at = self.at.take().expect("in hand");
-        self.grip(crate::interact::Gesture::Drop(at));
+        let at = self.at.expect("in hand");
+        self.drop_at(at);
+    }
+
+    /// Released at `to`.
+    fn drop_at(&mut self, to: Point) {
+        self.at = None;
+        self.grip(crate::interact::Gesture::Drop(to));
+    }
+
+    /// Where its feet were drawn last paint.
+    fn feet(&self) -> Point {
+        let tl = self.drawn.expect("drawn");
+        Point {
+            x: tl.x + crate::layout::CHARACTER_SPRITE_W / 2,
+            y: tl.y + crate::layout::WALKING_Y_OFF,
+        }
     }
 
     /// Painted until it is no longer drawn, or `paints` run out: how many drew it.
@@ -1836,17 +1851,115 @@ fn an_agent_whose_session_ends_in_hand_walks_out_from_it() {
 }
 
 #[test]
-fn an_agent_whose_session_ends_as_it_is_set_down_walks_out_from_there() {
+fn an_agent_whose_session_ends_as_it_is_set_down_walks_out_from_the_drop() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut hand = carried_off(now);
-    hand.drop_it();
+    let held = hand.at.expect("in hand");
+    let l = hand.layout();
+    // Released cells on from the last carry, so leaving from the hold and
+    // leaving from the drop part.
+    let cell = crate::pathfind::CELL_SIZE;
+    let to = [held.x.checked_add(3 * cell), held.x.checked_sub(3 * cell)]
+        .into_iter()
+        .flatten()
+        .map(|x| Point { x, y: held.y })
+        .find(|&p| l.reachable.reaches(p) && l.is_visually_clear(p))
+        .expect("open floor beside the hold");
+    hand.drop_at(to);
     let end = hand.now;
     hand.slot().exiting_at = Some(end);
+    hand.paint();
+    let feet = hand.feet();
+    assert!(
+        feet.x.abs_diff(to.x) <= cell && feet.y.abs_diff(to.y) <= cell,
+        "it walks out from the drop {to:?}, not the hold {held:?}: {feet:?}"
+    );
     assert!(hand.paint_out(600) > 20, "it walks out");
     assert!(
         hand.max_step <= MAX_FRAME_STEP_PX,
         "max frame jump {}px (> {MAX_FRAME_STEP_PX})",
         hand.max_step
+    );
+}
+
+/// Lifted on the very frame it comes back from an exit, it walks home from
+/// the hand and sits: the walk out it came back from never resumes.
+#[test]
+fn an_agent_lifted_as_it_comes_back_from_an_exit_never_resumes_the_walk_out() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut hand = Hand::new(entry_slot(now - Duration::from_secs(120)), now);
+    let end = hand.now;
+    hand.slot().exiting_at = Some(end);
+    for _ in 0..10 {
+        hand.paint();
+    }
+    let back = hand.now;
+    let slot = hand.slot();
+    slot.exiting_at = None;
+    slot.state_started_at = back;
+    hand.lift();
+    // Past the walk out's end, so a replay of it re-enters from the door.
+    let grace = pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64;
+    for _ in 0..grace / PAINT_FRAME_MS {
+        hand.paint();
+    }
+    hand.drop_it();
+    assert!(hand.paint_until_seated(900), "home, it sits");
+    for _ in 0..300 {
+        hand.paint();
+    }
+    assert!(
+        hand.max_step <= MAX_FRAME_STEP_PX,
+        "max frame jump {}px (> {MAX_FRAME_STEP_PX})",
+        hand.max_step
+    );
+}
+
+/// Set down by a pocket the walls close off, an agent lands on the floor its
+/// legs reach beside it, not home, wherever such floor lies within reach.
+#[test]
+fn an_agent_set_down_by_a_pocket_lands_on_the_floor_beside_it() {
+    let cell = crate::pathfind::CELL_SIZE;
+    let home = Point {
+        x: u16::MAX,
+        y: u16::MAX,
+    };
+    let mut checked = 0u32;
+    for (w, h) in [(55, 45), (80, 46), (120, 46)] {
+        for seed in 0..8 {
+            let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                continue;
+            };
+            let near = |at: Point| {
+                (-2i16..=2).any(|dx| {
+                    (-2i16..=2).any(|dy| {
+                        let (Some(x), Some(y)) = (
+                            at.x.checked_add_signed(dx * cell as i16),
+                            at.y.checked_add_signed(dy * cell as i16),
+                        ) else {
+                            return false;
+                        };
+                        l.reachable.reaches(Point { x, y })
+                    })
+                })
+            };
+            for at in (0..w)
+                .step_by(2)
+                .flat_map(|x| (0..h).step_by(2).map(move |y| Point { x, y }))
+                .filter(|&at| near(at))
+            {
+                let landed = landing(at, home, &l);
+                assert!(
+                    landed != home && l.reachable.reaches(landed),
+                    "{w}x{h} seed {seed}: set down at {at:?} lands {landed:?}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(
+        checked > 1_000,
+        "the sweep must set agents down, saw {checked}"
     );
 }
 

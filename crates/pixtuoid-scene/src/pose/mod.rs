@@ -237,13 +237,6 @@ pub fn derive_with_routing(
 ) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
-    // A pointer's hold, and the walk home after it, outrank all but the exit.
-    if slot.exiting_at.is_none()
-        && let Some(pose) = lifted_pose(slot, now, layout, desk, rctx)
-    {
-        return pose;
-    }
-
     if let Some(exit_time) = slot.exiting_at {
         let door_target = layout.door_threshold;
 
@@ -325,6 +318,12 @@ pub fn derive_with_routing(
 
     let live_now = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now);
     let re_enter = take_cancelled_walkout(rctx.walks.get_mut(&slot.agent_id), now, live_now);
+
+    // A pointer's hold, and the walk home after it, outrank all but the exit,
+    // and stand in for the re-entry of a walkout they cancel.
+    if let Some(pose) = lifted_pose(slot, now, layout, desk, rctx) {
+        return pose;
+    }
 
     // ENTRY_ANIMATION_MS bounds only how long we try to ROUTE; the physics
     // duration is the real walk time.
@@ -615,11 +614,10 @@ fn lifted_pose(
     Some(route_walking_pose(slot, now, layout, rctx, pose, settle))
 }
 
-/// Where an agent set down at `at` lands: on the floor its legs reach, else
-/// `home`.
+/// Where an agent set down at `at` lands: on the nearest floor its legs
+/// reach, else `home`.
 fn landing(at: Point, home: Point, layout: &SceneLayout) -> Point {
-    crate::pathfind::snap_point_to_walkable(&layout.walkable, at)
-        .filter(|&p| layout.reachable.reaches(p))
+    crate::pathfind::snap_point_where(&layout.walkable, at, |p| layout.reachable.reaches(p))
         .unwrap_or(home)
 }
 

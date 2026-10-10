@@ -2710,7 +2710,7 @@ struct OwnedSimStores {
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
     creatures:
         std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
-    grip: Option<crate::interact::Grip>,
+    grip: crate::interact::Grip,
 }
 
 impl OwnedSimStores {
@@ -2721,7 +2721,7 @@ impl OwnedSimStores {
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
             creatures: std::collections::HashMap::new(),
-            grip: None,
+            grip: crate::interact::Grip::default(),
         }
     }
 
@@ -3659,7 +3659,10 @@ fn each_mascot_hovers_as_its_own_instance() {
         },
     );
     let mut painted: Vec<_> = frame.mascots.iter().collect();
-    painted.sort_by_key(|m| m.sort_row);
+    painted.sort_by_key(|m| {
+        let h = crate::sim::pack_frame_size(&pack, m.anim_name, m.frame_idx).h;
+        sort_row_at(Pivot::Center, m.pos, h)
+    });
     let expected: Vec<_> = painted
         .iter()
         .map(|m| HoverTarget::Mascot(m.key.clone()))

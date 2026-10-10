@@ -2311,6 +2311,83 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
     assert_eq!(sat, Some(Pose::SeatedIdle), "home, it sits");
 }
 
+/// A drop and another figure's lift that reach a floor between two of its
+/// steps both land: the one set down leaves the hand, an agent to walk home
+/// and sit, a pet to rest and roam on.
+#[test]
+fn a_drop_and_the_next_lift_between_two_steps_both_land() {
+    use crate::interact::{Figure, Gesture};
+    use crate::layout::Point;
+    use crate::pose::Pose;
+    let pack = Arc::new(crate::pack::test_office());
+    let scene = make_scene(2, 4);
+    let mut ids = scene.agents.keys().copied();
+    let (a, b) = (
+        ids.next().expect("two agents"),
+        ids.next().expect("two agents"),
+    );
+    let cat = crate::pet::Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "Mochi".into(),
+    };
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let step = |session: &mut FloorSession, ms: u64| {
+        session
+            .step(
+                FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: t0 + Duration::from_millis(ms),
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs {
+                        pet: Some(&cat),
+                        petting: None,
+                    },
+                },
+                Size { w: 160, h: 96 },
+            )
+            .expect("lays out")
+            .frame
+    };
+    let at = Point { x: 40, y: 70 };
+    for first in [Figure::Agent(a), Figure::Pet(cat.kind)] {
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        step(&mut session, 0);
+        session.floor_mut().grip(&Gesture::Lift {
+            figure: first.clone(),
+            at,
+        });
+        step(&mut session, 100);
+        session.floor_mut().grip(&Gesture::Drop(at));
+        session.floor_mut().grip(&Gesture::Lift {
+            figure: Figure::Agent(b),
+            at,
+        });
+        let set_down = step(&mut session, 200);
+        session.floor_mut().grip(&Gesture::Drop(at));
+        let later = (3..).map(|tenth| step(&mut session, 100 * tenth));
+        match first {
+            Figure::Agent(_) => assert!(
+                later.take(300).any(|f| matches!(
+                    f.poses[&a],
+                    Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping)
+                )),
+                "the agent set down walks home and sits"
+            ),
+            _ => {
+                let rests = set_down.pet.expect("the cat is drawn").pos;
+                let paints = crate::creatures::PET_LONGEST_REST_MS / 100 + 50;
+                assert!(
+                    later
+                        .take(paints as usize)
+                        .any(|f| f.pet.is_some_and(|p| p.pos != rests)),
+                    "the cat set down rests, then roams on from {rests:?}"
+                );
+            }
+        }
+    }
+}
+
 /// A lifted agent stands at no waypoint, whatever its timeline says: in hand,
 /// or walking home, it reserves no cell another's route steps around.
 #[test]
@@ -2384,10 +2461,10 @@ fn a_lifted_agent_reserves_no_cell() {
     assert!(session.floor().ctx.overlay.is_empty(), "walking home");
 }
 
-/// A pet in hand is in front of the whole room, as an agent in hand is: held
-/// over a sitter's head, it is what the pointer finds there.
+/// A pet or a mascot in hand is in front of the whole room, as an agent in
+/// hand is: held over a sitter's head, it is what the pointer finds there.
 #[test]
-fn a_lifted_pet_is_in_front_of_the_room() {
+fn a_lifted_creature_is_in_front_of_the_room() {
     use crate::display::HoverTarget;
     use crate::hit::SceneHit;
     use crate::interact::{Figure, Gesture};
@@ -2404,6 +2481,19 @@ fn a_lifted_pet_is_in_front_of_the_room() {
             kind: pixtuoid_core::state::ToolKind::Edit,
         };
     }
+    let lobster = crate::creatures::openclaw_key("18789");
+    scene.insert_daemon(
+        lobster.source(),
+        lobster.instance().clone(),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 0,
+            last_seen: SystemTime::UNIX_EPOCH,
+            entered_at: SystemTime::UNIX_EPOCH,
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
     let cat = crate::pet::Pet {
         kind: crate::pet::PetKind::Cat,
         name: "Mochi".into(),
@@ -2439,13 +2529,16 @@ fn a_lifted_pet_is_in_front_of_the_room() {
         height: 1,
     };
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_060);
-    for look in [
+    let looks = [
         crate::look::Look::Classic,
         crate::look::Look::Cutaway {
             scale: crate::render_scale::RenderScale::new(4).expect("nonzero"),
             text: crate::look::WorldText::Baked,
         },
-    ] {
+    ];
+    for (look, figure) in looks.into_iter().flat_map(|look| {
+        [Figure::Pet(cat.kind), Figure::Mascot(lobster.clone())].map(|figure| (look, figure))
+    }) {
         let mut session = FloorSession::new(Arc::clone(&pack));
         render(&mut session, look, now);
         let head = (0..size.h)
@@ -2458,22 +2551,125 @@ fn a_lifted_pet_is_in_front_of_the_room() {
             })
             .expect("the sitter is drawn");
         session.floor_mut().grip(&Gesture::Lift {
-            figure: Figure::Pet(crate::pet::PetKind::Cat),
+            figure: figure.clone(),
             at: head,
         });
         // Every frame of the carry, so it never flickers behind.
         for paint in 1..=crate::anim::PAINT_FPS {
             session.floor_mut().grip(&Gesture::Carry(head));
             render(&mut session, look, now + FRAME * paint);
+            let hit = session.hit_at(cell(head));
             assert!(
                 matches!(
-                    session.hit_at(cell(head)),
-                    Some(SceneHit::Figure(HoverTarget::Pet(_)))
+                    (&figure, hit),
+                    (Figure::Pet(_), Some(SceneHit::Figure(HoverTarget::Pet(_))))
+                ) || matches!(
+                    (&figure, hit),
+                    (Figure::Mascot(k), Some(SceneHit::Figure(HoverTarget::Mascot(m)))) if k == m
                 ),
-                "{look:?} paint {paint}, in hand over {head:?}: {:?}",
-                session.hit_at(cell(head))
+                "{look:?} paint {paint}, {figure:?} in hand over {head:?}: {hit:?}"
             );
         }
+    }
+}
+
+/// A creature not in hand sorts on its frame's south row, both painters'
+/// order: the pet and the mascot alike.
+#[test]
+fn a_creature_not_in_hand_sorts_on_its_frames_south_row() {
+    use crate::layout::{Pivot, sort_row_at};
+    let pack = Arc::new(crate::pack::test_office());
+    let mut scene = make_scene(1, 4);
+    let lobster = crate::creatures::openclaw_key("18789");
+    scene.insert_daemon(
+        lobster.source(),
+        lobster.instance().clone(),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 0,
+            last_seen: SystemTime::UNIX_EPOCH,
+            entered_at: SystemTime::UNIX_EPOCH,
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
+    let cat = crate::pet::Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "Mochi".into(),
+    };
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let (mut pets, mut mascots) = (0u32, 0u32);
+    for paint in 0..crate::anim::PAINT_FPS * 60 {
+        let frame = session
+            .step(
+                FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: t0 + FRAME * paint,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs {
+                        pet: Some(&cat),
+                        petting: None,
+                    },
+                },
+                Size { w: 160, h: 96 },
+            )
+            .expect("lays out")
+            .frame;
+        let row = |pos, anim, frame_idx| {
+            let h = crate::sim::pack_frame_size(&pack, anim, frame_idx).h;
+            sort_row_at(Pivot::Center, pos, h)
+        };
+        if let Some(p) = &frame.pet {
+            assert_eq!(p.sort_row, row(p.pos, p.anim_name, p.frame_idx), "the pet");
+            pets += 1;
+        }
+        for m in &frame.mascots {
+            assert_eq!(
+                m.sort_row,
+                row(m.pos, m.anim_name, m.frame_idx),
+                "the mascot"
+            );
+            mascots += 1;
+        }
+    }
+    assert!(pets > 0 && mascots > 0, "both drawn: {pets}/{mascots}");
+}
+
+/// A lift names an agent a frame drew, and every agent a frame draws has a
+/// walk for the lift to land on, from its first frame: walking in, seated,
+/// or walking out.
+#[test]
+fn every_drawn_agent_has_a_walk_a_lift_lands_on() {
+    let pack = Arc::new(crate::pack::test_office());
+    let mut scene = make_scene(3, 4);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let mut slots = scene.agents.values_mut();
+    let seated = slots.next().expect("three agents");
+    seated.created_at = t0 - Duration::from_secs(120);
+    let leaving = slots.next().expect("three agents");
+    leaving.exiting_at = Some(t0);
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let stepped = session
+        .step(
+            FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t0 + FRAME,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            Size { w: 160, h: 96 },
+        )
+        .expect("lays out");
+    assert_eq!(stepped.frame.characters.len(), 3, "all three drawn");
+    for c in &stepped.frame.characters {
+        let id = stepped.frame.agents[c.agent_idx].agent_id;
+        assert!(
+            session.floor().ctx.walks.contains_key(&id),
+            "{id:?} is drawn with no walk"
+        );
     }
 }
 

@@ -155,10 +155,10 @@ pub struct WanderState {
 /// Walk state for one live agent on one floor.
 #[derive(Debug, Clone)]
 pub struct WalkState {
-    /// The arrival walk, snapshotted once at door-crossing, or the walk home a
-    /// pointer set it down for. Carries its own `from` because a resurrect
-    /// that cancels an IN-FLIGHT walkout re-enters from wherever the sprite
-    /// is; a hardcoded door origin teleports it.
+    /// The arrival walk, snapshotted once at door-crossing, or a pointer's
+    /// walk home ([`Lifted::Home`]) once that arrives. Carries its own `from`
+    /// because a resurrect that cancels an IN-FLIGHT walkout re-enters from
+    /// wherever the sprite is; a hardcoded door origin teleports it.
     pub(crate) entry: Option<WalkLeg>,
     /// The walkout, snapshotted once when `exiting_at` fires. `from` is where
     /// the sprite actually is (where a pointer's hold lands it, its wander
@@ -224,6 +224,11 @@ impl WalkState {
     #[doc(hidden)]
     pub fn wander(&self) -> &WanderState {
         &self.wander
+    }
+
+    /// Whether a pointer holds it.
+    pub(crate) fn carried(&self) -> bool {
+        matches!(self.lifted, Some(Lifted::Held(_)))
     }
 
     /// In a pointer's hand, its feet at `at`.

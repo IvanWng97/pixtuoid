@@ -4502,8 +4502,8 @@ mod tests {
         }
     }
 
-    /// A cat and two gateways of one source, the second degraded and nearer
-    /// the viewer, so it sorts last.
+    /// A cat and two gateways of one source, the second degraded and in hand,
+    /// so it sorts last on a row no feet stand on.
     fn creatures() -> (SceneLayout, SimFrame) {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let mut frame = empty_frame(&layout);
@@ -4540,7 +4540,7 @@ mod tests {
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
-            sort_row: row(sick, PackPiece::LobsterWalk, 0),
+            sort_row: u16::MAX,
             key: crate::creatures::openclaw_key("18790"),
             degraded: true,
             effects: Vec::new(),
