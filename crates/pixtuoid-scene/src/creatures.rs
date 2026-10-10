@@ -362,11 +362,11 @@ impl CreatureWalk {
         self.phase = Phase::Carried { at };
     }
 
-    /// Set down near `at`, from `now`: on the nearest floor it [rests
-    /// on](rests_at), else at its latest draw, where a roam would have taken
-    /// it; it rests there, and roams on from it.
+    /// Set down near `at`, from `now`, unless it is on its way out: on the
+    /// nearest floor it [rests on](rests_at), else at its latest draw, where a
+    /// roam would have taken it; it rests there, and roams on from it.
     pub(crate) fn set_down(&mut self, at: Point, layout: &SceneLayout, now: SystemTime) {
-        if !matches!(self.phase, Phase::Carried { .. }) {
+        if self.leaving() {
             return;
         }
         let at = snap_point_where(&layout.walkable, at, |p| rests_at(layout, p))

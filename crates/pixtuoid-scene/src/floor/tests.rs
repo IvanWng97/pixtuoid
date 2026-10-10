@@ -2673,6 +2673,54 @@ fn every_drawn_agent_has_a_walk_a_lift_lands_on() {
     }
 }
 
+/// A pet lifted and set down within one paint lands at the drop, as an agent
+/// does.
+#[test]
+fn a_pet_flicked_within_one_paint_lands_at_the_drop() {
+    use crate::interact::{Figure, Gesture};
+    use crate::layout::Point;
+    let pack = Arc::new(crate::pack::test_office());
+    let scene = make_scene(1, 4);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let cat = crate::pet::Pet {
+        kind: crate::pet::PetKind::Cat,
+        name: "Mochi".into(),
+    };
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let pet_at = |session: &mut FloorSession, now| {
+        session
+            .step(
+                FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs {
+                        pet: Some(&cat),
+                        petting: None,
+                    },
+                },
+                Size { w: 160, h: 96 },
+            )
+            .expect("lays out")
+            .frame
+            .pet
+            .expect("the cat is drawn")
+            .pos
+    };
+    let before = pet_at(&mut session, t0);
+    let at = Point { x: 130, y: 70 };
+    let near = |p: Point| p.x.abs_diff(at.x) <= 8 && p.y.abs_diff(at.y) <= 8;
+    assert!(!near(before), "setup: the cat starts away from {at:?}");
+    session.floor_mut().grip(&Gesture::Lift {
+        figure: Figure::Pet(cat.kind),
+        at,
+    });
+    session.floor_mut().grip(&Gesture::Drop(at));
+    let landed = pet_at(&mut session, t0 + Duration::from_millis(100));
+    assert!(near(landed), "it lands at the drop {at:?}: {landed:?}");
+}
+
 /// A lifted pet hangs where the pointer is; set down, it rests on the floor
 /// there.
 #[test]
