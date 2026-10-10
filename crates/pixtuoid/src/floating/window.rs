@@ -79,6 +79,9 @@ pub(crate) struct FloatingApp {
     /// Whether the pointer last hovered something, so a move off it redraws
     /// once to drop its tooltip.
     hovered: bool,
+    /// The cursor last set, so it is set only when it changes; `None` once
+    /// the pointer leaves, whatever the OS showed meanwhile.
+    cursor_icon: Option<winit::window::CursorIcon>,
     /// The last petting, played while it lasts.
     petting: Option<pixtuoid_scene::pet::PetState>,
     /// Where a clicked agent's transcript roots are, for its focus jump:
@@ -194,6 +197,7 @@ impl FloatingApp {
             petting: None,
             focus_roots,
             clock: super::cadence::FrameClock::new(Instant::now(), motion),
+            cursor_icon: None,
             zoom: cfg.zoom,
             overlays: super::overlays::OverlayLayers::default(),
             window: None,
@@ -243,10 +247,35 @@ impl FloatingApp {
         }
     }
 
+    /// Show the cursor for what is under the pointer. A frame calls it too: a
+    /// figure walks under a pointer at rest, and a carry ends on release.
+    fn recursor(&mut self) {
+        let (Some(window), Some(at)) = (&self.window, self.shown) else {
+            return;
+        };
+        if !self.cursor_in {
+            return;
+        }
+        let size = window.inner_size();
+        let icon = self.renderer.cursor_icon(
+            (self.cursor.x, self.cursor.y),
+            (size.width, size.height),
+            at,
+            &self.ui.modal(),
+            self.petting.as_ref(),
+            self.ui.now(),
+        );
+        if self.cursor_icon != Some(icon) {
+            self.cursor_icon = Some(icon);
+            window.set_cursor(icon);
+        }
+    }
+
     /// Redraw when the pointer hovers something, or stops, so its tooltip
     /// follows within a move rather than at the next paint tick, which an
     /// idle office spaces a second apart.
     fn rehover(&mut self) {
+        self.recursor();
         let hovered = self
             .shown
             .filter(|_| self.cursor_in)
@@ -382,7 +411,13 @@ impl FloatingApp {
         )
     }
 
+    /// The cursor reads the frame just painted, as a press and the tooltip do.
     fn redraw(&mut self) {
+        self.paint();
+        self.recursor();
+    }
+
+    fn paint(&mut self) {
         let started = Instant::now();
         let Some(window) = self.window.as_ref() else {
             return;
@@ -699,6 +734,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             }
             WindowEvent::CursorLeft { .. } => {
                 self.cursor_in = false;
+                self.cursor_icon = None;
                 self.rehover();
             }
             // Its release goes elsewhere now: a figure in hand is set down.
