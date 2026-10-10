@@ -1,7 +1,7 @@
 //! What the last frame shows a pointer over an area of the office, and what a
 //! press on it does, for every painter. A tooltip and a press both resolve an
 //! area through [`scene_hit`], so a press acts on exactly what the tooltip
-//! names, and `SceneHit::action` is the one answer to what it does.
+//! names, and [`SceneHit::action`] is the one answer to what it does.
 
 use std::time::SystemTime;
 
@@ -45,7 +45,7 @@ impl SceneHit<'_> {
     /// What a press on it does at `now`, with `petting` the last one; `None`
     /// where it does nothing — a fixture, a mascot, a pet mid-petting — and a
     /// painter treats the press as on the bare office.
-    pub(crate) fn action(self, petting: Option<&PetState>, now: SystemTime) -> Option<HitAction> {
+    pub fn action(self, petting: Option<&PetState>, now: SystemTime) -> Option<HitAction> {
         match self {
             Self::Figure(&HoverTarget::Agent(id)) => Some(HitAction::Focus(id)),
             Self::Figure(&HoverTarget::Pet(PetHover { kind, .. })) => petting
