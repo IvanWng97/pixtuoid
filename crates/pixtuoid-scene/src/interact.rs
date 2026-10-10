@@ -70,7 +70,7 @@ impl Affordance {
     }
 
     /// What the press lands on.
-    pub fn pressed(&self) -> Pressed {
+    pub(crate) fn pressed(&self) -> Pressed {
         if self.click.is_some() || self.lift.is_some() {
             Pressed::Something
         } else {
