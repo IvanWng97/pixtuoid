@@ -123,7 +123,7 @@ impl OfficeRenderer {
     /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
     /// when the flash hold keeps it back, so the window keeps the last. A
     /// frame shown is [`presented`](Self::presented) once it shows.
-    pub fn render_live(
+    pub(crate) fn render_live(
         &mut self,
         at: PixelFit,
         frame: WindowFrame<'_>,
@@ -145,7 +145,7 @@ impl OfficeRenderer {
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
-    pub fn presented(&mut self) {
+    pub(crate) fn presented(&mut self) {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
