@@ -92,6 +92,24 @@ test('the star plaque hangs beside the tenant board with the sourced engraving',
   );
 });
 
+test('pantry FAQ: an indented answer stays inside the chat column', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto('./');
+    const overhang = await page.evaluate(() => {
+      const column = document.querySelector('.pantry__chat')!.getBoundingClientRect().right;
+      return Math.max(
+        ...[...document.querySelectorAll('.pantry__bubble')].map(
+          (b) => b.getBoundingClientRect().right - column
+        )
+      );
+    });
+    expect(overhang, `${width}px`).toBeLessThanOrEqual(0);
+  }
+});
+
 test('pantry FAQ: bubbles pop in sequence, join pix:paused, reduced-motion is static', async ({
   page,
   browser,
