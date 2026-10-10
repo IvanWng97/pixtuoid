@@ -14,7 +14,7 @@ use pixtuoid_core::state::AgentSlot;
 
 use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position};
 use crate::walk::{
-    Dropped, LegPlan, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
+    LegPlan, Lifted, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
     advance_wander, snapshot_leg_profile,
 };
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -52,8 +52,6 @@ pub(crate) struct RouteCtx<'a> {
     /// Whether an idle agent wanders off its desk: an ambient loop, so not at
     /// [`Motion::Still`](crate::anim::Motion::Still).
     pub wanders: bool,
-    /// The agent a pointer holds, and where.
-    pub held: Option<(AgentId, Point)>,
 }
 
 /// Owns the stores a [`RouteCtx`] borrows, so a test threads one value.
@@ -83,7 +81,6 @@ impl<R: Router> RouteRig<R> {
             history: &mut self.history,
             walks: &mut self.walks,
             wanders: true,
-            held: None,
         }
     }
 }
@@ -244,17 +241,6 @@ pub(crate) fn derive_with_routing(
 ) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
-    // A pointer's hold, and the walk home after it, outrank all but the exit.
-    if slot.exiting_at.is_none() {
-        match rctx.held {
-            Some((id, at)) if id == slot.agent_id => return Some(Pose::Held { at }),
-            _ => {}
-        }
-        if let Some(pose) = walking_home(slot, now, layout, desk, rctx) {
-            return pose;
-        }
-    }
-
     if let Some(exit_time) = slot.exiting_at {
         let door_target = layout.door_threshold;
 
@@ -264,10 +250,15 @@ pub(crate) fn derive_with_routing(
             // From wherever the agent actually is — otherwise one mid-coffee-run at
             // session end teleports to the desk before walking to the door.
             let desk_anchor = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
-            let from = rctx
-                .history
-                .recent(slot.agent_id, HISTORY_RECENT_MS, now)
-                .unwrap_or(desk_anchor);
+            let from = match walk.lifted.take() {
+                Some(Lifted::Held(at) | Lifted::Dropped(at)) => {
+                    landing(at, desk_leg_endpoint(desk, layout).0, layout)
+                }
+                Some(Lifted::Home(_)) | None => rctx
+                    .history
+                    .recent(slot.agent_id, HISTORY_RECENT_MS, now)
+                    .unwrap_or(desk_anchor),
+            };
             let (route_from, chair_rise) = if from == desk_anchor {
                 desk_leg_endpoint(desk, layout)
             } else {
@@ -331,6 +322,12 @@ pub(crate) fn derive_with_routing(
 
     let live_now = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now);
     let re_enter = take_cancelled_walkout(rctx.walks.get_mut(&slot.agent_id), now, live_now);
+
+    // A pointer's hold, and the walk home after it, outrank all but the exit,
+    // and stand in for the re-entry of a walkout they cancel.
+    if let Some(pose) = lifted_pose(slot, now, layout, desk, rctx) {
+        return pose;
+    }
 
     // ENTRY_ANIMATION_MS bounds only how long we try to ROUTE; the physics
     // duration is the real walk time.
@@ -559,11 +556,11 @@ pub(crate) fn derive_with_routing(
     route_walking_pose(slot, now, layout, rctx, pose, final_settle)
 }
 
-/// `slot`'s walk home from where a pointer set it down, `desk` its desk:
-/// `Some` while it walks (the inner `None` where routing yields no pose);
-/// `None` once home, or never set down. Home, its wander restarts seated
+/// `slot`'s pose while a pointer holds it, or on its walk home from where it
+/// was set down, `desk` its desk (the inner `None` where routing yields no
+/// pose); `None` once home, or never lifted. Home, its wander restarts seated
 /// from `now`, so the timeline it missed cannot teleport it.
-fn walking_home(
+fn lifted_pose(
     slot: &AgentSlot,
     now: SystemTime,
     layout: &SceneLayout,
@@ -573,35 +570,38 @@ fn walking_home(
     let (home, chair_settle) = desk_leg_endpoint(desk, layout);
     let settle = chair_settle.map_or(Settle::None, Settle::End);
     let walk = rctx.walks.get_mut(&slot.agent_id)?;
-    if let Some(Dropped::At(at)) = walk.dropped {
-        // On the floor its legs reach; else it lands home.
-        let from = crate::pathfind::snap_point_to_walkable(&layout.walkable, at)
-            .filter(|&p| layout.reachable.reaches(p))
-            .unwrap_or(home);
-        let profile = snapshot_leg_profile(
-            rctx.router,
-            &layout.walkable,
-            rctx.overlay,
-            slot.agent_id,
-            LegPlan {
+    match walk.lifted {
+        Some(Lifted::Held(at)) => return Some(Some(Pose::Held { at })),
+        Some(Lifted::Dropped(at)) => {
+            let from = landing(at, home, layout);
+            let profile = snapshot_leg_profile(
+                rctx.router,
+                &layout.walkable,
+                rctx.overlay,
+                slot.agent_id,
+                LegPlan {
+                    from,
+                    to: home,
+                    settle,
+                    intent: WalkIntent::SnapBack,
+                },
+            );
+            walk.lifted = Some(Lifted::Home(WalkLeg {
+                started_at: now,
+                profile,
                 from,
-                to: home,
-                settle,
-                intent: WalkIntent::SnapBack,
-            },
-        );
-        walk.dropped = Some(Dropped::Home(WalkLeg {
-            started_at: now,
-            profile,
-            from,
-        }));
+            }));
+        }
+        Some(Lifted::Home(_)) | None => {}
     }
-    let Some(Dropped::Home(leg)) = &walk.dropped else {
+    let Some(Lifted::Home(leg)) = walk.lifted.clone() else {
         return None;
     };
     let elapsed_ms = crate::anim::elapsed_ms(now, leg.started_at);
     if walk_arrived(&leg.profile, elapsed_ms) {
-        walk.dropped = None;
+        walk.lifted = None;
+        // Its way in now, so the one it was lifted off never resumes.
+        walk.entry = Some(leg);
         walk.snap_back = None;
         walk.wander.phase = WanderPhase::Seated;
         walk.wander.phase_started_at = now;
@@ -616,6 +616,13 @@ fn walking_home(
         false,
     );
     Some(route_walking_pose(slot, now, layout, rctx, pose, settle))
+}
+
+/// Where an agent set down at `at` lands: on the nearest floor its legs
+/// reach, else `home`.
+fn landing(at: Point, home: Point, layout: &SceneLayout) -> Point {
+    crate::pathfind::snap_point_where(&layout.walkable, at, |p| layout.reachable.reaches(p))
+        .unwrap_or(home)
 }
 
 fn route_walking_pose(
@@ -654,10 +661,8 @@ fn route_walking_pose(
         return Some(pose);
     };
 
-    // Snapshot the A* route on the leg's first frame and reuse it until the
-    // endpoints change. Otherwise per-frame occupancy churn invalidates the cache and
-    // re-routes onto a differently-shaped path, landing the frozen progress `t` on a
-    // new pixel — the visible "flash" — and spiking the frame's A* cost.
+    // Frozen per leg (`WalkPathSnapshot`), which also spares every frame a re-route's
+    // A* cost.
     let path = {
         let walk = walks.entry(slot.agent_id).or_default();
         match &walk.walk_path {

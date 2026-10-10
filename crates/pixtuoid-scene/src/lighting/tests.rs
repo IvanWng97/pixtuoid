@@ -2,6 +2,7 @@ use crate::anim::Beat;
 use std::collections::HashMap;
 
 use super::*;
+use crate::display::pen::{ArtPx, layout_point, test_density};
 use crate::layout::WINDOW_W;
 use crate::sky::{Sky, Weather};
 
@@ -344,24 +345,69 @@ fn every_shape() -> [Emitter; 4] {
     ]
 }
 
+/// Whether a shape lights whole cells rather than a continuous falloff; no
+/// wildcard, so a new shape fails to compile until it is classified.
+fn is_whole_cell(light: &Light) -> bool {
+    match light {
+        Light::Spill { .. } | Light::Patch { .. } => true,
+        Light::Halo { .. } | Light::Glow { .. } => false,
+    }
+}
+
 #[test]
 fn a_light_sampled_between_cells_stays_inside_its_bounds() {
+    const D: u16 = 4;
+    let at = |a: u16| layout_point(ArtPx(a), test_density(D));
     for e in every_shape() {
         let ((x0, y0), (x1, y1)) = e.bounds();
-        for y in 0..(48 * 4) {
-            for x in 0..(64 * 4) {
-                let (fx, fy) = ((x as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
-                if e.level_at_f(fx, fy).is_some() {
-                    assert!(
-                        fx >= f32::from(x0)
-                            && fx < f32::from(x1)
-                            && fy >= f32::from(y0)
-                            && fy < f32::from(y1),
-                        "{:?} lights ({fx}, {fy}) outside {:?}",
-                        e.kind,
-                        e.bounds()
-                    );
+        // A whole-cell shape lights exactly its bounds' cells; a continuous
+        // one's reach ends at its bound, so its far-edge pixels sit up to half
+        // a cell past the last cell.
+        let whole_cell = is_whole_cell(&e.light);
+        for y in 0..48 * D {
+            for x in 0..64 * D {
+                let (fx, fy) = (at(x), at(y));
+                if e.level_at_f(fx, fy).is_none() {
+                    continue;
                 }
+                let inside = if whole_cell {
+                    (i32::from(x0)..i32::from(x1)).contains(&unit_holding(fx))
+                        && (i32::from(y0)..i32::from(y1)).contains(&unit_holding(fy))
+                } else {
+                    fx >= f32::from(x0)
+                        && fx < f32::from(x1)
+                        && fy >= f32::from(y0)
+                        && fy < f32::from(y1)
+                };
+                assert!(
+                    inside,
+                    "{:?} lights ({fx}, {fy}) outside {:?}",
+                    e.kind,
+                    e.bounds()
+                );
+            }
+        }
+    }
+}
+
+/// A whole-cell shape sampled the way the display does ([`layout_point`])
+/// lights exactly the art pixels of the cells it lights at density 1.
+#[test]
+fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
+    const D: u16 = 4;
+    for e in every_shape() {
+        if !is_whole_cell(&e.light) {
+            continue;
+        }
+        for y in 0..48 * D {
+            for x in 0..64 * D {
+                let at = |a: u16| layout_point(ArtPx(a), test_density(D));
+                assert_eq!(
+                    e.level_at_f(at(x), at(y)).is_some(),
+                    e.level_at(x / D, y / D).is_some(),
+                    "{:?} art pixel ({x}, {y})",
+                    e.kind
+                );
             }
         }
     }

@@ -174,6 +174,7 @@ impl Pen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::pen::test_density;
     use crate::render_scale::RenderScale;
 
     const LIGHT: Rgb = Rgb {
@@ -189,7 +190,7 @@ mod tests {
     const BG: Rgb = Rgb { r: 1, g: 2, b: 3 };
 
     fn pen(s: u16, d: u16) -> Pen {
-        Pen::new(RenderScale::new(s).expect("nonzero"), d).expect("d divides s")
+        Pen::new(RenderScale::new(s).expect("nonzero"), test_density(d)).expect("d divides s")
     }
 
     #[test]

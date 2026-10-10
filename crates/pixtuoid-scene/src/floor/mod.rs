@@ -137,12 +137,12 @@ pub struct FloorCtx {
     pub vacancy_dim: VacancyDim,
     /// This floor's neon-sign fade state.
     pub(crate) neon: NeonState,
-    /// Per-agent walk state (physics profiles for entry/exit/wander).
+    /// Per-agent walk state.
     pub walks: HashMap<AgentId, WalkState>,
     /// The pet's and the gateway mascots' walks.
     pub(crate) creatures: HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
-    /// What a pointer holds on this floor, or just set down.
-    pub(crate) grip: Option<crate::interact::Grip>,
+    /// What a pointer holds on this floor, and set down since its last step.
+    pub(crate) grip: crate::interact::Grip,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -173,7 +173,7 @@ impl FloorCtx {
             neon: NeonState::new(),
             walks: HashMap::new(),
             creatures: HashMap::new(),
-            grip: None,
+            grip: crate::interact::Grip::default(),
             door_anim_max_ms: 0,
             off_beat: false,
             layout_memo: None,
@@ -387,23 +387,7 @@ impl PerFloor {
     /// Hand this floor a pointer's lift, carry or drop; its next step carries
     /// it out. A click is the painter's ([`SceneHit::action`](crate::hit::SceneHit::action)).
     pub(crate) fn grip(&mut self, gesture: &crate::interact::Gesture) {
-        use crate::interact::{Gesture, Grip};
-        let grip = &mut self.ctx.grip;
-        *grip = match (gesture, grip.take()) {
-            (Gesture::Lift { figure, at }, _) => Some(Grip::Held {
-                figure: figure.clone(),
-                at: *at,
-            }),
-            (&Gesture::Carry(at), Some(Grip::Held { figure, .. })) => {
-                Some(Grip::Held { figure, at })
-            }
-            (&Gesture::Drop(at), Some(Grip::Held { figure, .. })) => {
-                Some(Grip::Dropped { figure, at })
-            }
-            (Gesture::Click(_), kept) => kept,
-            // nothing held to carry or drop: a lift on another floor, or none
-            (Gesture::Carry(_) | Gesture::Drop(_), _) => None,
-        };
+        self.ctx.grip.push(gesture);
     }
 
     /// Fresh floor stores, drawn with `pack`.
@@ -624,6 +608,13 @@ impl FloorSession {
     ) -> Option<Arc<crate::layout::SceneLayout>> {
         self.evict_missing(inputs.world.scene);
         self.view.render(&mut self.office, look, inputs)
+    }
+
+    /// What the LAST rendered frame shows a pointer over `area`, in layout
+    /// units: [`crate::hit::scene_hit`] on its hovers, star and layout.
+    #[cfg(test)]
+    pub(crate) fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
+        self.view.hit_at(area)
     }
 
     /// The badges of the LAST frame the classic rendered, in paint order.
