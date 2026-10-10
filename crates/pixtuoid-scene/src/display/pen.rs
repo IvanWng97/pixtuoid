@@ -5,6 +5,8 @@
 
 use std::num::NonZeroU16;
 
+use pixtuoid_core::sprite::format::Density;
+
 use crate::pack::OfficeArt;
 
 use crate::render_scale::RenderScale;
@@ -16,9 +18,15 @@ pub(crate) struct ArtPx(pub(crate) u16);
 /// Where art pixel `a`'s centre lies on the layout's units at `d` art pixels to
 /// the unit, with a unit's own centre on its integer: at one to the unit, the
 /// unit itself, as the classic samples it. The continuous twin of
-/// [`Pen::logical`]; a `d` of zero reads as one.
-pub(crate) fn layout_point(a: ArtPx, d: u16) -> f32 {
-    (f32::from(a.0) + 0.5) / f32::from(d.max(1)) - 0.5
+/// [`Pen::logical`].
+pub(crate) fn layout_point(a: ArtPx, d: Density) -> f32 {
+    (f32::from(a.0) + 0.5) / f32::from(d.get()) - 0.5
+}
+
+/// A density literal for a test.
+#[cfg(test)]
+pub(crate) const fn test_density(n: u16) -> Density {
+    Density::new(n).expect("a test density is nonzero")
 }
 
 /// A length or coordinate in a render's buffer pixels, which a [`Pen`] turns
@@ -39,22 +47,21 @@ pub(crate) struct ArtRect {
 /// art pixel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Pen {
-    d: NonZeroU16,
+    d: Density,
     k: NonZeroU16,
 }
 
 impl Pen {
     /// The classic painter's grid: one buffer pixel per logical unit.
     pub(crate) const UNIT: Self = Self {
-        d: NonZeroU16::MIN,
+        d: Density::ONE,
         k: NonZeroU16::MIN,
     };
 
     /// The pen for art authored at density `d`, painted at `scale`; `None` when
     /// `d` does not divide it, since an art pixel would then straddle buffer
     /// pixels.
-    pub(crate) fn new(scale: RenderScale, d: u16) -> Option<Self> {
-        let d = NonZeroU16::new(d)?;
+    pub(crate) fn new(scale: RenderScale, d: Density) -> Option<Self> {
         let s = scale.get();
         if !s.is_multiple_of(d.get()) {
             return None;
@@ -73,11 +80,16 @@ impl Pen {
     pub(crate) fn for_pack(scale: RenderScale, pack: &OfficeArt) -> Self {
         pack.density_variants()
             .iter()
-            .find_map(|d| Self::new(scale, d.get()))
+            .find_map(|&d| Self::new(scale, d))
             .unwrap_or(Self {
-                d: NonZeroU16::MIN,
+                d: Density::ONE,
                 k: scale.factor(),
             })
+    }
+
+    /// How many art pixels make one layout unit.
+    pub(crate) fn density(self) -> Density {
+        self.d
     }
 
     /// `logical` layout units, as art pixels: the one conversion from the
@@ -113,6 +125,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_pen_reports_the_density_it_was_built_at() {
+        let scale = RenderScale::new(4).expect("a scale");
+        assert_eq!(
+            Pen::new(scale, test_density(4)).map(Pen::density),
+            Some(test_density(4))
+        );
+        assert_eq!(Pen::UNIT.density(), test_density(1));
+    }
+
+    #[test]
     #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
         let pack = crate::pack::test_office();
@@ -125,19 +147,18 @@ mod tests {
     }
 
     fn pen(s: u16, d: u16) -> Pen {
-        Pen::new(RenderScale::new(s).expect("nonzero"), d).expect("d divides s")
+        Pen::new(RenderScale::new(s).expect("nonzero"), test_density(d)).expect("d divides s")
     }
 
     #[test]
     fn a_pen_needs_its_density_to_divide_the_scale() {
         let s = RenderScale::new(8).expect("nonzero");
-        assert_eq!(Pen::new(s, 4).map(|p| p.k.get()), Some(2));
+        assert_eq!(Pen::new(s, test_density(4)).map(|p| p.k.get()), Some(2));
         assert_eq!(
-            Pen::new(s, 3),
+            Pen::new(s, test_density(3)),
             None,
             "an art pixel would straddle buffer pixels"
         );
-        assert_eq!(Pen::new(s, 0), None);
     }
 
     /// Every buffer pixel an art pixel is painted on lies in it, the next one

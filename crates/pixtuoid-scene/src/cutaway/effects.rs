@@ -41,6 +41,7 @@ mod tests {
 
     use super::*;
     use crate::display::pen::Pen;
+    use crate::display::pen::test_density;
     use crate::effects::{Effect, EffectKind};
 
     /// A look stays whole while it shows at least its solid share and only then
@@ -49,7 +50,8 @@ mod tests {
     #[test]
     fn a_fading_look_stays_whole_then_dissolves() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pen = Pen::new(crate::render_scale::RenderScale::ONE, 1).expect("1 divides 1");
+        let pen =
+            Pen::new(crate::render_scale::RenderScale::ONE, test_density(1)).expect("1 divides 1");
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let drawn = |phase| {
             let heart = Riding {

@@ -2,7 +2,7 @@ use crate::anim::Beat;
 use std::collections::HashMap;
 
 use super::*;
-use crate::display::pen::{ArtPx, layout_point};
+use crate::display::pen::{ArtPx, layout_point, test_density};
 use crate::layout::WINDOW_W;
 use crate::sky::{Sky, Weather};
 
@@ -357,14 +357,12 @@ fn is_whole_cell(light: &Light) -> bool {
 #[test]
 fn a_light_sampled_between_cells_stays_inside_its_bounds() {
     const D: u16 = 4;
-    let at = |a: u16| layout_point(ArtPx(a), D);
+    let at = |a: u16| layout_point(ArtPx(a), test_density(D));
     for e in every_shape() {
         let ((x0, y0), (x1, y1)) = e.bounds();
         // A whole-cell shape lights exactly its bounds' cells; a continuous
         // one's reach ends at its bound, so its far-edge pixels sit up to half
-        // a cell past the last cell, and a bound saturated at 0 stands that
-        // far from the pixels beside it.
-        let from = |b: u16| if b == 0 { -0.5 } else { f32::from(b) };
+        // a cell past the last cell.
         let whole_cell = is_whole_cell(&e.light);
         for y in 0..48 * D {
             for x in 0..64 * D {
@@ -376,7 +374,10 @@ fn a_light_sampled_between_cells_stays_inside_its_bounds() {
                     (i32::from(x0)..i32::from(x1)).contains(&unit_holding(fx))
                         && (i32::from(y0)..i32::from(y1)).contains(&unit_holding(fy))
                 } else {
-                    fx >= from(x0) && fx < f32::from(x1) && fy >= from(y0) && fy < f32::from(y1)
+                    fx >= f32::from(x0)
+                        && fx < f32::from(x1)
+                        && fy >= f32::from(y0)
+                        && fy < f32::from(y1)
                 };
                 assert!(
                     inside,
@@ -400,7 +401,7 @@ fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
         }
         for y in 0..48 * D {
             for x in 0..64 * D {
-                let at = |a: u16| layout_point(ArtPx(a), D);
+                let at = |a: u16| layout_point(ArtPx(a), test_density(D));
                 assert_eq!(
                     e.level_at_f(at(x), at(y)).is_some(),
                     e.level_at(x / D, y / D).is_some(),
