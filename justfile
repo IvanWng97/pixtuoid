@@ -160,9 +160,9 @@ actionlint-composites:
     exit 0
 
 # Security audit for workflows/actions/Dependabot. zizmor owns the parser and
-# audit catalog; .github/zizmor.yml records the repository's deliberate
-# ref-or-SHA pin policy and every accepted finding is suppressed at its exact
-# source location with a WHY.
+# audit catalog; .github/zizmor.yml records the one deliberate pin exception
+# (`actions/*` floats on a major, every other action is a SHA) and every
+# accepted finding is suppressed at its exact source location with a WHY.
 # The operating MODE is env-derived, not chosen here, and the asymmetry is
 # deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips every
 # audit that needs the GitHub API (`RUST_LOG=debug zizmor` names each;
@@ -1016,7 +1016,7 @@ workspace-version:
     @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
 
 # Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross); anything but true/false
+# (CI installs it via taiki-e/install-action with `tool: cross`); anything but true/false
 # fails loudly (the case below).
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 [group('release')]
@@ -1067,7 +1067,7 @@ stage-notices dir:
     done
 
 # `--no-build`: the target is already built by `build-target`. Needs cargo-deb
-# (CI installs it via taiki-e/install-action@cargo-deb).
+# (CI installs it via taiki-e/install-action with `tool: cargo-deb`).
 [doc('Package the .deb for ONE already-built target (release.yml deb job)')]
 [group('release')]
 deb target:

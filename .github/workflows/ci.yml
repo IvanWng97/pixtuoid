@@ -69,10 +69,14 @@ jobs:
     with:
       full: ${{ needs.tier.outputs.full == 'true' }}
 
+  raycast:
+    name: Raycast
+    uses: ./.github/workflows/raycast.yml
+
   gate:
     name: ci-gate
     if: ${{ always() }}
-    needs: [lint, builds, tests, site]
+    needs: [lint, builds, tests, site, raycast]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
