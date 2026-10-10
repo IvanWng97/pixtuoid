@@ -6,6 +6,7 @@
 // theme.
 import { renderMermaidSVG } from 'beautiful-mermaid';
 import { fromHtml } from 'hast-util-from-html';
+import { SKIP, visit } from 'unist-util-visit';
 
 // Mermaid's accessibility directives are not part of beautiful-mermaid's grammar
 // (it draws them as nodes), so they are lifted out here and put back as the
@@ -88,17 +89,11 @@ function render(raw, index) {
 export default function rehypeBeautifulMermaid() {
   return (tree) => {
     let index = 0;
-    const walk = (node) => {
-      if (!node.children) return;
-      node.children = node.children.map((child) => {
-        const source = mermaidSource(child);
-        if (source === null) {
-          walk(child);
-          return child;
-        }
-        return render(source, index++);
-      });
-    };
-    walk(tree);
+    visit(tree, (node, i, parent) => {
+      const source = mermaidSource(node);
+      if (source === null || !parent) return;
+      parent.children[i] = render(source, index++);
+      return SKIP;
+    });
   };
 }

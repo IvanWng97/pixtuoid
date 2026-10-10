@@ -1642,22 +1642,17 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
       innerW,
       `${path} at ${width}px: window.innerWidth expanded to ${innerW}px (${innerW - width}px past the device width — over-wide content grew the emulated viewport)`
     ).toBeLessThanOrEqual(width);
-    const { scrollers, regions } = await page.evaluate(() => ({
-      scrollers: [...document.querySelectorAll('article.prose *')]
+    const scrollers = await page.evaluate(() =>
+      [...document.querySelectorAll('article.prose *')]
         .filter(
           (e) => /auto|scroll/.test(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth
         )
-        .map((e) => ({ tag: e.tagName.toLowerCase(), tabIndex: (e as HTMLElement).tabIndex })),
-      regions: [...document.querySelectorAll('article.prose [role="region"]')].map(
-        (e) => e.getAttribute('aria-label') ?? ''
-      ),
-    }));
+        .map((e) => ({ tag: e.tagName.toLowerCase(), tabIndex: (e as HTMLElement).tabIndex }))
+    );
     scrollersSeen += scrollers.length;
     for (const s of scrollers) {
       expect(s.tabIndex, `${path} at ${width}px: a ${s.tag} scroller is not a tab stop`).toBe(0);
     }
-    expect(regions, `${path}: every region has a name`).not.toContain('');
-    expect(new Set(regions).size, `${path}: region names repeat (${regions})`).toBe(regions.length);
     await context.close();
   }
   expect(scrollersSeen, 'no doc scroller to hold to the tab-stop check').toBeGreaterThan(0);

@@ -3,6 +3,7 @@
 // "~ warning" when the quote OPENS with an imperative-warning strong.
 // The red dot reuses global.css's .terminal__dot--r — no second red literal.
 import { toText } from 'hast-util-to-text';
+import { SKIP, visit } from 'unist-util-visit';
 
 const WARN_RE = /^(don'?t|never|warning|danger|caution)\b/i;
 
@@ -60,18 +61,11 @@ function calloutFor(blockquote) {
 
 export default function rehypeCallouts() {
   return function transform(tree) {
-    (function walk(node) {
-      const kids = node.children || [];
-      for (let i = 0; i < kids.length; i++) {
-        const c = kids[i];
-        if (c.type !== 'element') continue;
-        if (c.tagName === 'blockquote') {
-          // wrap and DON'T descend — a nested quote stays a plain quote
-          kids[i] = calloutFor(c);
-          continue;
-        }
-        walk(c);
-      }
-    })(tree);
+    visit(tree, 'element', (node, i, parent) => {
+      if (node.tagName !== 'blockquote' || !parent) return;
+      // wrap and DON'T descend — a nested quote stays a plain quote
+      parent.children[i] = calloutFor(node);
+      return SKIP;
+    });
   };
 }

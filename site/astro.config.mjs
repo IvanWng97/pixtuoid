@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { posix, join } from 'node:path';
 import sitemap from '@astrojs/sitemap';
 import { unified } from '@astrojs/markdown-remark';
+import { visit } from 'unist-util-visit';
 import { rewriteCspMeta } from './config/csp-hashes.mjs';
 import rehypeCallouts from './config/rehype-callouts.mjs';
 import rehypeBeautifulMermaid from './config/rehype-beautiful-mermaid.mjs';
@@ -122,7 +123,7 @@ function rehypeRepoLinks() {
   const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
   const DANGEROUS = /^\s*(?:javascript|data|vbscript):/i;
   /** @param {any} node */
-  const walk = (node) => {
+  const rewrite = (node) => {
     if (node.tagName === 'a' && node.properties && typeof node.properties.href === 'string') {
       const href = node.properties.href;
       if (DANGEROUS.test(href)) {
@@ -138,10 +139,9 @@ function rehypeRepoLinks() {
         node.properties.href = repo + rel;
       }
     }
-    (node.children || []).forEach(walk);
   };
   /** @param {any} tree */
-  const transform = (tree) => walk(tree);
+  const transform = (tree) => visit(tree, 'element', rewrite);
   return transform;
 }
 
