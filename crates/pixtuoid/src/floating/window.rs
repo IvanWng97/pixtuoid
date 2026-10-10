@@ -35,6 +35,8 @@ pub(crate) enum FloatingEvent {
     SceneChanged,
     /// wgpu reported a validation error or a lost device.
     GpuFailed(String),
+    /// SIGINT or SIGTERM: quit as the close button does.
+    Quit,
 }
 
 pub(crate) struct FloatingApp {
@@ -178,7 +180,7 @@ impl FloatingApp {
             // Until `resumed` names the platform: presenting every frame is
             // safe on any.
             screen: super::compose::Screen::new(false),
-            jank: crate::jank::Jank::new(Instant::now()),
+            jank: crate::jank::Jank::new(),
             motion,
             renderer,
             audio_ctl,
@@ -224,6 +226,15 @@ impl FloatingApp {
         if let Err(e) = config::save_floating(&self.config_path, &save) {
             tracing::warn!(error = ?e, "pixtuoid floating: could not persist window geometry");
         }
+    }
+
+    /// End the run. Geometry MUST persist HERE — the window is gone once
+    /// `run_app` returns — and a run shorter than a summary's window still
+    /// reports its spread.
+    fn quit(&self, event_loop: &ActiveEventLoop) {
+        self.persist_geometry();
+        self.jank.finish(Instant::now());
+        event_loop.exit();
     }
 
     fn request_redraw(&self) {
@@ -629,11 +640,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 tracing::error!(error = ?message, "pixtuoid floating: the GPU failed");
                 let failure = anyhow::anyhow!(message).context("the floating window's GPU failed");
                 if self.failure.fail(failure) {
-                    self.persist_geometry();
-                    self.jank.finish();
-                    event_loop.exit();
+                    self.quit(event_loop);
                 }
             }
+            FloatingEvent::Quit => self.quit(event_loop),
         }
     }
 
@@ -644,14 +654,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         event: WindowEvent,
     ) {
         match event {
-            WindowEvent::CloseRequested => {
-                // Geometry MUST persist HERE — the window is gone once `run_app`
-                // returns.
-                self.persist_geometry();
-                // A run shorter than a summary's window still reports its spread.
-                self.jank.finish();
-                event_loop.exit();
-            }
+            WindowEvent::CloseRequested => self.quit(event_loop),
             // `is_synthetic: false`: winit fabricates a Pressed for every key
             // physically held when the window GAINS FOCUS (X11 + Windows). A
             // muted user holding `+`/`m` who clicks in would otherwise be
@@ -675,9 +678,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                     return;
                 }
                 if self.key(&event) {
-                    self.persist_geometry();
-                    self.jank.finish();
-                    event_loop.exit();
+                    self.quit(event_loop);
                     return;
                 }
                 self.request_redraw();

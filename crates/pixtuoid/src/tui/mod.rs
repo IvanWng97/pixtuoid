@@ -26,7 +26,7 @@ use tokio::time::MissedTickBehavior;
 use tui_renderer::TuiRenderer;
 
 use crate::panels::{FloorNav, KeyCtx, apply_key_action, dispatch_key, ui_state};
-use crate::runtime::SceneRx;
+use crate::runtime::{QuitArms, SceneRx};
 use pixtuoid_scene::hit::HitAction;
 use pixtuoid_scene::{pet, theme};
 
@@ -224,6 +224,8 @@ impl std::io::Write for FrameOut {
 /// Enters raw mode + the alternate screen ATOMICALLY: a failure after raw mode is on rolls
 /// the terminal all the way back, or the error path strands the user's shell echo-less
 /// and/or on the alt screen. `Terminal::new`'s `.size()` query can fail too.
+/// `_armed` proves the quit arms came first, as a signal past this point killing the
+/// process would strand the shell the same way.
 ///
 /// # Errors
 ///
@@ -396,73 +398,6 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
     }
 }
 
-/// A boxed `select!` quit arm.
-type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
-
-/// Both quit arms, their handlers installed: [`setup_terminal`] takes them, so no
-/// SIGINT or SIGTERM can land between the alt-screen going up and the loop
-/// listening for it.
-pub(crate) struct QuitArms {
-    ctrl_c: QuitArm<std::io::Result<()>>,
-    terminate: QuitArm<()>,
-}
-
-impl QuitArms {
-    pub(crate) fn arm() -> Self {
-        Self {
-            ctrl_c: pin_ctrl_c(),
-            #[cfg(unix)]
-            terminate: Box::pin(terminate_signal()),
-            #[cfg(not(unix))]
-            terminate: Box::pin(std::future::pending()),
-        }
-    }
-}
-
-/// The SIGINT arm, pinned ONCE outside the frame loop: a per-iteration `ctrl_c()` drops the
-/// subscription mid-gap, and an external SIGINT would then hit the default disposition and
-/// kill the process mid-altscreen with mouse reporting still on, leaving the shell unusable
-/// until `reset`. BOXED so a registration failure can disarm the arm by swapping in a
-/// pending future — a resolved future must never be polled again. On unix the handler is
-/// installed at the call, not the first poll as `tokio::signal::ctrl_c` does.
-fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
-    #[cfg(unix)]
-    {
-        let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
-        Box::pin(async move {
-            sig?.recv().await;
-            Ok(())
-        })
-    }
-    #[cfg(not(unix))]
-    Box::pin(tokio::signal::ctrl_c())
-}
-
-/// The SIGTERM arm — same terminal-restoring purpose as [`pin_ctrl_c`]. A registration
-/// failure and a closed stream both park on `pending`: this is a `select!` QUIT arm, so
-/// resolving it would tear the office down on a non-event.
-#[cfg(unix)]
-fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
-    let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
-    async move {
-        match sig {
-            Ok(mut s) => {
-                if s.recv().await.is_none() {
-                    std::future::pending::<()>().await;
-                }
-            }
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    "SIGTERM handler registration failed — an external \
-                     SIGTERM will not restore the terminal"
-                );
-                std::future::pending::<()>().await;
-            }
-        }
-    }
-}
-
 /// Hand `renderer` the painter `plan` names.
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
@@ -538,10 +473,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         crate::term::query_sync_output(crate::term::SYNC_OUTPUT_PROBE_TIMEOUT),
     );
     let term = setup_terminal(out.clone(), &arms)?;
-    let QuitArms {
-        mut ctrl_c,
-        mut terminate,
-    } = arms;
+    let quit = arms.signalled();
+    tokio::pin!(quit);
     let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
     paint_plan(&mut renderer, plan, &out);
@@ -617,18 +550,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     ),
                     _ => {}
                 },
-                res = &mut ctrl_c => match res {
-                    Ok(()) => break,
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            "SIGINT handler registration failed — an external \
-                             Ctrl-C will not restore the terminal"
-                        );
-                        ctrl_c = Box::pin(std::future::pending());
-                    }
-                },
-                _ = &mut terminate => break,
+                () = &mut quit => break,
             }
         }
         Ok(())
@@ -950,23 +872,6 @@ mod teardown_tests {
             err.to_string().contains("terminal gone"),
             "the first failure is reported, got: {err:#}"
         );
-    }
-}
-
-/// Armed quit arms catch a signal raised before they are first polled — the
-/// window between [`setup_terminal`](super::setup_terminal) and the loop.
-#[cfg(all(test, unix))]
-mod quit_arms {
-    #[tokio::test]
-    async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
-        let super::QuitArms { ctrl_c, terminate } = super::QuitArms::arm();
-        // SAFETY: raising a signal this process handles from here on.
-        unsafe {
-            libc::raise(libc::SIGINT);
-            libc::raise(libc::SIGTERM);
-        }
-        ctrl_c.await.expect("the SIGINT arm resolves");
-        terminate.await;
     }
 }
 
