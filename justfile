@@ -160,9 +160,9 @@ actionlint-composites:
     exit 0
 
 # Security audit for workflows/actions/Dependabot. zizmor owns the parser and
-# audit catalog; .github/zizmor.yml records the repository's deliberate
-# ref-or-SHA pin policy and every accepted finding is suppressed at its exact
-# source location with a WHY.
+# audit catalog; .github/zizmor.yml records the one deliberate pin exception
+# (`actions/*` floats on a major, every other action is a SHA) and every
+# accepted finding is suppressed at its exact source location with a WHY.
 # The operating MODE is env-derived, not chosen here, and the asymmetry is
 # deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips every
 # audit that needs the GitHub API (`RUST_LOG=debug zizmor` names each;
