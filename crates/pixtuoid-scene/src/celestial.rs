@@ -54,8 +54,8 @@ pub(crate) const MOON_SHADOW: Rgb = Rgb {
 // the glass entirely rather than tracking the full window height.
 const HORIZON_FRAC: f32 = 0.55;
 const ARC_RISE_FRAC: f32 = 0.80;
-/// Below this [`Transmission::disc`](crate::sky::Transmission::disc), thick cloud
-/// swallows the disc entirely.
+/// Below this visibility (cloud transmission, the moon's nightfall and the
+/// horizon fade combined), the disc is not drawn at all.
 pub(crate) const MIN_DISC_VIS: f32 = 0.08;
 /// The altitude a rising body's disc takes to fade in, and a setting one's to
 /// fade out.

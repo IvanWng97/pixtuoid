@@ -262,9 +262,16 @@ impl Emitter {
     }
 }
 
+/// Where art pixel `a` lies in layout cells at `d` art pixels a cell: a cell's
+/// centre on its integer, so at `d == 1` the cell itself, as the classic samples
+/// it. The one sampler [`Emitter::level_at_f`]'s callers use; [`cell_of`] is its
+/// inverse.
+pub(crate) fn art_pixel_at(a: u16, d: f32) -> f32 {
+    (f32::from(a) + 0.5) / d - 0.5
+}
+
 /// The cell a point of [`Emitter::level_at_f`] falls in: a cell spans
-/// `[u - 0.5, u + 0.5)` around its integer, as the display samples art pixels
-/// (`display/light.rs`'s `at`).
+/// `[u - 0.5, u + 0.5)` around its integer, as [`art_pixel_at`] places pixels.
 fn cell_of(v: f32) -> i32 {
     (v + 0.5).floor() as i32
 }

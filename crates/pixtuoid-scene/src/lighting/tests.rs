@@ -346,30 +346,42 @@ fn every_shape() -> [Emitter; 4] {
 
 #[test]
 fn a_light_sampled_between_cells_stays_inside_its_bounds() {
+    const D: u16 = 4;
+    let at = |a: u16| art_pixel_at(a, f32::from(D));
     for e in every_shape() {
         let ((x0, y0), (x1, y1)) = e.bounds();
-        for y in 0..(48 * 4) {
-            for x in 0..(64 * 4) {
-                let (fx, fy) = ((x as f32 + 0.5) / 4.0 - 0.5, (y as f32 + 0.5) / 4.0 - 0.5);
-                if e.level_at_f(fx, fy).is_some() {
-                    assert!(
-                        fx >= f32::from(x0) - 0.5
-                            && fx < f32::from(x1)
-                            && fy >= f32::from(y0) - 0.5
-                            && fy < f32::from(y1),
-                        "{:?} lights ({fx}, {fy}) outside {:?}",
-                        e.kind,
-                        e.bounds()
-                    );
+        // A whole-cell shape lights exactly its bounds' cells; a continuous
+        // one's reach ends at its bound, so its edge pixels sit up to half a
+        // cell outside the last cell.
+        let whole_cell = matches!(e.light, Light::Spill { .. } | Light::Patch { .. });
+        for y in 0..48 * D {
+            for x in 0..64 * D {
+                let (fx, fy) = (at(x), at(y));
+                if e.level_at_f(fx, fy).is_none() {
+                    continue;
                 }
+                let inside = if whole_cell {
+                    (i32::from(x0)..i32::from(x1)).contains(&cell_of(fx))
+                        && (i32::from(y0)..i32::from(y1)).contains(&cell_of(fy))
+                } else {
+                    fx >= f32::from(x0) - 0.5
+                        && fx < f32::from(x1)
+                        && fy >= f32::from(y0) - 0.5
+                        && fy < f32::from(y1)
+                };
+                assert!(
+                    inside,
+                    "{:?} lights ({fx}, {fy}) outside {:?}",
+                    e.kind,
+                    e.bounds()
+                );
             }
         }
     }
 }
 
-/// A whole-cell shape sampled the way the display does (an art pixel `a` at
-/// `(a + 0.5) / d - 0.5`, a cell's centre on its integer) lights exactly the
-/// art pixels of the cells it lights at density 1.
+/// A whole-cell shape sampled the way the display does ([`art_pixel_at`])
+/// lights exactly the art pixels of the cells it lights at density 1.
 #[test]
 fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
     const D: u16 = 4;
@@ -379,7 +391,7 @@ fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
         }
         for y in 0..48 * D {
             for x in 0..64 * D {
-                let at = |a: u16| (f32::from(a) + 0.5) / f32::from(D) - 0.5;
+                let at = |a: u16| art_pixel_at(a, f32::from(D));
                 assert_eq!(
                     e.level_at_f(at(x), at(y)).is_some(),
                     e.level_at(x / D, y / D).is_some(),
