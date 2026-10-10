@@ -102,40 +102,39 @@ regenSection(
   [`| ${iconHeader} | Feature | Description |`, '|---|---|---|', ...featureRows].join('\n')
 );
 
-const OS_LABELS = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
-const OS_ORDER = ['macos', 'linux', 'windows'];
-const runsOn = (s) =>
-  OS_ORDER.filter((os) => s.platforms?.[os] === 'yes' || s.platforms?.[os] === 'experimental')
-    .map((os) => (s.platforms[os] === 'experimental' ? `${OS_LABELS[os]}\\*` : OS_LABELS[os]))
-    .join(' · ');
-const featured = sources.filter((s) => s.status === 'supported' && s.featured);
-// Over the population that actually RENDERS the `\*` marker, NOT all supported
-// sources — else the footnote could appear with no `\*` referent.
-const hasExperimental = featured.some((s) =>
-  Object.values(s.platforms || {}).includes('experimental')
-);
-const otherSupported = sources.filter((s) => s.status === 'supported' && !s.featured);
+const supported = sources.filter((s) => s.status === 'supported');
 const planned = sources.filter((s) => s.status === 'planned');
-const link = (s) => `[${cell(s.name)}](${s.url})`;
-const plannedTail = planned.length
-  ? ` Planned: ${planned.map((s) => cell(s.name)).join(', ')}.`
-  : '';
-const alsoLine = otherSupported.length
-  ? `_Also supported: ${otherSupported.map(link).join(', ')}.${plannedTail}_\n\n`
-  : planned.length
-    ? `_Planned: ${planned.map((s) => cell(s.name)).join(', ')}._\n\n`
-    : '';
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Two per row: a third column squeezes the longer names on a phone-width page.
+const TOOL_COLUMNS = 2;
+const toolRows = [];
+for (let i = 0; i < supported.length; i += TOOL_COLUMNS) {
+  const cells = supported
+    .slice(i, i + TOOL_COLUMNS)
+    .map((s) => `<td width="${100 / TOOL_COLUMNS}%"><a href="${esc(s.url)}">${esc(s.name)}</a></td>`);
+  toolRows.push(`<tr>${cells.join('')}</tr>`);
+}
+// The grid names no OS, so an OS any supported tool runs on only experimentally
+// gets its caveat here: a Windows user installs from this page.
+const OS_LABELS = { macos: 'macOS', linux: 'Linux', windows: 'Windows' };
+const experimentalNotes = Object.entries(OS_LABELS).flatMap(([os, label]) => {
+  const n = supported.filter((s) => s.platforms?.[os] === 'experimental').length;
+  if (!n) return [];
+  const scope = n === supported.length ? '' : ' for some tools';
+  return [`_${label} support is experimental${scope} — limited testing, unsigned binaries._`];
+});
 regenSection(
   'Supported-tools glimpse',
   '<!-- tools:start · generated from site/src/sources.json by `just gen-readme` — edit the JSON, not this table -->',
   '<!-- tools:end -->',
   [
-    '| Tool | Runs on |',
-    '|---|---|',
-    ...featured.map((s) => `| ${link(s)} | ${cell(runsOn(s)) || '—'} |`),
+    '<table>',
+    ...toolRows,
+    '</table>',
     '',
-    alsoLine + `**→ [Full tool × OS support matrix on the site](${SITE}/#tools)**`,
-    ...(hasExperimental ? ['', '_\\* experimental — limited testing, unsigned binaries._'] : []),
+    ...(planned.length ? [`_Planned: ${planned.map((s) => cell(s.name)).join(', ')}._`, ''] : []),
+    `**→ [Every tool × OS on the site](${SITE}/#tools)**`,
+    ...experimentalNotes.map((n) => `\n${n}`),
   ].join('\n')
 );
 

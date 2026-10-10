@@ -75,12 +75,6 @@ fn manifest_rows_are_well_formed() {
             matches!(status, "supported" | "planned"),
             "{name}: `status` must be supported|planned, got {status:?}"
         );
-        // `featured`'s only consumer is scripts/gen-readme.mjs, NOT the site —
-        // which is why site-scoped greps keep flagging it as dead data.
-        assert!(
-            s.get("featured").is_some_and(|v| v.is_boolean()),
-            "{name}: `featured` must be a bool"
-        );
         assert!(
             str_field(&s, "transport").is_some(),
             "{name}: missing `transport`"
