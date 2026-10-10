@@ -72,7 +72,8 @@ it is clear.
 
 ## Gates
 
-CI runs `.github/workflows/raycast.yml`'s steps on a Linux runner; run them
+CI runs `.github/workflows/raycast.yml`'s steps on a Linux runner, on a PR that
+touches this directory, and `ci-gate` judges them; run them
 locally before "done." `ray build` writes `raycast-env.d.ts`, the
 manifest's generated `Preferences` that `tsc` reads, and `ray lint` validates
 the manifest, icons and metadata and runs the Prettier pass. See the

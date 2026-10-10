@@ -18,22 +18,22 @@ use pixtuoid_core::state::{ActivityState, AgentSlot};
 /// How long after the last event an Idle agent stays in the "thinking" pose
 /// (seated, awake, no z's) before entering the wander/sleep cycle — sized to
 /// cover typical CC thinking pauses between tool bursts.
-pub const THINKING_WINDOW_SECS: u64 = 20;
+pub(crate) const THINKING_WINDOW_SECS: u64 = 20;
 
 /// Base of the stale-resume / off-screen-gap sentinel in
 /// `walk::advance_wander` — above on-screen frame cadence, below a
 /// floor-switch-away gap. NOT the wander dwell; see `dwell_ms` for that.
-pub const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
+pub(crate) const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
 /// Maximum extra time added per agent — jitter range is `[0, RANGE)`.
-pub const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
+pub(crate) const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
 
 /// Stateless-overlay estimate of one wander walk leg. Exact coherence with the
 /// routed timeline is impossible (core has no router, and walk legs are
 /// physics-timed only on the routed path), and `idle_pose` only needs an
 /// approximate timeline to place the occupancy overlay.
-pub const WANDER_WALK_EST_MS: u64 = 3_500;
+pub(crate) const WANDER_WALK_EST_MS: u64 = 3_500;
 /// Companion estimate: the at-waypoint dwell beat (paired with `WANDER_WALK_EST_MS`).
-pub const WANDER_DWELL_EST_MS: u64 = 18_000;
+pub(crate) const WANDER_DWELL_EST_MS: u64 = 18_000;
 
 /// The frame of typing loop `anim` for `slot` on `beat`: the art's own loop,
 /// phased by when it began typing so neighbours key out of step; the first
@@ -78,7 +78,7 @@ pub const ENTRY_ANIMATION_MS: u64 = 4000;
 /// `walk::advance_wander` treats the floor as off-screen/paused and
 /// re-bootstraps analytically instead of replaying the backlog one transition
 /// per frame. Jittered per agent so floors don't re-bootstrap in lockstep.
-pub fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
+pub(crate) fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
     STALE_RESUME_GAP_BASE_MS + (agent_id.raw() >> 16) % STALE_RESUME_GAP_RANGE_MS
 }
 
@@ -114,7 +114,7 @@ pub fn est_wander_cycle_ms(agent_id: AgentId) -> u64 {
 
 /// Per-agent wander personality derived from the agent's id hash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Personality {
+pub(crate) struct Personality {
     /// Probability (in percent) that this agent takes a trip on a given cycle.
     pub trip_chance_pct: u8,
     /// Probability (in percent) that a trip is aimless wander rather than a
@@ -126,7 +126,7 @@ const TRIP_CHANCE_SPAN_PCT: u64 = 36;
 const AIMLESS_PREF_SPAN_PCT: u64 = 51;
 
 /// Derives an agent's wander `Personality` from its id hash.
-pub fn personality_for(agent_id: AgentId) -> Personality {
+pub(crate) fn personality_for(agent_id: AgentId) -> Personality {
     let h = agent_id.raw();
     Personality {
         trip_chance_pct: (25 + (h % TRIP_CHANCE_SPAN_PCT)) as u8,
@@ -304,7 +304,11 @@ fn state_driven_pose(
 /// entry walk.
 ///
 /// Returns `None` when `slot.desk_index` is out of range for `layout`.
-pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
+pub(crate) fn derive_state_only(
+    slot: &AgentSlot,
+    now: SystemTime,
+    layout: &SceneLayout,
+) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
     state_driven_pose(slot, desk, layout, now)
 }
@@ -312,7 +316,7 @@ pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout
 /// Per-(agent, cycle) seed for `pick_aimless_dest`, shared by the stateless
 /// `idle_pose` and the routed `pick_wander_dest` so the two can't drift to
 /// different aimless destinations.
-pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
+pub(crate) fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
     agent_id.raw() ^ cycle_n.wrapping_mul(PHI3_GAMMA)
 }
 
@@ -324,7 +328,7 @@ pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
 ///
 /// `home_desk` is the same Point on both callers, so the result stays
 /// deterministic in `(layout, seed)` across them.
-pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> Point {
+pub(crate) fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> Point {
     let window_strip = Bounds {
         x: layout.cubicle_band.x,
         y: layout.top_margin + 1,

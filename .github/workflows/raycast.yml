@@ -1,21 +1,37 @@
 name: raycast
 
 on:
-  # PR-only gate for the self-contained Raycast extension.
-  pull_request:
-    # setup-npm installs the site's packageManager, so both are inputs too.
-    paths: ['integrations/raycast/**', '.github/workflows/raycast.yml', '.github/actions/setup-npm/**', 'site/package.json']
+  # Called by ci.yml, so its verdict reaches the required `ci-gate`.
+  workflow_call:
 
 permissions:
   contents: read
 
-concurrency:
-  group: raycast-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  # A PR that leaves the extension and its contract inputs alone skips `check`
+  # (a skip `required` accepts); path-changed treats a push or dispatch run as
+  # unchanged, as this workflow's old PR-only trigger did.
+  scope:
+    name: raycast in scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.scope.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: ./.github/actions/path-changed
+        id: scope
+        with:
+          # setup-npm installs the site's packageManager, so both are inputs too.
+          paths: integrations/raycast .github/workflows/raycast.yml .github/actions/setup-npm site/package.json
+
   check:
     name: types · lint
+    needs: scope
+    if: needs.scope.outputs.changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -50,3 +66,19 @@ jobs:
       # skips every check below it (#846/#848).
       - if: steps.lockfile.outputs.changed == 'true'
         run: npm run audit
+
+  required:
+    name: required-raycast-jobs
+    if: ${{ always() }}
+    needs: [scope, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/require-jobs
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "Required raycast job failed"
+          allow-skipped: 'true'

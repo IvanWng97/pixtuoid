@@ -7,12 +7,12 @@ mod tokyo_night;
 
 use pixtuoid_core::sprite::Rgb;
 
-pub use catppuccin::CATPPUCCIN;
+pub(crate) use catppuccin::CATPPUCCIN;
 pub use cyberpunk::CYBERPUNK;
-pub use dracula::DRACULA;
-pub use gruvbox::GRUVBOX;
+pub(crate) use dracula::DRACULA;
+pub(crate) use gruvbox::GRUVBOX;
 pub use normal::NORMAL;
-pub use tokyo_night::TOKYO_NIGHT;
+pub(crate) use tokyo_night::TOKYO_NIGHT;
 
 /// Light vs Dark classification — drives effects that only look right on
 /// one or the other (e.g. ceiling halos read as soft glow on dark themes

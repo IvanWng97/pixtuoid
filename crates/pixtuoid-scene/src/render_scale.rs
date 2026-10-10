@@ -229,10 +229,11 @@ impl PixelFit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::pen::test_density;
     use crate::floor::{floor_capacity, floor_capacity_scaled, floor_seed};
 
     fn fit(natural: u16, density: u16) -> Option<u16> {
-        RenderScale::fit(natural, Density::new(density).expect("nonzero")).map(RenderScale::get)
+        RenderScale::fit(natural, test_density(density)).map(RenderScale::get)
     }
 
     /// A surface with no other look renders at the nearest multiple of the
@@ -242,7 +243,7 @@ mod tests {
     fn a_fit_at_least_the_density_always_lands() {
         let px = crate::layout::Size { w: 640, h: 480 };
         for d in 1..=8 {
-            let density = Density::new(d).expect("nonzero");
+            let density = test_density(d);
             for natural in (0..=u16::MAX).step_by(7).chain([u16::MAX]) {
                 let got = PixelFit::at_least_density(natural, density, px)
                     .scale()

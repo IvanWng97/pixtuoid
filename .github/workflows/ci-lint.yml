@@ -48,7 +48,9 @@ jobs:
           persist-credentials: false
       # No setup-cargo-just: nothing compiles here, so the runner's preinstalled
       # cargo is enough — but cargo-deny DOES shell out to `cargo metadata`.
-      - uses: taiki-e/install-action@cargo-deny
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-deny
       - uses: ./.github/actions/setup-just
       - run: just deny
       - uses: ./.github/actions/path-changed
@@ -68,7 +70,9 @@ jobs:
         with:
           persist-credentials: false
       # cargo-machete parses manifests and does not need a Rust toolchain.
-      - uses: taiki-e/install-action@cargo-machete
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-machete
       - uses: ./.github/actions/setup-just
       - run: just machete
 
@@ -105,11 +109,11 @@ jobs:
         run: pipx install check-jsonschema==0.37.4
       # Lychee is not manifest-managed by install-action, so its documented
       # cargo-binstall fallback installs our pinned version.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: lychee@0.24.2,zizmor@1.30.0
           fallback: cargo-binstall
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: shellcheck@0.11.0
           fallback: none
@@ -224,10 +228,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v1-rust
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-binstall
       # The justfile's API_PUBLIC_API is the authority; api-surface-check

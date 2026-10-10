@@ -22,7 +22,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: dtolnay/rust-toolchain@stable
+    - uses: ./.github/actions/setup-rust
       with:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
@@ -30,7 +30,7 @@ runs:
     # Keep this prefix fixed so every Rust job shares one cache namespace; a bump
     # is a deliberate repository-wide invalidation.
     - if: ${{ inputs.enable-cache == 'true' }}
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         prefix-key: v1-rust
         shared-key: ${{ inputs.shared-key }}

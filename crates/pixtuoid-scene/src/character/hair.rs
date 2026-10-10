@@ -174,6 +174,7 @@ pub(crate) fn dress(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::pen::test_density;
     use pixtuoid_core::sprite::format::{Piece, load_filled_pack};
     #[cfg(feature = "cutaway-assets")]
     use strum::VariantArray as _;
@@ -192,7 +193,7 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     const LINE: Rgb = Rgb { r: 1, g: 1, b: 1 };
     #[cfg(feature = "cutaway-assets")]
-    const TWO: Density = Density::new(2).expect("nonzero");
+    const TWO: Density = test_density(2);
 
     /// A pack of `body` marked `head` (the `head.front` mark's column and row),
     /// outlined, and the styles `styles` at 2x, each a front-view over layer of
@@ -268,7 +269,7 @@ mod tests {
         let agent = AgentId::from_parts("x", "y");
         assert!(dress_for(&pack, agent, body, sprite.head(0), Density::ONE).is_none());
         assert!(dress_for(&pack, agent, body, None, TWO).is_none());
-        let four = Density::new(4).expect("nonzero");
+        let four = test_density(4);
         let bare = dress_for(&pack, agent, body, sprite.head(0), four).expect("marked at 4x");
         assert_eq!(bare.style, None, "no style at 4x: the head is bare");
     }
@@ -368,7 +369,7 @@ mod tests {
                     ],
                 )
                 .expect("the test pack loads");
-                let sprite = &pack.variants_of(Piece::Seated)[&Density::new(2).expect("nonzero")];
+                let sprite = &pack.variants_of(Piece::Seated)[&test_density(2)];
                 let (frame, head) = (sprite.first(), sprite.head(0).expect("marked"));
                 let style = pack.hairstyles().next();
                 let f = dress(
@@ -380,7 +381,7 @@ mod tests {
                 );
                 let dropped = !(0..f.height())
                     .any(|y| (0..f.width()).any(|x| f.get(x, y).copied().flatten() == Some(H)));
-                let flagged = !crate::pack::validate_pack(&pack)
+                let flagged = !crate::pack::validate::validate_pack(&pack)
                     .overhanging_hair
                     .is_empty();
                 let below = hy + mark >= side + side;

@@ -272,6 +272,7 @@ pub(crate) fn paint_icon(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::pen::test_density;
     use crate::display::text::{advance, width};
 
     /// Every character the wall board and the floor indicator write as text:
@@ -427,8 +428,11 @@ mod tests {
         let fg = Rgb { r: 9, g: 9, b: 9 };
         let unit = ink("H");
         for (s, d) in [(4u16, 4u16), (8, 4)] {
-            let pen = Pen::new(crate::render_scale::RenderScale::new(s).expect("s"), d)
-                .expect("d divides s");
+            let pen = Pen::new(
+                crate::render_scale::RenderScale::new(s).expect("s"),
+                test_density(d),
+            )
+            .expect("d divides s");
             let k = s / d;
             let side = 1 + LINE_H;
             let mut buf = RgbBuffer::filled(side * k, side * k, bg);

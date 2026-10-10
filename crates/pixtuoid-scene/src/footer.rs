@@ -182,7 +182,7 @@ const TOOL_TALLY_CAP: usize = 4;
 /// One aggregate tool-tally entry: the raw display `token` (kept verbatim), the
 /// TYPED [`ToolKind`] for the hue, and how many Active slots show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolTally {
+pub(crate) struct ToolTally {
     pub token: String,
     pub kind: ToolKind,
     pub count: usize,

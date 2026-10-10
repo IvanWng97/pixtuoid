@@ -18,7 +18,9 @@ use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize, make_tool_detai
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{CodexSource, live_codex_rollout_ids};
+pub use native::CodexSource;
+#[cfg(feature = "native")]
+pub(crate) use native::live_codex_rollout_ids;
 
 /// homebrew-core contract: their formula's `test do` asserts this exact id, so
 /// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.

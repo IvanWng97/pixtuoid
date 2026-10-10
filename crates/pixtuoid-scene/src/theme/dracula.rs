@@ -3,7 +3,7 @@ use pixtuoid_core::sprite::Rgb;
 use super::*;
 
 /// The `dracula` dark theme.
-pub static DRACULA: Theme = Theme {
+pub(crate) static DRACULA: Theme = Theme {
     name: "dracula",
     kind: ThemeKind::Dark,
     surface: SurfaceColors {

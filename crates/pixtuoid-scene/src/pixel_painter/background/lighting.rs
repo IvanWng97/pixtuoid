@@ -330,11 +330,13 @@ mod tests {
             g: 30,
             b: 30,
         };
-        let cells: Vec<_> =
-            crate::ground::Depths::of(std::iter::once(crate::ground::Contact::under(5, 10, 10)), 1)
-                .expect("one contact")
-                .cells()
-                .collect();
+        let cells: Vec<_> = crate::ground::Depths::of(
+            std::iter::once(crate::ground::Contact::under(5, 10, 10)),
+            pixtuoid_core::sprite::format::Density::ONE,
+        )
+        .expect("one contact")
+        .cells()
+        .collect();
         let mut buf = RgbBuffer::filled(20, 20, fill);
         paint_shadows(&mut buf, &cells, 0.0, shadow);
         assert!(

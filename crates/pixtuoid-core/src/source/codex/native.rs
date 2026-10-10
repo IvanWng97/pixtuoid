@@ -23,7 +23,7 @@ fn codex_session_ended(_tail: &[u8]) -> bool {
 /// `codex` process holds its rollout file open in append mode for the whole
 /// session, so an open rollout fd IS the first-party liveness signal: pid → open
 /// fd → rollout path → UUID.
-pub fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
+pub(crate) fn live_codex_rollout_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
     // `codex_id_from_path` is the SAME fn the registry row installs, so probe
     // ids and first-sight-gate ids cannot drift.
     ProbeSnapshot::from_open_fds(

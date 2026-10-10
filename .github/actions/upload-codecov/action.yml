@@ -27,7 +27,7 @@ runs:
     - name: Upload report
       id: upload
       continue-on-error: true
-      uses: codecov/codecov-action@v7
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         files: ${{ inputs.file }}
         flags: ${{ inputs.flag }}

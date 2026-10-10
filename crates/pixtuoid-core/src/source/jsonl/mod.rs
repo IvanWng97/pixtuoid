@@ -20,7 +20,8 @@ mod walk;
 
 #[cfg(test)]
 pub(crate) use crate::source::decoder::is_subagent_path;
-pub use liveness::{LivenessProbe, ProbeSnapshot};
+pub use liveness::LivenessProbe;
+pub use liveness::ProbeSnapshot;
 pub use unclaim::ChildEndUnclaims;
 
 pub(crate) use health::FailureLatch;
@@ -33,7 +34,8 @@ use walk::{scan_root, walk_jsonl};
 
 pub use crate::source::decoder::LineDecoder;
 
-pub use crate::source::decoder::{IdDeriver, PathFilter, TailActivity};
+pub use crate::source::decoder::PathFilter;
+pub use crate::source::decoder::{IdDeriver, TailActivity};
 
 /// Derives an agent's display label from its transcript `(path, source, cwd)`.
 /// The default is the source-prefixed cwd basename (`cx·dotfiles`); **CC**

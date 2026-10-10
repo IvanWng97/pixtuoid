@@ -95,9 +95,11 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "cutaway-assets")]
+    use crate::display::pen::test_density;
     use crate::pack::{appliance_overrides, fixture_overrides};
     #[cfg(feature = "cutaway-assets")]
-    use pixtuoid_core::sprite::format::{Density, Piece};
+    use pixtuoid_core::sprite::format::Piece;
 
     #[test]
     fn blend_pixel_composites_in_bounds_and_noops_out_of_bounds() {
@@ -149,8 +151,7 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     fn a_recolour_rethemes_the_fixture_art() {
         let pack = crate::pack::test_office();
-        let art =
-            pack.variants_of(Piece::FishTank)[&Density::new(4).expect("nonzero")].recolorable_at(0);
+        let art = pack.variants_of(Piece::FishTank)[&test_density(4)].recolorable_at(0);
         let water = pack.palette().get('Д').flatten().expect("the water");
         let plain = art.recolored(&[]);
         let (x, y) = (0..plain.height())
@@ -170,8 +171,7 @@ mod tests {
     #[cfg(feature = "cutaway-assets")]
     fn a_recolour_reshades_the_appliance_art() {
         let pack = crate::pack::test_office();
-        let art = pack.variants_of(Piece::VendingMachine)[&Density::new(4).expect("nonzero")]
-            .recolorable_at(0);
+        let art = pack.variants_of(Piece::VendingMachine)[&test_density(4)].recolorable_at(0);
         let [a, b] = ["normal", "cyberpunk"].map(|name| {
             let theme = crate::theme::theme_by_name(name).expect("theme");
             art.recolored(&appliance_overrides(&theme.appliance))

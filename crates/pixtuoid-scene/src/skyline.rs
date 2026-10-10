@@ -565,8 +565,8 @@ impl CityStrip {
 
     /// What of this city stands before the sky at a window cell on a grid `d`
     /// cells to the unit, the run's west end at column `run_x0`.
-    pub(crate) fn front(&self, run_x0: u16, d: u16) -> impl Fn(Cell) -> Option<Rgb> + '_ {
-        let x0 = run_x0.saturating_mul(d);
+    pub(crate) fn front(&self, run_x0: u16, d: Density) -> impl Fn(Cell) -> Option<Rgb> + '_ {
+        let x0 = run_x0.saturating_mul(d.get());
         move |cell| self.at(cell.at.0.wrapping_sub(x0), cell.glass_offset.1)
     }
 
@@ -598,6 +598,7 @@ fn hash(n: u32) -> u32 {
 mod tests {
     use super::*;
     use crate::atmosphere::Moment;
+    use crate::display::pen::test_density;
 
     use crate::anim::{Beat, Motion};
 
@@ -635,7 +636,7 @@ mod tests {
             idx: 1,
         };
         for d in [1, 4] {
-            let density = Density::new(d).expect("nonzero");
+            let density = test_density(d);
             let strip = CityStrip::draw(
                 &pack(),
                 (80, glass_h),
@@ -643,8 +644,8 @@ mod tests {
                 theme,
                 density,
             );
-            let front = strip.front(run_x0, d);
-            let view = crate::outside::WindowView::new(bay, rows.clone(), d, |cell| {
+            let front = strip.front(run_x0, density);
+            let view = crate::outside::WindowView::new(bay, rows.clone(), density, |cell| {
                 front(cell).unwrap_or(SKY)
             });
             let mut buildings = 0;
@@ -808,7 +809,7 @@ mod tests {
                 &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH))
                     .outlook(theme),
                 theme,
-                Density::new(d).expect("nonzero"),
+                test_density(d),
             )
         };
         let (one, three, four) = (strip(1), strip(3), strip(4));
@@ -882,7 +883,7 @@ mod tests {
                     (run_w, glass_h),
                     &moment.outlook(theme),
                     theme,
-                    Density::new(d).expect("nonzero"),
+                    test_density(d),
                 );
                 (s, near)
             };
@@ -919,7 +920,7 @@ mod tests {
                         return false;
                     };
                     let (art, grow) = building
-                        .variant(Density::new(d).expect("nonzero"))
+                        .variant(test_density(d))
                         .map_or((building.base(), d), |a| (a, 1));
                     let frame = art
                         .sprite()
@@ -969,7 +970,7 @@ mod tests {
         {
             for d in 1..=4 {
                 let (art, grow) = tower
-                    .variant(Density::new(d).expect("nonzero"))
+                    .variant(test_density(d))
                     .map_or((tower.base(), d), |a| (a, 1));
                 let frame = art
                     .sprite()

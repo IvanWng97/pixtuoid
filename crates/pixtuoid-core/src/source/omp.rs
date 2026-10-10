@@ -22,9 +22,9 @@ use crate::source::{AgentEvent, ToolDetail};
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub(crate) use native::live_omp_session_ids_for_focus;
+pub use native::OmpSource;
 #[cfg(feature = "native")]
-pub use native::{OmpProfileEnumerate, OmpSource};
+pub(crate) use native::live_omp_session_ids_for_focus;
 
 /// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "omp";

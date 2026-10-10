@@ -40,7 +40,9 @@ use crate::source::{AgentEvent, ToolDetail};
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{GrokSource, live_grok_session_ids};
+pub use native::GrokSource;
+#[cfg(feature = "native")]
+pub(crate) use native::live_grok_session_ids;
 
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
@@ -87,7 +89,7 @@ pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
 /// # Errors
 ///
 /// If the payload is not an object, lacks `hookEventName`, carries none of `sessionId`, `cwd` or `workspaceRoot`, names an unrecognized event, or is a subagent event without `subagentId`.
-pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
@@ -362,7 +364,7 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 /// # Errors
 ///
 /// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
-pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &grok_id_from_path(Path::new(path)));
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
         return Ok(vec![]);
@@ -559,7 +561,7 @@ pub(crate) fn is_updates_jsonl(p: &Path) -> bool {
 /// Session id from a transcript path: the PARENT-DIR name, the filename stem
 /// being the constant `updates`. Equal to every hook event's `sessionId`, so
 /// the two transports coalesce.
-pub fn grok_id_from_path(path: &Path) -> String {
+pub(crate) fn grok_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(|d| d.file_name())
         .map(|n| n.to_string_lossy().into_owned())
@@ -1554,8 +1556,11 @@ mod tests {
     fn cwd_slug_form_reads_the_dot_cwd_file() {
         // The >255-byte encoded form is `{slug}-{blake3_hex16}`, never absolute
         // after decoding, so upstream records the real cwd in a `.cwd` sibling.
-        let tmp = std::env::temp_dir().join(format!("pixtuoid-grok-cwd-{}", std::process::id()));
-        let group = tmp.join("sessions").join("deep-project-a1b2c3d4e5f60718");
+        let tmp = tempfile::tempdir().unwrap();
+        let group = tmp
+            .path()
+            .join("sessions")
+            .join("deep-project-a1b2c3d4e5f60718");
         let session = group.join("0197fa30-sess");
         std::fs::create_dir_all(&session).unwrap();
         std::fs::write(group.join(".cwd"), "/very/deep/project\n").unwrap();
@@ -1566,7 +1571,6 @@ mod tests {
         );
         std::fs::remove_file(group.join(".cwd")).unwrap();
         assert_eq!(grok_cwd_from_path(&p), None);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

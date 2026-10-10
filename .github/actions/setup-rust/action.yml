@@ -1,0 +1,50 @@
+name: 'Setup Rust'
+description: 'Installs the toolchain rust-toolchain.toml names, plus extra components and targets, with the runner image''s own rustup'
+
+inputs:
+  components:
+    description: 'Comma-separated components beyond rust-toolchain.toml''s'
+    required: false
+    default: ''
+  targets:
+    description: 'Comma-separated list of target triples'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # The runner images ship rustup on Linux, macOS and Windows
+    # (github.com/actions/runner-images, "Rust Tools"), so the toolchain needs
+    # no third-party action, pinned or not. The image's stable trails the
+    # current release (macOS and Windows images lag the MSRV policy's "latest
+    # stable"), and a no-argument install never updates an installed toolchain
+    # (rustup src/config.rs `ensure_installed`), hence the update first.
+    - shell: bash
+      env:
+        COMPONENTS: ${{ inputs.components }}
+        TARGETS: ${{ inputs.targets }}
+        UPDATE_ATTEMPTS: '3'
+        UPDATE_RETRY_SECONDS: '30'
+      run: |
+        set -euo pipefail
+        # A release-day manifest mid-publish fails its checksum
+        # (rust-lang/rustup#3390): the one failure dtolnay/rust-toolchain retries.
+        log="$(mktemp)"
+        trap 'rm -f "$log"' EXIT
+        for ((attempt = 1; ; attempt++)); do
+          status=0
+          rustup update --no-self-update 2>&1 | tee "$log" || status="${PIPESTATUS[0]}"
+          ((status != 0)) || break
+          if ! grep -Fq 'checksum failed for ' "$log" || ! grep -Fq 'ongoing update of the official release server' "$log"; then
+            exit "$status"
+          fi
+          ((attempt < UPDATE_ATTEMPTS)) || { echo "::error title=rustup update failed::the release server's update outlasted $UPDATE_ATTEMPTS attempts"; exit "$status"; }
+          echo "::warning title=rustup update retried::attempt $attempt of $UPDATE_ATTEMPTS"
+          sleep "$UPDATE_RETRY_SECONDS"
+        done
+        rustup toolchain install --profile minimal --no-self-update
+        read -ra extra_components <<< "${COMPONENTS//,/ }"
+        read -ra extra_targets <<< "${TARGETS//,/ }"
+        ((${#extra_components[@]} == 0)) || rustup component add "${extra_components[@]}"
+        ((${#extra_targets[@]} == 0)) || rustup target add "${extra_targets[@]}"

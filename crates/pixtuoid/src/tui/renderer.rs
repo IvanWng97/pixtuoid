@@ -1,5 +1,5 @@
 //! Terminal-coupled rendering: the `draw_scene` orchestrator and the half-block
-//! flush of the `pixtuoid_scene::pixel_painter` buffer.
+//! flush of the `RgbBuffer` that `look::render` produces.
 
 use std::time::SystemTime;
 

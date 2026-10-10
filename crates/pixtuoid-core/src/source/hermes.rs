@@ -104,7 +104,7 @@ fn resolve_hermes_home(
 /// # Errors
 ///
 /// If the payload is not an object, lacks `hook_event_name`, carries neither `session_id` nor `cwd`, or names an unregistered event.
-pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;

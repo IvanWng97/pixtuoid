@@ -13,9 +13,9 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 pub(crate) const COARSE_CELL_SIZE: u16 = 4;
 
 /// Min pixels of a coarse cell's [`walk_piece`] for the cell to count as
-/// walkable. At 50% the grid squeezes through the 2px corridors the meeting-room
-/// interior needs after furniture padding; tighter made the meeting room
-/// unreachable, looser grazed furniture edges.
+/// walkable: low enough that the grid squeezes through the corridors the
+/// meeting-room interior needs after furniture padding (tighter made the
+/// meeting room unreachable), high enough not to graze furniture edges.
 const COARSE_CELL_WALKABLE_MIN: u16 = 8;
 
 /// The centre pixel of coarse cell `(cx, cy)`.
@@ -271,9 +271,9 @@ fn memo(grid: &mut Grid<Memo>, x: u16, y: u16, f: impl FnOnce() -> bool) -> bool
     }
 }
 
-/// Snap coarse `cell` to the nearest walkable coarse cell within `max_radius`
-/// rings (Chebyshev), or `None` when none is walkable in range (or the cell is
-/// out of the `cell_w × cell_h` grid).
+/// Snap coarse `cell` to the nearest walkable coarse cell of the
+/// `cell_w × cell_h` grid within `max_radius` rings (Chebyshev), or `None` when
+/// none is in range.
 pub(crate) fn snap(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
@@ -282,7 +282,20 @@ pub(crate) fn snap(
     cell_h: u16,
     max_radius: u16,
 ) -> Option<(u16, u16)> {
-    if cell.0 < cell_w && cell.1 < cell_h && cell_walkable(mask, overlay, cell.0, cell.1) {
+    snap_where(cell, cell_w, cell_h, max_radius, |(x, y)| {
+        cell_walkable(mask, overlay, x, y)
+    })
+}
+
+/// [`snap`] to the nearest in-grid cell that `fits`.
+pub(crate) fn snap_where(
+    cell: (u16, u16),
+    cell_w: u16,
+    cell_h: u16,
+    max_radius: u16,
+    mut fits: impl FnMut((u16, u16)) -> bool,
+) -> Option<(u16, u16)> {
+    if cell.0 < cell_w && cell.1 < cell_h && fits(cell) {
         return Some(cell);
     }
     for r in 1..=max_radius {
@@ -301,7 +314,7 @@ pub(crate) fn snap(
                 if nx >= cell_w || ny >= cell_h {
                     continue;
                 }
-                if cell_walkable(mask, overlay, nx, ny) {
+                if fits((nx, ny)) {
                     return Some((nx, ny));
                 }
             }

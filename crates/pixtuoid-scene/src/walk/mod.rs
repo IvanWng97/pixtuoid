@@ -21,7 +21,7 @@ use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 /// invalidates the A* cache, and mapping the frozen profile's progress `t` onto
 /// a re-routed shape mid-stride makes the sprite visibly jump.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalkPathSnapshot {
+pub(crate) struct WalkPathSnapshot {
     /// Leg start point.
     pub(crate) from: Point,
     /// Leg end point.
@@ -32,7 +32,7 @@ pub struct WalkPathSnapshot {
 
 /// Phase the wander cycle is currently in for a given agent.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum WanderPhase {
+pub(crate) enum WanderPhase {
     /// Sitting at the desk between trips.
     Seated,
     /// Walking from desk to the chosen waypoint, on this frozen out-leg profile.
@@ -47,7 +47,7 @@ pub enum WanderPhase {
 /// The wander frame `advance_wander` resolves, snapshotted off `WalkState` at
 /// return time so the caller never re-reads (or re-borrows) `walks`.
 #[derive(Debug, Clone, Copy)]
-pub struct WanderFrame {
+pub(crate) struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
     pub phase: WanderPhase,
     /// Physics walk progress 0–1000, meaningful ONLY in `WalkingOut`/
@@ -58,13 +58,11 @@ pub struct WanderFrame {
     /// The current trip's kind — the seat cell + waypoint identity the walk /
     /// at-waypoint arms need.
     pub kind: WanderKind,
-    /// The current phase's start instant — the pose builder's walk-frame clock.
-    pub phase_started_at: SystemTime,
 }
 
-/// A one-shot walk leg (entry / exit / snap-back).
+/// A one-shot walk leg (entry / exit / snap-back / walk home).
 #[derive(Debug, Clone)]
-pub struct WalkLeg {
+pub(crate) struct WalkLeg {
     /// Wall-clock instant the leg armed.
     pub(crate) started_at: SystemTime,
     /// Frozen physics profile for the leg.
@@ -75,7 +73,7 @@ pub struct WalkLeg {
 
 /// A resolved wander destination: the walkable target cell plus WHAT it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WanderTarget {
+pub(crate) struct WanderTarget {
     /// Destination pixel of the current trip (the walkable approach/amble cell).
     pub dest: Point,
     /// Whether `dest` is a named waypoint (with optional seat) or an aimless amble.
@@ -84,7 +82,7 @@ pub struct WanderTarget {
 
 /// What KIND of wander destination [`WanderTarget::dest`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WanderKind {
+pub(crate) enum WanderKind {
     /// A named lounge waypoint. `seat = Some(S)` ⇒ the walk SETTLES from the
     /// approach point `dest` onto `S` (and rises from `S` on the way back) so
     /// arrival/departure don't pop; `seat = None` ⇒ the agent stands AT `dest`.
@@ -155,13 +153,15 @@ pub struct WanderState {
 /// Walk state for one live agent on one floor.
 #[derive(Debug, Clone)]
 pub struct WalkState {
-    /// The arrival walk, snapshotted once at door-crossing. Carries its own
-    /// `from` because a resurrect that cancels an IN-FLIGHT walkout re-enters
-    /// from wherever the sprite is; a hardcoded door origin teleports it.
+    /// The arrival walk, snapshotted once at door-crossing, or a pointer's
+    /// walk home ([`Lifted::Home`]) once that arrives. Carries its own `from`
+    /// because a resurrect that cancels an IN-FLIGHT walkout re-enters from
+    /// wherever the sprite is; a hardcoded door origin teleports it.
     pub(crate) entry: Option<WalkLeg>,
     /// The walkout, snapshotted once when `exiting_at` fires. `from` is where
-    /// the sprite actually is (wander position if it was out, else the desk
-    /// anchor), so the exit doesn't teleport to the desk.
+    /// the sprite actually is (where a pointer's hold lands it, its wander
+    /// position if it was out, else the desk anchor), so the exit doesn't
+    /// teleport to the desk.
     pub(crate) exit: Option<WalkLeg>,
     /// The state-transition snap-back walk. `from` is the FROZEN origin recorded
     /// when the leg armed, reused every frame so the walk doesn't drift toward
@@ -176,16 +176,18 @@ pub struct WalkState {
     /// [`WalkPathSnapshot`].
     pub(crate) walk_path: Option<WalkPathSnapshot>,
 
-    /// Set down by a pointer, and walking home from there: overrides the
-    /// wander and the state's pose until it arrives.
-    pub(crate) dropped: Option<Dropped>,
+    /// Lifted by a pointer, and walking home after: overrides the wander and
+    /// the state's pose until it arrives.
+    pub(crate) lifted: Option<Lifted>,
 }
 
-/// An agent set down by a pointer.
+/// An agent a pointer lifted.
 #[derive(Debug, Clone)]
-pub(crate) enum Dropped {
-    /// Where, until the next derivation arms the walk home from it.
-    At(Point),
+pub(crate) enum Lifted {
+    /// In hand, its feet at this point.
+    Held(Point),
+    /// Set down here, until the next derivation arms the walk home from it.
+    Dropped(Point),
     /// The walk home.
     Home(WalkLeg),
 }
@@ -210,7 +212,7 @@ impl Default for WalkState {
                 last_advanced_at: SystemTime::UNIX_EPOCH,
             },
             walk_path: None,
-            dropped: None,
+            lifted: None,
         }
     }
 }
@@ -220,6 +222,21 @@ impl WalkState {
     #[doc(hidden)]
     pub fn wander(&self) -> &WanderState {
         &self.wander
+    }
+
+    /// Whether a pointer holds it.
+    pub(crate) fn carried(&self) -> bool {
+        matches!(self.lifted, Some(Lifted::Held(_)))
+    }
+
+    /// In a pointer's hand, its feet at `at`.
+    pub(crate) fn carry(&mut self, at: Point) {
+        self.lifted = Some(Lifted::Held(at));
+    }
+
+    /// Set down at `at`, to walk home from there.
+    pub(crate) fn set_down(&mut self, at: Point) {
+        self.lifted = Some(Lifted::Dropped(at));
     }
 }
 
@@ -244,9 +261,9 @@ impl WanderState {
 /// repeat call at the same `now` changes nothing.
 ///
 /// On the first call for a fresh Idle slot, `cycle_n` is fast-forwarded so
-/// destination selection agrees with what core's stateless `idle_pose` would
+/// destination selection agrees with what the stateless `pose::pure::idle_pose` would
 /// have derived for an agent that was Idle before the first render.
-pub fn advance_wander(
+pub(crate) fn advance_wander(
     slot: &AgentSlot,
     now: SystemTime,
     layout: &SceneLayout,
@@ -320,7 +337,7 @@ pub fn advance_wander(
                         .checked_add(Duration::from_millis(seated_dur))
                         .unwrap_or(now);
                 } else {
-                    // The origin must match core::idle_pose's `desk` so the
+                    // The origin must match pose::pure::idle_pose's `desk` so the
                     // stateless/stateful destinations stay in lockstep.
                     let desk_pt = layout.home_desk(slot.desk_index.single_floor_local());
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
@@ -404,14 +421,13 @@ pub fn advance_wander(
     }
 
     // `result.0` == `walk.wander.phase` in every arm, so the frame's
-    // `phase_started_at`/`target` always describe the returned phase.
+    // `dest`/`kind` always describe the returned phase.
     let (phase, t_x1000) = result;
     WanderFrame {
         phase,
         t_x1000,
         dest: walk.wander.target.dest,
         kind: walk.wander.target.kind,
-        phase_started_at: walk.wander.phase_started_at,
     }
 }
 
@@ -553,7 +569,7 @@ pub(crate) fn snapshot_leg_profile(
 
 /// Freeze the WanderBack profile. The endpoint is the desk APPROACH cell
 /// (matching `seated_top_left` via the chair-glide) so there's no jump on arrival;
-/// this intentionally differs from `core::idle_pose`'s raw `to: desk`, since
+/// this intentionally differs from `pose::pure::idle_pose`'s raw `to: desk`, since
 /// only the routed path is user-visible.
 fn snapshot_back_profile(
     slot: &AgentSlot,
@@ -582,7 +598,7 @@ fn snapshot_back_profile(
 
 /// Octile length of a routed polyline — the same metric A* uses, so the
 /// snapshotted length is consistent with per-segment timing. 0 below 2 points.
-pub fn octile_path_len(path: &[Point]) -> u32 {
+pub(crate) fn octile_path_len(path: &[Point]) -> u32 {
     if path.len() < 2 {
         return 0;
     }
