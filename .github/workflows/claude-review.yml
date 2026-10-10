@@ -34,7 +34,6 @@ jobs:
     with:
       pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
       prompt_path: REVIEW.md
-      lenses: '["correctness", "design"]'
       max_turns: 120
       max_budget_usd: 50
       allow_fork: ${{ github.event_name == 'issue_comment' }}
@@ -46,7 +45,7 @@ jobs:
 
   # The owner's policy: Dependabot's dependency and action bumps merge without
   # the model review, which reads a lockfile diff it cannot audit. Main requires
-  # each lens's status by name from this app, and no protection rule can key on
+  # the review's status by name from this app, and no protection rule can key on
   # a PR's author, so the exemption is posted as that status. Anything short of
   # a same-name bump of Dependabot's own manifests gets `pending` and waits for
   # a maintainer's /claude-review.
@@ -57,10 +56,6 @@ jobs:
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.base.ref == github.event.repository.default_branch
-    strategy:
-      fail-fast: false
-      matrix:
-        lens: [correctness, design]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -73,14 +68,15 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          LENS: ${{ matrix.lens }}
+          # claude-readonly-review.yml's REVIEW_CONTEXT, the one name main requires.
+          REVIEW_CONTEXT: claude-review
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           post() {
-            jq -n --arg state "$1" --arg context "claude-review/$LENS" --arg target_url "$RUN_URL" \
+            jq -n --arg state "$1" --arg context "$REVIEW_CONTEXT" --arg target_url "$RUN_URL" \
               --arg description "$2" '$ARGS.named' |
               gh api --method POST "repos/${REPOSITORY}/statuses/${HEAD_SHA}" --input - > /dev/null
           }

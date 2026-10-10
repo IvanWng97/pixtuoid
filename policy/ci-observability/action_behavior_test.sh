@@ -121,19 +121,15 @@ for part in .claude-review/ pr-description.json prior-threads.json units.json he
 done
 review_lenses="$(awk '/^## /{on = ($0 == "## Lenses")} on && /^### /{print tolower(substr($0, 5))}' "$REVIEW_RULES_FILE" | sort)"
 [[ -n "$review_lenses" ]] || fail "$REVIEW_RULES_FILE has no \"### <lens>\" under \"## Lenses\""
-caller_lenses="$(
-    for caller in .github/workflows/*.yml; do
-        yq -o=json '.' "$caller" | jq -r '.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")
-            | .with.lenses | fromjson[]'
-    done | sort
-)"
 schema_lenses="$(jq -r '.properties.findings.items.properties.lens.enum[]' "$REVIEW_SCHEMA_FILE" | sort)"
-[[ "$caller_lenses" == "$review_lenses" && "$schema_lenses" == "$review_lenses" ]] ||
-    fail "the review's lenses [${caller_lenses//$'\n'/ }] and $REVIEW_SCHEMA_FILE's [${schema_lenses//$'\n'/ }] are not $REVIEW_RULES_FILE's lens headings [${review_lenses//$'\n'/ }]"
-lenses_json="$(jq -cn --arg l "$review_lenses" '$l | split("\n")')"
+[[ "$schema_lenses" == "$review_lenses" ]] ||
+    fail "$REVIEW_SCHEMA_FILE's lenses [${schema_lenses//$'\n'/ }] are not $REVIEW_RULES_FILE's lens headings [${review_lenses//$'\n'/ }]"
 
 review_context="$(yq -e -r '.env.REVIEW_CONTEXT' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_CONTEXT"
+# The exemption posts the same one context main requires.
+[[ "$(yq -e -r '.jobs.exempt.steps[0].env.REVIEW_CONTEXT' .github/workflows/claude-review.yml)" == "$review_context" ]] ||
+    fail "claude-review.yml's exemption posts a context other than $review_context"
 review_title="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_TITLE"
 unit_passes="$(yq -e -r '.env.UNIT_PASSES' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
@@ -229,16 +225,15 @@ run_publisher() {
         REVIEW_JSON="$review_json" \
         REVIEW_SAFE_PATH="$review_safe_path" \
         SKIPPED="${SKIPPED-[]}" \
-        REVIEW_LENSES="$lenses_json" \
         REVIEW_TITLE="$review_title" \
         RUN_URL="$run_url" \
         bash -c "$publisher_script"
 }
 
-# One status per lens, each the context main requires by name.
+# One status, the context main requires by name.
 assert_status() {
-    jq -e -s --argjson lenses "$lenses_json" --arg url "$run_url" \
-        "map(.context) == [\$lenses[] | \"claude-review/\\(.)\"] and all(.[]; .target_url == \$url and $1)" \
+    jq -e -s --arg context "$review_context" --arg url "$run_url" \
+        "length == 1 and (.[0] | .context == \$context and .target_url == \$url and $1)" \
         "$posted_statuses" >/dev/null 2>&1 ||
         fail "review status: $2: $(cat "$posted_statuses" 2>/dev/null)"
 }
@@ -302,7 +297,8 @@ REFUTED=3 SKIPPED='["Cargo.lock", "a b.rs", "docs/images/x.png"]' run_publisher 
 # shellcheck disable=SC2016 # Markdown backticks, matched literally.
 [[ "$(<"$published_comment")" == *'Not reviewed: `Cargo.lock`, `docs/images/x.png`, 1 unsafe path(s)'* ]] ||
     fail "Claude publisher's summary does not list what was not reviewed, unsafe paths counted: $(<"$published_comment")"
-bad_bounds=("" "$(with_bounds '.severities = []')" "$(with_bounds '.severities = ["blocking", "**x**"]')")
+bad_bounds=("" "$(with_bounds '.severities = []')" "$(with_bounds '.severities = ["blocking", "**x**"]')"
+"$(with_bounds 'del(.lenses)')" "$(with_bounds '.lenses = []')" "$(with_bounds '.lenses = ["design", "**x**"]')")
 for key in max_findings path_max summary_max body_max; do
     bad_bounds+=("$(with_bounds "del(.$key)")" "$(with_bounds ".$key = 0")" "$(with_bounds ".$key = 1.5")")
 done
@@ -377,8 +373,8 @@ run_publisher "$in_diff_review" ||
     fail "Claude publisher rejected findings inside the diff"
 assert_threads 'length == 5 and all(.[]; .commit_id == "abc123")' \
     "one thread per finding, at the reviewed head"
-assert_status '.description == "Published at this head: \(if .context == "claude-review/design" then 1 else 4 end) findings"' \
-    "each lens's status counts its own findings"
+assert_status '.description == "Published at this head: 5 findings (correctness 4, design 1)"' \
+    "the status counts every finding and each lens's"
 assert_threads '[.[:3][] | [.path, .line, .side]] == [["src/a.rs", 2, "RIGHT"], ["src/a.rs", 21, "RIGHT"], ["src/b.rs", 5, "RIGHT"]]' \
     "a finding on a diff line is an inline comment on that line"
 assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs", "file", false], ["img.png", "file", false]]' \
@@ -498,7 +494,6 @@ run_report() {
         POSTED_STATUSES="$posted_statuses" \
         REPOSITORY="owner/repo" \
         REVIEW_CONTEXT="$review_context" \
-        REVIEW_LENSES="${REVIEW_LENSES_OVERRIDE:-$lenses_json}" \
         REVIEW_TITLE="$review_title" \
         RUN_URL="$run_url" \
         bash -c "$report_script"
@@ -507,18 +502,16 @@ report="$(run_report success failure old-head)" ||
     fail "the absence report exited non-zero"
 [[ "$report" == *"::error "* ]] ||
     fail "the absence report left no annotation"
-assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails every lens at the analyzed head"
+assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails the status at the analyzed head"
 run_report failure skipped "" >/dev/null 2>&1 &&
     fail "the absence report marked no head"
 run_report success skipped declined-head >/dev/null ||
     fail "the absence report exited non-zero on an open PR it declined"
-assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails every lens"
+assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails the status"
 run_report success skipped merged-head closed >/dev/null ||
     fail "the absence report exited non-zero on a closed PR"
 [[ ! -e "$posted_statuses" ]] ||
-    fail "the absence report set a closed PR's lens statuses: $(<"$posted_statuses")"
-REVIEW_LENSES_OVERRIDE='[]' run_report success failure old-head >/dev/null 2>&1 &&
-    fail "the absence report exited zero with no lens to fail"
+    fail "the absence report set a closed PR's status: $(<"$posted_statuses")"
 # shellcheck disable=SC2016 # Workflow expressions, matched literally.
 yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     .jobs.analyze.outputs.state == "${{ steps.pr.outputs.state }}"
@@ -744,13 +737,13 @@ run_exempt() {
     local fixtures="$1" current_head="${2:-head123}"
     PATH="$exempt_bin:$PATH" EXEMPT_FIXTURES="$fixtures" EXEMPT_CURRENT_HEAD="$current_head" \
         GH_TOKEN=test-token REPOSITORY=owner/repo PR_NUMBER=42 HEAD_SHA=head123 BASE_SHA=main123 \
-        LENS=correctness RUN_URL=https://example.test/run \
+        REVIEW_CONTEXT=claude-review RUN_URL=https://example.test/run \
         bash -c "$exempt_script" >/dev/null 2>&1 || fail "the exemption exited non-zero on $3"
 }
 assert_exempt() {
     local fixtures="$1" want="$2" label="$3"
     local got
-    got="$(jq -sr 'map(select(.context == "claude-review/correctness")) | last | .state // "none"' "$fixtures/statuses.jsonl")"
+    got="$(jq -sr 'map(select(.context == "claude-review")) | last | .state // "none"' "$fixtures/statuses.jsonl")"
     [[ "$got" == "$want" ]] || fail "the exemption posted $got, not $want, on $label"
 }
 file_row() { jq -cn --arg f "$1" --arg s "${2:-modified}" --arg p "${3:-@@ -1 +1 @@}" '{filename: $f, status: $s, patch: $p}'; }

@@ -99,7 +99,8 @@ CodSpeed skip drafts. The jobs:
   [`REVIEW.md`](../REVIEW.md#scope) readers: repeated passes per planned unit,
   one per lens over the whole diff, a verifier per candidate. A unit it skips
   fails the run; a separate least-privilege publisher opens a review thread
-  per finding and sets each lens's `claude-review/<lens>` status.
+  per finding and sets the one required `claude-review` status, with each
+  lens's finding count in its description.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -277,7 +278,7 @@ invariants"), which every contributor and agent reads first.
 
 ### The merge gate
 
-Green `ci-gate`; every lens's required `claude-review/<lens>` status
+Green `ci-gate`; the required `claude-review` status
 `success` at the final head, from a published review or Dependabot's policy
 exemption; every finding's review thread resolved by its
 disposition; zero open confirmed `issue (blocking)`; each matching
