@@ -1644,6 +1644,47 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
   }
 });
 
+test('every doc scroller is a named tab stop at phone width (keyboard scroll)', async ({
+  browser,
+}) => {
+  // Safari never makes an overflowing box a tab stop, so a code block or table wider than the phone
+  // would scroll for a pointer only (axe `scrollable-region-focusable`); config/rehype-scroll-regions.mjs
+  // makes each one a named region. Measured, not listed: any new scroller in a doc is held to it.
+  for (const [path, mustScroll] of [
+    ['./config', true],
+    ['./contributing', true],
+    ['./architecture', false],
+  ] as const) {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+    await page.goto(path);
+    const scrollers = await page.evaluate(() =>
+      [...document.querySelectorAll('article.prose *')]
+        .filter(
+          (e) => /auto|scroll/.test(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth
+        )
+        .map((e) => ({
+          tag: e.tagName.toLowerCase(),
+          tabIndex: (e as HTMLElement).tabIndex,
+          role: e.getAttribute('role'),
+          name: e.getAttribute('aria-label') ?? '',
+        }))
+    );
+    if (mustScroll) expect(scrollers.length, `${path}: no scroller to check`).toBeGreaterThan(0);
+    for (const s of scrollers) {
+      expect(s.tabIndex, `${path}: a ${s.tag} scroller is not a tab stop`).toBe(0);
+      expect(s.role, `${path}: a ${s.tag} scroller has no role to carry its name`).toBe('region');
+      expect(s.name, `${path}: a ${s.tag} scroller has no name`).not.toBe('');
+    }
+    await context.close();
+  }
+});
+
 test('the hero copy clears the floating nav at phone viewports (vertical overlap guard)', async ({
   browser,
 }) => {

@@ -994,18 +994,16 @@ code {
 .prose pre code {
   font-family: var(--font-mono);
 }
-/* tables — display:block + overflow-x:auto gives a bare markdown <table> its OWN
-   horizontal scroll on mobile instead of overflowing the page (which
-   body{overflow-x:hidden} would clip unreachably). Same GOAL as the Tools matrix
-   but a different mechanism: the matrix hangs overflow on a wrapper div and keeps
-   width:100%, whereas markdown has no wrapper — so display:block on the table
-   itself, which drops width:100% (narrow tables shrink to content on desktop). */
-.prose table {
-  display: block;
+/* tables scroll sideways in their own wrapper (config/rehype-scroll-regions.mjs)
+   instead of overflowing the page, which body{overflow-x:hidden} would clip
+   unreachably; the table keeps display:table, and with it its table semantics. */
+.prose .table-scroll {
   overflow-x: auto;
   max-width: 100%;
-  border-collapse: collapse;
   margin: 1.2rem 0;
+}
+.prose table {
+  border-collapse: collapse;
   font-size: 0.95rem;
 }
 .prose th,
@@ -1022,7 +1020,7 @@ code {
   font-synthesis: none;
 }
 /* inside tables, the inline-code `overflow-wrap:anywhere` guard above is both
-   redundant (the table's own overflow-x:auto handles wide content) and harmful:
+   redundant (the `.table-scroll` wrapper's overflow-x:auto handles wide content) and harmful:
    `anywhere` shrinks min-content to 1ch, so table auto-layout collapses a
    code-only column and wraps its token letter-by-letter. nowrap also stops the
    hyphen-break (`max-` / `desks`) a squeezed column would otherwise take.
