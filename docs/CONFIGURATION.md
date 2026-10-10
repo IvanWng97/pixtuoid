@@ -45,9 +45,8 @@ kind = "dog"        # name omitted → "Office Dog"
 
 Press `t` in the TUI to switch themes with a live preview picker (`j`/`k` or
 `↑`/`↓` to navigate); your choice is written back to `config.toml` and persists
-across sessions. Override for a single run with `--theme <name>`. Six themes ship
-built-in: `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`,
-`gruvbox`.
+across sessions. Override for a single run with `--theme <name>`;
+`pixtuoid run --help` lists the built-in themes.
 
 ## Logging & troubleshooting
 
