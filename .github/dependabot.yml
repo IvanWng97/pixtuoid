@@ -76,8 +76,8 @@ updates:
       # filtered by the cooldown below, would rewrite the self-updating ref into
       # an exact pin a week OLD, a downgrade (#786). Only majors need a human.
       # Every other action is SHA-pinned (zizmor's default, relaxed for this
-      # namespace alone in .github/zizmor.yml), so a minor/patch bump is the
-      # only way it moves.
+      # namespace alone in .github/zizmor.yml), so each of its updates, majors
+      # included, arrives as a PR.
       - dependency-name: "actions/*"
         update-types:
           ["version-update:semver-patch", "version-update:semver-minor"]

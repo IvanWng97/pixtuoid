@@ -53,6 +53,10 @@ fn flatten_wrapped_comments(src: &str) -> String {
         .replace("\n//", " ")
 }
 
+/// How far a claim's name may trail "pinned by" ("pinned by the TUI's `x`")
+/// and still be the claim's.
+const MAX_QUALIFIER_BYTES: usize = 24;
+
 /// The identifier a `Pinned by` claim names, if the line makes one.
 ///
 /// Matched on text with comment leaders collapsed to a space first: a claim
@@ -63,10 +67,12 @@ fn claims_in(text: &str) -> Vec<String> {
     let mut rest = text;
     while let Some(idx) = rest.find("inned by") {
         rest = &rest[idx + "inned by".len()..];
-        let after = rest.trim_start_matches([' ', '\n', '[']);
-        let Some(body) = after.strip_prefix('`') else {
+        let Some(tick) = rest.find('`') else { break };
+        let qualifier = &rest[..tick];
+        if qualifier.len() > MAX_QUALIFIER_BYTES || qualifier.contains(['.', ',', ';', ':', '\n']) {
             continue;
-        };
+        }
+        let body = &rest[tick + 1..];
         let Some(end) = body.find('`') else { continue };
         let name = &body[..end];
         if name.len() >= 4
@@ -158,7 +164,33 @@ fn the_claim_scanner_fires_on_an_orphan_and_stays_silent_on_a_real_one() {
         "an INDENTED wrapped claim is a live shape in the tree — \
          a column-0-anchored collapse skips it silently"
     );
+    assert_eq!(
+        claims_in("/// in place (pinned by the TUI's `qualified_name`)."),
+        ["qualified_name"],
+        "a short qualifier before the name is still the same claim"
+    );
     assert!(claims_in("/// Pinned by the shared harness.").is_empty());
+    assert!(
+        claims_in("/// Pinned by the shared harness. Its `fixture_name` differs.").is_empty(),
+        "a sentence end closes the claim before a later name"
+    );
+    for stop in ['.', ',', ';', ':', '\n'] {
+        assert!(
+            claims_in(&format!("/// Pinned by e2e{stop} see `fixture_name`")).is_empty(),
+            "{stop:?} closes the claim inside the qualifier bound"
+        );
+    }
+    // The qualifier counts the spaces either side of it.
+    let qualified = |len: usize| format!("/// pinned by {} `qualified_name`", "x".repeat(len - 2));
+    assert_eq!(
+        claims_in(&qualified(MAX_QUALIFIER_BYTES)),
+        ["qualified_name"],
+        "a qualifier at the bound is still the claim's"
+    );
+    assert!(
+        claims_in(&qualified(MAX_QUALIFIER_BYTES + 1)).is_empty(),
+        "a name past the qualifier bound is no longer the claim's"
+    );
     assert!(
         claims_in("/// Pinned by `CONST_NAME`").is_empty(),
         "a SCREAMING const is not a function name"
