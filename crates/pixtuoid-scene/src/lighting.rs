@@ -207,8 +207,8 @@ impl Emitter {
     /// [`Self::level_at`] at any point, in layout units: a painter whose grid is
     /// finer than a layout cell samples each of its pixels where it lies, so a
     /// light's falloff steps with the art rather than in blocks a cell wide. A
-    /// spill's rows and a patch's footprint stay whole cells, the shapes they
-    /// are.
+    /// spill's rows and a patch's footprint stay whole cells ([`cell_of`]), the
+    /// shapes they are.
     pub(crate) fn level_at_f(&self, x: f32, y: f32) -> Option<f32> {
         let strength = self.strength;
         match self.light {
@@ -239,24 +239,16 @@ impl Emitter {
                 top,
                 slant,
             } => {
-                let below = y - f32::from(top);
-                if below < 0.0 {
-                    return None;
-                }
-                let dy = below.floor() as u16;
-                if dy >= SPILL_DEPTH {
-                    return None;
-                }
+                let below = cell_of(y) - i32::from(top);
+                let dy = u16::try_from(below).ok().filter(|&dy| dy < SPILL_DEPTH)?;
                 let row = spill_rows(wx, w, slant).nth(usize::from(dy))?;
-                row.contains(&(x.floor() as i32))
+                row.contains(&cell_of(x))
                     .then(|| strength * (1.0 - f32::from(dy) / f32::from(SPILL_DEPTH)))
             }
             Light::Patch { centre } => {
                 let ((x0, y0), (x1, y1)) = self.bounds();
-                if x < f32::from(x0)
-                    || x >= f32::from(x1)
-                    || y < f32::from(y0)
-                    || y >= f32::from(y1)
+                if !(i32::from(x0)..i32::from(x1)).contains(&cell_of(x))
+                    || !(i32::from(y0)..i32::from(y1)).contains(&cell_of(y))
                 {
                     return None;
                 }
@@ -268,6 +260,13 @@ impl Emitter {
             }
         }
     }
+}
+
+/// The cell a point of [`Emitter::level_at_f`] falls in: a cell spans
+/// `[u - 0.5, u + 0.5)` around its integer, as the display samples art pixels
+/// (`display/light.rs`'s `at`).
+fn cell_of(v: f32) -> i32 {
+    (v + 0.5).floor() as i32
 }
 
 /// The columns each row of a spill spans, top row first, unclipped: the

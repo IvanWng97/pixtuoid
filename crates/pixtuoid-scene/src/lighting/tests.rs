@@ -350,18 +350,42 @@ fn a_light_sampled_between_cells_stays_inside_its_bounds() {
         let ((x0, y0), (x1, y1)) = e.bounds();
         for y in 0..(48 * 4) {
             for x in 0..(64 * 4) {
-                let (fx, fy) = ((x as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
+                let (fx, fy) = ((x as f32 + 0.5) / 4.0 - 0.5, (y as f32 + 0.5) / 4.0 - 0.5);
                 if e.level_at_f(fx, fy).is_some() {
                     assert!(
-                        fx >= f32::from(x0)
+                        fx >= f32::from(x0) - 0.5
                             && fx < f32::from(x1)
-                            && fy >= f32::from(y0)
+                            && fy >= f32::from(y0) - 0.5
                             && fy < f32::from(y1),
                         "{:?} lights ({fx}, {fy}) outside {:?}",
                         e.kind,
                         e.bounds()
                     );
                 }
+            }
+        }
+    }
+}
+
+/// A whole-cell shape sampled the way the display does (an art pixel `a` at
+/// `(a + 0.5) / d - 0.5`, a cell's centre on its integer) lights exactly the
+/// art pixels of the cells it lights at density 1.
+#[test]
+fn a_whole_cell_light_lights_the_same_cells_at_any_density() {
+    const D: u16 = 4;
+    for e in every_shape() {
+        if matches!(e.light, Light::Halo { .. } | Light::Glow { .. }) {
+            continue;
+        }
+        for y in 0..48 * D {
+            for x in 0..64 * D {
+                let at = |a: u16| (f32::from(a) + 0.5) / f32::from(D) - 0.5;
+                assert_eq!(
+                    e.level_at_f(at(x), at(y)).is_some(),
+                    e.level_at(x / D, y / D).is_some(),
+                    "{:?} art pixel ({x}, {y})",
+                    e.kind
+                );
             }
         }
     }

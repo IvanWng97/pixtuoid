@@ -57,26 +57,25 @@ const ARC_RISE_FRAC: f32 = 0.80;
 /// Below this [`Transmission::disc`](crate::sky::Transmission::disc), thick cloud
 /// swallows the disc entirely.
 pub(crate) const MIN_DISC_VIS: f32 = 0.08;
-/// The altitude a rising moon's disc takes to fade in, and a setting one's to
+/// The altitude a rising body's disc takes to fade in, and a setting one's to
 /// fade out.
-const MOON_HORIZON_FADE: f32 = 0.1;
+const HORIZON_FADE: f32 = 0.1;
 
 impl Disc {
     /// This frame's disc over a wall band `top_wall_h` tall, or `None` under
     /// thick cloud.
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.body();
-        let vis = match e.kind {
-            BodyKind::Sun => sky.transmission().disc,
-            // A moon below the horizon shows no disc; one up fades in with the
-            // night, and with its altitude as it rises and sets.
-            BodyKind::Moon if e.altitude <= 0.0 => return None,
-            BodyKind::Moon => {
-                sky.transmission().disc
-                    * sky.nightfall()
-                    * (e.altitude / MOON_HORIZON_FADE).min(1.0)
-            }
+        // A body below the horizon shows no disc; one up fades in with its
+        // altitude as it rises and sets, and a moon with the night too.
+        if e.altitude <= 0.0 {
+            return None;
+        }
+        let nightly = match e.kind {
+            BodyKind::Sun => 1.0,
+            BodyKind::Moon => sky.nightfall(),
         };
+        let vis = sky.transmission().disc * nightly * (e.altitude / HORIZON_FADE).min(1.0);
         if vis < MIN_DISC_VIS {
             return None;
         }
@@ -395,35 +394,53 @@ mod tests {
         assert_eq!(cycles, range.collect(), "the cycles in beats");
     }
 
-    /// The moon's disc fades in as it rises and out as it sets, never popping
-    /// a whole step between two minutes.
+    /// Either body's disc fades in as it rises and out as it sets, never
+    /// popping a whole step between two minutes, in any weather.
     #[test]
-    fn the_moons_disc_never_pops_minute_by_minute() {
+    fn a_discs_visibility_never_pops_minute_by_minute() {
         use crate::sky::Weather;
         const MAX_STEP: f32 = 0.25;
-        for day in 0..30u32 {
-            let start = crate::localclock::on_day(day, 0);
-            let vis = |m: u64| {
-                let s = crate::sky::Sky::at_with(
-                    start + std::time::Duration::from_secs(m * 60),
-                    Weather::Clear,
-                );
-                Disc::of(&s, 96, 40)
-                    .filter(|d| d.body == BodyKind::Moon)
-                    .map_or(0.0, |d| d.vis)
-            };
-            let mut prev = vis(0);
-            for m in 1..24 * 60 {
-                let next = vis(m);
-                assert!(
-                    (next - prev).abs() <= MAX_STEP,
-                    "day {day} {:02}:{:02}: {prev} -> {next}",
-                    m / 60,
-                    m % 60
-                );
-                prev = next;
+        for weather in [Weather::Clear, Weather::Windy] {
+            for day in 0..30u32 {
+                let start = crate::localclock::on_day(day, 0);
+                let vis = |m: u64| {
+                    let s = crate::sky::Sky::at_with(
+                        start + std::time::Duration::from_secs(m * 60),
+                        weather,
+                    );
+                    Disc::of(&s, 96, 40).map_or(0.0, |d| d.vis)
+                };
+                let mut prev = vis(0);
+                for m in 1..24 * 60 {
+                    let next = vis(m);
+                    assert!(
+                        (next - prev).abs() <= MAX_STEP,
+                        "{weather:?} day {day} {:02}:{:02}: {prev} -> {next}",
+                        m / 60,
+                        m % 60
+                    );
+                    prev = next;
+                }
             }
         }
+    }
+
+    /// A sun disc grows with its altitude through the morning and shrinks back
+    /// through the evening, and is absent at the horizon itself.
+    #[test]
+    fn a_suns_disc_fades_monotonically_toward_the_horizon() {
+        use crate::sky::Weather;
+        let vis = |h, m: u64| {
+            let t = crate::localclock::on_day(0, h) + std::time::Duration::from_secs(m * 60);
+            let s = crate::sky::Sky::at_with(t, Weather::Clear);
+            Disc::of(&s, 96, 40).map_or(0.0, |d| d.vis)
+        };
+        assert_eq!(vis(5, 0), 0.0);
+        assert_eq!(vis(20, 0), 0.0);
+        let morning: Vec<f32> = (0..=180).map(|m| vis(5, m)).collect();
+        assert!(morning.windows(2).all(|w| w[0] <= w[1]), "{morning:?}");
+        let evening: Vec<f32> = (0..=180).map(|m| vis(17, m)).collect();
+        assert!(evening.windows(2).all(|w| w[0] >= w[1]), "{evening:?}");
     }
 
     /// A moon below the horizon shows no disc, and one up fades in with the
