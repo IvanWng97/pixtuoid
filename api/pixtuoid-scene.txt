@@ -337,7 +337,6 @@ pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> u
 pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneState, usize) -> pixtuoid_core::state::SceneState
 pub fn pixtuoid_scene::floor::step_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::sky::WeatherPolicy) -> crate::audio::TrackId
-pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::SceneLayout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
 pub mod pixtuoid_scene::layout
 pub enum pixtuoid_scene::layout::Facing
 pub pixtuoid_scene::layout::Facing::East
@@ -409,8 +408,6 @@ pub pixtuoid_scene::layout::FixtureKind::Wall
 pub pixtuoid_scene::layout::FixtureKind::Wall::item: usize
 pub pixtuoid_scene::layout::FixtureKind::Wall::kind: pixtuoid_scene::layout::WallDecor
 pub pixtuoid_scene::layout::FixtureKind::WaterCooler
-impl pixtuoid_scene::layout::FixtureKind
-pub fn pixtuoid_scene::layout::FixtureKind::hover_label(self) -> core::option::Option<&'static str>
 impl core::clone::Clone for pixtuoid_scene::layout::FixtureKind
 pub fn pixtuoid_scene::layout::FixtureKind::clone(&self) -> pixtuoid_scene::layout::FixtureKind
 impl core::cmp::Eq for pixtuoid_scene::layout::FixtureKind
@@ -1095,7 +1092,6 @@ pub fn pixtuoid_scene::layout::anchored_top_left(pixtuoid_scene::layout::Pivot, 
 pub const fn pixtuoid_scene::layout::desk_furniture_def() -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::desk_walk_anchor_facing(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub fn pixtuoid_scene::layout::floor_indicator(pixtuoid_scene::floor::FloorMeta) -> [crate::display::Content; 3]
-pub fn pixtuoid_scene::layout::floor_indicator_rows(u16) -> core::ops::range::Range<u16>
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::min_layout_size() -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
@@ -1336,7 +1332,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::pack::OfficeArt
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pack::OfficeArt
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::OfficeArt
 pub fn pixtuoid_scene::pack::load_bundled_pack() -> core::result::Result<pixtuoid_scene::pack::OfficeArt, pixtuoid_scene::pack::ArtError>
-pub fn pixtuoid_scene::pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::pathfind
 pub struct pixtuoid_scene::pathfind::AStarRouter
 impl pixtuoid_scene::pathfind::AStarRouter
@@ -1440,66 +1435,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pet::PetState
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pet::PetState
 pub const pixtuoid_scene::pet::PET_DURATION_MS: u64
 pub fn pixtuoid_scene::pet::select_pet_for_floor(u64, &[pixtuoid_scene::pet::Pet]) -> core::option::Option<&pixtuoid_scene::pet::Pet>
-pub mod pixtuoid_scene::physics
-pub enum pixtuoid_scene::physics::WalkIntent
-pub pixtuoid_scene::physics::WalkIntent::Entry
-pub pixtuoid_scene::physics::WalkIntent::Exit
-pub pixtuoid_scene::physics::WalkIntent::SnapBack
-pub pixtuoid_scene::physics::WalkIntent::WanderBack
-pub pixtuoid_scene::physics::WalkIntent::WanderOut
-impl core::clone::Clone for pixtuoid_scene::physics::WalkIntent
-pub fn pixtuoid_scene::physics::WalkIntent::clone(&self) -> pixtuoid_scene::physics::WalkIntent
-impl core::cmp::Eq for pixtuoid_scene::physics::WalkIntent
-impl core::cmp::PartialEq for pixtuoid_scene::physics::WalkIntent
-pub fn pixtuoid_scene::physics::WalkIntent::eq(&self, &pixtuoid_scene::physics::WalkIntent) -> bool
-impl core::fmt::Debug for pixtuoid_scene::physics::WalkIntent
-pub fn pixtuoid_scene::physics::WalkIntent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::physics::WalkIntent
-impl core::marker::StructuralPartialEq for pixtuoid_scene::physics::WalkIntent
-impl core::marker::Freeze for pixtuoid_scene::physics::WalkIntent
-impl core::marker::Send for pixtuoid_scene::physics::WalkIntent
-impl core::marker::Sync for pixtuoid_scene::physics::WalkIntent
-impl core::marker::Unpin for pixtuoid_scene::physics::WalkIntent
-impl core::marker::UnsafeUnpin for pixtuoid_scene::physics::WalkIntent
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::physics::WalkIntent
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::physics::WalkIntent
-pub struct pixtuoid_scene::physics::WalkProfile
-pub pixtuoid_scene::physics::WalkProfile::accel: f32
-pub pixtuoid_scene::physics::WalkProfile::duration_ms: u64
-pub pixtuoid_scene::physics::WalkProfile::path_len_octile: u32
-pub pixtuoid_scene::physics::WalkProfile::pause_ms: u64
-pub pixtuoid_scene::physics::WalkProfile::v_cruise: f32
-impl core::clone::Clone for pixtuoid_scene::physics::WalkProfile
-pub fn pixtuoid_scene::physics::WalkProfile::clone(&self) -> pixtuoid_scene::physics::WalkProfile
-impl core::cmp::PartialEq for pixtuoid_scene::physics::WalkProfile
-pub fn pixtuoid_scene::physics::WalkProfile::eq(&self, &pixtuoid_scene::physics::WalkProfile) -> bool
-impl core::fmt::Debug for pixtuoid_scene::physics::WalkProfile
-pub fn pixtuoid_scene::physics::WalkProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::physics::WalkProfile
-impl core::marker::StructuralPartialEq for pixtuoid_scene::physics::WalkProfile
-impl core::marker::Freeze for pixtuoid_scene::physics::WalkProfile
-impl core::marker::Send for pixtuoid_scene::physics::WalkProfile
-impl core::marker::Sync for pixtuoid_scene::physics::WalkProfile
-impl core::marker::Unpin for pixtuoid_scene::physics::WalkProfile
-impl core::marker::UnsafeUnpin for pixtuoid_scene::physics::WalkProfile
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::physics::WalkProfile
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::physics::WalkProfile
-pub const pixtuoid_scene::physics::PAUSE_MS_MAX: u64
-pub const pixtuoid_scene::physics::PAUSE_MS_MIN: u64
-pub const pixtuoid_scene::physics::PROGRESS_SCALE: u16
-pub const pixtuoid_scene::physics::SPEED_MULT_MAX: f32
-pub const pixtuoid_scene::physics::SPEED_MULT_MIN: f32
-pub const pixtuoid_scene::physics::V_CRUISE_COMMUTE: f32
-pub const pixtuoid_scene::physics::V_CRUISE_SNAPBACK: f32
-pub const pixtuoid_scene::physics::V_CRUISE_WANDER: f32
-pub const pixtuoid_scene::physics::WALK_ACCEL: f32
-pub const pixtuoid_scene::physics::WALK_ACCEL_SNAPBACK: f32
-pub fn pixtuoid_scene::physics::pause_ms_for(pixtuoid_core::id::AgentId) -> u64
-pub fn pixtuoid_scene::physics::speed_mult(pixtuoid_core::id::AgentId) -> f32
-pub fn pixtuoid_scene::physics::walk_arrived(&pixtuoid_scene::physics::WalkProfile, u64) -> bool
-pub fn pixtuoid_scene::physics::walk_profile(u32, pixtuoid_scene::physics::WalkIntent, pixtuoid_core::id::AgentId) -> pixtuoid_scene::physics::WalkProfile
-pub fn pixtuoid_scene::physics::walk_progress(&pixtuoid_scene::physics::WalkProfile, u64) -> u16
-pub mod pixtuoid_scene::pixel_painter
 pub mod pixtuoid_scene::pose
 pub enum pixtuoid_scene::pose::Pose
 pub pixtuoid_scene::pose::Pose::AimlessAt
@@ -1598,7 +1533,6 @@ pub const pixtuoid_scene::pose::WANDER_WALK_EST_MS: u64
 pub fn pixtuoid_scene::pose::aimless_wander_seed(pixtuoid_core::id::AgentId, u64) -> u64
 pub fn pixtuoid_scene::pose::derive(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout) -> core::option::Option<pixtuoid_scene::pose::Pose>
 pub fn pixtuoid_scene::pose::derive_state_only(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout) -> core::option::Option<pixtuoid_scene::pose::Pose>
-pub fn pixtuoid_scene::pose::derive_with_routing(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout, &mut pixtuoid_scene::pose::RouteCtx<'_>) -> core::option::Option<pixtuoid_scene::pose::Pose>
 pub fn pixtuoid_scene::pose::dwell_ms(pixtuoid_scene::layout::WaypointKind, pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::est_wander_cycle_ms(pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::is_aimless_cycle(pixtuoid_core::id::AgentId, u64) -> bool
@@ -2022,7 +1956,6 @@ pub static pixtuoid_scene::theme::NORMAL: pixtuoid_scene::theme::Theme
 pub static pixtuoid_scene::theme::TOKYO_NIGHT: pixtuoid_scene::theme::Theme
 pub fn pixtuoid_scene::theme::theme_by_name(&str) -> core::option::Option<&'static pixtuoid_scene::theme::Theme>
 pub mod pixtuoid_scene::token_meter
-pub fn pixtuoid_scene::token_meter::compact_tokens(u64) -> alloc::string::String
 pub fn pixtuoid_scene::token_meter::token_tier(u64) -> u8
 pub mod pixtuoid_scene::walk
 pub enum pixtuoid_scene::walk::WanderKind
@@ -2159,4 +2092,3 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::walk::WanderTarget
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::walk::WanderTarget
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::walk::WanderTarget
 pub fn pixtuoid_scene::walk::advance_wander(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout, &mut dyn pixtuoid_scene::pathfind::Router, &pixtuoid_core::walkable::OccupancyOverlay, &mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::walk::WalkState>) -> pixtuoid_scene::walk::WanderFrame
-pub fn pixtuoid_scene::walk::octile_path_len(&[pixtuoid_scene::layout::Point]) -> u32

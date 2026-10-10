@@ -11,10 +11,9 @@ use std::num::NonZeroU16;
 use enum_map::EnumMap;
 use pixtuoid_core::sprite::Sprite;
 use pixtuoid_core::sprite::error::PackError;
-use pixtuoid_core::sprite::format::{
-    Density, IconArt, Pack, PackContract, Piece, ValidationReport, load_pack_from_strings,
-    validate_pack_animations,
-};
+use pixtuoid_core::sprite::format::{Density, IconArt, Pack, Piece, load_pack_from_strings};
+#[cfg(test)]
+use pixtuoid_core::sprite::format::{PackContract, ValidationReport, validate_pack_animations};
 use strum::VariantArray as _;
 
 use crate::display::Icon;
@@ -382,6 +381,7 @@ fn face_reach(dial: &Sprite) -> Option<f32> {
 /// starts at: the looping fixtures, the appliances' busy loops
 /// ([`appliance_frame_index`]), the typists (`pose::typing_frame`), and every
 /// creature pose that is not a walk.
+#[cfg(test)]
 fn looped_animations() -> Vec<(Piece, usize)> {
     let appliances =
         [Piece::VendingMachine, Piece::Printer].map(|p| (p, lookup::APPLIANCE_IDLE_FRAMES));
@@ -404,7 +404,8 @@ fn looped_animations() -> Vec<(Piece, usize)> {
 
 /// [`validate_pack_animations`], against the loops this crate's painters play
 /// on the Full beat.
-pub fn validate_pack(pack: &Pack) -> ValidationReport {
+#[cfg(test)]
+pub(crate) fn validate_pack(pack: &Pack) -> ValidationReport {
     validate_pack_animations(
         pack,
         &PackContract {
@@ -608,8 +609,7 @@ mod tests {
     fn the_bundled_pack_passes_its_own_validation() {
         let pack = test_default_pack();
         let report = validate_pack(&pack);
-        assert!(!report.has_errors(), "{report:?}");
-        assert_eq!(report.warning_count(), 0, "{report:?}");
+        assert_eq!(report.finding_count(), 0, "{report:?}");
     }
 
     /// A desk's front is its own art, cut down: on the desk's canvas, every
@@ -745,8 +745,7 @@ mod tests {
             "at their base alone"
         );
         let report = validate_pack(&pack);
-        assert!(!report.has_errors(), "{report:?}");
-        assert_eq!(report.warning_count(), 0, "{report:?}");
+        assert_eq!(report.finding_count(), 0, "{report:?}");
         let undrawn = undrawn(&toml, &srcs);
         assert!(undrawn.is_empty(), "undrawn sprites: {undrawn:?}");
     }

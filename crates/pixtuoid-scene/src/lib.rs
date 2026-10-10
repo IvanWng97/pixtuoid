@@ -83,8 +83,8 @@ pub mod par;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
 pub mod pet;
-pub mod physics;
-pub mod pixel_painter;
+pub(crate) mod physics;
+pub(crate) mod pixel_painter;
 pub mod pose;
 pub mod render_scale;
 pub mod sim;

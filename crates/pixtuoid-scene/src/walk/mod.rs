@@ -582,7 +582,7 @@ fn snapshot_back_profile(
 
 /// Octile length of a routed polyline — the same metric A* uses, so the
 /// snapshotted length is consistent with per-segment timing. 0 below 2 points.
-pub fn octile_path_len(path: &[Point]) -> u32 {
+pub(crate) fn octile_path_len(path: &[Point]) -> u32 {
     if path.len() < 2 {
         return 0;
     }

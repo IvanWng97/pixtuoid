@@ -232,7 +232,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 /// later frames compute `t_x1000` against that frozen profile.
 /// [`RouteCtx::history`] is consulted on state transitions so an agent whose
 /// pose flipped mid-wander walks back to the desk instead of teleporting.
-pub fn derive_with_routing(
+pub(crate) fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
     layout: &SceneLayout,

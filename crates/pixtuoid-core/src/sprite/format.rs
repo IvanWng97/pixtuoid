@@ -1040,7 +1040,7 @@ impl Pack {
     /// A painter picks its render scale against these (the scene's
     /// `RenderScale::fit`), since a variant only lands at a scale its density
     /// divides. Only a variant of a registered animation that redraws its base
-    /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
+    /// (`variant_redraws`) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
     pub fn density_variants(&self) -> &[Density] {
         &self.densities
@@ -1891,7 +1891,7 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
 ///
 /// Wider than a frame dimension: a claim past `u16::MAX` stays a size no frame
 /// can meet, where a saturated one would equal a `u16::MAX`-wide frame.
-pub fn claimed_variant_size(base: &Frame, density: Density) -> (u32, u32) {
+pub(crate) fn claimed_variant_size(base: &Frame, density: Density) -> (u32, u32) {
     (
         u32::from(base.width()) * u32::from(density.get()),
         u32::from(base.height()) * u32::from(density.get()),
@@ -1900,7 +1900,7 @@ pub fn claimed_variant_size(base: &Frame, density: Density) -> (u32, u32) {
 
 /// Whether `variant` is exactly the size its density claims over `base`
 /// ([`claimed_variant_size`]).
-pub fn variant_fits(base: &Frame, density: Density, variant: &Frame) -> bool {
+pub(crate) fn variant_fits(base: &Frame, density: Density, variant: &Frame) -> bool {
     claimed_variant_size(base, density) == (u32::from(variant.width()), u32::from(variant.height()))
 }
 
@@ -1908,7 +1908,7 @@ pub fn variant_fits(base: &Frame, density: Density, variant: &Frame) -> bool {
 /// exactly the size its density claims over the matching base frame
 /// ([`variant_fits`]). The one rule a renderer takes a variant by and
 /// [`validate_pack_animations`] passes one by.
-pub fn variant_redraws(base: &Sprite, density: Density, variant: &Sprite) -> bool {
+pub(crate) fn variant_redraws(base: &Sprite, density: Density, variant: &Sprite) -> bool {
     let (base, variant) = (base.frames(), variant.frames());
     !variant.is_empty()
         && variant.len() == base.len()
@@ -1921,6 +1921,7 @@ pub fn variant_redraws(base: &Sprite, density: Density, variant: &Sprite) -> boo
 /// A character frame a hairstyle would dress but for its missing head mark: it
 /// is drawn bare.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct UnmarkedHead {
     /// The animation, e.g. `standing@4x`.
     pub name: String,
@@ -1932,6 +1933,7 @@ pub struct UnmarkedHead {
 /// A view a hairstyle leaves out and a head at its density faces: that head is
 /// drawn bare.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct MissingHairView {
     /// The style's key, e.g. `mop@4x`.
     pub style: String,
@@ -1943,6 +1945,7 @@ pub struct MissingHairView {
 
 /// A hairstyle view with a layer reaching past a character frame's sides.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct HairOverhang {
     /// The style's key, e.g. `mop@4x`.
     pub style: String,
@@ -1957,6 +1960,7 @@ pub struct HairOverhang {
 /// What a loaded pack draws as its author may not have meant: a pack that
 /// can't draw at all does not load ([`PackError`]).
 #[derive(Debug, Default)]
+#[doc(hidden)]
 pub struct ValidationReport {
     /// One per character animation.
     pub unmarked_heads: Vec<UnmarkedHead>,
@@ -1977,6 +1981,7 @@ pub struct ValidationReport {
 /// A density variant's timing that differs from its base's, which is the
 /// timing that plays.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct UnreadTiming {
     /// The variant, e.g. `typing@4x`.
     pub name: String,
@@ -1986,6 +1991,7 @@ pub struct UnreadTiming {
 
 /// The timing field an [`UnreadTiming`] sets apart, with both values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
 pub enum UnreadField {
     /// [`Sprite::frame_ms`].
     FrameMs {
@@ -2005,6 +2011,7 @@ pub enum UnreadField {
 
 /// A loop whose `frame_ms` is not a whole number of the caller's beats.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct OffBeatLoop {
     /// The animation.
     pub name: String,
@@ -2014,6 +2021,7 @@ pub struct OffBeatLoop {
 
 /// What only the caller knows of a pack.
 #[derive(Debug, Clone, Copy, Default)]
+#[doc(hidden)]
 pub struct PackContract<'a> {
     /// The pieces the caller loops on its beat, unless they are walks, each
     /// with the frame its loop starts at: the frames before it stand still.
@@ -2023,49 +2031,30 @@ pub struct PackContract<'a> {
 }
 
 impl ValidationReport {
-    /// How many findings make the pack unusable: the fields this destructure counts.
-    pub fn error_count(&self) -> usize {
-        // No `..`: a new report field must be classed error-or-not here before
-        // this compiles.
-        let ValidationReport {
-            unmarked_heads: _,
-            missing_hair_views: _,
-            overhanging_hair: _,
-            orphan_hairstyles,
-            unread_variant_timing: _,
-            off_beat_loops: _,
-        } = self;
-        orphan_hairstyles.len()
-    }
-
-    /// How many findings leave the pack usable but not as authored: the fields
-    /// this destructure counts.
-    pub fn warning_count(&self) -> usize {
-        // No `..`, for the reason `error_count` gives.
+    /// How many findings the report holds.
+    pub fn finding_count(&self) -> usize {
+        // No `..`: a new report field must be counted here before this compiles.
         let ValidationReport {
             unmarked_heads,
             missing_hair_views,
             overhanging_hair,
-            orphan_hairstyles: _,
+            orphan_hairstyles,
             unread_variant_timing,
             off_beat_loops,
         } = self;
         unmarked_heads.len()
             + missing_hair_views.len()
             + overhanging_hair.len()
+            + orphan_hairstyles.len()
             + unread_variant_timing.len()
             + off_beat_loops.len()
-    }
-
-    /// True when the pack is unusable; see [`error_count`](Self::error_count).
-    pub fn has_errors(&self) -> bool {
-        self.error_count() > 0
     }
 }
 
 /// Check a loaded pack's variants' timing, its hairstyles against the
 /// characters they dress, and its loops against what only the caller knows
 /// ([`PackContract`]).
+#[doc(hidden)]
 pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> ValidationReport {
     let PackContract { loops, beat_ms } = *contract;
     let mut report = ValidationReport {
@@ -2481,7 +2470,7 @@ mod validation_floor_tests {
             SIZED_FRAMES,
         );
         let report = validate_pack_animations(&pack, &PackContract::default());
-        let (errors, warnings) = (report.error_count(), report.warning_count());
+        let findings = report.finding_count();
         let stride = |n| NonZeroU16::new(n).expect("nonzero");
         assert_eq!(
             report.unread_variant_timing,
@@ -2513,15 +2502,10 @@ mod validation_floor_tests {
             unread_variant_timing: Vec::new(),
             ..report
         };
-        assert_eq!(
-            timed_alike.error_count(),
-            errors,
-            "the variant still draws: no error"
-        );
-        assert_eq!(timed_alike.warning_count() + 3, warnings);
+        assert_eq!(timed_alike.finding_count() + 3, findings);
     }
 
-    /// A caller's loop off its beat is reported, a warning; one on it, a
+    /// A caller's loop off its beat is reported; one on it, a
     /// one-frame one, a strided one, one whose loop past its still frames is a
     /// single frame, and any the caller doesn't loop are not.
     #[test]
@@ -2552,11 +2536,6 @@ mod validation_floor_tests {
                 name: "typing".to_string(),
                 frame_ms: 400,
             }]
-        );
-        assert_eq!(
-            report.error_count(),
-            validate_pack_animations(&pack, &PackContract::default()).error_count(),
-            "an off-beat loop still plays: no error"
         );
     }
 
@@ -2824,10 +2803,9 @@ mod validation_floor_tests {
         );
     }
 
-    /// Pins [`ValidationReport::warning_count`] and
-    /// [`ValidationReport::error_count`]: one finding in every field.
+    /// Pins [`ValidationReport::finding_count`]: one finding in every field.
     #[test]
-    fn every_finding_is_counted_once_as_an_error_or_a_warning() {
+    fn every_finding_is_counted_once() {
         let report = ValidationReport {
             unmarked_heads: vec![UnmarkedHead {
                 name: "standing@4x".to_string(),
@@ -2857,8 +2835,7 @@ mod validation_floor_tests {
                 frame_ms: 400,
             }],
         };
-        assert_eq!(report.error_count(), 1);
-        assert_eq!(report.warning_count(), 5);
+        assert_eq!(report.finding_count(), 6);
     }
 
     /// A 1x `standing` and its 2x redraw `body`, dressed by `hairstyles`.
@@ -2884,14 +2861,11 @@ mod validation_floor_tests {
         validate_pack_animations(pack, &PackContract::default())
     }
 
-    /// `report`'s errors and warnings past those of the same pack undressed.
-    fn hair_counts(report: &ValidationReport) -> (usize, usize) {
+    /// `report`'s findings past those of the same pack undressed.
+    fn hair_counts(report: &ValidationReport) -> usize {
         let bare =
             validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &PackContract::default());
-        (
-            report.error_count() - bare.error_count(),
-            report.warning_count() - bare.warning_count(),
-        )
+        report.finding_count() - bare.finding_count()
     }
 
     #[test]
@@ -2905,7 +2879,7 @@ mod validation_floor_tests {
     }
 
     #[test]
-    fn a_frame_the_styles_would_dress_without_a_head_mark_is_a_warning() {
+    fn a_frame_the_styles_would_dress_without_a_head_mark_is_reported() {
         let hair = ("o.sprite", "@frame 0\n@mark head.front 0 0\nA");
         let bald = "@frame 0\nA A\nA A";
         let report = hair_findings(&dressed_pack(bald, MOP, &[hair]));
@@ -2916,14 +2890,14 @@ mod validation_floor_tests {
                 frame: 0
             }]
         );
-        assert_eq!(hair_counts(&report), (0, 1));
+        assert_eq!(hair_counts(&report), 1);
 
         let undressed = hair_findings(&dressed_pack(bald, "", &[]));
         assert!(undressed.unmarked_heads.is_empty(), "no style to dress it");
     }
 
     #[test]
-    fn a_style_without_a_view_a_head_faces_is_a_warning() {
+    fn a_style_without_a_view_a_head_faces_is_reported() {
         let hair = ("o.sprite", "@frame 0\n@mark head.front 0 0\nA");
         let back = "@frame 0\n@mark head.back 0 0\nA A\nA A";
         let report = hair_findings(&dressed_pack(back, MOP, &[hair]));
@@ -2935,11 +2909,11 @@ mod validation_floor_tests {
                 name: "standing@2x".into(),
             }]
         );
-        assert_eq!(hair_counts(&report), (0, 1));
+        assert_eq!(hair_counts(&report), 1);
     }
 
     #[test]
-    fn hair_past_a_frames_side_is_a_warning() {
+    fn hair_past_a_frames_side_is_reported() {
         for (hair, what) in [
             ("@frame 0\n@mark head.front 0 0\nA A A", "right"),
             ("@frame 0\n@mark head.front 1 0\nA A", "left"),
@@ -2955,7 +2929,7 @@ mod validation_floor_tests {
                 }],
                 "{what}"
             );
-            assert_eq!(hair_counts(&report), (0, 1));
+            assert_eq!(hair_counts(&report), 1);
         }
         for (hair, what) in [
             (
@@ -2970,12 +2944,12 @@ mod validation_floor_tests {
     }
 
     #[test]
-    fn a_style_at_a_density_no_character_is_drawn_at_is_an_error() {
+    fn a_style_at_a_density_no_character_is_drawn_at_is_reported() {
         let hair = ("o.sprite", "@frame 0\n@mark head.front 0 0\nA");
         let four = "[hairstyles.\"mop@4x\"]\nfront={ over=\"o.sprite\" }\n";
         let report = hair_findings(&dressed_pack(FRONT_BODY, four, &[hair]));
         assert_eq!(report.orphan_hairstyles, vec!["mop@4x".to_string()]);
-        assert_eq!(hair_counts(&report), (1, 0));
+        assert_eq!(hair_counts(&report), 1);
     }
 }
 

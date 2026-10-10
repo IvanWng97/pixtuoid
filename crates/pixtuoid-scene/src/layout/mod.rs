@@ -403,7 +403,7 @@ pub const CELL_ROWS: u16 = 2;
 
 /// The rows over a door whose top row is `door_y` that the terminal's floor
 /// indicator writes its text across: the whole cell above the door's.
-pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
+pub(crate) fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
     let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
     top..top + CELL_ROWS
 }

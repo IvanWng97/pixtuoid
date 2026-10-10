@@ -21,7 +21,7 @@ use crate::theme::Theme;
 
 /// The oldest in-scene agent's age in seconds — every agent still in the scene
 /// (live or walking out; swept ones are gone).
-pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
+pub(crate) fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
     scene
         .agents
         .values()
@@ -33,7 +33,7 @@ pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {
 
 /// Format a duration in seconds as a compact `"{h}h{m}m"` / `"{m}m"` / `"<1m"`
 /// string, with no prefix.
-pub fn compact_hms(secs: u64) -> String {
+pub(crate) fn compact_hms(secs: u64) -> String {
     if secs >= 3600 {
         format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
     } else if secs >= 60 {
@@ -228,7 +228,7 @@ impl OfficeMood {
 ///
 /// Its text is ASCII and each lamp one cell, so a roll keeps every column in
 /// place (pinned by the TUI's `every_l2_face_is_one_terminal_column_per_char`).
-pub fn board_mood_segments(counts: StateCounts, lit: bool) -> Vec<BoardSegment> {
+pub(crate) fn board_mood_segments(counts: StateCounts, lit: bool) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
             "\u{2014} office empty \u{2014}",
