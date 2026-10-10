@@ -6,7 +6,7 @@
 use pixtuoid_core::sprite::Rgb;
 
 use crate::display::Span;
-use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtPx, ArtRect, Pen, layout_point};
 use crate::lighting::{Emitter, EmitterKind};
 use crate::theme::Theme;
 
@@ -150,15 +150,14 @@ impl LightView {
         }
         let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
         let (ax1, ay1) = (pen.art(x1).0, pen.art(y1).0);
-        let d = f32::from(pen.art(1).0);
-        // An art pixel's centre, in layout cells: at one art pixel a cell, the
-        // cell itself, as the classic samples it.
-        let at = |a: u16| (f32::from(a) + 0.5) / d - 0.5;
+        let d = pen.art(1).0;
         let mut solid = false;
         let lift: Vec<u8> = (ay0..ay1)
             .flat_map(|ay| (ax0..ax1).map(move |ax| (ax, ay)))
             .map(|(ax, ay)| {
-                let Some(level) = emitter.level_at_f(at(ax), at(ay)) else {
+                let Some(level) =
+                    emitter.level_at_f(layout_point(ArtPx(ax), d), layout_point(ArtPx(ay), d))
+                else {
                     return 0;
                 };
                 let stops = level * LIFT_STOPS_PER_LEVEL;

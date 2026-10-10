@@ -13,6 +13,14 @@ use crate::render_scale::RenderScale;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ArtPx(pub(crate) u16);
 
+/// Where art pixel `a`'s centre lies on the layout's units at `d` art pixels to
+/// the unit, with a unit's own centre on its integer: at one to the unit, the
+/// unit itself, as the classic samples it. The continuous twin of
+/// [`Pen::logical`]; a `d` of zero reads as one.
+pub(crate) fn layout_point(a: ArtPx, d: u16) -> f32 {
+    (f32::from(a.0) + 0.5) / f32::from(d.max(1)) - 0.5
+}
+
 /// A length or coordinate in a render's buffer pixels, which a [`Pen`] turns
 /// an [`ArtPx`] into and back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
