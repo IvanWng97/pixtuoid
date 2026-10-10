@@ -17,7 +17,7 @@
       "type": "boolean"
     },
     "health": {
-      "description": "The source's worst install or decode issue as one line, or `null` if none.",
+      "description": "The source's worst issue as one line, or `null` if none was found: a broken\ninstall or decode drift (connected sources only), or hooks an older release\nleft that still fire.",
       "type": [
         "string",
         "null"

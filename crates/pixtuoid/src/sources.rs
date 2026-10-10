@@ -141,7 +141,9 @@ pub(crate) struct SourceStatus {
     pub display_name: String,
     pub connected: bool,
     pub cli_present: bool,
-    /// The source's worst install or decode issue as one line, or `null` if none.
+    /// The source's worst issue as one line, or `null` if none was found: a broken
+    /// install or decode drift (connected sources only), or hooks an older release
+    /// left that still fire.
     // Generates `health?: string | null`. Do NOT add `schemars(required)` to force
     // it required: that STRIPS the `| null` → the WRONG `health: string`, and the
     // wire CAN be null. Optional is a harmless superset; nullable is load-bearing.
