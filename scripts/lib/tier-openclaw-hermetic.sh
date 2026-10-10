@@ -129,8 +129,10 @@ echo "[6] before_agent_run -> busy"
 send_a '{"type":"before_agent_run","runId":"r2"}'
 expect busy busy-2
 
-echo "[7] agent_end success:false -> degraded (#317)"
-send_a '{"type":"agent_end","runId":"r2","success":false}'
+# The pair the plugin sends for a failed run: it stamps `errored` on every
+# `success: false` (crates/pixtuoid/src/install/openclaw_plugin.js).
+echo "[7] agent_end success:false, errored:true -> degraded (#317)"
+send_a '{"type":"agent_end","runId":"r2","success":false,"errored":true}'
 expect degraded degraded
 
 echo "[8] before_agent_run -> busy (re-attempt clears degraded)"
@@ -140,6 +142,14 @@ expect busy busy-retry
 echo "[9] agent_end success:true -> idle (heals)"
 send_a '{"type":"agent_end","runId":"r3","success":true}'
 expect idle idle-healed
+
+echo "[9a] before_agent_run -> busy"
+send_a '{"type":"before_agent_run","runId":"r4"}'
+expect busy busy-cancel
+
+echo "[9b] agent_end success:false, errored:false -> idle (a cancel is no degradation)"
+send_a '{"type":"agent_end","runId":"r4","success":false,"errored":false}'
+expect idle idle-cancelled
 
 # `PidSeen` adoption is None-ONLY, and the shim stamps a resolved _pid onto every
 # event lacking one — so [5]'s gateway_start already armed current_pid, and a bare

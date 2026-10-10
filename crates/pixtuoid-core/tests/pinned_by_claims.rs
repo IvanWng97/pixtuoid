@@ -55,7 +55,7 @@ fn flatten_wrapped_comments(src: &str) -> String {
 
 /// How far a claim's name may trail "pinned by" ("pinned by the TUI's `x`")
 /// and still be the claim's.
-const QUALIFIER_MAX: usize = 24;
+const MAX_QUALIFIER_BYTES: usize = 24;
 
 /// The identifier a `Pinned by` claim names, if the line makes one.
 ///
@@ -69,7 +69,7 @@ fn claims_in(text: &str) -> Vec<String> {
         rest = &rest[idx + "inned by".len()..];
         let Some(tick) = rest.find('`') else { break };
         let qualifier = &rest[..tick];
-        if qualifier.len() > QUALIFIER_MAX || qualifier.contains(['.', ',', ';', ':', '\n']) {
+        if qualifier.len() > MAX_QUALIFIER_BYTES || qualifier.contains(['.', ',', ';', ':', '\n']) {
             continue;
         }
         let body = &rest[tick + 1..];
@@ -174,9 +174,15 @@ fn the_claim_scanner_fires_on_an_orphan_and_stays_silent_on_a_real_one() {
         claims_in("/// Pinned by the shared harness. Its `fixture_name` differs.").is_empty(),
         "a sentence end closes the claim before a later name"
     );
+    // The qualifier counts the spaces either side of it.
+    let qualified = |len: usize| format!("/// pinned by {} `qualified_name`", "x".repeat(len - 2));
+    assert_eq!(
+        claims_in(&qualified(MAX_QUALIFIER_BYTES)),
+        ["qualified_name"],
+        "a qualifier at the bound is still the claim's"
+    );
     assert!(
-        claims_in("/// Pinned by every test that renders a frame through `render_name`.")
-            .is_empty(),
+        claims_in(&qualified(MAX_QUALIFIER_BYTES + 1)).is_empty(),
         "a name past the qualifier bound is no longer the claim's"
     );
     assert!(

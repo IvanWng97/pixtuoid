@@ -24,6 +24,9 @@ pub(super) const PLANT_OBSTACLE_CLEARANCE_PX: u16 = 3;
 /// the spawn threshold never routes around furniture.
 pub(super) const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
 
+const COUCH_X_PCT: u16 = 35;
+const COUCH_BELOW_TOP_MARGIN: u16 = 3;
+
 fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point {
     // `west_clear_x` is the divider wall's east edge — the westmost seat's ground must
     // stay east of it (== band start with no wall, so the clamp is a no-op).
@@ -32,8 +35,9 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
     // Its side table stands west of it ([`LoungeFlanks`]).
     let couch_west_reach = seat_reach.max(LoungeFlanks::west_reach());
     Point {
-        x: (cubicle_band.x + pct(cubicle_band.width, 35)).max(west_clear_x + couch_west_reach),
-        y: top_margin + 3,
+        x: (cubicle_band.x + pct(cubicle_band.width, COUCH_X_PCT))
+            .max(west_clear_x + couch_west_reach),
+        y: top_margin + COUCH_BELOW_TOP_MARGIN,
     }
 }
 
@@ -828,6 +832,8 @@ fn place_wall_decor(
     wall_decor
 }
 
+const BOOKSHELF_X_PCT: u16 = 18;
+
 /// The bookshelf's wall slot — flush east of the meeting screen, spread further past
 /// the sofa's drain edge, or back to flush when that spread would pierce the divider.
 fn bookshelf_x(
@@ -837,7 +843,7 @@ fn bookshelf_x(
     meeting_screen_x: Option<u16>,
     meeting_room: Option<&MeetingRoom>,
 ) -> u16 {
-    let x = pct(buf_w, 18);
+    let x = pct(buf_w, BOOKSHELF_X_PCT);
     match (meeting_screen_x, meeting_room) {
         (Some(sx), Some(mr)) => {
             // The ONE flush slot: screen east edge + a 2-px gap, so the two grounds'
