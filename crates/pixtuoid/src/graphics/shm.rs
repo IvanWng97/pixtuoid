@@ -158,7 +158,7 @@ fn unlink(name: &str) {
 }
 
 /// Unlink every object this process still holds: at teardown, and in the
-/// unwind, so none outlives the process.
+/// unwind, so none outlives a quit [`QuitArms`](crate::runtime::QuitArms) catches.
 pub(crate) fn unlink_all() {
     ledger().drain();
 }

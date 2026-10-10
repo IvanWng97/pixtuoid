@@ -230,7 +230,7 @@ pub(crate) fn modal_mouse(
         if !on_url {
             return ModalMouse::Inert;
         }
-        let _ = open::that(widgets::release_url(env!("CARGO_PKG_VERSION")));
+        crate::open_url(&widgets::release_url(env!("CARGO_PKG_VERSION")));
         return ModalMouse::Took;
     }
     if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open {

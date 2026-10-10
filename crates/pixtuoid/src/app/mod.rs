@@ -113,12 +113,20 @@ pub fn run() -> Result<()> {
                 graphics,
                 drift,
             )?;
-            runtime::run(rc)
+            // After every Drop the run held: the unwind is done, so the signal can now
+            // end the process the way it would have.
+            if let Some(signal) = runtime::run(rc)? {
+                signal.reraise();
+            }
+            Ok(())
         }
         Cmd::Floating { source } => {
             // No desk cap: floating seeds its capacity from the window.
             let rc = build_run_config(cli_theme.as_deref(), source, None, false, None, drift)?;
-            floating::run(rc)
+            if let Some(signal) = floating::run(rc)? {
+                signal.reraise();
+            }
+            Ok(())
         }
         Cmd::Doctor { graphics } => {
             let report = doctor::run(&crate::run_log::LogLocation::from_env(), graphics)?;

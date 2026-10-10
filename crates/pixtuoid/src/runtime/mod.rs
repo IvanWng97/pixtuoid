@@ -219,85 +219,145 @@ pub(crate) fn unseen_deaths<'a>(deaths: &'a [SourceDeath], seen: &mut usize) -> 
 }
 
 /// A boxed quit arm.
-type QuitArm<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+type QuitArm = std::pin::Pin<Box<dyn std::future::Future<Output = QuitSignal> + Send>>;
 
-/// SIGINT and SIGTERM, their handlers installed at [`arm`](Self::arm): armed
-/// before a painter sets up what its exit undoes (the TUI's terminal modes, the
-/// floating window's saved geometry), so neither signal can land in between and
-/// kill the process by its default disposition.
-pub(crate) struct QuitArms {
-    ctrl_c: QuitArm<std::io::Result<()>>,
-    terminate: QuitArm<()>,
+/// The signals that mean quit, one list. SIGHUP is the terminal window closing.
+#[cfg(unix)]
+const QUIT_SIGNALS: [(tokio::signal::unix::SignalKind, &str); 4] = {
+    use tokio::signal::unix::SignalKind;
+    [
+        (SignalKind::interrupt(), "SIGINT"),
+        (SignalKind::terminate(), "SIGTERM"),
+        (SignalKind::hangup(), "SIGHUP"),
+        (SignalKind::quit(), "SIGQUIT"),
+    ]
+};
+
+/// The quit signal that ended a run. After the painter's teardown,
+/// [`reraise`](Self::reraise) hands it back to the kernel, so the exit status and a
+/// SIGQUIT core dump are its own (glibc, "Termination in Handler"); for SIGINT a
+/// waiting shell reads the death as the user's interrupt (cons.org/cracauer/sigint.html).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct QuitSignal(#[cfg(unix)] std::os::raw::c_int);
+
+impl QuitSignal {
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        #[cfg(unix)]
+        return Self(libc::SIGTERM);
+        #[cfg(not(unix))]
+        Self()
+    }
+
+    /// Deliver the signal again under its default disposition. Returns only
+    /// where the platform has no such signal.
+    pub(crate) fn reraise(self) {
+        #[cfg(unix)]
+        // SAFETY: resetting a disposition and raising the signal that already
+        // ran this process's handler.
+        unsafe {
+            libc::signal(self.0, libc::SIG_DFL);
+            libc::raise(self.0);
+        }
+    }
 }
+
+/// The platform's quit signals (`QUIT_SIGNALS`; `windows_arms` on Windows), their
+/// handlers installed at [`arm`](Self::arm): armed before a painter sets up what its exit
+/// undoes (the TUI's terminal modes, the floating window's saved geometry, the
+/// kitty shared-memory unlink), so no signal can land in between and kill the
+/// process by its default disposition. A signal inherited as SIG_IGN stays
+/// unarmed: a handler would replace the ignore that `nohup`, or a
+/// non-job-control shell for a background job (POSIX Shell §2.12), gave a run
+/// meant to outlive its terminal.
+pub(crate) struct QuitArms(Vec<QuitArm>);
 
 impl QuitArms {
     pub(crate) fn arm() -> Self {
-        Self {
-            ctrl_c: pin_ctrl_c(),
-            #[cfg(unix)]
-            terminate: Box::pin(terminate_signal()),
-            #[cfg(not(unix))]
-            terminate: Box::pin(std::future::pending()),
-        }
+        #[cfg(unix)]
+        let arms = QUIT_SIGNALS.into_iter().filter_map(arm_signal).collect();
+        #[cfg(not(unix))]
+        let arms = windows_arms();
+        Self(arms)
     }
 
-    /// Either signal's arrival. Pin it ONCE outside a loop: a per-iteration
-    /// future drops the subscription mid-gap.
-    pub(crate) async fn signalled(self) {
-        let Self { ctrl_c, terminate } = self;
-        let ctrl_c = async {
-            if let Err(e) = ctrl_c.await {
-                tracing::error!(
-                    error = %e,
-                    "SIGINT handler registration failed — an external Ctrl-C will not quit cleanly"
-                );
-                // A quit arm resolving on a non-event would tear the painter down.
-                std::future::pending::<()>().await;
-            }
-        };
-        tokio::select! {
-            () = ctrl_c => {}
-            () = terminate => {}
-        }
-    }
-}
-
-/// The SIGINT arm. On unix the handler is installed at the call, not the first
-/// poll as `tokio::signal::ctrl_c` does.
-fn pin_ctrl_c() -> QuitArm<std::io::Result<()>> {
-    #[cfg(unix)]
-    {
-        let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
-        Box::pin(async move {
-            sig?.recv().await;
-            Ok(())
-        })
-    }
-    #[cfg(not(unix))]
-    Box::pin(tokio::signal::ctrl_c())
-}
-
-/// The SIGTERM arm. A registration failure and a closed stream both park on
-/// `pending`: resolving a quit arm on a non-event would tear the painter down.
-#[cfg(unix)]
-fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
-    let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
-    async move {
-        match sig {
-            Ok(mut s) => {
-                if s.recv().await.is_none() {
-                    std::future::pending::<()>().await;
+    /// The first armed signal's arrival. Pin it ONCE outside a loop: a
+    /// per-iteration future drops the subscription mid-gap.
+    pub(crate) async fn signalled(mut self) -> QuitSignal {
+        std::future::poll_fn(|cx| {
+            for arm in &mut self.0 {
+                if let std::task::Poll::Ready(fired) = arm.as_mut().poll(cx) {
+                    return std::task::Poll::Ready(fired);
                 }
             }
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    "SIGTERM handler registration failed — an external SIGTERM will not quit cleanly"
-                );
-                std::future::pending::<()>().await;
-            }
+            std::task::Poll::Pending
+        })
+        .await
+    }
+}
+
+/// One arm, its handler installed at the call. `None` when the signal was inherited
+/// as ignored or its registration failed: an arm resolving on a non-event would
+/// tear the painter down.
+#[cfg(unix)]
+fn arm_signal((kind, name): (tokio::signal::unix::SignalKind, &'static str)) -> Option<QuitArm> {
+    let raw = kind.as_raw_value();
+    if inherited_ignored(raw) {
+        return None;
+    }
+    match tokio::signal::unix::signal(kind) {
+        Ok(mut sig) => Some(Box::pin(async move {
+            sig.recv().await;
+            QuitSignal(raw)
+        })),
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                signal = name,
+                "signal handler registration failed — an external signal will not quit cleanly"
+            );
+            None
         }
     }
+}
+
+#[cfg(unix)]
+fn inherited_ignored(raw: std::os::raw::c_int) -> bool {
+    // SAFETY: a null `act` only reads the current disposition into `old`.
+    unsafe {
+        let mut old: libc::sigaction = std::mem::zeroed();
+        libc::sigaction(raw, std::ptr::null(), &mut old) == 0 && old.sa_sigaction == libc::SIG_IGN
+    }
+}
+
+/// Ctrl-C, Ctrl-Break and console close (the Windows twin of SIGHUP). Raw mode
+/// turns Ctrl-C into a key, but "CTRL+BREAK is always treated as a signal"
+/// (<https://learn.microsoft.com/en-us/windows/console/ctrl-c-and-ctrl-break-signals>),
+/// and the close handler has [a few seconds](https://learn.microsoft.com/en-us/windows/console/handlerroutine)
+/// before the OS ends the process, which a painter's teardown fits.
+#[cfg(not(unix))]
+fn windows_arms() -> Vec<QuitArm> {
+    use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close};
+    let mut arms: Vec<QuitArm> = Vec::new();
+    macro_rules! arm {
+        ($register:expr, $name:literal) => {
+            match $register {
+                Ok(mut sig) => arms.push(Box::pin(async move {
+                    sig.recv().await;
+                    QuitSignal()
+                })),
+                Err(e) => tracing::error!(
+                    error = %e,
+                    signal = $name,
+                    "console handler registration failed — an external signal will not quit cleanly"
+                ),
+            }
+        };
+    }
+    arm!(ctrl_c(), "Ctrl-C");
+    arm!(ctrl_break(), "Ctrl-Break");
+    arm!(ctrl_close(), "console close");
+    arms
 }
 
 #[cfg(test)]
@@ -699,26 +759,39 @@ mod tests {
 }
 
 /// Armed quit arms catch a signal raised before they are first polled — the
-/// window between arming and the loop that listens.
+/// window between arming and the loop that listens. The dispositions are
+/// process-wide, which only nextest's process per test (justfile `test`) isolates.
 #[cfg(all(test, unix))]
 mod quit_arms {
-    use super::QuitArms;
+    use super::{QUIT_SIGNALS, QuitArms, QuitSignal};
 
-    #[tokio::test]
-    async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
-        let QuitArms { ctrl_c, terminate } = QuitArms::arm();
-        // SAFETY: raising a signal this process handles from here on.
-        unsafe {
-            libc::raise(libc::SIGINT);
-            libc::raise(libc::SIGTERM);
+    /// A test never reads ambient state.
+    fn default_dispositions() {
+        for (kind, _) in QUIT_SIGNALS {
+            // SAFETY: resetting a disposition before any arm exists.
+            unsafe {
+                libc::signal(kind.as_raw_value(), libc::SIG_DFL);
+            }
         }
-        ctrl_c.await.expect("the SIGINT arm resolves");
-        terminate.await;
     }
 
     #[tokio::test]
-    async fn either_signal_alone_is_a_quit() {
-        for signal in [libc::SIGINT, libc::SIGTERM] {
+    async fn a_signal_before_the_first_poll_is_caught_not_fatal() {
+        default_dispositions();
+        let arms = QuitArms::arm();
+        for (kind, _) in QUIT_SIGNALS {
+            // SAFETY: raising a signal this process handles from here on.
+            unsafe {
+                libc::raise(kind.as_raw_value());
+            }
+        }
+        arms.signalled().await;
+    }
+
+    #[tokio::test]
+    async fn any_one_signal_alone_is_a_quit_and_is_the_one_that_fired() {
+        default_dispositions();
+        for (kind, name) in QUIT_SIGNALS {
             let mut quit = Box::pin(QuitArms::arm().signalled());
             assert!(
                 tokio::time::timeout(std::time::Duration::from_millis(100), &mut quit)
@@ -728,11 +801,67 @@ mod quit_arms {
             );
             // SAFETY: raising a signal this process handles from here on.
             unsafe {
-                libc::raise(signal);
+                libc::raise(kind.as_raw_value());
             }
-            tokio::time::timeout(std::time::Duration::from_secs(5), quit)
+            let fired = tokio::time::timeout(std::time::Duration::from_secs(5), quit)
                 .await
-                .unwrap_or_else(|_| panic!("signal {signal} did not quit"));
+                .unwrap_or_else(|_| panic!("{name} did not quit"));
+            assert_eq!(fired, QuitSignal(kind.as_raw_value()), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_signal_inherited_as_ignored_stays_ignored() {
+        for (kind, name) in QUIT_SIGNALS {
+            let raw = kind.as_raw_value();
+            // SAFETY: process-wide disposition; the test raises only this signal.
+            unsafe {
+                libc::signal(raw, libc::SIG_IGN);
+            }
+            let mut quit = Box::pin(QuitArms::arm().signalled());
+            // SAFETY: the signal is ignored.
+            unsafe {
+                libc::raise(raw);
+            }
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(200), &mut quit)
+                    .await
+                    .is_err(),
+                "an ignored {name} must not quit"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_registration_the_runtime_refuses_arms_nothing() {
+        use tokio::signal::unix::SignalKind;
+        assert!(super::arm_signal((SignalKind::from_raw(libc::SIGKILL), "SIGKILL")).is_none());
+    }
+
+    /// The kernel's own verdict on a re-raised signal, read from a child that
+    /// raises it: a fork, because the raise ends the process. The child starts
+    /// with the signal ignored, so only `reraise`'s own reset can end it.
+    #[test]
+    fn reraise_ends_the_process_by_the_signal() {
+        for raw in [libc::SIGTERM, libc::SIGHUP] {
+            // SAFETY: the child only resets a disposition and raises, then
+            // `_exit`s if the raise returned.
+            let status = unsafe {
+                let pid = libc::fork();
+                assert!(pid >= 0, "fork");
+                if pid == 0 {
+                    libc::signal(raw, libc::SIG_IGN);
+                    QuitSignal(raw).reraise();
+                    libc::_exit(0);
+                }
+                let mut status = 0;
+                assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
+                status
+            };
+            assert!(
+                libc::WIFSIGNALED(status) && libc::WTERMSIG(status) == raw,
+                "signal {raw}: wait status {status:#x}"
+            );
         }
     }
 }

@@ -1,10 +1,10 @@
 //! The async runtime glue: builds the tokio runtime, spawns the reducer
 //! task + sources, binds the hook socket, and drives either the TUI or the
-//! headless summary loop until Ctrl-C (or, headless, until the summary's
-//! reader leaves).
+//! headless summary loop until a quit signal ([`super::QuitArms`]) or, headless,
+//! until the summary's reader leaves.
 //!
 //! `run` and `run_async` are structurally unreachable by a headless test (a
-//! real tokio runtime + `block_on` + `ctrl_c` + socket bind), so this file is
+//! real tokio runtime + `block_on` + the quit arms + socket bind), so this file is
 //! coverage-excluded and stays a shell: a DECISION lives in a covered sibling,
 //! as the connection gate does in [`super::gate`], or behind an injected seam
 //! tested here, as the headless loop's signal and stdout are.
@@ -30,14 +30,17 @@ use pixtuoid_core::{Reducer, SceneState, TaggedReceiver};
 use tokio::sync::watch;
 
 use super::gate;
-use super::{ConnectedSources, RunConfig, SceneRx, resolve_boot_caps, summarize};
+use super::{
+    ConnectedSources, QuitArms, QuitSignal, RunConfig, SceneRx, resolve_boot_caps, summarize,
+};
 
-/// Boot the TUI (unless headless) and drive the source pipeline until it exits.
+/// Boot the TUI (unless headless) and drive the source pipeline until it exits;
+/// the quit signal that ended it, for the caller to re-raise.
 ///
 /// # Errors
 ///
 /// If the sprite pack fails to load, the tokio runtime cannot be built, or the headless loop or TUI session fails.
-pub(crate) fn run(cfg: RunConfig) -> Result<()> {
+pub(crate) fn run(cfg: RunConfig) -> Result<Option<QuitSignal>> {
     // Before tokio and the boot caps: the query reads the terminal while no
     // other thread does, and once the cutaway paints, the boot seed is the
     // plan's geometry.
@@ -70,7 +73,7 @@ fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
     Ok((pack, plan, motion))
 }
 
-async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
+async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<Option<QuitSignal>> {
     let RunConfig {
         socket,
         projects_root,
@@ -288,28 +291,23 @@ pub(crate) async fn reducer_task(
 async fn headless_loop(
     scene_rx: SceneRx,
     health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
-) -> Result<()> {
-    // ONE SIGINT listener for the loop's lifetime. A fresh `ctrl_c()` per select!
-    // iteration would drop the old listener while the sleep arm runs, and tokio's
-    // process-global handler suppresses default termination — so a SIGINT landing
-    // in that gap notifies zero listeners and is silently lost. Boxed so the loop
-    // can disarm a registration FAILURE (a resolved future must never be polled
-    // again), and injected so that arm is testable in-process.
+) -> Result<Option<QuitSignal>> {
     headless_loop_with_signal(
         scene_rx,
         health_rx,
-        Box::pin(tokio::signal::ctrl_c()),
+        Box::pin(QuitArms::arm().signalled()),
         std::io::stdout(),
     )
     .await
 }
 
+/// `Ok(None)` when the reader left (`| head`) rather than a quit signal.
 async fn headless_loop_with_signal(
     mut scene_rx: SceneRx,
     mut health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
-    mut ctrl_c: std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>,
+    mut quit: std::pin::Pin<Box<dyn std::future::Future<Output = QuitSignal> + Send>>,
     out: impl std::io::Write,
-) -> Result<()> {
+) -> Result<Option<QuitSignal>> {
     use std::io::Write;
     let mut out = crate::CliOut::new(out);
     tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
@@ -324,7 +322,7 @@ async fn headless_loop_with_signal(
         // (`| head`) ends the run.
         if out.closed() {
             tracing::info!("stdout closed — shutting down");
-            return Ok(());
+            return Ok(None);
         }
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
@@ -341,24 +339,9 @@ async fn headless_loop_with_signal(
                     writeln!(out, "{}", super::format_source_death(d))?;
                 }
             }
-            res = &mut ctrl_c => match res {
-                Ok(()) => {
-                    tracing::info!("shutting down");
-                    return Ok(());
-                }
-                Err(e) => {
-                    // A failed handler registration resolves Err on the FIRST poll,
-                    // so a wildcard match here exits headless mode instantly and
-                    // silently with status 0. Disarm and keep serving: the default
-                    // SIGINT disposition was never replaced, so Ctrl-C still
-                    // terminates the process.
-                    tracing::error!(
-                        error = %e,
-                        "Ctrl-C handler registration failed — headless loop \
-                         continues; SIGINT falls back to the default disposition"
-                    );
-                    ctrl_c = Box::pin(std::future::pending());
-                }
+            signal = &mut quit => {
+                tracing::info!("shutting down");
+                return Ok(Some(signal));
             }
         }
     }
@@ -415,35 +398,15 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn headless_loop_shuts_down_on_a_delivered_signal() {
         let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
-        headless_loop_with_signal(
+        let fired = headless_loop_with_signal(
             scene_rx,
             health_rx,
-            Box::pin(async { Ok(()) }),
+            Box::pin(async { QuitSignal::test() }),
             std::io::sink(),
         )
         .await
-        .expect("a delivered Ctrl-C is a clean shutdown");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn headless_loop_keeps_serving_after_a_failed_signal_registration() {
-        // Still-serving is proved by the timeout ELAPSING — on the paused clock
-        // that is instant.
-        let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
-        let res = tokio::time::timeout(
-            Duration::from_secs(5),
-            headless_loop_with_signal(
-                scene_rx,
-                health_rx,
-                Box::pin(async { Err(std::io::Error::other("sigaction denied")) }),
-                std::io::sink(),
-            ),
-        )
-        .await;
-        assert!(
-            res.is_err(),
-            "the loop must still be running after a failed signal registration, got {res:?}"
-        );
+        .expect("a delivered quit signal is a clean shutdown");
+        assert_eq!(fired, Some(QuitSignal::test()));
     }
 
     #[tokio::test(start_paused = true)]
@@ -460,7 +423,7 @@ mod tests {
         )
         .await;
         assert!(
-            matches!(res, Ok(Ok(()))),
+            matches!(res, Ok(Ok(None))),
             "a closed stdout is a clean end of the run, got {res:?}"
         );
     }
