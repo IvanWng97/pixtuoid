@@ -11,10 +11,6 @@ on:
         description: Trusted default-branch review prompt
         required: true
         type: string
-      lenses:
-        description: The REVIEW.md lenses this review reports, a JSON array of lowercase names
-        required: true
-        type: string
       max_turns:
         description: Claude turn budget
         required: true
@@ -35,10 +31,9 @@ on:
 permissions: {}
 
 env:
-  # main requires each lens's `<REVIEW_CONTEXT>/<lens>` by name; renaming one
-  # leaves every PR at Expected.
+  # main requires this context by name, and claude-review.yml's exemption posts
+  # it too; renaming it leaves every PR at Expected.
   REVIEW_CONTEXT: claude-review
-  REVIEW_LENSES: ${{ inputs.lenses }}
   REVIEW_TITLE: Claude review
   # Repeated passes over a unit, aggregated, find what one misses
   # (SWR-Bench, arXiv 2509.01494; Cursor Bugbot); the owner chose two.
@@ -245,7 +240,7 @@ jobs:
           printf 'json=%s\nagents=%s\n' "$(quoted .github/prompts/review-schema.json)" \
             "$(quoted .github/prompts/review-agents.json)" >>"$GITHUB_OUTPUT"
           jq -r '.properties as $p | $p.findings.items.properties as $f
-            | "bounds=\({severities: $f.severity.enum, max_findings: $p.findings.maxItems,
+            | "bounds=\({severities: $f.severity.enum, lenses: $f.lens.enum, max_findings: $p.findings.maxItems,
                 path_max: $f.path.maxLength, summary_max: $p.summary.maxLength,
                 body_max: $f.body.maxLength} | tojson)"' \
             .github/prompts/review-schema.json >>"$GITHUB_OUTPUT"
@@ -386,14 +381,14 @@ jobs:
           set -euo pipefail
           # Severities reach a heading and a thread body, so only a plain label passes.
           if ! jq -n --exit-status --argjson b "$BOUNDS" '
-            ($b.severities | type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z-]+$")))
+            all($b.severities, $b.lenses; type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z-]+$")))
             and ([$b.max_findings, $b.path_max, $b.summary_max, $b.body_max]
               | all(.[]; type == "number" and floor == . and . >= 1))
           ' > /dev/null; then
             echo "::error title=Review schema bounds missing::bounds '$BOUNDS'"
             exit 1
           fi
-          jq --exit-status --argjson b "$BOUNDS" --argjson lenses "$REVIEW_LENSES" "$REVIEW_SAFE_PATH"'
+          jq --exit-status --argjson b "$BOUNDS" "$REVIEW_SAFE_PATH"'
             def valid_path: safe_path and length <= $b.path_max;
             type == "object"
             and ((keys | sort) == ["findings", "summary"])
@@ -406,7 +401,7 @@ jobs:
                 type == "object"
                 and ((keys | sort) == ["body", "lens", "line", "path", "severity"])
                 and (.severity | IN($b.severities[]))
-                and (.lens | IN($lenses[]))
+                and (.lens | IN($b.lenses[]))
                 and (.path | valid_path)
                 and (.line | type == "number" and floor == . and . >= 1)
                 and (.body | type == "string" and length > 0 and length <= $b.body_max)
@@ -519,13 +514,12 @@ jobs:
             exit 1
           fi
           # Success whatever the findings: each one blocks as its unresolved thread.
-          lenses="$(jq -er '.[]' <<< "$REVIEW_LENSES")"
-          while IFS= read -r lens; do
-            count="$(jq --arg lens "$lens" '[.findings[] | select(.lens == $lens)] | length' <<< "$REVIEW_JSON")"
-            jq -n --arg state success --arg context "$REVIEW_CONTEXT/$lens" --arg target_url "$RUN_URL" \
-              --arg description "Published at this head: $count findings" '$ARGS.named' |
-              gh api --method POST "repos/${REPOSITORY}/statuses/${EXPECTED_HEAD_SHA}" --input - > /dev/null
-          done <<< "$lenses"
+          by_lens="$(jq -r --argjson b "$BOUNDS" '
+            [.findings[].lens] as $found | [$b.lenses[] as $l | "\($l) \([$found[] | select(. == $l)] | length)"]
+            | join(", ")' <<< "$REVIEW_JSON")"
+          jq -n --arg state success --arg context "$REVIEW_CONTEXT" --arg target_url "$RUN_URL" \
+            --arg description "Published at this head: $finding_count findings ($by_lens)" '$ARGS.named' |
+            gh api --method POST "repos/${REPOSITORY}/statuses/${EXPECTED_HEAD_SHA}" --input - > /dev/null
 
   # `!cancelled()` is load-bearing: an implicit `success()` would skip this job
   # exactly when it is needed.
@@ -555,9 +549,6 @@ jobs:
           fi
           echo "::error title=$REVIEW_TITLE absent::analyze $ANALYZE_RESULT, publish $PUBLISH_RESULT"
           [[ -n "$HEAD_SHA" ]] || exit 1
-          lenses="$(jq -er '.[]' <<< "$REVIEW_LENSES")"
-          while IFS= read -r lens; do
-            jq -n --arg state failure --arg context "$REVIEW_CONTEXT/$lens" --arg target_url "$RUN_URL" \
-              --arg description "No review published at this head: see the run" '$ARGS.named' |
-              gh api --method POST "repos/${REPOSITORY}/statuses/${HEAD_SHA}" --input - > /dev/null
-          done <<< "$lenses"
+          jq -n --arg state failure --arg context "$REVIEW_CONTEXT" --arg target_url "$RUN_URL" \
+            --arg description "No review published at this head: see the run" '$ARGS.named' |
+            gh api --method POST "repos/${REPOSITORY}/statuses/${HEAD_SHA}" --input - > /dev/null
