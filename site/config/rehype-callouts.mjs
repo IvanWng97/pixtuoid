@@ -2,19 +2,14 @@
 // rendered doc becomes a small terminal window — "~ note" by default, a red-dot
 // "~ warning" when the quote OPENS with an imperative-warning strong.
 // The red dot reuses global.css's .terminal__dot--r — no second red literal.
+import { toText } from 'hast-util-to-text';
 
 const WARN_RE = /^(don'?t|never|warning|danger|caution)\b/i;
-
-function textOf(node) {
-  if (!node) return '';
-  if (node.type === 'text') return node.value;
-  return (node.children || []).map(textOf).join('');
-}
 
 // The FIRST <strong> in document order — the docs' "**Don't …**" idiom
 // puts the imperative there; a plain editorial quote has none → note.
 function firstStrongText(node) {
-  if (node.type === 'element' && node.tagName === 'strong') return textOf(node);
+  if (node.type === 'element' && node.tagName === 'strong') return toText(node);
   for (const c of node.children || []) {
     if (c.type !== 'element') continue;
     const t = firstStrongText(c);

@@ -8,7 +8,7 @@ import { unified } from '@astrojs/markdown-remark';
 import { rewriteCspMeta } from './config/csp-hashes.mjs';
 import rehypeCallouts from './config/rehype-callouts.mjs';
 import rehypeBeautifulMermaid from './config/rehype-beautiful-mermaid.mjs';
-import rehypeScrollRegions from './config/rehype-scroll-regions.mjs';
+import rehypeScrollFocus from './config/rehype-scroll-focus.mjs';
 import { fetchStarCount } from './config/gh-stars.mjs';
 import { latestReleaseTag, resolveDisplayedVersion } from './config/released-version.mjs';
 import { COMPRESS_HTML } from './config/compress-html.mjs';
@@ -219,7 +219,7 @@ export default defineConfig({
       rehypePlugins: [
         // inline <svg> at build time, in-process: zero client JS, no browser.
         rehypeBeautifulMermaid,
-        rehypeScrollRegions, // after the diagram, whose `pre` leaves as an <svg>
+        rehypeScrollFocus, // after the diagram, whose `pre` leaves as an <svg>
         rehypeRepoLinks, // after the diagram so it walks the final tree
         rehypeCallouts, // last: promotes doc blockquotes to terminal-window chrome
       ],

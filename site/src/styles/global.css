@@ -994,9 +994,9 @@ code {
 .prose pre code {
   font-family: var(--font-mono);
 }
-/* tables scroll sideways in their own wrapper (config/rehype-scroll-regions.mjs)
-   instead of overflowing the page, which body{overflow-x:hidden} would clip
-   unreachably; the table keeps display:table, and with it its table semantics. */
+/* tables scroll sideways in their own wrapper, the tab stop
+   config/rehype-scroll-focus.mjs makes, instead of overflowing the page, which
+   body{overflow-x:hidden} would clip unreachably. */
 .prose .table-scroll {
   overflow-x: auto;
   max-width: 100%;
