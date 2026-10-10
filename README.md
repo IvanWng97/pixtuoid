@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/main/docs/images/banner/banner-dark.svg" />
-    <img alt="pixtuoid: a neon office sign, a cat asleep on it and a coworker holding a coffee" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/main/docs/images/banner/banner-light.svg" />
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner/banner-dark.svg" />
+    <img alt="pixtuoid: a neon office sign, a cat asleep on it and a coworker holding a coffee" src="docs/images/banner/banner-light.svg" />
   </picture>
 </p>
 

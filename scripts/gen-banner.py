@@ -2,7 +2,7 @@
 """Render the README's banner: the office's neon sign, with the cat asleep on it and a coworker holding a coffee.
 
 The figures are the cutaway's own art as the office draws it, read from the
-golden `hair.rs`'s `the_readme_banner_art_is_the_office_s_own` writes; the
+golden `character.rs`'s `the_readme_banner_art_is_the_office_s_own` writes; the
 sign's colours are the theme copies `readme_chart_palette.rs` pins. The image is
 static, so it is committed under docs/images, and `--check` holds it to its
 inputs.
