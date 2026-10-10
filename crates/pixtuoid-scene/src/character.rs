@@ -206,3 +206,86 @@ pub(crate) struct CharacterFrame<'c> {
     /// [`Dress::rise`].
     pub(crate) rise: u16,
 }
+
+#[cfg(all(test, feature = "cutaway-assets"))]
+mod tests {
+    use super::*;
+    use std::fmt::Write as _;
+
+    /// The README banner's coworker: whose transcript and working directory
+    /// pick their outfit, hair, skin and hairstyle, as any agent's do.
+    const BANNER_AGENT: (&str, &str) = ("/h.jsonl", "/tmp/lab");
+
+    /// `art`'s frames as text, every colour named by one key in `@palette`.
+    fn golden(art: &[(&str, u32, &Frame)]) -> String {
+        const KEYS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let (mut keys, mut frames) = (Vec::<Rgb>::new(), String::new());
+        for (name, ms, f) in art {
+            writeln!(frames, "@frame {name} {ms}").expect("a String takes every write");
+            for y in 0..f.height() {
+                let row: Vec<String> = (0..f.width())
+                    .map(|x| match f.get(x, y).copied().flatten() {
+                        None => ".".to_owned(),
+                        Some(c) => {
+                            let i = keys.iter().position(|&k| k == c).unwrap_or_else(|| {
+                                keys.push(c);
+                                keys.len() - 1
+                            });
+                            KEYS.chars().nth(i).expect("a key per colour").to_string()
+                        }
+                    })
+                    .collect();
+                writeln!(frames, "{}", row.join(" ")).expect("a String takes every write");
+            }
+        }
+        let palette: Vec<String> = keys
+            .iter()
+            .zip(KEYS.chars())
+            .map(|(c, k)| format!("{k}=#{:02x}{:02x}{:02x}", c.r, c.g, c.b))
+            .collect();
+        format!("@palette {}\n{frames}", palette.join(" "))
+    }
+
+    /// The banner art for `agent`: their coworker holding a coffee as
+    /// [`character_frame`] draws them at the pack's densest art, and the
+    /// sleeping cat at the same density.
+    fn banner_art(pack: &OfficeArt, agent: &AgentSlot) -> String {
+        let density = pack.max_density_variant();
+        let scale = crate::render_scale::RenderScale::new(density.get()).expect("nonzero");
+        let mut cache = FrameCache::new();
+        let pose = SpritePose {
+            anim_name: Piece::HoldingCoffee,
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        };
+        let coffee = pack.variants_of(Piece::HoldingCoffee)[&density].frame_ms();
+        let coworker =
+            character_frame(pose, agent, pack, scale, &mut cache, SystemTime::UNIX_EPOCH)
+                .frame
+                .clone();
+        let cat = &pack.variants_of(Piece::CatSleep)[&density];
+        let art: Vec<_> = std::iter::once(("coworker", coffee, &coworker))
+            .chain(cat.frames().iter().map(|f| ("cat", cat.frame_ms(), f)))
+            .collect();
+        golden(&art)
+    }
+
+    /// `banner.golden` is the README banner's cutaway art as the office draws
+    /// it, so `scripts/gen-banner.py`, which only lays it out, cannot drift from
+    /// the pack, the recolor or the dressing. `just gen-banner` rewrites it.
+    #[test]
+    fn the_readme_banner_art_is_the_office_s_own() {
+        const BANNER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/character/banner.golden");
+        let (transcript, cwd) = BANNER_AGENT;
+        let agent = test_support::make_slot_cwd(transcript, cwd, false);
+        let pinned = snapbox::Data::read_from(
+            std::path::Path::new(BANNER),
+            Some(snapbox::data::DataFormat::Text),
+        );
+        snapbox::assert_data_eq!(
+            banner_art(&crate::pack::test_office(), &agent),
+            pinned.raw()
+        );
+    }
+}

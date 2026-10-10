@@ -1,7 +1,8 @@
 """The README's pixel art kit: the office palette, a dot-matrix font and the sprite pack, drawn as SVG path runs.
 
-Shared by `star-history.py` (the star chart) and `bmc-button.py` (the Buy Me a
-Coffee button); their selftests exercise it.
+Shared by `star-history.py` (the star chart), `bmc-button.py` (the Buy Me a
+Coffee button) and `gen-banner.py` (the README banner); their selftests exercise
+it.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ class Palette(NamedTuple):
     city_lit_b: str
     city_lit_c: str
     moon: str
+    neon_panel: str
+    neon_brand: str
 
 
 # Copied from the themes, not derived — the renderer is Python. The copy's guard

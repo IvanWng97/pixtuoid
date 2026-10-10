@@ -47,9 +47,9 @@ DIFF_DIR = ROOT / "target/gen-check-diff"
 # --check must REGENERATE the proof posters (pixel-gated stills) but skip the
 # video encodes (presence-gated, non-byte-stable) — handlers read this flag.
 CHECK_MODE = False
-# A live-agent capture and a hand-made banner: committed but not generated here,
-# so --check must never compare them.
-NOT_GENERATED = {"screenshot-real.png", "sprite-banner.png"}
+# A live-agent capture: committed but not generated here, so --check must never
+# compare it.
+NOT_GENERATED = {"screenshot-real.png"}
 # The snapshot's `--frames-dir` naming (its `FrameSink::Pngs`).
 FRAME_PATTERN = "f%04d.png"
 

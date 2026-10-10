@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="docs/images/sprite-banner.png" alt="pixtuoid sprites" width="500" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner/banner-dark.svg" />
+    <img alt="pixtuoid: a neon office sign, a cat asleep on it and a coworker holding a coffee" src="docs/images/banner/banner-light.svg" />
+  </picture>
 </p>
-
-<h1 align="center">pixtuoid</h1>
 
 <p align="center">
   <samp>Your AI coding agents, visualized as pixel-art coworkers in a terminal office.</samp>

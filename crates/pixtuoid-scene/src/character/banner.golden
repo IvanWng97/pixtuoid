@@ -1,0 +1,119 @@
+@palette a=#16121a b=#f37b3a c=#d86832 d=#ff9a5a e=#ad4316 f=#c89a64 g=#b08454 h=#1a1a1a i=#88603a j=#d2d4d8 k=#c97b5e l=#e28d67 m=#9e5643 n=#c8bea8 o=#4a2c18 p=#968c78 q=#6b573d r=#503f2e s=#2a2226 t=#4a3e40 u=#3a2010 v=#e89a8a w=#ed9a50 x=#d68a4a y=#a9622c z=#ececec
+@frame coworker 600
+. . . . . . . . . . a . . a a a a a a a a a . . . . . . . . . .
+. . . . . . . . a a b a a b b b b b b b b b a . . . . . . . . .
+. . . . . . a a b b b b b b b b b b b b b b b a a a . . . . . .
+. . . . a a b b b b c b b c d d c c c c c c b b b b a . . . . .
+. . . a b b b b c d d c c c c c c c c c c c c b b b b a . . . .
+. . . a b b c c c c c c c c c c c c c c c c c c c c b b a . . .
+. . a b b c c c c c c c c c c c c c c c c c c c c c e b a . . .
+. . a b b c c c c c c c c c c c c c c e c c c c c c e e a . . .
+. . a b b c c c c c c e c c c c c c c e c c c c c c e e a . . .
+. a b b c c c c c c c c c c c c c c c c c c c e e c c e b a . .
+a b b c c c c c c c c c c c c c c c c c c c c e e c c c b b a .
+a b b c c c c b b c c c c c c c c c c c c c c e e c c c e b a .
+a b b c c c c b b c c c c e e c e e c c c c c e e c c c e e a .
+. a b b c c c b b e e e e e f e e f e b e e c e e c c e e a . .
+a b b c c c c b b e f f e f f f f f f e f g e b e c c c e e a .
+a b b c c c c b e f f f f f f f f f f f f g g e b c c c e b a .
+a b b c c c c e f f f f f f f f f f f f f g g g e c c c e e a .
+a b b c c c e f f f f f f f f f f f f f f g g g g e c c e e a .
+. a b b c c e f f f f h h f f f f f f h h g g g g e c e e a . .
+. . a b b c e f f f f h h f f f f f f h h g g g g e e e a . . .
+. . a b b c e f f f f h h f f f f f f h h g g g g e e e a . . .
+. . . a b b e f f f f h h f f f f f f h h g g g g e e a . . . .
+. . . . a a a a f f f f f f f f f f f f f g g g a a a . . . . .
+. . . . . . . . a f f f f f f i i f f f f g g a . . . . . . . .
+. . . . . . . . a f f f f f f f f f f f f g g a . . . . . . . .
+. . . . . . . . . a a g g g g g g g g g g a a . . . . . . . . .
+. . . . . . . . . a a a a g g j g g g a a a a . . . . . . . . .
+. . . . . . a a a k k k i i i i j i i i k k k a a a . . . . . .
+. . . . . a l k k k k k k i i j i i i k m m m m m m a a . . . .
+. . . . a k k k k k k k k k k k k k k k m m m m m m m m a . . .
+. . . . a k k k k k k k k n o o o o p k m m m m m m m m a . . .
+. . . . a k k k k k k k k n n n n p p k m m m m m m m m a . . .
+. . . . a k k k k k f f f f n n n p p f f f f m m m m m a . . .
+. . . . . a l k k k f f f f n n n p p f f f f m m m a a . . . .
+. . . . . a l k k k f f f f n n n p p f f f f m m m a . . . . .
+. . . . . a l k k k a g g a n n n p p a g g a m m m a . . . . .
+. . . . . a l k k k k k k n n n n p p k m m m m m m a . . . . .
+. . . . . a l k k k k k k k k k k k k k m m m m m m a . . . . .
+. . . . . a l k k k k k k k k k k k k k m m m m m m a . . . . .
+. . . . . . a a q q q q q r r q q q q q q q r r a a . . . . . .
+. . . . . . . a q q q q q r r q q q q q q q r r a . . . . . . .
+. . . . . . . a q q q q q r r a a q q q q q r r a . . . . . . .
+. . . . . . . a q q q q q r r a a q q q q q r r a . . . . . . .
+. . . . . . . a q q q q q r r a a q q q q q r r a . . . . . . .
+. . . . . . . a q q q q q r r a a q q q q q r r a . . . . . . .
+. . . . . . . a q q q q q r r a a q q q q q r r a . . . . . . .
+. . . . . . a s t t t t t t s a s t t t t t t s a . . . . . . .
+. . . . . . a s s s s s s s s a s s s s s s s s a . . . . . . .
+. . . . . . a s s s s s s s s a s s s s s s s s a . . . . . . .
+@frame cat 750
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . a . . . . . a . . . . . . . . . . . . .
+. . . a u a . . . a u a . . . . . . . . . . . .
+. . . a u v a a a a v u a a a a a a a a a . . .
+. . a w w w w w u w w w a w w w w w w w w a . .
+. . a x x x x u x x u x x x x y x x y x x x a .
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x u u u x x x u x x x y x x x x x x x x a
+. a v z z x x v x x x x x y x x x x x x x x x a
+. a z u z z x x x x x x x y x x x x x x x x x a
+. . a z z z x x x x x y y y y y y y y y y x a .
+. . . a a a a a a u u x x x x x x x x x x x a .
+. . . . . . . . . a a a a a a a a a a a a a . .
+@frame cat 750
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . a . . . . . a . . . . . . . . . . . . .
+. . . a u a . . . a u a . . a a a a a a . . . .
+. . . a u v a a a a v u a a w w w w w w a . . .
+. . a w w w w w u w w w a x x x x x x x x a . .
+. . a x x x x u x x u x x x x y x x y x x x a .
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x u u u x x x u x x x y x x x x x x x x a
+. a v z z x x v x x x x x y x x x x x x x x x a
+. a z u z z x x x x x x x y x x x x x x x x x a
+. . a z z z x x x x x y y y y y y y y y y x a .
+. . . a a a a a a u u x x x x x x x x x x x a .
+. . . . . . . . . a a a a a a a a a a a a a . .
+@frame cat 750
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . a . . . . . a . . . . . . . . . . . . .
+. . . a u a . . . a u a . . a a a a a a . . . .
+. . . a u v a a a a v u a a w w w w w w a . . .
+. . a w w w w w u w w w a x x x x x x x x a . .
+. . a x x x x u x x u x x x x y x x y x x x a .
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x u u u x x x u x x x y x x x x x x x x a
+. a v z z x x v x x x x x y x x x x x x x x x a
+. a z u z z x x x x x x x y x x x x x x x x x a
+. . a z z z x x x x x y y y y y y y y y y x a .
+. . . a a a a a a u u x x x x x x x x x x x a .
+. . . . . . . . . a a a a a a a a a a a a a . .
+@frame cat 750
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . . . . . . . . . . . . . . . . . . . . .
+. . . . a . . . . . a . . . . . . . . . . . . .
+. . . a u a . . . a u a . . . . . . . . . . . .
+. . . a u v a a a a v u a a a a a a a a a . . .
+. . a w w w w w u w w w a w w w w w w w w a . .
+. . a x x x x u x x u x x x x y x x y x x x a .
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x x x x x x x x x x y x x x x x x x x x a
+. a x x u u u x x x u x x x y x x x x x x x x a
+. a v z z x x v x x x x x y x x x x x x x x x a
+. a z u z z x x x x x x x y x x x x x x x x x a
+. . a z z z x x x x x y y y y y y y y y y x a .
+. . . a a a a a a u u x x x x x x x x x x x a .
+. . . . . . . . . a a a a a a a a a a a a a . .

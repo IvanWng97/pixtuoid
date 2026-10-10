@@ -1,6 +1,6 @@
 //! Pins `scripts/readme-palette.json` — the office colours the README's star
-//! chart and Buy Me a Coffee button are painted with — to the theme each
-//! variant names, by struct access. Their renderers are Python and can only
+//! chart, Buy Me a Coffee button and banner are painted with — to the theme
+//! each variant names, by struct access. Their renderers are Python and can only
 //! copy; this is the copy's guard, the same shape as `site_badge_colors.rs`.
 //!
 //! Reads the JSON at RUNTIME because `include_str!` of a path outside the
@@ -21,7 +21,7 @@ fn hex(rgb: Rgb) -> String {
 }
 
 /// Every field the renderer paints with, and the theme role it copies.
-fn roles(t: &Theme) -> [(&'static str, Rgb); 17] {
+fn roles(t: &Theme) -> [(&'static str, Rgb); 19] {
     [
         ("wall", t.surface.wall),
         ("trim", t.surface.wall_trim),
@@ -40,6 +40,8 @@ fn roles(t: &Theme) -> [(&'static str, Rgb); 17] {
         ("city_lit_b", t.office.city_lit_windows[1]),
         ("city_lit_c", t.office.city_lit_windows[2]),
         ("moon", t.lighting.moon_core),
+        ("neon_panel", t.office.neon_panel_bg),
+        ("neon_brand", t.ui.neon_brand),
     ]
 }
 

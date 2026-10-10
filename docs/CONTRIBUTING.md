@@ -38,8 +38,8 @@ the tests are CI's).
 
 CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
 runs those locally), it runs the jobs below. Preflight's `just lint` covers
-only **hygiene**, **zizmor**, cargo-deny and the sprite half of **generated
-drift**, so a green preflight does not mean a green PR.
+only **hygiene**, **zizmor**, cargo-deny and the sprite and banner half of
+**generated drift**, so a green preflight does not mean a green PR.
 
 A PR's pushes run only the **light tier** (every job without
 `if: inputs.full`: linters, formatters, unit tests on every platform and
@@ -58,9 +58,9 @@ CodSpeed skip drafts. The jobs:
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
   the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
   nextest skips.
-- **generated drift** (`just gen-readme-check gen-art-check gen-icons-check
-  compare-selftest`) — generated sprites, icons and README freshness, and the
-  image comparator.
+- **generated drift** (`just gen-readme-check gen-art-check gen-banner-check
+  gen-icons-check compare-selftest`) — generated sprites, icons, the README
+  banner and README freshness, and the image comparator.
 - **smoke** — the release binaries and the hook shim's silent exit. The
   README's media drift (`just gen-media-check`) is reported in it as evidence,
   not a gate.
