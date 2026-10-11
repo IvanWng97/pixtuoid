@@ -143,11 +143,13 @@ pub fn run() -> Result<()> {
         }),
         Cmd::Disconnect { ids, json } => {
             sources_cli::run_change(&ids, json, |c, i| match sources::disconnect(c, i)? {
-                sources::DisconnectOutcome::Uninstalled(r) if r.plugin_left_registered => {
+                sources::DisconnectOutcome::Uninstalled(r)
+                    if let Some(cli) = r.plugin_left_registered =>
+                {
                     let _ = writeln!(
                         std::io::stderr(),
                         "{i}: {}",
-                        sources::PLUGIN_LEFT_REGISTERED_PHRASE
+                        sources::plugin_left_registered(cli)
                     );
                     Ok(sources::ChangeOutcome::Disconnected)
                 }

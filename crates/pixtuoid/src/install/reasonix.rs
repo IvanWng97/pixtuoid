@@ -23,7 +23,7 @@ use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
-use crate::install::verify::{SchemaParse, ShimRef, assemble};
+use crate::install::verify::{SchemaParse, ShimRef};
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
@@ -45,26 +45,34 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
 /// Reasonix links the plugin dir in place, so a rewrite of the manifest reaches the
 /// next session.
 pub(crate) const HOST: HostRegistration = HostRegistration {
+    cli: CLI,
     register,
     unregister,
     is_registered,
-    reload: None,
+    copy: None,
     legacy: Some(LegacyConfig {
         path: settings_path,
         strip: merge_uninstall,
     }),
 };
 
+const CLI: io::HostCli = io::HostCli {
+    command: "reasonix",
+    display_name: "Reasonix",
+};
+
 const MANIFEST: &str = "reasonix-plugin.json";
+
+const HOOKS_AT: host_plugin::HooksAt = host_plugin::HooksAt {
+    hooks: "/contributes/hooks",
+    command: "/command",
+};
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     host_plugin::owned_path("reasonix-plugin", &[MANIFEST])
 }
 
 /// The GLOBAL `settings.json` a pixtuoid from before the plugin merged into.
-/// Reasonix's home is platform-ASYMMETRIC: `REASONIX_HOME` (verbatim) wins; else
-/// macOS/Linux = `~/.reasonix`, but **Windows = `%APPDATA%\reasonix`**, NOT
-/// `%USERPROFILE%\.reasonix`.
 fn settings_path() -> Result<PathBuf> {
     Ok(home()?.join("settings.json"))
 }
@@ -75,8 +83,9 @@ fn packages_path() -> Result<PathBuf> {
     Ok(home()?.join("plugin-packages.json"))
 }
 
-/// Erroring mirrors the sibling home-anchored targets instead of silently reading a
-/// CWD-relative file Reasonix never writes.
+/// Reasonix's home is platform-ASYMMETRIC, so a generic USERPROFILE-first path on
+/// Windows misses it. Erroring mirrors the sibling home-anchored targets instead of
+/// silently reading a CWD-relative file Reasonix never writes.
 fn home() -> Result<PathBuf> {
     reasonix_home()
         .ok_or_else(|| io::home_unset("Reasonix's home", "REASONIX_HOME/APPDATA/HOME/USERPROFILE"))
@@ -111,9 +120,8 @@ fn resolve_reasonix_home(
     unix_home.map(|h| h.join(".reasonix"))
 }
 
-/// Reasonix never creates `settings.json`, it is purely user-authored. What a real
-/// install does create is the Reasonix home dir — and hook/trust users
-/// additionally have a `~/.reasonix` even on Windows, so probe both.
+/// Reasonix is present when its home dir is — and hook/trust users additionally
+/// have a `~/.reasonix` even on Windows, so probe both.
 pub(crate) fn detect_installed() -> bool {
     reasonix_home().is_some_and(|d| d.exists()) || io::home_relative(".reasonix").exists()
 }
@@ -173,12 +181,8 @@ pub(crate) fn render_manifest(hook_cmd: &str) -> Result<String> {
         "timeout": 1000,
         "description": "pixtuoid visualizer",
     });
-    let hooks: serde_json::Map<_, _> = REASONIX_EVENTS
-        .iter()
-        .map(|ev| ((*ev).to_string(), json!([entry])))
-        .collect();
     let mut doc = manifest();
-    doc["contributes"] = json!({ "hooks": hooks });
+    doc["contributes"] = json!({ "hooks": host_plugin::hooks_map(REASONIX_EVENTS, &entry) });
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
@@ -192,31 +196,10 @@ fn manifest() -> Value {
     })
 }
 
-/// Every event holds an entry, and the first one's `command` is the shim.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
-    let Ok(doc) = serde_json::from_str::<Value>(content) else {
-        return SchemaParse::broken("the plugin's reasonix-plugin.json no longer parses as JSON");
-    };
-    let hooks = doc["contributes"]["hooks"].as_object();
-    let mut missing = Vec::new();
-    let mut shim = ShimRef::Unknown;
-    for ev in REASONIX_EVENTS {
-        match hooks
-            .and_then(|h| h.get(*ev))
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-        {
-            Some(entry) if shim == ShimRef::Unknown => {
-                shim = entry["command"]
-                    .as_str()
-                    .map_or(ShimRef::Unknown, |c| ShimRef::Absolute(PathBuf::from(c)));
-            }
-            Some(_) => {}
-            None => missing.push(*ev),
-        }
-    }
-    let any = missing.len() < REASONIX_EVENTS.len();
-    assemble(&missing, any, shim, vec![])
+    host_plugin::verify_hooks(content, HOOKS_AT, REASONIX_EVENTS, |c| {
+        ShimRef::Absolute(PathBuf::from(c))
+    })
 }
 
 pub(crate) fn installed_shim(content: &str) -> ShimRef {
@@ -226,32 +209,16 @@ pub(crate) fn installed_shim(content: &str) -> ShimRef {
 /// The manifest as a disconnect leaves it: still one Reasonix loads, should the
 /// plugin stay registered, and still naming us so `unregister` may delete it.
 pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
-    let had_hooks = serde_json::from_str::<Value>(content)
-        .ok()
-        .and_then(|doc| {
-            doc["contributes"]["hooks"]
-                .as_object()
-                .map(|h| !h.is_empty())
-        })
-        .unwrap_or(false);
     Ok(MergeOutcome {
         content: serde_json::to_string_pretty(&manifest())?,
-        changed: had_hooks,
+        changed: host_plugin::holds_hooks(content, HOOKS_AT),
     })
-}
-
-/// The plugin dir and the root it sits in, around `<root>/<plugin>/reasonix-plugin.json`.
-fn layout(config: &Path) -> Result<(&Path, &Path)> {
-    let plugin = config.parent();
-    plugin
-        .zip(plugin.and_then(Path::parent))
-        .with_context(|| format!("{} is not <root>/<plugin>/{MANIFEST}", config.display()))
 }
 
 /// `--yes` is the CLI's consent to write, not a trust step; `--replace` makes a
 /// repeat connect re-link (`docs/PLUGIN_PACKAGES.md` @ v2.35.0).
 fn register(config: &Path) -> Result<()> {
-    let (plugin, _) = layout(config)?;
+    let (plugin, _) = host_plugin::layout(config, &[MANIFEST])?;
     CLI.run(&[
         "plugin".as_ref(),
         "install".as_ref(),
@@ -264,9 +231,10 @@ fn register(config: &Path) -> Result<()> {
 }
 
 /// Reads Reasonix's state first, so a disconnect with nothing registered starts no
-/// CLI. Removing a linked plugin leaves its dir, so this deletes it.
+/// CLI. Removing a linked plugin leaves its dir (`docs/PLUGIN_PACKAGES.md`
+/// @ v2.35.0), so this deletes it.
 fn unregister(config: &Path) -> Result<Unregistered> {
-    let (_, root) = layout(config)?;
+    let (_, root) = host_plugin::layout(config, &[MANIFEST])?;
     let installed = plugin_entry()?.is_some();
     if installed {
         if CLI.locate().is_none() {
@@ -306,12 +274,6 @@ fn plugin_entry() -> Result<Option<Value>> {
         .and_then(|rows| rows.iter().find(|r| r["name"].as_str() == Some(NAME)))
         .cloned())
 }
-
-/// The CLI that registers the plugin, named in every error it raises.
-const CLI: io::HostCli = io::HostCli {
-    command: "reasonix",
-    display_name: "Reasonix",
-};
 
 /// Strips what a pixtuoid from before the plugin merged into `settings.json`.
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {

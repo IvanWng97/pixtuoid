@@ -131,7 +131,18 @@ pub(crate) fn verify_target(
     }
     if let Some(host) = t.host {
         match (host.is_registered)() {
-            Ok(true) => {}
+            Ok(true) => match host.copy.as_ref().map(|c| (c.stale)(&path)) {
+                Some(Ok(true)) => issues.push(format!(
+                    "{} runs an older copy of the plugin (a launch re-copies it; the log \
+                     names a re-copy that failed)",
+                    t.display_name
+                )),
+                Some(Err(e)) => notes.push(format!(
+                    "could not compare {}'s copy of the plugin with pixtuoid's: {e:#}",
+                    t.display_name
+                )),
+                Some(Ok(false)) | None => {}
+            },
             Ok(false) => issues.push(format!(
                 "the pixtuoid plugin is not installed and enabled in {} — reconnect the source",
                 t.display_name
@@ -655,9 +666,9 @@ pub(crate) enum UninstallOutcome {
 #[derive(Debug)]
 pub(crate) struct UninstallReport {
     pub outcome: UninstallOutcome,
-    /// The CLI couldn't be reached to deregister a host target's plugin, which
-    /// stays registered with no hooks.
-    pub plugin_left_registered: bool,
+    /// The host CLI that couldn't be reached to deregister its plugin, which stays
+    /// registered.
+    pub plugin_left_registered: Option<io::HostCli>,
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. Same
@@ -671,17 +682,18 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         removed |= strip_legacy(host)?;
     }
     // Last, since the strips need no CLI: a failing deregister leaves a
-    // registered plugin with no hooks, never hooks that still fire.
+    // registered plugin whose hooks are gone, or whose copy fires into a
+    // disconnected source, which drops the events.
     let plugin_left_registered = match t.host {
         Some(host) => match (host.unregister)(&path)? {
             target::Unregistered::Removed => {
                 removed = true;
-                false
+                None
             }
-            target::Unregistered::Absent => false,
-            target::Unregistered::Unreachable => true,
+            target::Unregistered::Absent => None,
+            target::Unregistered::Unreachable => Some(host.cli),
         },
-        None => false,
+        None => None,
     };
     Ok(UninstallReport {
         outcome: if removed {

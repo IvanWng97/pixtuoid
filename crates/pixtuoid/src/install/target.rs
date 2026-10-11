@@ -171,6 +171,7 @@ impl Primary {
 /// owns its settings.
 #[derive(Debug)]
 pub struct HostRegistration {
+    pub(crate) cli: crate::install::io::HostCli,
     /// Write the plugin's manifests beside the hooks file `config` and register
     /// the plugin. Idempotent, and run on every install so a deregistered plugin
     /// heals.
@@ -180,11 +181,21 @@ pub struct HostRegistration {
     pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,
-    /// Re-copy the plugin after its files changed, for a CLI that runs a copy;
-    /// `None` when the CLI loads the files in place.
-    pub reload: Option<fn(config: &Path) -> Result<()>>,
+    /// `None` when the CLI loads the plugin's files in place.
+    pub copy: Option<PluginCopy>,
     /// Where a pixtuoid from before the plugin merged its hooks.
     pub legacy: Option<LegacyConfig>,
+}
+
+/// A CLI that runs its own copy of the plugin, so a rewrite of the files reaches it
+/// only once re-copied.
+#[derive(Debug)]
+pub struct PluginCopy {
+    /// Whether the copy differs from the plugin around the owned primary `config`.
+    pub stale: fn(config: &Path) -> Result<bool>,
+    /// Re-copy the plugin. It may also re-enable a plugin the user disabled, so it
+    /// runs only while [`HostRegistration::is_registered`].
+    pub refresh: fn() -> Result<()>,
 }
 
 /// A config of the CLI's own that an older pixtuoid merged its hooks into. Connect
@@ -468,10 +479,6 @@ pub(crate) fn by_source(source_id: &str) -> Option<&'static Target> {
 /// ~/.codex must NOT count as present.
 pub(crate) fn config_present(path: &Path) -> bool {
     crate::install::io::resolve_symlink(path).exists()
-}
-
-pub(crate) fn is_present(t: &Target) -> bool {
-    (t.presence_probe)()
 }
 
 #[cfg(test)]

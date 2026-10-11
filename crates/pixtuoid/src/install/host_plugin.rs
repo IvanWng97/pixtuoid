@@ -15,8 +15,24 @@ use crate::install::verify::{SchemaParse, ShimRef, assemble};
 /// `pixtuoid@pixtuoid`.
 pub(crate) const NAME: &str = "pixtuoid";
 
-/// A hooks file's place in its plugin dir, where Claude Code and Codex both look.
+/// A hooks file's place in its plugin dir: Claude Code's default, and Codex's
+/// (`DEFAULT_HOOKS_CONFIG_FILE` in `codex-rs/core-plugins/src/loader.rs` @ rust-v0.162.1).
 pub(crate) const HOOKS_FILE: &[&str] = &["hooks", "hooks.json"];
+
+/// Where a plugin file keeps its per-event hooks, and where an event's first entry
+/// keeps its command, as JSON pointers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HooksAt {
+    pub(crate) hooks: &'static str,
+    pub(crate) command: &'static str,
+}
+
+/// Claude Code's plugin shape, `{"hooks": {<event>: [{"hooks": [{"command": …}]}]}}`,
+/// which Codex's plugins read too (`codex-rs/config/src/hook_config.rs` @ rust-v0.162.1).
+pub(crate) const CLAUDE_SHAPE: HooksAt = HooksAt {
+    hooks: "/hooks",
+    command: "/hooks/0/command",
+};
 
 pub(crate) fn plugin_id() -> String {
     format!("{NAME}@{NAME}")
@@ -32,13 +48,15 @@ pub(crate) fn owned_path(root: &str, file: &[&str]) -> Result<PathBuf> {
         }))
 }
 
-/// The plugin dir and the root of `<root>/<plugin>/hooks/hooks.json`.
-pub(crate) fn hooks_layout(config: &Path) -> Result<(&Path, &Path)> {
-    let plugin = config.parent().and_then(Path::parent);
+/// The plugin dir and the root of `<root>/<plugin>/<file…>`, `file` as [`owned_path`]
+/// joined it.
+pub(crate) fn layout<'a>(config: &'a Path, file: &[&str]) -> Result<(&'a Path, &'a Path)> {
+    let plugin = config.ancestors().nth(file.len());
     plugin.zip(plugin.and_then(Path::parent)).with_context(|| {
         format!(
-            "{} is not <marketplace>/<plugin>/hooks/hooks.json",
-            config.display()
+            "{} is not <root>/<plugin>/{}",
+            config.display(),
+            file.join("/")
         )
     })
 }
@@ -74,60 +92,70 @@ pub(crate) fn remove_if_ours(dir: &Path, manifest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A hooks file in Claude Code's plugin shape, `{"hooks": {<event>: [<group>]}}`,
-/// which Codex's plugins read too (`codex-rs/config/src/hook_config.rs` @ rust-v0.162.1).
-pub(crate) fn render_hooks(events: &[&str], group: &Value) -> Result<String> {
-    let want = json!({
-        "hooks": events
-            .iter()
-            .map(|ev| ((*ev).to_string(), json!([group])))
-            .collect::<serde_json::Map<_, _>>()
-    });
-    Ok(serde_json::to_string_pretty(&want)?)
+/// `{<event>: [entry]}` for each of `events`.
+pub(crate) fn hooks_map(events: &[&str], entry: &Value) -> Value {
+    events
+        .iter()
+        .map(|ev| ((*ev).to_string(), json!([entry])))
+        .collect::<serde_json::Map<_, _>>()
+        .into()
 }
 
-/// Every event in `events` holds a group, and the first group's command gives the
-/// shim back through `shim_of`.
+/// A hooks file in [`CLAUDE_SHAPE`], one `group` per event.
+pub(crate) fn render_hooks(events: &[&str], group: &Value) -> Result<String> {
+    Ok(serde_json::to_string_pretty(
+        &json!({ "hooks": hooks_map(events, group) }),
+    )?)
+}
+
+/// Every event in `events` holds an entry at `at`, and the first one's command gives
+/// the shim back through `shim_of`.
 pub(crate) fn verify_hooks(
     content: &str,
+    at: HooksAt,
     events: &[&str],
     shim_of: fn(command: &str) -> ShimRef,
 ) -> SchemaParse {
     let Ok(doc) = serde_json::from_str::<Value>(content) else {
-        return SchemaParse::broken("the plugin's hooks.json no longer parses as JSON");
+        return SchemaParse::broken("the plugin file no longer parses as JSON");
     };
-    let hooks = doc.get("hooks").and_then(Value::as_object);
+    let hooks = doc.pointer(at.hooks).and_then(Value::as_object);
     let mut missing = Vec::new();
     let mut any = false;
     let mut shim = ShimRef::Unknown;
     for ev in events {
-        let group = hooks
+        let entry = hooks
             .and_then(|h| h.get(*ev))
             .and_then(Value::as_array)
-            .and_then(|groups| groups.first());
-        let Some(group) = group else {
+            .and_then(|entries| entries.first());
+        let Some(entry) = entry else {
             missing.push(*ev);
             continue;
         };
         any = true;
         if shim == ShimRef::Unknown {
-            shim = group["hooks"][0]["command"]
-                .as_str()
+            shim = entry
+                .pointer(at.command)
+                .and_then(Value::as_str)
                 .map_or(ShimRef::Unknown, shim_of);
         }
     }
     assemble(&missing, any, shim, vec![])
 }
 
-/// The hooks file as a disconnect leaves it; `changed` iff it held hooks.
-pub(crate) fn uninstall_hooks(content: &str) -> Result<MergeOutcome> {
-    let had_hooks = serde_json::from_str::<Value>(content)
+/// Whether `content` holds any hooks at `at`, which a disconnect then removes.
+pub(crate) fn holds_hooks(content: &str, at: HooksAt) -> bool {
+    serde_json::from_str::<Value>(content)
         .ok()
-        .and_then(|doc| doc.get("hooks")?.as_object().map(|h| !h.is_empty()))
-        .unwrap_or(false);
+        .and_then(|doc| doc.pointer(at.hooks)?.as_object().map(|h| !h.is_empty()))
+        .unwrap_or(false)
+}
+
+/// A [`CLAUDE_SHAPE`] hooks file as a disconnect leaves it.
+pub(crate) fn uninstall_hooks(content: &str) -> Result<MergeOutcome> {
     Ok(MergeOutcome {
         content: "{}\n".to_string(),
-        changed: had_hooks,
+        changed: holds_hooks(content, CLAUDE_SHAPE),
     })
 }
 
@@ -145,7 +173,7 @@ mod tests {
                 hooks,
                 root.join("pixtuoid").join("hooks").join("hooks.json")
             );
-            let (plugin, at) = hooks_layout(&hooks).unwrap();
+            let (plugin, at) = layout(&hooks, HOOKS_FILE).unwrap();
             assert_eq!(
                 (plugin, at),
                 (root.join("pixtuoid").as_path(), root.as_path())

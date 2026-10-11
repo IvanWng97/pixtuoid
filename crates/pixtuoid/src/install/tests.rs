@@ -504,13 +504,12 @@ fn install_target_round_trips_every_registered_target() {
 
 #[test]
 fn openclaw_is_present_is_false_before_then_true_after_install() {
-    use crate::install::target::is_present;
     // OPENCLAW_STATE_DIR points at a NON-EXISTENT dir so the probe starts FALSE.
     let oc_home = tempfile::TempDir::new().unwrap();
     let state = oc_home.path().join("ocstate"); // not yet created
     temp_env::with_var("OPENCLAW_STATE_DIR", Some(&state), || {
         assert!(
-            !is_present(&OPENCLAW),
+            !(OPENCLAW.presence_probe)(),
             "OpenClaw must be undetected before install (empty isolated state dir)"
         );
 
@@ -520,7 +519,7 @@ fn openclaw_is_present_is_false_before_then_true_after_install() {
         install_target_from(&OPENCLAW, Some(cfg), Some(exe)).unwrap();
 
         assert!(
-            is_present(&OPENCLAW),
+            (OPENCLAW.presence_probe)(),
             "install must create the state dir the presence probe detects \
          (detect⇄install symmetry — else installed-but-invisible)"
         );
@@ -1317,12 +1316,13 @@ exit /b 0\r
 const FAKE_CODEX_SH: &str = r#"#!/bin/sh
 d=$(dirname "$0")
 c="$CODEX_HOME/config.toml"
+cache="$CODEX_HOME/plugins/cache/pixtuoid/pixtuoid/local"
 echo "codex $*" >> "$d/calls.log"
 [ "codex $*" = "${FAKE_HOST_FAIL-}" ] && exit 1
 case "$*" in
-"plugin marketplace add "*) grep -qxF '[marketplaces.pixtuoid]' "$c" 2>/dev/null || printf "[marketplaces.pixtuoid]\nsource_type = 'local'\n" >> "$c" ;;
-"plugin add pixtuoid@pixtuoid") grep -qxF "[plugins.'pixtuoid@pixtuoid']" "$c" 2>/dev/null || printf "[plugins.'pixtuoid@pixtuoid']\nenabled = true\n" >> "$c" ;;
-"plugin remove pixtuoid@pixtuoid") grep -vxF -e "[plugins.'pixtuoid@pixtuoid']" -e 'enabled = true' "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
+"plugin marketplace add "*) echo "$4" > "$d/codex-root"; grep -qxF '[marketplaces.pixtuoid]' "$c" 2>/dev/null || printf "[marketplaces.pixtuoid]\nsource_type = 'local'\n" >> "$c" ;;
+"plugin add pixtuoid@pixtuoid") rm -rf "$cache"; mkdir -p "$cache"; for p in "$(cat "$d/codex-root")"/*/; do cp -R "$p". "$cache"; done; grep -qxF "[plugins.'pixtuoid@pixtuoid']" "$c" 2>/dev/null || printf "[plugins.'pixtuoid@pixtuoid']\nenabled = true\n" >> "$c" ;;
+"plugin remove pixtuoid@pixtuoid") rm -rf "$cache"; grep -vxF -e "[plugins.'pixtuoid@pixtuoid']" -e 'enabled = true' "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
 "plugin marketplace remove pixtuoid") grep -vxF -e '[marketplaces.pixtuoid]' -e "source_type = 'local'" "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
 esac
 "#;
@@ -1330,11 +1330,19 @@ esac
 const FAKE_CODEX_CMD: &str = "@echo off\r
 set \"d=%~dp0\"\r
 set \"c=%CODEX_HOME%\\config.toml\"\r
+set \"cache=%CODEX_HOME%\\plugins\\cache\\pixtuoid\\pixtuoid\\local\"\r
+set \"root=\"\r
+if exist \"%d%codex-root\" set /p root=<\"%d%codex-root\"\r
 >>\"%d%calls.log\" echo codex %~1 %~2 %~3 %~4\r
 if defined FAKE_HOST_FAIL if \"codex %*\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
+if \"%1 %2 %3\"==\"plugin marketplace add\" (>\"%d%codex-root\" echo %~4)\r
 if \"%1 %2 %3\"==\"plugin marketplace add\" ((findstr /l /x /c:\"[marketplaces.pixtuoid]\" \"%c%\" >nul 2>&1 || (>>\"%c%\" echo [marketplaces.pixtuoid]& >>\"%c%\" echo source_type = 'local'))& exit /b 0)\r
 if \"%1 %2 %3\"==\"plugin marketplace remove\" ((findstr /l /v /x /c:\"[marketplaces.pixtuoid]\" /c:\"source_type = 'local'\" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
+if \"%1 %2\"==\"plugin add\" if not defined root exit /b 1\r
+if \"%1 %2\"==\"plugin add\" (if exist \"%cache%\" rmdir /s /q \"%cache%\")\r
+if \"%1 %2\"==\"plugin add\" (for /d %%p in (\"%root%\\*\") do xcopy /e /i /y /q \"%%p\" \"%cache%\" >nul)\r
 if \"%1 %2\"==\"plugin add\" ((findstr /l /x /c:\"[plugins.'pixtuoid@pixtuoid']\" \"%c%\" >nul 2>&1 || (>>\"%c%\" echo [plugins.'pixtuoid@pixtuoid']& >>\"%c%\" echo enabled = true))& exit /b 0)\r
+if \"%1 %2\"==\"plugin remove\" (if exist \"%cache%\" rmdir /s /q \"%cache%\")\r
 if \"%1 %2\"==\"plugin remove\" ((findstr /l /v /x /c:\"[plugins.'pixtuoid@pixtuoid']\" /c:\"enabled = true\" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
 exit /b 0\r
 ";
@@ -1506,7 +1514,7 @@ fn a_disconnect_that_deregisters_a_stranded_plugin_reports_a_removal() {
         uninstall_target(&CLAUDE_FILE, Some(hooks.clone())).unwrap();
         let u = uninstall_target(&CLAUDE, Some(hooks)).unwrap();
         assert!(matches!(u.outcome, UninstallOutcome::Removed));
-        assert!(!u.plugin_left_registered);
+        assert!(u.plugin_left_registered.is_none());
     });
 }
 
@@ -1541,15 +1549,17 @@ fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
             let settings = config.join("settings.json");
             // No settings.json reads as never registered.
             assert!(
-                !uninstall_target(&CLAUDE, Some(hooks.clone()))
+                uninstall_target(&CLAUDE, Some(hooks.clone()))
                     .unwrap()
                     .plugin_left_registered
+                    .is_none()
             );
             std::fs::write(&settings, "{}").unwrap();
             assert!(
-                !uninstall_target(&CLAUDE, Some(hooks.clone()))
+                uninstall_target(&CLAUDE, Some(hooks.clone()))
                     .unwrap()
                     .plugin_left_registered
+                    .is_none()
             );
             std::fs::write(
                 &settings,
@@ -1560,6 +1570,7 @@ fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
                 uninstall_target(&CLAUDE, Some(hooks.clone()))
                     .unwrap()
                     .plugin_left_registered
+                    .is_some()
             );
             // Disabled in Claude Code is still installed: its marketplace stays.
             std::fs::write(
@@ -1571,6 +1582,7 @@ fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
                 uninstall_target(&CLAUDE, Some(hooks))
                     .unwrap()
                     .plugin_left_registered
+                    .is_some()
             );
         },
     );
@@ -1713,6 +1725,58 @@ fn codex_verify_flags_a_disabled_plugin() {
     });
 }
 
+/// Codex runs its cached copy, so a copy that differs from the owned hooks file is
+/// what doctor names and what a re-copy fixes.
+#[test]
+fn codex_doctor_names_a_stale_copy_until_it_is_re_copied() {
+    with_fake_hosts(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let hook = Some(std::env::current_exe().unwrap());
+        install_target_from(&CODEX, Some(hooks.clone()), hook).unwrap();
+        let copy = CODEX.host.and_then(|h| h.copy.as_ref()).unwrap();
+        assert!(!(copy.stale)(&hooks).unwrap(), "connect copies the plugin");
+
+        let cached =
+            codex_config().with_file_name("plugins/cache/pixtuoid/pixtuoid/local/hooks/hooks.json");
+        std::fs::write(&cached, "{}\n").unwrap();
+        assert!((copy.stale)(&hooks).unwrap());
+        let v = verify_target(&CODEX, Some(hooks.clone()));
+        assert!(
+            v.issues.iter().any(|i| i.contains("runs an older copy")),
+            "{:?}",
+            v.issues
+        );
+
+        (copy.refresh)().unwrap();
+        assert!(!(copy.stale)(&hooks).unwrap());
+        assert!(verify_target(&CODEX, Some(hooks)).is_sound());
+    });
+}
+
+/// Each host reads its own state file: absent is not registered, and one it cannot
+/// parse is an error rather than a guess.
+#[test]
+fn a_host_state_file_absent_reads_unregistered_and_unparsable_errs() {
+    with_fake_hosts(|_| {
+        for (t, state, unparsable) in [
+            (&CODEX, codex_config(), "not = = toml [[["),
+            (&REASONIX, reasonix_packages(), "{not json"),
+        ] {
+            let is_registered = t.host.unwrap().is_registered;
+            assert!(!is_registered().unwrap(), "{}: absent", t.name);
+            std::fs::write(&state, unparsable).unwrap();
+            assert!(is_registered().is_err(), "{}: unparsable", t.name);
+        }
+        std::fs::write(
+            reasonix_packages(),
+            r#"{"version":1,"plugins":[{"name":"other","enabled":true}]}"#,
+        )
+        .unwrap();
+        assert!(!(REASONIX.host.unwrap().is_registered)().unwrap());
+    });
+}
+
 #[test]
 fn codex_disconnect_removes_the_plugin_and_its_marketplace_through_codex() {
     with_fake_hosts(|fake| {
@@ -1782,7 +1846,7 @@ fn codex_disconnect_without_codex_on_path_leaves_a_registered_plugin() {
         let u = temp_env::with_var("PATH", Some(fake), || {
             uninstall_target(&CODEX, Some(hooks.clone())).unwrap()
         });
-        assert!(u.plugin_left_registered);
+        assert!(u.plugin_left_registered.is_some());
         assert!(
             tmp.path()
                 .join("marketplace/.agents/plugins/marketplace.json")
@@ -1926,7 +1990,7 @@ fn reasonix_disconnect_without_reasonix_on_path_leaves_a_registered_plugin_loada
         let u = temp_env::with_var("PATH", Some(fake), || {
             uninstall_target(&REASONIX, Some(manifest.clone())).unwrap()
         });
-        assert!(u.plugin_left_registered);
+        assert!(u.plugin_left_registered.is_some());
         let left =
             crate::install::reasonix::verify_schema(&std::fs::read_to_string(&manifest).unwrap());
         assert_eq!(

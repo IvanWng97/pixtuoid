@@ -31,12 +31,17 @@ pub(crate) const EVENTS: &[&str] = &[
 /// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads
 /// in place, so a rewrite of the file reaches the next session.
 pub(crate) const HOST: HostRegistration = HostRegistration {
+    cli: CLI,
     register,
     unregister,
     is_registered,
-    // A local-path marketplace loads in place.
-    reload: None,
+    copy: None,
     legacy: None,
+};
+
+const CLI: io::HostCli = io::HostCli {
+    command: "claude",
+    display_name: "Claude Code",
 };
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
@@ -65,7 +70,7 @@ fn marketplace_manifest(root: &Path) -> PathBuf {
 }
 
 fn register(config: &Path) -> Result<()> {
-    let (plugin, root) = host_plugin::hooks_layout(config)?;
+    let (plugin, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     host_plugin::write_manifests(&[
         (
             marketplace_manifest(root),
@@ -108,7 +113,7 @@ fn register(config: &Path) -> Result<()> {
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
 fn unregister(config: &Path) -> Result<Unregistered> {
-    let (_, root) = host_plugin::hooks_layout(config)?;
+    let (_, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     if CLI.locate().is_none() {
         // Disabled is still installed: its marketplace must outlive it.
         if plugin_entry()?.is_some() {
@@ -170,12 +175,6 @@ fn marketplace_listed(json_out: &str) -> Result<bool> {
         .any(|r| r.get("name").and_then(Value::as_str) == Some(NAME)))
 }
 
-/// The CLI that registers the plugin, named in every error it raises.
-const CLI: io::HostCli = io::HostCli {
-    command: "claude",
-    display_name: "Claude Code",
-};
-
 /// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
 /// carries, so CC PATH-resolves it and a binary upgrade applies without a
 /// rewrite. [`io::HOOK_OVERRIDE_ENV`] overrides that — the user set it precisely because
@@ -222,7 +221,7 @@ pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
 }
 
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    host_plugin::verify_hooks(content, EVENTS, claude_shim_ref)
+    host_plugin::verify_hooks(content, host_plugin::CLAUDE_SHAPE, EVENTS, claude_shim_ref)
 }
 
 fn claude_shim_ref(command: &str) -> ShimRef {

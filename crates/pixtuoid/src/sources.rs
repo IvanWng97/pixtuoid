@@ -14,7 +14,7 @@ use pixtuoid_core::source::registry;
 use crate::config;
 use crate::install::{
     self, InstallReport, UninstallReport,
-    target::{Target, by_source, is_present},
+    target::{HostRegistration, PluginCopy, Target, by_source},
 };
 
 /// The wire-facing outcome token — a CLOSED set, published in the JSON schema
@@ -216,9 +216,10 @@ fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<boo
 }
 
 /// Bring every connected source's owned plugin files to this build
-/// ([`install::converge`]), and return the targets it rewrote: each CLI loads the
-/// new plugin only at its next start. A failure leaves the install for the boot
-/// warning and doctor to report.
+/// ([`install::converge`]), and the copy a CLI runs to those files, and return the
+/// targets whose CLI now has a newer plugin to load at its next start. A failure
+/// leaves the install for the boot warning and doctor to report, and the next
+/// launch retries it.
 pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target> {
     converge_owned_with(connected, |t| install::converge(t, None))
 }
@@ -246,25 +247,28 @@ fn converge_owned_with(
         for (path, error) in &done.failed {
             tracing::warn!(cli = t.name, path = ?path, error = ?error, "could not refresh a plugin file to this build");
         }
-        if done.rewritten.is_empty() {
-            continue;
+        let loads_new = match t.host.and_then(|h| h.copy.as_ref().map(|c| (h, c))) {
+            Some((host, copy)) => recopy(host, copy, t).unwrap_or_else(|e| {
+                tracing::warn!(cli = t.name, error = ?e, "could not re-copy the plugin to this build");
+                false
+            }),
+            None => !done.rewritten.is_empty(),
+        };
+        if loads_new {
+            refreshed.push(t);
         }
-        if let Ok(primary) = (t.default_config_path)()
-            && let Some(Err(e)) = reload_copied_plugin(t, &primary)
-        {
-            tracing::warn!(cli = t.name, error = ?e, "could not re-copy the refreshed plugin");
-        }
-        refreshed.push(t);
     }
     refreshed
 }
 
-/// Re-copy a plugin whose files the launch rewrote, for a host that runs a copy,
-/// and only while the user has it enabled: the re-add re-enables a disabled one.
-fn reload_copied_plugin(t: &Target, primary: &Path) -> Option<Result<()>> {
-    let host = t.host?;
-    let reload = host.reload?;
-    matches!((host.is_registered)(), Ok(true)).then(|| reload(primary))
+/// Re-copy `t`'s plugin when the copy its CLI runs differs from the owned files, and
+/// say whether it did. A disabled plugin stays as the user left it.
+fn recopy(host: &HostRegistration, copy: &PluginCopy, t: &Target) -> Result<bool> {
+    if !(host.is_registered)()? || !(copy.stale)(&(t.default_config_path)()?)? {
+        return Ok(false);
+    }
+    (copy.refresh)()?;
+    Ok(true)
 }
 
 /// The line a launch prints for a plugin [`converge_owned`] rewrote.
@@ -419,10 +423,11 @@ fn apply_want(cfg: &Path, sid: &'static str, want: bool) -> AppliedChange {
     done.unwrap_or_else(|e| AppliedChange::Failed(format!("{e:#}")))
 }
 
-/// How both presenters word a disconnect that couldn't reach `claude` to
-/// deregister the plugin, which keeps it registered with no hooks.
-pub(crate) const PLUGIN_LEFT_REGISTERED_PHRASE: &str =
-    "plugin left registered (claude not on PATH)";
+/// How both presenters word a disconnect that couldn't reach `cli` to deregister
+/// the plugin, which stays registered with the CLI.
+pub(crate) fn plugin_left_registered(cli: install::io::HostCli) -> String {
+    format!("plugin left registered ({} not on PATH)", cli.command)
+}
 
 /// Connect each of `ids` — onboarding's confirm and `setup --yes`. Nothing is
 /// connected on a first run, so an id left out needs no change.
@@ -532,7 +537,7 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
             // target is "claude" but its source is "claude-code".
             let target = by_source(d.name);
             let facts = target.map(|t| RowFacts {
-                present: is_present(t),
+                present: (t.presence_probe)(),
                 config_path: (t.default_config_path)().ok(),
             });
             let connected = connected.contains(d.name);
@@ -577,7 +582,7 @@ pub(crate) fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
 /// present) — the "offer to connect these" set for first-run onboarding.
 pub(crate) fn detect() -> Vec<&'static str> {
     registry::registered_source_names()
-        .filter(|sid| by_source(sid).is_some_and(is_present))
+        .filter(|sid| by_source(sid).is_some_and(|t| (t.presence_probe)()))
         .collect()
 }
 
@@ -590,45 +595,51 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
-    static RELOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static REFRESHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static STALE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    /// A host that copies its plugin, with an enabled state the test sets.
-    static COPYING_HOST: crate::install::target::HostRegistration =
-        crate::install::target::HostRegistration {
-            register: |_| Ok(()),
-            unregister: |_| Ok(crate::install::target::Unregistered::Absent),
-            is_registered: || Ok(ENABLED.load(std::sync::atomic::Ordering::SeqCst)),
-            reload: Some(|_| {
-                RELOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    /// A host that runs a copy, with the enabled and stale states the test sets.
+    static COPYING_HOST: HostRegistration = HostRegistration {
+        cli: crate::install::target::CLAUDE.host.unwrap().cli,
+        register: |_| Ok(()),
+        unregister: |_| Ok(crate::install::target::Unregistered::Absent),
+        is_registered: || Ok(ENABLED.load(std::sync::atomic::Ordering::SeqCst)),
+        copy: Some(PluginCopy {
+            stale: |_| Ok(STALE.load(std::sync::atomic::Ordering::SeqCst)),
+            refresh: || {
+                REFRESHES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
-            }),
-            legacy: None,
-        };
+            },
+        }),
+        legacy: None,
+    };
 
-    /// A copied plugin is re-added after its files changed only while the user has
-    /// it enabled: a re-add re-enables a disabled one. An in-place host is never
-    /// asked.
+    /// Each launch re-copies a stale copy, so a re-copy that failed, or waited for the
+    /// user to re-enable the plugin, lands later.
     #[test]
-    fn a_copied_plugin_reloads_only_while_enabled() {
+    fn a_launch_re_copies_a_stale_copy_only_while_enabled() {
         use std::sync::atomic::Ordering::SeqCst;
-        let copying = Target {
+        let t = Target {
             host: Some(&COPYING_HOST),
             ..crate::install::target::CLAUDE
         };
-        RELOADS.store(0, SeqCst);
-        ENABLED.store(false, SeqCst);
-        assert!(reload_copied_plugin(&copying, Path::new("/x")).is_none());
-        ENABLED.store(true, SeqCst);
-        assert!(matches!(
-            reload_copied_plugin(&copying, Path::new("/x")),
-            Some(Ok(()))
-        ));
-        assert_eq!(RELOADS.load(SeqCst), 1);
-        assert!(
-            reload_copied_plugin(&crate::install::target::CLAUDE, Path::new("/x")).is_none(),
-            "Claude loads its plugin in place"
-        );
+        let copy = COPYING_HOST.copy.as_ref().unwrap();
+        REFRESHES.store(0, SeqCst);
+        for (enabled, stale, recopied) in [
+            (false, true, false),
+            (true, false, false),
+            (true, true, true),
+        ] {
+            ENABLED.store(enabled, SeqCst);
+            STALE.store(stale, SeqCst);
+            assert_eq!(
+                recopy(&COPYING_HOST, copy, &t).unwrap(),
+                recopied,
+                "enabled {enabled}, stale {stale}"
+            );
+        }
+        assert_eq!(REFRESHES.load(SeqCst), 1);
     }
 
     #[test]

@@ -198,9 +198,9 @@ pub(crate) fn format_disconnect_result(r: &UninstallReport, display_name: &str) 
             format!("\u{2713} {display_name} disconnected")
         }
     };
-    if r.plugin_left_registered {
+    if let Some(cli) = r.plugin_left_registered {
         s.push_str(" \u{00b7} \u{26a0} ");
-        s.push_str(crate::sources::PLUGIN_LEFT_REGISTERED_PHRASE);
+        s.push_str(&crate::sources::plugin_left_registered(cli));
     }
     s
 }

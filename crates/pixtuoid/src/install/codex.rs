@@ -6,7 +6,9 @@ use serde_json::json;
 use crate::install::SENTINEL_KEY;
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
-use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
+use crate::install::target::{
+    HostRegistration, LegacyConfig, MergeOutcome, PluginCopy, Unregistered,
+};
 use crate::install::verify::{SchemaParse, ShimRef};
 
 pub(crate) const CODEX_EVENTS: &[&str] = &[
@@ -24,17 +26,25 @@ pub(crate) const CODEX_EVENTS: &[&str] = &[
 ];
 
 /// Codex loads the hooks through its plugin system: a local marketplace it records in
-/// place, and a plugin `codex plugin add` copies into its cache and enables
-/// (`codex-rs/core-plugins/src/manager.rs` @ rust-v0.162.1).
+/// place, and a plugin `codex plugin add` copies into its cache.
 pub(crate) const HOST: HostRegistration = HostRegistration {
+    cli: CLI,
     register,
     unregister,
     is_registered,
-    reload: Some(reload),
+    copy: Some(PluginCopy {
+        stale: copy_is_stale,
+        refresh: add_plugin,
+    }),
     legacy: Some(LegacyConfig {
         path: config_toml,
         strip: merge_uninstall,
     }),
+};
+
+const CLI: io::HostCli = io::HostCli {
+    command: "codex",
+    display_name: "Codex",
 };
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
@@ -81,6 +91,7 @@ pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     host_plugin::verify_hooks(
         content,
+        host_plugin::CLAUDE_SHAPE,
         CODEX_EVENTS,
         crate::install::verify::shell_shim_ref,
     )
@@ -97,7 +108,7 @@ fn marketplace_manifest(root: &Path) -> PathBuf {
 }
 
 fn register(config: &Path) -> Result<()> {
-    let (plugin, root) = host_plugin::hooks_layout(config)?;
+    let (plugin, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     host_plugin::write_manifests(&[
         (
             marketplace_manifest(root),
@@ -111,8 +122,9 @@ fn register(config: &Path) -> Result<()> {
         ),
         (
             plugin.join(".codex-plugin").join("plugin.json"),
-            // No `version`: Codex then caches the copy as `local`, so no release
-            // changes a byte it runs.
+            // No `version`: Codex then copies the plugin to a `local` dir
+            // (`codex-rs/core-plugin-common/src/installed.rs` @ rust-v0.162.1), so no
+            // release moves what it runs.
             json!({
                 "name": NAME,
                 "description": "Sends Codex's session events to the pixtuoid office",
@@ -120,20 +132,19 @@ fn register(config: &Path) -> Result<()> {
         ),
     ])?;
     // A repeat add of the same local source is a no-op
-    // (`codex-rs/core-plugins/src/marketplace_add.rs` @ rust-v0.162.1), and a repeat
-    // plugin add replaces the copy.
+    // (`codex-rs/core-plugins/src/marketplace_add.rs` @ rust-v0.162.1).
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
         "add".as_ref(),
         root.as_os_str(),
     ])?;
-    reload(config)
+    add_plugin()
 }
 
-/// `plugin add` also re-enables a plugin the user disabled, so only a connect or an
-/// enabled plugin calls it.
-fn reload(_config: &Path) -> Result<()> {
+/// Copy the plugin into Codex's cache, replacing an older copy, and enable it
+/// (`codex-rs/core-plugins/src/manager.rs` @ rust-v0.162.1).
+fn add_plugin() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "add".as_ref(),
@@ -142,14 +153,27 @@ fn reload(_config: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether the hooks file Codex runs, `<codex_home>/plugins/cache/<marketplace>/
+/// <plugin>/local/hooks/hooks.json` (`codex-rs/core-plugins/src/store.rs`
+/// @ rust-v0.162.1), differs from ours at `config`. A missing copy differs.
+fn copy_is_stale(config: &Path) -> Result<bool> {
+    let copy = host_plugin::HOOKS_FILE.iter().fold(
+        pixtuoid_core::source::codex::codex_home()
+            .join("plugins")
+            .join("cache")
+            .join(NAME)
+            .join(NAME)
+            .join("local"),
+        |p, c| p.join(c),
+    );
+    Ok(io::read_config(&copy)? != io::read_config(config)?)
+}
+
 /// Reads Codex's config first, so a disconnect with nothing registered starts no CLI.
 fn unregister(config: &Path) -> Result<Unregistered> {
-    let (_, root) = host_plugin::hooks_layout(config)?;
+    let (_, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     let doc = read_codex_config()?;
-    let installed = doc
-        .get("plugins")
-        .and_then(|p| p.get(host_plugin::plugin_id().as_str()))
-        .is_some();
+    let installed = plugin_entry(&doc).is_some();
     let listed = doc.get("marketplaces").and_then(|m| m.get(NAME)).is_some();
     if !installed && !listed {
         host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
@@ -179,16 +203,18 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     Ok(Unregistered::Removed)
 }
 
-/// Where `codex plugin add` records the plugin enabled
-/// (`codex-rs/config/src/plugin_edit.rs` @ rust-v0.162.1).
 fn is_registered() -> Result<bool> {
     let doc = read_codex_config()?;
-    Ok(doc
-        .get("plugins")
-        .and_then(|p| p.get(host_plugin::plugin_id().as_str()))
+    Ok(plugin_entry(&doc)
         .and_then(|e| e.get("enabled"))
         .and_then(toml::Value::as_bool)
         == Some(true))
+}
+
+/// Where `codex plugin add` records the plugin and whether it is enabled
+/// (`codex-rs/config/src/plugin_edit.rs` @ rust-v0.162.1).
+fn plugin_entry(doc: &toml::Value) -> Option<&toml::Value> {
+    doc.get("plugins")?.get(host_plugin::plugin_id().as_str())
 }
 
 /// An empty table for a missing or empty file.
@@ -197,12 +223,6 @@ fn read_codex_config() -> Result<toml::Value> {
     let content = io::read_config(&path)?;
     toml::from_str(&content).with_context(|| format!("parsing {}", path.display()))
 }
-
-/// The CLI that registers the plugin, named in every error it raises.
-const CLI: io::HostCli = io::HostCli {
-    command: "codex",
-    display_name: "Codex",
-};
 
 /// Strips what a pixtuoid from before the plugin merged into `config.toml`.
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {

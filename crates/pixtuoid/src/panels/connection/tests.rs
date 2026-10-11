@@ -398,21 +398,24 @@ fn format_disconnect_result_renders_disconnected_plus_registration_note() {
     use crate::install::{UninstallOutcome, UninstallReport};
     let removed = UninstallReport {
         outcome: UninstallOutcome::Removed,
-        plugin_left_registered: false,
+        plugin_left_registered: None,
     };
     let s = format_disconnect_result(&removed, "Claude Code");
     assert_eq!(s, "\u{2713} Claude Code disconnected");
 
     let stranded = UninstallReport {
-        plugin_left_registered: true,
+        plugin_left_registered: crate::install::target::CODEX.host.map(|h| h.cli),
         ..removed
     };
-    let s = format_disconnect_result(&stranded, "Claude Code");
-    assert!(s.contains("plugin left registered"), "{s}");
+    let s = format_disconnect_result(&stranded, "Codex");
+    assert!(
+        s.contains("plugin left registered (codex not on PATH)"),
+        "the CLI it could not reach, by name: {s}"
+    );
 
     let nothing = UninstallReport {
         outcome: UninstallOutcome::NothingToRemove,
-        plugin_left_registered: false,
+        plugin_left_registered: None,
     };
     let s2 = format_disconnect_result(&nothing, "Codex");
     assert_eq!(s2, "\u{2713} Codex disconnected");

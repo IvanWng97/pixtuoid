@@ -871,7 +871,7 @@ fn collect(
                 .map(|t| crate::install::has_hooks(t, None))
                 .unwrap_or(false);
             let is_connected = connected.contains(src);
-            let cli_detected = target.map(crate::install::target::is_present);
+            let cli_detected = target.map(|t| (t.presence_probe)());
             DoctorSourceRow {
                 prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
                 source_id: src,
