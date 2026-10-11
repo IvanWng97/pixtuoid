@@ -42,10 +42,7 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     }),
 };
 
-const CLI: io::HostCli = io::HostCli {
-    command: "codex",
-    display_name: "Codex",
-};
+const CLI: io::HostCli = io::HostCli { command: "codex" };
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     host_plugin::owned_path("codex-plugin", host_plugin::HOOKS_FILE)

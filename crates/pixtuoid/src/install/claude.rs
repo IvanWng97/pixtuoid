@@ -39,10 +39,7 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     legacy: None,
 };
 
-const CLI: io::HostCli = io::HostCli {
-    command: "claude",
-    display_name: "Claude Code",
-};
+const CLI: io::HostCli = io::HostCli { command: "claude" };
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     host_plugin::owned_path("claude-plugin", host_plugin::HOOKS_FILE)

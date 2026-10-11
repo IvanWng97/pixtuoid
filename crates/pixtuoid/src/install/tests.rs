@@ -1348,12 +1348,13 @@ exit /b 0\r
 ";
 
 /// Reasonix records an install in its plugin-packages.json, which
-/// [`reasonix_packages`] reads.
+/// [`reasonix_packages`] reads. It fails on its first two args alone, since an
+/// install's path arg is quoted differently by each OS's spawn.
 const FAKE_REASONIX_SH: &str = r#"#!/bin/sh
 d=$(dirname "$0")
 s="$REASONIX_HOME/plugin-packages.json"
 echo "reasonix $*" >> "$d/calls.log"
-[ "reasonix $*" = "${FAKE_HOST_FAIL-}" ] && exit 1
+[ "reasonix $1 $2" = "${FAKE_HOST_FAIL-}" ] && exit 1
 case "$*" in
 "plugin install "*" --link --replace --yes") echo '{"version":1,"plugins":[{"name":"pixtuoid","root":"linked","enabled":true}]}' > "$s" ;;
 "plugin remove pixtuoid --yes") echo '{"version":1,"plugins":[]}' > "$s" ;;
@@ -1364,7 +1365,7 @@ const FAKE_REASONIX_CMD: &str = "@echo off\r
 set \"d=%~dp0\"\r
 set \"s=%REASONIX_HOME%\\plugin-packages.json\"\r
 >>\"%d%calls.log\" echo reasonix %~1 %~2 %~3 %~4 %~5 %~6\r
-if defined FAKE_HOST_FAIL if \"reasonix %*\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
+if defined FAKE_HOST_FAIL if \"reasonix %1 %2\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
 if \"%1 %2\"==\"plugin install\" (>\"%s%\" echo {\"version\":1,\"plugins\":[{\"name\":\"pixtuoid\",\"root\":\"linked\",\"enabled\":true}]}& exit /b 0)\r
 if \"%1 %2\"==\"plugin remove\" (>\"%s%\" echo {\"version\":1,\"plugins\":[]}& exit /b 0)\r
 exit /b 0\r
@@ -1931,15 +1932,90 @@ fn codex_disconnect_without_codex_on_path_leaves_a_registered_plugin() {
     });
 }
 
+/// The legacy strip runs before the plugin registers, so a registration that fails
+/// leaves neither firing: stripping after would leave the copy and the legacy
+/// hooks both firing whenever the strip failed.
 #[test]
 fn codex_connect_fails_when_adding_the_plugin_fails_and_leaves_no_hooks() {
     with_fake_hosts_failing(Some("codex plugin add pixtuoid@pixtuoid"), |_| {
+        std::fs::write(codex_config(), CODEX_LEGACY_HOOK).unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
         assert!(install_target_from(&CODEX, Some(hooks.clone()), hook).is_err());
         assert!(!has_hooks(&CODEX, Some(hooks)));
+        assert!(
+            !std::fs::read_to_string(codex_config())
+                .unwrap()
+                .contains(SENTINEL_KEY)
+        );
     });
+}
+
+/// A legacy config that no longer parses is never rewritten: the connect fails
+/// before the strip touches it, and before any registration.
+#[test]
+fn a_connect_over_an_unparsable_legacy_config_errs_and_rewrites_nothing() {
+    with_fake_hosts(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for (t, legacy, primary, register) in [
+            (
+                &CODEX,
+                codex_config(),
+                plugin_hooks_path(tmp.path()),
+                "codex plugin",
+            ),
+            (
+                &REASONIX,
+                reasonix_settings(),
+                reasonix_manifest_path(tmp.path()),
+                "reasonix plugin",
+            ),
+        ] {
+            std::fs::write(&legacy, "{ not = = valid [[[").unwrap();
+            let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+            assert!(
+                install_target_from(t, Some(primary.clone()), hook).is_err(),
+                "{}",
+                t.name
+            );
+            assert_eq!(
+                std::fs::read_to_string(&legacy).unwrap(),
+                "{ not = = valid [[[",
+                "{}",
+                t.name
+            );
+            assert!(!has_hooks(t, Some(primary)), "{}", t.name);
+            let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap_or_default();
+            assert!(!calls.contains(register), "{}: {calls}", t.name);
+        }
+    });
+}
+
+/// Codex is detected from its own config.toml, never from the plugin pixtuoid
+/// writes: an empty Codex home is not Codex, and a connect alone cannot detect it.
+#[test]
+fn codex_is_detected_from_its_own_config_only() {
+    let codex_home = tempfile::TempDir::new().unwrap();
+    let xdg = tempfile::TempDir::new().unwrap();
+    temp_env::with_vars(
+        [
+            ("CODEX_HOME", Some(codex_home.path())),
+            ("XDG_CONFIG_HOME", Some(xdg.path())),
+        ],
+        || {
+            assert!(!(CODEX.presence_probe)());
+            let ours = (CODEX.default_config_path)().unwrap();
+            std::fs::create_dir_all(ours.parent().unwrap()).unwrap();
+            std::fs::write(&ours, "{}").unwrap();
+            assert!(
+                !(CODEX.presence_probe)(),
+                "the plugin pixtuoid writes says nothing"
+            );
+            std::fs::write(codex_home.path().join("config.toml"), "").unwrap();
+            assert!((CODEX.presence_probe)());
+        },
+    );
 }
 
 /// `<root>/pixtuoid/reasonix-plugin.json` inside `tmp`.
@@ -2078,17 +2154,11 @@ fn reasonix_disconnect_without_reasonix_on_path_leaves_a_registered_plugin_loada
 
 #[test]
 fn reasonix_connect_fails_when_linking_fails_and_leaves_no_hooks() {
-    with_fake_hosts(|_| {
+    with_fake_hosts_failing(Some("reasonix plugin install"), |_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let manifest = reasonix_manifest_path(tmp.path());
-        let fail = format!(
-            "reasonix plugin install {} --link --replace --yes",
-            manifest.parent().unwrap().display()
-        );
-        temp_env::with_var("FAKE_HOST_FAIL", Some(&fail), || {
-            let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
-            assert!(install_target_from(&REASONIX, Some(manifest.clone()), hook).is_err());
-        });
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        assert!(install_target_from(&REASONIX, Some(manifest.clone()), hook).is_err());
         assert!(!has_hooks(&REASONIX, Some(manifest)));
     });
 }
@@ -2121,7 +2191,13 @@ fn every_owned_set_re_renders_byte_identical_from_the_shim_its_first_file_bakes(
                 continue;
             };
             for explicit in [true, false] {
-                let hook = (t.hook_command)(&shim, explicit).unwrap();
+                let hook = match (t.hook_command)(&shim, explicit) {
+                    Ok(hook) => hook,
+                    // A command cmd.exe runs refuses a spaced path at connect, so it
+                    // is never written.
+                    Err(_) if cfg!(windows) => continue,
+                    Err(e) => panic!("{}: {e:#}", t.name),
+                };
                 let rendered = files.render(&primary, &hook).unwrap();
                 let back = files.installed_shim(&rendered[0].1);
                 let rehooked = rehook(t.hook_command, &back)

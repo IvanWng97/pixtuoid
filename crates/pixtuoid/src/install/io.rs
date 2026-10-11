@@ -382,7 +382,6 @@ pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostCli {
     pub(crate) command: &'static str,
-    pub(crate) display_name: &'static str,
 }
 
 impl HostCli {
@@ -394,14 +393,11 @@ impl HostCli {
 
     /// [`Self::locate`], or the error that names what to do about it.
     pub(crate) fn require(self) -> Result<PathBuf> {
-        let Self {
-            command,
-            display_name,
-        } = self;
+        let Self { command } = self;
         self.locate().with_context(|| {
             format!(
-                "{display_name}'s `{command}` command is not on PATH; pixtuoid installs its \
-                 hooks as a {display_name} plugin through it — put it on PATH and reconnect"
+                "`{command}` is not on PATH; pixtuoid installs its hooks as a plugin \
+                 through it — put it on PATH and reconnect"
             )
         })
     }

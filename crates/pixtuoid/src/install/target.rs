@@ -99,7 +99,8 @@ pub struct Target {
     /// whose hooks take effect on the CLI's next run.
     pub post_install_hint: Option<&'static str>,
     /// Set when the CLI loads our hooks through its own plugin system: the owned
-    /// primary is then the plugin's hooks file, which this registers with the CLI.
+    /// primary is then the plugin file that carries them (a hooks file, or a
+    /// manifest with the hooks inside), which this registers with the CLI.
     pub host: Option<&'static HostRegistration>,
 }
 
@@ -172,12 +173,12 @@ impl Primary {
 #[derive(Debug)]
 pub struct HostRegistration {
     pub(crate) cli: crate::install::io::HostCli,
-    /// Write the plugin's manifests beside the hooks file `config` and register
-    /// the plugin. Idempotent, and run on every install so a deregistered plugin
-    /// heals.
+    /// Register the plugin around the owned primary `config`, first writing any
+    /// manifest the CLI needs beside it. Idempotent, and run on every install so a
+    /// deregistered plugin heals.
     pub register: fn(config: &Path) -> Result<()>,
-    /// Deregister the plugin and delete the files `register` wrote beside the
-    /// hooks file `config`; an unreachable CLI leaves both in place.
+    /// Deregister the plugin and delete its files, `config` included; an
+    /// unreachable CLI leaves both in place.
     pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,

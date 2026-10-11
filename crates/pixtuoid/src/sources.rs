@@ -142,8 +142,7 @@ pub(crate) struct SourceStatus {
     pub connected: bool,
     pub cli_present: bool,
     /// The source's worst issue as one line, or `null` if none was found: a broken
-    /// install or decode drift (connected sources only), or hooks an older release
-    /// left that still fire.
+    /// install or decode drift, for connected sources only.
     // Generates `health?: string | null`. Do NOT add `schemars(required)` to force
     // it required: that STRIPS the `| null` → the WRONG `health: string`, and the
     // wire CAN be null. Optional is a harmless superset; nullable is load-bearing.
@@ -221,16 +220,17 @@ fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<boo
 /// leaves the install for the boot warning and doctor to report, and the next
 /// launch retries it.
 pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target> {
-    converge_owned_with(connected, |t| install::converge(t, None))
+    converge_owned_with(install::TARGETS, connected, |t| install::converge(t, None))
 }
 
-/// [`converge_owned`] with the convergence injected.
+/// [`converge_owned`] over `targets`, with the convergence injected.
 fn converge_owned_with(
+    targets: &[&'static Target],
     connected: &HashSet<String>,
     converge: impl Fn(&'static Target) -> Result<install::Converged>,
 ) -> Vec<&'static Target> {
     let mut refreshed = Vec::new();
-    for t in install::TARGETS.iter().copied() {
+    for t in targets.iter().copied() {
         if !connected.contains(t.core_source) {
             continue;
         }
@@ -271,7 +271,8 @@ fn recopy(host: &HostRegistration, copy: &PluginCopy, t: &Target) -> Result<bool
     Ok(true)
 }
 
-/// The line a launch prints for a plugin [`converge_owned`] rewrote.
+/// The line a launch prints for a target [`converge_owned`] returned: its CLI now
+/// has a newer plugin to load.
 pub(crate) fn refreshed_notice(t: &Target) -> String {
     let step = t.post_install_hint.map_or_else(
         || format!("restart {} to load it", t.display_name),
@@ -311,7 +312,9 @@ fn write_flags(cfg: &Path, change: Option<(&str, bool)>) -> Result<()> {
 /// **Honors the explicit id — it does NOT gate on CLI presence.** Unlike the
 /// in-TUI panel (which renders an absent CLI as `NoCli` and refuses the toggle),
 /// this installs for any registered id even if that CLI isn't installed yet —
-/// pre-provisioning for automation/onboarding where the caller stated intent.
+/// pre-provisioning for automation/onboarding where the caller stated intent. A
+/// plugin-host source is the exception: it registers through its CLI, which must
+/// be on PATH.
 ///
 /// # Errors
 ///
@@ -463,8 +466,7 @@ pub struct ConnectionRow {
     pub config_path: Option<PathBuf>,
     /// `None` ⇒ connect/disconnect is a flag-only flip (no hooks to write).
     pub target: Option<&'static Target>,
-    /// Cached health summary: a CONNECTED row's worst issue, a disconnected
-    /// one's hooks that fire anyway.
+    /// Cached health summary: a CONNECTED row's worst issue; `None` for any other.
     pub health: Option<String>,
 }
 
@@ -598,6 +600,7 @@ mod tests {
     static REFRESHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static STALE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static STALE_ERRS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     /// A host that runs a copy, with the enabled and stale states the test sets.
     static COPYING_HOST: HostRegistration = HostRegistration {
@@ -606,7 +609,13 @@ mod tests {
         unregister: |_| Ok(crate::install::target::Unregistered::Absent),
         is_registered: || Ok(ENABLED.load(std::sync::atomic::Ordering::SeqCst)),
         copy: Some(PluginCopy {
-            stale: |_| Ok(STALE.load(std::sync::atomic::Ordering::SeqCst)),
+            stale: |_| {
+                use std::sync::atomic::Ordering::SeqCst;
+                if STALE_ERRS.load(SeqCst) {
+                    anyhow::bail!("the copy could not be read");
+                }
+                Ok(STALE.load(SeqCst))
+            },
             refresh: || {
                 REFRESHES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
@@ -642,12 +651,49 @@ mod tests {
         assert_eq!(REFRESHES.load(SeqCst), 1);
     }
 
+    static COPYING: Target = Target {
+        host: Some(&COPYING_HOST),
+        ..crate::install::target::CLAUDE
+    };
+
+    /// A host that runs a copy is announced only when a launch re-copied it: a
+    /// rewrite of a disabled plugin's files, or a re-copy that failed, has nothing
+    /// new for the CLI to load.
+    #[test]
+    fn a_launch_announces_a_copying_host_only_when_it_re_copied() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let connected = set(&["claude-code"]);
+        let rewrote = || {
+            Ok(install::Converged {
+                rewritten: vec![PathBuf::from("/x/hooks.json")],
+                failed: Vec::new(),
+            })
+        };
+        for (enabled, stale, errs, announced) in [
+            (false, true, false, false),
+            (true, true, false, true),
+            (true, false, false, false),
+            (true, true, true, false),
+        ] {
+            ENABLED.store(enabled, SeqCst);
+            STALE.store(stale, SeqCst);
+            STALE_ERRS.store(errs, SeqCst);
+            let refreshed = converge_owned_with(&[&COPYING], &connected, |_| rewrote());
+            assert_eq!(
+                !refreshed.is_empty(),
+                announced,
+                "enabled {enabled}, stale {stale}, errs {errs}"
+            );
+        }
+    }
+
     #[test]
     fn converge_owned_reaches_only_connected_targets_and_survives_a_failure() {
         // TARGETS order: claude fails first, so a stop-at-first-error loop would never
         // reach opencode; omp only fails files, so it rewrote nothing to announce.
         let seen = std::cell::RefCell::new(Vec::new());
-        let refreshed = converge_owned_with(&set(&["opencode", "omp", "claude-code"]), |t| {
+        let connected = set(&["opencode", "omp", "claude-code"]);
+        let refreshed = converge_owned_with(install::TARGETS, &connected, |t| {
             seen.borrow_mut().push(t.name);
             match t.name {
                 "claude" => Err(anyhow::anyhow!("no home")),

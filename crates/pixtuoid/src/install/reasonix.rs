@@ -58,7 +58,6 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
 
 const CLI: io::HostCli = io::HostCli {
     command: "reasonix",
-    display_name: "Reasonix",
 };
 
 const MANIFEST: &str = "reasonix-plugin.json";
@@ -104,7 +103,8 @@ fn reasonix_home() -> Option<PathBuf> {
 
 /// Pure core for [`reasonix_home`] — everything is injected so BOTH platform arms
 /// unit-test on any host. `None` only when neither `%APPDATA%` nor a home
-/// resolves; installing then would write a CWD-relative file Reasonix never reads.
+/// resolves, and the legacy strip and the registration probe then error rather
+/// than read a CWD-relative file Reasonix never writes.
 fn resolve_reasonix_home(
     reasonix_home_env: Option<PathBuf>,
     windows: bool,
