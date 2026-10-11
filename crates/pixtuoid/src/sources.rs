@@ -215,6 +215,50 @@ fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<boo
     hooked(sid).unwrap_or_else(|| app.sources.get(sid) == Some(&true))
 }
 
+/// Bring every connected source's owned plugin files to this build
+/// ([`install::converge`]), and return the targets it rewrote: each CLI loads the
+/// new plugin only at its next start. A failure leaves the install for the boot
+/// warning and doctor to report.
+pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target> {
+    converge_owned_with(connected, |t| install::converge(t, None))
+}
+
+/// [`converge_owned`] with the convergence injected.
+fn converge_owned_with(
+    connected: &HashSet<String>,
+    converge: impl Fn(&'static Target) -> Result<Vec<PathBuf>>,
+) -> Vec<&'static Target> {
+    install::TARGETS
+        .iter()
+        .copied()
+        .filter(|t| connected.contains(t.core_source))
+        .filter(|t| match converge(t) {
+            Ok(rewritten) => {
+                for path in &rewritten {
+                    tracing::info!(cli = t.name, path = ?path, "refreshed a plugin file to this build");
+                }
+                !rewritten.is_empty()
+            }
+            Err(e) => {
+                tracing::warn!(cli = t.name, error = ?e, "could not refresh the plugin to this build");
+                false
+            }
+        })
+        .collect()
+}
+
+/// The line a launch prints for a plugin [`converge_owned`] rewrote.
+pub(crate) fn refreshed_notice(t: &Target) -> String {
+    let step = t.post_install_hint.map_or_else(
+        || format!("restart {} to load it", t.display_name),
+        str::to_string,
+    );
+    format!(
+        "pixtuoid: refreshed the {} plugin to this build — {step}",
+        t.display_name
+    )
+}
+
 /// Onboarding opens when nothing is connected — unless the config failed to
 /// load, which means "previously configured": every write its apply makes
 /// would be refused by `update_config`.
@@ -526,6 +570,34 @@ mod tests {
 
     fn set(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn converge_owned_reaches_only_connected_targets_and_survives_a_failure() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let refreshed = converge_owned_with(&set(&["opencode", "omp", "claude-code"]), |t| {
+            seen.borrow_mut().push(t.name);
+            match t.name {
+                "opencode" => Ok(vec![PathBuf::from("/x/pixtuoid.ts")]),
+                "omp" => Err(anyhow::anyhow!("could not lock")),
+                _ => Ok(Vec::new()),
+            }
+        });
+        assert_eq!(
+            refreshed.iter().map(|t| t.name).collect::<Vec<_>>(),
+            ["opencode"]
+        );
+        let mut seen = seen.into_inner();
+        seen.sort_unstable();
+        assert_eq!(seen, ["claude", "omp", "opencode"]);
+    }
+
+    #[test]
+    fn a_refreshed_notice_names_the_step_that_loads_the_plugin() {
+        let openclaw = refreshed_notice(by_source("openclaw").unwrap());
+        assert!(openclaw.contains("openclaw gateway restart"), "{openclaw}");
+        let opencode = refreshed_notice(by_source("opencode").unwrap());
+        assert!(opencode.contains("restart opencode"), "{opencode}");
     }
 
     #[test]

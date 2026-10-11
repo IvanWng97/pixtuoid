@@ -299,7 +299,7 @@ pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
         let p = if explicit {
             merge::hook_path_str(resolved)?
         } else {
-            "pixtuoid-hook"
+            io::HOOK_BIN
         };
         crate::install::hook_cmd::shell_hook_command(
             p,
@@ -367,7 +367,7 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
         // thing mapped on top.
         #[cfg(not(windows))]
         Some(c) => match crate::install::verify::shell_shim_ref(c.trim()) {
-            ShimRef::Absolute(p) if p.as_os_str() == "pixtuoid-hook" => ShimRef::BareName,
+            ShimRef::Absolute(p) if p.as_os_str() == io::HOOK_BIN => ShimRef::BareName,
             other => other,
         },
         // NOT that parser: CC's Windows entry is exec form (`args: []`), a bare
@@ -380,6 +380,13 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
 
 pub(crate) fn render_owned(primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>> {
     Ok(vec![(primary.to_path_buf(), render_hooks(hook_cmd)?)])
+}
+
+/// Every event carries the same command, so the first one's is the install's.
+pub(crate) fn installed_shim(content: &str) -> crate::install::verify::ShimRef {
+    serde_json::from_str::<Value>(content).map_or(crate::install::verify::ShimRef::Unknown, |doc| {
+        claude_shim_ref(&doc["hooks"][EVENTS[0]][0])
+    })
 }
 
 fn render_hooks(hook_cmd: &str) -> Result<String> {

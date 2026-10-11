@@ -198,6 +198,8 @@ fn build_run_config(
     let graphics = config::resolve_graphics(&cfg, cli_graphics, &mut cfg_warnings);
     let motion = config::resolve_motion(&cfg, &mut cfg_warnings);
     let connected = sources::connected(&cfg);
+    // Outside the gate below: a headless run's CLIs load the plugin too.
+    let refreshed = sources::converge_owned(&connected);
     let first_run = sources::is_first_run(&connected, load_degraded);
     if !headless {
         // Config problems must reach stderr BEFORE any alternate screen / window,
@@ -205,6 +207,9 @@ fn build_run_config(
         // so re-printing there would duplicate.
         for w in &cfg_warnings {
             let _ = writeln!(std::io::stderr(), "⚠ pixtuoid: {w}");
+        }
+        for t in refreshed {
+            let _ = writeln!(std::io::stderr(), "{}", sources::refreshed_notice(t));
         }
         warn_broken_installs(&connected);
     }

@@ -119,11 +119,14 @@ pub(crate) fn verify_target(
         }
     }
     if let Primary::Config {
-        beside: Some(render),
+        beside: Some(files),
         ..
     } = t.primary
     {
-        verify_beside(render, &path, &mut issues, &mut notes);
+        verify_beside(files, &path, &mut issues, &mut notes);
+    }
+    if let Some(files) = t.primary.owned() {
+        verify_owned_drift(t, files, &path, &mut issues, &mut notes);
     }
     if let Some(host) = t.host {
         match (host.is_registered)() {
@@ -147,14 +150,14 @@ pub(crate) fn verify_target(
 /// file IS that target's owned primary — its `verify` covers it instead (the opencode
 /// plugin and the omp bridge extension are that shape).
 fn verify_beside(
-    render: target::RenderOwned,
+    files: target::OwnedFiles,
     config: &std::path::Path,
     issues: &mut Vec<String>,
     notes: &mut Vec<String>,
 ) {
     // A placeholder hook arg yields the real install locations WITHOUT resolving the
     // binary: a read-only check must not hard-error just because it isn't locatable.
-    let arts = match render(config, "pixtuoid-hook") {
+    let arts = match (files.render)(config, io::HOOK_BIN) {
         Ok(arts) => arts,
         Err(e) => {
             notes.push(format!("could not resolve plugin artifact paths: {e}"));
@@ -172,35 +175,20 @@ fn verify_beside(
             notes.push(format!("could not read {}", crate::display_path(&p)));
             continue;
         };
-        check_artifact_content(&p, &installed, &intended, issues, notes);
+        check_beside_shim(&p, &installed, &intended, issues, notes);
     }
     issues.extend(missing_artifact_issue(&missing));
 }
 
-/// Compare one installed artifact against what this binary would render now, then stat the
-/// shim path it bakes. A config-shaped target names the EVENTS an old install is missing;
-/// a code artifact has no per-event config, so the equivalent is its code — nothing
-/// re-installs on a pixtuoid upgrade, so without this an upgrader runs the plugin they
-/// connected with forever and doctor says fine.
-fn check_artifact_content(
+/// Stat the shim path a beside file bakes: existence misses a shim that MOVED — a green
+/// doctor over a plugin whose every forward fails.
+fn check_beside_shim(
     p: &std::path::Path,
     installed: &str,
     intended: &str,
     issues: &mut Vec<String>,
     notes: &mut Vec<String>,
 ) {
-    // EVERY artifact, not just the one baking a shim path: nested under the marker guard
-    // below, OpenClaw's manifest and its `package.json` got existence-only checks.
-    if plugin_code_differs(installed, intended) {
-        issues.push(format!(
-            "{} differs from the plugin this pixtuoid ships — it \
-             predates an upgrade, so anything added since is not \
-             forwarded. Reconnect the source to refresh it.",
-            crate::display_path(p)
-        ));
-    }
-    // Existence misses a shim that MOVED — a green doctor over a plugin whose every
-    // forward fails — so stat the baked path too.
     if !intended.contains(verify::BAKED_HOOK_MARKER) {
         return;
     }
@@ -213,29 +201,128 @@ fn check_artifact_content(
     }
 }
 
-/// A rendered artifact as the staleness compare reads it: its code, without the
-/// `const HOOK_PATH` line (the only line that legitimately differs between what is
-/// installed, a real shim path, and what this binary would render, a placeholder),
-/// without whole-line `//` comments and without blank lines, so a comment-only edit
-/// never flags an install stale. The marker is anchored with `starts_with`, as
-/// `verify::baked_hook_path` anchors, so a code line that merely mentions it still
-/// compares. A trailing `//` and a `/* */` (openclaw_plugin.js has both) still count as
-/// code, so editing one flags every install.
-fn plugin_code(content: &str) -> String {
-    content
-        .lines()
-        .filter(|l| {
-            let l = l.trim_start();
-            !l.is_empty() && !l.starts_with("//") && !l.starts_with(verify::BAKED_HOOK_MARKER)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// The HARD issue for owned files that differ from this binary's render. Each launch
+/// rewrites them ([`converge`]), so the boot warning shows it only when that failed. A
+/// missing file is the primary's read or [`verify_beside`]'s to report.
+fn verify_owned_drift(
+    t: &Target,
+    files: target::OwnedFiles,
+    primary: &std::path::Path,
+    issues: &mut Vec<String>,
+    notes: &mut Vec<String>,
+) {
+    match owned_state(files, t.hook_command, primary) {
+        Ok(OwnedState::Differs(stale)) => {
+            let present: Vec<String> = stale
+                .iter()
+                .filter(|(p, _)| p.exists())
+                .map(|(p, _)| crate::display_path(p))
+                .collect();
+            if !present.is_empty() {
+                issues.push(format!(
+                    "{} differs from the plugin this pixtuoid ships; pixtuoid rewrites it \
+                     at launch, so if this persists, reconnect {}",
+                    present.join(", "),
+                    t.display_name
+                ));
+            }
+        }
+        Ok(OwnedState::Current | OwnedState::Unknown) => {}
+        Err(e) => notes.push(format!(
+            "could not compare the plugin files with this pixtuoid's: {e:#}"
+        )),
+    }
 }
 
-/// Whether `installed` differs in code from what this binary would render
-/// ([`plugin_code`]): the ONE staleness compare for every code artifact.
-pub(crate) fn plugin_code_differs(installed: &str, intended: &str) -> bool {
-    plugin_code(installed) != plugin_code(intended)
+/// How a target's owned files on disk compare with this binary's render of them.
+#[derive(Debug)]
+pub(crate) enum OwnedState {
+    Current,
+    /// Each file that differs or is missing, with what this binary renders for it.
+    Differs(Vec<(PathBuf, String)>),
+    /// The first file is gone or no longer gives back its shim, so only a reconnect
+    /// knows what to bake.
+    Unknown,
+}
+
+/// Compare `files` byte for byte with this binary's render, re-rendered with the shim
+/// the install baked, so a build run from elsewhere (a worktree, `just live-sources`)
+/// never re-points a real plugin at its own shim.
+pub(crate) fn owned_state(
+    files: target::OwnedFiles,
+    hook_command: target::HookCommand,
+    primary: &std::path::Path,
+) -> Result<OwnedState> {
+    let located = (files.render)(primary, io::HOOK_BIN)?;
+    let Some((entry, _)) = located.first() else {
+        return Ok(OwnedState::Unknown);
+    };
+    let shim = (files.installed_shim)(&io::read_config(entry)?);
+    let Some(hook) = rehook(hook_command, &shim).transpose()? else {
+        return Ok(OwnedState::Unknown);
+    };
+    let differs: Vec<_> = (files.render)(primary, &hook)?
+        .into_iter()
+        .filter(|(p, want)| io::read_config(p).map_or(true, |on_disk| on_disk != *want))
+        .collect();
+    Ok(if differs.is_empty() {
+        OwnedState::Current
+    } else {
+        OwnedState::Differs(differs)
+    })
+}
+
+/// Rewrite each of `t`'s owned files that differs from this binary's render, and
+/// return their paths. Nothing else: a config merge or a host registration is a
+/// consent only `connect` asks for, so [`converge_files`] is never handed either.
+pub(crate) fn converge(t: &Target, config: Option<PathBuf>) -> Result<Vec<PathBuf>> {
+    let Some(files) = t.primary.owned() else {
+        return Ok(Vec::new());
+    };
+    let primary = config
+        .map(Ok)
+        .unwrap_or_else(|| (t.default_config_path)())?;
+    converge_files(files, t.hook_command, &primary)
+}
+
+fn converge_files(
+    files: target::OwnedFiles,
+    hook_command: target::HookCommand,
+    primary: &std::path::Path,
+) -> Result<Vec<PathBuf>> {
+    let OwnedState::Differs(stale) = owned_state(files, hook_command, primary)? else {
+        return Ok(Vec::new());
+    };
+    let mut rewritten = Vec::new();
+    for (p, _) in stale {
+        #[cfg(test)]
+        assert!(
+            p.starts_with(std::env::temp_dir()),
+            "a test is about to converge {} outside the temp dir",
+            p.display()
+        );
+        let lock = io::lock_config(&p)?;
+        // Re-derived under the lock: a concurrent connect may have re-pointed the shim.
+        let OwnedState::Differs(now) = owned_state(files, hook_command, primary)? else {
+            break;
+        };
+        if let Some((_, want)) = now.into_iter().find(|(q, _)| *q == p) {
+            lock.write_atomic(&want)?;
+            rewritten.push(p);
+        }
+    }
+    Ok(rewritten)
+}
+
+/// The hook command this binary writes for an installed shim: an explicit path
+/// stays explicit and a PATH-resolved bare name stays bare, while the command's
+/// shape is this binary's.
+fn rehook(hook_command: target::HookCommand, shim: &verify::ShimRef) -> Option<Result<String>> {
+    match shim {
+        verify::ShimRef::Absolute(p) => Some(hook_command(p, true)),
+        verify::ShimRef::BareName => Some(hook_command(std::path::Path::new(io::HOOK_BIN), false)),
+        verify::ShimRef::Unknown => None,
+    }
 }
 
 /// The HARD issue(s) for missing code artifacts, collapsed when they share a
@@ -347,7 +434,7 @@ fn resolve_hook_binary_from(
     match locate() {
         Ok(p) => Ok((p, false)),
         Err(e) if t.binary_strategy == BinaryStrategy::EmbedAbsolute => Err(e),
-        Err(_) => Ok((PathBuf::from("pixtuoid-hook"), false)),
+        Err(_) => Ok((PathBuf::from(io::HOOK_BIN), false)),
     }
 }
 
@@ -408,11 +495,11 @@ fn install_target_from(
             // nowhere (partial install).
             let outcome = merge_install(&content, &hook_cmd)
                 .with_context(|| format!("processing {}", path.display()))?;
-            let files = beside.map(|r| r(&path, &hook_cmd)).transpose()?;
+            let files = beside.map(|b| (b.render)(&path, &hook_cmd)).transpose()?;
             (outcome, files.unwrap_or_default())
         }
-        Primary::Owned { render, .. } => {
-            let mut files = render(&path, &hook_cmd)?.into_iter();
+        Primary::Owned { files, .. } => {
+            let mut files = (files.render)(&path, &hook_cmd)?.into_iter();
             let (_, rendered) = files
                 .next()
                 .with_context(|| format!("{} rendered no primary", t.name))?;
@@ -578,32 +665,6 @@ pub(crate) fn assert_event_roster<T: Ord + std::fmt::Debug + Copy>(
         "{name} membership changed — a registered event that vanishes is a \
          shipping bug no other test can see."
     );
-}
-
-/// `content` as a later pixtuoid that edited only comments would render it: a whole-line
-/// `//` comment and blank lines added, every other one reworded, and the last one removed.
-/// The sentinel, which leads each template, survives.
-#[cfg(test)]
-pub(crate) fn comment_only_edit(content: &str) -> String {
-    let is_comment = |l: &str| l.trim_start().starts_with("//");
-    let last = content
-        .lines()
-        .enumerate()
-        .filter(|(_, l)| is_comment(l))
-        .map(|(i, _)| i)
-        .last();
-    let mut out = String::from("// a comment no release shipped\n\n  \n");
-    for (i, line) in content.lines().enumerate() {
-        if Some(i) == last {
-            continue;
-        }
-        out.push_str(line);
-        if is_comment(line) {
-            out.push_str(" (reworded)");
-        }
-        out.push('\n');
-    }
-    out
 }
 
 #[cfg(test)]

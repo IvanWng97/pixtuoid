@@ -271,8 +271,7 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 
 /// The patch file carries the MOUNT, not the shim (that is baked inside the
 /// plugin file) — so `shim` stays `Unknown` here; a missing plugin file is
-/// `verify_beside`'s existence check and a stale one its code compare
-/// (`plugin_code_differs`; nothing re-installs on a pixtuoid upgrade). The schema's own,
+/// `verify_beside`'s existence check and a stale one `owned_state`'s. The schema's own,
 /// stat-free half is the row-vs-home path match below.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let rows = match parse_rows(content) {
@@ -307,8 +306,8 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             });
             match name {
                 // PURE over the content (`target.rs` schema contract): file
-                // existence/staleness is `verify_beside`'s stat +
-                // code compare, never checked here. The HOME match is
+                // existence is `verify_beside`'s stat and staleness
+                // `owned_state`'s, never checked here. The HOME match is
                 // this check's own: `verify_beside` stats only the path
                 // derived from the current `$DSH_HOME`, so a row carried
                 // over from a relocated home would verify green while dsh
