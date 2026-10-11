@@ -28,6 +28,7 @@ pub(crate) fn showing(
         floor,
         now,
         board: quiet_board(),
+        dim: crate::look::Dim::NONE,
     }
 }
 

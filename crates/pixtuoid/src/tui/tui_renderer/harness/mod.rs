@@ -298,6 +298,39 @@ pub(super) fn half_blocks_on_screen(
     (r, screen, wire)
 }
 
+/// Every cell of world text `bright` sets over its office that `dimmed` sets
+/// too shows its colors under `dim` there.
+pub(super) fn assert_world_text_dims(
+    bright: &ratatui::buffer::Buffer,
+    dimmed: &ratatui::buffer::Buffer,
+    dim: pixtuoid_scene::look::Dim,
+) {
+    use ratatui::style::Color;
+    let under = |c: Color| match c {
+        Color::Rgb(r, g, b) => {
+            let pixtuoid_core::sprite::Rgb { r, g, b } =
+                dim.of(pixtuoid_core::sprite::Rgb { r, g, b });
+            Color::Rgb(r, g, b)
+        }
+        other => other,
+    };
+    let text: Vec<_> = crate::tui::renderer::scene_rect(bright.area)
+        .positions()
+        .filter(|&p| {
+            bright[p].symbol().chars().any(char::is_alphanumeric)
+                && bright[p].symbol() == dimmed[p].symbol()
+        })
+        .collect();
+    assert!(!text.is_empty(), "the office sets no world text");
+    for p in text {
+        assert_eq!(
+            (dimmed[p].fg, dimmed[p].bg),
+            (under(bright[p].fg), under(bright[p].bg)),
+            "{p:?}"
+        );
+    }
+}
+
 pub(super) fn two_floor_scene() -> SceneState {
     let cap = 16;
     scene_with(

@@ -200,6 +200,7 @@ fn main() -> Result<()> {
                     floor: None,
                 },
                 debug_walkable: false,
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         )
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;

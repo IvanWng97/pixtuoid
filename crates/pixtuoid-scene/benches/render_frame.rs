@@ -174,6 +174,7 @@ fn floor_frames<'a>(
                 size,
                 place: Place::default(),
                 debug_walkable: false,
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         )
         .expect("layout")
@@ -320,6 +321,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     floor: meta,
                     now: *now,
                     board,
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 };
                 render_cutaway(
                     frame,
@@ -347,6 +349,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                     floor: meta,
                     now: *now,
                     board,
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 };
                 canvas
                     .frame(

@@ -9,6 +9,7 @@ use pixtuoid_core::AgentId;
 use pixtuoid_scene::display::cells::{CellMap, CellRect};
 use pixtuoid_scene::display::{Badge, HostText, TextRole, TextRun};
 use pixtuoid_scene::layout::Bounds;
+use pixtuoid_scene::look::Dim;
 use pixtuoid_scene::tooltip::Tooltip;
 
 /// Where a cursor tooltip anchors: the hovered cell, and the scene rect it must
@@ -21,19 +22,29 @@ pub(crate) struct TooltipAt {
 }
 
 /// Paint `text` as terminal text over the office in `scene_rect`, whose
-/// cells `map` lays over it: the badges, each bubble over them, then the
-/// signs, which a bubble must not cover.
+/// cells `map` lays over it, under its dim: the badges, each
+/// bubble over them, then the signs, which a bubble must not cover.
 pub(crate) fn paint_host_text(
     f: &mut ratatui::Frame<'_>,
     text: HostText<'_>,
     (scene_rect, map): (Rect, CellMap),
     hovered: Option<AgentId>,
 ) {
-    paint_badges(f, text.badges, (scene_rect, map), hovered);
-    paint_text_runs(f, text.bubbles, (scene_rect, map));
+    let dim = text.dim;
+    paint_badges(f, text.badges, (scene_rect, map), hovered, dim);
+    paint_text_runs(f, text.bubbles, (scene_rect, map), dim);
     for (run, at) in set_signs(text.signs, map) {
-        put_line(f, run_line(run), at, scene_rect);
+        put_line(f, dim_line(run_line(run), dim), at, scene_rect);
     }
+}
+
+/// `line`'s colors under `dim`.
+fn dim_line(mut line: Line<'_>, dim: Dim) -> Line<'_> {
+    for span in &mut line.spans {
+        span.style.fg = span.style.fg.map(|c| super::dim_color(c, dim));
+        span.style.bg = span.style.bg.map(|c| super::dim_color(c, dim));
+    }
+    line
 }
 
 /// The logical units the cells of `map` show that the star among `signs`
@@ -63,6 +74,7 @@ pub(crate) fn paint_badges(
     badges: &[Badge],
     (scene_rect, map): (Rect, CellMap),
     hovered: Option<AgentId>,
+    dim: Dim,
 ) {
     use ratatui::style::Modifier;
     for badge in badges {
@@ -87,7 +99,7 @@ pub(crate) fn paint_badges(
             ])
         };
         let at = badge.line_at(line_width(&line), map);
-        put_line(f, line, at, scene_rect);
+        put_line(f, dim_line(line, dim), at, scene_rect);
     }
 }
 
@@ -97,11 +109,12 @@ pub(crate) fn paint_text_runs(
     f: &mut ratatui::Frame<'_>,
     runs: &[TextRun],
     (scene_rect, map): (Rect, CellMap),
+    dim: Dim,
 ) {
     for run in runs {
         let line = run_line(run);
         let at = run.line_at(line_width(&line), map);
-        put_line(f, line, at, scene_rect);
+        put_line(f, dim_line(line, dim), at, scene_rect);
     }
 }
 
@@ -198,7 +211,7 @@ pub(crate) fn paint_tooltip(
 
 #[cfg(test)]
 mod tests {
-    use super::{TooltipAt, paint_tooltip};
+    use super::{Dim, TooltipAt, paint_tooltip};
     use pixtuoid_scene::display::GatewayCard;
     use pixtuoid_scene::tooltip::{DETAIL_CHARS, Tooltip, mascot_text as mascot_tooltip_text};
 
@@ -348,6 +361,7 @@ mod tests {
                 f,
                 &model.runs(&theme::NORMAL),
                 (scene_rect, CellMap::HALF_BLOCK),
+                Dim::NONE,
             );
         })
         .unwrap();
@@ -419,7 +433,8 @@ mod tests {
                     f,
                     std::slice::from_ref(&badge),
                     (area, CellMap::HALF_BLOCK),
-                    None
+                    None,
+                    Dim::NONE
                 )),
                 (40 - w / 2..40 - w / 2 + w)
                     .map(|x| (x, row))
@@ -445,7 +460,12 @@ mod tests {
                 let at = run.line_at(super::line_width(&super::run_line(run)), map);
                 let cells: Vec<(u16, u16)> = (at.x..at.x + at.w).map(|x| (x, at.y)).collect();
                 assert_eq!(
-                    painted(&|f| super::paint_text_runs(f, std::slice::from_ref(run), (area, map))),
+                    painted(&|f| super::paint_text_runs(
+                        f,
+                        std::slice::from_ref(run),
+                        (area, map),
+                        Dim::NONE
+                    )),
                     cells,
                     "{map:?}: {:?}",
                     run.role
@@ -482,6 +502,7 @@ mod tests {
                 std::slice::from_ref(&badge),
                 (Rect::new(0, 0, 40, 8), CellMap::HALF_BLOCK),
                 Some(badge.agent),
+                Dim::NONE,
             )
         })
         .unwrap();
@@ -519,7 +540,12 @@ mod tests {
         let text: String = run.spans.iter().map(|s| s.text()).collect();
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
         term.draw(|f| {
-            super::paint_text_runs(f, &[run], (Rect::new(0, 0, 80, 30), CellMap::HALF_BLOCK))
+            super::paint_text_runs(
+                f,
+                &[run],
+                (Rect::new(0, 0, 80, 30), CellMap::HALF_BLOCK),
+                Dim::NONE,
+            )
         })
         .unwrap();
         let buf = term.backend().buffer();
@@ -564,6 +590,7 @@ mod tests {
                     std::slice::from_ref(&badge),
                     (f.area(), CellMap::HALF_BLOCK),
                     hovered,
+                    Dim::NONE,
                 )
             })
             .unwrap();
@@ -601,6 +628,7 @@ mod tests {
                 &[badge(anchor, text, BadgeTone::Idle, &theme::NORMAL)],
                 (scene_rect, CellMap::HALF_BLOCK),
                 None,
+                Dim::NONE,
             )
         })
         .unwrap();
@@ -636,6 +664,7 @@ mod tests {
                         &[badge(Point { x: 20, y: 8 }, text, tone, theme)],
                         (f.area(), CellMap::HALF_BLOCK),
                         None,
+                        Dim::NONE,
                     )
                 })
                 .unwrap();
@@ -694,8 +723,9 @@ mod tests {
                 std::slice::from_ref(&speaker),
                 (scene_rect, CellMap::HALF_BLOCK),
                 None,
+                Dim::NONE,
             );
-            super::paint_text_runs(f, &[bubble], (scene_rect, CellMap::HALF_BLOCK));
+            super::paint_text_runs(f, &[bubble], (scene_rect, CellMap::HALF_BLOCK), Dim::NONE);
         })
         .unwrap();
         let buf = term.backend().buffer();
