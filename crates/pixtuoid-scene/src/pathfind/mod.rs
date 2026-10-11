@@ -70,12 +70,14 @@ impl AStarRouter {
     }
 
     /// Number of cached `(from, to)` routes currently held.
-    pub fn len(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.paths.len()
     }
 
     /// Whether the path cache holds no routes.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.paths.is_empty()
     }
 }

@@ -128,7 +128,7 @@ impl FloorMeta {
 #[derive(Debug)]
 pub struct FloorCtx {
     /// This floor's A\* pathfinder.
-    pub router: AStarRouter,
+    pub(crate) router: AStarRouter,
     /// Per-tick walkable-cell occupancy (routing steers around occupied cells).
     pub(crate) overlay: OccupancyOverlay,
     /// Per-agent pose history for the routed pose derivation.
