@@ -1004,6 +1004,29 @@ mod tests {
     }
 
     #[test]
+    fn a_day_take_renders_each_lane_in_its_shape() {
+        use crate::audio::compose::compose;
+        let score = compose(Mood::Day, 0);
+        let mut rng = NoiseStream::new(crate::audio::BUILD_SEED);
+        let [pad, sparkle, keys, drums, texture, bass] =
+            Lane::ALL.map(|lane| render_lane(&score, lane, &mut rng));
+        assert_eq!(
+            texture.len(),
+            1 << 19,
+            "day texture = the free-running noise-bed loop"
+        );
+        for bed in [&sparkle, &keys, &drums, &bass] {
+            assert_eq!(bed.len(), pad.len(), "musical beds phase-lock");
+        }
+        assert!(
+            centroid_hz(&sparkle) > centroid_hz(&pad) * 1.5,
+            "the lead must sit clearly above the pad: {:.0} vs {:.0}",
+            centroid_hz(&sparkle),
+            centroid_hz(&pad)
+        );
+    }
+
+    #[test]
     fn new_lead_voices_are_pure_finite_and_keep_their_decay_character() {
         let rms = |s: &[f32]| (s.iter().map(|v| v * v).sum::<f32>() / s.len() as f32).sqrt();
         let tail_ratio = |b: &[f32]| {
