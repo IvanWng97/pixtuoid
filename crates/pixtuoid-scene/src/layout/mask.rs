@@ -3,9 +3,9 @@
 
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
-    Furniture, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, Pivot, PlantItem,
-    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_THICK_V, WAYPOINT_STAMP_PAD_PX,
-    WallDecorItem, Waypoint, WaypointKind, anchored_top_left, furniture_def,
+    Furniture, LOUNGE_STAMP_PAD_PX, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, Pivot,
+    PlantItem, PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_THICK_V,
+    WAYPOINT_STAMP_PAD_PX, WallDecorItem, Waypoint, WaypointKind, anchored_top_left, furniture_def,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -209,17 +209,17 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 
     if let Some(lamp) = floor_lamp {
         let def = furniture_def(Furniture::FloorLamp);
-        stamp_ground(&mut mask, &def, Pivot::Center, lamp, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, lamp, LOUNGE_STAMP_PAD_PX);
     }
 
     if let Some(t) = lounge_side_table {
         let def = furniture_def(Furniture::LoungeSideTable);
-        stamp_ground(&mut mask, &def, Pivot::Center, t, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, t, LOUNGE_STAMP_PAD_PX);
     }
 
     if let Some(t) = fish_tank {
         let def = furniture_def(Furniture::FishTank);
-        stamp_ground(&mut mask, &def, Pivot::Center, t, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, t, LOUNGE_STAMP_PAD_PX);
     }
 
     for &WallDecorItem { kind, pos } in wall_decor {

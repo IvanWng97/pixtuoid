@@ -345,6 +345,11 @@ pub(crate) const OBSTACLE_PAD_PX: u16 = 2;
 /// so the gate can never assume a different pad than the mask actually stamps.
 pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
 
+/// The mask pad around the lounge's floor lamp, side table and fish tank. THE
+/// single source, read by `mask.rs`'s stamps AND the couch↔door gate's lamp term,
+/// so the gate measures the ground the mask actually blocks.
+pub(super) const LOUNGE_STAMP_PAD_PX: u16 = 1;
+
 /// The north wall+window band's visual bottom sits this many px ABOVE
 /// `top_margin`; the rows in between render as carpet apron, not wall, so the
 /// mask blocks only down to the band bottom. The renderer derives

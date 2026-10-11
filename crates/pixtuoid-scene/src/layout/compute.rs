@@ -913,7 +913,7 @@ impl LoungeFlanks {
                 .footprint
                 .map_or(0, |f| f.w)
                 / 2
-            + OBSTACLE_PAD_PX
+            + LOUNGE_STAMP_PAD_PX
     }
 }
 
@@ -1810,6 +1810,44 @@ fn compute_waypoints(
 #[cfg(test)]
 mod tests {
     use super::{FloorGeometry, FloorVariant};
+
+    /// The couch↔door gate reads the column past the lamp's ground AS THE MASK
+    /// STAMPS IT, so it drops the lounge exactly when the lamp would block the
+    /// threshold, not a column early.
+    #[test]
+    fn the_lamps_east_ground_is_the_column_past_its_stamped_ground() {
+        use super::LoungeFlanks;
+        use crate::layout::Size;
+        use crate::layout::mask::{MaskObstacles, build_walkable_mask};
+        let (buf_w, buf_h) = (160, 96);
+        let flanks = LoungeFlanks::of(60);
+        let lamp = crate::layout::Point {
+            x: flanks.lamp_x,
+            y: 50,
+        };
+        let mask = build_walkable_mask(&MaskObstacles {
+            buf_w,
+            buf_h,
+            top_margin: 20,
+            home_desks: &[],
+            meeting_rooms: &[],
+            kitchen_island: None,
+            waypoints: &[],
+            plants: &[],
+            floor_lamp: Some(lamp),
+            lounge_side_table: None,
+            fish_tank: None,
+            wall_decor: &[],
+            pod_decor: &[],
+            wall_pieces: &[],
+            pantry_counter_size: Size { w: 20, h: 8 },
+        });
+        let last_blocked = (lamp.x..buf_w)
+            .take_while(|&x| !mask.is_walkable(x, lamp.y))
+            .last()
+            .expect("the lamp blocks its own column");
+        assert_eq!(flanks.east_ground(), last_blocked + 1);
+    }
 
     /// An aisle too short or too narrow for a vending machine has none, so the
     /// printer keeps off nothing there.
