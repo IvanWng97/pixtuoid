@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
-use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::{HostRegistration, MergeOutcome, Unregistered};
@@ -37,7 +36,6 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
     is_registered,
-    leftover_hooks,
 };
 
 /// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
@@ -196,38 +194,6 @@ fn read_settings(settings: &Path) -> Result<Value> {
         return Ok(Value::Null);
     }
     serde_json::from_str(&content).with_context(|| format!("parsing {}", settings.display()))
-}
-
-fn leftover_hooks() -> Option<String> {
-    leftover_hooks_in(&settings_path().ok()?)
-}
-
-/// Releases before the plugin merged their hooks into this settings file, keyed
-/// on [`SENTINEL_KEY`]; Claude Code runs a plugin's copy of a handler beside a
-/// settings file's (code.claude.com/docs/en/hooks), hence "twice". A file that
-/// doesn't parse reports none: Claude Code skips it too
-/// (code.claude.com/docs/en/settings).
-fn leftover_hooks_in(settings: &Path) -> Option<String> {
-    let doc = read_settings(settings).ok()?;
-    let events: Vec<&str> = doc
-        .get("hooks")?
-        .as_object()?
-        .iter()
-        .filter(|(_, list)| {
-            list.as_array()
-                .is_some_and(|l| l.iter().any(|e| merge::is_flat_managed(e, SENTINEL_KEY)))
-        })
-        .map(|(event, _)| event.as_str())
-        .collect();
-    (!events.is_empty()).then(|| {
-        format!(
-            "{} still holds the hooks an older pixtuoid wrote for {}: Claude Code runs \
-             them while disconnected, and twice beside the plugin — delete each entry \
-             marked \"{SENTINEL_KEY}\": true",
-            crate::display_path(settings),
-            crate::strip_control_chars(&events.join(", "))
-        )
-    })
 }
 
 fn marketplace_listed(json_out: &str) -> Result<bool> {
@@ -441,66 +407,6 @@ mod tests {
         });
     }
 
-    fn leftovers_in(settings: Option<&str>) -> Option<String> {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("settings.json");
-        if let Some(s) = settings {
-            std::fs::write(&path, s).unwrap();
-        }
-        leftover_hooks_in(&path)
-    }
-
-    #[test]
-    fn leftover_hooks_names_each_event_a_pre_plugin_install_still_holds() {
-        let theirs =
-            json!({ "matcher": "Bash", "hooks": [{ "type": "command", "command": "lint" }] });
-        let ours = json!({
-            SENTINEL_KEY: true,
-            "matcher": ".*",
-            "hooks": [{ "type": "command", "command": "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'" }],
-        });
-        let settings = json!({
-            "enabledPlugins": { "pixtuoid@pixtuoid": true },
-            "hooks": {
-                "PreToolUse": [theirs, ours],
-                "Stop": [ours],
-                "PostToolUse": [theirs],
-            },
-        });
-        let note = leftovers_in(Some(&settings.to_string())).expect("two events still hold ours");
-        assert!(note.contains("PreToolUse, Stop"), "{note}");
-        assert!(
-            !note.contains("PostToolUse"),
-            "only the user's hook there: {note}"
-        );
-        assert!(
-            note.contains(r#""_pixtuoid": true"#),
-            "names the removal step: {note}"
-        );
-        assert!(note.contains("settings.json"), "names the file: {note}");
-    }
-
-    #[test]
-    fn leftover_hooks_reports_none_without_a_sentinel_entry() {
-        for settings in [
-            None,
-            Some(""),
-            Some("{not json"),
-            Some("[]"),
-            Some(r#"{"enabledPlugins":{"pixtuoid@pixtuoid":true}}"#),
-            Some(r#"{"hooks":{}}"#),
-            Some(r#"{"hooks":[]}"#),
-            Some(r#"{"hooks":{"Stop":[]}}"#),
-            Some(r#"{"hooks":{"Stop":{"_pixtuoid":true}}}"#),
-            Some(r#"{"hooks":{"Stop":[{"_pixtuoid":false,"hooks":[]}]}}"#),
-            Some(
-                r#"{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"pixtuoid-hook"}]}]}}"#,
-            ),
-        ] {
-            assert_eq!(leftovers_in(settings), None, "{settings:?}");
-        }
-    }
-
     #[test]
     fn the_hooks_file_sits_in_pixtuoids_own_marketplace() {
         let base = std::env::temp_dir().join("pixtuoid-xdg");
@@ -535,7 +441,7 @@ mod tests {
                 json!("/usr/local/bin/pixtuoid-hook")
             );
             assert!(
-                hooks[*ev][0].get(SENTINEL_KEY).is_none(),
+                hooks[*ev][0].get(crate::install::SENTINEL_KEY).is_none(),
                 "Claude Code rejects unknown keys in a plugin's hooks.json"
             );
         }

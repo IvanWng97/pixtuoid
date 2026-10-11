@@ -528,11 +528,9 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
                 target,
                 facts,
                 connected,
-                health: if connected {
-                    crate::doctor::diagnose(d.name, log, None).summary()
-                } else {
-                    crate::doctor::leftover_hooks_health(d.name)
-                },
+                health: connected
+                    .then(|| crate::doctor::diagnose(d.name, log, None).summary())
+                    .flatten(),
             }
         })
         .collect();

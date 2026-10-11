@@ -251,35 +251,18 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
     assert_eq!(live.len(), rows.len());
 }
 
-/// A disconnected Claude Code row still names the hooks an older pixtuoid
-/// left firing: they run whatever the row says.
+/// A disconnected row carries no health line, even with drift its connected
+/// self would report.
 #[test]
-fn a_disconnected_row_names_hooks_that_still_fire() {
-    let cfg = tempfile::tempdir().unwrap();
-    std::fs::write(
-        cfg.path().join("settings.json"),
-        r#"{"hooks":{"Stop":[{"_pixtuoid":true,"matcher":".*","hooks":[]}]}}"#,
-    )
-    .unwrap();
-    // Codex drift a connected row would report.
+fn a_disconnected_row_shows_no_health_line() {
     let log = format!(
         "ts  WARN {}: source=codex kind=unknown_event name=OtherHook",
         pixtuoid_core::source::drift::TARGET
     );
-    let rows = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(cfg.path()), || {
-        build_rows(&HashSet::new(), &log)
-    });
-    let cc = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
-    assert_ne!(cc.state, ConnState::Connected);
-    assert!(
-        cc.health
-            .as_deref()
-            .is_some_and(|h| h.contains("pixtuoid doctor")),
-        "{:?}",
-        cc.health
-    );
+    let rows = build_rows(&HashSet::new(), &log);
     let cx = rows.iter().find(|r| r.source_id == "codex").unwrap();
-    assert_eq!(cx.health, None, "a disconnected row shows nothing else");
+    assert_ne!(cx.state, ConnState::Connected);
+    assert_eq!(cx.health, None);
 }
 
 #[test]
