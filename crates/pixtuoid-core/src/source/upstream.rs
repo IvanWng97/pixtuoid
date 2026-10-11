@@ -6,8 +6,8 @@
 /// Whether a source is watched upstream, and through what.
 #[derive(Debug)]
 pub enum Upstream {
-    /// One slice of watches per upstream project the source reads, its own
-    /// first. Empty means not yet moved off `check_upstream_drift.py`: the
+    /// One slice of watches per upstream project the source reads. Empty
+    /// means not yet moved off `check_upstream_drift.py`: the
     /// census that every row is watched or closed lands with the last move.
     Watched(&'static [&'static [Watch]]),
     /// Nothing upstream publishes declares what the source reads.
@@ -62,7 +62,7 @@ pub enum At {
 /// How a document yields upstream's names.
 #[derive(Debug)]
 pub enum Read {
-    /// Each name must match `pattern`, where `{name}` stands for the name,
+    /// A name is declared where `pattern` matches, `{name}` standing for it,
     /// regex-escaped.
     Each { pattern: &'static str },
     /// The first group of the ONE match of `pattern`: a second declaration

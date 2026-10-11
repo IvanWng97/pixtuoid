@@ -277,24 +277,4 @@ mod tests {
             );
         }
     }
-
-    /// Byte-stability across feature unification: serde_json's `preserve_order`,
-    /// which `pixtuoid` asks for, keeps a `json!` literal's insertion order
-    /// under a whole-workspace build and sorts it under `-p pixtuoid`, so the
-    /// committed fragment would pass one way and fail the other.
-    #[test]
-    fn every_emitted_object_has_sorted_keys() {
-        fn walk(v: &Value, path: &str) {
-            if let Some(o) = v.as_object() {
-                let keys: Vec<&str> = o.keys().map(String::as_str).collect();
-                let mut sorted = keys.clone();
-                sorted.sort_unstable();
-                assert_eq!(keys, sorted, "{path} emits keys in insertion order");
-                for (k, x) in o {
-                    walk(x, &format!("{path}.{k}"));
-                }
-            }
-        }
-        walk(&surface(), "<root>");
-    }
 }

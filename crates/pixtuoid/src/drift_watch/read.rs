@@ -475,6 +475,9 @@ mod tests {
             found(rust_enum(src, "Missing")),
             Err("no `enum Missing`".to_owned())
         );
+        // An attribute's own words never name the variant it sits on.
+        let attributed = "#[serde(rename_all = \"snake_case\")]\nenum A {\n    #[schemars(with = \"Other\")]\n    Plain,\n}";
+        assert_eq!(found(rust_enum(attributed, "A")), names(&["plain"]));
         // Another spelling is never guessed at: its names would all be wrong.
         let camel = "#[serde(rename_all = \"camelCase\")]\nenum E { OneTwo }";
         assert!(found(rust_enum(camel, "E")).is_err());
