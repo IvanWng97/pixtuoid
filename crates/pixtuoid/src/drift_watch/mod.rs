@@ -15,7 +15,7 @@ use pixtuoid_core::source::upstream::{At, Doc, Family, Read, Siblings, Upstream,
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use net::Curl;
+use net::Platform;
 use read::Names;
 
 /// One stalled host must not hold the whole sweep.
@@ -400,12 +400,7 @@ fn check_watch(source: &str, up: &Upstream, w: &Watch, fetched: &mut Fetched, re
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        report.add_blind(
-                            &format!("`{}`'s pattern ({e})", w.id),
-                            source,
-                            &format!("`{}` was SKIPPED.", w.id),
-                            true,
-                        );
+                        our_pattern_is_broken(w, source, &e, report);
                         return;
                     }
                 }
@@ -463,6 +458,15 @@ fn yields_only_the_family(read: &Read) -> bool {
     matches!(read, Read::RustArms { .. })
 }
 
+fn our_pattern_is_broken(w: &Watch, source: &str, e: &regex::Error, report: &mut Report) {
+    report.add_blind(
+        &format!("`{}`'s pattern ({e})", w.id),
+        source,
+        &format!("`{}` was SKIPPED.", w.id),
+        true,
+    );
+}
+
 /// Upstream's names off every `(label, path, text)` document of `w`, each
 /// through `reader`; `None` once it has filed why it could not. Every
 /// document must yield, as every one must fetch: a union read off the rest
@@ -492,12 +496,7 @@ fn read_docs(
                 return None;
             }
             Err(e) => {
-                report.add_blind(
-                    &format!("`{}`'s pattern ({e})", w.id),
-                    source,
-                    &format!("`{}` was SKIPPED.", w.id),
-                    true,
-                );
+                our_pattern_is_broken(w, source, &e, report);
                 return None;
             }
         }
@@ -565,7 +564,7 @@ fn code_span(name: &str) -> String {
 
 /// Every watch every registered source declares, over the network.
 pub fn run(report: &mut Report) {
-    check_all(&Curl, report);
+    check_all(&Platform, report);
 }
 
 fn check_all(fetch: &dyn Fetch, report: &mut Report) {

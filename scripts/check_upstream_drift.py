@@ -1514,8 +1514,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"fires, so the decoder is never reached (no sprite)."
                     )
 
-    # The PREFIX twin of the codex suffix sweep. Copilot is deliberately out of this
-    # direction: `session.*` is a product-wide bus a sibling ledger would just mirror.
+    # The PREFIX twin of the codex suffix sweep.
     if ours.grok_xai_tags is not None:
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:

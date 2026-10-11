@@ -336,6 +336,23 @@ mod tests {
             .collect()
     }
 
+    /// The binding test above catches a one-sided drop; this pin is what stops
+    /// a SYMMETRIC one — plugin and decoder deleted together — from shipping
+    /// silently.
+    #[test]
+    fn opencode_plugin_forward_set_is_pinned() {
+        assert_eq!(
+            plugin_forward_set(),
+            std::collections::BTreeSet::from([
+                "permission.asked",
+                "permission.v2.asked",
+                "session.created",
+                "session.deleted",
+            ]),
+            "opencode_plugin.ts FORWARD changed — update the decoder and this pin together"
+        );
+    }
+
     /// Every event the PLUGIN forwards must decode — driven off the template's own
     /// set, so a new `FORWARD` entry with no decoder arm fails here rather than
     /// silently arriving as an unmapped event.

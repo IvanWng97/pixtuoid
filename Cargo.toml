@@ -154,7 +154,8 @@ tempfile           = "3"
 # one process-wide lock.
 temp-env           = "0.3"
 # The drift watch's patterns and its release-tarball check (pixtuoid's
-# `upstream` feature), each already in the tree: regex through criterion, sha2
-# through wezterm-blob-leases.
+# `upstream` feature). regex is already built through criterion. sha2 is new to
+# the build but already locked, and a platform hasher would need a seam of its
+# own to keep the sums check testable.
 regex              = "1"
 sha2               = "0.10"

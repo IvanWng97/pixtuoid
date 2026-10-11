@@ -173,6 +173,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
             },
             vanish: "the transcript still carries it, but the decoder maps it to nothing \
                  (no sprite, no activity)",
+            // `session.*` is a product-wide bus a sibling ledger would just mirror.
             siblings: None,
         },
         Watch {

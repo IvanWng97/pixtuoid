@@ -16,9 +16,9 @@ const PERMANENT_HTTP_STATUS: [u16; 3] = [404, 410, 451];
 const WRITE_OUT: &str = "%{stderr}\n%{http_code}";
 
 #[derive(Debug)]
-pub(super) struct Curl;
+pub(super) struct Platform;
 
-impl Fetch for Curl {
+impl Fetch for Platform {
     fn get(&self, url: &str, timeout: Duration) -> Result<Vec<u8>, FetchError> {
         let out = Command::new("curl")
             .args(["--silent", "--show-error", "--location", "--max-time"])
@@ -168,12 +168,12 @@ mod tests {
         let tarball = tar(&["-czf", "-", "-C", at, "pkg"], &[]).expect("tar packs");
 
         assert!(matches!(
-            Curl.untar(&tarball, "pkg/schema.json"),
+            Platform.untar(&tarball, "pkg/schema.json"),
             Ok(Some(b)) if b == big
         ));
-        assert_eq!(Curl.untar(&tarball, "pkg/gone.json"), Ok(None));
+        assert_eq!(Platform.untar(&tarball, "pkg/gone.json"), Ok(None));
         assert!(matches!(
-            Curl.untar(b"not a tarball", "pkg/schema.json"),
+            Platform.untar(b"not a tarball", "pkg/schema.json"),
             Err(FetchError::Transient(_))
         ));
     }

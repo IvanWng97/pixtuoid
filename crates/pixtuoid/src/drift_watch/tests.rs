@@ -249,11 +249,35 @@ fn one_unreadable_document_skips_the_whole_union() {
 /// upstream wording would send the maintainer to repin a working pin.
 #[test]
 fn a_broken_pattern_of_ours_blames_ours() {
-    const W: Watch = each(&[doc("e.ts")], r"({name}");
-    let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), &W);
-    assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
-    assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
-    assert!(r.blind[0].contains("`t.each` was SKIPPED"), "{r:?}");
+    const EACH: Watch = each(&[doc("e.ts")], r"({name}");
+    const SOLE: Watch = Watch {
+        id: "t.sole",
+        ours: || vec!["agent"],
+        docs: &[doc("e.ts")],
+        read: Read::Sole { pattern: "(" },
+        vanish: "x",
+        siblings: None,
+    };
+    const ARMS: Watch = Watch {
+        id: "t.arms",
+        ours: || vec!["start"],
+        docs: &[doc("e.ts")],
+        read: Read::RustArms {
+            name: "parse",
+            arm: "(",
+        },
+        vanish: "x",
+        siblings: None,
+    };
+    for w in [&EACH, &SOLE, &ARMS] {
+        let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), w);
+        assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
+        assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
+        assert!(
+            r.blind[0].contains(&format!("`{}` was SKIPPED", w.id)),
+            "{r:?}"
+        );
+    }
 }
 
 /// A failed fetch is upstream's answer for the run too: re-asking per watch
