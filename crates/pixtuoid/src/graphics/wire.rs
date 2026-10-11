@@ -329,6 +329,13 @@ mod tests {
         }
     }
 
+    /// An APC cut short gives way to the next escape, so the status reply
+    /// still ends the answer.
+    #[test]
+    fn an_unterminated_apc_gives_way_to_the_status_reply() {
+        assert_eq!(read(31, b"\x1b_Gi=31;OK\x1b[0n"), (Answer::default(), true));
+    }
+
     /// Nothing after the status reply is read: it answers another query.
     #[test]
     fn nothing_after_the_status_reply_is_read() {
@@ -385,6 +392,7 @@ mod tests {
         assert_eq!(read(31, b"\x1b[4;800;1200t\x1b[0n").0.cell, None);
         assert_eq!(read(31, b"\x1b[9;41;17t\x1b[0n").0.cell, None);
         assert_eq!(read(31, b"\x1b[6;0;17t\x1b[0n").0.cell, None);
+        assert_eq!(read(31, b"\x1b[6;41;0t\x1b[0n").0.cell, None);
         assert_eq!(read(31, b"\x1b[6;41t\x1b[0n").0.cell, None);
     }
 

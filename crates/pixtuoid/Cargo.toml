@@ -24,7 +24,7 @@ pixtuoid-core  = { path = "../pixtuoid-core", version = "0.19.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.19.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
-# The base64 of kitty's transmits and of the probe's shm query.
+# The base64 of kitty's transmits and of the probe's queries.
 base64-simd        = "0.8"
 # iTerm2's PNG: `image`'s own copy (a dev-dependency here and in
 # pixtuoid-web), so no second crate.

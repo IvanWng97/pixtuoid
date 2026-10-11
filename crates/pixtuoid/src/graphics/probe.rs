@@ -1,8 +1,8 @@
 //! Asking the terminal what it can draw: the IO half of [`super`].
 //!
-//! The query, the parse and the environment's hints are separate here so the
-//! decisions — which protocol, which cell — are pure and tested; only
-//! [`probe`] touches the terminal.
+//! The environment's hints and the choice of what to ask are separate here so
+//! the decisions — which protocol, which cell — are pure and tested; the bytes
+//! both ways are [`super::wire`]'s, and only [`probe`] touches the terminal.
 
 use super::wire::{self, Answer, Passthrough, Question, Reader};
 use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv, env_set, env_text};
@@ -412,12 +412,13 @@ mod tests {
         assert_eq!((d.protocol, d.cell), (Some(ImageProtocol::Sixel), window));
     }
 
-    /// Each terminal is asked for what it animates with: kitty's query, the
-    /// attributes that list SIXEL, both, or neither.
+    /// Each terminal is asked for what it animates with — kitty's query, the
+    /// attributes that list SIXEL, both, or neither — and always for its cell.
     #[test]
     fn each_terminal_is_asked_for_what_it_animates_with() {
         let asks = |h: &EnvHints| {
             let query = h.query();
+            assert!(query.contains("[16t"), "{query:?}");
             (query.contains("_Gi="), query.contains("[c"))
         };
         let konsole = EnvHints {
