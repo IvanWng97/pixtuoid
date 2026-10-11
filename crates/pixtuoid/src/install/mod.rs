@@ -27,8 +27,9 @@ use target::{BinaryStrategy, Primary, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid merges into a
 /// shared config — those targets key install/uninstall/detect on this, not the
-/// command shape. A plugin's own hooks file (Claude Code's) is ours whole and
-/// carries none.
+/// command shape. A plugin's own file (Claude Code's, Codex's, Reasonix's) is ours
+/// whole and carries none; for those hosts it names only what an older pixtuoid
+/// merged into the CLI's own config ([`target::LegacyConfig`]).
 pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 
 /// Whether `t`'s config currently bears pixtuoid hooks — whether its source is

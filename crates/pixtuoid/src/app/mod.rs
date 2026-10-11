@@ -237,9 +237,10 @@ fn build_run_config(
     })
 }
 
-/// Bring the connected sources' plugin files up to this build, then name each one
-/// rewritten on `out`. A headless run converges too, since its CLIs load the plugin,
-/// and leaves the naming to the converge's own log line.
+/// Bring the connected sources' plugin files up to this build, then name on `out`
+/// each one whose CLI now has a newer plugin to load ([`sources::converge_owned`]).
+/// A headless run converges too, since its CLIs load the plugin, and leaves the
+/// naming to the converge's own log line.
 fn refresh_plugins(
     connected: &std::collections::HashSet<String>,
     headless: bool,

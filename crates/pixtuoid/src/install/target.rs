@@ -184,7 +184,7 @@ pub struct HostRegistration {
     pub is_registered: fn() -> Result<bool>,
     /// `None` when the CLI loads the plugin's files in place.
     pub copy: Option<PluginCopy>,
-    /// Where a pixtuoid from before the plugin merged its hooks.
+    /// `None` when no released pixtuoid ever merged hooks into the CLI's own config.
     pub legacy: Option<LegacyConfig>,
 }
 

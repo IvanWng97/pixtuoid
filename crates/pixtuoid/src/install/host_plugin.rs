@@ -198,6 +198,23 @@ mod tests {
         assert!(!uninstall_hooks("").unwrap().changed);
     }
 
+    /// A plugin file carries no sentinel, so one with no hooks must not be reported
+    /// as missing it.
+    #[test]
+    fn a_plugin_file_with_no_hooks_says_so_without_naming_a_sentinel() {
+        for content in ["{}", r#"{"hooks":{}}"#] {
+            let v = verify_hooks(content, CLAUDE_SHAPE, &["Stop"], |_| ShimRef::Unknown);
+            assert_eq!(v.issues.len(), 1, "{content}: {:?}", v.issues);
+            assert!(
+                v.issues[0].contains("no pixtuoid hooks")
+                    && !v.issues[0].contains("sentinel")
+                    && !v.issues[0].contains("_pixtuoid"),
+                "{content}: {:?}",
+                v.issues
+            );
+        }
+    }
+
     #[test]
     fn only_a_manifest_naming_us_lets_its_dir_go() {
         let tmp = tempfile::TempDir::new().unwrap();

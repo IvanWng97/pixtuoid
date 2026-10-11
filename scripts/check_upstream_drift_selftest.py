@@ -103,6 +103,42 @@ def test_plugin_doc_markers_fire_on_vanish() -> None:
         )
 
 
+def test_plugin_contract_findings_reach_review_only_for_registered_hosts() -> None:
+    """A host's plugin documents are fetched only while we register its events, and
+    a vanished marker files a review naming that host's installer."""
+    real = d.fetch
+    try:
+        url = d.CODEX_PLUGIN_CMD_URL
+        entry = d.PLUGIN_DOC_MARKERS[url]
+        first = sorted(entry.markers)[0]
+        maimed = ANCHOR_SAMPLES[url] + "\n".join(m for m in entry.markers if m != first)
+        served: list[str] = []
+
+        def stub(u: str) -> str:
+            served.append(u)
+            if u == url:
+                return maimed
+            raise urllib.error.URLError("offline: not this case's document")
+
+        d.fetch = stub
+        rep = d.Report()
+        d.run_checks(d.OurNames(codex={"SessionStart"}), report=rep)
+        check(
+            any(first in r and "install/codex.rs" in r for r in rep.review),
+            f"a vanished Codex plugin marker files a review: {rep.review!r}",
+        )
+
+        served.clear()
+        d.run_checks(d.OurNames(cc={"SessionStart"}), report=d.Report())
+        codex_docs = {u for u, e in d.PLUGIN_DOC_MARKERS.items() if e.cli == "Codex"}
+        check(
+            not codex_docs & set(served),
+            f"an unregistered host's plugin documents are not fetched: {sorted(served)}",
+        )
+    finally:
+        d.fetch = real
+
+
 # One snippet per anchored document; a new ANCHORS entry with no sample here
 # fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
