@@ -1,7 +1,7 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
 //! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
+//! `pixtuoid_scene::floor::OfficeSession` across frames so walks stay continuous.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
@@ -123,7 +123,7 @@ impl OfficeRenderer {
     /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
     /// when the flash hold keeps it back, so the window keeps the last. A
     /// frame shown is [`presented`](Self::presented) once it shows.
-    pub fn render_live(
+    pub(crate) fn render_live(
         &mut self,
         at: PixelFit,
         frame: WindowFrame<'_>,
@@ -145,7 +145,7 @@ impl OfficeRenderer {
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
-    pub fn presented(&mut self) {
+    pub(crate) fn presented(&mut self) {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
@@ -566,8 +566,7 @@ mod tests {
     /// to pass on the screen clock, though its frame's own clock says it has.
     #[test]
     fn a_slow_presents_phase_holds_the_floor_from_when_it_lands() {
-        use crate::test_flash::storm_strike;
-        const SLOW: Duration = Duration::from_millis(60);
+        use crate::test_flash::{SLOW, storm_strike};
         let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
         let strike = storm_strike();
         let [first, second] = [strike.changes[0], strike.changes[1]];

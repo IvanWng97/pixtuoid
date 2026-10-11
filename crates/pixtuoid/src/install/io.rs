@@ -92,7 +92,7 @@ pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`bre
 
 /// AUTO-locate `pixtuoid-hook`: PATH, then a sibling of the running exe — both
 /// arms return absolute, verified-existing paths. The [`HOOK_OVERRIDE_ENV`]
-/// override is deliberately NOT read here: `resolve_hook_binary` absolutizes it
+/// override is deliberately NOT read here: [`super::resolve_hook_binary_from`] absolutizes it
 /// first, since a relative value embedded into a Codex/Reasonix config would
 /// silently never fire from another cwd.
 pub(crate) fn default_hook_binary() -> Result<PathBuf> {
@@ -608,7 +608,8 @@ mod tests {
 
     #[test]
     fn resolve_symlink_nonexistent_returns_as_is() {
-        let path = PathBuf::from("/tmp/pixtuoid-test-nonexistent-xyz");
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("missing");
         assert_eq!(resolve_symlink(&path), path);
     }
 

@@ -70,7 +70,7 @@ pub enum Icon {
 impl Icon {
     /// Its `[icons]` name in the pack: an arrow with no floor its way is the
     /// lit arrow in a dim ink.
-    pub fn art(self) -> &'static str {
+    pub(crate) fn art(self) -> &'static str {
         match self {
             Self::Alert => "alert",
             Self::Active => "active",
@@ -110,7 +110,7 @@ impl Icon {
 
     /// What a terminal writes for it: an arrow with no floor its way is
     /// hollow.
-    pub fn terminal(self) -> &'static str {
+    pub(crate) fn terminal(self) -> &'static str {
         match self {
             Self::Alert | Self::Up => "\u{25b2}",
             Self::Active => "\u{25cf}",

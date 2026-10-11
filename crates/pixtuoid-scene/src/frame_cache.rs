@@ -74,14 +74,12 @@ impl FrameCache {
     /// Test-only inspection seam; `#[doc(hidden)]` because the cache is opaque
     /// to consumers.
     #[doc(hidden)]
+    #[expect(
+        clippy::len_without_is_empty,
+        reason = "an inspection seam, not a collection"
+    )]
     pub fn len(&self) -> usize {
         self.entries.len()
-    }
-
-    /// Paired with `len` so clippy's `len_without_is_empty` is satisfied.
-    #[doc(hidden)]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -112,11 +110,9 @@ mod tests {
     #[test]
     fn new_cache_is_empty_then_populated_after_get_or_make() {
         let mut cache = FrameCache::new();
-        assert!(cache.is_empty(), "fresh cache must be empty");
         assert_eq!(cache.len(), 0);
 
         let _ = cache.get_or_make(key(), dummy_frame);
-        assert!(!cache.is_empty(), "cache must be non-empty after a make");
         assert_eq!(cache.len(), 1);
 
         let mut computed_again = false;

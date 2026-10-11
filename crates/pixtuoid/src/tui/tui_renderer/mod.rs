@@ -311,7 +311,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.jank.due_at(at);
     }
 
-    /// Hold each frame's output in `out` and present it whole.
+    /// Hold each frame's output in `out` and present it whole. For the terminal
+    /// painter, `out` is the handle its backend writes through
+    /// ([`Self::restore_terminal`] abandons it).
     pub(crate) fn present_through(&mut self, out: crate::tui::FrameOut) {
         self.frame_out = Some(out);
     }
@@ -374,11 +376,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.volume_flash = flash;
     }
 
-    pub fn debug_walkable(&self) -> bool {
+    pub(crate) fn debug_walkable(&self) -> bool {
         self.debug_walkable
     }
 
-    pub fn set_debug_walkable(&mut self, v: bool) {
+    pub(crate) fn set_debug_walkable(&mut self, v: bool) {
         self.debug_walkable = v;
     }
 
@@ -387,12 +389,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn floor_history(&self, floor: usize) -> Option<&pixtuoid_scene::pose::PoseHistory> {
+    pub(crate) fn floor_history(&self, floor: usize) -> Option<&pixtuoid_scene::pose::PoseHistory> {
         self.session.floor(floor).map(|f| &f.ctx.history)
     }
 
     #[cfg(test)]
-    pub fn floor_walks(
+    pub(crate) fn floor_walks(
         &self,
         floor: usize,
     ) -> Option<&std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::walk::WalkState>>
@@ -401,18 +403,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn floor_buf(&self, floor: usize) -> Option<&RgbBuffer> {
+    pub(crate) fn floor_buf(&self, floor: usize) -> Option<&RgbBuffer> {
         self.session.floor(floor)?.raster.pixels()
     }
 
     /// Seed coffee-carrier state directly: the production path needs a full pantry
     /// wander trip, so this injects the end state to exercise steam rendering.
     #[cfg(test)]
-    pub fn inject_coffee(&mut self, id: AgentId, fetched_at: SystemTime) {
+    pub(crate) fn inject_coffee(&mut self, id: AgentId, fetched_at: SystemTime) {
         self.session.office_mut().coffee.insert(id, fetched_at);
     }
 
-    pub fn cached_layout(&self) -> Option<&SceneLayout> {
+    pub(crate) fn cached_layout(&self) -> Option<&SceneLayout> {
         self.cached_layout.as_deref()
     }
 
@@ -519,7 +521,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn current_floor_seed(&self) -> u64 {
+    pub(crate) fn current_floor_seed(&self) -> u64 {
         FloorMeta::for_floor(self.session.nav().current(), self.session.n_floors()).floor_seed
     }
 
@@ -535,7 +537,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.session.cancel_slide();
     }
 
-    pub fn set_mouse_pos(&mut self, pos: Option<(u16, u16)>) {
+    pub(crate) fn set_mouse_pos(&mut self, pos: Option<(u16, u16)>) {
         self.mouse_pos = pos;
     }
 
@@ -547,7 +549,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .pixels()
     }
 
-    pub fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
+    pub(crate) fn set_theme(&mut self, theme: &'static pixtuoid_scene::theme::Theme) {
         if !std::ptr::eq(self.chrome.theme, theme) {
             self.chrome.theme = theme;
             for pf in self.session.floors_mut() {
@@ -582,7 +584,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .scale(self.chrome.frames.version_popup, now)
     }
 
-    pub fn last_popup_scale(&self) -> f32 {
+    pub(crate) fn last_popup_scale(&self) -> f32 {
         self.chrome.popup.last_scale
     }
 
@@ -591,7 +593,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn active_pet_ref(&self) -> Option<&PetState> {
+    pub(crate) fn active_pet_ref(&self) -> Option<&PetState> {
         self.chrome.active_pet.as_ref()
     }
 
@@ -619,12 +621,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Drop the agents gone from `scene`: [`OfficeSession::evict_missing`],
     /// which every frame's `prepare` runs.
     #[cfg(test)]
-    pub fn evict_missing(&mut self, scene: &SceneState) {
+    pub(crate) fn evict_missing(&mut self, scene: &SceneState) {
         self.session.evict_missing(scene);
     }
 
     #[cfg(test)]
-    pub fn coffee_contains(&self, id: AgentId) -> bool {
+    pub(crate) fn coffee_contains(&self, id: AgentId) -> bool {
         self.session.office().coffee.map().contains_key(&id)
     }
 
@@ -709,7 +711,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// A refused frame steps nothing, but the door's clamp still keeps time, as
-    /// [`step_floor`](pixtuoid_scene::floor::step_floor) keeps it for a stepped one.
+    /// `step_floor` keeps it for a stepped one.
     fn rest_floor(&mut self, now: SystemTime) {
         if let Some((floor, _)) = self.session.floor_mut(self.session.nav().current()) {
             floor.ctx.recompute_door_anim_max_ms(now);
@@ -993,8 +995,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 hovers,
                 star,
                 geometry: Some(geometry),
-                // The cutaway holds its own tiles; the terminal's text draws.
-                held: false,
             };
             let over = Over {
                 text: text.map(|t| (t, hovered)),
@@ -1040,8 +1040,20 @@ impl<B> TuiRenderer<B>
 where
     B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<ratatui::backend::TestBackend>,
 {
-    pub fn frame_buffer(&self) -> &ratatui::buffer::Buffer {
+    pub(crate) fn frame_buffer(&self) -> &ratatui::buffer::Buffer {
         self.terminal.backend().borrow().buffer()
+    }
+}
+
+impl TuiRenderer<ratatui::backend::CrosstermBackend<crate::tui::FrameOut>> {
+    /// [`crate::tui::teardown_terminal`], abandoning the writer this renderer
+    /// presents through ([`Self::present_through`]) when the restore fails.
+    ///
+    /// # Errors
+    ///
+    /// If restoring the terminal modes or showing the cursor fails.
+    pub(crate) fn restore_terminal(&mut self) -> anyhow::Result<()> {
+        crate::tui::teardown_terminal(&mut self.terminal, self.frame_out.as_ref())
     }
 }
 

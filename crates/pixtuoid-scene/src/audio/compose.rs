@@ -10,7 +10,7 @@
 //! of seeds (`examples/lofi_audition`) and the generator as a whole is ratified.
 //! The frozen takes are `#[cfg(test)]` fingerprint anchors, not a fallback.
 //!
-//! The seed is the [`super::track_epoch`] block, so generation is DETERMINISTIC
+//! The seed is the `track_epoch` block, so generation is DETERMINISTIC
 //! — the same block renders the same song everywhere, and "never repeats" comes
 //! from the clock advancing, not from entropy.
 

@@ -47,7 +47,7 @@ impl<T> Grid<T> {
 
     /// The flat row-major cell data, mutable.
     #[inline]
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self.data
     }
 
@@ -56,7 +56,7 @@ impl<T> Grid<T> {
     /// # Panics
     ///
     /// If `data.len()` is not `width * height`.
-    pub fn from_vec(width: u16, height: u16, data: Vec<T>) -> Self {
+    pub(crate) fn from_vec(width: u16, height: u16, data: Vec<T>) -> Self {
         assert_eq!(
             data.len(),
             width as usize * height as usize,
@@ -102,7 +102,7 @@ impl<T: Copy> Grid<T> {
 
     /// Resize and fill in one shot, reusing the existing allocation when
     /// possible (cheaper than rebuilding once per frame).
-    pub fn resize_fill(&mut self, width: u16, height: u16, fill: T) {
+    pub(crate) fn resize_fill(&mut self, width: u16, height: u16, fill: T) {
         let total = (width as usize) * (height as usize);
         if self.width == width && self.height == height {
             self.data.fill(fill);

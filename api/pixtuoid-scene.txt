@@ -1,102 +1,12 @@
 pub mod pixtuoid_scene
 pub mod pixtuoid_scene::chitchat
-pub enum pixtuoid_scene::chitchat::VenueKey
-pub pixtuoid_scene::chitchat::VenueKey::Room
-pub pixtuoid_scene::chitchat::VenueKey::Room::floor_idx: usize
-pub pixtuoid_scene::chitchat::VenueKey::Room::room_id: usize
-pub pixtuoid_scene::chitchat::VenueKey::Waypoint
-pub pixtuoid_scene::chitchat::VenueKey::Waypoint::floor_idx: usize
-pub pixtuoid_scene::chitchat::VenueKey::Waypoint::wp_idx: usize
-impl core::clone::Clone for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::clone(&self) -> pixtuoid_scene::chitchat::VenueKey
-impl core::cmp::Eq for pixtuoid_scene::chitchat::VenueKey
-impl core::cmp::PartialEq for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::eq(&self, &pixtuoid_scene::chitchat::VenueKey) -> bool
-impl core::fmt::Debug for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for pixtuoid_scene::chitchat::VenueKey
-pub fn pixtuoid_scene::chitchat::VenueKey::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::StructuralPartialEq for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Freeze for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Send for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Sync for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::Unpin for pixtuoid_scene::chitchat::VenueKey
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::VenueKey
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::VenueKey
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::VenueKey
-pub struct pixtuoid_scene::chitchat::ActiveChitchat
-impl pixtuoid_scene::chitchat::ActiveChitchat
-pub fn pixtuoid_scene::chitchat::ActiveChitchat::current_bubble(&self, std::time::SystemTime) -> core::option::Option<(pixtuoid_core::id::AgentId, &'static str)>
-pub fn pixtuoid_scene::chitchat::ActiveChitchat::is_expired(&self, std::time::SystemTime) -> bool
-pub fn pixtuoid_scene::chitchat::ActiveChitchat::new(alloc::vec::Vec<pixtuoid_core::id::AgentId>, std::time::SystemTime) -> Self
-pub fn pixtuoid_scene::chitchat::ActiveChitchat::set_participants(&mut self, alloc::vec::Vec<pixtuoid_core::id::AgentId>)
-impl core::fmt::Debug for pixtuoid_scene::chitchat::ActiveChitchat
-pub fn pixtuoid_scene::chitchat::ActiveChitchat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::Send for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::Sync for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::Unpin for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
-pub struct pixtuoid_scene::chitchat::ChitchatBubble
-pub pixtuoid_scene::chitchat::ChitchatBubble::speaker: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::chitchat::ChitchatBubble::text: &'static str
-impl core::clone::Clone for pixtuoid_scene::chitchat::ChitchatBubble
-pub fn pixtuoid_scene::chitchat::ChitchatBubble::clone(&self) -> pixtuoid_scene::chitchat::ChitchatBubble
-impl core::fmt::Debug for pixtuoid_scene::chitchat::ChitchatBubble
-pub fn pixtuoid_scene::chitchat::ChitchatBubble::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Freeze for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Send for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Sync for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::Unpin for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::ChitchatBubble
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ChitchatBubble
-pub struct pixtuoid_scene::chitchat::Visitor
-pub pixtuoid_scene::chitchat::Visitor::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::chitchat::Visitor::room_id: core::option::Option<usize>
-pub pixtuoid_scene::chitchat::Visitor::wp_idx: usize
-impl core::clone::Clone for pixtuoid_scene::chitchat::Visitor
-pub fn pixtuoid_scene::chitchat::Visitor::clone(&self) -> pixtuoid_scene::chitchat::Visitor
-impl core::fmt::Debug for pixtuoid_scene::chitchat::Visitor
-pub fn pixtuoid_scene::chitchat::Visitor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::chitchat::Visitor
-impl core::marker::Freeze for pixtuoid_scene::chitchat::Visitor
-impl core::marker::Send for pixtuoid_scene::chitchat::Visitor
-impl core::marker::Sync for pixtuoid_scene::chitchat::Visitor
-impl core::marker::Unpin for pixtuoid_scene::chitchat::Visitor
-impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::Visitor
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::Visitor
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::Visitor
 pub const pixtuoid_scene::chitchat::CHITCHAT_LINES: &[&str]
 pub mod pixtuoid_scene::floor
 pub use pixtuoid_scene::floor::MAX_FLOORS
-pub struct pixtuoid_scene::floor::AudioObserver
-impl pixtuoid_scene::floor::AudioObserver
-pub fn pixtuoid_scene::floor::AudioObserver::frame(&mut self, &pixtuoid_core::state::SceneState, &std::collections::hash::set::HashSet<usize>, impl core::ops::function::Fn(usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> AudioFrame
-pub fn pixtuoid_scene::floor::AudioObserver::new() -> Self
-impl core::default::Default for pixtuoid_scene::floor::AudioObserver
-pub fn pixtuoid_scene::floor::AudioObserver::default() -> pixtuoid_scene::floor::AudioObserver
-impl core::fmt::Debug for pixtuoid_scene::floor::AudioObserver
-pub fn pixtuoid_scene::floor::AudioObserver::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::floor::AudioObserver
-impl core::marker::Send for pixtuoid_scene::floor::AudioObserver
-impl core::marker::Sync for pixtuoid_scene::floor::AudioObserver
-impl core::marker::Unpin for pixtuoid_scene::floor::AudioObserver
-impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::AudioObserver
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::AudioObserver
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::AudioObserver
 pub struct pixtuoid_scene::floor::CoffeeState(_)
 impl pixtuoid_scene::floor::CoffeeState
-pub const pixtuoid_scene::floor::CoffeeState::STEAM_WINDOW_SECS: u64
-pub fn pixtuoid_scene::floor::CoffeeState::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::CoffeeState::insert(&mut self, pixtuoid_core::id::AgentId, std::time::SystemTime)
 pub fn pixtuoid_scene::floor::CoffeeState::map(&self) -> &std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, std::time::SystemTime>
-pub fn pixtuoid_scene::floor::CoffeeState::new() -> Self
-pub fn pixtuoid_scene::floor::CoffeeState::record(&mut self, impl core::iter::traits::collect::IntoIterator<Item = pixtuoid_core::id::AgentId>, std::time::SystemTime)
 impl core::default::Default for pixtuoid_scene::floor::CoffeeState
 pub fn pixtuoid_scene::floor::CoffeeState::default() -> pixtuoid_scene::floor::CoffeeState
 impl core::fmt::Debug for pixtuoid_scene::floor::CoffeeState
@@ -111,14 +21,10 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::CoffeeState
 pub struct pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::floor::FloorCtx::door_anim_max_ms: u64
 pub pixtuoid_scene::floor::FloorCtx::history: pixtuoid_scene::pose::PoseHistory
-pub pixtuoid_scene::floor::FloorCtx::overlay: pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::floor::FloorCtx::router: pixtuoid_scene::pathfind::AStarRouter
 pub pixtuoid_scene::floor::FloorCtx::vacancy_dim: pixtuoid_scene::floor::VacancyDim
 pub pixtuoid_scene::floor::FloorCtx::walks: std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::walk::WalkState>
 impl pixtuoid_scene::floor::FloorCtx
-pub fn pixtuoid_scene::floor::FloorCtx::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
-pub fn pixtuoid_scene::floor::FloorCtx::frame_layout(&mut self, u16, u16, u64) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
-pub fn pixtuoid_scene::floor::FloorCtx::new() -> Self
 pub fn pixtuoid_scene::floor::FloorCtx::recompute_door_anim_max_ms(&mut self, std::time::SystemTime)
 impl core::default::Default for pixtuoid_scene::floor::FloorCtx
 pub fn pixtuoid_scene::floor::FloorCtx::default() -> Self
@@ -180,10 +86,8 @@ pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_cor
 pub fn pixtuoid_scene::floor::FloorSession::badges(&self) -> &[crate::display::Badge]
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::neon_sign::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
-pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::flash(&self) -> crate::flash::FlashPhase
 pub fn pixtuoid_scene::floor::FloorSession::floor(&self) -> &pixtuoid_scene::floor::PerFloor
-pub fn pixtuoid_scene::floor::FloorSession::moves_off_beat(&self) -> bool
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_scene::pack::OfficeArt>) -> Self
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
@@ -199,13 +103,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::FloorSes
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FloorSession
 pub struct pixtuoid_scene::floor::FloorTransition
 pub pixtuoid_scene::floor::FloorTransition::duration_ms: u64
-pub pixtuoid_scene::floor::FloorTransition::from_floor: usize
-pub pixtuoid_scene::floor::FloorTransition::started_at: std::time::SystemTime
 pub pixtuoid_scene::floor::FloorTransition::to_floor: usize
-impl pixtuoid_scene::floor::FloorTransition
-pub fn pixtuoid_scene::floor::FloorTransition::is_done(&self, std::time::SystemTime) -> bool
-pub fn pixtuoid_scene::floor::FloorTransition::new(usize, usize, std::time::SystemTime) -> Self
-pub fn pixtuoid_scene::floor::FloorTransition::t(&self, std::time::SystemTime) -> f32
 impl core::fmt::Debug for pixtuoid_scene::floor::FloorTransition
 pub fn pixtuoid_scene::floor::FloorTransition::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorTransition
@@ -216,9 +114,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::FloorTransition
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::FloorTransition
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FloorTransition
 pub struct pixtuoid_scene::floor::OfficeStores<'a>
-pub pixtuoid_scene::floor::OfficeStores::chitchat: &'a mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>
-pub pixtuoid_scene::floor::OfficeStores::coffee: &'a mut pixtuoid_scene::floor::CoffeeState
-pub pixtuoid_scene::floor::OfficeStores::raster: &'a mut pixtuoid_scene::look::OfficeRaster
 impl pixtuoid_scene::floor::OfficeStores<'_>
 pub fn pixtuoid_scene::floor::OfficeStores<'_>::reborrow(&mut self) -> pixtuoid_scene::floor::OfficeStores<'_>
 impl<'a> core::fmt::Debug for pixtuoid_scene::floor::OfficeStores<'a>
@@ -234,7 +129,6 @@ pub struct pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::PerFloor::ctx: pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::floor::PerFloor::raster: pixtuoid_scene::look::Raster
 impl pixtuoid_scene::floor::PerFloor
-pub fn pixtuoid_scene::floor::PerFloor::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::PerFloor::new(alloc::sync::Arc<pixtuoid_scene::pack::OfficeArt>) -> Self
 impl core::fmt::Debug for pixtuoid_scene::floor::PerFloor
 pub fn pixtuoid_scene::floor::PerFloor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -246,12 +140,9 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::PerFloor
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::PerFloor
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::PerFloor
 pub struct pixtuoid_scene::floor::PerOffice
-pub pixtuoid_scene::floor::PerOffice::audio: pixtuoid_scene::floor::AudioObserver
-pub pixtuoid_scene::floor::PerOffice::chitchat: std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>
 pub pixtuoid_scene::floor::PerOffice::coffee: pixtuoid_scene::floor::CoffeeState
 pub pixtuoid_scene::floor::PerOffice::raster: pixtuoid_scene::look::OfficeRaster
 impl pixtuoid_scene::floor::PerOffice
-pub fn pixtuoid_scene::floor::PerOffice::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::PerOffice::new() -> Self
 pub fn pixtuoid_scene::floor::PerOffice::stores(&mut self) -> pixtuoid_scene::floor::OfficeStores<'_>
 impl core::default::Default for pixtuoid_scene::floor::PerOffice
@@ -282,18 +173,6 @@ impl<'a> core::marker::Unpin for pixtuoid_scene::floor::PetInputs<'a>
 impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::floor::PetInputs<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::PetInputs<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::PetInputs<'a>
-pub struct pixtuoid_scene::floor::ProjectedSlot
-pub pixtuoid_scene::floor::ProjectedSlot::desk: pixtuoid_core::state::FloorLocalDeskIndex
-pub pixtuoid_scene::floor::ProjectedSlot::slot: pixtuoid_core::state::AgentSlot
-impl core::fmt::Debug for pixtuoid_scene::floor::ProjectedSlot
-pub fn pixtuoid_scene::floor::ProjectedSlot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::floor::ProjectedSlot
-impl core::marker::Send for pixtuoid_scene::floor::ProjectedSlot
-impl core::marker::Sync for pixtuoid_scene::floor::ProjectedSlot
-impl core::marker::Unpin for pixtuoid_scene::floor::ProjectedSlot
-impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::ProjectedSlot
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::ProjectedSlot
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSlot
 pub struct pixtuoid_scene::floor::SteppedFloor
 pub pixtuoid_scene::floor::SteppedFloor::frame: pixtuoid_scene::sim::SimFrame
 pub pixtuoid_scene::floor::SteppedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
@@ -309,12 +188,8 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::SteppedFloo
 pub struct pixtuoid_scene::floor::VacancyDim
 impl pixtuoid_scene::floor::VacancyDim
 pub const pixtuoid_scene::floor::VacancyDim::EMPTY_DEBOUNCE_MS: u64
-pub const pixtuoid_scene::floor::VacancyDim::FADE_TAU_MS: u64
-pub const pixtuoid_scene::floor::VacancyDim::MIN_LEVEL: f32
 pub fn pixtuoid_scene::floor::VacancyDim::level(&self) -> f32
-pub fn pixtuoid_scene::floor::VacancyDim::new() -> Self
 pub fn pixtuoid_scene::floor::VacancyDim::snap_to_empty(&mut self)
-pub fn pixtuoid_scene::floor::VacancyDim::tick(&mut self, bool, std::time::SystemTime) -> f32
 impl core::default::Default for pixtuoid_scene::floor::VacancyDim
 pub fn pixtuoid_scene::floor::VacancyDim::default() -> Self
 impl core::fmt::Debug for pixtuoid_scene::floor::VacancyDim
@@ -326,12 +201,10 @@ impl core::marker::Unpin for pixtuoid_scene::floor::VacancyDim
 impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::VacancyDim
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::VacancyDim
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::VacancyDim
-pub fn pixtuoid_scene::floor::build_floor_scene(&pixtuoid_core::state::SceneState, usize) -> alloc::vec::Vec<pixtuoid_scene::floor::ProjectedSlot>
 pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64
 pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> usize
 pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneState, usize) -> pixtuoid_core::state::SceneState
-pub fn pixtuoid_scene::floor::step_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::sky::WeatherPolicy) -> crate::audio::TrackId
 pub mod pixtuoid_scene::layout
 pub enum pixtuoid_scene::layout::Facing
@@ -452,8 +325,6 @@ pub pixtuoid_scene::layout::Furniture::StandingDesk
 pub pixtuoid_scene::layout::Furniture::Tv
 pub pixtuoid_scene::layout::Furniture::VendingMachine
 pub pixtuoid_scene::layout::Furniture::Whiteboard
-impl pixtuoid_scene::layout::Furniture
-pub const pixtuoid_scene::layout::Furniture::ALL: &'static [pixtuoid_scene::layout::Furniture]
 impl core::clone::Clone for pixtuoid_scene::layout::Furniture
 pub fn pixtuoid_scene::layout::Furniture::clone(&self) -> pixtuoid_scene::layout::Furniture
 impl core::cmp::Eq for pixtuoid_scene::layout::Furniture
@@ -477,10 +348,6 @@ pub pixtuoid_scene::layout::PlantKind::Ficus
 pub pixtuoid_scene::layout::PlantKind::Flower
 pub pixtuoid_scene::layout::PlantKind::Succulent
 pub pixtuoid_scene::layout::PlantKind::Tall
-impl pixtuoid_scene::layout::PlantKind
-pub const pixtuoid_scene::layout::PlantKind::ALL: &'static [pixtuoid_scene::layout::PlantKind]
-pub const fn pixtuoid_scene::layout::PlantKind::furniture(self) -> pixtuoid_scene::layout::Furniture
-pub const fn pixtuoid_scene::layout::PlantKind::piece(self) -> pixtuoid_core::sprite::format::Piece
 impl core::clone::Clone for pixtuoid_scene::layout::PlantKind
 pub fn pixtuoid_scene::layout::PlantKind::clone(&self) -> pixtuoid_scene::layout::PlantKind
 impl core::cmp::Eq for pixtuoid_scene::layout::PlantKind
@@ -505,10 +372,6 @@ pub pixtuoid_scene::layout::PodDecor::PlantTall
 pub pixtuoid_scene::layout::PodDecor::StandingDesk
 pub pixtuoid_scene::layout::PodDecor::Tv
 pub pixtuoid_scene::layout::PodDecor::Whiteboard
-impl pixtuoid_scene::layout::PodDecor
-pub const pixtuoid_scene::layout::PodDecor::ALL: &'static [pixtuoid_scene::layout::PodDecor]
-pub const fn pixtuoid_scene::layout::PodDecor::furniture(self) -> pixtuoid_scene::layout::Furniture
-pub const fn pixtuoid_scene::layout::PodDecor::piece(self) -> pixtuoid_core::sprite::format::Piece
 impl core::clone::Clone for pixtuoid_scene::layout::PodDecor
 pub fn pixtuoid_scene::layout::PodDecor::clone(&self) -> pixtuoid_scene::layout::PodDecor
 impl core::cmp::Eq for pixtuoid_scene::layout::PodDecor
@@ -556,10 +419,6 @@ pub pixtuoid_scene::layout::WallDecor::BulletinBoard
 pub pixtuoid_scene::layout::WallDecor::ExitSign
 pub pixtuoid_scene::layout::WallDecor::MeetingScreen
 pub pixtuoid_scene::layout::WallDecor::Whiteboard
-impl pixtuoid_scene::layout::WallDecor
-pub const pixtuoid_scene::layout::WallDecor::ALL: &'static [pixtuoid_scene::layout::WallDecor]
-pub const fn pixtuoid_scene::layout::WallDecor::furniture(self) -> pixtuoid_scene::layout::Furniture
-pub const fn pixtuoid_scene::layout::WallDecor::piece(self) -> pixtuoid_core::sprite::format::Piece
 impl core::clone::Clone for pixtuoid_scene::layout::WallDecor
 pub fn pixtuoid_scene::layout::WallDecor::clone(&self) -> pixtuoid_scene::layout::WallDecor
 impl core::cmp::Eq for pixtuoid_scene::layout::WallDecor
@@ -618,7 +477,6 @@ pub pixtuoid_scene::layout::WaypointKind::StandingDesk
 pub pixtuoid_scene::layout::WaypointKind::VendingMachine
 impl pixtuoid_scene::layout::WaypointKind
 pub const pixtuoid_scene::layout::WaypointKind::ALL: &'static [pixtuoid_scene::layout::WaypointKind]
-pub const fn pixtuoid_scene::layout::WaypointKind::furniture(self) -> pixtuoid_scene::layout::Furniture
 impl core::clone::Clone for pixtuoid_scene::layout::WaypointKind
 pub fn pixtuoid_scene::layout::WaypointKind::clone(&self) -> pixtuoid_scene::layout::WaypointKind
 impl core::cmp::Eq for pixtuoid_scene::layout::WaypointKind
@@ -637,31 +495,6 @@ impl core::marker::Unpin for pixtuoid_scene::layout::WaypointKind
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::WaypointKind
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::WaypointKind
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::WaypointKind
-pub struct pixtuoid_scene::layout::ApproachSides
-pub pixtuoid_scene::layout::ApproachSides::e: bool
-pub pixtuoid_scene::layout::ApproachSides::n: bool
-pub pixtuoid_scene::layout::ApproachSides::s: bool
-pub pixtuoid_scene::layout::ApproachSides::w: bool
-impl pixtuoid_scene::layout::ApproachSides
-pub const pixtuoid_scene::layout::ApproachSides::ALL: Self
-pub fn pixtuoid_scene::layout::ApproachSides::allows(self, pixtuoid_scene::layout::Facing, (i32, i32)) -> bool
-pub fn pixtuoid_scene::layout::ApproachSides::rotated(self, pixtuoid_scene::layout::Facing) -> Self
-impl core::clone::Clone for pixtuoid_scene::layout::ApproachSides
-pub fn pixtuoid_scene::layout::ApproachSides::clone(&self) -> pixtuoid_scene::layout::ApproachSides
-impl core::cmp::Eq for pixtuoid_scene::layout::ApproachSides
-impl core::cmp::PartialEq for pixtuoid_scene::layout::ApproachSides
-pub fn pixtuoid_scene::layout::ApproachSides::eq(&self, &pixtuoid_scene::layout::ApproachSides) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::ApproachSides
-pub fn pixtuoid_scene::layout::ApproachSides::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::layout::ApproachSides
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Freeze for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Send for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Sync for pixtuoid_scene::layout::ApproachSides
-impl core::marker::Unpin for pixtuoid_scene::layout::ApproachSides
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::ApproachSides
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::ApproachSides
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::ApproachSides
 pub struct pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::Bounds::height: u16
 pub pixtuoid_scene::layout::Bounds::width: u16
@@ -685,54 +518,7 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Bounds
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Bounds
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Bounds
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Bounds
-pub struct pixtuoid_scene::layout::Doorway
-pub pixtuoid_scene::layout::Doorway::end: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::layout::Doorway::start: pixtuoid_scene::layout::Point
-impl core::clone::Clone for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::clone(&self) -> pixtuoid_scene::layout::Doorway
-impl core::cmp::Eq for pixtuoid_scene::layout::Doorway
-impl core::cmp::PartialEq for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::eq(&self, &pixtuoid_scene::layout::Doorway) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for pixtuoid_scene::layout::Doorway
-pub fn pixtuoid_scene::layout::Doorway::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for pixtuoid_scene::layout::Doorway
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::Doorway
-impl core::marker::Freeze for pixtuoid_scene::layout::Doorway
-impl core::marker::Send for pixtuoid_scene::layout::Doorway
-impl core::marker::Sync for pixtuoid_scene::layout::Doorway
-impl core::marker::Unpin for pixtuoid_scene::layout::Doorway
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Doorway
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Doorway
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Doorway
-pub struct pixtuoid_scene::layout::DwellWindow
-pub pixtuoid_scene::layout::DwellWindow::base_ms: u64
-pub pixtuoid_scene::layout::DwellWindow::range_ms: u64
-impl pixtuoid_scene::layout::DwellWindow
-pub const pixtuoid_scene::layout::DwellWindow::DECOR: pixtuoid_scene::layout::DwellWindow
-impl core::clone::Clone for pixtuoid_scene::layout::DwellWindow
-pub fn pixtuoid_scene::layout::DwellWindow::clone(&self) -> pixtuoid_scene::layout::DwellWindow
-impl core::cmp::Eq for pixtuoid_scene::layout::DwellWindow
-impl core::cmp::PartialEq for pixtuoid_scene::layout::DwellWindow
-pub fn pixtuoid_scene::layout::DwellWindow::eq(&self, &pixtuoid_scene::layout::DwellWindow) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::DwellWindow
-pub fn pixtuoid_scene::layout::DwellWindow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::layout::DwellWindow
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Freeze for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Send for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Sync for pixtuoid_scene::layout::DwellWindow
-impl core::marker::Unpin for pixtuoid_scene::layout::DwellWindow
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::DwellWindow
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::DwellWindow
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::DwellWindow
 pub struct pixtuoid_scene::layout::FurnitureDef
-pub pixtuoid_scene::layout::FurnitureDef::approach: pixtuoid_scene::layout::ApproachSides
-pub pixtuoid_scene::layout::FurnitureDef::dwell: pixtuoid_scene::layout::DwellWindow
-pub pixtuoid_scene::layout::FurnitureDef::exclusive: bool
-pub pixtuoid_scene::layout::FurnitureDef::footprint: core::option::Option<pixtuoid_scene::layout::Size>
-pub pixtuoid_scene::layout::FurnitureDef::occupies_pos: bool
 pub pixtuoid_scene::layout::FurnitureDef::visual: pixtuoid_scene::layout::Size
 impl core::clone::Clone for pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::FurnitureDef::clone(&self) -> pixtuoid_scene::layout::FurnitureDef
@@ -774,8 +560,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Lounge
 pub struct pixtuoid_scene::layout::MeetingRoom
 pub pixtuoid_scene::layout::MeetingRoom::bounds: pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::MeetingRoom::trio: core::option::Option<pixtuoid_scene::layout::MeetingTrio>
-impl pixtuoid_scene::layout::MeetingRoom
-pub fn pixtuoid_scene::layout::MeetingRoom::doormat_rect(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::clone::Clone for pixtuoid_scene::layout::MeetingRoom
 pub fn pixtuoid_scene::layout::MeetingRoom::clone(&self) -> pixtuoid_scene::layout::MeetingRoom
 impl core::cmp::Eq for pixtuoid_scene::layout::MeetingRoom
@@ -795,7 +579,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::MeetingRoom
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::MeetingRoom
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::MeetingRoom
 pub struct pixtuoid_scene::layout::MeetingTrio
-pub pixtuoid_scene::layout::MeetingTrio::sofas: [pixtuoid_scene::layout::Point; 2]
 pub pixtuoid_scene::layout::MeetingTrio::table: pixtuoid_scene::layout::Point
 impl core::clone::Clone for pixtuoid_scene::layout::MeetingTrio
 pub fn pixtuoid_scene::layout::MeetingTrio::clone(&self) -> pixtuoid_scene::layout::MeetingTrio
@@ -817,11 +600,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Meeting
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::MeetingTrio
 pub struct pixtuoid_scene::layout::PantryRoom
 pub pixtuoid_scene::layout::PantryRoom::bounds: pixtuoid_scene::layout::Bounds
-pub pixtuoid_scene::layout::PantryRoom::counter_size: pixtuoid_scene::layout::Size
-pub pixtuoid_scene::layout::PantryRoom::kitchen_island: core::option::Option<pixtuoid_scene::layout::Point>
-impl pixtuoid_scene::layout::PantryRoom
-pub fn pixtuoid_scene::layout::PantryRoom::trash_bin_rect(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
-pub fn pixtuoid_scene::layout::PantryRoom::water_cooler_rect(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::clone::Clone for pixtuoid_scene::layout::PantryRoom
 pub fn pixtuoid_scene::layout::PantryRoom::clone(&self) -> pixtuoid_scene::layout::PantryRoom
 impl core::cmp::Eq for pixtuoid_scene::layout::PantryRoom
@@ -899,68 +677,34 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Point
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Point
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Point
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Point
-pub struct pixtuoid_scene::layout::ReachSet
-impl pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::from_mask(&pixtuoid_core::walkable::WalkableMask, pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::reaches(&self, pixtuoid_scene::layout::Point) -> bool
-impl core::clone::Clone for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::clone(&self) -> pixtuoid_scene::layout::ReachSet
-impl core::cmp::Eq for pixtuoid_scene::layout::ReachSet
-impl core::cmp::PartialEq for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::eq(&self, &pixtuoid_scene::layout::ReachSet) -> bool
-impl core::default::Default for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::default() -> pixtuoid_scene::layout::ReachSet
-impl core::fmt::Debug for pixtuoid_scene::layout::ReachSet
-pub fn pixtuoid_scene::layout::ReachSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::ReachSet
-impl core::marker::Freeze for pixtuoid_scene::layout::ReachSet
-impl core::marker::Send for pixtuoid_scene::layout::ReachSet
-impl core::marker::Sync for pixtuoid_scene::layout::ReachSet
-impl core::marker::Unpin for pixtuoid_scene::layout::ReachSet
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::ReachSet
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::ReachSet
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::ReachSet
 pub struct pixtuoid_scene::layout::SceneLayout
 pub pixtuoid_scene::layout::SceneLayout::buf_h: u16
 pub pixtuoid_scene::layout::SceneLayout::buf_w: u16
-pub pixtuoid_scene::layout::SceneLayout::corridor: core::option::Option<pixtuoid_scene::layout::Bounds>
 pub pixtuoid_scene::layout::SceneLayout::cubicle_aisle: pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::SceneLayout::cubicle_band: pixtuoid_scene::layout::Bounds
-pub pixtuoid_scene::layout::SceneLayout::desk_facings: alloc::vec::Vec<pixtuoid_scene::layout::Facing>
 pub pixtuoid_scene::layout::SceneLayout::door: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::layout::SceneLayout::door_threshold: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::layout::SceneLayout::doorways: alloc::vec::Vec<pixtuoid_scene::layout::Doorway>
 pub pixtuoid_scene::layout::SceneLayout::home_desks: alloc::vec::Vec<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::layout::SceneLayout::lounge: core::option::Option<pixtuoid_scene::layout::Lounge>
 pub pixtuoid_scene::layout::SceneLayout::meeting_rooms: alloc::vec::Vec<pixtuoid_scene::layout::MeetingRoom>
 pub pixtuoid_scene::layout::SceneLayout::pantry: core::option::Option<pixtuoid_scene::layout::PantryRoom>
 pub pixtuoid_scene::layout::SceneLayout::plants: alloc::vec::Vec<pixtuoid_scene::layout::PlantItem>
 pub pixtuoid_scene::layout::SceneLayout::pod_decor: alloc::vec::Vec<pixtuoid_scene::layout::PodDecorItem>
-pub pixtuoid_scene::layout::SceneLayout::reachable: pixtuoid_scene::layout::ReachSet
 pub pixtuoid_scene::layout::SceneLayout::room_walls: alloc::vec::Vec<pixtuoid_scene::layout::WallSegment>
 pub pixtuoid_scene::layout::SceneLayout::top_margin: u16
 pub pixtuoid_scene::layout::SceneLayout::walkable: pixtuoid_core::walkable::WalkableMask
 pub pixtuoid_scene::layout::SceneLayout::wall_decor: alloc::vec::Vec<pixtuoid_scene::layout::WallDecorItem>
 pub pixtuoid_scene::layout::SceneLayout::waypoints: alloc::vec::Vec<pixtuoid_scene::layout::Waypoint>
 impl pixtuoid_scene::layout::SceneLayout
-pub fn pixtuoid_scene::layout::SceneLayout::approach_point(&self, pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
-pub fn pixtuoid_scene::layout::SceneLayout::compute(u16, u16, core::option::Option<usize>) -> core::option::Option<Self>
-pub fn pixtuoid_scene::layout::SceneLayout::compute_with_seed(u16, u16, core::option::Option<usize>, u64) -> core::option::Option<Self>
-pub fn pixtuoid_scene::layout::SceneLayout::couch_sprite_center(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::SceneLayout::desk_facing(&self, pixtuoid_core::state::FloorLocalDeskIndex) -> pixtuoid_scene::layout::Facing
-pub fn pixtuoid_scene::layout::SceneLayout::desk_facing_at(&self, pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::Facing
-pub fn pixtuoid_scene::layout::SceneLayout::fish_tank(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::SceneLayout::floor_lamp(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::SceneLayout::home_desk(&self, pixtuoid_core::state::FloorLocalDeskIndex) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::SceneLayout::is_walkable(&self, u16, u16) -> bool
-pub fn pixtuoid_scene::layout::SceneLayout::lounge_side_table(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::SceneLayout::meeting_room_bounds(&self, usize) -> core::option::Option<pixtuoid_scene::layout::Bounds>
-pub fn pixtuoid_scene::layout::SceneLayout::pantry_counter_size(&self) -> pixtuoid_scene::layout::Size
-pub fn pixtuoid_scene::layout::SceneLayout::stand_point(&self, pixtuoid_scene::layout::WaypointKind, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
-pub fn pixtuoid_scene::layout::SceneLayout::wall_band_h(&self) -> u16
-impl pixtuoid_scene::layout::SceneLayout
 pub fn pixtuoid_scene::layout::SceneLayout::coffee_machine(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 pub fn pixtuoid_scene::layout::SceneLayout::fixture_at(&self, pixtuoid_scene::layout::Bounds) -> core::option::Option<pixtuoid_scene::layout::FixtureKind>
+impl pixtuoid_scene::layout::SceneLayout
+pub fn pixtuoid_scene::layout::SceneLayout::compute(u16, u16, core::option::Option<usize>) -> core::option::Option<Self>
+pub fn pixtuoid_scene::layout::SceneLayout::compute_with_seed(u16, u16, core::option::Option<usize>, u64) -> core::option::Option<Self>
+pub fn pixtuoid_scene::layout::SceneLayout::desk_facing(&self, pixtuoid_core::state::FloorLocalDeskIndex) -> pixtuoid_scene::layout::Facing
+pub fn pixtuoid_scene::layout::SceneLayout::home_desk(&self, pixtuoid_core::state::FloorLocalDeskIndex) -> core::option::Option<pixtuoid_scene::layout::Point>
+pub fn pixtuoid_scene::layout::SceneLayout::is_walkable(&self, u16, u16) -> bool
+pub fn pixtuoid_scene::layout::SceneLayout::meeting_room_bounds(&self, usize) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::clone::Clone for pixtuoid_scene::layout::SceneLayout
 pub fn pixtuoid_scene::layout::SceneLayout::clone(&self) -> pixtuoid_scene::layout::SceneLayout
 impl core::fmt::Debug for pixtuoid_scene::layout::SceneLayout
@@ -1037,11 +781,8 @@ pub const pixtuoid_scene::layout::CELL_ROWS: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_H: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_W: u16
 pub const pixtuoid_scene::layout::CLASSIC_OFFICE_DESKS: usize
-pub const pixtuoid_scene::layout::DESK_H: u16
 pub const pixtuoid_scene::layout::ELEVATOR_H: u16
 pub const pixtuoid_scene::layout::ELEVATOR_W: u16
-pub const pixtuoid_scene::layout::INTRA_POD_GAP_X: u16
-pub const pixtuoid_scene::layout::INTRA_POD_GAP_Y: u16
 pub const pixtuoid_scene::layout::NEON_PANEL_INNER_H: u16
 pub const pixtuoid_scene::layout::NEON_PANEL_INNER_W: u16
 pub const pixtuoid_scene::layout::NEON_PANEL_INNER_X: u16
@@ -1140,7 +881,6 @@ pub fn pixtuoid_scene::look::Raster::host_text(&self) -> core::option::Option<cr
 pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
-pub fn pixtuoid_scene::look::Raster::star(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::fmt::Debug for pixtuoid_scene::look::Raster
 pub fn pixtuoid_scene::look::Raster::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::look::Raster
@@ -1168,22 +908,19 @@ impl<'a> core::marker::Unpin for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
-pub struct pixtuoid_scene::look::Rendered<'r>
-pub pixtuoid_scene::look::Rendered::dirty: crate::cutaway::canvas::Dirty
+pub struct pixtuoid_scene::look::Rendered
 pub pixtuoid_scene::look::Rendered::flash: crate::flash::FlashPhase
 pub pixtuoid_scene::look::Rendered::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
-pub pixtuoid_scene::look::Rendered::occupied_waypoints: std::collections::hash::set::HashSet<usize>
-pub pixtuoid_scene::look::Rendered::pixels: &'r pixtuoid_core::sprite::RgbBuffer
-impl<'r> core::fmt::Debug for pixtuoid_scene::look::Rendered<'r>
-pub fn pixtuoid_scene::look::Rendered<'r>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'r> core::marker::Freeze for pixtuoid_scene::look::Rendered<'r>
-impl<'r> core::marker::Send for pixtuoid_scene::look::Rendered<'r>
-impl<'r> core::marker::Sync for pixtuoid_scene::look::Rendered<'r>
-impl<'r> core::marker::Unpin for pixtuoid_scene::look::Rendered<'r>
-impl<'r> core::marker::UnsafeUnpin for pixtuoid_scene::look::Rendered<'r>
-impl<'r> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Rendered<'r>
-impl<'r> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Rendered<'r>
-pub fn pixtuoid_scene::look::render<'r>(&'r mut pixtuoid_scene::floor::PerFloor, pixtuoid_scene::floor::OfficeStores<'_>, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<pixtuoid_scene::look::Rendered<'r>>
+impl core::fmt::Debug for pixtuoid_scene::look::Rendered
+pub fn pixtuoid_scene::look::Rendered::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_scene::look::Rendered
+impl core::marker::Send for pixtuoid_scene::look::Rendered
+impl core::marker::Sync for pixtuoid_scene::look::Rendered
+impl core::marker::Unpin for pixtuoid_scene::look::Rendered
+impl core::marker::UnsafeUnpin for pixtuoid_scene::look::Rendered
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Rendered
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Rendered
+pub fn pixtuoid_scene::look::render(&mut pixtuoid_scene::floor::PerFloor, pixtuoid_scene::floor::OfficeStores<'_>, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<pixtuoid_scene::look::Rendered>
 pub mod pixtuoid_scene::pack
 #[non_exhaustive] pub enum pixtuoid_scene::pack::ArtError
 #[non_exhaustive] pub pixtuoid_scene::pack::ArtError::ClockFace
@@ -1216,8 +953,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::ArtError
 pub enum pixtuoid_scene::pack::Desk
 pub pixtuoid_scene::pack::Desk::North
 pub pixtuoid_scene::pack::Desk::South
-impl pixtuoid_scene::pack::Desk
-pub fn pixtuoid_scene::pack::Desk::piece(self) -> pixtuoid_core::sprite::format::Piece
 impl core::clone::Clone for pixtuoid_scene::pack::Desk
 pub fn pixtuoid_scene::pack::Desk::clone(&self) -> pixtuoid_scene::pack::Desk
 impl core::cmp::Eq for pixtuoid_scene::pack::Desk
@@ -1245,8 +980,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::Desk
 pub enum pixtuoid_scene::pack::DeskProp
 pub pixtuoid_scene::pack::DeskProp::Cup
 pub pixtuoid_scene::pack::DeskProp::Tower
-impl pixtuoid_scene::pack::DeskProp
-pub fn pixtuoid_scene::pack::DeskProp::mark(self) -> &'static str
 impl core::clone::Clone for pixtuoid_scene::pack::DeskProp
 pub fn pixtuoid_scene::pack::DeskProp::clone(&self) -> pixtuoid_scene::pack::DeskProp
 impl core::cmp::Eq for pixtuoid_scene::pack::DeskProp
@@ -1272,7 +1005,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::DeskProp
 pub struct pixtuoid_scene::pack::OfficeArt
 impl pixtuoid_scene::pack::OfficeArt
 pub fn pixtuoid_scene::pack::OfficeArt::max_density_variant(&self) -> pixtuoid_core::sprite::format::Density
-pub fn pixtuoid_scene::pack::OfficeArt::parse(pixtuoid_core::sprite::format::Pack) -> core::result::Result<Self, pixtuoid_scene::pack::ArtError>
 pub fn pixtuoid_scene::pack::OfficeArt::piece(&self, pixtuoid_core::sprite::format::Piece) -> &pixtuoid_core::sprite::Sprite
 impl core::clone::Clone for pixtuoid_scene::pack::OfficeArt
 pub fn pixtuoid_scene::pack::OfficeArt::clone(&self) -> pixtuoid_scene::pack::OfficeArt
@@ -1291,7 +1023,6 @@ pub struct pixtuoid_scene::pathfind::AStarRouter
 impl pixtuoid_scene::pathfind::AStarRouter
 pub fn pixtuoid_scene::pathfind::AStarRouter::is_empty(&self) -> bool
 pub fn pixtuoid_scene::pathfind::AStarRouter::len(&self) -> usize
-pub fn pixtuoid_scene::pathfind::AStarRouter::new() -> Self
 impl core::clone::Clone for pixtuoid_scene::pathfind::AStarRouter
 pub fn pixtuoid_scene::pathfind::AStarRouter::clone(&self) -> pixtuoid_scene::pathfind::AStarRouter
 impl core::default::Default for pixtuoid_scene::pathfind::AStarRouter
@@ -1328,7 +1059,6 @@ pub fn pixtuoid_scene::pet::PetKind::default_name(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::from_config_name(&str) -> core::option::Option<Self>
 pub fn pixtuoid_scene::pet::PetKind::sit_anim(self) -> pixtuoid_core::sprite::format::Piece
 pub fn pixtuoid_scene::pet::PetKind::sleep_anim(self) -> pixtuoid_core::sprite::format::Piece
-pub fn pixtuoid_scene::pet::PetKind::sleeps_near_idle(self) -> bool
 pub fn pixtuoid_scene::pet::PetKind::walk_anim(self) -> pixtuoid_core::sprite::format::Walk
 impl core::clone::Clone for pixtuoid_scene::pet::PetKind
 pub fn pixtuoid_scene::pet::PetKind::clone(&self) -> pixtuoid_scene::pet::PetKind
@@ -1373,7 +1103,6 @@ pub pixtuoid_scene::pet::PetState::floor_idx: usize
 pub pixtuoid_scene::pet::PetState::kind: pixtuoid_scene::pet::PetKind
 pub pixtuoid_scene::pet::PetState::petted_at: std::time::SystemTime
 impl pixtuoid_scene::pet::PetState
-pub fn pixtuoid_scene::pet::PetState::elapsed_ms(&self, std::time::SystemTime) -> u64
 pub fn pixtuoid_scene::pet::PetState::is_active(&self, std::time::SystemTime) -> bool
 impl core::fmt::Debug for pixtuoid_scene::pet::PetState
 pub fn pixtuoid_scene::pet::PetState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -1385,46 +1114,11 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::pet::PetState
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pet::PetState
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pet::PetState
 pub mod pixtuoid_scene::pose
-pub enum pixtuoid_scene::pose::Pose
-pub pixtuoid_scene::pose::Pose::AimlessAt
-pub pixtuoid_scene::pose::Pose::AimlessAt::dest: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::AtWaypoint
-pub pixtuoid_scene::pose::Pose::AtWaypoint::kind: pixtuoid_scene::layout::WaypointKind
-pub pixtuoid_scene::pose::Pose::AtWaypoint::wp: usize
-pub pixtuoid_scene::pose::Pose::Held
-pub pixtuoid_scene::pose::Pose::Held::at: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::SeatedIdle
-pub pixtuoid_scene::pose::Pose::SeatedThinking
-pub pixtuoid_scene::pose::Pose::SeatedTyping
-pub pixtuoid_scene::pose::Pose::Walking
-pub pixtuoid_scene::pose::Pose::Walking::carrying_coffee: bool
-pub pixtuoid_scene::pose::Pose::Walking::from: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::Walking::t_x1000: u16
-pub pixtuoid_scene::pose::Pose::Walking::to: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pose::Pose::Walking::travelled: u32
-impl core::clone::Clone for pixtuoid_scene::pose::Pose
-pub fn pixtuoid_scene::pose::Pose::clone(&self) -> pixtuoid_scene::pose::Pose
-impl core::cmp::Eq for pixtuoid_scene::pose::Pose
-impl core::cmp::PartialEq for pixtuoid_scene::pose::Pose
-pub fn pixtuoid_scene::pose::Pose::eq(&self, &pixtuoid_scene::pose::Pose) -> bool
-impl core::fmt::Debug for pixtuoid_scene::pose::Pose
-pub fn pixtuoid_scene::pose::Pose::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pose::Pose
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pose::Pose
-impl core::marker::Freeze for pixtuoid_scene::pose::Pose
-impl core::marker::Send for pixtuoid_scene::pose::Pose
-impl core::marker::Sync for pixtuoid_scene::pose::Pose
-impl core::marker::Unpin for pixtuoid_scene::pose::Pose
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pose::Pose
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pose::Pose
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pose::Pose
 pub struct pixtuoid_scene::pose::PoseHistory
 impl pixtuoid_scene::pose::PoseHistory
 pub fn pixtuoid_scene::pose::PoseHistory::contains(&self, pixtuoid_core::id::AgentId) -> bool
-pub fn pixtuoid_scene::pose::PoseHistory::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::pose::PoseHistory::new() -> Self
 pub fn pixtuoid_scene::pose::PoseHistory::recent(&self, pixtuoid_core::id::AgentId, u64, std::time::SystemTime) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::pose::PoseHistory::record(&mut self, pixtuoid_core::id::AgentId, pixtuoid_scene::layout::Point, std::time::SystemTime)
 impl core::clone::Clone for pixtuoid_scene::pose::PoseHistory
 pub fn pixtuoid_scene::pose::PoseHistory::clone(&self) -> pixtuoid_scene::pose::PoseHistory
 impl core::default::Default for pixtuoid_scene::pose::PoseHistory
@@ -1438,9 +1132,6 @@ impl core::marker::Unpin for pixtuoid_scene::pose::PoseHistory
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pose::PoseHistory
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pose::PoseHistory
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pose::PoseHistory
-pub const pixtuoid_scene::pose::ENTRY_ANIMATION_MS: u64
-pub fn pixtuoid_scene::pose::derive(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout) -> core::option::Option<pixtuoid_scene::pose::Pose>
-pub fn pixtuoid_scene::pose::dwell_ms(pixtuoid_scene::layout::WaypointKind, pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::est_wander_cycle_ms(pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::is_aimless_cycle(pixtuoid_core::id::AgentId, u64) -> bool
 pub fn pixtuoid_scene::pose::seated_dwell_ms(pixtuoid_core::id::AgentId) -> u64
@@ -1449,9 +1140,6 @@ pub fn pixtuoid_scene::pose::waypoint_index_for_cycle(pixtuoid_core::id::AgentId
 pub mod pixtuoid_scene::render_scale
 pub struct pixtuoid_scene::render_scale::RenderScale(_)
 impl pixtuoid_scene::render_scale::RenderScale
-pub const pixtuoid_scene::render_scale::RenderScale::ONE: Self
-pub fn pixtuoid_scene::render_scale::RenderScale::factor(self) -> core::num::nonzero::NonZeroU16
-pub fn pixtuoid_scene::render_scale::RenderScale::fit(u16, pixtuoid_core::sprite::format::Density) -> core::option::Option<Self>
 pub fn pixtuoid_scene::render_scale::RenderScale::get(self) -> u16
 pub fn pixtuoid_scene::render_scale::RenderScale::logical(self, u16) -> u16
 pub fn pixtuoid_scene::render_scale::RenderScale::new(u16) -> core::option::Option<Self>
@@ -1479,37 +1167,10 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::render_scale::RenderScale
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::render_scale::RenderScale
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::render_scale::RenderScale
 pub mod pixtuoid_scene::sim
-pub enum pixtuoid_scene::sim::CharacterGlow
-pub pixtuoid_scene::sim::CharacterGlow::None
-pub pixtuoid_scene::sim::CharacterGlow::Thinking
-pub pixtuoid_scene::sim::CharacterGlow::Tool
-impl core::clone::Clone for pixtuoid_scene::sim::CharacterGlow
-pub fn pixtuoid_scene::sim::CharacterGlow::clone(&self) -> pixtuoid_scene::sim::CharacterGlow
-impl core::cmp::Eq for pixtuoid_scene::sim::CharacterGlow
-impl core::cmp::PartialEq for pixtuoid_scene::sim::CharacterGlow
-pub fn pixtuoid_scene::sim::CharacterGlow::eq(&self, &pixtuoid_scene::sim::CharacterGlow) -> bool
-impl core::fmt::Debug for pixtuoid_scene::sim::CharacterGlow
-pub fn pixtuoid_scene::sim::CharacterGlow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::StructuralPartialEq for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Freeze for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Send for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Sync for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::Unpin for pixtuoid_scene::sim::CharacterGlow
-impl core::marker::UnsafeUnpin for pixtuoid_scene::sim::CharacterGlow
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::CharacterGlow
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterGlow
 pub struct pixtuoid_scene::sim::CharacterPlacement
 pub pixtuoid_scene::sim::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::sim::CharacterPlacement::anim_name: pixtuoid_core::sprite::format::Piece
-pub pixtuoid_scene::sim::CharacterPlacement::breathes: bool
-pub pixtuoid_scene::sim::CharacterPlacement::flip_x: bool
 pub pixtuoid_scene::sim::CharacterPlacement::frame_idx: usize
-pub pixtuoid_scene::sim::CharacterPlacement::glow: pixtuoid_scene::sim::CharacterGlow
-pub pixtuoid_scene::sim::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::sim::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
-pub pixtuoid_scene::sim::CharacterPlacement::seated: bool
-pub pixtuoid_scene::sim::CharacterPlacement::sort_row: u16
 pub pixtuoid_scene::sim::CharacterPlacement::top_left: pixtuoid_scene::layout::Point
 impl core::clone::Clone for pixtuoid_scene::sim::CharacterPlacement
 pub fn pixtuoid_scene::sim::CharacterPlacement::clone(&self) -> pixtuoid_scene::sim::CharacterPlacement
@@ -1525,12 +1186,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterPlac
 pub struct pixtuoid_scene::sim::SimFrame
 pub pixtuoid_scene::sim::SimFrame::agents: alloc::vec::Vec<pixtuoid_core::state::AgentSlot>
 pub pixtuoid_scene::sim::SimFrame::characters: alloc::vec::Vec<pixtuoid_scene::sim::CharacterPlacement>
-pub pixtuoid_scene::sim::SimFrame::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
-pub pixtuoid_scene::sim::SimFrame::indoor_scale: f32
-pub pixtuoid_scene::sim::SimFrame::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>
-pub pixtuoid_scene::sim::SimFrame::occupied_waypoints: std::collections::hash::set::HashSet<usize>
-pub pixtuoid_scene::sim::SimFrame::poses: std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, core::option::Option<pixtuoid_scene::pose::Pose>>
-pub pixtuoid_scene::sim::SimFrame::seated_agents: std::collections::hash::map::HashMap<pixtuoid_core::state::FloorLocalDeskIndex, bool>
 impl core::clone::Clone for pixtuoid_scene::sim::SimFrame
 pub fn pixtuoid_scene::sim::SimFrame::clone(&self) -> pixtuoid_scene::sim::SimFrame
 impl core::fmt::Debug for pixtuoid_scene::sim::SimFrame
@@ -1594,110 +1249,12 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::sky::WeatherPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sky::WeatherPolicy
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sky::WeatherPolicy
 pub fn pixtuoid_scene::sky::hour_is_day(f32) -> bool
-pub fn pixtuoid_scene::sky::weather_names() -> alloc::vec::Vec<&'static str>
 pub mod pixtuoid_scene::theme
-pub enum pixtuoid_scene::theme::ThemeKind
-pub pixtuoid_scene::theme::ThemeKind::Dark
-pub pixtuoid_scene::theme::ThemeKind::Light
-impl core::clone::Clone for pixtuoid_scene::theme::ThemeKind
-pub fn pixtuoid_scene::theme::ThemeKind::clone(&self) -> pixtuoid_scene::theme::ThemeKind
-impl core::cmp::Eq for pixtuoid_scene::theme::ThemeKind
-impl core::cmp::PartialEq for pixtuoid_scene::theme::ThemeKind
-pub fn pixtuoid_scene::theme::ThemeKind::eq(&self, &pixtuoid_scene::theme::ThemeKind) -> bool
-impl core::fmt::Debug for pixtuoid_scene::theme::ThemeKind
-pub fn pixtuoid_scene::theme::ThemeKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::theme::ThemeKind
-impl core::marker::StructuralPartialEq for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Freeze for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Send for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Sync for pixtuoid_scene::theme::ThemeKind
-impl core::marker::Unpin for pixtuoid_scene::theme::ThemeKind
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::ThemeKind
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::ThemeKind
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::ThemeKind
-pub struct pixtuoid_scene::theme::ApplianceColors
-pub pixtuoid_scene::theme::ApplianceColors::coats: [pixtuoid_core::sprite::Rgb; 3]
-pub pixtuoid_scene::theme::ApplianceColors::printer_body: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::printer_glass: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::printer_paper: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::printer_top: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::printer_tray: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::vending_body: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::vending_dark: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::vending_drinks: [pixtuoid_core::sprite::Rgb; 4]
-pub pixtuoid_scene::theme::ApplianceColors::vending_panel: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ApplianceColors::vending_trim: pixtuoid_core::sprite::Rgb
-impl core::clone::Clone for pixtuoid_scene::theme::ApplianceColors
-pub fn pixtuoid_scene::theme::ApplianceColors::clone(&self) -> pixtuoid_scene::theme::ApplianceColors
-impl core::fmt::Debug for pixtuoid_scene::theme::ApplianceColors
-pub fn pixtuoid_scene::theme::ApplianceColors::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::Send for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::Sync for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::Unpin for pixtuoid_scene::theme::ApplianceColors
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::ApplianceColors
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::ApplianceColors
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::ApplianceColors
-pub struct pixtuoid_scene::theme::EffectColors
-pub pixtuoid_scene::theme::EffectColors::coffee_steam: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::EffectColors::monitor_frame_lit: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::EffectColors::monitor_idle: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::EffectColors::sleep_z: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::EffectColors::waiting_bubble: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::EffectColors::walking_dust: pixtuoid_core::sprite::Rgb
-impl core::clone::Clone for pixtuoid_scene::theme::EffectColors
-pub fn pixtuoid_scene::theme::EffectColors::clone(&self) -> pixtuoid_scene::theme::EffectColors
-impl core::fmt::Debug for pixtuoid_scene::theme::EffectColors
-pub fn pixtuoid_scene::theme::EffectColors::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::theme::EffectColors
-impl core::marker::Send for pixtuoid_scene::theme::EffectColors
-impl core::marker::Sync for pixtuoid_scene::theme::EffectColors
-impl core::marker::Unpin for pixtuoid_scene::theme::EffectColors
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::EffectColors
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::EffectColors
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::EffectColors
-pub struct pixtuoid_scene::theme::FurnitureColors
-pub pixtuoid_scene::theme::FurnitureColors::chair_trim: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::coffee_cup: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::coffee_cup_shadow: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::magazine: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::magazine_trim: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::paper: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::paper_shade: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::rug_accent: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::rug_field: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::rug_trim: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::tank_fish: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::tank_fish_alt: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::tank_plant: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::tank_water: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::tank_water_line: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::wood_top: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::FurnitureColors::wood_trim: pixtuoid_core::sprite::Rgb
-impl core::clone::Clone for pixtuoid_scene::theme::FurnitureColors
-pub fn pixtuoid_scene::theme::FurnitureColors::clone(&self) -> pixtuoid_scene::theme::FurnitureColors
-impl core::fmt::Debug for pixtuoid_scene::theme::FurnitureColors
-pub fn pixtuoid_scene::theme::FurnitureColors::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::Send for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::Sync for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::Unpin for pixtuoid_scene::theme::FurnitureColors
-impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::FurnitureColors
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::FurnitureColors
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::FurnitureColors
 pub struct pixtuoid_scene::theme::LightingColors
-pub pixtuoid_scene::theme::LightingColors::day_sky_a: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::day_sky_b: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::desk_lamp: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::floor_lamp_halo: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::moon_core: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::night_sky_a: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::night_sky_b: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::night_tint: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::sun_core: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::sun_spill: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::twilight_a: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::LightingColors::twilight_b: pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::theme::LightingColors
 pub fn pixtuoid_scene::theme::LightingColors::clone(&self) -> pixtuoid_scene::theme::LightingColors
 impl core::fmt::Debug for pixtuoid_scene::theme::LightingColors
@@ -1714,16 +1271,7 @@ pub pixtuoid_scene::theme::OfficeColors::building_dark: pixtuoid_core::sprite::R
 pub pixtuoid_scene::theme::OfficeColors::building_light: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::city_dark_window: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::city_lit_windows: [pixtuoid_core::sprite::Rgb; 3]
-pub pixtuoid_scene::theme::OfficeColors::clock_face: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::clock_hand: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::clock_rim: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::neon_panel_bg: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::room_wall_trim_dark: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::room_wall_trim_light: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::runner_base: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::runner_edge: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::runner_stripe: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::shadow: pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::theme::OfficeColors
 pub fn pixtuoid_scene::theme::OfficeColors::clone(&self) -> pixtuoid_scene::theme::OfficeColors
 impl core::fmt::Debug for pixtuoid_scene::theme::OfficeColors
@@ -1736,22 +1284,9 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::OfficeColors
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::OfficeColors
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::OfficeColors
 pub struct pixtuoid_scene::theme::SourceColors
-pub pixtuoid_scene::theme::SourceColors::antigravity: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::claude_code: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::codewhale: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::codex: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::copilot: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::cursor: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::dsh: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::grok: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::hermes: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::kimi: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::omp: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::openclaw: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::opencode: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::SourceColors::reasonix: pixtuoid_core::sprite::Rgb
 impl pixtuoid_scene::theme::SourceColors
-pub fn pixtuoid_scene::theme::SourceColors::all(&self) -> [pixtuoid_core::sprite::Rgb; 14]
 pub fn pixtuoid_scene::theme::SourceColors::by_prefix(&self, &str) -> core::option::Option<pixtuoid_core::sprite::Rgb>
 impl core::clone::Clone for pixtuoid_scene::theme::SourceColors
 pub fn pixtuoid_scene::theme::SourceColors::clone(&self) -> pixtuoid_scene::theme::SourceColors
@@ -1784,10 +1319,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::SurfaceColors
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::SurfaceColors
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::SurfaceColors
 pub struct pixtuoid_scene::theme::Theme
-pub pixtuoid_scene::theme::Theme::appliance: pixtuoid_scene::theme::ApplianceColors
-pub pixtuoid_scene::theme::Theme::effects: pixtuoid_scene::theme::EffectColors
-pub pixtuoid_scene::theme::Theme::furniture: pixtuoid_scene::theme::FurnitureColors
-pub pixtuoid_scene::theme::Theme::kind: pixtuoid_scene::theme::ThemeKind
 pub pixtuoid_scene::theme::Theme::lighting: pixtuoid_scene::theme::LightingColors
 pub pixtuoid_scene::theme::Theme::name: &'static str
 pub pixtuoid_scene::theme::Theme::office: pixtuoid_scene::theme::OfficeColors
@@ -1810,11 +1341,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::Theme
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::Theme
 pub struct pixtuoid_scene::theme::ToolGlowColors
 pub pixtuoid_scene::theme::ToolGlowColors::agent: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ToolGlowColors::bash: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ToolGlowColors::default: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ToolGlowColors::edit: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ToolGlowColors::grep: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::ToolGlowColors::read: pixtuoid_core::sprite::Rgb
 impl pixtuoid_scene::theme::ToolGlowColors
 pub fn pixtuoid_scene::theme::ToolGlowColors::for_kind(&self, pixtuoid_core::state::ToolKind) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::theme::ToolGlowColors
@@ -1833,9 +1359,7 @@ pub pixtuoid_scene::theme::UiColors::label_active: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::label_exiting: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::label_idle: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::label_waiting: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::UiColors::neon_alert: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::neon_brand: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::UiColors::neon_star: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::tooltip_bg: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::tooltip_dim: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::tooltip_text: pixtuoid_core::sprite::Rgb

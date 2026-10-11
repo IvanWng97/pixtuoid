@@ -82,7 +82,8 @@ impl OccupancyOverlay {
     }
 
     /// The number of blocked rects.
-    pub fn len(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.rects.len()
     }
 

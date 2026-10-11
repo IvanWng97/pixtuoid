@@ -10,7 +10,7 @@ use crate::layout::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeetingTrio {
     /// The two sofa centres: `[0]` north, `[1]` south (pixel-space).
-    pub sofas: [Point; 2],
+    pub(crate) sofas: [Point; 2],
     /// The table centre, midway between the two sofas (pixel-space).
     pub table: Point,
 }
@@ -165,7 +165,7 @@ impl MeetingRoom {
     /// The entrance doormat's sprite box (bordered rug on the cubicle side, one
     /// clear column east of the room's east wall) — `None` on a room too narrow.
     /// The roster's mat also gives way to what stands over it.
-    pub fn doormat_rect(&self) -> Option<Bounds> {
+    pub(crate) fn doormat_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Lazy `.then`: `b.height / 2 - 2` must not run for a sub-gate room.
         (b.width > 10).then(|| Bounds {

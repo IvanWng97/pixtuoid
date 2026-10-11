@@ -443,15 +443,14 @@ command = "/hand/written/pixtuoid-hook"
             );
         });
 
-        let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
-        std::fs::create_dir_all(&custom).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let custom = tmp.path().to_path_buf();
         temp_env::with_var("CODEX_HOME", Some(&custom), || {
             assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
         });
 
-        // A non-existent dir falls back, matching upstream codex's own gate.
-        let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
-        let _ = std::fs::remove_dir_all(&missing);
+        // A non-existent dir falls back, where upstream errors; `resolve_codex_home` says why.
+        let missing = tmp.path().join("missing");
         temp_env::with_var("CODEX_HOME", Some(&missing), || {
             assert!(
                 default_config_path().unwrap().ends_with(&fallback_suffix),
@@ -462,8 +461,6 @@ command = "/hand/written/pixtuoid-hook"
         temp_env::with_var("CODEX_HOME", Some(""), || {
             assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
         });
-
-        let _ = std::fs::remove_dir_all(&custom);
     }
 
     #[test]

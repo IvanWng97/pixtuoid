@@ -59,7 +59,7 @@ pub enum DriftKind {
 /// `ParseError` stays out of this crate's API.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no drift kind is named {0:?}")]
-pub struct UnknownDriftKind(pub String);
+pub struct UnknownDriftKind(pub(crate) String);
 
 impl UnknownDriftKind {
     fn of(name: &str) -> Self {
