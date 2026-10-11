@@ -3768,8 +3768,15 @@ fn the_classic_layers_creatures_under_characters_in_any_queue_order() {
     enqueue_pet(&pack, frame.pet.as_ref().expect("the cat"), &mut queue);
     drawable::sort_drawables(&mut queue);
     assert_eq!(
-        queue.iter().map(|d| d.layer).collect::<Vec<_>>(),
-        [Layer::Creature, Layer::Creature, Layer::Character]
+        queue
+            .iter()
+            .map(|d| (d.layer, matches!(d.kind, DrawableKind::Character { .. })))
+            .collect::<Vec<_>>(),
+        [
+            (Layer::Creature, false),
+            (Layer::Creature, false),
+            (Layer::Character, true)
+        ]
     );
 }
 

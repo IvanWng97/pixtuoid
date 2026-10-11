@@ -19,10 +19,11 @@ use crate::layout::{Bounds, Tie};
 pub(crate) enum Layer {
     /// A fixture a figure at its row sits on or stands in front of.
     Under,
-    /// A pet or a mascot: under a person tied with it on a row, whichever look
-    /// paints it.
+    /// A pet or a mascot: under a character tied with it on a row, whichever
+    /// look paints it.
     Creature,
-    /// A character.
+    /// A character, and a back-turned sitter's chair with it
+    /// (`occupant_span`).
     Character,
     /// A fixture that hides a figure at its row, and a glass wall band, which
     /// composites over whoever stands behind it.
