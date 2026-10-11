@@ -202,28 +202,18 @@ impl FurnitureDef {
         self.footprint.map(|fp| self.ground_rect_of(pivot, pos, fp))
     }
 
-    /// [`Self::ground_rect_of`] grown by this def's `pad` — the rect the mask blocks.
-    pub(super) fn padded_ground_rect_of(
-        &self,
-        pivot: Pivot,
-        pos: Point,
-        fp: Size,
-    ) -> (Point, Size) {
-        super::mask::padded(self.ground_rect_of(pivot, pos, fp), self.pad)
-    }
-
-    /// [`Self::ground_rect`] grown by this def's `pad`: the ground the mask blocks,
-    /// or `None` for a piece with no table footprint.
-    pub(super) fn padded_ground_rect(&self, pivot: Pivot, pos: Point) -> Option<(Point, Size)> {
-        self.footprint
-            .map(|fp| self.padded_ground_rect_of(pivot, pos, fp))
-    }
-
-    /// The first column east of [`Self::padded_ground_rect`], or `None` for a piece
-    /// with no table footprint, which the mask doesn't block.
+    /// The first column the mask leaves walkable east of this piece's ground (its
+    /// [`Self::pad`] included), or `None` for a piece with no table footprint, which
+    /// the mask doesn't block.
     pub(super) fn east_of_padded_ground(&self, pivot: Pivot, pos: Point) -> Option<u16> {
-        self.padded_ground_rect(pivot, pos)
-            .map(|(tl, sz)| tl.x + sz.w)
+        self.ground_rect(pivot, pos)
+            .map(|(tl, sz)| tl.x + sz.w + self.pad)
+    }
+
+    /// First clear pixel beyond a footprint half-extent: the one past the
+    /// [`Self::pad`] band the mask stamps around the furniture.
+    pub(super) const fn stand_clearance(&self) -> u16 {
+        self.pad + 1
     }
 }
 
@@ -1046,7 +1036,7 @@ pub enum PodDecor {
 
 impl PodDecor {
     /// The randomly-picked pool. Every member's GROUND footprint has to fit the
-    /// aisle width once the obstacle pad is added.
+    /// aisle width once its row's [`FurnitureDef::pad`] is added.
     pub(crate) const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,
         PodDecor::Whiteboard,

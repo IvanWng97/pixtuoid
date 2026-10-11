@@ -412,9 +412,11 @@ pub(super) fn compute_with_seed(
     } = couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
     // #566: every lounge piece's padded ground ends west of the threshold column.
     let flanks = LoungeFlanks::of(couch_x);
-    let lounge_fits = couch_east_ground(couch_x, couch_y)
-        .max(flanks.east_ground())
-        .is_none_or(|east| east <= door_threshold.x);
+    let lounge_fits = lounge_east_ground(Point {
+        x: couch_x,
+        y: couch_y,
+    })
+    .is_none_or(|east| east <= door_threshold.x);
     let lounge = lounge_fits.then(|| {
         place_lounge(
             Point {
@@ -871,6 +873,12 @@ fn bookshelf_x(
         }
         _ => x,
     }
+}
+
+/// The column past the farthest-east lounge piece's padded ground, for a couch at
+/// `couch`.
+fn lounge_east_ground(couch: Point) -> Option<u16> {
+    couch_east_ground(couch.x, couch.y).max(LoungeFlanks::of(couch.x).east_ground())
 }
 
 /// The column past the couch's east seat's padded ground.
@@ -1833,6 +1841,49 @@ fn compute_waypoints(
 #[cfg(test)]
 mod tests {
     use super::{FloorGeometry, FloorVariant};
+
+    /// The lounge is kept exactly while its padded ground ends at or west of the
+    /// door threshold's column: the scan finds the width where the east edge meets
+    /// the column, which is kept, and the width below it, which is dropped.
+    #[test]
+    fn the_lounge_is_kept_iff_its_east_ground_reaches_no_further_than_the_threshold() {
+        use super::{FloorPlan, couch_pos, lounge_east_ground};
+        use crate::layout::SceneLayout;
+        use crate::layout::placement_sweep::NARROW_BAND;
+        let (h, seed) = (160, 1);
+        let scan: Vec<(u16, bool, Option<u16>, u16)> = NARROW_BAND
+            .map(|w| {
+                let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
+                let plan = FloorPlan::new(w, h, seed);
+                let couch = couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
+                (
+                    w,
+                    l.lounge.is_some(),
+                    lounge_east_ground(couch),
+                    l.door_threshold.x,
+                )
+            })
+            .collect();
+        for &(w, kept, east, threshold) in &scan {
+            assert_eq!(
+                kept,
+                east.is_none_or(|e| e <= threshold),
+                "{w}x{h} seed {seed}: kept {kept}, east ground {east:?}, threshold {threshold}"
+            );
+        }
+        let exact = scan
+            .iter()
+            .find(|&&(_, kept, east, threshold)| kept && east == Some(threshold))
+            .expect("a width keeps the lounge with its ground meeting the threshold exactly");
+        let below = scan
+            .iter()
+            .find(|&&(w, ..)| w + 1 == exact.0)
+            .expect("the width below is in the band");
+        assert!(
+            !below.1 && below.2.is_some_and(|e| e > below.3),
+            "the width below the exact fit must drop the lounge for crossing the threshold: {below:?}"
+        );
+    }
 
     /// The couch↔door gate reads the column past the lamp's ground AS THE MASK
     /// STAMPS IT, so it drops the lounge exactly when the lamp would block the

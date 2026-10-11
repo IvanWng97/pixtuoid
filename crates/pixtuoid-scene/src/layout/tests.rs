@@ -1202,6 +1202,8 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
         bounds,
         trio: Some(trio),
     };
+    // place_trio centres the sofa on the room's mid-column.
+    assert_eq!(trio.sofas[0].x, bounds.x + bounds.width / 2);
     let mask = mask::build_walkable_mask(&mask::MaskObstacles {
         meeting_rooms: &[room],
         ..mask::MaskObstacles::bare(80, 100)

@@ -14,42 +14,19 @@ use pixtuoid_core::walkable::WalkableMask;
 /// (the SAME origin the renderer blits from, so blocked ground and painted
 /// sprite can't drift); the footprint is offset inside it by the row's
 /// [`GroundAlign`] per axis. A footprint-less piece (wall-hung decor) stamps
-/// nothing; runtime-footprint pieces stamp their own rect through [`stamp_rect`].
-/// The pad is the row's [`FurnitureDef::pad`].
+/// nothing; runtime-footprint pieces build their rect and call `mark_blocked`
+/// directly. The pad is the row's [`FurnitureDef::pad`].
 fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, pivot: Pivot, pos: Point) {
-    if let Some(rect) = def.padded_ground_rect(pivot, pos) {
-        stamp_rect(mask, rect);
+    if let Some((tl, sz)) = def.ground_rect(pivot, pos) {
+        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, def.pad);
     }
-}
-
-/// Block an already-[`padded`] rect.
-fn stamp_rect(mask: &mut WalkableMask, (tl, sz): (Point, Size)) {
-    mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
-}
-
-/// `rect` grown by `pad` on every side, saturating at the buffer's west and north
-/// edge exactly as [`WalkableMask::mark_blocked`] does — so a gate reading the east
-/// edge of this rect reads the first column the stamp leaves walkable.
-pub(super) fn padded((tl, sz): (Point, Size), pad: u16) -> (Point, Size) {
-    let left = tl.x.saturating_sub(pad);
-    let top = tl.y.saturating_sub(pad);
-    let right = tl.x.saturating_add(sz.w).saturating_add(pad);
-    let bottom = tl.y.saturating_add(sz.h).saturating_add(pad);
-    (
-        Point { x: left, y: top },
-        Size {
-            w: right - left,
-            h: bottom - top,
-        },
-    )
 }
 
 /// The ONE ground-geometry formula: the blocked rect (top-left + size) of a
 /// piece's footprint, declared relative to its VISUAL box. Shared by the mask
 /// AND the placement sweep's containment/overlap invariants, so the sweep can't
 /// grow a second copy of the offset math. The pad is deliberately NOT part of the
-/// rect: it is routing slack, not the object; [`FurnitureDef::padded_ground_rect`]
-/// adds it.
+/// rect: it is routing slack, not the object; `mark_blocked` adds it.
 pub(super) fn ground_rect(
     pivot: Pivot,
     pos: Point,
@@ -95,7 +72,7 @@ use super::rooms::walls::WallPiece;
 /// with the visual.
 const WALL_ROUTING_MARGIN_X: u16 = 1;
 
-/// The placed-piece inventory the mask stamps — a NAMED input so the five
+/// The placed-piece inventory the mask stamps — a NAMED input so the
 /// interchangeable `Option<Point>` pieces can't be positionally swapped, and so
 /// `build_walkable_mask` destructures it with NO `..` (a new field added here
 /// must then be handled by the mask, not silently walked through).
@@ -244,17 +221,12 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
             // overhang (invariant #6). `stand_point` uses the FULL visual instead, so
             // the USER parks clear of the whole counter rather than inside it.
             let (tl, sz) = pantry_ground_rect(wp.pos, Size { w, h });
-            stamp_rect(
-                &mut mask,
-                padded((tl, sz), furniture_def(Furniture::Pantry).pad),
-            );
+            mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, furniture_def(Furniture::Pantry).pad);
             continue;
         }
         let def = furniture_def(wp.kind.furniture());
-        stamp_rect(
-            &mut mask,
-            def.padded_ground_rect_of(Pivot::Center, wp.pos, Size { w, h }),
-        );
+        let (tl, sz) = def.ground_rect_of(Pivot::Center, wp.pos, Size { w, h });
+        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, def.pad);
     }
 
     for &PlantItem { kind, pos } in plants {
@@ -296,25 +268,6 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 mod tests {
     use super::*;
     use crate::layout::{WALL_THICK_V, sort_row_at};
-
-    #[test]
-    fn a_padded_rect_blocks_what_mark_blocked_pads() {
-        let rect = |x, y, w, h| (Point { x, y }, Size { w, h });
-        // Interior, west/north-saturating, and past-the-buffer rects.
-        for (r, pad) in [
-            (rect(10, 10, 4, 3), 2),
-            (rect(1, 0, 4, 3), 2),
-            (rect(0, 1, 3, 3), 1),
-            (rect(28, 18, 6, 6), 2),
-        ] {
-            let (tl, sz) = r;
-            let mut direct = WalkableMask::new_open(30, 20);
-            direct.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
-            let mut via = WalkableMask::new_open(30, 20);
-            stamp_rect(&mut via, padded(r, pad));
-            assert_eq!(direct.as_slice(), via.as_slice(), "{r:?} pad {pad}");
-        }
-    }
 
     #[test]
     fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {

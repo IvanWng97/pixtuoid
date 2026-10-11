@@ -11,17 +11,12 @@
 //! stay in lockstep with where the render stands the sprite (all three call
 //! this with the same `origin = home desk`).
 
-use super::decor::{Facing, Furniture, FurnitureDef, WaypointKind, furniture_def};
+use super::decor::{Facing, Furniture, WaypointKind, furniture_def};
 use super::reach::ReachSet;
 use super::{Point, Size};
 use pixtuoid_core::walkable::WalkableMask;
 
-/// First clear pixel beyond a footprint half-extent: the one past the
-/// [`FurnitureDef::pad`] band the mask stamps around the furniture.
-const fn stand_clearance(def: &FurnitureDef) -> u16 {
-    def.pad + 1
-}
-/// How far past `half + stand_clearance` to keep probing for a walkable
+/// How far past `half + def.stand_clearance()` to keep probing for a walkable
 /// cell before giving up on a side.
 const STAND_SCAN: i32 = 4;
 
@@ -190,7 +185,7 @@ pub(crate) fn approach_point(
             }
             let half = if dx != 0 { hx } else { hy };
             for step in 0..=STAND_SCAN {
-                let dist = half + i32::from(stand_clearance(&def)) + step;
+                let dist = half + i32::from(def.stand_clearance()) + step;
                 let cx = i32::from(pos.x) + dx * dist;
                 let cy = i32::from(pos.y) + dy * dist;
                 if cx < 0 || cy < 0 {
@@ -452,11 +447,11 @@ mod tests {
                             (i32::from(visual.h) / 2, dy.abs())
                         };
                         assert!(
-                            off >= half + i32::from(stand_clearance(&def)),
+                            off >= half + i32::from(def.stand_clearance()),
                             "{bw}x{bh} seed {seed}: {:?} stand {s:?} sits INSIDE its visual \
                              (off {off} < half {half} + clearance {})",
                             wp.kind,
-                            stand_clearance(&def)
+                            def.stand_clearance()
                         );
                     }
                 }
