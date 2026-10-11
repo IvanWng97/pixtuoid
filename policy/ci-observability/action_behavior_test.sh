@@ -822,7 +822,8 @@ crate serde 1.0.2 >"$f/head123/Cargo.lock"
 run_exempt "$f" newer456 "a head that moved"
 assert_exempt "$f" pending "a head that moved"
 
-# ── The reviewer's round: the heads the review was published at before this one, plus one.
+# ── The reviewer's round: one per distinct own change among the heads the review was
+# published at, the current one included.
 round_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Count the review's rounds")"
 round_dir="$test_dir/round"
 mkdir -p "$round_dir/bin" "$round_dir/diffs" "$round_dir/work/.claude-review"
@@ -843,7 +844,7 @@ jq -cs '[.[:2], .[2:]]' <(
 ) >"$round_dir/comments.json"
 assert_round() {
     : >"$round_dir/work/.claude-review/review-context.md"
-    (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
+    (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="${ROUND_COMMENTS_FILE:-$round_dir/comments.json}" \
         GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="$review_title" HEAD_SHA="$1" \
         DEFAULT_BRANCH=main ROUND_DIFFS="$round_dir/diffs" bash -c "$round_script" >/dev/null 2>&1) ||
         fail "the round count exited non-zero"
@@ -881,6 +882,24 @@ diff_of 1 10 ctx x >"$round_dir/diffs/a"
     printf -- '--- other\n'
 } >"$round_dir/diffs/c"
 assert_round c 3 "changed lines that open with --- are told apart"
+
+# Heads count in the order their reviews were published, not in sha order.
+jq -cs '[.]' <(
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `b`'
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `a`'
+) >"$round_dir/comments-reversed.json"
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+diff_of 2 10 ctx y >"$round_dir/diffs/b"
+diff_of 3 10 ctx x >"$round_dir/diffs/c"
+ROUND_COMMENTS_FILE="$round_dir/comments-reversed.json" assert_round c 2 "b then a then c, where c repeats a: a is not compared with b first"
+
+# A mode change alone is a change of its own.
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+{
+    diff_of 1 10 ctx x
+    printf 'new mode 100755\n'
+} >"$round_dir/diffs/b"
+assert_round b 2 "a mode change on the same lines is a new change"
 
 # A change put back counts: it is a new change on the PR.
 diff_of 1 10 ctx x >"$round_dir/diffs/a"
