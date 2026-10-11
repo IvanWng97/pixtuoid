@@ -178,7 +178,7 @@ pub(crate) fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -
 /// Decode a [`TrackId`] to its composed score — the ONE
 /// `TrackId → (Mood, seed) → compose` bridge both build shells call, so the mood
 /// decode lives once instead of a hand-synced match per shell.
-pub fn compose_track(track: TrackId) -> compose::GeneratedScore {
+pub fn compose_track(track: TrackId) -> compose::Score {
     let (mood, seed) = match track {
         TrackId::GenDay(seed) => (compose::Mood::Day, seed),
         TrackId::GenNight(seed) => (compose::Mood::Night, seed),

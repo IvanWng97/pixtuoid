@@ -276,7 +276,7 @@ pub(crate) fn texture_bed(rng: &mut NoiseStream) -> Vec<f32> {
 }
 
 // The `#[cfg(test)]` stems below are fingerprint ANCHORS, not dead code: their
-// pins prove the shared cores `gen_beds` ships still render the ratified sound.
+// pins prove the shared cores `render_lane` ships still render the ratified sound.
 
 use super::score;
 
@@ -700,13 +700,13 @@ fn events_stem_voiced(
 
 #[cfg(test)]
 pub(crate) fn night_keys() -> Vec<f32> {
-    let (dur, cutoff, peak) = lane_recipe(Mood::Night, 2);
+    let (dur, cutoff, peak) = lane_recipe(Mood::Night, Lane::Keys);
     night_events_stem(&score::NIGHT_KEYS, dur, cutoff, peak)
 }
 
 #[cfg(test)]
 pub(crate) fn night_sparkle() -> Vec<f32> {
-    let (dur, cutoff, peak) = lane_recipe(Mood::Night, 1);
+    let (dur, cutoff, peak) = lane_recipe(Mood::Night, Lane::Sparkle);
     night_events_stem(&score::NIGHT_SPARKLE, dur, cutoff, peak)
 }
 
@@ -722,7 +722,7 @@ fn drum_hit(rng: &mut NoiseStream, kind: score::DrumKind) -> Vec<f32> {
 
 #[cfg(test)]
 pub(crate) fn night_drums(rng: &mut NoiseStream) -> Vec<f32> {
-    let (cutoff, drive, peak) = lane_recipe(Mood::Night, 3);
+    let (cutoff, drive, peak) = lane_recipe(Mood::Night, Lane::Drums);
     drums_core(
         score::night_loop_secs(),
         &score::NIGHT_DRUMS,
@@ -862,23 +862,23 @@ fn day_take_events_stem(
 
 #[cfg(test)]
 pub(super) fn day_take_sparkle(take: &score::DayTake) -> Vec<f32> {
-    let (dur, cutoff, peak) = lane_recipe(Mood::Day, 1);
+    let (dur, cutoff, peak) = lane_recipe(Mood::Day, Lane::Sparkle);
     day_take_events_stem(take, take.sparkle, dur, cutoff, peak)
 }
 
 #[cfg(test)]
 pub(super) fn day_take_keys(take: &score::DayTake) -> Vec<f32> {
-    let (dur, cutoff, peak) = lane_recipe(Mood::Day, 2);
+    let (dur, cutoff, peak) = lane_recipe(Mood::Day, Lane::Keys);
     day_take_events_stem(take, take.keys, dur, cutoff, peak)
 }
 
 #[cfg(test)]
 pub(super) fn day_take_drums(take: &score::DayTake, rng: &mut NoiseStream) -> Vec<f32> {
-    let (cutoff, drive, peak) = lane_recipe(Mood::Day, 3);
+    let (cutoff, drive, peak) = lane_recipe(Mood::Day, Lane::Drums);
     drums_core(take.loop_secs(), take.drums, cutoff, drive, peak, rng)
 }
 
-use super::compose::{GeneratedScore, LeadVoice, Mood};
+use super::compose::{LeadVoice, Mood, Score};
 
 /// The "bright" master for GENERATED takes: a one-pole tilt shelf, then
 /// re-normalize to the bed's pre-tilt peak. FROZEN takes keep their darker
@@ -894,7 +894,7 @@ fn brighten(buf: &mut [f32]) {
     normalize(buf, pre_peak.max(1e-6));
 }
 
-fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
+fn lead_voice_fn(score: &Score) -> fn(u8, f32, f32) -> Vec<f32> {
     match score.lead_voice {
         LeadVoice::EpVel => ep_pluck_vel,
         LeadVoice::Pluck => pluck_note,
@@ -903,70 +903,86 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
     }
 }
 
-/// The per-`(mood, lane)` render recipe — the ONE authority both the [`gen_bed`]
-/// arms and the frozen `#[cfg(test)]` delegations read, so the frozen
-/// fingerprint pins transitively guard the params that actually ship. The triple
-/// is that lane's core-call args IN ORDER: sparkle/keys/bass (lanes 1,2,5) =
-/// `(dur_s, cutoff_hz, peak)`; drums (lane 3) = `(cutoff_hz, drive, peak)`.
-/// Pad/texture lanes (0,4) read the `(0.0, 0.0, 0.0)` fallback and ignore it.
-fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
+/// One lane of a generated take. A take's lanes render in [`Lane::ALL`] order
+/// from one rng stream, so that order is part of the sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lane {
+    Pad,
+    Sparkle,
+    Keys,
+    Drums,
+    Texture,
+    Bass,
+}
+
+impl Lane {
+    pub const ALL: [Lane; 6] = [
+        Lane::Pad,
+        Lane::Sparkle,
+        Lane::Keys,
+        Lane::Drums,
+        Lane::Texture,
+        Lane::Bass,
+    ];
+}
+
+/// The per-`(mood, lane)` render recipe — the ONE authority both the
+/// [`render_lane`] arms and the frozen `#[cfg(test)]` delegations read, so the
+/// frozen fingerprint pins transitively guard the params that actually ship. The
+/// triple is that lane's core-call args IN ORDER: sparkle/keys/bass =
+/// `(dur_s, cutoff_hz, peak)`; drums = `(cutoff_hz, drive, peak)`.
+/// Pad/texture lanes read the `(0.0, 0.0, 0.0)` fallback and ignore it.
+fn lane_recipe(mood: Mood, lane: Lane) -> (f32, f32, f32) {
     match (mood, lane) {
-        (Mood::Day, 1) => (2.0, 3200.0, 0.6),
-        (Mood::Day, 2) => (0.9, 2400.0, 0.8),
-        (Mood::Day, 3) => (7500.0, 2.2, 0.85),
-        (Mood::Day, 5) => (1.5, 900.0, 0.8),
-        (Mood::Night, 1) => (2.2, 2800.0, 0.5),
-        (Mood::Night, 2) => (1.1, 2000.0, 0.7),
-        (Mood::Night, 3) => (6000.0, 2.0, 0.8),
-        (Mood::Night, 5) => (1.7, 700.0, 0.8),
+        (Mood::Day, Lane::Sparkle) => (2.0, 3200.0, 0.6),
+        (Mood::Day, Lane::Keys) => (0.9, 2400.0, 0.8),
+        (Mood::Day, Lane::Drums) => (7500.0, 2.2, 0.85),
+        (Mood::Day, Lane::Bass) => (1.5, 900.0, 0.8),
+        (Mood::Night, Lane::Sparkle) => (2.2, 2800.0, 0.5),
+        (Mood::Night, Lane::Keys) => (1.1, 2000.0, 0.7),
+        (Mood::Night, Lane::Drums) => (6000.0, 2.0, 0.8),
+        (Mood::Night, Lane::Bass) => (1.7, 700.0, 0.8),
         _ => (0.0, 0.0, 0.0),
     }
 }
 
-/// One lane of a generated take (`bank::TRACK_STEMS` order: pad, sparkle, keys,
-/// drums, texture, bass) — the CHUNKED build unit the wasm driver spreads across
-/// ticks, because a full six-bed build in one rAF tick hitches the page. An
-/// out-of-range lane returns silence rather than panicking.
-pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Vec<f32> {
+/// One lane of a generated take — the chunked build unit the wasm driver
+/// spreads across ticks, because a full six-lane build in one rAF tick hitches
+/// the page.
+pub fn render_lane(score: &Score, lane: Lane, rng: &mut NoiseStream) -> Vec<f32> {
     let loop_s = score.loop_secs();
     let (r0, r1, r2) = lane_recipe(score.mood, lane);
     let mut bed = match (score.mood, lane) {
-        (Mood::Day, 0) => day_pad_core(
+        (Mood::Day, Lane::Pad) => day_pad_core(
             &score.bar_chords,
             score.bar_s(),
             super::compose::GEN_LOOP_BARS,
         ),
-        (Mood::Day, 1) => {
+        (Mood::Day, Lane::Sparkle) => {
             events_stem_voiced(loop_s, &score.sparkle, r0, r1, r2, lead_voice_fn(score))
         }
-        (Mood::Day, 2) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
-        (Mood::Day, 3) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
-        (Mood::Day, 4) => texture_bed(rng),
-        // the generated night pad renders NO baked sub — lane 5 owns that register
-        (Mood::Night, 0) => night_pad_core(
+        (Mood::Day, Lane::Keys) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
+        (Mood::Day, Lane::Drums) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
+        (Mood::Day, Lane::Texture) => texture_bed(rng),
+        // the generated night pad renders NO baked sub — the bass lane owns that register
+        (Mood::Night, Lane::Pad) => night_pad_core(
             &score.bar_chords,
             score.bar_s(),
             super::compose::GEN_LOOP_BARS,
             None,
         ),
-        (Mood::Night, 1) => {
+        (Mood::Night, Lane::Sparkle) => {
             events_stem_voiced(loop_s, &score.sparkle, r0, r1, r2, lead_voice_fn(score))
         }
-        (Mood::Night, 2) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
-        (Mood::Night, 3) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
-        (Mood::Night, 4) => night_texture_core(loop_s, &score.kick_times, rng),
-        (Mood::Day | Mood::Night, 5) => {
+        (Mood::Night, Lane::Keys) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
+        (Mood::Night, Lane::Drums) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
+        (Mood::Night, Lane::Texture) => night_texture_core(loop_s, &score.kick_times, rng),
+        (Mood::Day | Mood::Night, Lane::Bass) => {
             events_stem_voiced(loop_s, &score.bass, r0, r1, r2, bass_note)
         }
-        _ => Vec::new(),
     };
     brighten(&mut bed);
     bed
-}
-
-/// Synthesize a generated take's six beds in `bank::TRACK_STEMS` order.
-pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 6] {
-    std::array::from_fn(|lane| gen_bed(score, lane, rng))
 }
 
 #[cfg(test)]
@@ -977,14 +993,14 @@ mod tests {
     #[test]
     fn lane_recipe_is_the_ratified_shipping_params() {
         use crate::audio::compose::Mood;
-        assert_eq!(lane_recipe(Mood::Day, 1), (2.0, 3200.0, 0.6));
-        assert_eq!(lane_recipe(Mood::Day, 2), (0.9, 2400.0, 0.8));
-        assert_eq!(lane_recipe(Mood::Day, 3), (7500.0, 2.2, 0.85));
-        assert_eq!(lane_recipe(Mood::Day, 5), (1.5, 900.0, 0.8));
-        assert_eq!(lane_recipe(Mood::Night, 1), (2.2, 2800.0, 0.5));
-        assert_eq!(lane_recipe(Mood::Night, 2), (1.1, 2000.0, 0.7));
-        assert_eq!(lane_recipe(Mood::Night, 3), (6000.0, 2.0, 0.8));
-        assert_eq!(lane_recipe(Mood::Night, 5), (1.7, 700.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Day, Lane::Sparkle), (2.0, 3200.0, 0.6));
+        assert_eq!(lane_recipe(Mood::Day, Lane::Keys), (0.9, 2400.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Day, Lane::Drums), (7500.0, 2.2, 0.85));
+        assert_eq!(lane_recipe(Mood::Day, Lane::Bass), (1.5, 900.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Night, Lane::Sparkle), (2.2, 2800.0, 0.5));
+        assert_eq!(lane_recipe(Mood::Night, Lane::Keys), (1.1, 2000.0, 0.7));
+        assert_eq!(lane_recipe(Mood::Night, Lane::Drums), (6000.0, 2.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Night, Lane::Bass), (1.7, 700.0, 0.8));
     }
 
     #[test]
@@ -1315,7 +1331,7 @@ mod tests {
             for seed in [0u64, 7] {
                 let score = super::super::compose::compose(mood, seed);
                 let mut rng = NoiseStream::new(9);
-                let beds = gen_beds(&score, &mut rng);
+                let beds = Lane::ALL.map(|l| render_lane(&score, l, &mut rng));
                 let n = n_samples(score.loop_secs());
                 for (i, bed) in beds.iter().enumerate() {
                     assert!(

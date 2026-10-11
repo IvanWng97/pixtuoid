@@ -1,5 +1,5 @@
 //! The theory-constrained COMPOSER — generative lofi as constrained sampling:
-//! a pure function `seed -> GeneratedScore`. Harmony walks a vetted progression
+//! a pure function `seed -> Score`. Harmony walks a vetted progression
 //! grammar and the lead obeys melody rules (strong-beat chord tones, diatonic
 //! passing tones, bounded leaps with stepwise resolution, two-phrase form with a
 //! peak and a loop-closing resolution), so ANY seed is musically well-formed BY
@@ -42,9 +42,9 @@ pub(crate) enum LeadVoice {
 /// A generated 8-bar composition — the runtime-sized twin of the frozen
 /// `score` tables.
 #[derive(Debug, Clone, PartialEq)]
-pub struct GeneratedScore {
+pub struct Score {
     pub(super) mood: Mood,
-    pub bpm: f32,
+    pub(super) bpm: f32,
     pub(super) chords: [[u8; 4]; 4],
     /// The key as pitch classes — the lead's invariant home.
     pub(super) scale_pcs: [u8; 7],
@@ -72,7 +72,11 @@ pub struct GeneratedScore {
 
 pub(super) const GEN_LOOP_BARS: usize = 8;
 
-impl GeneratedScore {
+impl Score {
+    pub fn bpm(&self) -> f32 {
+        self.bpm
+    }
+
     pub(super) fn beat_s(&self) -> f32 {
         60.0 / self.bpm
     }
@@ -933,8 +937,8 @@ fn keys_events(
 }
 
 /// Compose one full take from a seed — deterministic, no clock and no I/O.
-/// Synthesis lives in `synth::gen_beds`.
-pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
+/// Synthesis lives in [`super::synth::render_lane`].
+pub fn compose(mood: Mood, seed: u64) -> Score {
     let mut rng = NoiseStream::new(pixtuoid_core::id::splitmix64(seed ^ 0x10F1_C0DE));
 
     let (progs, bpm_win): (&[Progression], (f32, f32)) = match mood {
@@ -995,7 +999,7 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         }
     };
 
-    GeneratedScore {
+    Score {
         mood,
         bpm,
         chords,

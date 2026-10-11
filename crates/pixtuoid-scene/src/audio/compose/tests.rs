@@ -184,7 +184,7 @@ fn every_seed_is_well_formed_night() {
     }
 }
 
-fn assert_well_formed(s: &GeneratedScore, seed: u64) {
+fn assert_well_formed(s: &Score, seed: u64) {
     let loop_s = s.loop_secs();
     let bar_s = s.bar_s();
     for &(at, _, vel) in s.sparkle.iter().chain(s.keys.iter()).chain(s.bass.iter()) {

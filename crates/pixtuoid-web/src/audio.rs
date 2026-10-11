@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use pixtuoid_scene::audio::bank::{AssetBank, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS, TrackBeds};
-use pixtuoid_scene::audio::compose::GeneratedScore;
+use pixtuoid_scene::audio::compose::Score;
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
@@ -176,7 +176,7 @@ const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
 
 #[derive(Debug)]
 struct LaneBuild {
-    score: GeneratedScore,
+    score: Score,
     beds: Vec<Arc<Vec<f32>>>,
 }
 
@@ -190,8 +190,11 @@ impl LaneBuild {
 
     fn step(&mut self, rng: &mut NoiseStream) -> Option<[Arc<Vec<f32>>; TRACK_STEMS.len()]> {
         let lane = self.beds.len();
-        self.beds
-            .push(Arc::new(synth::gen_bed(&self.score, lane, rng)));
+        self.beds.push(Arc::new(synth::render_lane(
+            &self.score,
+            synth::Lane::ALL[lane],
+            rng,
+        )));
         if self.beds.len() == TRACK_STEMS.len() {
             <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(std::mem::take(&mut self.beds)).ok()
         } else {

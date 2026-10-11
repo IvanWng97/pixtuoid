@@ -1,6 +1,6 @@
 //! The generator's STATISTICAL listen gate: render N random-seed takes to wav so
 //! the owner blind-auditions the COMPOSER, not one take. Renders through the REAL
-//! `synth::gen_beds` chain, so what you hear is what ships.
+//! `synth::render_lane` chain, so what you hear is what ships.
 //!
 //! Usage:
 //!   cargo run --release -p pixtuoid-scene --example lofi_audition -- \
@@ -14,7 +14,7 @@ use std::process::ExitCode;
 
 use pixtuoid_scene::audio::compose::{Mood, compose};
 use pixtuoid_scene::audio::dsp::{NoiseStream, SAMPLE_RATE};
-use pixtuoid_scene::audio::synth::gen_beds;
+use pixtuoid_scene::audio::synth::{Lane, render_lane};
 
 /// Audition mix gains per mood, in `TRACK_STEMS` order
 /// (pad, sparkle, keys, drums, texture, bass).
@@ -27,7 +27,7 @@ const SOAK_SECS: f32 = 90.0;
 /// Every take renders at ONE loudness, so a blind A/B compares takes not gain.
 const TARGET_RMS_DBFS: f32 = -16.0;
 
-/// The soloable lanes, in `gen_beds` order — the ONE spelling `--solo` accepts.
+/// The soloable lanes, in [`Lane::ALL`] order — the ONE spelling `--solo` accepts.
 const SOLO_LANES: [&str; 6] = ["pad", "sparkle", "keys", "drums", "texture", "bass"];
 
 /// The `--mood` vocabulary paired with its [`Mood`], so the parse and the error
@@ -121,7 +121,7 @@ fn run() -> std::io::Result<()> {
     for seed in start..start + seeds {
         let score = compose(mood, seed);
         let mut rng = NoiseStream::new(9);
-        let beds = gen_beds(&score, &mut rng);
+        let beds = Lane::ALL.map(|l| render_lane(&score, l, &mut rng));
         let take_len = beds[0].len();
         let loops = (SOAK_SECS * SAMPLE_RATE as f32 / take_len as f32).ceil() as usize;
         let total = take_len * loops.max(1);
@@ -146,7 +146,7 @@ fn run() -> std::io::Result<()> {
         write_wav(&path, &mixdown)?;
         println!(
             "  seed {seed:3}  {:>3.0} bpm  lead={:5}  {}",
-            score.bpm,
+            score.bpm(),
             score.lead_voice_name(),
             path.display()
         );

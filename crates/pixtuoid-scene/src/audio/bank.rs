@@ -171,7 +171,7 @@ impl TrackBeds {
     pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
         let score = super::compose_track(track);
         Self {
-            beds: synth::gen_beds(&score, rng).map(Arc::new),
+            beds: synth::Lane::ALL.map(|lane| Arc::new(synth::render_lane(&score, lane, rng))),
         }
     }
 
