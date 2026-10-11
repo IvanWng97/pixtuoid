@@ -37,11 +37,10 @@ import { spawn } from "node:child_process";
 
 const HOOK_PATH = "{{HOOK_PATH_JSON}}";
 
-// The ONLY fields forwarded. `messages` / `prompt` / `sessionFile` / `systemPrompt`
-// are deliberately ABSENT — the daemon fixture needs the run pairing key + ids,
-// never content. The `error` STRING riding alongside `success` is likewise NOT
-// forwarded: it can embed content.
-const ALLOW = ["runId", "sessionId", "sessionKey", "reason", "messageCount", "success"];
+// The ONLY fields forwarded: the run pairing key and ids the decoder reads, never
+// content (`messages`, `prompt`, `error`). `success` stays behind too: the verdict
+// below is the run's outcome, so nothing downstream can read the ambiguous one.
+const ALLOW = ["runId", "sessionId"];
 
 // OpenClaw's own `DEFAULT_GATEWAY_PORT`, un-importable from here (see the module
 // note). Named ONCE and emitted into the drift surface by `drift_surface.rs`,
@@ -94,6 +93,31 @@ function notePort(ev, ctx) {
   }
 }
 
+// The runs whose LATEST model call failed — on the embedded runner the only place a
+// provider failure shows (openclaw src/agents/embedded-agent-runner/run/
+// attempt.model-diagnostic-lifecycle.ts).
+const failedRuns = new Set();
+
+// A run upstream ends without `agent_end` never clears its entry, so past this
+// many the ledger drops its oldest failure.
+export const MAX_TRACKED_RUNS = 64;
+
+function noteModelCall(ev) {
+  try {
+    if (!ev || typeof ev.runId !== "string") return;
+    failedRuns.delete(ev.runId);
+    // The user's own abort is no provider failure.
+    if (ev.outcome === "error" && ev.failureKind !== "aborted") {
+      failedRuns.add(ev.runId);
+      if (failedRuns.size > MAX_TRACKED_RUNS) {
+        failedRuns.delete(failedRuns.values().next().value);
+      }
+    }
+  } catch (_) {
+    // never throw into the gateway
+  }
+}
+
 function forward(type, ev, ctx) {
   try {
     notePort(ev, ctx);
@@ -111,14 +135,17 @@ function forward(type, ev, ctx) {
     // — where pixtuoid never observed gateway_start — can still adopt the live pid
     // for its abrupt-down watch. The plugin runs IN the gateway process.
     payload._pid = process.pid;
-    // `success: false` alone cannot call a gateway degraded: upstream builds it as
-    // `!aborted && !promptError`, so a user CANCELLING a turn is indistinguishable
-    // from the provider being down. Only a prompt error carries `error`, so its
-    // mere PRESENCE is the discriminator — forwarded as a bare boolean because the
-    // error STRING can embed prompt content.
-    if (type === "agent_end" && payload.success === false) {
-      payload.errored =
-        (ev && ev.error !== undefined) || (ctx && ctx.error !== undefined);
+    // The run's verdict. `success: false` alone cannot call a gateway degraded:
+    // upstream builds it as `!aborted && !promptError`, so a user CANCELLING a turn
+    // reads `false` too, and only a prompt error carries `error` (on the event; the
+    // context never does) — its mere PRESENCE, as a bare boolean because the string
+    // can embed prompt content. A provider failure is no prompt error, so its
+    // `agent_end` carries no `error` and reads like a clean end; the run's last
+    // model call adds it.
+    if (type === "agent_end") {
+      const promptError = !!ev && ev.success === false && ev.error !== undefined;
+      payload.errored = promptError || failedRuns.has(payload.runId);
+      failedRuns.delete(payload.runId);
     }
 
     const proc = spawn(HOOK_PATH, ["--source", "openclaw"], {
@@ -144,6 +171,10 @@ const HOOKS = [
   "agent_end",
 ];
 
+// Registered but never forwarded, each with the one handler its event fits: they
+// only feed the verdict `agent_end` carries.
+const VERDICT_HOOKS = { model_call_ended: noteModelCall };
+
 // The ONE awaited DECISION hook among them (see the never-block note above).
 const DECISION_HOOK = "before_agent_run";
 
@@ -168,6 +199,15 @@ export default {
           forward(h, ev, ctx);
           // NEVER derived from the detached spawn.
           return h === DECISION_HOOK ? pass() : undefined;
+        });
+      } catch (_) {
+        /* unknown hook name on this OpenClaw version — skip, never throw */
+      }
+    }
+    for (const [h, note] of Object.entries(VERDICT_HOOKS)) {
+      try {
+        api.on(h, (ev) => {
+          note(ev);
         });
       } catch (_) {
         /* unknown hook name on this OpenClaw version — skip, never throw */

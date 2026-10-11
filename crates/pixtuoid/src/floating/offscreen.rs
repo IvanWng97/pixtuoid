@@ -1,12 +1,9 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
-//!
-//! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::OfficeSession` across frames so walks stay continuous.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
 
-use pixtuoid_scene::flash::{FlashHold, FlashPhase};
+use pixtuoid_scene::flash::FlashHold;
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
@@ -24,11 +21,8 @@ pub struct OfficeRenderer {
     pointer: Pointer,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// The flash the window shows.
-    flash: FlashHold<FlashPhase, (u32, u32)>,
-    /// The flash the last [`render_live`](Self::render_live) handed out, and
-    /// the window it was for.
-    rendered: (FlashPhase, (u32, u32)),
+    /// The flashes the window shows.
+    flash: FlashHold<(u32, u32)>,
     /// The walkable debug layer, the TUI's `w`; not persisted.
     pub(super) debug_walkable: bool,
 }
@@ -42,7 +36,6 @@ impl OfficeRenderer {
             pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            rendered: (FlashPhase::default(), (0, 0)),
             debug_walkable: false,
         }
     }
@@ -130,11 +123,11 @@ impl OfficeRenderer {
         window: (u32, u32),
     ) -> bool {
         self.render(at, frame);
-        let flash = self.session.flash();
-        if self.flash.holds(flash, window) {
+        let flashes = self.session.flashes();
+        if self.flash.holds(flashes, window) {
             return false;
         }
-        self.rendered = (flash, window);
+        self.flash.stage(flashes, window);
         true
     }
 
@@ -146,7 +139,7 @@ impl OfficeRenderer {
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
     pub(crate) fn presented(&mut self) {
-        self.flash.shown(self.rendered.0, self.rendered.1);
+        self.flash.landed();
     }
 
     /// A left press at `cursor` (physical px) in a `window`-sized window
@@ -513,6 +506,15 @@ mod tests {
             }
         }
 
+        /// [`Self::new`], with a busy floor above the empty one to slide to.
+        fn with_a_floor_above(weather: pixtuoid_scene::sky::WeatherPolicy) -> Self {
+            let cap = 8;
+            Self {
+                scene: scene_with(vec![active_on("/p/upstairs.jsonl", 1, cap)], cap),
+                ..Self::new(weather)
+            }
+        }
+
         /// What the window shows after its redraw at `now`, as `window.rs`
         /// presents it.
         fn present(&mut self, now: SystemTime) -> RgbBuffer {
@@ -658,8 +660,131 @@ mod tests {
                 shown = presented;
             }
             let at = format!("a frame each {frame:?} from +{offset:?}");
-            assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+            assert_each_phase_holds_the_floor(&changed, stutter.changes.len(), &at);
         }
+    }
+
+    /// When a slide starts, against the frames
+    /// [`assert_a_slide_holds_the_floor`] names.
+    #[derive(Debug, Clone, Copy)]
+    enum Slide {
+        /// At `late`, after its frame: `held` is the slide's first.
+        Starting,
+        /// At the frame before `late`.
+        Under,
+        /// So it lands on `held`.
+        Ending,
+    }
+
+    /// How long a floor slide takes, whichever floors it joins.
+    fn slide_length() -> Duration {
+        let mut probe = OfficeRenderer::new(crate::test_flash::pack_arc());
+        probe.navigate(1, SystemTime::UNIX_EPOCH);
+        let slide = probe.nav().transition().expect("a slide");
+        Duration::from_millis(slide.duration_ms)
+    }
+
+    /// In `window` sliding to floor `to` as `slide` says, the phase from
+    /// `changes[0]` holds the floor from `late`, its first frame a quarter
+    /// floor before `changes[1]`: `held`, the next phase's first frame,
+    /// waits, and the first frame the floor after `late` shows.
+    fn assert_a_slide_holds_the_floor(
+        window: &mut Window,
+        changes: [SystemTime; 2],
+        slide: Slide,
+        to: usize,
+    ) {
+        let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+        // A phase apart: a starved tube catches only across a step no longer
+        // than its shortest catch.
+        let [before, late] = changes.map(|change| change - floor / 4);
+        let held = changes[1];
+        let from = window.renderer.nav().current();
+        // Where the window is, and the floor it slides to.
+        let (starts, nav) = match slide {
+            Slide::Starting => (late, [(from, None), (from, Some(to))]),
+            Slide::Under => (before, [(from, Some(to)); 2]),
+            Slide::Ending => (held - slide_length(), [(from, Some(to)), (to, None)]),
+        };
+        let [_, at_late, at_held, at_after] = [before, late, held, late + floor].map(|now| {
+            if starts < now {
+                window.renderer.navigate(to, starts);
+            }
+            let shown = window.present(now);
+            let nav = window.renderer.nav();
+            (
+                shown,
+                (nav.current(), nav.transition().map(|tr| tr.to_floor)),
+            )
+        });
+        assert_eq!(
+            [at_late.1, at_held.1],
+            nav,
+            "{slide:?}: where the window is"
+        );
+        assert!(
+            at_held.0.as_slice() == at_late.0.as_slice(),
+            "{slide:?}: held under the floor"
+        );
+        assert!(
+            at_after.0.as_slice() != at_late.0.as_slice(),
+            "{slide:?}: shown once it has"
+        );
+    }
+
+    /// A strike lights both floors of a slide, so a phase holds the floor on
+    /// a slide's first frame, under way, and on the first frame after.
+    #[test]
+    fn a_strike_phase_holds_the_floor_across_a_floor_slide() {
+        let strike = crate::test_flash::storm_strike();
+        for slide in [Slide::Starting, Slide::Under, Slide::Ending] {
+            let mut window = Window::with_a_floor_above(strike.weather);
+            assert_a_slide_holds_the_floor(
+                &mut window,
+                [strike.changes[0], strike.changes[1]],
+                slide,
+                1,
+            );
+        }
+    }
+
+    /// A starved neon's catch holds the floor as a slide leaves its floor,
+    /// which is off screen by the slide's end.
+    #[test]
+    fn a_stutter_phase_holds_the_floor_as_a_slide_leaves_it() {
+        let stutter = crate::test_flash::starved_stutter();
+        for slide in [Slide::Starting, Slide::Under] {
+            let mut window = Window::with_a_floor_above(stutter.weather);
+            for at in stutter.setup {
+                window.present(at);
+            }
+            assert_a_slide_holds_the_floor(
+                &mut window,
+                [stutter.changes[0], stutter.changes[1]],
+                slide,
+                1,
+            );
+        }
+    }
+
+    /// A starved neon's catch holds the floor as a slide arrives at its
+    /// floor, on the first frame after the slide, which shows that floor
+    /// whole.
+    #[test]
+    fn a_stutter_phase_holds_the_floor_as_a_slide_arrives_at_it() {
+        let stutter = crate::test_flash::starved_stutter();
+        let mut window = Window::with_a_floor_above(stutter.weather);
+        let [emptied, starved] = stutter.setup;
+        // The ground floor empties, and starves while the window is upstairs.
+        window.present(emptied);
+        window.renderer.navigate(1, emptied);
+        window.present(starved);
+        assert_a_slide_holds_the_floor(
+            &mut window,
+            [stutter.changes[0], stutter.changes[1]],
+            Slide::Ending,
+            0,
+        );
     }
 
     /// A press acts on what the frame on screen shows under it: an agent's

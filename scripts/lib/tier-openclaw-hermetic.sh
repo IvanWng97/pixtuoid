@@ -129,16 +129,18 @@ echo "[6] before_agent_run -> busy"
 send_a '{"type":"before_agent_run","runId":"r2"}'
 expect busy busy-2
 
-echo "[7] agent_end success:false -> degraded (#317)"
-send_a '{"type":"agent_end","runId":"r2","success":false}'
+# The plugin's own wire: its verdict rides as `errored`, and `success` stays in the
+# gateway, so a prompt error and a failed provider look alike here.
+echo "[7] agent_end errored:true -> degraded (#317)"
+send_a '{"type":"agent_end","runId":"r2","errored":true}'
 expect degraded degraded
 
 echo "[8] before_agent_run -> busy (re-attempt clears degraded)"
 send_a '{"type":"before_agent_run","runId":"r3"}'
 expect busy busy-retry
 
-echo "[9] agent_end success:true -> idle (heals)"
-send_a '{"type":"agent_end","runId":"r3","success":true}'
+echo "[9] agent_end errored:false -> idle (heals: a clean end or a cancel)"
+send_a '{"type":"agent_end","runId":"r3","errored":false}'
 expect idle idle-healed
 
 # `PidSeen` adoption is None-ONLY, and the shim stamps a resolved _pid onto every
