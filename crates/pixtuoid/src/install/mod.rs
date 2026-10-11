@@ -185,7 +185,7 @@ fn check_artifact_content(
 ) {
     // EVERY artifact, not just the one baking a shim path: nested under the marker guard
     // below, OpenClaw's manifest and its `package.json` got existence-only checks.
-    if strip_baked_line(installed) != strip_baked_line(intended) {
+    if plugin_code_differs(installed, intended) {
         issues.push(format!(
             "{} differs from the plugin this pixtuoid ships — it \
              predates an upgrade, so anything added since is not \
@@ -207,17 +207,29 @@ fn check_artifact_content(
     }
 }
 
-/// A rendered artifact without its `const HOOK_PATH` line — the only line that legitimately
-/// differs between what is installed (a real shim path) and what this binary would render
-/// (a placeholder). Anchored with `starts_with`, exactly as `verify::baked_hook_path`
-/// anchors: `contains` also stripped opencode's comment ABOVE the binding, so a change
-/// confined to that comment was invisible to the staleness compare.
-fn strip_baked_line(content: &str) -> String {
+/// A rendered artifact as the staleness compare reads it: its code, without the
+/// `const HOOK_PATH` line (the only line that legitimately differs between what is
+/// installed, a real shim path, and what this binary would render, a placeholder),
+/// without whole-line `//` comments and without blank lines, so a comment-only edit
+/// never flags an install stale. The marker is anchored with `starts_with`, exactly as
+/// `verify::baked_hook_path` anchors: `contains` also stripped opencode's comment ABOVE
+/// the binding. A trailing `//` and a `/* */` (openclaw_plugin.js has both) still count as
+/// code, so editing one flags every install: no template may keep its behavior there.
+fn plugin_code(content: &str) -> String {
     content
         .lines()
-        .filter(|l| !l.trim_start().starts_with(verify::BAKED_HOOK_MARKER))
+        .filter(|l| {
+            let l = l.trim_start();
+            !l.is_empty() && !l.starts_with("//") && !l.starts_with(verify::BAKED_HOOK_MARKER)
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Whether `installed` differs in code from what this binary would render
+/// ([`plugin_code`]): the ONE staleness compare for every code artifact.
+pub(crate) fn plugin_code_differs(installed: &str, intended: &str) -> bool {
+    plugin_code(installed) != plugin_code(intended)
 }
 
 /// The HARD issue(s) for missing code artifacts, collapsed when they share a
@@ -538,6 +550,32 @@ pub(crate) fn assert_event_roster<T: Ord + std::fmt::Debug + Copy>(
         "{name} membership changed — a registered event that vanishes is a \
          shipping bug no other test can see."
     );
+}
+
+/// `content` as a later pixtuoid that edited only comments would render it: a whole-line
+/// `//` comment and blank lines added, every other one reworded, and the last one removed.
+/// The sentinel, which leads each template, survives.
+#[cfg(test)]
+pub(crate) fn comment_only_edit(content: &str) -> String {
+    let is_comment = |l: &str| l.trim_start().starts_with("//");
+    let last = content
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| is_comment(l))
+        .map(|(i, _)| i)
+        .last();
+    let mut out = String::from("// a comment no release shipped\n\n  \n");
+    for (i, line) in content.lines().enumerate() {
+        if Some(i) == last {
+            continue;
+        }
+        out.push_str(line);
+        if is_comment(line) {
+            out.push_str(" (reworded)");
+        }
+        out.push('\n');
+    }
+    out
 }
 
 #[cfg(test)]

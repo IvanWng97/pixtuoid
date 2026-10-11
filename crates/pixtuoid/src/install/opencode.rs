@@ -124,7 +124,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     // says fine — and `opencode_plugin_forward_set_is_pinned` makes a change
     // deliberate on the AUTHORING side while leaving the installed base silent.
     let stale = render_plugin(&p.to_string_lossy())
-        .map(|want| want.trim() != content.trim())
+        .map(|want| crate::install::plugin_code_differs(content, &want))
         .unwrap_or(false);
     SchemaParse {
         shim: ShimRef::Absolute(p),
@@ -202,6 +202,11 @@ mod tests {
         assert!(
             verify_schema(&current).issues.is_empty(),
             "the plugin this binary would install must verify clean"
+        );
+        let reworded = verify_schema(&crate::install::comment_only_edit(&current)).issues;
+        assert!(
+            reworded.is_empty(),
+            "a plugin whose comments alone changed must verify clean, got {reworded:?}"
         );
 
         // An older pixtuoid's plugin: same sentinel, same baked path, one event
