@@ -1458,3 +1458,20 @@ fn a_floor_clamped_into_view_repaints_whole() {
         "the terminal still shows the vanished floor"
     );
 }
+
+/// The cutaway never draws the walkable layer, so `w` is neither listed nor
+/// read: the flag stays off however often it is pressed.
+#[cfg(debug_assertions)]
+#[test]
+fn the_cutaway_neither_lists_nor_reads_w() {
+    use crossterm::event::KeyCode;
+    let (mut r, _) = kitty(100, 40);
+    assert!(!r.offers_walkable_debug());
+    assert!(r.chrome.overlays(0.0).host_keys.is_empty());
+    assert!(!crate::tui::read_walkable_debug_key(
+        &mut r,
+        KeyCode::Char('w'),
+        &overlays::no_panel()
+    ));
+    assert!(!r.debug_walkable());
+}

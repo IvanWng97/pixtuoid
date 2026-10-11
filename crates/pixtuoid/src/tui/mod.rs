@@ -47,15 +47,20 @@ pub(crate) const SHORTCUTS: &[crate::panels::widgets::Shortcut] =
 pub(crate) const SHORTCUTS: &[crate::panels::widgets::Shortcut] = &[];
 
 /// Whether `code` was `w`, which flips the half-block painter's walkable
-/// debug layer when no panel owns input. Only the half-blocks draw that layer,
-/// so the terminal's loop reads the key itself, and the window's cutaway never
-/// sees it.
-fn read_walkable_debug_key<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+/// debug layer when no panel owns input. Only the half-blocks draw that layer
+/// ([`TuiRenderer::offers_walkable_debug`]), so the terminal's loop reads the
+/// key itself, and neither cutaway sees it.
+pub(crate) fn read_walkable_debug_key<
+    B: ratatui::backend::Backend<Error: Send + Sync + 'static>,
+>(
     renderer: &mut TuiRenderer<B>,
     code: KeyCode,
     modal: &ModalState,
 ) -> bool {
-    let toggles = cfg!(debug_assertions) && code == KeyCode::Char('w') && !modal.any_open();
+    let toggles = cfg!(debug_assertions)
+        && renderer.offers_walkable_debug()
+        && code == KeyCode::Char('w')
+        && !modal.any_open();
     if toggles {
         let on = renderer.debug_walkable();
         renderer.set_debug_walkable(!on);

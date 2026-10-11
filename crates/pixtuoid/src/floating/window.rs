@@ -411,15 +411,6 @@ impl FloatingApp {
         )
     }
 
-    /// The cursor reads the frame just painted, as a press and the tooltip do.
-    fn redraw(&mut self) {
-        self.paint();
-        // Every early return of `paint` skips `record`, which is what spends a
-        // scheduled frame's due.
-        self.jank.skipped();
-        self.recursor();
-    }
-
     fn paint(&mut self) {
         let started = Instant::now();
         let Some(window) = self.window.as_ref() else {
@@ -592,6 +583,33 @@ fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h
     )
 }
 
+impl super::lifecycle::Frame for FloatingApp {
+    fn jank(&mut self) -> &mut crate::jank::Jank {
+        &mut self.jank
+    }
+
+    fn paint(&mut self) {
+        FloatingApp::paint(self);
+    }
+
+    /// The cursor reads the frame just painted, as a press and the tooltip do.
+    fn recursor(&mut self) {
+        FloatingApp::recursor(self);
+    }
+}
+
+impl super::lifecycle::Teardown for FloatingApp {
+    // The surface borrows the window, so it goes first.
+    fn close_surface(&mut self) {
+        self.gpu = None;
+        self.window = None;
+    }
+
+    fn stop_audio(&mut self) {
+        self.audio_ctl.stop();
+    }
+}
+
 impl ApplicationHandler<FloatingEvent> for FloatingApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -720,7 +738,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.request_redraw();
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => super::lifecycle::redraw(self),
             WindowEvent::Resized(_) => self.request_redraw(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = position;
@@ -758,6 +776,12 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             } => self.release(),
             _ => {}
         }
+    }
+
+    /// `exit` was called: geometry persisted in [`FloatingApp::quit`], so the
+    /// window can go.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        super::lifecycle::tear_down(self);
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

@@ -93,6 +93,10 @@ struct Chrome {
     volume_flash: Option<u8>,
     weather: pixtuoid_scene::sky::WeatherPolicy,
     motion: pixtuoid_scene::anim::Motion,
+    /// Whether the look painting draws the walkable debug layer, which the
+    /// half-blocks do and the cutaway never does: `w` is listed and read only
+    /// then.
+    offers_walkable_debug: bool,
 }
 
 impl PopupState {
@@ -121,7 +125,12 @@ impl Chrome {
     /// The panels open over a frame at `popup_scale`, the help listing the
     /// terminal's own shortcuts.
     fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
-        self.frames.overlays(popup_scale, crate::tui::SHORTCUTS)
+        let host_keys = if self.offers_walkable_debug {
+            crate::tui::SHORTCUTS
+        } else {
+            &[]
+        };
+        self.frames.overlays(popup_scale, host_keys)
     }
 
     /// Floor `floor` of `session`'s office in `scene`, whose projection is
@@ -216,6 +225,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 volume_flash: None,
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
+                offers_walkable_debug: true,
             },
             flash: pixtuoid_scene::flash::FlashHold::on(pixtuoid_scene::flash::monotonic()),
             #[cfg(feature = "graphics")]
@@ -227,6 +237,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     #[cfg(feature = "graphics")]
     pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
         self.cutaway = Some(cutaway);
+        self.chrome.offers_walkable_debug = false;
+    }
+
+    /// Whether `w` flips a layer the next frame draws.
+    pub(crate) fn offers_walkable_debug(&self) -> bool {
+        self.chrome.offers_walkable_debug
     }
 
     /// Draw the first frame of `scene` unseen, in the look the first frame

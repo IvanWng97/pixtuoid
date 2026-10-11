@@ -208,6 +208,14 @@ impl AudioController {
 /// during unwind.
 impl Drop for AudioController {
     fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+impl AudioController {
+    /// Persist, then join the device thread. Idempotent, so a caller that
+    /// must not wait on the drop can run it first.
+    pub(crate) fn stop(&mut self) {
         self.flush_on_exit();
         self.ui.handle.shutdown();
     }
@@ -654,7 +662,7 @@ impl AudioHandle {
 
     /// Stop the device thread SYNCHRONOUSLY: dropping the sole sender makes `run_loop` return
     /// and drop its `RodioSink` (the OS device close); the JOIN makes that Drop finish before
-    /// the process exits (see `join`). INVARIANT: only from `AudioController::drop`, after the
+    /// the process exits (see `join`). INVARIANT: only from `AudioController::stop`, after the
     /// painter's loop ended — nothing races `tx`/`join`.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;

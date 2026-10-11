@@ -774,3 +774,48 @@ fn a_still_floor_holds_its_wall_board_flap() {
         "the Still board rolled"
     );
 }
+
+/// No panel owns input.
+#[cfg(debug_assertions)]
+pub(crate) fn no_panel() -> crate::panels::ModalState {
+    crate::panels::ModalState {
+        onboarding_open: false,
+        help_open: false,
+        version_popup: false,
+        theme_picker: None,
+        dashboard_open: false,
+        connection_open: false,
+        connection_confirm: false,
+        n_themes: 1,
+    }
+}
+
+/// In the half-blocks `w` is listed in the help and flips a layer the frame
+/// shows.
+#[cfg(debug_assertions)]
+#[test]
+fn the_classic_lists_w_and_its_key_tints_the_frame() {
+    use crossterm::event::KeyCode;
+    let scene = scene_with(vec![idle("/t/0.jsonl", 0, t0())], 16);
+    let mut r = build(120, 60, vec![]);
+    r.render(&scene, pack(), t0()).unwrap();
+    let before = r.buf().expect("a frame").clone();
+    assert!(
+        r.chrome
+            .overlays(0.0)
+            .host_keys
+            .iter()
+            .any(|(k, _)| *k == "w")
+    );
+    assert!(crate::tui::read_walkable_debug_key(
+        &mut r,
+        KeyCode::Char('w'),
+        &no_panel()
+    ));
+    r.render(&scene, pack(), t0()).unwrap();
+    let after = r.buf().expect("a frame");
+    assert!(
+        region_diff(&before, after, 0, 0, before.width(), before.height()) > 1_000,
+        "the key must show the layer"
+    );
+}
