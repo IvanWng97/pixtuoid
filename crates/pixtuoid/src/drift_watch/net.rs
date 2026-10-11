@@ -97,7 +97,9 @@ fn classify(ran: bool, stderr: &str, body: Vec<u8>) -> Result<Vec<u8>, FetchErro
     }
     match status {
         200..=299 => Ok(body),
-        s if PERMANENT_HTTP_STATUS.contains(&s) => Err(FetchError::Gone { status: s }),
+        s if PERMANENT_HTTP_STATUS.contains(&s) => Err(FetchError::Gone {
+            why: format!("HTTP {s}"),
+        }),
         s => Err(FetchError::Transient(format!("HTTP {s}"))),
     }
 }
@@ -114,7 +116,9 @@ mod tests {
         for s in PERMANENT_HTTP_STATUS {
             assert_eq!(
                 classify(true, &format!("\n{s}"), vec![]),
-                Err(FetchError::Gone { status: s })
+                Err(FetchError::Gone {
+                    why: format!("HTTP {s}")
+                })
             );
         }
         for s in [403, 429, 500, 502, 503] {
@@ -191,7 +195,9 @@ mod tests {
         };
         assert_eq!(
             classify(true, &curl_stderr("", "404"), vec![]),
-            Err(FetchError::Gone { status: 404 })
+            Err(FetchError::Gone {
+                why: "HTTP 404".to_owned()
+            })
         );
         assert!(matches!(
             classify(false, &curl_stderr("curl: (6) Could not resolve host", "000"), vec![]),

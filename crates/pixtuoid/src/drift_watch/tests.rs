@@ -51,7 +51,9 @@ impl Fetch for Served {
         self.calls.borrow_mut().push((url.to_owned(), timeout));
         match self.bodies.get(url) {
             Some(Ok(b)) => Ok(b.clone()),
-            Some(Err(status)) => Err(FetchError::Gone { status: *status }),
+            Some(Err(status)) => Err(FetchError::Gone {
+                why: format!("HTTP {status}"),
+            }),
             None => Err(FetchError::Transient(format!("not served: {url}"))),
         }
     }
@@ -499,6 +501,11 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
     assert!(
         r.errors.is_empty() && r.blind.len() == 1,
         "a missing member darkens the pin: {r:?}"
+    );
+    assert!(
+        r.blind[0].contains("no pkg/schema.json in cli-1.0.0-linux.tgz")
+            && !r.blind[0].contains("HTTP"),
+        "no request 404'd, so the line says what is missing: {r:?}"
     );
 
     let tagless = Served::default()

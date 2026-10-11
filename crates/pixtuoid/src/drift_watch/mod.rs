@@ -29,13 +29,15 @@ const API_URL: &str = "https://api.github.com/repos";
 /// Why a fetch returned nothing. Neither is ever a vanish.
 #[derive(Debug, PartialEq, Eq)]
 enum FetchError {
-    /// Our pin is gone, so the watch is dark for that document.
-    Gone { status: u16 },
+    /// Our pin is gone, so the watch is dark for that document: `why` is
+    /// upstream's answer.
+    Gone { why: String },
     /// May pass on a retry.
     Transient(String),
 }
 
-/// The network, behind a seam so the tests never spawn `curl` or `tar`.
+/// The network, behind a seam so the engine's tests never spawn `curl` or
+/// `tar`.
 trait Fetch {
     /// The body at `url`.
     ///
@@ -191,7 +193,7 @@ enum Located {
     },
 }
 
-/// Where one declared document is read from, and how the report names it.
+/// `at`'s [`Located`], and the label the report names it by.
 fn locate(up: &Upstream, at: &At) -> (Located, String) {
     let repo = up.repo;
     match *at {
@@ -252,10 +254,10 @@ impl<'f> Fetched<'f> {
         };
         let text = match got {
             Ok(t) => Some(t),
-            Err(FetchError::Gone { status }) => {
+            Err(FetchError::Gone { why }) => {
                 report.add_blind(
                     "the document",
-                    &format!("{label} (HTTP {status})"),
+                    &format!("{label} ({why})"),
                     "Every watch reading it was SKIPPED.",
                     false,
                 );
@@ -309,7 +311,9 @@ impl<'f> Fetched<'f> {
         let body = self
             .fetch
             .untar(&tarball, member)?
-            .ok_or(FetchError::Gone { status: 404 })?;
+            .ok_or_else(|| FetchError::Gone {
+                why: format!("no {member} in {name}"),
+            })?;
         Ok(String::from_utf8_lossy(&body).into_owned())
     }
 
