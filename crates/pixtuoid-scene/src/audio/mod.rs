@@ -15,6 +15,7 @@ pub mod compose;
 pub mod dsp;
 #[doc(hidden)]
 pub mod engine;
+pub(crate) mod foley;
 #[doc(hidden)]
 pub mod mixer;
 // Private, not `pub`: the frozen takes are `#[cfg(test)]` fingerprint ANCHORS

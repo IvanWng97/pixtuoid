@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::mixer::LoopStem;
-use super::{OneShot, TrackId, dsp, synth};
+use super::{OneShot, TrackId, dsp, foley, synth};
 
 /// Per-key / per-drop variant pool sizes: playback picks randomly so
 /// typing/rain never sound repeated, while runtime stays synthesis-free.
@@ -113,14 +113,14 @@ impl AssetBank {
     pub(crate) fn build(rng: &mut dsp::NoiseStream) -> Self {
         Self {
             keystrokes: (0..KEYSTROKE_POOL)
-                .map(|_| Arc::new(synth::keystroke(rng)))
+                .map(|_| Arc::new(foley::keystroke(rng)))
                 .collect(),
             drops: (0..DROP_POOL)
-                .map(|_| Arc::new(synth::rain_drop(rng)))
+                .map(|_| Arc::new(foley::rain_drop(rng)))
                 .collect(),
-            door_chime: Arc::new(synth::door_chime()),
-            printer_whir: Arc::new(synth::printer_whir(rng)),
-            vending_drop: Arc::new(synth::vending_drop(rng)),
+            door_chime: Arc::new(foley::door_chime()),
+            printer_whir: Arc::new(foley::printer_whir(rng)),
+            vending_drop: Arc::new(foley::vending_drop(rng)),
         }
     }
 
@@ -230,7 +230,7 @@ impl Synthesis {
     }
 
     pub fn rain(&mut self) -> Arc<Vec<f32>> {
-        Arc::new(synth::rain_bed(&mut self.rng))
+        Arc::new(foley::rain_bed(&mut self.rng))
     }
 
     /// Every lane of `track` at once — the native thread, which may block.
@@ -312,14 +312,6 @@ mod tests {
     }
 
     #[test]
-    fn rain_bed_is_one_power_of_two_loop() {
-        assert_eq!(
-            synth::rain_bed(&mut dsp::NoiseStream::new(1)).len(),
-            1 << 19
-        );
-    }
-
-    #[test]
     fn a_mood_swap_never_touches_the_rain_stem() {
         assert!(!TRACK_STEMS.contains(&LoopStem::Rain));
     }
@@ -336,7 +328,7 @@ mod tests {
 
         let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
         let want_assets = AssetBank::build(&mut rng);
-        let want_rain = synth::rain_bed(&mut rng);
+        let want_rain = foley::rain_bed(&mut rng);
         let mut lanes = |track| {
             let score = super::super::compose_track(track);
             synth::Lane::ALL.map(|lane| synth::render_lane(&score, lane, &mut rng))
