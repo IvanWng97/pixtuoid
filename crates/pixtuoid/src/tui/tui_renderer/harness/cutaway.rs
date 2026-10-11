@@ -212,6 +212,38 @@ fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
     assert_eq!(wire.take(), "");
 }
 
+/// The onboarding's backdrop dims the cutaway: the composed frame darkens
+/// under it, and its tiles are sent again though nothing else in the office
+/// moved.
+#[test]
+fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
+    use crate::panels::welcome::OnboardingFrame;
+    let (mut r, wire) = kitty(120, 40);
+    let scene = office();
+    let lum = |r: &TuiRenderer<Window>| {
+        let frame = r.session.buf().expect("a frame");
+        avg_lum(frame, 0, 0, frame.width(), frame.height())
+    };
+    r.render(&scene, pack(), t0()).expect("render");
+    let bright = lum(&r);
+    wire.take();
+    r.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                open: true,
+                dim: 0.4,
+                ..OnboardingFrame::default()
+            },
+            ..RenderFrames::default()
+        },
+        t0(),
+    );
+    r.render(&scene, pack(), t0()).expect("render");
+    let dim = lum(&r);
+    assert!(dim < bright * 0.6, "dim={dim} vs bright={bright}");
+    assert!(wire.take().contains(TRANSMIT), "the dimmed tiles are sent");
+}
+
 /// A frame encoded across four threads, on any machine, still reaches the
 /// wire as one transmit per tile, in the grid's order.
 #[test]

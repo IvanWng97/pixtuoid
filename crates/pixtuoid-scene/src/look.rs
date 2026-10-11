@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::pack::OfficeArt;
-use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::DaemonState;
 
 /// Where a [`Rendered`] frame may differ from the last: the frame entry's
@@ -69,6 +69,47 @@ pub struct RenderInputs<'a> {
     pub place: Place,
     /// The classic's walkable/approach/route debug layer (the `w` toggle).
     pub debug_walkable: bool,
+    /// How far the host's modal dims the frame.
+    pub dim: Dim,
+}
+
+/// How bright a host's modal leaves the office under it: the multiplier each
+/// pixel of a frame takes, [`Self::NONE`] leaving it as drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Dim(pub f32);
+
+impl Dim {
+    /// The office as drawn.
+    pub const NONE: Self = Self(1.0);
+    /// The factor from which a frame counts as undimmed: one at or above it is
+    /// left as drawn.
+    const UNDIMMED: f32 = 0.999;
+
+    /// Darken every pixel of `buf` a frame may write: within its clip, where
+    /// it has one.
+    pub(crate) fn apply(self, buf: &mut RgbBuffer) {
+        if self.0 >= Self::UNDIMMED {
+            return;
+        }
+        for (_, _, row) in buf.writable_rows_mut() {
+            for px in row {
+                *px = self.of(*px);
+            }
+        }
+    }
+
+    /// `rgb` darkened.
+    pub(crate) fn of(self, rgb: Rgb) -> Rgb {
+        if self.0 >= Self::UNDIMMED {
+            return rgb;
+        }
+        let channel = |c: u8| (f32::from(c) * self.0) as u8;
+        Rgb {
+            r: channel(rgb.r),
+            g: channel(rgb.g),
+            b: channel(rgb.b),
+        }
+    }
 }
 
 /// One frame from [`render`].
@@ -188,8 +229,8 @@ impl Classic {
 /// sets the classic's text and hit-tests it itself.
 #[derive(Debug)]
 pub struct ClassicDrawn<'a> {
-    /// The frame, for a painter's own wash over it (a modal's dim).
-    pub pixels: &'a mut RgbBuffer,
+    /// The frame.
+    pub pixels: &'a RgbBuffer,
     /// The text the painter sets over it.
     pub text: crate::display::HostText<'a>,
     /// What the frame answers a pointer with.
@@ -218,10 +259,10 @@ impl Raster {
     }
 
     /// The last frame, when the classic drew it.
-    pub fn classic_drawn(&mut self) -> Option<ClassicDrawn<'_>> {
+    pub fn classic_drawn(&self) -> Option<ClassicDrawn<'_>> {
         let classic = self
             .classic
-            .as_mut()
+            .as_ref()
             .filter(|_| self.shown == Some(Look::Classic))?;
         let Classic {
             buf, hits, signs, ..
@@ -325,6 +366,7 @@ pub fn render(
         size,
         place,
         debug_walkable,
+        dim,
     } = inputs;
     if !std::ptr::eq(world.pack, &*raster.pack) {
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
@@ -384,6 +426,7 @@ pub fn render(
             );
             let flash = paint.flash(&stepped.frame);
             classic.hits = paint_frame(&mut paint, &stepped.frame);
+            dim.apply(&mut classic.buf);
             classic.signs =
                 crate::display::TextRun::signs(&board, stepped.layout.door, world.floor, theme);
             (Dirty::All, flash)
@@ -404,6 +447,7 @@ pub fn render(
                     floor: world.floor,
                     now: world.now,
                     board: &board,
+                    dim,
                 },
                 text,
                 (&mut office.raster.cutaway, &mut office.raster.outside),

@@ -68,6 +68,7 @@ fn inputs<'a>(scene: &'a SceneState, pack: &'a OfficeArt, now: SystemTime) -> Re
         size: SIZE,
         place: Place::default(),
         debug_walkable: false,
+        dim: crate::look::Dim::NONE,
     }
 }
 
@@ -392,4 +393,22 @@ fn a_new_pack_or_theme_empties_the_office_caches() {
     raster.serve(&other, cyberpunk);
     let packed = views(&mut raster.outside, &other, cyberpunk);
     assert!(!Arc::ptr_eq(&themed, &packed), "a new pack kept the views");
+}
+
+/// A dim this near none leaves a frame as drawn; a real one darkens each
+/// pixel a frame may write, inside a clip where the buffer has one.
+#[test]
+fn a_dim_darkens_each_pixel_a_frame_may_write() {
+    let px = pixtuoid_core::sprite::Rgb {
+        r: 201,
+        g: 103,
+        b: 7,
+    };
+    let mut buf = RgbBuffer::filled(3, 2, px);
+    Dim(0.9995).apply(&mut buf);
+    assert!(buf.as_slice().iter().all(|p| *p == px));
+    buf.with_clip((0..1, 0..2), |buf| Dim(0.5).apply(buf));
+    assert_eq!(buf.get(0, 1), Dim(0.5).of(px));
+    assert_ne!(buf.get(0, 1), px);
+    assert_eq!(buf.get(1, 1), px, "outside the clip");
 }

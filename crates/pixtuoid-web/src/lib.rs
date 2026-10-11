@@ -669,6 +669,7 @@ impl Office {
                 size: Size { w: buf_w, h: buf_h },
                 place: Place::default(),
                 debug_walkable: false,
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
     }

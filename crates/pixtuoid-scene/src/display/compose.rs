@@ -120,8 +120,9 @@ pub struct Office<'a> {
     pub scale: RenderScale,
 }
 
-/// Which floor a frame shows, when, and what its wall board says: what moves
-/// a frame beyond its office and the sim's world.
+/// Which floor a frame shows, when, what its wall board says, and how far the
+/// host's modal dims it: what moves a frame beyond its office and the sim's
+/// world.
 #[derive(Debug, Clone, Copy)]
 pub struct Showing<'a> {
     /// The floor of the building it shows.
@@ -131,13 +132,21 @@ pub struct Showing<'a> {
     /// The wall board, the classic painter's
     /// ([`build_board`](crate::neon_sign::build_board)).
     pub board: &'a crate::neon_sign::BoardModel,
+    /// The host's modal dim, which the display list ignores and the canvas
+    /// paints.
+    pub dim: crate::look::Dim,
 }
 
 /// `frame`'s [`DisplayList`] as `showing` says.
 pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
-    Showing { floor, now, board }: Showing<'_>,
+    Showing {
+        floor,
+        now,
+        board,
+        dim: _,
+    }: Showing<'_>,
     caches: (&mut LightCache, &mut crate::outside::OutsideCache),
 ) -> DisplayList<'a> {
     let timing = floor.motion.timing(now);

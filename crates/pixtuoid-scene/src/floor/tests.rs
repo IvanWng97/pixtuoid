@@ -641,6 +641,7 @@ fn classic_frame(
             size,
             place: crate::look::Place::default(),
             debug_walkable: false,
+            dim: crate::look::Dim::NONE,
         },
     )
 }
@@ -777,6 +778,7 @@ fn floor_session_render_owns_the_dual_eviction() {
             size: Size { w: 160, h: 96 },
             place: crate::look::Place::default(),
             debug_walkable: false,
+            dim: crate::look::Dim::NONE,
         },
     );
     assert!(layout.is_some(), "a layoutable size renders");
@@ -829,6 +831,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
                     size: Size { w: 160, h: 96 },
                     place: crate::look::Place::default(),
                     debug_walkable: false,
+                    dim: crate::look::Dim::NONE,
                 },
             )
             .expect("160x96 lays out");
@@ -869,6 +872,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
             size: Size { w: 8, h: 8 },
             place: crate::look::Place::default(),
             debug_walkable: false,
+            dim: crate::look::Dim::NONE,
         },
     );
     assert!(none.is_none());
@@ -1667,6 +1671,7 @@ fn paint(
             floor: None,
         },
         debug_walkable: false,
+        dim: crate::look::Dim::NONE,
     };
     session.render(look, inputs).expect("lays out");
     session.buf().expect("a frame").as_slice().to_vec()
@@ -2034,6 +2039,7 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
                 size: Size { w: 160, h: 96 },
                 place: crate::look::Place::default(),
                 debug_walkable: false,
+                dim: crate::look::Dim::NONE,
             },
             &[],
             theme.surface.bg_fallback,
@@ -2105,6 +2111,7 @@ fn a_cutaway_slide_bakes_its_floors_text() {
                     size: Size { w: 160, h: 96 },
                     place: crate::look::Place::default(),
                     debug_walkable: false,
+                    dim: crate::look::Dim::NONE,
                 },
                 &[],
                 theme.surface.bg_fallback,
@@ -2166,6 +2173,7 @@ fn a_frame_without_the_office_forgets_the_last() {
                 size: Size { w: 160, h: 96 },
                 place: crate::look::Place::default(),
                 debug_walkable: false,
+                dim: crate::look::Dim::NONE,
             },
             &[],
             theme.surface.bg_fallback,
@@ -2211,6 +2219,7 @@ fn an_office_session_follows_its_floors_down() {
                 size: Size { w: 160, h: 96 },
                 place: crate::look::Place::default(),
                 debug_walkable: false,
+                dim: crate::look::Dim::NONE,
             },
             &[],
             theme.surface.bg_fallback,
@@ -2514,6 +2523,7 @@ fn a_lifted_creature_is_in_front_of_the_room() {
                     size,
                     place: crate::look::Place::default(),
                     debug_walkable: false,
+                    dim: crate::look::Dim::NONE,
                 },
             )
             .expect("lays out");

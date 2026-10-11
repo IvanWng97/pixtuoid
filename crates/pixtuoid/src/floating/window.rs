@@ -460,6 +460,12 @@ impl FloatingApp {
                 petting: self.petting.as_ref(),
             },
         };
+        let health = self
+            .live
+            .as_ref()
+            .map(super::LivePipeline::health)
+            .unwrap_or_default();
+        let frames = self.ui.build_frames(now, &scene, &health);
         let live = self.renderer.render_live(
             at,
             WindowFrame {
@@ -469,6 +475,7 @@ impl FloatingApp {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
+                dim: pixtuoid_scene::look::Dim(frames.onboarding.dim),
             },
             (win_w, win_h),
         );
@@ -514,20 +521,12 @@ impl FloatingApp {
                     pixtuoid_scene::tooltip::for_hit(hit, &shown)
                 })
                 .map(|tip| (tip, (cursor.0 as i32, cursor.1 as i32))),
-            panels: {
-                let health = self
-                    .live
-                    .as_ref()
-                    .map(super::LivePipeline::health)
-                    .unwrap_or_default();
-                let frames = self.ui.build_frames(now, &scene, &health);
-                super::overlays::panels_grid(
-                    &frames,
-                    super::overlays::panel_cells((win_w, win_h), Face::chrome(at)),
-                    now,
-                    self.theme,
-                )
-            },
+            panels: super::overlays::panels_grid(
+                &frames,
+                super::overlays::panel_cells((win_w, win_h), Face::chrome(at)),
+                now,
+                self.theme,
+            ),
         };
         self.overlays.update(next, at, (self.theme, &*self.pack));
         let dirty = self.renderer.dirty();

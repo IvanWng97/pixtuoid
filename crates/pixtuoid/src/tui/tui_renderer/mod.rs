@@ -274,6 +274,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     floor: None,
                 },
                 debug_walkable,
+                dim: pixtuoid_scene::look::Dim(self.chrome.frames.onboarding.dim),
             },
             &self.chrome.pets,
             self.chrome.theme.surface.bg_fallback,
@@ -647,15 +648,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let overlays = self.chrome.overlays(popup_scale);
         let theme = self.chrome.theme;
         let flashes = self.session.flashes();
-        let Some(slide) = self.session.slide_mut() else {
+        let Some(slide) = self.session.buf() else {
             return Ok(());
         };
-        // Modal backdrop: the same multiply a floor's frame takes.
-        crate::tui::renderer::apply_dim(slide, self.chrome.frames.onboarding.dim);
         if self.flash.holds(flashes, term_size) {
             return Ok(());
         }
-        let slide = &*slide;
         self.terminal.draw(|f| {
             let full = f.area();
             paint_footer(f, &footer, full, theme);

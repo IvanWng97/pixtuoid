@@ -56,6 +56,8 @@ pub struct Repaint {
     pub(crate) carpet: bool,
     /// A strike's lift of the room.
     pub(crate) flash: bool,
+    /// The host's modal dim.
+    pub(crate) dim: bool,
 }
 
 impl Repaint {
@@ -76,6 +78,7 @@ impl Repaint {
             ambient: was.ambient != now.ambient,
             carpet: was.carpet != now.carpet,
             flash: was.flash != now.flash,
+            dim: was.dim != now.dim,
         })
     }
 }
@@ -175,6 +178,7 @@ struct Epoch {
     ambient: Ambient,
     carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
     flash: crate::display::light::Flash,
+    dim: crate::look::Dim,
 }
 
 #[derive(Debug)]
@@ -201,8 +205,8 @@ impl CutawayCanvas {
     }
 
     /// Paint `stepped` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
-    /// does, its world text as `text` says, unless the frame would be the one
-    /// already shown.
+    /// does, under `showing`'s dim, its world text as `text` says, unless the
+    /// frame would be the one already shown.
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
@@ -222,6 +226,7 @@ impl CutawayCanvas {
             theme,
             scale,
         };
+        let dim = showing.dim;
         let mut list = tracing::trace_span!("canvas.compose")
             .in_scope(|| compose(&stepped.frame, office, showing, (&mut self.lights, outside)));
         let host_text = (text == crate::look::WorldText::Host).then(|| list.host_text());
@@ -232,6 +237,7 @@ impl CutawayCanvas {
             ambient: list.ambient(),
             carpet: list.carpet(),
             flash: list.flash(),
+            dim,
         };
         let footprints: Vec<(Span, u64)> = list
             .pieces()
@@ -250,6 +256,7 @@ impl CutawayCanvas {
                 ambient = r.ambient,
                 carpet = r.carpet,
                 flash = r.flash,
+                dim = r.dim,
                 ambient_now = ?epoch.ambient,
                 flash_now = ?epoch.flash,
                 "canvas.epoch"
@@ -270,13 +277,17 @@ impl CutawayCanvas {
                     self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
                 }
                 paint(&list, cache, &mut self.buf);
+                dim.apply(&mut self.buf);
             }
             Dirty::Rects(rects) => {
                 // a new size changes the epoch's backdrop, so it paints whole
                 debug_assert_eq!((self.buf.width(), self.buf.height()), size);
                 for pass in passes(rects.as_slice(), MAX_PASSES) {
                     let clip = (pass.x..pass.x + pass.width, pass.y..pass.y + pass.height);
-                    self.buf.with_clip(clip, |buf| paint(&list, cache, buf));
+                    self.buf.with_clip(clip, |buf| {
+                        paint(&list, cache, buf);
+                        dim.apply(buf);
+                    });
                 }
             }
             Dirty::Unchanged => {}
@@ -443,15 +454,21 @@ mod tests {
     /// full render, and every pixel two full renders in a row differ in lies in
     /// what it reported.
     fn run(layout: SceneLayout, pack: OfficeArt, steps: &[(SimFrame, SystemTime)]) -> Run {
-        run_under(layout, pack, steps, clear_ground())
+        run_under(
+            layout,
+            pack,
+            steps,
+            (clear_ground(), crate::look::Dim::NONE),
+        )
     }
 
-    /// [`run`] on `floor`, under its weather.
+    /// [`run`] on `floor`, under its weather and `dim`, each full render
+    /// dimmed alike.
     fn run_under(
         layout: SceneLayout,
         pack: OfficeArt,
         steps: &[(SimFrame, SystemTime)],
-        floor: FloorMeta,
+        (floor, dim): (FloorMeta, crate::look::Dim),
     ) -> Run {
         let (layout, pack) = (Arc::new(layout), Arc::new(pack));
         let theme = normal();
@@ -477,7 +494,8 @@ mod tests {
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
-            let full = full_render(&layout, &pack, scale, (frame, floor), *now);
+            let mut full = full_render(&layout, &pack, scale, (frame, floor), *now);
+            dim.apply(&mut full);
             let list = compose(
                 frame,
                 office,
@@ -501,7 +519,10 @@ mod tests {
                 &stepped,
                 theme,
                 scale,
-                crate::display::compose::tests::showing(floor, *now),
+                Showing {
+                    dim,
+                    ..crate::display::compose::tests::showing(floor, *now)
+                },
                 crate::look::WorldText::Baked,
                 (&mut cache, &mut outside),
             );
@@ -569,6 +590,57 @@ mod tests {
         );
     }
 
+    /// Under a host's dim, every frame the canvas shows is the full render
+    /// dimmed, those it repaints only in part included; and a change of the
+    /// dim repaints the whole frame.
+    #[test]
+    fn a_dim_darkens_every_frame_and_its_change_repaints_whole() {
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 4);
+        let steps: Vec<_> = frames
+            .into_iter()
+            .zip(ticks(crate::localclock::at_hour(12), u64::MAX))
+            .collect();
+        let (seated, now) = steps.last().cloned().expect("a seated frame");
+        let (layout, pack) = (Arc::new(layout), Arc::new(pack));
+        let tally = run_under(
+            SceneLayout::clone(&layout),
+            OfficeArt::clone(&pack),
+            &steps,
+            (clear_ground(), crate::look::Dim(0.4)),
+        );
+        assert!(tally.partial > 0, "{tally:?}");
+        let (mut cache, mut outside) = (
+            crate::cutaway::paint::CutawayCache::default(),
+            crate::outside::OutsideCache::default(),
+        );
+        let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+        let stepped = SteppedFloor {
+            layout,
+            frame: seated,
+        };
+        let mut show = |dim| {
+            canvas.frame(
+                &stepped,
+                normal(),
+                RenderScale::from(pack.max_density_variant()),
+                Showing {
+                    dim,
+                    ..crate::display::compose::tests::showing(clear_ground(), now)
+                },
+                crate::look::WorldText::Baked,
+                (&mut cache, &mut outside),
+            )
+        };
+        show(crate::look::Dim::NONE);
+        let dimmed = show(crate::look::Dim(0.4));
+        assert_eq!(dimmed.dirty, Dirty::All);
+        assert!(
+            dimmed.repaint.is_some_and(|r| r.dim),
+            "{:?}",
+            dimmed.repaint
+        );
+    }
+
     /// From afternoon into night, ten minutes a step, the room's tone moves
     /// with the hour and the weather, repainting the whole frame; the steps
     /// between move only the sky and the lights.
@@ -607,7 +679,10 @@ mod tests {
             layout,
             pack,
             &steps,
-            FloorMeta::ground().with_weather(storm),
+            (
+                FloorMeta::ground().with_weather(storm),
+                crate::look::Dim::NONE,
+            ),
         );
         assert!(tally.whole >= 2, "{tally:?}");
     }
