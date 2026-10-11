@@ -167,7 +167,7 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
 }
 
 /// A backend that forwards every call to `inner`, its [`Tap`] seeing each
-/// draw's cells and each flush, and answering the window's pixel size.
+/// draw's cells, and answering the window's pixel size.
 /// `append_lines` is forwarded too: ratatui defaults it to a no-op.
 pub(super) struct Tapped<B, T> {
     pub(super) inner: B,
@@ -179,8 +179,6 @@ pub(super) struct Tapped<B, T> {
 pub(super) trait Tap<B: Backend> {
     /// Sees each draw's cells before `inner` does.
     fn on_draw(&mut self, _cells: &[(u16, u16, &ratatui::buffer::Cell)]) {}
-    /// Runs before `inner` flushes.
-    fn on_flush(&mut self) {}
     fn window_size(&mut self, inner: &mut B) -> Result<ratatui::backend::WindowSize, B::Error> {
         inner.window_size()
     }
@@ -227,7 +225,6 @@ impl<B: Backend, T: Tap<B>> Backend for Tapped<B, T> {
         self.tap.window_size(&mut self.inner)
     }
     fn flush(&mut self) -> Result<(), Self::Error> {
-        self.tap.on_flush();
         self.inner.flush()
     }
 }
@@ -250,36 +247,55 @@ impl Latency {
     }
 }
 
-/// A `TestBackend` whose flush lands late once `tap` holds a [`Latency`].
-pub(super) type Slow = Tapped<TestBackend, Option<Latency>>;
+/// The terminal's side of a [`FrameOut`](crate::tui::FrameOut); set `fail` to
+/// make it refuse writes as a full terminal does (`WouldBlock`), or `slow` to
+/// make a flush land late.
+#[derive(Clone, Default)]
+pub(super) struct Wire {
+    pub(super) bytes: Arc<std::sync::Mutex<Vec<u8>>>,
+    pub(super) fail: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) slow: Arc<std::sync::Mutex<Option<Latency>>>,
+}
 
-impl Tap<TestBackend> for Option<Latency> {
-    fn on_flush(&mut self) {
-        if let Some(latency) = self {
+impl std::io::Write for Wire {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.fail.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        self.bytes.lock().expect("lock").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(latency) = &*self.slow.lock().expect("lock") {
             latency.land();
         }
+        Ok(())
     }
 }
 
-/// A half-block renderer over a `cols`×`rows` terminal, its flashes held on a
-/// screen clock the test moves.
+/// A half-block renderer over a `cols`×`rows` terminal, presenting each
+/// frame through a [`Wire`] as the TUI does through its terminal, its
+/// flashes held on a screen clock the test moves.
 pub(super) fn half_blocks_on_screen(
     cols: u16,
     rows: u16,
-) -> (TuiRenderer<Slow>, pixtuoid_scene::flash::ManualClock) {
+) -> (
+    TuiRenderer<TestBackend>,
+    pixtuoid_scene::flash::ManualClock,
+    Wire,
+) {
     let screen = pixtuoid_scene::flash::ManualClock::default();
-    let backend = Slow {
-        inner: TestBackend::new(cols, rows),
-        tap: None,
-    };
     let mut r = TuiRenderer::new(
-        Terminal::new(backend).expect("test backend"),
+        Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         vec![],
         pack_arc(),
     );
+    let wire = Wire::default();
+    // Synchronized, so every frame writes, and a refusing wire refuses it.
+    r.present_through(crate::tui::FrameOut::new(wire.clone(), true));
     r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
-    (r, screen)
+    (r, screen, wire)
 }
 
 pub(super) fn two_floor_scene() -> SceneState {
