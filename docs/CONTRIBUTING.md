@@ -182,7 +182,7 @@ our release never builds. Two consequences:
   formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/app/sources_cli.rs`,
-  `crates/pixtuoid-core/src/source/codex.rs`. Change homebrew-core's `test do`
+  `crates/pixtuoid-core/src/source/codewhale.rs`. Change homebrew-core's `test do`
   first, against the released version, so the next autobump stays green; the
   packaging-build action replays the block, so it changes in the same PR. A
   `release-plz.yml` dispatch opens no release PR while their block still calls

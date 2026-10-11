@@ -181,11 +181,11 @@ mod tests {
     #[test]
     fn outcome_envelope_is_the_id_outcome_raycast_contract() {
         // Raycast is not the only consumer. homebrew-core contract: the
-        // formula's `test do` parses `connect codex --json` and asserts the row
-        // equals `{"id" => "codex", "outcome" => "connected"}`. Reshaping this
+        // formula's `test do` parses `connect codewhale --json` and asserts the row
+        // equals `{"id" => "codewhale", "outcome" => "connected"}`. Reshaping this
         // envelope breaks Homebrew's CI on the next autobump.
         let rows = vec![
-            sources::OutcomeRow::new("codex".to_string(), &sources::ChangeOutcome::Connected),
+            sources::OutcomeRow::new("codewhale".to_string(), &sources::ChangeOutcome::Connected),
             sources::OutcomeRow::new(
                 "cursor".to_string(),
                 &sources::ChangeOutcome::Failed("boom".into()),
@@ -193,7 +193,7 @@ mod tests {
         ];
         assert_eq!(
             serde_json::to_string(&rows).unwrap(),
-            r#"[{"id":"codex","outcome":"connected"},{"id":"cursor","outcome":"failed","message":"boom"}]"#
+            r#"[{"id":"codewhale","outcome":"connected"},{"id":"cursor","outcome":"failed","message":"boom"}]"#
         );
     }
 

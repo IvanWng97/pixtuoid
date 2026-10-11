@@ -91,10 +91,9 @@ pub struct Target {
     pub hook_command: HookCommand,
     pub primary: Primary,
     pub binary_strategy: BinaryStrategy,
-    /// Presence probe overriding the default config-file-exists check. Needed
-    /// when the file we WRITE is not a file the CLI CREATES — checking it would
-    /// mean auto-detection can never fire for such a target.
-    pub presence_probe: Option<fn() -> bool>,
+    /// Whether the CLI is installed, read from something the CLI itself creates: the
+    /// file pixtuoid writes would mean auto-detection never fires before a connect.
+    pub presence_probe: fn() -> bool,
     /// A one-line note the presenters append after a SUCCESSFUL connect, when
     /// installing is not the last step the user must take. `None` for every target
     /// whose hooks take effect on the CLI's next run.
@@ -184,6 +183,17 @@ pub struct HostRegistration {
     /// Re-copy the plugin after its files changed, for a CLI that runs a copy;
     /// `None` when the CLI loads the files in place.
     pub reload: Option<fn(config: &Path) -> Result<()>>,
+    /// Where a pixtuoid from before the plugin merged its hooks.
+    pub legacy: Option<LegacyConfig>,
+}
+
+/// A config of the CLI's own that an older pixtuoid merged its hooks into. Connect
+/// and disconnect both strip them, so no event fires twice.
+#[derive(Debug)]
+pub struct LegacyConfig {
+    pub path: fn() -> Result<PathBuf>,
+    /// Remove only the entries pixtuoid merged, as `Primary::Config`'s `merge_uninstall`.
+    pub strip: fn(content: &str) -> Result<MergeOutcome>,
 }
 
 /// What [`HostRegistration::unregister`] found.
@@ -206,7 +216,7 @@ pub(crate) const CLAUDE: Target = Target {
     primary: Primary::Owned {
         render: crate::install::claude::render_hooks,
         installed_shim: crate::install::claude::installed_shim,
-        uninstall: crate::install::claude::uninstall,
+        uninstall: crate::install::host_plugin::uninstall_hooks,
         verify_schema: crate::install::claude::verify_schema,
     },
     // Windows: the exec form embeds the absolute path, and a hook spawned without
@@ -216,7 +226,7 @@ pub(crate) const CLAUDE: Target = Target {
     } else {
         BinaryStrategy::BareNameOnPath
     },
-    presence_probe: Some(crate::install::claude::detect_installed),
+    presence_probe: crate::install::claude::detect_installed,
     post_install_hint: None,
     host: Some(&crate::install::claude::HOST),
 };
@@ -227,16 +237,16 @@ pub(crate) const CODEX: Target = Target {
     display_name: "Codex",
     default_config_path: crate::install::codex::default_config_path,
     hook_command: crate::install::codex::hook_command,
-    primary: Primary::Config {
-        merge_install: crate::install::codex::merge_install,
-        merge_uninstall: crate::install::codex::merge_uninstall,
+    primary: Primary::Owned {
+        render: crate::install::codex::render_hooks,
+        installed_shim: crate::install::codex::installed_shim,
+        uninstall: crate::install::host_plugin::uninstall_hooks,
         verify_schema: crate::install::codex::verify_schema,
-        beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: None,
+    presence_probe: crate::install::codex::detect_installed,
     post_install_hint: None,
-    host: None,
+    host: Some(&crate::install::codex::HOST),
 };
 
 pub(crate) const REASONIX: Target = Target {
@@ -252,7 +262,7 @@ pub(crate) const REASONIX: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: Some(crate::install::reasonix::detect_installed),
+    presence_probe: crate::install::reasonix::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -270,7 +280,7 @@ pub(crate) const CODEWHALE: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: Some(crate::install::codewhale::detect_installed),
+    presence_probe: crate::install::codewhale::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -290,7 +300,7 @@ pub(crate) const OPENCODE: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on opencode's own dirs
     // rather than our plugin file.
-    presence_probe: Some(crate::install::opencode::detect_installed),
+    presence_probe: crate::install::opencode::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -308,7 +318,7 @@ pub(crate) const GROK: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: Some(crate::install::grok::detect_installed),
+    presence_probe: crate::install::grok::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -326,7 +336,7 @@ pub(crate) const CURSOR: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: Some(crate::install::cursor::detect_installed),
+    presence_probe: crate::install::cursor::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -345,7 +355,7 @@ pub(crate) const HERMES: Target = Target {
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // Hermes OWNS config.yaml (model/provider), so probe the home dir instead.
-    presence_probe: Some(crate::install::hermes::detect_installed),
+    presence_probe: crate::install::hermes::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -365,7 +375,7 @@ pub(crate) const OPENCLAW: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // openclaw.json is created by OpenClaw itself; probe its own dir so
     // auto-detect fires whether or not we've installed.
-    presence_probe: Some(crate::install::openclaw::detect_installed),
+    presence_probe: crate::install::openclaw::detect_installed,
     // `plugins.load` is `kind: "restart"` upstream, so a RUNNING gateway does not
     // hot-load the plugin — the lobster appears on its next restart.
     post_install_hint: Some("restart the gateway to load it (openclaw gateway restart)"),
@@ -387,7 +397,7 @@ pub(crate) const KIMI: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // Kimi may not create config.toml until a provider is configured, so probe the
     // data root rather than the file we write.
-    presence_probe: Some(crate::install::kimi::detect_installed),
+    presence_probe: crate::install::kimi::detect_installed,
     post_install_hint: None,
     host: None,
 };
@@ -406,7 +416,7 @@ pub(crate) const DSH: Target = Target {
     },
     // The plugin spawns the shim under Node by embedded path — no PATH.
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: Some(crate::install::dsh::detect_installed),
+    presence_probe: crate::install::dsh::detect_installed,
     // Profiles other than `web` compose patches once at boot (`web` watches
     // and hot-reloads both user patch files).
     post_install_hint: Some(
@@ -430,7 +440,7 @@ pub(crate) const OMP: Target = Target {
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on omp's own agent dir
     // rather than our file.
-    presence_probe: Some(crate::install::omp::detect_installed),
+    presence_probe: crate::install::omp::detect_installed,
     // Extensions load once at startup (`discoverAndLoadExtensions`).
     post_install_hint: Some("already-running omp sessions must restart to load the bridge"),
     host: None,
@@ -461,12 +471,7 @@ pub(crate) fn config_present(path: &Path) -> bool {
 }
 
 pub(crate) fn is_present(t: &Target) -> bool {
-    match t.presence_probe {
-        Some(probe) => probe(),
-        None => (t.default_config_path)()
-            .map(|p| config_present(&p))
-            .unwrap_or(false),
-    }
+    (t.presence_probe)()
 }
 
 #[cfg(test)]
@@ -502,38 +507,6 @@ mod tests {
         assert!(!config_present(&p));
         std::fs::write(&p, "{}").unwrap();
         assert!(config_present(&p));
-    }
-
-    #[test]
-    fn is_present_false_when_default_path_unresolvable() {
-        static NO_HOME: Target = Target {
-            name: "nohome",
-            core_source: "nohome",
-            display_name: "NoHome",
-            default_config_path: || Err(anyhow::anyhow!("cannot resolve the home directory")),
-            hook_command: |_, _| Ok("x".into()),
-            primary: Primary::Config {
-                merge_install: |c, _| {
-                    Ok(MergeOutcome {
-                        content: c.to_string(),
-                        changed: false,
-                    })
-                },
-                merge_uninstall: |c| {
-                    Ok(MergeOutcome {
-                        content: c.to_string(),
-                        changed: false,
-                    })
-                },
-                verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
-                beside: None,
-            },
-            binary_strategy: BinaryStrategy::EmbedAbsolute,
-            presence_probe: None,
-            post_install_hint: None,
-            host: None,
-        };
-        assert!(!is_present(&NO_HOME));
     }
 
     #[test]

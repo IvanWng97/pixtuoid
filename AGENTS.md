@@ -23,7 +23,7 @@ formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
 `completions <shell>` on clean stdout — breakage surfaces in THEIR CI on an
 autobump we never see, while our suite stays green (it asserts the same
 strings as goldens). The asserted rows are marked "homebrew-core contract" at
-`sources_cli.rs`, `codex.rs`; release-side consequences
+`sources_cli.rs`, `codewhale.rs`; release-side consequences
 in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## What this is

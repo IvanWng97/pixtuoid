@@ -22,8 +22,7 @@ pub use native::CodexSource;
 #[cfg(feature = "native")]
 pub(crate) use native::live_codex_rollout_ids;
 
-/// homebrew-core contract: their formula's `test do` asserts this exact id, so
-/// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
+/// The Codex source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codex";
 
 /// Trailing canonical UUID (`8-4-4-4-12`) of a `rollout-<ts>-<UUID>.jsonl`

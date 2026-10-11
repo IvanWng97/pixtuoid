@@ -5,6 +5,7 @@ pub(crate) mod cursor;
 pub(crate) mod grok;
 pub(crate) mod hermes;
 mod hook_cmd;
+pub(crate) mod host_plugin;
 pub(crate) mod io;
 pub(crate) mod kimi;
 pub(crate) use io::{nonempty_abs_env, owner_only_create};
@@ -529,7 +530,7 @@ fn install_target_from(
     // call changed: the hooks ARE the connected fact (`has_hooks`), and a plugin
     // that never registered fires none of the new ones.
     if let Some(host) = t.host
-        && let Err(e) = (host.register)(&path)
+        && let Err(e) = connect_host(host, &path)
     {
         if outcome.changed
             && let Err(undo) = restore(&lock, prior.as_deref())
@@ -547,6 +548,30 @@ fn install_target_from(
         path_warning,
         post_install_hint: t.post_install_hint,
     })
+}
+
+/// Strip what an older pixtuoid merged into the CLI's own config, then register. A
+/// registration that fails after the strip leaves neither firing, which is what a
+/// failed connect reads as.
+fn connect_host(host: &target::HostRegistration, primary: &std::path::Path) -> Result<()> {
+    strip_legacy(host)?;
+    (host.register)(primary)
+}
+
+/// Whether it removed anything from the host's [`target::LegacyConfig`].
+fn strip_legacy(host: &target::HostRegistration) -> Result<bool> {
+    let Some(legacy) = &host.legacy else {
+        return Ok(false);
+    };
+    let path = (legacy.path)()?;
+    // The CLI's own config resolves from its home, not the primary a test passes.
+    #[cfg(test)]
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "a test is about to strip {} — point the CLI's home at a TempDir first",
+        path.display()
+    );
+    strip_managed(legacy.strip, &path)
 }
 
 /// Put the locked file back as an install found it: `prior`, or no file at all.
@@ -642,7 +667,10 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
     let mut removed = strip_managed(t.primary.uninstall(), &path)?;
-    // Last, since the strip needs no CLI: a failing deregister leaves a
+    if let Some(host) = t.host {
+        removed |= strip_legacy(host)?;
+    }
+    // Last, since the strips need no CLI: a failing deregister leaves a
     // registered plugin with no hooks, never hooks that still fire.
     let plugin_left_registered = match t.host {
         Some(host) => match (host.unregister)(&path)? {

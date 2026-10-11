@@ -2444,7 +2444,7 @@ mod tests {
         use crate::install::{install_target, target::CLAUDE};
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("m/pixtuoid/hooks/hooks.json");
-        let d = crate::install::tests::with_fake_claude(|_| {
+        let d = crate::install::tests::with_fake_hosts(|_| {
             temp_env::with_var(
                 crate::install::io::HOOK_OVERRIDE_ENV,
                 Some("/nonexistent/pixtuoid-hook"),

@@ -5,7 +5,7 @@ use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Primary, Tar
 /// for the tests of the primary-write path itself.
 const CLAUDE_FILE: Target = Target {
     host: None,
-    presence_probe: None,
+    presence_probe: || false,
     ..CLAUDE
 };
 
@@ -32,7 +32,7 @@ static FAKE: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: None,
+    presence_probe: || false,
     post_install_hint: None,
     host: None,
 };
@@ -72,7 +72,7 @@ static FAKE2: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: None,
+    presence_probe: || false,
     post_install_hint: None,
     host: None,
 };
@@ -101,7 +101,7 @@ static FAKE_DIR: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: None,
+    presence_probe: || false,
     post_install_hint: None,
     host: None,
 };
@@ -130,7 +130,7 @@ static FAKE_NO_HOME: Target = Target {
         beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    presence_probe: None,
+    presence_probe: || false,
     post_install_hint: None,
     host: None,
 };
@@ -463,7 +463,7 @@ fn install_target_round_trips_every_registered_target() {
             ("DSH_HOME", Some(dsh_home.path())),
         ],
         || {
-            with_fake_claude(|_| {
+            with_fake_hosts(|_| {
                 for t in target::TARGETS {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = plugin_hooks_path(tmp.path());
@@ -502,42 +502,6 @@ fn install_target_round_trips_every_registered_target() {
     );
 }
 
-// The detect⇄install symmetry, per detection mechanism. A literal
-// false→true→false does NOT hold: uninstall PRESERVES the user's file, so
-// detection stays TRUE afterwards.
-#[test]
-fn config_present_target_file_is_absent_before_then_present_after_install() {
-    use crate::install::target::config_present;
-    // CODEX is the one shipped `presence_probe: None` (config_present) target;
-    // CLAUDE_FILE is CLAUDE with its probe and host stripped.
-    for t in [&CLAUDE_FILE, &CODEX] {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("cfg");
-        assert!(
-            !config_present(&cfg),
-            "{}: config_present must be FALSE before any write",
-            t.name
-        );
-        install_target_from(
-            t,
-            Some(cfg.clone()),
-            Some(PathBuf::from("/fake/pixtuoid-hook")),
-        )
-        .unwrap();
-        assert!(
-            config_present(&cfg),
-            "{}: config_present must be TRUE after install writes the config",
-            t.name
-        );
-        uninstall_target(t, Some(cfg.clone())).unwrap();
-        assert!(
-            config_present(&cfg),
-            "{}: uninstall preserves the user's config file → still present",
-            t.name
-        );
-    }
-}
-
 #[test]
 fn openclaw_is_present_is_false_before_then_true_after_install() {
     use crate::install::target::is_present;
@@ -565,14 +529,14 @@ fn openclaw_is_present_is_false_before_then_true_after_install() {
 
 #[test]
 fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
-    // Codex installed ALONE: the config holds only our managed entry, so uninstall
-    // un-merges to an effectively EMPTY TOML doc — the exact case where a naive
-    // "delete if empty" would lose the user's file.
+    // CodeWhale installed ALONE: the config holds only our managed entries, so
+    // uninstall un-merges to an effectively EMPTY TOML doc — the exact case where a
+    // naive "delete if empty" would lose the user's file.
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("config.toml");
 
     let r = install_target_from(
-        &CODEX,
+        &target::CODEWHALE,
         Some(cfg.clone()),
         Some(PathBuf::from("/fake/pixtuoid-hook")),
     )
@@ -580,7 +544,7 @@ fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
     assert!(matches!(r.outcome, InstallOutcome::Installed));
     assert!(cfg.exists());
 
-    let u = uninstall_target(&CODEX, Some(cfg.clone())).unwrap();
+    let u = uninstall_target(&target::CODEWHALE, Some(cfg.clone())).unwrap();
     assert!(
         matches!(u.outcome, UninstallOutcome::Removed),
         "uninstall must have removed the managed entry (the merge produced a change)"
@@ -599,7 +563,7 @@ fn uninstall_preserves_the_config_file_even_when_it_merges_to_empty() {
 #[test]
 fn install_on_a_malformed_config_errors_without_rewriting() {
     for (t, malformed) in [
-        (&CODEX, "this is = = not valid toml [[["),
+        (&target::CODEWHALE, "this is = = not valid toml [[["),
         (&crate::install::target::CURSOR, "{ not valid json,,, "),
     ] {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -680,7 +644,7 @@ fn verify_target_is_sound_after_a_real_install_for_every_target() {
         ],
         || {
             let exe = std::env::current_exe().unwrap(); // a real, executable file
-            with_fake_claude(|_| {
+            with_fake_hosts(|_| {
                 for &t in target::TARGETS {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = plugin_hooks_path(tmp.path());
@@ -742,7 +706,7 @@ fn verify_target_flags_an_unreadable_config() {
     );
 }
 
-// CODEX embeds an ABSOLUTE shim path, so a shim file present with no exec bits
+// CODEWHALE embeds an ABSOLUTE shim path, so a shim file present with no exec bits
 // reaches the not-executable arm rather than the missing-shim one.
 #[cfg(unix)]
 #[test]
@@ -754,8 +718,8 @@ fn verify_target_flags_a_non_executable_shim() {
     std::fs::write(&shim, b"#!/bin/sh\n").unwrap();
     std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-    install_target_from(&CODEX, Some(cfg.clone()), Some(shim)).unwrap();
-    let v = verify_target(&CODEX, Some(cfg));
+    install_target_from(&target::CODEWHALE, Some(cfg.clone()), Some(shim)).unwrap();
+    let v = verify_target(&target::CODEWHALE, Some(cfg));
     assert!(!v.is_sound());
     assert!(
         v.issues
@@ -827,7 +791,7 @@ fn verify_target_hard_flags_a_missing_beside_file_for_every_beside_target() {
 #[test]
 fn verify_target_flags_any_byte_drift_in_every_owned_file() {
     with_owned_homes(|| {
-        with_fake_claude(|_| {
+        with_fake_hosts(|_| {
             let mut covered = 0;
             for &t in target::TARGETS {
                 let Some(files) = t.primary.owned_files() else {
@@ -1221,7 +1185,7 @@ fn every_target_that_writes_a_config_names_us_in_it() {
             let tmpdir = tempfile::TempDir::new().unwrap();
             let hook = tmpdir.path().join("pixtuoid-hook");
             std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
-            with_fake_claude(|_| {
+            with_fake_hosts(|_| {
                 for t in crate::install::TARGETS {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = plugin_hooks_path(tmp.path());
@@ -1276,46 +1240,57 @@ fn kimis_uppercase_env_marker_alone_satisfies_the_fallback_probe() {
     );
 }
 
-/// A fake `claude` first on PATH and a temp `CLAUDE_CONFIG_DIR`, so no test reaches
-/// the developer's Claude Code. It logs its argv to `calls.log` beside it and keeps
-/// the two listings in files the way the real CLI's state behaves.
-pub(crate) fn with_fake_claude<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
-    with_fake_claude_failing(None, f)
+/// A fake of every plugin host's CLI first on PATH, each with a temp home, so no test
+/// reaches the developer's own. Each logs `<cli> <args>` to `calls.log` beside it and
+/// keeps its state where the real CLI does.
+pub(crate) fn with_fake_hosts<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
+    with_fake_hosts_failing(None, f)
 }
 
-/// [`with_fake_claude`], whose `claude` exits 1 on the exact argument line `fail`.
-fn with_fake_claude_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Path) -> R) -> R {
+/// [`with_fake_hosts`], whose fakes exit 1 on the exact call `fail` (`<cli> <args>`).
+fn with_fake_hosts_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Path) -> R) -> R {
     let dir = tempfile::TempDir::new().unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let bin = dir.path().join("claude");
-        std::fs::write(&bin, FAKE_CLAUDE_SH).unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for (cli, _unix, _windows) in FAKE_HOSTS {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = dir.path().join(cli);
+            std::fs::write(&bin, _unix).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        #[cfg(windows)]
+        std::fs::write(dir.path().join(format!("{cli}.cmd")), _windows).unwrap();
     }
-    #[cfg(windows)]
-    std::fs::write(dir.path().join("claude.cmd"), FAKE_CLAUDE_CMD).unwrap();
     let path = std::env::join_paths(std::iter::once(dir.path().to_path_buf()).chain(
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
     ))
     .unwrap();
-    let config = dir.path().join("claude-config");
-    std::fs::create_dir_all(&config).unwrap();
+    let claude = dir.path().join("claude-config");
+    let codex = dir.path().join("codex-home");
+    for home in [&claude, &codex] {
+        std::fs::create_dir_all(home).unwrap();
+    }
     temp_env::with_vars(
         [
             ("PATH", Some(path.as_os_str())),
-            ("CLAUDE_CONFIG_DIR", Some(config.as_os_str())),
-            ("FAKE_CLAUDE_FAIL", fail.map(std::ffi::OsStr::new)),
+            ("CLAUDE_CONFIG_DIR", Some(claude.as_os_str())),
+            ("CODEX_HOME", Some(codex.as_os_str())),
+            ("FAKE_HOST_FAIL", fail.map(std::ffi::OsStr::new)),
         ],
         || f(dir.path()),
     )
 }
 
-#[cfg(unix)]
+/// Each fake: its command, then its sh and cmd scripts.
+const FAKE_HOSTS: &[(&str, &str, &str)] = &[
+    ("claude", FAKE_CLAUDE_SH, FAKE_CLAUDE_CMD),
+    ("codex", FAKE_CODEX_SH, FAKE_CODEX_CMD),
+];
+
 const FAKE_CLAUDE_SH: &str = r#"#!/bin/sh
 d=$(dirname "$0")
-echo "$*" >> "$d/calls.log"
-[ "$*" = "${FAKE_CLAUDE_FAIL-}" ] && exit 1
+echo "claude $*" >> "$d/calls.log"
+[ "claude $*" = "${FAKE_HOST_FAIL-}" ] && exit 1
 case "$*" in
 "plugin marketplace add "*) echo '[{"name":"pixtuoid"}]' > "$d/marketplaces.json" ;;
 "plugin install pixtuoid@pixtuoid") [ -f "$CLAUDE_CONFIG_DIR/settings.json" ] || echo '{"enabledPlugins":{"pixtuoid@pixtuoid":true}}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
@@ -1324,11 +1299,10 @@ case "$*" in
 esac
 "#;
 
-#[cfg(windows)]
 const FAKE_CLAUDE_CMD: &str = "@echo off\r
 set \"d=%~dp0\"\r
->>\"%d%calls.log\" echo %~1 %~2 %~3 %~4\r
-if defined FAKE_CLAUDE_FAIL if \"%*\"==\"%FAKE_CLAUDE_FAIL%\" exit /b 1\r
+>>\"%d%calls.log\" echo claude %~1 %~2 %~3 %~4\r
+if defined FAKE_HOST_FAIL if \"claude %*\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
 if \"%1 %2 %3\"==\"plugin marketplace add\" (>\"%d%marketplaces.json\" echo [{\"name\":\"pixtuoid\"}]& exit /b 0)\r
 if \"%1 %2\"==\"plugin install\" (if not exist \"%CLAUDE_CONFIG_DIR%\\settings.json\" (>\"%CLAUDE_CONFIG_DIR%\\settings.json\" echo {\"enabledPlugins\":{\"pixtuoid@pixtuoid\":true}})& exit /b 0)\r
 if \"%1 %2 %3\"==\"plugin marketplace remove\" (>\"%d%marketplaces.json\" echo []& exit /b 0)\r
@@ -1336,9 +1310,41 @@ if \"%1 %2 %3\"==\"plugin marketplace list\" (if exist \"%d%marketplaces.json\" 
 exit /b 0\r
 ";
 
+/// Codex records both registrations in its config.toml, which [`codex_config`] reads.
+const FAKE_CODEX_SH: &str = r#"#!/bin/sh
+d=$(dirname "$0")
+c="$CODEX_HOME/config.toml"
+echo "codex $*" >> "$d/calls.log"
+[ "codex $*" = "${FAKE_HOST_FAIL-}" ] && exit 1
+case "$*" in
+"plugin marketplace add "*) grep -qxF '[marketplaces.pixtuoid]' "$c" 2>/dev/null || printf "[marketplaces.pixtuoid]\nsource_type = 'local'\n" >> "$c" ;;
+"plugin add pixtuoid@pixtuoid") grep -qxF "[plugins.'pixtuoid@pixtuoid']" "$c" 2>/dev/null || printf "[plugins.'pixtuoid@pixtuoid']\nenabled = true\n" >> "$c" ;;
+"plugin remove pixtuoid@pixtuoid") grep -vxF -e "[plugins.'pixtuoid@pixtuoid']" -e 'enabled = true' "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
+"plugin marketplace remove pixtuoid") grep -vxF -e '[marketplaces.pixtuoid]' -e "source_type = 'local'" "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
+esac
+"#;
+
+const FAKE_CODEX_CMD: &str = "@echo off\r
+set \"d=%~dp0\"\r
+set \"c=%CODEX_HOME%\\config.toml\"\r
+>>\"%d%calls.log\" echo codex %~1 %~2 %~3 %~4\r
+if defined FAKE_HOST_FAIL if \"codex %*\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
+if \"%1 %2 %3\"==\"plugin marketplace add\" ((findstr /l /x /c:\"[marketplaces.pixtuoid]\" \"%c%\" >nul 2>&1 || (>>\"%c%\" echo [marketplaces.pixtuoid]& >>\"%c%\" echo source_type = 'local'))& exit /b 0)\r
+if \"%1 %2 %3\"==\"plugin marketplace remove\" ((findstr /l /v /x /c:\"[marketplaces.pixtuoid]\" /c:\"source_type = 'local'\" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
+if \"%1 %2\"==\"plugin add\" ((findstr /l /x /c:\"[plugins.'pixtuoid@pixtuoid']\" \"%c%\" >nul 2>&1 || (>>\"%c%\" echo [plugins.'pixtuoid@pixtuoid']& >>\"%c%\" echo enabled = true))& exit /b 0)\r
+if \"%1 %2\"==\"plugin remove\" ((findstr /l /v /x /c:\"[plugins.'pixtuoid@pixtuoid']\" /c:\"enabled = true\" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
+exit /b 0\r
+";
+
+/// The config.toml Codex reads, under the fake's `CODEX_HOME`.
+fn codex_config() -> PathBuf {
+    PathBuf::from(std::env::var_os("CODEX_HOME").expect("inside with_fake_hosts"))
+        .join("config.toml")
+}
+
 /// The settings.json Claude Code reads, under the fake's `CLAUDE_CONFIG_DIR`.
 fn cc_settings() -> PathBuf {
-    PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("inside with_fake_claude"))
+    PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR").expect("inside with_fake_hosts"))
         .join("settings.json")
 }
 
@@ -1353,7 +1359,7 @@ fn plugin_hooks_path(tmp: &std::path::Path) -> PathBuf {
 
 #[test]
 fn claude_install_registers_the_plugin() {
-    with_fake_claude(|fake| {
+    with_fake_hosts(|fake| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         // An executable that exists, so verify has only the plugin to judge.
@@ -1395,7 +1401,7 @@ fn claude_install_registers_the_plugin() {
 
 #[test]
 fn claude_verify_flags_an_unregistered_plugin() {
-    with_fake_claude(|_| {
+    with_fake_hosts(|_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         install_target_from(
@@ -1419,7 +1425,7 @@ fn claude_verify_flags_an_unregistered_plugin() {
 
 #[test]
 fn claude_uninstall_removes_the_marketplace_only_when_listed() {
-    with_fake_claude(|fake| {
+    with_fake_hosts(|fake| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         install_target_from(
@@ -1454,7 +1460,7 @@ fn claude_uninstall_removes_the_marketplace_only_when_listed() {
 
 #[test]
 fn a_disconnect_that_deregisters_a_stranded_plugin_reports_a_removal() {
-    with_fake_claude(|_| {
+    with_fake_hosts(|_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         install_target_from(
@@ -1474,7 +1480,7 @@ fn a_disconnect_that_deregisters_a_stranded_plugin_reports_a_removal() {
 
 #[test]
 fn a_custom_config_never_deletes_a_marketplace_that_is_not_ours() {
-    with_fake_claude(|_| {
+    with_fake_hosts(|_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         let manifest = tmp
@@ -1540,7 +1546,7 @@ fn claude_uninstall_without_claude_on_path_flags_only_a_registered_plugin() {
 
 #[test]
 fn claude_install_fails_when_registering_fails_and_leaves_no_hooks() {
-    with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
+    with_fake_hosts_failing(Some("claude plugin install pixtuoid@pixtuoid"), |_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
@@ -1557,9 +1563,9 @@ fn a_failed_registration_restores_the_hooks_it_found() {
     let tmp = tempfile::TempDir::new().unwrap();
     let hooks = plugin_hooks_path(tmp.path());
     let old = Some(PathBuf::from("/fake/old/pixtuoid-hook"));
-    with_fake_claude(|_| install_target_from(&CLAUDE, Some(hooks.clone()), old.clone()).unwrap());
+    with_fake_hosts(|_| install_target_from(&CLAUDE, Some(hooks.clone()), old.clone()).unwrap());
     let before = std::fs::read_to_string(&hooks).unwrap();
-    with_fake_claude_failing(Some("plugin install pixtuoid@pixtuoid"), |_| {
+    with_fake_hosts_failing(Some("claude plugin install pixtuoid@pixtuoid"), |_| {
         assert!(install_target_from(&CLAUDE, Some(hooks.clone()), old).is_err());
         assert_eq!(
             std::fs::read_to_string(&hooks).unwrap(),
@@ -1578,13 +1584,190 @@ fn a_failed_registration_restores_the_hooks_it_found() {
 
 #[test]
 fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
-    with_fake_claude_failing(Some("plugin marketplace list --json"), |_| {
+    with_fake_hosts_failing(Some("claude plugin marketplace list --json"), |_| {
         let tmp = tempfile::TempDir::new().unwrap();
         let hooks = plugin_hooks_path(tmp.path());
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
         install_target_from(&CLAUDE, Some(hooks.clone()), hook).unwrap();
         assert!(uninstall_target(&CLAUDE, Some(hooks.clone())).is_err());
         assert!(!has_hooks(&CLAUDE, Some(hooks)), "the plugin is left inert");
+    });
+}
+
+/// A user's own Codex hook beside one an older pixtuoid merged into config.toml.
+const CODEX_USER_HOOK: &str =
+    "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"notify-send done\"\n";
+const CODEX_LEGACY_HOOK: &str = "[[hooks.PreToolUse]]\n[[hooks.PreToolUse.hooks]]\ntype = \"command\"\ncommand = \"PIXTUOID_SOURCE=codex '/old/pixtuoid-hook'\"\ntimeout = 5\nstatusMessage = \"pixtuoid visualizer\"\n_pixtuoid = true\n";
+
+#[test]
+fn codex_connect_registers_the_plugin_and_strips_the_hooks_an_older_pixtuoid_merged() {
+    with_fake_hosts(|fake| {
+        std::fs::write(
+            codex_config(),
+            format!("{CODEX_USER_HOOK}{CODEX_LEGACY_HOOK}"),
+        )
+        .unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let hook = Some(std::env::current_exe().unwrap());
+        let r = install_target_from(&CODEX, Some(hooks.clone()), hook.clone()).unwrap();
+        assert!(matches!(r.outcome, InstallOutcome::Installed));
+
+        let root = tmp.path().join("marketplace");
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert!(
+            calls.contains(&format!("codex plugin marketplace add {}", root.display()))
+                && calls.contains("codex plugin add pixtuoid@pixtuoid"),
+            "calls: {calls}"
+        );
+        let marketplace: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(".agents/plugins/marketplace.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            marketplace["plugins"][0]["source"],
+            serde_json::json!({ "source": "local", "path": "./plugin" })
+        );
+        let config = std::fs::read_to_string(codex_config()).unwrap();
+        assert!(
+            config.starts_with(CODEX_USER_HOOK) && !config.contains(SENTINEL_KEY),
+            "the user's hook stays byte for byte and ours goes: {config}"
+        );
+        assert!(has_hooks(&CODEX, Some(hooks.clone())));
+        let v = verify_target(&CODEX, Some(hooks.clone()));
+        assert!(v.is_sound(), "{:?}", v.issues);
+
+        // Nothing it writes carries the release, so no upgrade alone changes what
+        // Codex copied and runs.
+        for f in [root.join("plugin/.codex-plugin/plugin.json"), hooks.clone()] {
+            let body = std::fs::read_to_string(&f).unwrap();
+            assert!(
+                !body.contains(env!("CARGO_PKG_VERSION")),
+                "{}: {body}",
+                f.display()
+            );
+        }
+
+        let r2 = install_target_from(&CODEX, Some(hooks), hook).unwrap();
+        assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
+    });
+}
+
+#[test]
+fn codex_verify_flags_a_disabled_plugin() {
+    with_fake_hosts(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target_from(
+            &CODEX,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let config = std::fs::read_to_string(codex_config()).unwrap();
+        std::fs::write(
+            codex_config(),
+            config.replace("enabled = true", "enabled = false"),
+        )
+        .unwrap();
+        let v = verify_target(&CODEX, Some(hooks));
+        assert!(
+            v.issues
+                .iter()
+                .any(|i| i.contains("not installed and enabled")),
+            "{:?}",
+            v.issues
+        );
+    });
+}
+
+#[test]
+fn codex_disconnect_removes_the_plugin_and_its_marketplace_through_codex() {
+    with_fake_hosts(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target_from(
+            &CODEX,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let u = uninstall_target(&CODEX, Some(hooks.clone())).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        assert!(!tmp.path().join("marketplace").exists());
+        let removes = |calls: &str| {
+            (
+                calls
+                    .matches("codex plugin remove pixtuoid@pixtuoid")
+                    .count(),
+                calls
+                    .matches("codex plugin marketplace remove pixtuoid")
+                    .count(),
+            )
+        };
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert_eq!(removes(&calls), (1, 1), "calls: {calls}");
+
+        // Nothing registered now: a second disconnect starts no CLI.
+        let u2 = uninstall_target(&CODEX, Some(hooks)).unwrap();
+        assert!(matches!(u2.outcome, UninstallOutcome::NothingToRemove));
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert_eq!(removes(&calls), (1, 1), "calls: {calls}");
+    });
+}
+
+#[test]
+fn codex_disconnect_strips_the_hooks_an_older_pixtuoid_merged_without_a_plugin() {
+    with_fake_hosts(|fake| {
+        std::fs::write(codex_config(), CODEX_LEGACY_HOOK).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let u = uninstall_target(&CODEX, Some(plugin_hooks_path(tmp.path()))).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        assert!(
+            !std::fs::read_to_string(codex_config())
+                .unwrap()
+                .contains(SENTINEL_KEY)
+        );
+        assert!(
+            !fake.join("calls.log").exists(),
+            "no CLI for nothing registered"
+        );
+    });
+}
+
+#[test]
+fn codex_disconnect_without_codex_on_path_leaves_a_registered_plugin() {
+    with_fake_hosts(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target_from(
+            &CODEX,
+            Some(hooks.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        std::fs::remove_file(fake.join(if cfg!(windows) { "codex.cmd" } else { "codex" })).unwrap();
+        let u = temp_env::with_var("PATH", Some(fake), || {
+            uninstall_target(&CODEX, Some(hooks.clone())).unwrap()
+        });
+        assert!(u.plugin_left_registered);
+        assert!(
+            tmp.path()
+                .join("marketplace/.agents/plugins/marketplace.json")
+                .exists(),
+            "a marketplace Codex still lists keeps its manifest"
+        );
+    });
+}
+
+#[test]
+fn codex_connect_fails_when_adding_the_plugin_fails_and_leaves_no_hooks() {
+    with_fake_hosts_failing(Some("codex plugin add pixtuoid@pixtuoid"), |_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        assert!(install_target_from(&CODEX, Some(hooks.clone()), hook).is_err());
+        assert!(!has_hooks(&CODEX, Some(hooks)));
     });
 }
 
@@ -1643,7 +1826,7 @@ fn every_owned_set_re_renders_byte_identical_from_the_shim_its_first_file_bakes(
 #[test]
 fn owned_state_is_current_after_install_and_differs_after_any_byte_edit() {
     with_owned_homes(|| {
-        with_fake_claude(|_| {
+        with_fake_hosts(|_| {
             for t in target::TARGETS {
                 let Some(files) = t.primary.owned_files() else {
                     continue;
@@ -1715,7 +1898,7 @@ fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
 #[test]
 fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
     with_owned_homes(|| {
-        with_fake_claude(|fake| {
+        with_fake_hosts(|fake| {
             let host_calls = || std::fs::read_to_string(fake.join("calls.log")).unwrap_or_default();
             for t in target::TARGETS {
                 let Some(files) = t.primary.owned_files() else {
@@ -1874,7 +2057,7 @@ fn reinstall_adds_newly_registered_events_to_an_older_claude_hooks_file() {
 /// file with this binary's render at the new path, never a sentinel.
 #[test]
 fn reinstall_re_bakes_a_moved_shim_into_every_owned_primary() {
-    with_fake_claude(|_| {
+    with_fake_hosts(|_| {
         let mut covered = 0;
         for &t in target::TARGETS {
             let Primary::Owned { render, .. } = t.primary else {
@@ -1902,7 +2085,7 @@ fn reinstall_re_bakes_a_moved_shim_into_every_owned_primary() {
 /// that converges it anyway (a stale connected set) leaves the stub alone.
 #[test]
 fn converge_leaves_a_disconnected_owned_primary_alone() {
-    with_fake_claude(|_| {
+    with_fake_hosts(|_| {
         for &t in target::TARGETS {
             if !matches!(t.primary, Primary::Owned { .. }) {
                 continue;

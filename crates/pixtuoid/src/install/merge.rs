@@ -344,15 +344,14 @@ mod tests {
     /// and the next reinstall finds nothing to do.
     #[test]
     fn a_reinstall_after_an_owner_hook_settles() {
-        let cmd = "PIXTUOID_SOURCE=codex /opt/bin/pixtuoid-hook";
-        let ours = crate::install::codex::merge_install("", cmd)
-            .unwrap()
-            .content;
-        let owner = format!(
-            "{ours}\n[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"notify-send done\"\n"
-        );
-        let moved = crate::install::codex::merge_install(&owner, cmd).unwrap();
-        let again = crate::install::codex::merge_install(&moved.content, cmd).unwrap();
+        use crate::install::codewhale::merge_install;
+        let cmd = "PIXTUOID_SOURCE=codewhale /opt/bin/pixtuoid-hook";
+        let ours = merge_install("", cmd).unwrap().content;
+        let owner =
+            format!("{ours}\n[[hooks.hooks]]\nevent = \"Stop\"\ncommand = \"notify-send done\"\n");
+        let moved = merge_install(&owner, cmd).unwrap();
+        assert!(moved.changed, "{}", moved.content);
+        let again = merge_install(&moved.content, cmd).unwrap();
         assert!(!again.changed, "{}", moved.content);
         assert_eq!(again.content, moved.content);
     }

@@ -4,9 +4,11 @@ use anyhow::{Context, Result};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
+use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
-use crate::install::target::{HostRegistration, MergeOutcome, Unregistered};
+use crate::install::target::{HostRegistration, Unregistered};
+use crate::install::verify::ShimRef;
 
 pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
@@ -25,10 +27,6 @@ pub(crate) const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// The marketplace and the plugin share one name, so the plugin id is
-/// `pixtuoid@pixtuoid`.
-const PLUGIN_NAME: &str = "pixtuoid";
-
 /// Claude Code loads the hooks through its plugin system
 /// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads
 /// in place, so a rewrite of the file reaches the next session.
@@ -38,17 +36,11 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     is_registered,
     // A local-path marketplace loads in place.
     reload: None,
+    legacy: None,
 };
 
-/// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    let base = crate::config::config_base().context("no home directory resolves")?;
-    Ok(base
-        .join("pixtuoid")
-        .join("claude-plugin")
-        .join(PLUGIN_NAME)
-        .join("hooks")
-        .join("hooks.json"))
+    host_plugin::owned_path("claude-plugin", host_plugin::HOOKS_FILE)
 }
 
 /// Claude Code's user settings, where it records the plugin as enabled.
@@ -68,52 +60,35 @@ pub(crate) fn detect_installed() -> bool {
         .unwrap_or(false)
 }
 
-/// The plugin dir and the marketplace root of `<root>/<plugin>/hooks/hooks.json`.
-fn plugin_layout(config: &Path) -> Result<(&Path, &Path)> {
-    let plugin = config.parent().and_then(Path::parent);
-    plugin.zip(plugin.and_then(Path::parent)).with_context(|| {
-        format!(
-            "{} is not <marketplace>/<plugin>/hooks/hooks.json",
-            config.display()
-        )
-    })
-}
-
-fn plugin_id() -> String {
-    format!("{PLUGIN_NAME}@{PLUGIN_NAME}")
+fn marketplace_manifest(root: &Path) -> PathBuf {
+    root.join(".claude-plugin").join("marketplace.json")
 }
 
 fn register(config: &Path) -> Result<()> {
-    let (plugin, root) = plugin_layout(config)?;
-    let source = Path::new(".").join(plugin.file_name().context("the plugin dir has no name")?);
-    let marketplace = json!({
-        "name": PLUGIN_NAME,
-        "owner": { "name": PLUGIN_NAME },
-        "plugins": [{
-            "name": PLUGIN_NAME,
-            "source": source.to_string_lossy().replace('\\', "/"),
-            "description": "Sends Claude Code's session events to the pixtuoid office",
-        }],
-    });
-    let manifest = json!({
-        "name": PLUGIN_NAME,
-        "version": env!("CARGO_PKG_VERSION"),
-        "description": "Sends Claude Code's session events to the pixtuoid office",
-        "homepage": env!("CARGO_PKG_HOMEPAGE"),
-    });
-    for (path, doc) in [
+    let (plugin, root) = host_plugin::hooks_layout(config)?;
+    host_plugin::write_manifests(&[
         (
-            root.join(".claude-plugin").join("marketplace.json"),
-            marketplace,
+            marketplace_manifest(root),
+            json!({
+                "name": NAME,
+                "owner": { "name": NAME },
+                "plugins": [{
+                    "name": NAME,
+                    "source": host_plugin::relative_source(plugin)?,
+                    "description": "Sends Claude Code's session events to the pixtuoid office",
+                }],
+            }),
         ),
-        (plugin.join(".claude-plugin").join("plugin.json"), manifest),
-    ] {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        }
-        io::write_config_atomic(&path, &serde_json::to_string_pretty(&doc)?)
-            .with_context(|| format!("writing {}", path.display()))?;
-    }
+        (
+            plugin.join(".claude-plugin").join("plugin.json"),
+            json!({
+                "name": NAME,
+                "version": env!("CARGO_PKG_VERSION"),
+                "description": "Sends Claude Code's session events to the pixtuoid office",
+                "homepage": env!("CARGO_PKG_HOMEPAGE"),
+            }),
+        ),
+    ])?;
     // Both are idempotent: a repeat add reports the marketplace already on disk,
     // a repeat install that the plugin already loads in place.
     CLI.run(&[
@@ -122,20 +97,25 @@ fn register(config: &Path) -> Result<()> {
         "add".as_ref(),
         root.as_os_str(),
     ])?;
-    CLI.run(&["plugin".as_ref(), "install".as_ref(), plugin_id().as_ref()])?;
+    CLI.run(&[
+        "plugin".as_ref(),
+        "install".as_ref(),
+        host_plugin::plugin_id().as_ref(),
+    ])?;
     Ok(())
 }
 
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
 fn unregister(config: &Path) -> Result<Unregistered> {
+    let (_, root) = host_plugin::hooks_layout(config)?;
     if CLI.locate().is_none() {
         // Disabled is still installed: its marketplace must outlive it.
         if plugin_entry()?.is_some() {
             tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
             return Ok(Unregistered::Unreachable);
         }
-        remove_marketplace(config)?;
+        host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
         return Ok(Unregistered::Absent);
     }
     let listed = CLI.run(&[
@@ -150,31 +130,15 @@ fn unregister(config: &Path) -> Result<Unregistered> {
             "plugin".as_ref(),
             "marketplace".as_ref(),
             "remove".as_ref(),
-            PLUGIN_NAME.as_ref(),
+            NAME.as_ref(),
         ])?;
     }
-    remove_marketplace(config)?;
+    host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
     Ok(if found {
         Unregistered::Removed
     } else {
         Unregistered::Absent
     })
-}
-
-/// Delete the marketplace `register` wrote around `config`, only when its
-/// manifest is ours: a custom `config` path must not take a stranger's dir.
-fn remove_marketplace(config: &Path) -> Result<()> {
-    let (_, root) = plugin_layout(config)?;
-    let manifest = root.join(".claude-plugin").join("marketplace.json");
-    let Ok(text) = std::fs::read_to_string(&manifest) else {
-        return Ok(());
-    };
-    let ours =
-        serde_json::from_str::<Value>(&text).is_ok_and(|m| m["name"].as_str() == Some(PLUGIN_NAME));
-    if ours {
-        std::fs::remove_dir_all(root).with_context(|| format!("removing {}", root.display()))?;
-    }
-    Ok(())
 }
 
 /// Read where Claude Code records a user-scope install as enabled
@@ -186,7 +150,7 @@ fn is_registered() -> Result<bool> {
 
 /// The plugin's `enabledPlugins` value: `Some(false)` is installed but disabled.
 fn plugin_entry() -> Result<Option<bool>> {
-    Ok(read_settings(&settings_path()?)?["enabledPlugins"][plugin_id()].as_bool())
+    Ok(read_settings(&settings_path()?)?["enabledPlugins"][host_plugin::plugin_id()].as_bool())
 }
 
 /// `Null` for a missing or empty file.
@@ -203,7 +167,7 @@ fn marketplace_listed(json_out: &str) -> Result<bool> {
         .context("parsing `claude plugin marketplace list --json`")?;
     Ok(rows
         .iter()
-        .any(|r| r.get("name").and_then(Value::as_str) == Some(PLUGIN_NAME)))
+        .any(|r| r.get("name").and_then(Value::as_str) == Some(NAME)))
 }
 
 /// The CLI that registers the plugin, named in every error it raises.
@@ -258,82 +222,36 @@ pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
 }
 
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{SchemaParse, ShimRef, assemble};
-    let Ok(doc) = serde_json::from_str::<Value>(content) else {
-        return SchemaParse::broken("the plugin's hooks.json no longer parses as JSON");
-    };
-    let hooks = doc.get("hooks").and_then(|h| h.as_object());
-    let mut missing = Vec::new();
-    let mut any = false;
-    let mut shim = ShimRef::Unknown;
-    for ev in EVENTS {
-        let managed: Option<&Value> = hooks
-            .and_then(|h| h.get(*ev))
-            .and_then(|a| a.as_array())
-            .and_then(|arr| arr.first());
-        match managed {
-            Some(entry) => {
-                any = true;
-                if shim == ShimRef::Unknown {
-                    shim = claude_shim_ref(entry);
-                }
-            }
-            None => missing.push(*ev),
-        }
-    }
-    assemble(&missing, any, shim, vec![])
+    host_plugin::verify_hooks(content, EVENTS, claude_shim_ref)
 }
 
-fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
-    use crate::install::verify::ShimRef;
-    let cmd = entry
-        .get("hooks")
-        .and_then(|h| h.as_array())
-        .and_then(|a| a.first())
-        .and_then(|h| h.get("command"))
-        .and_then(|c| c.as_str());
-    match cmd {
-        None => ShimRef::Unknown,
-        // The SHELL form is `shell_shim_ref`'s own wire format, so it parses it —
-        // including any future ` --event` suffix, which a private copy here would
-        // bake into the path. CC alone can answer `BareName`, so that is the one
-        // thing mapped on top.
-        #[cfg(not(windows))]
-        Some(c) => match crate::install::verify::shell_shim_ref(c.trim()) {
+fn claude_shim_ref(command: &str) -> ShimRef {
+    // The SHELL form is `shell_shim_ref`'s own wire format, so it parses it —
+    // including any future ` --event` suffix, which a private copy here would
+    // bake into the path. CC alone can answer `BareName`, so that is the one
+    // thing mapped on top.
+    #[cfg(not(windows))]
+    {
+        match crate::install::verify::shell_shim_ref(command.trim()) {
             ShimRef::Absolute(p) if p.as_os_str() == io::HOOK_BIN => ShimRef::BareName,
             other => other,
-        },
-        // NOT that parser: CC's Windows entry is exec form (`args: []`), a bare
-        // absolute path with neither quoting nor `--source`, so it would fall to
-        // that parser's last-whitespace-token arm and truncate `C:\Program Files\…`.
-        #[cfg(windows)]
-        Some(c) => ShimRef::Absolute(std::path::PathBuf::from(c.trim())),
+        }
+    }
+    // NOT that parser: CC's Windows entry is exec form (`args: []`), a bare
+    // absolute path with neither quoting nor `--source`, so it would fall to
+    // that parser's last-whitespace-token arm and truncate `C:\Program Files\…`.
+    #[cfg(windows)]
+    {
+        ShimRef::Absolute(PathBuf::from(command.trim()))
     }
 }
 
-pub(crate) fn installed_shim(content: &str) -> crate::install::verify::ShimRef {
+pub(crate) fn installed_shim(content: &str) -> ShimRef {
     verify_schema(content).shim
 }
 
 pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {
-    let want = json!({
-        "hooks": EVENTS
-            .iter()
-            .map(|ev| ((*ev).to_string(), json!([managed_entry(hook_cmd)])))
-            .collect::<serde_json::Map<_, _>>()
-    });
-    Ok(serde_json::to_string_pretty(&want)?)
-}
-
-pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
-    let had_hooks = serde_json::from_str::<Value>(content)
-        .ok()
-        .and_then(|doc| doc.get("hooks")?.as_object().map(|h| !h.is_empty()))
-        .unwrap_or(false);
-    Ok(MergeOutcome {
-        content: "{}\n".to_string(),
-        changed: had_hooks,
-    })
+    host_plugin::render_hooks(EVENTS, &managed_entry(hook_cmd))
 }
 
 /// The one place Claude's nested per-event shape lives.
@@ -383,9 +301,6 @@ mod tests {
                 hooks,
                 base.join("pixtuoid/claude-plugin/pixtuoid/hooks/hooks.json")
             );
-            let (plugin, root) = plugin_layout(&hooks).unwrap();
-            assert_eq!(plugin, base.join("pixtuoid/claude-plugin/pixtuoid"));
-            assert_eq!(root, base.join("pixtuoid/claude-plugin"));
         });
     }
 
@@ -414,15 +329,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn uninstall_empties_the_file_and_reports_a_change_only_with_hooks() {
-        let installed = render_hooks("pixtuoid-hook").unwrap();
-        let out = uninstall(&installed).unwrap();
-        assert!(out.changed);
-        assert!(!uninstall(&out.content).unwrap().changed);
-        assert!(!uninstall("").unwrap().changed);
-    }
-
     #[cfg(unix)]
     #[test]
     fn hook_command_explicit_path_is_embedded_and_stamped_on_unix() {
@@ -448,21 +354,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn claude_shim_ref_reads_the_auto_resolved_command_back_as_a_bare_name() {
-        use crate::install::verify::ShimRef;
         let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
-        let entry = serde_json::json!({ "hooks": [{ "command": cmd }] });
-        assert_eq!(claude_shim_ref(&entry), ShimRef::BareName);
+        assert_eq!(claude_shim_ref(&cmd), ShimRef::BareName);
     }
 
     #[cfg(unix)]
     #[test]
     fn claude_shim_ref_survives_an_event_suffix_it_does_not_write_today() {
-        use crate::install::verify::ShimRef;
-        let entry = serde_json::json!({
-            "hooks": [{ "command": "PIXTUOID_SOURCE=claude-code '/opt/pixtuoid-hook' --event PreToolUse" }]
-        });
         assert_eq!(
-            claude_shim_ref(&entry),
+            claude_shim_ref("PIXTUOID_SOURCE=claude-code '/opt/pixtuoid-hook' --event PreToolUse"),
             ShimRef::Absolute(std::path::PathBuf::from("/opt/pixtuoid-hook"))
         );
     }
@@ -471,26 +371,22 @@ mod tests {
     #[test]
     fn claude_shim_ref_recovers_a_single_quoted_path_with_an_apostrophe() {
         use crate::install::hook_cmd::unix::shell_single_quote;
-        use crate::install::verify::ShimRef;
         let path = "/U/O'B/pixtuoid-hook";
         let cmd = shell_single_quote(path);
         assert!(
             cmd.contains("'\\''"),
             "expected an escaped apostrophe in {cmd:?}"
         );
-        let entry = serde_json::json!({ "hooks": [{ "command": cmd }] });
         assert_eq!(
-            claude_shim_ref(&entry),
+            claude_shim_ref(&cmd),
             ShimRef::Absolute(std::path::PathBuf::from(path))
         );
     }
 
     #[test]
     fn claude_shim_ref_half_quoted_command_is_literal_not_unquoted() {
-        use crate::install::verify::ShimRef;
-        let entry = serde_json::json!({ "hooks": [{ "command": "'/opt/pixtuoid-hook" }] });
         assert_eq!(
-            claude_shim_ref(&entry),
+            claude_shim_ref("'/opt/pixtuoid-hook"),
             ShimRef::Absolute(std::path::PathBuf::from("'/opt/pixtuoid-hook"))
         );
     }

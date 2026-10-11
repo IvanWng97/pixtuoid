@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-use toml::value::Table;
+use anyhow::{Context, Result};
+use serde_json::json;
 
 use crate::install::SENTINEL_KEY;
-use crate::install::target::MergeOutcome;
+use crate::install::host_plugin::{self, NAME};
+use crate::install::io;
+use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
+use crate::install::verify::{SchemaParse, ShimRef};
 
 pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionStart",
@@ -20,11 +23,33 @@ pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// Codex loads the hooks through its plugin system: a local marketplace it records in
+/// place, and a plugin `codex plugin add` copies into its cache and enables
+/// (`codex-rs/core-plugins/src/manager.rs` @ rust-v0.162.1).
+pub(crate) const HOST: HostRegistration = HostRegistration {
+    register,
+    unregister,
+    is_registered,
+    reload: Some(reload),
+    legacy: Some(LegacyConfig {
+        path: config_toml,
+        strip: merge_uninstall,
+    }),
+};
+
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    // The SAME codex_home() the watcher uses, so the installed-hook config and the
-    // watched sessions root can't disagree. Infallibly `Ok` — the `Result` is the
-    // shared `Target` signature, which home-anchored targets genuinely need.
+    host_plugin::owned_path("codex-plugin", host_plugin::HOOKS_FILE)
+}
+
+/// Codex's own config, where it records the marketplace and the plugin's enablement.
+/// The SAME codex_home() the watcher uses, so the two can't disagree.
+fn config_toml() -> Result<PathBuf> {
     Ok(pixtuoid_core::source::codex::codex_home().join("config.toml"))
+}
+
+/// Codex is present when its config is: an empty ~/.codex says nothing.
+pub(crate) fn detect_installed() -> bool {
+    config_toml().is_ok_and(|p| crate::install::target::config_present(&p))
 }
 
 /// The Codex hook `command`. Codex runs it under a shell (`/bin/sh -lc` on Unix,
@@ -38,10 +63,148 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::hook_cmd::shell_hook_command(p, "codex")
 }
 
-pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    crate::install::merge::toml_merge_outcome(content, |doc| toml_merge_install(doc, hook_cmd))
+pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {
+    // No `matcher`: an omitted matcher means "match all" in Codex. Do NOT write
+    // `"*"` — codex rejects a bare `*` as an invalid regex and silently
+    // drops the ENTIRE group, so SessionStart/PreToolUse never fire.
+    let group = json!({
+        "hooks": [{
+            "type": "command",
+            "command": hook_cmd,
+            "timeout": 5,
+            "statusMessage": "pixtuoid visualizer",
+        }]
+    });
+    host_plugin::render_hooks(CODEX_EVENTS, &group)
 }
 
+pub(crate) fn verify_schema(content: &str) -> SchemaParse {
+    host_plugin::verify_hooks(
+        content,
+        CODEX_EVENTS,
+        crate::install::verify::shell_shim_ref,
+    )
+}
+
+pub(crate) fn installed_shim(content: &str) -> ShimRef {
+    verify_schema(content).shim
+}
+
+fn marketplace_manifest(root: &Path) -> PathBuf {
+    root.join(".agents")
+        .join("plugins")
+        .join("marketplace.json")
+}
+
+fn register(config: &Path) -> Result<()> {
+    let (plugin, root) = host_plugin::hooks_layout(config)?;
+    host_plugin::write_manifests(&[
+        (
+            marketplace_manifest(root),
+            json!({
+                "name": NAME,
+                "plugins": [{
+                    "name": NAME,
+                    "source": { "source": "local", "path": host_plugin::relative_source(plugin)? },
+                }],
+            }),
+        ),
+        (
+            plugin.join(".codex-plugin").join("plugin.json"),
+            // No `version`: Codex then caches the copy as `local`, so no release
+            // changes a byte it runs.
+            json!({
+                "name": NAME,
+                "description": "Sends Codex's session events to the pixtuoid office",
+            }),
+        ),
+    ])?;
+    // A repeat add of the same local source is a no-op
+    // (`codex-rs/core-plugins/src/marketplace_add.rs` @ rust-v0.162.1), and a repeat
+    // plugin add replaces the copy.
+    CLI.run(&[
+        "plugin".as_ref(),
+        "marketplace".as_ref(),
+        "add".as_ref(),
+        root.as_os_str(),
+    ])?;
+    reload(config)
+}
+
+/// `plugin add` also re-enables a plugin the user disabled, so only a connect or an
+/// enabled plugin calls it.
+fn reload(_config: &Path) -> Result<()> {
+    CLI.run(&[
+        "plugin".as_ref(),
+        "add".as_ref(),
+        host_plugin::plugin_id().as_ref(),
+    ])?;
+    Ok(())
+}
+
+/// Reads Codex's config first, so a disconnect with nothing registered starts no CLI.
+fn unregister(config: &Path) -> Result<Unregistered> {
+    let (_, root) = host_plugin::hooks_layout(config)?;
+    let doc = read_codex_config()?;
+    let installed = doc
+        .get("plugins")
+        .and_then(|p| p.get(host_plugin::plugin_id().as_str()))
+        .is_some();
+    let listed = doc.get("marketplaces").and_then(|m| m.get(NAME)).is_some();
+    if !installed && !listed {
+        host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
+        return Ok(Unregistered::Absent);
+    }
+    if CLI.locate().is_none() {
+        // A marketplace Codex still lists must keep its manifest.
+        tracing::warn!("codex not on PATH; leaving the pixtuoid plugin registered");
+        return Ok(Unregistered::Unreachable);
+    }
+    if installed {
+        CLI.run(&[
+            "plugin".as_ref(),
+            "remove".as_ref(),
+            host_plugin::plugin_id().as_ref(),
+        ])?;
+    }
+    if listed {
+        CLI.run(&[
+            "plugin".as_ref(),
+            "marketplace".as_ref(),
+            "remove".as_ref(),
+            NAME.as_ref(),
+        ])?;
+    }
+    host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
+    Ok(Unregistered::Removed)
+}
+
+/// Where `codex plugin add` records the plugin enabled
+/// (`codex-rs/config/src/plugin_edit.rs` @ rust-v0.162.1).
+fn is_registered() -> Result<bool> {
+    let doc = read_codex_config()?;
+    Ok(doc
+        .get("plugins")
+        .and_then(|p| p.get(host_plugin::plugin_id().as_str()))
+        .and_then(|e| e.get("enabled"))
+        .and_then(toml::Value::as_bool)
+        == Some(true))
+}
+
+/// An empty table for a missing or empty file.
+fn read_codex_config() -> Result<toml::Value> {
+    let path = config_toml()?;
+    let content = io::read_config(&path)?;
+    toml::from_str(&content).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// The CLI that registers the plugin, named in every error it raises.
+const CLI: io::HostCli = io::HostCli {
+    command: "codex",
+    display_name: "Codex",
+};
+
+/// Strips what a pixtuoid from before the plugin merged into `config.toml`.
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     crate::install::merge::toml_merge_outcome(content, toml_merge_uninstall)
 }
@@ -59,100 +222,11 @@ fn prune_managed_handlers(group: &mut toml::Value) {
     }
 }
 
-/// Install-schema verification: every `CODEX_EVENTS` group still holds a
-/// sentinel-tagged handler, and the shim command is read back for the on-disk check.
-pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
-    let Ok(doc) = toml::from_str::<toml::Value>(content) else {
-        return SchemaParse::broken("config.toml no longer parses as TOML");
-    };
-    let hooks = doc.get("hooks").and_then(|h| h.as_table());
-    let mut missing = Vec::new();
-    let mut any = false;
-    let mut shim = ShimRef::Unknown;
-    for ev in CODEX_EVENTS {
-        let handler = hooks
-            .and_then(|h| h.get(*ev))
-            .and_then(|a| a.as_array())
-            .and_then(|groups| {
-                groups.iter().find_map(|g| {
-                    g.get("hooks")
-                        .and_then(|hs| hs.as_array())
-                        .and_then(|hs| hs.iter().find(|h| handler_is_managed(h)))
-                })
-            });
-        match handler {
-            Some(h) => {
-                any = true;
-                if shim == ShimRef::Unknown {
-                    shim = h
-                        .get("command")
-                        .and_then(|c| c.as_str())
-                        .map(shell_shim_ref)
-                        .unwrap_or(ShimRef::Unknown);
-                }
-            }
-            None => missing.push(*ev),
-        }
-    }
-    assemble(&missing, any, shim, vec![])
-}
-
 fn group_has_no_hooks(group: &toml::Value) -> bool {
     group
         .get("hooks")
         .and_then(|h| h.as_array())
         .is_some_and(|h| h.is_empty())
-}
-
-fn managed_group(hook_command: &str) -> toml::Value {
-    let mut handler = Table::new();
-    handler.insert("type".into(), toml::Value::String("command".into()));
-    handler.insert("command".into(), toml::Value::String(hook_command.into()));
-    handler.insert("timeout".into(), toml::Value::Integer(5));
-    handler.insert(
-        "statusMessage".into(),
-        toml::Value::String("pixtuoid visualizer".into()),
-    );
-    handler.insert(SENTINEL_KEY.into(), toml::Value::Boolean(true));
-
-    // No `matcher`: an omitted matcher means "match all" in Codex. Do NOT write
-    // `matcher = "*"` — codex rejects a bare `*` as an invalid regex and silently
-    // drops the ENTIRE group, so SessionStart/PreToolUse never fire.
-    let mut group = Table::new();
-    group.insert(
-        "hooks".into(),
-        toml::Value::Array(vec![toml::Value::Table(handler)]),
-    );
-    toml::Value::Table(group)
-}
-
-fn toml_merge_install(doc: toml::Value, hook_command: &str) -> toml::Value {
-    let mut root = doc.as_table().cloned().unwrap_or_default();
-    let hooks = root
-        .entry("hooks".to_string())
-        .or_insert_with(|| toml::Value::Table(Table::new()));
-    if !hooks.is_table() {
-        *hooks = toml::Value::Table(Table::new());
-    }
-    if let Some(hooks) = hooks.as_table_mut() {
-        for ev in CODEX_EVENTS {
-            let entry = hooks
-                .entry((*ev).to_string())
-                .or_insert_with(|| toml::Value::Array(vec![]));
-            if !entry.is_array() {
-                *entry = toml::Value::Array(vec![]);
-            }
-            if let Some(arr) = entry.as_array_mut() {
-                for group in arr.iter_mut() {
-                    prune_managed_handlers(group);
-                }
-                arr.retain(|group| !group_has_no_hooks(group));
-                arr.push(managed_group(hook_command));
-            }
-        }
-    }
-    toml::Value::Table(root)
 }
 
 fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
@@ -194,72 +268,69 @@ mod tests {
         toml::from_str(s).unwrap()
     }
 
+    /// One event as a pixtuoid from before the plugin merged it into config.toml.
+    const LEGACY: &str = r#"
+[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "PIXTUOID_SOURCE=codex '/x/pixtuoid-hook'"
+timeout = 5
+statusMessage = "pixtuoid visualizer"
+_pixtuoid = true
+"#;
+
     #[test]
-    fn install_creates_groups_for_all_events_with_sentinel() {
-        let out = merge_install("", "PIXTUOID_SOURCE=codex /opt/bin/pixtuoid-hook").unwrap();
-        assert!(out.changed);
-        let v = parse(&out.content);
-        for ev in CODEX_EVENTS {
-            let arr = v["hooks"][*ev].as_array().unwrap();
-            assert_eq!(arr.len(), 1, "event {ev}");
-            let handler = &arr[0]["hooks"][0];
+    fn the_hooks_file_sits_in_pixtuoids_own_codex_marketplace() {
+        let base = std::env::temp_dir().join("pixtuoid-xdg");
+        temp_env::with_var("XDG_CONFIG_HOME", Some(&base), || {
             assert_eq!(
-                handler["command"].as_str().unwrap(),
-                "PIXTUOID_SOURCE=codex /opt/bin/pixtuoid-hook"
+                default_config_path().unwrap(),
+                base.join("pixtuoid/codex-plugin/pixtuoid/hooks/hooks.json")
             );
-            assert_eq!(handler["timeout"].as_integer().unwrap(), 5);
-            assert_eq!(
-                handler["statusMessage"].as_str().unwrap(),
-                "pixtuoid visualizer"
-            );
-            assert!(handler["_pixtuoid"].as_bool().unwrap());
-        }
+        });
     }
 
     #[test]
-    fn install_does_not_write_features_hooks() {
-        let out = merge_install("", "/x").unwrap();
-        let v = parse(&out.content);
-        assert!(
-            v.get("features").is_none(),
-            "must not write [features] hooks = true"
+    fn the_legacy_config_honors_codex_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        temp_env::with_var("CODEX_HOME", Some(tmp.path()), || {
+            assert_eq!(config_toml().unwrap(), tmp.path().join("config.toml"));
+        });
+        // A non-existent dir falls back, where upstream errors; `resolve_codex_home` says why.
+        let missing = tmp.path().join("missing");
+        temp_env::with_var("CODEX_HOME", Some(&missing), || {
+            assert!(
+                config_toml()
+                    .unwrap()
+                    .ends_with(PathBuf::from(".codex").join("config.toml"))
+            );
+        });
+    }
+
+    #[test]
+    fn every_event_runs_the_shim_with_no_matcher_and_reads_it_back() {
+        let cmd = "PIXTUOID_SOURCE=codex '/opt/bin/pixtuoid-hook'";
+        let doc: serde_json::Value = serde_json::from_str(&render_hooks(cmd).unwrap()).unwrap();
+        let hooks = doc["hooks"].as_object().unwrap();
+        assert_eq!(hooks.len(), CODEX_EVENTS.len());
+        for ev in CODEX_EVENTS {
+            let group = &hooks[*ev][0];
+            assert!(group.get("matcher").is_none(), "{ev}: {group}");
+            assert_eq!(group["hooks"][0]["command"], json!(cmd));
+            assert!(group["hooks"][0].get(SENTINEL_KEY).is_none());
+        }
+        assert_eq!(
+            doc.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["hooks"],
+            "Codex denies unknown top-level keys in a plugin's hooks file"
         );
-    }
-
-    #[test]
-    fn install_writes_no_matcher() {
-        let out = merge_install("", "/x/pixtuoid-hook").unwrap();
-        let v = parse(&out.content);
-        let hooks = v["hooks"].as_table().unwrap();
-        for (ev, arr) in hooks {
-            for group in arr.as_array().unwrap() {
-                assert!(
-                    group.get("matcher").is_none(),
-                    "event {ev} group must not carry a matcher"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn install_is_idempotent_across_different_paths() {
-        let a = merge_install("", "/opt/a/pixtuoid-hook").unwrap();
-        let b = merge_install(&a.content, "/opt/b/pixtuoid-hook").unwrap();
-        let v = parse(&b.content);
-        for ev in CODEX_EVENTS {
-            assert_eq!(
-                v["hooks"][*ev].as_array().unwrap().len(),
-                1,
-                "event {ev} duplicated"
-            );
-        }
-    }
-
-    #[test]
-    fn install_same_command_reports_unchanged() {
-        let first = merge_install("", "/opt/a/pixtuoid-hook").unwrap();
-        let second = merge_install(&first.content, "/opt/a/pixtuoid-hook").unwrap();
-        assert!(!second.changed, "identical re-install is a no-op");
+        let v = verify_schema(&render_hooks(cmd).unwrap());
+        assert!(v.issues.is_empty(), "{:?}", v.issues);
+        #[cfg(unix)]
+        assert_eq!(
+            v.shim,
+            ShimRef::Absolute(PathBuf::from("/opt/bin/pixtuoid-hook"))
+        );
     }
 
     #[test]
@@ -271,8 +342,7 @@ mod tests {
 
     #[test]
     fn uninstall_keeps_user_handler_in_mixed_group() {
-        let installed = merge_install("", "/x/pixtuoid-hook").unwrap();
-        let mut v = parse(&installed.content);
+        let mut v = parse(LEGACY);
         let group = &mut v["hooks"]["PreToolUse"].as_array_mut().unwrap()[0];
         group["hooks"]
             .as_array_mut()
@@ -295,8 +365,8 @@ mod tests {
 
     #[test]
     fn uninstall_removes_empty_groups_and_events() {
-        let installed = merge_install("", "/x/pixtuoid-hook").unwrap();
-        let cleaned = merge_uninstall(&installed.content).unwrap();
+        let cleaned = merge_uninstall(LEGACY).unwrap();
+        assert!(cleaned.changed);
         let v = parse(&cleaned.content);
         assert!(
             v.get("hooks").is_none(),
@@ -397,29 +467,6 @@ command = "/hand/written/pixtuoid-hook"
     }
 
     #[test]
-    fn install_coerces_non_table_hooks_to_table() {
-        let out = merge_install("hooks = 5", "/x/pixtuoid-hook").unwrap();
-        let v = parse(&out.content);
-        let hooks = v["hooks"].as_table().unwrap();
-        for ev in CODEX_EVENTS {
-            assert_eq!(
-                hooks.get(*ev).and_then(|e| e.as_array()).unwrap().len(),
-                1,
-                "event {ev} populated after coercion"
-            );
-        }
-    }
-
-    #[test]
-    fn install_coerces_non_array_event_to_array() {
-        let out = merge_install("[hooks]\nPreToolUse = 5", "/x/pixtuoid-hook").unwrap();
-        let v = parse(&out.content);
-        let arr = v["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 1);
-        assert!(arr[0]["hooks"][0]["_pixtuoid"].as_bool().unwrap());
-    }
-
-    #[test]
     fn uninstall_non_table_doc_returns_unchanged() {
         let input = toml::Value::Integer(3);
         assert_eq!(toml_merge_uninstall(input.clone()), input);
@@ -429,38 +476,6 @@ command = "/hand/written/pixtuoid-hook"
     fn uninstall_doc_without_hooks_returns_unchanged() {
         let out = merge_uninstall("model = \"o1\"\n").unwrap();
         assert!(!out.changed, "no [hooks] → nothing to remove");
-    }
-
-    #[test]
-    fn default_config_path_honors_codex_home_env() {
-        let fallback_suffix = PathBuf::from(".codex").join("config.toml");
-
-        temp_env::with_var_unset("CODEX_HOME", || {
-            assert!(
-                default_config_path().unwrap().ends_with(&fallback_suffix),
-                "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
-                default_config_path().unwrap()
-            );
-        });
-
-        let tmp = tempfile::tempdir().unwrap();
-        let custom = tmp.path().to_path_buf();
-        temp_env::with_var("CODEX_HOME", Some(&custom), || {
-            assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
-        });
-
-        // A non-existent dir falls back, where upstream errors; `resolve_codex_home` says why.
-        let missing = tmp.path().join("missing");
-        temp_env::with_var("CODEX_HOME", Some(&missing), || {
-            assert!(
-                default_config_path().unwrap().ends_with(&fallback_suffix),
-                "non-existent CODEX_HOME must fall back to .codex/config.toml"
-            );
-        });
-
-        temp_env::with_var("CODEX_HOME", Some(""), || {
-            assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
-        });
     }
 
     #[test]

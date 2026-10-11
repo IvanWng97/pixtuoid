@@ -603,6 +603,7 @@ mod tests {
                 RELOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             }),
+            legacy: None,
         };
 
     /// A copied plugin is re-added after its files changed only while the user has
@@ -908,7 +909,7 @@ mod tests {
             beside: None,
         },
         binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
-        presence_probe: None,
+        presence_probe: || false,
         post_install_hint: None,
         host: None,
     };
