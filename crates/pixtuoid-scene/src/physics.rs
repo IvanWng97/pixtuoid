@@ -190,12 +190,16 @@ pub(crate) fn walk_profile_for(path_len_octile: u32, gait: Gait) -> WalkProfile 
     }
 }
 
+#[cfg(test)]
+pub(crate) use progress::SegmentProgress;
 pub(crate) use progress::{
-    LegProgress, SegmentProgress, distance_at, segment_pixels, walking_position,
+    LegProgress, OCTILE_DIAGONAL_COST, OCTILE_STRAIGHT_COST, Segment, octile_cost, octile_distance,
+    octile_path_len, segment_pixels,
 };
 
-/// Walk progress and the pixels and distances it maps to: the one place that
-/// knows its scale.
+/// Walk progress, the segment it puts a walker on, and the distances and
+/// pixels in between: the one place that knows its scale and builds either
+/// kind of progress.
 mod progress {
     use crate::layout::Point;
 
@@ -203,7 +207,8 @@ mod progress {
     const SCALE: u16 = 1000;
 
     /// `done` of `total` in steps, rounded down; all of them from
-    /// `done >= total` on, a zero `total` included.
+    /// `done >= total` on, a zero `total` included. Every progress built from
+    /// a ratio of counts rounds this way.
     fn steps(done: u64, total: u64) -> u16 {
         if done >= total {
             return SCALE;
@@ -226,8 +231,7 @@ mod progress {
         pub(crate) const ZERO: Self = Self(0);
         pub(crate) const DONE: Self = Self(SCALE);
 
-        /// `done` of `total`, rounded down; [`LegProgress::DONE`] from
-        /// `done >= total` on, a zero `total` included.
+        /// `done` of `total`, in [`steps`].
         pub(crate) fn of(done: u64, total: u64) -> Self {
             Self(steps(done, total))
         }
@@ -240,17 +244,16 @@ mod progress {
 
         /// The same progress on a leg drawn as the one segment between its own
         /// ends.
-        pub(crate) fn straight(self) -> SegmentProgress {
+        fn straight(self) -> SegmentProgress {
             SegmentProgress(self.0)
         }
     }
 
     impl SegmentProgress {
-        pub(crate) const DONE: Self = Self(SCALE);
+        const DONE: Self = Self(SCALE);
 
-        /// `done` of `total`, rounded down; [`SegmentProgress::DONE`] from
-        /// `done >= total` on, a zero `total` included.
-        pub(crate) fn of(done: u64, total: u64) -> Self {
+        /// `done` of `total`, in [`steps`].
+        fn of(done: u64, total: u64) -> Self {
             Self(steps(done, total))
         }
     }
@@ -262,10 +265,23 @@ mod progress {
         pub(crate) fn get(self) -> u16 {
             self.0
         }
+
+        pub(crate) fn distance(self, length: u32) -> u32 {
+            distance_at(self, length)
+        }
+    }
+
+    #[cfg(test)]
+    impl SegmentProgress {
+        pub(crate) const FULL: Self = Self::DONE;
+
+        pub(crate) fn fraction(done: u64, total: u64) -> Self {
+            Self::of(done, total)
+        }
     }
 
     /// Pure linear interpolation along the walk segment `from → to` at `t`.
-    pub(crate) fn walking_position(from: Point, to: Point, t: SegmentProgress) -> Point {
+    fn walking_position(from: Point, to: Point, t: SegmentProgress) -> Point {
         let (t, scale) = (i32::from(t.0), i32::from(SCALE));
         let dx = i32::from(to.x) - i32::from(from.x);
         let dy = i32::from(to.y) - i32::from(from.y);
@@ -302,10 +318,119 @@ mod progress {
     }
 
     /// The distance `t` along a leg `length` long is, both in
-    /// [`travelled`](crate::pose::Segment::travelled)'s unit.
-    pub(crate) fn distance_at(t: LegProgress, length: u32) -> u32 {
+    /// [`Segment`]'s `travelled` unit.
+    fn distance_at(t: LegProgress, length: u32) -> u32 {
         // At most `length`, as t <= DONE.
         (u64::from(t.0) * u64::from(length) / u64::from(SCALE)) as u32
+    }
+
+    /// Octile-distance step costs, integer so A* needs no floats — a diagonal
+    /// about √2 straights. Shared by [`octile_distance`] and A*'s heuristic so
+    /// the heuristic and the path metric can't drift; the heuristic ignores
+    /// the preferred-zone discount, so a zone-biased route is not guaranteed
+    /// shortest.
+    pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
+    pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
+
+    /// The octile distance for deltas `(dx, dy)` — THE combining formula shared
+    /// by the A* heuristic (coarse cells) and [`octile_distance`] (pixel Points).
+    pub(crate) fn octile_cost(dx: u32, dy: u32) -> u32 {
+        OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
+    }
+
+    pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
+        let dx = (i32::from(a.x) - i32::from(b.x)).unsigned_abs();
+        let dy = (i32::from(a.y) - i32::from(b.y)).unsigned_abs();
+        octile_cost(dx, dy)
+    }
+
+    /// Octile length of a routed polyline — the same metric A* uses, so the
+    /// snapshotted length is consistent with per-segment timing. 0 below 2 points.
+    pub(crate) fn octile_path_len(path: &[Point]) -> u32 {
+        if path.len() < 2 {
+            return 0;
+        }
+        path.windows(2).map(|w| octile_distance(w[0], w[1])).sum()
+    }
+
+    /// Where a walker `travelled` along a polyline is: the segment it is on and
+    /// how far through it, by cumulative OCTILE distance — the metric A* planned
+    /// with, so timing stays uniform along diagonals. Only [`Segment::straight`]
+    /// and [`Segment::on_route`] build one, from a [`LegProgress`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct Segment {
+        /// Segment start point (layout pixels).
+        from: Point,
+        /// Segment end point (layout pixels).
+        to: Point,
+        progress: SegmentProgress,
+        /// How far into the whole leg the walker is, in octile units: the
+        /// tenths of a layout pixel A* measures by.
+        travelled: u32,
+    }
+
+    impl Segment {
+        /// The segment a leg is drawn on when no route bends it: the one between its own ends.
+        pub(crate) fn straight(from: Point, to: Point, progress: LegProgress) -> Self {
+            Segment {
+                from,
+                to,
+                progress: progress.straight(),
+                travelled: distance_at(progress, octile_distance(from, to)),
+            }
+        }
+
+        /// `progress` of the whole leg along `path` (two or more points).
+        pub(crate) fn on_route(path: &[Point], progress: LegProgress) -> Self {
+            Self::along(path, distance_at(progress, octile_path_len(path)))
+        }
+
+        /// `travelled` along `path` (two or more points), its last segment's end
+        /// past the whole of it.
+        fn along(path: &[Point], travelled: u32) -> Self {
+            let mut acc: u32 = 0;
+            for w in path.windows(2) {
+                let len = octile_distance(w[0], w[1]);
+                if acc + len >= travelled {
+                    return Segment {
+                        from: w[0],
+                        to: w[1],
+                        progress: SegmentProgress::of(u64::from(travelled - acc), u64::from(len)),
+                        travelled,
+                    };
+                }
+                acc += len;
+            }
+            let last = path.len().saturating_sub(1);
+            Segment {
+                from: path[last.saturating_sub(1)],
+                to: path[last],
+                progress: SegmentProgress::DONE,
+                travelled: acc,
+            }
+        }
+
+        /// The point it stands on.
+        pub(crate) fn at(self) -> Point {
+            walking_position(self.from, self.to, self.progress)
+        }
+
+        pub(crate) fn from(self) -> Point {
+            self.from
+        }
+
+        pub(crate) fn to(self) -> Point {
+            self.to
+        }
+
+        pub(crate) fn travelled(self) -> u32 {
+            self.travelled
+        }
+
+        #[cfg(test)]
+        pub(crate) fn progress(self) -> SegmentProgress {
+            self.progress
+        }
     }
 
     #[cfg(test)]
@@ -373,7 +498,7 @@ mod progress {
             }
 
             #[test]
-            fn nearest_is_total(done in prop::num::f32::ANY, total in prop::num::f32::ANY) {
+            fn nearest_never_passes_done(done in prop::num::f32::ANY, total in prop::num::f32::ANY) {
                 prop_assert!(LegProgress::nearest(done, total) <= LegProgress::DONE);
             }
 
@@ -498,15 +623,15 @@ mod tests {
 
     const WALK_PROFILE_DIGEST: u64 = 0xd201_4d4b_4be1_5652;
 
-    /// The progress each pinned profile reaches across its walk, one step past
+    /// The progress each pinned profile reaches across its walk, one sample past
     /// the end included, folded to one digest: a one-step rounding shift in a
     /// walk position is invisible to the bounds and monotonicity proptests.
     #[test]
     fn the_people_s_walk_progress_is_pinned() {
-        const STEPS: u64 = 8;
+        const SAMPLES: u64 = 8;
         let digest = pixtuoid_core::id::fnv1a(pinned_profiles().flat_map(|p| {
-            (0..=STEPS + 1)
-                .map(move |k| u64::from(walk_progress(&p, p.duration_ms * k / STEPS).get()))
+            (0..=SAMPLES + 1)
+                .map(move |k| u64::from(walk_progress(&p, p.duration_ms * k / SAMPLES).get()))
         }));
         assert_eq!(digest, WALK_PROGRESS_DIGEST, "{digest:#018x}");
     }

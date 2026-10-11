@@ -49,11 +49,11 @@ pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat, anim: &Spr
     (crate::pack::looping_frame_index(anim, beat) + phase) % frames
 }
 
-/// The frame walk `anim` shows [`travelled`](super::Segment::travelled) along
+/// The frame walk `anim` shows [`travelled`](crate::physics::Segment::travelled) along
 /// its leg: a full cycle each `stride`.
 pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, stride: NonZeroU16) -> usize {
     let frames = anim.frames().len() as u64;
-    let per_cycle = u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
+    let per_cycle = u64::from(stride.get()) * u64::from(crate::physics::OCTILE_STRAIGHT_COST);
     ((u64::from(travelled) * frames / per_cycle) % frames) as usize
 }
 
@@ -170,7 +170,7 @@ pub(crate) enum Pose {
     },
     /// Walking along the current leg, drawn on the segment it is on.
     Walking {
-        segment: super::Segment,
+        segment: crate::physics::Segment,
         /// Whether the agent renders holding a coffee on this leg.
         carrying_coffee: bool,
     },
@@ -200,7 +200,7 @@ impl LegPose {
     /// Drawn as the one straight segment between its own ends: no route bends it.
     pub(crate) fn straight(self) -> Pose {
         Pose::Walking {
-            segment: super::Segment::straight(self.from, self.to, self.progress),
+            segment: crate::physics::Segment::straight(self.from, self.to, self.progress),
             carrying_coffee: self.carrying_coffee,
         }
     }

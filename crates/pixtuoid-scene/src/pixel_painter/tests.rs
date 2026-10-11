@@ -3259,11 +3259,8 @@ fn sim_step_advances_walks_without_painting() {
     let mut owned = OwnedSimStores::new();
     let mut stores = owned.stores();
 
-    let walk_t = |f: &SimFrame| match f.poses.get(&id) {
-        Some(Some(Pose::Walking {
-            segment: crate::pose::Segment { travelled, .. },
-            ..
-        })) => *travelled,
+    let travelled = |f: &SimFrame| match f.poses.get(&id) {
+        Some(Some(Pose::Walking { segment, .. })) => segment.travelled(),
         other => panic!("expected an entry walk pose, got {other:?}"),
     };
     let f1 = sim_step(
@@ -3297,10 +3294,10 @@ fn sim_step_advances_walks_without_painting() {
         },
     );
     assert!(
-        walk_t(&f2) > walk_t(&f1),
-        "entry walk must progress between ticks: {:?} -> {:?}",
-        walk_t(&f1),
-        walk_t(&f2)
+        travelled(&f2) > travelled(&f1),
+        "entry walk must progress between ticks: {} -> {}",
+        travelled(&f1),
+        travelled(&f2)
     );
     assert!(
         f2.characters

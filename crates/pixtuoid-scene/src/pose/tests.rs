@@ -1,7 +1,9 @@
 use super::*;
 use crate::anim::PAINT_FRAME_MS;
-use crate::physics::walk_profile;
-use crate::walk::{octile_path_len, settle_len};
+use crate::physics::{
+    LegProgress, SegmentProgress, octile_distance, octile_path_len, walk_profile,
+};
+use crate::walk::settle_len;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
@@ -185,10 +187,8 @@ fn snap_back_walks_from_history_when_state_just_flipped() {
     rig.history
         .record(slot.agent_id, prev, now - Duration::from_millis(50));
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
-        Some(Pose::Walking {
-            segment: Segment { from, .. },
-            ..
-        }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let from = segment.from();
             assert_eq!(from, prev, "snap-back walk should start from recorded prev");
         }
         other => panic!("expected snap-back Walking pose, got {other:?}"),
@@ -239,11 +239,9 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let active = active_slot(now, now - Duration::from_secs(60));
     let then = now + Duration::from_millis(50);
     match derive_with_routing(&active, then, &l, &mut rig.rctx()) {
-        Some(Pose::Walking {
-            segment: Segment { from, .. },
-            ..
-        }) => assert_eq!(
-            from, seat,
+        Some(Pose::Walking { segment, .. }) => assert_eq!(
+            segment.from(),
+            seat,
             "snap-back must start from the rendered seat {seat:?}, not the approach cell {approach:?}"
         ),
         other => panic!("expected snap-back Walking pose, got {other:?}"),
@@ -275,10 +273,7 @@ fn snap_back_origin_is_frozen_across_frames() {
     for i in 0..8u64 {
         let t = now0 + Duration::from_millis(i * PAINT_FRAME_MS);
         match derive_with_routing(&slot, t, &l, &mut rig.rctx()) {
-            Some(Pose::Walking {
-                segment: Segment { from, .. },
-                ..
-            }) => origins.push((i, from)),
+            Some(Pose::Walking { segment, .. }) => origins.push((i, segment.from())),
             other => panic!("frame {i}: expected Walking pose mid snap-back, got {other:?}"),
         }
     }
@@ -594,7 +589,7 @@ fn snap_back_skipped_without_recent_history() {
 }
 
 #[test]
-fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
+fn multi_segment_path_maps_progress_to_segment_via_octile_distance() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = entry_slot(now - Duration::from_millis(400));
@@ -607,17 +602,15 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
     let mut rig = RouteRig::new(StubRouter::corners(vec![door, mid, desk]));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     match p {
-        Some(Pose::Walking {
-            segment: Segment {
-                from, to, progress, ..
-            },
-            ..
-        }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let from = segment.from();
+            let to = segment.to();
+            let progress = segment.progress();
             assert_eq!(from, door, "first segment starts at door, got {from:?}");
             assert_eq!(to, mid, "first segment ends at mid, got {to:?}");
             assert!(
-                (..=SegmentProgress::of(1, 2)).contains(&progress),
-                "expected first-segment seg_t in [0,half], got progress={progress:?}"
+                (..=SegmentProgress::fraction(1, 2)).contains(&progress),
+                "expected first-segment progress in [0,half], got progress={progress:?}"
             );
             assert!(rig.history.recent(slot.agent_id, 1_000, now).is_some());
         }
@@ -741,13 +734,12 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let p = derive_with_routing(&slot_q, quarter_now, &l, &mut rig.rctx());
 
     match p {
-        Some(Pose::Walking {
-            segment: Segment { travelled, .. },
-            ..
-        }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let travelled = segment.travelled();
+            let linear = LegProgress::of(dur_ms / 4, dur_ms).distance(path_len);
             assert!(
-                u64::from(travelled) * 4 < u64::from(path_len),
-                "physics ease-in: expected under 1/4 of the route at 25% of duration, got {travelled} of {path_len}"
+                travelled < linear,
+                "physics ease-in: expected behind a linear walk at 25% of duration, got {travelled} of {path_len}, linear {linear}"
             );
         }
         other => panic!("expected Walking pose at 25% of snap-back duration, got {other:?}"),
@@ -1068,10 +1060,8 @@ fn exit_far_completes_before_grace_window_no_vanish() {
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
         // Walking at the end of the path, or already arrived (None, GC
         // imminent) — either way NOT stuck mid-corridor.
-        Some(Pose::Walking {
-            segment: Segment { travelled, .. },
-            ..
-        }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let travelled = segment.travelled();
             let route_len = rig.walks[&slot.agent_id]
                 .exit
                 .as_ref()
@@ -2288,32 +2278,8 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         .expect("history");
     assert_eq!(
         recorded,
-        walking_position(from, to, LegProgress::of(1, 2).straight()),
+        Segment::straight(from, to, LegProgress::of(1, 2)).at(),
         "straight leg records the lerped position"
-    );
-}
-
-#[test]
-fn route_walking_pose_draws_a_coincident_route_straight() {
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let l = layout();
-    let slot = unit_slot(now);
-    let p = Point { x: 40, y: 40 };
-
-    let mut rig = RouteRig::new(StubRouter::corners(vec![p, p, p]));
-    // 3 coincident points: len > 2 (so not the straight branch), total length 0.
-
-    let leg = LegPose {
-        from: p,
-        to: p,
-        progress: LegProgress::of(1, 2),
-        carrying_coffee: false,
-    };
-    let out = route_walking_pose(&slot, now, &l, &mut rig.rctx(), leg, Settle::None);
-    assert_eq!(
-        out,
-        leg.straight(),
-        "a zero-length (coincident) polyline is drawn as the one straight segment"
     );
 }
 
@@ -2384,35 +2350,11 @@ fn route_walking_pose_measures_travelled_along_the_whole_route() {
             },
             Settle::None,
         );
-        let Pose::Walking {
-            segment: Segment { travelled, .. },
-            ..
-        } = out
-        else {
+        let Pose::Walking { segment, .. } = out else {
             panic!("a walk at {t:?}, got {out:?}");
         };
-        assert_eq!(travelled, distance_at(t, total), "at {t:?}");
+        assert_eq!(segment.travelled(), t.distance(total), "at {t:?}");
     }
-}
-
-#[test]
-fn segment_along_past_the_route_snaps_to_the_final_segment() {
-    // The "past the last segment" fall-through fires only when `travelled` exceeds
-    // the summed segment lengths, which in-tree callers never do.
-    let a = Point { x: 10, y: 10 };
-    let b = Point { x: 30, y: 10 };
-    let c = Point { x: 30, y: 30 };
-    let total = octile_path_len(&[a, b, c]);
-
-    assert_eq!(
-        Segment::along(&[a, b, c], total + 1),
-        Segment {
-            from: b,
-            to: c,
-            progress: SegmentProgress::DONE,
-            travelled: total,
-        },
-    );
 }
 
 #[test]
@@ -2423,15 +2365,11 @@ fn on_route_starts_and_ends_where_the_leg_does() {
     let path = [a, b, c];
 
     let start = Segment::on_route(&path, LegProgress::ZERO);
-    assert_eq!((start.at(), start.travelled), (a, 0));
+    assert_eq!((start.at(), start.travelled()), (a, 0));
+    let end = Segment::on_route(&path, LegProgress::DONE);
     assert_eq!(
-        Segment::on_route(&path, LegProgress::DONE),
-        Segment {
-            from: b,
-            to: c,
-            progress: SegmentProgress::DONE,
-            travelled: octile_path_len(&path),
-        },
+        (end.from(), end.to(), end.progress(), end.travelled()),
+        (b, c, SegmentProgress::FULL, octile_path_len(&path)),
     );
 }
 
@@ -2448,13 +2386,13 @@ fn on_route_never_walks_back() {
         let segment = Segment::on_route(&path, LegProgress::of(q, 64));
         let index = path
             .iter()
-            .position(|&p| p == segment.from)
+            .position(|&p| p == segment.from())
             .expect("a segment starts on a route point");
         assert!(
-            segment.travelled >= last.0 && index >= last.1,
+            segment.travelled() >= last.0 && index >= last.1,
             "step {q}: {segment:?} walked back from {last:?}"
         );
-        last = (segment.travelled, index);
+        last = (segment.travelled(), index);
     }
 }
 
@@ -2490,11 +2428,9 @@ fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
 
     let p = derive_with_routing(&slot, arrived, &l, &mut rig.rctx());
     match p {
-        Some(Pose::Walking {
-            segment: Segment { from, .. },
-            ..
-        }) => assert_eq!(
-            from, door,
+        Some(Pose::Walking { segment, .. }) => assert_eq!(
+            segment.from(),
+            door,
             "a resurrect past its walkout must re-enter from the door"
         ),
         other => panic!("expected a fresh entry walk, got {other:?}"),

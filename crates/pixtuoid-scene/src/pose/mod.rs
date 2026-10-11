@@ -12,10 +12,7 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 
-use crate::physics::{
-    LegProgress, SegmentProgress, WalkIntent, WalkProfile, distance_at, walk_arrived,
-    walk_progress, walking_position,
-};
+use crate::physics::{Segment, WalkIntent, WalkProfile, walk_arrived, walk_progress};
 use crate::walk::{
     LegPlan, Lifted, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
     advance_wander, snapshot_leg_profile,
@@ -491,14 +488,10 @@ pub(crate) fn derive_with_routing(
     // overrides and produces a double-walk.
     let raw = derive_state_only(slot, now, layout)?;
 
+    let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     // A desk-bound state pose would teleport an agent who was mid-wander when the
     // state changed, so walk it from the previous rendered position instead.
-    let desk_pose = matches!(
-        raw,
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping
-    );
-    let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
-    let snap = if desk_pose {
+    let snap = {
         let walk = rctx.walks.entry(slot.agent_id).or_default();
         // ARM ONCE per transition: `route_walking_pose` records the advancing walker
         // into history every call, so re-checking the gate on a second `derive` this
@@ -571,15 +564,6 @@ pub(crate) fn derive_with_routing(
             }
             _ => None,
         }
-    } else {
-        // Clear any stale snap-back so the next transition snapshots afresh rather
-        // than replaying a previous one.
-        if let Some(walk) = rctx.walks.get_mut(&slot.agent_id)
-            && walk.snap_back.is_some()
-        {
-            walk.snap_back = None;
-        }
-        None
     };
 
     match snap {
@@ -731,87 +715,12 @@ fn route_walking_pose(
             carrying_coffee,
         };
     }
-    if crate::walk::octile_path_len(&path) == 0 {
-        return leg.straight();
-    }
     let segment = Segment::on_route(&path, progress);
     history.record(slot.agent_id, segment.at(), now);
     Pose::Walking {
         segment,
         carrying_coffee,
     }
-}
-
-/// Where a walker `travelled` along a polyline is: the segment it is on and
-/// how far through it, by cumulative OCTILE distance — the metric A* planned
-/// with, so timing stays uniform along diagonals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Segment {
-    /// Segment start point (layout pixels).
-    pub(crate) from: Point,
-    /// Segment end point (layout pixels).
-    pub(crate) to: Point,
-    /// Progress along the segment.
-    pub(crate) progress: SegmentProgress,
-    /// How far into the whole leg the walker is, in octile units: the
-    /// tenths of a layout pixel A* measures by.
-    pub(crate) travelled: u32,
-}
-
-impl Segment {
-    /// The segment a leg is drawn on when no route bends it: the one between its own ends.
-    pub(crate) fn straight(from: Point, to: Point, progress: LegProgress) -> Self {
-        Segment {
-            from,
-            to,
-            progress: progress.straight(),
-            travelled: distance_at(progress, octile_distance(from, to)),
-        }
-    }
-
-    /// `progress` of the whole leg along `path` (two or more points).
-    pub(crate) fn on_route(path: &[Point], progress: LegProgress) -> Self {
-        Self::along(
-            path,
-            distance_at(progress, crate::walk::octile_path_len(path)),
-        )
-    }
-
-    /// `travelled` along `path` (two or more points), its last segment's end
-    /// past the whole of it.
-    fn along(path: &[Point], travelled: u32) -> Self {
-        let mut acc: u32 = 0;
-        for w in path.windows(2) {
-            let leg = octile_distance(w[0], w[1]);
-            if acc + leg >= travelled {
-                return Segment {
-                    from: w[0],
-                    to: w[1],
-                    progress: SegmentProgress::of(u64::from(travelled - acc), u64::from(leg)),
-                    travelled,
-                };
-            }
-            acc += leg;
-        }
-        let last = path.len().saturating_sub(1);
-        Segment {
-            from: path[last.saturating_sub(1)],
-            to: path[last],
-            progress: SegmentProgress::DONE,
-            travelled: acc,
-        }
-    }
-
-    /// The point it stands on.
-    pub(crate) fn at(self) -> Point {
-        walking_position(self.from, self.to, self.progress)
-    }
-}
-
-pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
-    let dx = (i32::from(a.x) - i32::from(b.x)).unsigned_abs();
-    let dy = (i32::from(a.y) - i32::from(b.y)).unsigned_abs();
-    crate::pathfind::octile_cost(dx, dy)
 }
 
 /// Half-range (px) of the per-agent destination jitter — the offset spans

@@ -1,6 +1,5 @@
 use super::*;
-use crate::physics::{SegmentProgress, distance_at};
-use crate::pose::Segment;
+use crate::physics::SegmentProgress;
 use pixtuoid_core::sprite::format::{Piece, Walk};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
@@ -125,17 +124,12 @@ fn idle_phase_1_is_walking_out() {
     let (s, now) = slot(ActivityState::Idle, midpoint);
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking {
-            segment:
-                Segment {
-                    progress,
-                    travelled,
-                    ..
-                },
-            ..
-        } => {
+        Pose::Walking { segment, .. } => {
+            let progress = segment.progress();
+            let travelled = segment.travelled();
             assert!(
-                (SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress),
+                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
+                    .contains(&progress),
                 "progress={progress:?}"
             );
             assert!(travelled > 0, "halfway down the leg, it has walked");
@@ -169,11 +163,12 @@ fn idle_phase_3_is_walking_back() {
     let (s, now) = slot(ActivityState::Idle, midpoint);
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking {
-            segment: Segment { progress, .. },
-            ..
-        } => {
-            assert!((SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress));
+        Pose::Walking { segment, .. } => {
+            let progress = segment.progress();
+            assert!(
+                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
+                    .contains(&progress)
+            );
         }
         other => panic!("expected Walking, got {other:?}"),
     }
@@ -210,12 +205,10 @@ fn pantry_walk_destination_is_walkable() {
     s.agent_id = id; // desk_index 0 is valid for the 4-agent layout
 
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking {
-            segment: Segment { to, .. },
-            ..
-        } => assert!(
-            l.walkable.is_walkable(to.x, to.y),
-            "pantry walk dest {to:?} is not walkable (center={:?})",
+        Pose::Walking { segment, .. } => assert!(
+            l.walkable.is_walkable(segment.to().x, segment.to().y),
+            "pantry walk dest {:?} is not walkable (center={:?})",
+            segment.to(),
             l.waypoints[pantry_idx].pos
         ),
         other => panic!("expected Walking at walk-out midpoint, got {other:?}"),
@@ -363,7 +356,7 @@ fn idle_cycle_loops_after_one_cycle() {
 fn entry_animation_overrides_normal_pose_for_first_4s() {
     let id = AgentId::from_transcript_path("/p/entry.jsonl");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    // created_at == now0, so since_spawn = 1500ms at probe time
+    // created_at == now0, so since_spawn is the probe offset
     let s = AgentSlot {
         agent_id: id,
         source: std::sync::Arc::from("claude-code"),
@@ -388,18 +381,11 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
         tokens_used: 0,
         last_usage: None,
     };
-    let probe = now0 + Duration::from_millis(1500);
+    let probe = now0 + Duration::from_millis(ENTRY_ANIMATION_MS * 3 / 8);
     let l = layout();
     match derive(&s, probe, &l).expect("pose") {
-        Pose::Walking {
-            segment: Segment { progress, .. },
-            ..
-        } => {
-            // 1500/4000 = 0.375
-            assert!(
-                (SegmentProgress::of(3, 10)..=SegmentProgress::of(9, 20)).contains(&progress),
-                "progress={progress:?}"
-            );
+        Pose::Walking { segment, .. } => {
+            assert_eq!(segment.progress(), SegmentProgress::fraction(3, 8));
         }
         other => panic!("expected Walking entry, got {other:?}"),
     }
@@ -419,10 +405,9 @@ fn exit_override_walks_desk_to_door_within_window() {
     let l = layout();
     let desk = l.home_desks[s.desk_index.0];
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking {
-            segment: Segment { from, to, .. },
-            ..
-        } => {
+        Pose::Walking { segment, .. } => {
+            let from = segment.from();
+            let to = segment.to();
             assert_eq!(
                 from,
                 desk_walk_anchor_facing(desk, l.desk_facing_at(desk)),
@@ -761,13 +746,13 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
     let mid_walk_out = seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
     let now = s.state_started_at + Duration::from_millis(mid_walk_out);
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking {
-            segment: Segment { from, progress, .. },
-            ..
-        } => {
+        Pose::Walking { segment, .. } => {
+            let from = segment.from();
+            let progress = segment.progress();
             assert_eq!(from, desk, "cycle-0 walk-out starts from the desk");
             assert!(
-                (SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress),
+                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
+                    .contains(&progress),
                 "progress={progress:?}"
             );
         }
@@ -788,13 +773,13 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
     let mid_walk_out = cycle + seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
     let now = s.state_started_at + Duration::from_millis(mid_walk_out);
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking {
-            segment: Segment { from, progress, .. },
-            ..
-        } => {
+        Pose::Walking { segment, .. } => {
+            let from = segment.from();
+            let progress = segment.progress();
             assert_eq!(from, desk, "cycle-1 walk-out starts from the desk");
             assert!(
-                (SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress),
+                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
+                    .contains(&progress),
                 "progress={progress:?}"
             );
         }
@@ -902,14 +887,10 @@ fn a_walking_person_never_slides() {
             },
         );
         let turns = steps(ENTRY_ANIMATION_MS, &|ms| {
-            let Pose::Walking {
-                segment: Segment { travelled, .. },
-                ..
-            } = linear_walk_pose(ms, from, to)
-            else {
+            let Pose::Walking { segment, .. } = linear_walk_pose(ms, from, to) else {
                 panic!("a walk");
             };
-            travelled
+            segment.travelled()
         });
         judge("the entry walk", turns, f32::from(length));
     }
@@ -922,7 +903,7 @@ fn a_walking_person_never_slides() {
         speed_mult(fastest) > SPEED_MULT_MAX * 0.98,
         "a near-fastest agent"
     );
-    let length = 200 * crate::pathfind::OCTILE_STRAIGHT_COST;
+    let length = 200 * crate::physics::OCTILE_STRAIGHT_COST;
     for intent in [
         WalkIntent::Entry,
         WalkIntent::WanderOut,
@@ -930,12 +911,12 @@ fn a_walking_person_never_slides() {
     ] {
         let profile = walk_profile(length, intent, fastest);
         let turns = steps(profile.duration_ms, &|ms| {
-            distance_at(walk_progress(&profile, ms), length)
+            walk_progress(&profile, ms).distance(length)
         });
         judge(
             &format!("{intent:?}"),
             turns,
-            length as f32 / crate::pathfind::OCTILE_STRAIGHT_COST as f32,
+            length as f32 / crate::physics::OCTILE_STRAIGHT_COST as f32,
         );
     }
 }
@@ -948,7 +929,7 @@ fn a_walk_steps_by_the_ground_it_covers() {
     let walk = pack.piece(Piece::Walking);
     let stride = pack.stride(Walk::Walking);
     let frames = walk.frames().len() as u32;
-    let per_cycle = u32::from(stride.get()) * crate::pathfind::OCTILE_STRAIGHT_COST;
+    let per_cycle = u32::from(stride.get()) * crate::physics::OCTILE_STRAIGHT_COST;
     // the first distance the second frame shows at
     let next = per_cycle.div_ceil(frames);
     for (travelled, frame) in [(0, 0), (next - 1, 0), (next, 1), (per_cycle, 0)] {

@@ -18,13 +18,13 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 
 use crate::anim::{FULL_TICK_MS, Timing, elapsed_ms};
 use crate::layout::{Point, SceneLayout};
-use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable, snap_point_where};
+use crate::pathfind::{Router, snap_point_to_walkable, snap_point_where};
 use crate::pet::PetKind;
 use crate::physics::{
-    Gait, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
+    Gait, OCTILE_STRAIGHT_COST, Segment, WALK_ACCEL, WalkProfile, octile_path_len, walk_arrived,
+    walk_profile_for, walk_progress,
 };
-use crate::pose::{STALE_RESUME_GAP_BASE_MS, Segment};
-use crate::walk::octile_path_len;
+use crate::pose::STALE_RESUME_GAP_BASE_MS;
 
 /// How close a resting spot must be to an idle agent's desk to count as "napping
 /// beside them" — sized to the desk's footprint plus a creature's width, so it
@@ -781,26 +781,26 @@ mod tests {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
                 let stances = drive(&mut walk, roam, &l, Motion::Full, (0, 90_000));
                 for run in stances.split(|s| s.is_none_or(|s| s.walking.is_none())) {
-                    let legs: Vec<Segment> = run
+                    let segments: Vec<Segment> = run
                         .iter()
                         .filter_map(|s| s.and_then(|s| s.walking))
                         .collect();
-                    for pair in legs.windows(2) {
-                        let step = pair[1].travelled.saturating_sub(pair[0].travelled);
+                    for pair in segments.windows(2) {
+                        let step = pair[1].travelled().saturating_sub(pair[0].travelled());
                         assert!(
                             step <= stride / 2,
                             "{anim} seed {seed}: {step} in one paint of a {stride} stride"
                         );
                     }
-                    for span in legs.windows(PAINTS + 1) {
+                    for span in segments.windows(PAINTS + 1) {
                         let (first, last) = (span[0], span[PAINTS]);
-                        let covered = u64::from(last.travelled.saturating_sub(first.travelled));
+                        let covered = u64::from(last.travelled().saturating_sub(first.travelled()));
                         assert!(
                             covered <= cadence + rounding,
                             "{anim} seed {seed}: {covered} in a second, its cadence allows {cadence}"
                         );
                     }
-                    walked += legs.len();
+                    walked += segments.len();
                 }
             }
             assert!(walked > 0, "{anim} must walk in the sample");

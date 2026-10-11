@@ -30,7 +30,7 @@ use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Facing, Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
 use crate::pathfind::Router;
 use crate::pet::PetKind;
-use crate::pose::{self, Pose, PoseHistory, Segment};
+use crate::pose::{self, Pose, PoseHistory};
 use crate::walk::WalkState;
 
 use crate::layout::CHARACTER_SPRITE_W;
@@ -545,11 +545,11 @@ fn pet_placement(
     let Stance { at, walking } = walk.step(Roam::pet(stride), ground, timing)?;
     // a petted pet sits for it, even held mid-leg
     let (anim_name, frame_idx, flip) = match walking.filter(|_| petted.is_none()) {
-        Some(leg) => (
+        Some(segment) => (
             walk_anim.piece(),
-            pose::walk_frame(leg.travelled, pack.piece(walk_anim.piece()), stride),
+            pose::walk_frame(segment.travelled(), pack.piece(walk_anim.piece()), stride),
             // its walk faces east
-            leg.to.x < leg.from.x,
+            segment.to().x < segment.from().x,
         ),
         None => {
             let all_idle = agents
@@ -735,10 +735,10 @@ fn mascot_placements(
              }| {
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
-                    Some(leg) => (
+                    Some(segment) => (
                         def.walk.piece(),
                         pose::walk_frame(
-                            leg.travelled,
+                            segment.travelled(),
                             pack.piece(def.walk.piece()),
                             pack.stride(def.walk),
                         ),
@@ -1032,12 +1032,7 @@ pub(crate) fn resolve_characters(
                 segment,
                 mut carrying_coffee,
             } => {
-                let Segment {
-                    from,
-                    to,
-                    travelled,
-                    ..
-                } = segment;
+                let (from, to, travelled) = (segment.from(), segment.to(), segment.travelled());
                 // Exit walks: core sets carrying_coffee=false (it holds no
                 // render-side state), but the coffee map knows better.
                 if agent.exiting_at.is_some() && coffee.contains_key(&agent.agent_id) {

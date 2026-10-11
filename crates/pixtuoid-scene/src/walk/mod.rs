@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use crate::physics::{LegProgress, WalkIntent, WalkProfile, walk_arrived, walk_profile};
+use crate::physics::{
+    LegProgress, WalkIntent, WalkProfile, octile_distance, octile_path_len, walk_arrived,
+    walk_profile,
+};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -14,7 +17,7 @@ use crate::pose::{
     SpotClaims, WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms,
     stale_resume_gap_ms, takes_trip,
 };
-use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
+use crate::pose::{desk_leg_endpoint, route_jittered};
 
 /// Frozen A* polyline for one in-flight walk leg. Snapshotted when the leg's
 /// `(from, to)` first appear and reused unchanged: per-frame occupancy churn
@@ -591,15 +594,6 @@ fn snapshot_back_profile(
             intent: WalkIntent::WanderBack,
         },
     )
-}
-
-/// Octile length of a routed polyline — the same metric A* uses, so the
-/// snapshotted length is consistent with per-segment timing. 0 below 2 points.
-pub(crate) fn octile_path_len(path: &[Point]) -> u32 {
-    if path.len() < 2 {
-        return 0;
-    }
-    path.windows(2).map(|w| octile_distance(w[0], w[1])).sum()
 }
 
 /// Octile length of the settle segment `approach → seat`, or 0 when there is no
