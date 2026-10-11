@@ -125,7 +125,8 @@ pub fn render_cutaway(
     paint(&list, cache, buf);
 }
 
-/// Paint `list` whole: its backdrop, then its pieces over it.
+/// Paint `list` whole: its backdrop, then its pieces over it, then its dim
+/// over all, which the cached backdrop never holds.
 pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let key = BackdropKey {
         backdrop: list.backdrop(),
@@ -139,6 +140,7 @@ pub(crate) fn paint(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut 
         buf,
     );
     paint_list(list, cache, buf);
+    list.dim().apply(buf);
 }
 
 /// All [`paint_backdrop`] reads. Held owning its backdrop, probed borrowing

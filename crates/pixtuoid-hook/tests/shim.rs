@@ -257,7 +257,7 @@ fn missing_socket_exits_zero_without_blocking() {
     // A missing socket makes `connect()` return ConnectionRefused in
     // microseconds, so this guards a regression that adds a blocking
     // retry/backoff on connect failure — don't delete it. The bound is the
-    // ~200ms watchdog plus spawn/exec jitter: it measures a CHILD PROCESS's
+    // watchdog's `transport::WRITE_TIMEOUT` plus spawn/exec jitter: it measures a CHILD PROCESS's
     // whole spawn+exit wall-clock, which is load-sensitive (#161 flaked at 1s
     // under the fully-parallel suite), hence .config/nextest.toml's
     // threads-required override giving this test the machine to itself.
@@ -272,7 +272,7 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
     // A wedged accept loop with a saturated backlog is the one Unix path where
     // `connect()` itself can park forever (#167). Kernel-dependent: Linux
     // BLOCKS the shim's connect (the load-bearing arm — the watchdog must shoot
-    // the process at ~200ms), macOS fails fast with ECONNREFUSED.
+    // the process at `WRITE_TIMEOUT`), macOS fails fast with ECONNREFUSED.
     let path = sock_path("stall");
     let listener = UnixListener::bind(&path).expect("bind listener");
 
@@ -295,7 +295,7 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
         status.success(),
         "stalled listener must still exit 0; got {status:?}"
     );
-    // Watchdog bound is 200ms; the rest is spawn-jitter headroom.
+    // The watchdog bound is `transport::WRITE_TIMEOUT`; the rest is spawn-jitter headroom.
     assert!(
         start.elapsed() < Duration::from_millis(1500),
         "watchdog must bound the connect phase; took {:?}",

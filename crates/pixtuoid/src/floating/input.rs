@@ -316,6 +316,25 @@ mod tests {
         }
     }
 
+    /// Esc closes the version popup, as the help's "Enter / Esc" row says; it
+    /// never quits.
+    #[test]
+    fn esc_dismisses_the_version_popup() {
+        use crossterm::event::KeyCode;
+        let mut k = Keys::new();
+        k.ui = crate::panels::ui_state::UiState::new(
+            pixtuoid_scene::theme::ALL_THEMES[0],
+            crate::panels::welcome::WelcomeUi::from_detected(&[]),
+            true,
+            k._tmp.path().join("sock"),
+            None,
+            crate::doctor::DriftSeen::default(),
+        );
+        assert!(k.ui.modal().version_popup);
+        assert!(!k.press(KeyCode::Esc), "Esc quit");
+        assert!(!k.ui.modal().version_popup, "the popup is still up");
+    }
+
     /// A previewed theme shows in the window at once, and only a commit
     /// saves it: quitting or cancelling mid-preview leaves the config as it
     /// was.

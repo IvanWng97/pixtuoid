@@ -4,8 +4,8 @@
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
     Furniture, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, Pivot, PlantItem,
-    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_THICK_V, WAYPOINT_STAMP_PAD_PX,
-    WallDecorItem, Waypoint, WaypointKind, anchored_top_left, furniture_def,
+    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_DECOR_STAMP_PAD_PX, WALL_THICK_V,
+    WAYPOINT_STAMP_PAD_PX, WallDecorItem, Waypoint, WaypointKind, anchored_top_left, furniture_def,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -223,10 +223,14 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     }
 
     for &WallDecorItem { kind, pos } in wall_decor {
-        // pad=1, not OBSTACLE_PAD_PX: these overhang nothing solid, and a 2px band
-        // every side inflated the blocked rect back to the full sprite width.
         let def = furniture_def(kind.furniture());
-        stamp_ground(&mut mask, &def, Pivot::TopLeft, pos, 1);
+        stamp_ground(
+            &mut mask,
+            &def,
+            Pivot::TopLeft,
+            pos,
+            WALL_DECOR_STAMP_PAD_PX,
+        );
     }
 
     // PhoneBooth + StandingDesk double-block as waypoints too; `mark_blocked` is
