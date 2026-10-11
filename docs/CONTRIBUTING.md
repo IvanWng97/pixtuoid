@@ -389,8 +389,7 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 The registration steps (4–7, 9) and step 12's roster literals are test-forced —
 skipping one fails `just test`. Step 8 is forced only for hook-only sources;
-step 10 by the theme guards; step 11's `UPSTREAM` by the test build, its
-watches' contents not; steps 1–3 and step 12's `#[test]` are on you.
+step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact
@@ -434,10 +433,9 @@ watches' contents not; steps 1–3 and step 12's `#[test]` are on you.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
-11. **Drift-watch in the same PR**: the module's `UPSTREAM` (the registry row
-    does not compile without one) — a `Watch` beside each decoded set, or
-    `Project::Closed { why }` when nothing upstream is readable; the types are
-    in `source/upstream.rs`, and `just drift-watch` runs it. A registered hook set is still a
+11. **Drift-watch in the same PR**: the module's `UPSTREAM`, named in its
+    registry row — a `Watch` beside each decoded set; the types are in
+    `source/upstream.rs`, and `just drift-watch` runs it. A registered hook set is still a
     `check_upstream_drift.py` row: the const, the `insert` in that crate's
     `src/drift_surface.rs`, `just gen-drift-surface` (commit both fragments),
     and the `SURFACE_ROWS` row plus its selftest case.

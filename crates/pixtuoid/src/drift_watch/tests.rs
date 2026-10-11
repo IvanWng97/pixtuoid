@@ -293,26 +293,40 @@ fn rendering_a_pattern_yields_text_it_matches() {
     }
 }
 
-/// #941's gate, generic: every watch whose pattern carries our names fires
-/// when one vanishes and stays silent while all are there. The vanished name
-/// leaves a decoy in its own shape, so a pattern loose enough to match the
-/// decoy (a bare substring where the declaration is quoted) cannot pass.
+/// A page declaring `names` the way `w` reads them, its anchors included.
+fn page(w: &Watch, names: &[&str]) -> String {
+    let anchors: Vec<String> = w.docs.iter().map(|doc| render(doc.anchor, "")).collect();
+    match w.read {
+        Read::Each { pattern } => {
+            let decls: Vec<String> = names.iter().map(|n| render(pattern, n)).collect();
+            format!("{}\n{}\n", anchors.join("\n"), decls.join("\n"))
+        }
+        // A JSON document's anchor renders as a key, so each one opens a member.
+        Read::JsonUnion { def, prop } => {
+            let members: Vec<serde_json::Value> = names
+                .iter()
+                .map(|n| match prop {
+                    Some(p) => serde_json::json!({"properties": {p: {"const": n}}}),
+                    None => serde_json::json!({"const": n}),
+                })
+                .collect();
+            let defs = serde_json::json!({ def: {"oneOf": members} });
+            let keys: String = anchors.iter().map(|a| format!("{a} 0, ")).collect();
+            format!("{{{keys}\"$defs\": {defs}}}")
+        }
+    }
+}
+
+/// #941's gate, generic: every watch fires when one of its names vanishes
+/// and stays silent while all are there. The vanished name leaves a decoy in
+/// its own shape, so a pattern loose enough to match the decoy (a bare
+/// substring where the declaration is quoted) cannot pass.
 #[test]
-fn every_name_bearing_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
+fn every_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
     let mut proven = 0;
     for d in REGISTRY {
         for up in d.upstream {
             for w in up.watches {
-                let pattern = match w.read {
-                    Read::Each { pattern } => pattern,
-                    _ => continue,
-                };
-                let page = |names: &[&str]| {
-                    let anchors: Vec<String> =
-                        w.docs.iter().map(|doc| render(doc.anchor, "")).collect();
-                    let decls: Vec<String> = names.iter().map(|n| render(pattern, n)).collect();
-                    format!("{}\n{}\n", anchors.join("\n"), decls.join("\n"))
-                };
                 let serve = |text: &str| {
                     w.docs.iter().fold(Served::default(), |s, doc| {
                         let (url, _) = locate(&up.project, &doc.at);
@@ -327,7 +341,7 @@ fn every_name_bearing_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
                     report
                 };
                 let ours = (w.ours)();
-                let intact = run_on(&page(&ours));
+                let intact = run_on(&page(w, &ours));
                 assert!(
                     intact.breaking.is_empty() && intact.blind.is_empty(),
                     "{}: an intact document stays silent: {intact:?}",
@@ -337,7 +351,7 @@ fn every_name_bearing_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
                 let decoy = format!("{victim}_pxd");
                 let mut kept: Vec<&str> = ours[1..].to_vec();
                 kept.push(&decoy);
-                let vanished = run_on(&page(&kept));
+                let vanished = run_on(&page(w, &kept));
                 assert!(
                     vanished
                         .breaking
@@ -350,7 +364,7 @@ fn every_name_bearing_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
             }
         }
     }
-    assert!(proven > 0, "the registry declares name-bearing watches");
+    assert!(proven > 0, "the registry declares watches");
 }
 
 #[test]
@@ -444,4 +458,52 @@ fn a_fetched_name_cannot_leave_its_code_span() {
         code_span("tool_call`](https://x)\nmore"),
         "tool_call](https://x)more"
     );
+}
+
+/// The heading is the instruction: a line filed under the wrong one sends a
+/// reader to edit a decoder that works (#793).
+#[test]
+fn each_line_renders_under_its_own_heading() {
+    let mut r = Report::default();
+    r.add_breaking("VERIFIED-LINE".to_owned());
+    r.add_blind("PROBE-LINE", "AT", "C", false);
+    let out = r.render();
+    let at = |s: &str| out.find(s).unwrap_or(usize::MAX);
+    let order = [
+        at("## ⛔ Verified upstream change"),
+        at("VERIFIED-LINE"),
+        at("## 🩺 Probe could NOT verify"),
+        at("PROBE-LINE"),
+    ];
+    assert!(order.is_sorted() && order[3] < usize::MAX, "{out}");
+    assert!(out.contains("do NOT change a decoder"), "{out}");
+
+    let mut blind = Report::default();
+    blind.add_blind("PROBE-ONLY", "AT", "C", false);
+    let out = blind.render();
+    assert!(out.contains("Probe could NOT verify") && !out.contains("Verified upstream change"));
+}
+
+/// upstream-drift.yml titles the issue with the report's H1 rather than its
+/// own copy of these strings: a reworded copy would title a confirmed rename
+/// "could not verify".
+#[test]
+fn the_workflow_titles_the_issue_from_the_report_h1() {
+    let wf = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../.github/workflows/upstream-drift.yml"
+    ))
+    .expect("the workflow is readable");
+    assert!(wf.contains("head -1 drift-report.md") && wf.contains("s/^# //"));
+    let mut r = Report::default();
+    let mut titles = vec![r.title()];
+    r.add_blind("W", "AT", "C", false);
+    titles.push(r.title());
+    r.add_review("R".to_owned());
+    titles.push(r.title());
+    r.add_breaking("B".to_owned());
+    titles.push(r.title());
+    for t in titles {
+        assert!(!wf.contains(t), "the workflow keeps a copy of {t:?}");
+    }
 }
