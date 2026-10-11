@@ -359,10 +359,10 @@ before re-litigating.
   later rarely lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
   After that a fold takes only what [the merge gate](#the-merge-gate)
   confirms blocks the merge, plus, in at most one fold,
-  [in-place](#dispositions) fixes that are a comment or doc change, or a
-  refactor the existing tests cover (its commit names, for each branch it
-  rewrites, a mutation that turns one of them red; `just mutants` lists a
-  Rust diff's); any other non-blocking finding is a FOLLOW-UP: a
+  [in-place](#dispositions) fixes that change no behavior: a comment or doc
+  change, or a refactor the existing tests cover (its commit names, for each
+  branch it rewrites, the test that fails when that branch takes another
+  branch's action); any other non-blocking finding is a FOLLOW-UP: a
   review moves on once only non-blocking suggestions remain
   ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
   issue confirmed in a fold STOPS the loop: revert the fold and re-land
