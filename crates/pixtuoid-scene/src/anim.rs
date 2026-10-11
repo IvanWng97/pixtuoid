@@ -21,7 +21,7 @@ pub enum Easing {
 
 impl Easing {
     /// Apply the easing curve to a normalized `t ∈ [0.0, 1.0]`.
-    pub fn apply(self, t: f32) -> f32 {
+    pub(crate) fn apply(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
             Easing::Linear => t,
@@ -66,7 +66,7 @@ pub enum Motion {
     /// Every loop, stepped each [`FULL_TICK_MS`].
     #[default]
     Full,
-    /// Every loop at a quarter of Full's pace: each [`CALM_TICK_MS`] it steps
+    /// Every loop at a quarter of Full's pace: each `CALM_TICK_MS` it steps
     /// one Full tick, so a loop plays Full's very sequence, slower, and none
     /// aliases on the slower repaint.
     Calm,
@@ -77,12 +77,12 @@ pub enum Motion {
 /// How often a [`Motion::Full`] loop steps.
 pub const FULL_TICK_MS: u64 = 125;
 /// How often a [`Motion::Calm`] loop steps.
-pub const CALM_TICK_MS: u64 = 500;
+pub(crate) const CALM_TICK_MS: u64 = 500;
 /// The rate the TUI and the floating window repaint an office with agents in
 /// it, on every tier: the sampling rate the walks' strides are sized for
 /// (`a_walking_person_never_slides`).
 pub const PAINT_FPS: u32 = 30;
-/// One [`PAINT_FPS`] frame, in whole ms: the step a test samples a painter at.
+/// One [`PAINT_FPS`] frame, in whole ms.
 pub const PAINT_FRAME_MS: u64 = 1000 / PAINT_FPS as u64;
 
 /// The least any phase of a flash — a strike's level, a starved neon's catch,

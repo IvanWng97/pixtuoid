@@ -47,8 +47,7 @@ impl ChildEndUnclaims {
 
     /// Test-only seam: shrinks the prune TTL so the bounded-growth contract is
     /// testable without waiting out `CHILD_END_UNCLAIM_TTL`.
-    #[doc(hidden)]
-    pub fn with_ttl(ttl: Duration) -> Self {
+    pub(crate) fn with_ttl(ttl: Duration) -> Self {
         Self {
             entries: Arc::new(std::sync::Mutex::new(Vec::new())),
             ttl,
@@ -141,17 +140,14 @@ pub(super) async fn drain_child_end_unclaims(
             .map(|(p, &held)| {
                 (
                     p.clone(),
-                    // Folded via `walk::id_path` like every other derivation
-                    // seam — a raw path computes an id in a different space.
                     AgentId::from_parts(ctx.source, &decoders.id_derive.id_for(p)),
                     held,
                 )
             })
             .collect()
     };
-    // Consume ids matching ANY of this watcher's known paths (held or already
-    // released — a duplicate stop's work is done either way); foreign ids stay
-    // pending for their owning watcher.
+    // Consume ids matching ANY of this watcher's known paths, held or already
+    // released: a duplicate stop's work is done either way.
     let matched = unclaims.take_matching(|id| claimed.iter().any(|(_, pid, _)| pid == id));
     for id in matched {
         for (path, pid, held) in &claimed {

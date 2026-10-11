@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::format::Piece;
 
-use super::{DESK_FOOT_H, DESK_H, DESK_W, Pivot, Point, Size};
+use super::{DESK_FOOT_H, DESK_H, DESK_W, OBSTACLE_PAD_PX, Pivot, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -35,16 +35,16 @@ pub enum WaypointKind {
 /// Per-spot idle dwell window. `range_ms == 0` is the DECOR sentinel (not a
 /// wander destination).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DwellWindow {
+pub(crate) struct DwellWindow {
     /// Baseline dwell time at the spot, in milliseconds.
-    pub base_ms: u64,
+    pub(crate) base_ms: u64,
     /// Extra randomized dwell added on top of `base_ms`, in milliseconds
     /// (`0` marks the [`Self::DECOR`] non-destination sentinel).
-    pub range_ms: u64,
+    pub(crate) range_ms: u64,
 }
 impl DwellWindow {
     /// The decor sentinel — scenery, not a wander destination.
-    pub const DECOR: DwellWindow = DwellWindow {
+    pub(crate) const DECOR: DwellWindow = DwellWindow {
         base_ms: 0,
         range_ms: 0,
     };
@@ -57,24 +57,24 @@ impl DwellWindow {
 pub(crate) const PLANT_FOOTPRINT: Size = Size { w: 6, h: 3 };
 
 /// Which sides an agent may approach a piece of furniture from, in the
-/// CANONICAL frame (furniture facing South, toward the viewer). [`Self::allows`]
+/// CANONICAL frame (furniture facing South, toward the viewer). `Self::allows`
 /// rotates this to the live `facing`, so one stored set works for
 /// variable-facing furniture. **To add/remove an entry side, flip one bool.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ApproachSides {
+pub(crate) struct ApproachSides {
     /// Approachable from the north (−y) in the canonical frame?
-    pub n: bool,
+    pub(crate) n: bool,
     /// Approachable from the south (+y, the canonical front)?
-    pub s: bool,
+    pub(crate) s: bool,
     /// Approachable from the east (+x)?
-    pub e: bool,
+    pub(crate) e: bool,
     /// Approachable from the west (−x)?
-    pub w: bool,
+    pub(crate) w: bool,
 }
 
 impl ApproachSides {
     /// 360° — approachable from every open side (pantry counter).
-    pub const ALL: Self = Self {
+    pub(crate) const ALL: Self = Self {
         n: true,
         s: true,
         e: true,
@@ -82,7 +82,7 @@ impl ApproachSides {
     };
 
     /// This canonical (facing-South) set rotated to the live `facing`.
-    pub fn rotated(self, facing: Facing) -> Self {
+    pub(crate) fn rotated(self, facing: Facing) -> Self {
         let s = self;
         match facing {
             Facing::South => s,
@@ -109,7 +109,7 @@ impl ApproachSides {
 
     /// Is the absolute unit dir `(dx, dy)` (north = (0,−1), south = (0,1),
     /// east = (1,0), west = (−1,0)) an allowed approach under the live `facing`?
-    pub fn allows(self, facing: Facing, dir: (i32, i32)) -> bool {
+    pub(crate) fn allows(self, facing: Facing, dir: (i32, i32)) -> bool {
         let r = self.rotated(facing);
         match dir {
             (0, -1) => r.n,
@@ -141,7 +141,7 @@ pub struct FurnitureDef {
     /// sit on furniture stamped elsewhere). NB: `Pantry` is also `None` because its
     /// footprint is runtime-sized — `obstacle_footprint` special-cases it, the one
     /// kind whose shape isn't a static literal.
-    pub footprint: Option<Size>,
+    pub(crate) footprint: Option<Size>,
     /// Visual sprite size `(w, h)` in buffer px — the SECOND geometry axis, kept
     /// distinct from `footprint` (the top-down ground rule, invariant #6): a sprite
     /// legitimately overhangs its ground base, and conflating the two is the
@@ -154,23 +154,23 @@ pub struct FurnitureDef {
     /// phone booth renders stand-beside yet holds exactly one caller, so capacity
     /// lives on the separate [`exclusive`](Self::exclusive) field. This is the set
     /// `seated_foot_cell` switches on (its `unreachable!` arm keeps the two in step).
-    pub occupies_pos: bool,
+    pub(crate) occupies_pos: bool,
     /// A single-occupancy DESTINATION: at most one agent is assigned here at a
     /// time. SUPERSET of `occupies_pos` — every seat, PLUS the enclosed
     /// stand-beside singles (`PhoneBooth`, `StandingDesk`) that render at a SIDE
     /// cell yet still hold exactly one person. Queue spots (pantry / vending /
     /// printer / snack shelf) are NOT exclusive — agents share and step aside.
-    pub exclusive: bool,
+    pub(crate) exclusive: bool,
     /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a kind
     /// that is NOT a wander destination; `dwell_ms` guards with
     /// `% range_ms.max(1)`, so a zero range is safe. Do not "fix" a decor row to a
     /// non-zero range — that silently turns it into a wander destination.
-    pub dwell: DwellWindow,
+    pub(crate) dwell: DwellWindow,
     /// Canonical (facing-South) sides an agent may approach from. Obstacle
     /// furniture against walls keeps `ALL` (walls already constrain the open side);
     /// seats use "front + sides, no back" so a walker never paths in through the
     /// sofa back.
-    pub approach: ApproachSides,
+    pub(crate) approach: ApproachSides,
     /// Where `footprint` sits inside the VISUAL box horizontally. Every current row
     /// is `Center`; the field exists so a future sideways-overhanging piece declares
     /// `Start`/`End` instead of needing a new stamp path.
@@ -240,7 +240,7 @@ impl WaypointKind {
 
     /// This waypoint's geometry kind in the unified [`Furniture`] table. The
     /// waypoint enum carries only ROLE — a wander destination.
-    pub const fn furniture(self) -> Furniture {
+    pub(crate) const fn furniture(self) -> Furniture {
         match self {
             WaypointKind::Couch => Furniture::Couch,
             WaypointKind::Pantry => Furniture::Pantry,
@@ -316,10 +316,11 @@ pub enum Furniture {
     /// already-blocked window band.
     MeetingScreen,
     /// The meeting-sofa BODY — the obstacle the mask stamps once per room (its
-    /// seats are the [`Furniture::MeetingSofa`] rows). Both axes are sized so
-    /// `footprint + 2·OBSTACLE_PAD` lands exactly on the sprite; the width is
-    /// narrower than the sprite ON PURPOSE, because a full-width footprint plus
-    /// pad disconnects the narrowest meeting room. Its strip is CENTERED, not
+    /// seats are the [`Furniture::MeetingSofa`] rows). Its footprint is the
+    /// sprite less the obstacle pad on every side, so footprint plus pad lands
+    /// exactly on the sprite; the width is narrower than the sprite ON
+    /// PURPOSE, because a full-width footprint plus pad disconnects the narrowest
+    /// meeting room. Its strip is CENTERED, not
     /// south-anchored: seat settle clearance and narrowest-room connectivity are
     /// both tuned to it sitting on the sofa pos.
     MeetingSofaBody,
@@ -373,7 +374,8 @@ impl Furniture {
     /// Every variant — the iteration handle for the exhaustive row-invariant test.
     /// A new variant fails the `ALL.len()` count assert until it is listed here,
     /// so no row can slip in unverified.
-    pub const ALL: &'static [Furniture] = &[
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [Furniture] = &[
         Furniture::Couch,
         Furniture::Pantry,
         Furniture::PhoneBooth,
@@ -627,12 +629,18 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 14, h: 12 },
             ..DECOR
         },
-        Furniture::MeetingSofaBody => FurnitureDef {
-            footprint: Some(Size { w: 16, h: 3 }),
-            visual: Size { w: 20, h: 7 },
-            ground_y: GroundAlign::Center,
-            ..DECOR
-        },
+        Furniture::MeetingSofaBody => {
+            const VISUAL: Size = Size { w: 20, h: 7 };
+            FurnitureDef {
+                footprint: Some(Size {
+                    w: VISUAL.w - 2 * OBSTACLE_PAD_PX,
+                    h: VISUAL.h - 2 * OBSTACLE_PAD_PX,
+                }),
+                visual: VISUAL,
+                ground_y: GroundAlign::Center,
+                ..DECOR
+            }
+        }
         Furniture::MeetingTable => FurnitureDef {
             footprint: Some(Size { w: 11, h: 5 }),
             visual: Size { w: 11, h: 5 },
@@ -894,7 +902,8 @@ pub enum WallDecor {
 
 impl WallDecor {
     /// Every variant.
-    pub const ALL: &'static [WallDecor] = &[
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [WallDecor] = &[
         WallDecor::Bookshelf,
         WallDecor::Whiteboard,
         WallDecor::BulletinBoard,
@@ -903,7 +912,7 @@ impl WallDecor {
     ];
 
     /// Geometry kind in the unified [`Furniture`] table.
-    pub const fn furniture(self) -> Furniture {
+    pub(crate) const fn furniture(self) -> Furniture {
         match self {
             WallDecor::Whiteboard => Furniture::Whiteboard,
             WallDecor::Bookshelf => Furniture::Bookshelf,
@@ -921,7 +930,7 @@ impl WallDecor {
 
     /// The piece it draws: here, so a new variant is a compile error HERE,
     /// not a forgotten call-site match arm.
-    pub const fn piece(self) -> Piece {
+    pub(crate) const fn piece(self) -> Piece {
         match self {
             WallDecor::Bookshelf => Piece::Bookshelf,
             WallDecor::Whiteboard => Piece::Whiteboard,
@@ -948,7 +957,8 @@ pub enum PlantKind {
 
 impl PlantKind {
     /// Every variant.
-    pub const ALL: &'static [PlantKind] = &[
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [PlantKind] = &[
         PlantKind::Ficus,
         PlantKind::Tall,
         PlantKind::Flower,
@@ -956,7 +966,7 @@ impl PlantKind {
     ];
 
     /// Geometry kind in the unified [`Furniture`] table.
-    pub const fn furniture(self) -> Furniture {
+    pub(crate) const fn furniture(self) -> Furniture {
         match self {
             PlantKind::Ficus => Furniture::PlantFicus,
             PlantKind::Tall => Furniture::PlantTall,
@@ -966,7 +976,7 @@ impl PlantKind {
     }
 
     /// The piece it draws.
-    pub const fn piece(self) -> Piece {
+    pub(crate) const fn piece(self) -> Piece {
         match self {
             PlantKind::Ficus => Piece::Plant,
             PlantKind::Tall => Piece::PlantTall,
@@ -996,7 +1006,7 @@ pub enum PodDecor {
 impl PodDecor {
     /// The randomly-picked pool. Every member's GROUND footprint has to fit the
     /// aisle width once the obstacle pad is added.
-    pub const ALL: &'static [PodDecor] = &[
+    pub(crate) const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,
         PodDecor::Whiteboard,
         PodDecor::Tv,
@@ -1007,7 +1017,7 @@ impl PodDecor {
     /// Geometry kind in the unified [`Furniture`] table. PlantTall resolves to the
     /// SAME row as the free-standing `PlantKind::Tall`, and PhoneBooth/StandingDesk
     /// to the same rows as their `WaypointKind` twins, so nothing drifts.
-    pub const fn furniture(self) -> Furniture {
+    pub(crate) const fn furniture(self) -> Furniture {
         match self {
             PodDecor::PlantTall => Furniture::PlantTall,
             PodDecor::Whiteboard => Furniture::Whiteboard,
@@ -1028,7 +1038,7 @@ impl PodDecor {
     }
 
     /// The piece it draws.
-    pub const fn piece(self) -> Piece {
+    pub(crate) const fn piece(self) -> Piece {
         match self {
             PodDecor::PlantTall => Piece::PlantTall,
             PodDecor::Whiteboard => Piece::Whiteboard,

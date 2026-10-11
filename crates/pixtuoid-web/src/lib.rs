@@ -270,8 +270,8 @@ impl Office {
         self.hires.try_hire(base, &self.scene)
     }
 
-    /// Force one of the [`weather_names`](pixtuoid_scene::sky::weather_names),
-    /// or `None` (or an unrecognized name) to follow the clock-based cycle.
+    /// Force the weather [`WeatherPolicy::from_name`] names, or `None` (or an
+    /// unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }

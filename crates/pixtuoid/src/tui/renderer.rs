@@ -84,19 +84,17 @@ impl<'a> DrawCtx<'a> {
 }
 
 /// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
-/// `Default` is a refused frame, which leaves nothing to hit-test.
+/// `Default` is a frame refused or held by the flash hold, which draws nothing
+/// new to hit-test.
 #[derive(Debug, Default)]
 pub struct DrawOut {
-    /// `None` when the frame was refused.
+    /// `None` when the frame was refused or held.
     pub layout: Option<Arc<SceneLayout>>,
     pub hovers: Hovers,
     /// The board's star, a link the pointer finds.
-    pub star: Option<pixtuoid_scene::layout::Bounds>,
-    /// Where the frame lies under the cells; `None` when it was refused.
+    pub(crate) star: Option<pixtuoid_scene::layout::Bounds>,
+    /// Where the frame lies under the cells; `None` when it was refused or held.
     pub(crate) geometry: Option<SceneGeometry>,
-    /// The flash hold kept the frame off the terminal, which still shows the
-    /// last one and its hit targets.
-    pub held: bool,
 }
 
 /// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
@@ -304,10 +302,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         .as_ref()
         .is_some_and(|f| f.holds(flashes, term_size))
     {
-        return Ok(DrawOut {
-            held: true,
-            ..DrawOut::default()
-        });
+        return Ok(DrawOut::default());
     }
     let frame = ClassicFrame {
         footer: &footer,
@@ -402,7 +397,6 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         hovers: hovers.clone(),
         star,
         geometry: Some(geometry),
-        held: false,
     })
 }
 

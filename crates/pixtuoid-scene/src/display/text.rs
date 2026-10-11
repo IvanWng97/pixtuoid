@@ -164,7 +164,7 @@ pub enum Content {
 
 impl Content {
     /// It as a terminal writes it: an icon as its glyph.
-    pub fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         match self {
             Self::Text(text) => text,
             Self::Icon(icon) => icon.terminal(),

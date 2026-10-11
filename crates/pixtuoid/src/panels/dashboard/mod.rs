@@ -64,14 +64,14 @@ impl DashboardFolds {
 
     /// Collapse every given root and pin it; roots that appear later are not
     /// pinned, so they still auto-evaluate.
-    pub fn fold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
+    pub(crate) fn fold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
         for root in roots {
             self.user_toggled.insert(root);
             self.collapsed.insert(root);
         }
     }
 
-    pub fn unfold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
+    pub(crate) fn unfold_all(&mut self, roots: impl IntoIterator<Item = AgentId>) {
         for root in roots {
             self.user_toggled.insert(root);
             self.collapsed.remove(&root);
