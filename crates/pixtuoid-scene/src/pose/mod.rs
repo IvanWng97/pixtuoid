@@ -578,8 +578,8 @@ pub(crate) fn derive_with_routing(
 }
 
 /// `slot`'s pose while a pointer holds it, or on its walk home from where it
-/// was set down, `desk` its desk; `None` once home, or never lifted. Home, its wander restarts seated
-/// from `now`, so the timeline it missed cannot teleport it.
+/// was set down, `desk` its desk; `None` once home, or never lifted. Home, its
+/// wander restarts seated from `now`, so the timeline it missed cannot teleport it.
 fn lifted_pose(
     slot: &AgentSlot,
     now: SystemTime,
