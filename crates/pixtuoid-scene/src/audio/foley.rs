@@ -282,7 +282,11 @@ mod tests {
 
     #[test]
     fn rain_bed_is_one_rain_loop() {
-        assert_eq!(rain_bed(&mut NoiseStream::new(1)).len(), RAIN_LOOP_SAMPLES);
+        assert_eq!(
+            rain_bed(&mut NoiseStream::new(1)).len(),
+            1 << 19,
+            "the ratified rain loop: a new length is a new sound"
+        );
     }
 
     #[test]

@@ -41,8 +41,9 @@ fn midi_freq(m: f32) -> f32 {
     MIDI_A4 * 2f32.powf((m - 69.0) / 12.0)
 }
 
-/// Seamless-loop length for the noise beds. Must stay a power of two: the
-/// FFT-domain shaping is circular, so the block loops click-free.
+/// Seamless-loop length for the texture bed. Must stay a power of two: its FFT
+/// lowpass pads to one, and only an unpadded block filters circularly, so the
+/// bed loops click-free.
 const BED_LOOP_SAMPLES: usize = 1 << 19;
 
 /// Vinyl-crackle pop density shared by BOTH room-tone beds — one knob, so the
