@@ -278,10 +278,10 @@ mod tests {
         }
     }
 
-    /// Byte-stability across feature unification — the WHY is on
-    /// `pixtuoid_core`'s twin of this test, which this deliberately duplicates
-    /// rather than share: a small walker is under the extract-a-helper bar,
-    /// and each crate's fragment has to be gated where it is emitted.
+    /// Byte-stability across feature unification: serde_json's `preserve_order`,
+    /// which `pixtuoid` asks for, keeps a `json!` literal's insertion order
+    /// under a whole-workspace build and sorts it under `-p pixtuoid`, so the
+    /// committed fragment would pass one way and fail the other.
     #[test]
     fn every_emitted_object_has_sorted_keys() {
         fn walk(v: &Value, path: &str) {

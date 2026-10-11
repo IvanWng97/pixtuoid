@@ -73,9 +73,9 @@ pub enum Read {
         name: &'static str,
         arm: &'static str,
     },
-    /// Enum `name`'s serde wire names: each top-level variant in snake_case,
-    /// plus each variant's `rename`/`alias` literal. Read only under
-    /// `rename_all = "snake_case"`, the one spelling it derives.
+    /// Enum `name`'s serde wire names: each top-level variant's `rename`, else
+    /// its ident in snake_case. Read only under `rename_all = "snake_case"`,
+    /// the one spelling it derives.
     RustEnum { name: &'static str },
     /// The fields of the ONE `export interface name`.
     TsFields { name: &'static str },
@@ -200,8 +200,12 @@ mod tests {
                 );
                 if let Some(sib) = &w.siblings {
                     assert!(
-                        matches!(w.when, When::Vanishes)
-                            && !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
+                        matches!(w.when, When::Vanishes),
+                        "{} sweeps siblings on a watch that does not fire on a vanish",
+                        w.id
+                    );
+                    assert!(
+                        !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
                         "{} sweeps siblings off a reader that yields none",
                         w.id
                     );

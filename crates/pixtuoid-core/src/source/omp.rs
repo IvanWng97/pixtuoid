@@ -165,7 +165,6 @@ fn resolve_profile(env: &OmpEnv) -> Option<String> {
     }
 }
 
-/// `getProfileConfigRoot` — `<home>/<PI_CONFIG_DIR|.omp>[/profiles/<profile>]`.
 /// The fixed path segments of a profile's tree, named once — `dirs.ts` joins
 /// these literals, and a silent rename upstream is the drift class
 /// `EXTENSIONS_SUBDIR` already guards its own segment against.
@@ -173,6 +172,7 @@ const PROFILES_SUBDIR: &str = "profiles";
 /// The agent-dir segment under a config root (flattened away by the XDG arm).
 const AGENT_SUBDIR: &str = "agent";
 
+/// `getProfileConfigRoot` — `<home>/<PI_CONFIG_DIR|.omp>[/profiles/<profile>]`.
 fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
     let name = env
         .config_dir_name

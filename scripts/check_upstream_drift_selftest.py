@@ -235,7 +235,7 @@ def test_anchor_gate_fires_in_both_directions() -> None:
 
 def test_one_document_is_fetched_once_per_run() -> None:
     """A document is upstream's answer for the whole run, and several checks read
-    the same one — three read codex's `protocol.rs`."""
+    the same one — two read hermes's `plugins.py`."""
     real = d.fetch
     try:
         calls: list[str] = []
@@ -261,9 +261,9 @@ def test_one_document_is_fetched_once_per_run() -> None:
         # A SUCCESSFUL document is reused as well, not only a failed one.
         served: list[str] = []
 
-        def live(u: str, _s: str = ANCHOR_SAMPLES[d.CODEX_PROTOCOL_URL]) -> str:
+        def live(u: str, _s: str = ANCHOR_SAMPLES[d.HERMES_PLUGINS_URL]) -> str:
             served.append(u)
-            if u == d.CODEX_PROTOCOL_URL:
+            if u == d.HERMES_PLUGINS_URL:
                 return _s
             raise urllib.error.URLError("offline: not this case's document")
 
@@ -271,9 +271,9 @@ def test_one_document_is_fetched_once_per_run() -> None:
         rep = d.Report()
         d.run_checks(d.read_our_names(rep), report=rep)
         check(
-            served.count(d.CODEX_PROTOCOL_URL) == 1,
+            served.count(d.HERMES_PLUGINS_URL) == 1,
             f"a document that ANSWERED is cached too, got "
-            f"{served.count(d.CODEX_PROTOCOL_URL)} fetches of protocol.rs",
+            f"{served.count(d.HERMES_PLUGINS_URL)} fetches of plugins.py",
         )
     finally:
         d.fetch = real
@@ -1179,8 +1179,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
             # The decoy is built from the VICTIM, so the mutated document carries the
             # dropped name's spelling in a NON-declaration position: that is the only
-            # shape that can tell `f'"{name}"' not in text` from `name not in text`,
-            # and eight matchers exist for exactly that distinction.
+            # shape that can tell `f'"{name}"' not in text` from `name not in text`.
             stem = spell(victims[0])
             if stem.isdigit():
                 # A numeric VALUE row: a `Pxd` suffix leaves our digits at the front,

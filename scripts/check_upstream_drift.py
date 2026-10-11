@@ -773,11 +773,12 @@ def check_omp_extension_reads(
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
-    """The brace-balanced body of `enum <enum_name> { … }`, for every Rust surface
-    we watch. Never a regex: `(.*?)\\}` stops at the FIRST `}`, so one struct
-    variant truncates the enum into a phantom rename per variant, and `(.*?)\\n\\}`
+    """The brace-balanced body of `enum <enum_name> { … }`, for the hook enums.
+    Never a regex: `(.*?)\\}` stops at the FIRST `}`, so one struct variant
+    truncates the enum into a phantom rename per variant, and `(.*?)\\n\\}`
     demands a column-0 brace, so an INDENTED enum runs on into the next `impl`.
-    Comments go first; string literals stay, so callers still read `rename = "…"`."""
+    Comments go first; string literals stay, so a `//` inside one is not mistaken
+    for a comment."""
     # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
     # `HookEvent` must not bind to `enum HookEventName {`.
     return _braced_body(text, rf"enum\s+{enum_name}\s*\{{")
@@ -807,11 +808,11 @@ def _snake_case(camel: str) -> str:
 
 
 def _strip_nested(s: str) -> str:
-    """Iteratively strip innermost `(…)`/`{…}` so only top-level variant idents
-    survive — else a CamelCase field/param TYPE reads as a variant. PRECONDITION:
-    comments are already gone. Do NOT re-strip them with a naive `//[^\\n]*` — inside
-    a STRING LITERAL that eats to end-of-line, so one `rename = "http://…"` attr
-    deletes every variant after it on that line."""
+    """Iteratively strip innermost `(…)`/`{…}` so only a type body's top-level
+    members survive — else a nested object type's fields read as members of this
+    one. PRECONDITION: comments are already gone. Do NOT re-strip them with a
+    naive `//[^\\n]*` — inside a STRING LITERAL that eats to end-of-line, so one
+    `"http://…"` literal deletes every member after it on that line."""
     prev = None
     while prev != s:
         prev = s

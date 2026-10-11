@@ -7,9 +7,8 @@
 //! const and the parser returns a smaller set, so the watch narrows with
 //! nothing to show for it. Emitting makes it a test failure HERE.
 //!
-//! `crates/pixtuoid` emits the other half — what we REGISTER — because a
-//! decode arm with no registration row is a real failure class, not an
-//! organisational split.
+//! `crates/pixtuoid` emits the other half — the hook sets it REGISTERS and the
+//! values its install templates ship — because it owns those tables.
 
 use std::collections::BTreeMap;
 
@@ -19,11 +18,9 @@ use serde_json::{Value, json};
 const FRAGMENT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/drift-surface.json");
 
 fn surface() -> Value {
-    // A BTreeMap so the emitted order is the key order, not a hash order — the
-    // committed file has to be byte-stable or the gate flaps. The value rides
-    // the file the installer writes; why it is watched is on
-    // `omp::EXTENSIONS_SUBDIR`.
     let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
+    // The value rides the file the installer writes; why it is watched is on
+    // `omp::EXTENSIONS_SUBDIR`.
     shipped.insert(
         "omp.extension_subdir",
         json!([crate::source::omp::EXTENSIONS_SUBDIR]),
@@ -434,8 +431,9 @@ mod tests {
             }
             walk(&frag, &mut carried);
         }
-        // The vanish watches' names are carried too, read off the registry; an
-        // appearance watch's are names we wait on, which no decoder reads.
+        // The vanish watches' names are carried too, read off the registry. An
+        // appearance watch fires only when a name lands, so it cannot see one
+        // renamed: its names are not carried.
         for d in crate::source::registry::REGISTRY {
             for w in d
                 .upstream

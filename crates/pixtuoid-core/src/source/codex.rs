@@ -250,7 +250,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "codex.escalation",
         ours: || DECODED_ESCALATION.to_vec(),
-        // The shell tool's own schema, which the model fills in.
+        // The shell tool's own schema, which the model fills in. Quoted: a doc
+        // comment naming the field would keep a renamed one alive.
         docs: &[codex_rs(
             "codex-rs/core/src/tools/handlers/shell_spec.rs",
             r"fn create_approval_parameters\b",

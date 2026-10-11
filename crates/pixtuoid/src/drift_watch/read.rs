@@ -87,7 +87,8 @@ pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unre
 }
 
 /// Comments go first, and a struct variant's own fields never name a variant,
-/// so only the top level is read.
+/// so only the top level is read. An `alias` is only ever read by serde, so it
+/// never counts: a name moved into one is gone from the wire.
 pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
     let src = strip_rust_comments(text);
     let opener = Regex::new(&format!(r"enum\s+{}\b[^{{;]*\{{", regex::escape(name)))?;
@@ -106,20 +107,18 @@ pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
     let body =
         braced_body(&src, &opener).ok_or_else(|| missing(format!("no end to `enum {name}`")))?;
     let variants = top_level(&body, &['{']);
-    let serde = Regex::new(r"#\[serde\(([^\]]*)\)\]")?;
-    let literal = Regex::new(r#"\b(?:rename|alias)\s*=\s*"([^"]+)""#)?;
-    let mut names: Names = serde
-        .captures_iter(&variants)
-        .filter_map(|attr| attr.get(1))
-        .flat_map(|args| literal.captures_iter(args.as_str()))
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
-        .collect();
+    let rename = Regex::new(r#"#\[serde\([^\]]*\brename\s*=\s*"([^"]+)""#)?;
     let ident = Regex::new(r"\b([A-Z][A-Za-z0-9]*)\b")?;
-    names.extend(
-        ident
-            .captures_iter(&top_level(&variants, &['(']))
-            .filter_map(|c| c.get(1).map(|m| snake_case(m.as_str()))),
-    );
+    let names: Names = split_top_level(&variants)
+        .into_iter()
+        .filter_map(|variant| match rename.captures(variant) {
+            Some(renamed) => renamed.get(1).map(|m| m.as_str().to_owned()),
+            None => ident
+                .captures(&top_level(variant, &['(', '[']))
+                .and_then(|c| c.get(1))
+                .map(|m| snake_case(m.as_str())),
+        })
+        .collect();
     if names.is_empty() {
         return Err(missing(format!("no variant in `enum {name}`")));
     }
@@ -136,6 +135,24 @@ fn snake_case(ident: &str) -> String {
         }
         out.push(c.to_ascii_lowercase());
     }
+    out
+}
+
+/// `src` cut at each comma outside every bracket.
+fn split_top_level(src: &str) -> Vec<&str> {
+    let (mut out, mut depth, mut start) = (Vec::new(), 0usize, 0);
+    for (i, c) in src.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(&src[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&src[start..]);
     out
 }
 
@@ -448,14 +465,7 @@ mod tests {
             enum ItemKind { NotThisOne }"#;
         assert_eq!(
             found(rust_enum(src, "Item")),
-            names(&[
-                "compacted",
-                "compaction",
-                "compaction_summary",
-                "event_msg",
-                "h_t_t_p_call",
-                "struct"
-            ])
+            names(&["compaction_summary", "event_msg", "h_t_t_p_call", "struct"])
         );
         assert_eq!(
             found(rust_enum(src, "ItemKind")).map(|_| ()).unwrap_err(),

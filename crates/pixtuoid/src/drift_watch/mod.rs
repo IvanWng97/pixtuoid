@@ -1,5 +1,6 @@
-//! The upstream drift watch: every name a source declares it reads
-//! ([`pixtuoid_core::source::upstream`]) is still declared upstream. The
+//! The upstream drift watch: a name a source declares it reads
+//! ([`pixtuoid_core::source::upstream`]) has not vanished upstream, and one it
+//! waits on has not appeared. The
 //! `drift_watch` example runs it for upstream-drift.yml, which files the report
 //! as a tracking issue; a name ships renamed with no notice (`Task` → `Agent`
 //! silently disabled subagent suppression), so this is how we hear first.
@@ -161,7 +162,10 @@ impl Report {
             && self.blind.is_empty()
             && self.errors.is_empty()
         {
-            out.push("✅ No drift. Every name we depend on is present upstream.".to_owned());
+            out.push(
+                "✅ No drift. Nothing we read has vanished and nothing we wait on has appeared."
+                    .to_owned(),
+            );
         }
         out.join("\n")
     }

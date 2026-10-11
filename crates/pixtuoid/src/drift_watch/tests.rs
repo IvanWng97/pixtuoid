@@ -695,10 +695,11 @@ fn pascal(snake: &str) -> String {
 }
 
 /// `name` where `w`'s reader must not find it: another item of the reader's
-/// kind, or a commented-out declaration. An `Each` pattern's strictness cannot
-/// be read off the pattern under test, so
-/// `a_declaration_form_is_not_satisfied_by_prose` pins it per watch, and a
-/// JSON reader reads its whole document by design.
+/// kind, or for `Sole`, a commented-out declaration. An `Each` pattern's
+/// strictness cannot be read off the pattern under test, so
+/// `a_declaration_form_is_not_satisfied_by_prose` pins it where a declaration
+/// names the prose it must reject, and a JSON reader reads its whole document
+/// by design.
 fn near_miss(w: &Watch, name: &str) -> String {
     let in_rust = w.docs.iter().all(|doc| match doc.at {
         At::Path { path, .. } => path.ends_with(".rs"),
@@ -749,6 +750,7 @@ fn a_declaration_form_is_not_satisfied_by_prose() {
             r#"type Done = Omit<ToolPart, "{name}">"#,
         ),
         ("omp.entry_types", "// a {name} entry, written once"),
+        ("codex.escalation", "/// set `{name}` to escalate"),
     ] {
         let w = pixtuoid_core::source::registry::declared_watch(id)
             .unwrap_or_else(|| panic!("{id} is declared"));
