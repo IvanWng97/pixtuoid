@@ -17,10 +17,10 @@ pub enum BinaryStrategy {
     EmbedAbsolute,
 }
 
-/// `changed` compares the PARSED document before and after the merge, never the
-/// serialized bytes (which always differ from a hand-formatted file). A byte
-/// comparison would make a semantic no-op look like a change, triggering a
-/// rewrite of the user's formatting.
+/// A merge's `changed` compares the PARSED document before and after, never the
+/// serialized bytes (which always differ from a hand-formatted file): a byte
+/// comparison would make a semantic no-op look like a change, rewriting the user's
+/// formatting. An owned primary is pixtuoid's whole file, so its install compares bytes.
 #[derive(Debug)]
 pub struct MergeOutcome {
     pub content: String,
@@ -87,11 +87,11 @@ pub enum Primary {
     Owned {
         /// The primary's whole content, `hook_cmd` baked in.
         render: fn(hook_cmd: &str) -> Result<String>,
-        /// The primary as a disconnect leaves it; `changed` iff it was ours. Same
+        /// The primary as an uninstall leaves it; `changed` iff it was ours. Same
         /// empty rule as `merge_uninstall`.
-        disconnect: fn(content: &str) -> Result<MergeOutcome>,
-        /// `verify_schema`'s contract, over the owned primary.
-        verify: fn(content: &str) -> crate::install::verify::SchemaParse,
+        uninstall: fn(content: &str) -> Result<MergeOutcome>,
+        /// As `Config`'s, over the owned primary.
+        verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
     },
 }
 
@@ -102,14 +102,15 @@ impl Primary {
             Primary::Config {
                 merge_uninstall, ..
             } => *merge_uninstall,
-            Primary::Owned { disconnect, .. } => *disconnect,
+            Primary::Owned { uninstall, .. } => *uninstall,
         }
     }
 
     pub(crate) fn verify(&self) -> fn(&str) -> crate::install::verify::SchemaParse {
         match self {
-            Primary::Config { verify_schema, .. } => *verify_schema,
-            Primary::Owned { verify, .. } => *verify,
+            Primary::Config { verify_schema, .. } | Primary::Owned { verify_schema, .. } => {
+                *verify_schema
+            }
         }
     }
 }
@@ -152,8 +153,8 @@ pub(crate) const CLAUDE: Target = Target {
     hook_command: crate::install::claude::hook_command,
     primary: Primary::Owned {
         render: crate::install::claude::render_hooks,
-        disconnect: crate::install::claude::disconnect,
-        verify: crate::install::claude::verify_schema,
+        uninstall: crate::install::claude::uninstall,
+        verify_schema: crate::install::claude::verify_schema,
     },
     // Windows: the exec form embeds the absolute path, and a hook spawned without
     // a shell can't PATH-search, so an unresolvable binary is fatal there.
@@ -229,8 +230,8 @@ pub(crate) const OPENCODE: Target = Target {
     hook_command: crate::install::opencode::hook_command,
     primary: Primary::Owned {
         render: crate::install::opencode::render_plugin,
-        disconnect: crate::install::opencode::disconnect,
-        verify: crate::install::opencode::verify_schema,
+        uninstall: crate::install::opencode::uninstall,
+        verify_schema: crate::install::opencode::verify_schema,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on opencode's own dirs
@@ -368,8 +369,8 @@ pub(crate) const OMP: Target = Target {
     hook_command: crate::install::omp::hook_command,
     primary: Primary::Owned {
         render: crate::install::omp::render_extension,
-        disconnect: crate::install::omp::disconnect,
-        verify: crate::install::omp::verify_schema,
+        uninstall: crate::install::omp::uninstall,
+        verify_schema: crate::install::omp::verify_schema,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on omp's own agent dir

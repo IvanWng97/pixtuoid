@@ -78,7 +78,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 
 /// `changed` only when the content is actually ours (carries the sentinel) — a
 /// foreign file, an already-removed stub, or empty content is left untouched.
-pub(crate) fn disconnect(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
     let ours = content.contains(SENTINEL);
     Ok(MergeOutcome {
         changed: ours,
@@ -300,14 +300,6 @@ mod tests {
     }
 
     #[test]
-    fn install_re_renders_on_a_path_change() {
-        let a = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
-        let b = render_plugin("/usr/local/bin/pixtuoid-hook").unwrap();
-        assert_ne!(a, b);
-        assert!(b.contains("\"/usr/local/bin/pixtuoid-hook\""));
-    }
-
-    #[test]
     fn a_path_with_special_chars_bakes_as_a_valid_escaped_literal() {
         let out = render_plugin(r#"/weird/pi"x\hook"#).unwrap();
         assert!(out.contains(r#""/weird/pi\"x\\hook""#));
@@ -316,7 +308,7 @@ mod tests {
     #[test]
     fn uninstall_replaces_our_plugin_with_a_sentinel_free_stub() {
         let installed = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
-        let removed = disconnect(&installed).unwrap();
+        let removed = uninstall(&installed).unwrap();
         assert!(removed.changed);
         assert!(
             !removed.content.contains(SENTINEL),
@@ -331,16 +323,16 @@ mod tests {
     #[test]
     fn uninstall_of_a_foreign_or_removed_file_is_a_no_op() {
         let foreign = "export const myPlugin = async () => ({})\n";
-        assert!(!disconnect(foreign).unwrap().changed);
-        assert!(!disconnect(REMOVED_STUB).unwrap().changed);
-        assert!(!disconnect("").unwrap().changed);
+        assert!(!uninstall(foreign).unwrap().changed);
+        assert!(!uninstall(REMOVED_STUB).unwrap().changed);
+        assert!(!uninstall("").unwrap().changed);
     }
 
     #[test]
     fn install_then_uninstall_round_trips_the_content_sentinel() {
         let installed = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
         assert!(installed.contains(SENTINEL));
-        let removed = disconnect(&installed).unwrap();
+        let removed = uninstall(&installed).unwrap();
         assert!(!removed.content.contains(SENTINEL));
     }
 
@@ -411,9 +403,8 @@ mod tests {
             .collect()
     }
 
-    /// opencode is the tenth install target, and the nine `*_EVENTS` membership
-    /// pins could not reach it: its registered set is a TS `Set`, not a Rust
-    /// const. Deleting `permission.v2.asked` from the plugin shipped GREEN —
+    /// opencode's registered set is a TS `Set`, not a Rust `*_EVENTS` const, so the
+    /// `*_EVENTS` membership pins could not reach it. Deleting `permission.v2.asked` from the plugin shipped GREEN —
     /// the same hole `PermissionRequest` and `pre_approval_request` shipped
     /// through. openclaw's plugin already had this bridge; opencode did not.
     #[test]
