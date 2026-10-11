@@ -184,13 +184,7 @@ fn a_refused_classic_frame_names_no_one() {
     )
     .expect("lays out");
     assert!(
-        !floor
-            .raster
-            .classic_drawn()
-            .expect("shown")
-            .text
-            .signs
-            .is_empty(),
+        !floor.raster.host_text().expect("shown").signs.is_empty(),
         "the office is drawn"
     );
     let refused = RenderInputs {
@@ -198,11 +192,9 @@ fn a_refused_classic_frame_names_no_one() {
         ..inputs(&scene, &pack, t0)
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
-    let drawn = floor.raster.classic_drawn().expect("shown");
+    let text = floor.raster.host_text().expect("shown");
     assert!(
-        drawn.text.badges.is_empty()
-            && drawn.text.bubbles.is_empty()
-            && drawn.text.signs.is_empty(),
+        text.badges.is_empty() && text.bubbles.is_empty() && text.signs.is_empty(),
         "no badge, bubble or sign"
     );
 }
@@ -298,12 +290,9 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
         inputs(&scene, &pack, t0),
     )
     .expect("lays out");
-    let drawn = floor.raster.classic_drawn().expect("shown");
-    assert!(
-        !drawn.text.badges.is_empty(),
-        "the office badges its agents"
-    );
-    let signs: Vec<TextRole> = drawn.text.signs.iter().map(|r| r.role).collect();
+    let text = floor.raster.host_text().expect("shown");
+    assert!(!text.badges.is_empty(), "the office badges its agents");
+    let signs: Vec<TextRole> = text.signs.iter().map(|r| r.role).collect();
     assert!(
         signs.contains(&TextRole::Star) && signs.contains(&TextRole::Indicator),
         "{signs:?}"
@@ -317,12 +306,8 @@ fn a_classic_frame_hands_over_its_badges_and_signs_apart() {
         ..inputs(&scene, &pack, t0)
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
-    let drawn = floor.raster.classic_drawn().expect("shown");
-    assert!(
-        drawn.text.badges.is_empty()
-            && drawn.text.bubbles.is_empty()
-            && drawn.text.signs.is_empty()
-    );
+    let text = floor.raster.host_text().expect("shown");
+    assert!(text.badges.is_empty() && text.bubbles.is_empty() && text.signs.is_empty());
 }
 
 /// The sim and the raster draw one pack: a frame stepped with another is

@@ -237,7 +237,7 @@ impl<T> std::borrow::Borrow<TestBackend> for Tapped<TestBackend, T> {
 
 /// A write that lands `by` late on the `screen` clock.
 pub(super) struct Latency {
-    pub(super) screen: pixtuoid_scene::flash::ManualClock,
+    pub(super) screen: pixtuoid_scene::screen::ManualClock,
     pub(super) by: Duration,
 }
 
@@ -281,10 +281,10 @@ pub(super) fn half_blocks_on_screen(
     rows: u16,
 ) -> (
     TuiRenderer<TestBackend>,
-    pixtuoid_scene::flash::ManualClock,
+    pixtuoid_scene::screen::ManualClock,
     Wire,
 ) {
-    let screen = pixtuoid_scene::flash::ManualClock::default();
+    let screen = pixtuoid_scene::screen::ManualClock::default();
     let mut r = TuiRenderer::new(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
@@ -294,7 +294,7 @@ pub(super) fn half_blocks_on_screen(
     let wire = Wire::default();
     // Synchronized, so every frame writes, and a refusing wire refuses it.
     r.present_through(crate::tui::FrameOut::new(wire.clone(), true));
-    r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
+    r.screen = pixtuoid_scene::screen::Screen::on(screen.clock());
     (r, screen, wire)
 }
 

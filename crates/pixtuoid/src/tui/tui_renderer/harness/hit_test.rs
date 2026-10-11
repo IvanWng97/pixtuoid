@@ -331,13 +331,13 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
             FloorMeta::ground(),
         );
         ctx.world.pets.pet = Some(&cat);
-        let out = draw_scene(&mut term, &mut ctx).expect("draw");
-        let (layout, geometry) = (
-            out.layout.as_deref().expect("drawn"),
-            out.geometry.expect("drawn"),
+        let drawn = draw_scene(&mut term, &mut ctx)
+            .expect("draw")
+            .expect("drawn");
+        let geometry = crate::tui::geometry::SceneGeometry::half_block(
+            crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)),
         );
-        let hits =
-            |at: CellArea| crate::tui::hit_test::scene_hit(&out.hovers, out.star, layout, at);
+        let hits = |at: CellArea| drawn.at(at.bounds(), None);
         let mut seen = [false; 5];
         for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
             let half_block = hits(CellArea::half_block(col, row));
@@ -504,7 +504,7 @@ where
     );
     send(r, &mut ui, MouseEventKind::Drag(MouseButton::Left), away);
     assert!(r.pointer.carrying(), "premise: the agent is lifted");
-    r.forget_drawn();
+    r.screen.blank();
     send(r, &mut ui, MouseEventKind::Down(MouseButton::Left), away);
     assert!(
         !r.pointer.carrying(),

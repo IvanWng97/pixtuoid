@@ -17,12 +17,12 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 
 use crate::tui::renderer::PetState;
-use pixtuoid_scene::display::Hovers;
 use pixtuoid_scene::floor::{
-    FloorInputs, FloorMeta, FloorTransition, OfficeSession, PetInputs, project_floor_scene,
+    FloorInputs, FloorMeta, FloorTransition, Frame, OfficeSession, PetInputs, project_floor_scene,
 };
 use pixtuoid_scene::layout::{SceneLayout, Size};
-use pixtuoid_scene::look::{Look, Place, RenderInputs};
+use pixtuoid_scene::look::{Look, Picture, Place, RenderInputs};
+use pixtuoid_scene::screen::Screen;
 
 #[derive(Debug, Default)]
 struct PopupState {
@@ -59,17 +59,14 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// [`Self::office_extent`] after the last frame.
     last_extent: Option<(u16, u16)>,
     mouse_pos: Option<(u16, u16)>,
-    cached_layout: Option<Arc<SceneLayout>>,
-    last_hovers: Hovers,
-    last_star: Option<pixtuoid_scene::layout::Bounds>,
     /// The left button's gesture over the office.
     pointer: pixtuoid_scene::interact::Pointer,
-    last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Live walkable/approach/route debug layer toggle (`w`); not persisted.
     debug_walkable: bool,
     chrome: Chrome,
-    /// The flashes the half-blocks show; the cutaway holds its own.
-    flash: pixtuoid_scene::flash::FlashHold<ratatui::layout::Size>,
+    /// What the terminal shows, the half-blocks or the cutaway's tiles, and
+    /// what a pointer finds there: one screen, so one flash hold.
+    screen: Screen<ratatui::layout::Size, crate::tui::geometry::SceneGeometry>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
 }
@@ -207,11 +204,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             refusing: false,
             last_extent: None,
             mouse_pos: None,
-            cached_layout: None,
-            last_hovers: Hovers::default(),
-            last_star: None,
             pointer: pixtuoid_scene::interact::Pointer::default(),
-            last_geometry: None,
             debug_walkable: false,
             chrome: Chrome {
                 theme,
@@ -224,7 +217,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
             },
-            flash: pixtuoid_scene::flash::FlashHold::on(pixtuoid_scene::flash::monotonic()),
+            screen: Screen::on(pixtuoid_scene::screen::monotonic()),
             cutaway: None,
         }
     }
@@ -267,8 +260,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// One frame of `scene` drawn through the session in `look` at `size`:
-    /// the floor showing, or a slide's two floors composed. The layout
-    /// drawn; `None` in a slide or when `size` can't lay out.
+    /// the floor showing, or a slide's two floors composed, its picture the
+    /// session's.
     fn render_office(
         &mut self,
         scene: &SceneState,
@@ -277,7 +270,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         look: Look,
         size: Size,
         debug_walkable: bool,
-    ) -> Option<Arc<SceneLayout>> {
+    ) -> Frame {
         self.session.render(
             look,
             RenderInputs {
@@ -424,17 +417,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.session.office_mut().coffee.insert(id, fetched_at);
     }
 
+    /// The layout of the frame the terminal shows.
     pub(crate) fn cached_layout(&self) -> Option<&SceneLayout> {
-        self.cached_layout.as_deref()
+        Some(self.screen.shown()?.hits()?.layout())
     }
 
-    /// The pixels cell `(col, row)` showed in the last frame drawn.
+    /// The pixels cell `(col, row)` shows of the floor the terminal shows;
+    /// none in a slide, which shows no one floor where it stands.
     pub(crate) fn scene_area_at(
         &self,
         col: u16,
         row: u16,
     ) -> Option<crate::tui::geometry::CellArea> {
-        self.last_geometry?.area_at(col, row)
+        let shown = self.screen.shown()?;
+        shown.hits().and(shown.geometry.area_at(col, row))
     }
 
     /// A left press at cell `(col, row)` at `now`: on what the last frame
@@ -447,9 +443,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             }
             return;
         };
-        let hit = self.cached_layout.as_deref().and_then(|layout| {
-            crate::tui::hit_test::scene_hit(&self.last_hovers, self.last_star, layout, cell)
-        });
+        let hit = self
+            .screen
+            .shown()
+            .and_then(|shown| shown.hit_at(cell.bounds()));
         let bounds = cell.bounds();
         // A cell is the terminal's one step: any move to another lifts.
         let slop = pixtuoid_scene::interact::Slop {
@@ -503,20 +500,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.session.grip(gesture);
     }
 
-    /// What cell `(col, row)` showed the pointer in the last frame drawn.
+    /// What cell `(col, row)` shows the pointer in the frame the terminal
+    /// shows.
     #[cfg(test)]
     pub(crate) fn scene_hit_at(
         &self,
         col: u16,
         row: u16,
     ) -> Option<crate::tui::hit_test::SceneHit<'_>> {
-        let layout = self.cached_layout.as_deref()?;
-        crate::tui::hit_test::scene_hit(
-            &self.last_hovers,
-            self.last_star,
-            layout,
-            self.scene_area_at(col, row)?,
-        )
+        let shown = self.screen.shown()?;
+        shown.hit_at(shown.geometry.area_at(col, row)?.bounds())
     }
 
     /// The agent topmost at cell `(col, row)` in the last frame drawn.
@@ -606,7 +599,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// logical pixel it is the topmost hover.
     #[cfg(test)]
     pub(crate) fn drawn_pet(&self) -> Option<pixtuoid_scene::display::PetHover> {
-        let layout = self.cached_layout.as_deref()?;
+        let hits = self.screen.shown()?.hits()?;
+        let layout = hits.layout();
         (0..layout.buf_h)
             .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
             .find_map(|(x, y)| {
@@ -616,7 +610,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     width: 1,
                     height: 1,
                 };
-                match self.last_hovers.at(pixel)? {
+                match hits.hovers().at(pixel)? {
                     pixtuoid_scene::display::HoverTarget::Pet(pet) => Some(*pet),
                     _ => None,
                 }
@@ -640,7 +634,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     fn flush_classic_slide(&mut self, scene: &SceneState, now: SystemTime) -> Result<()> {
         use crate::panels::paint_overlays;
         use crate::tui::renderer::{flush_buffer_to_term, paint_footer, scene_rect};
-        self.forget_drawn();
         let term_size = self.terminal.size()?;
         let footer_scene = self.session.footer_scene(scene);
         let footer = pixtuoid_scene::footer::FooterInputs::new(
@@ -652,27 +645,42 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .overlays(popup_scale, self.offers_walkable_debug());
         let theme = self.chrome.theme;
-        let flashes = self.session.flashes();
-        let Some(slide) = self.session.buf() else {
+        let Some(picture) = self.session.picture() else {
             return Ok(());
         };
-        if self.flash.holds(flashes, term_size) {
+        let geometry = crate::tui::geometry::SceneGeometry::half_block(scene_rect(Rect::new(
+            0,
+            0,
+            term_size.width,
+            term_size.height,
+        )));
+        if !self
+            .screen
+            .admit(&picture, term_size, geometry, None)
+            .written()
+        {
             return Ok(());
         }
+        let slide = picture.pixels();
         self.terminal.draw(|f| {
             let full = f.area();
             paint_footer(f, &footer, full, theme);
             flush_buffer_to_term(f, slide, scene_rect(full));
             paint_overlays(f, &overlays, now, full, theme);
         })?;
-        self.flash.stage(flashes, term_size);
         self.chrome.popup.last_scale = popup_scale;
         Ok(())
     }
 
     /// The footer-only frame of a terminal too small for the office; a slide
-    /// it would hide ends at once rather than run its course unseen.
-    fn draw_too_small(&mut self, scene: &SceneState, now: SystemTime) -> Result<()> {
+    /// it would hide ends at once rather than run its course unseen. `drawn`
+    /// is the office frame stepped for it, if one was.
+    fn draw_too_small(
+        &mut self,
+        scene: &SceneState,
+        now: SystemTime,
+        drawn: Option<Frame>,
+    ) -> Result<Frame> {
         self.session.prepare(scene, now);
         self.cancel_transition();
         let footer_scene = self.session.footer_scene(scene);
@@ -682,26 +690,24 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         );
         let popup_scale = self.version_popup_scale(now);
         let offers_walkable_debug = self.offers_walkable_debug();
-        let drawn = crate::tui::renderer::draw_footer_only_frame(
+        let flushed = crate::tui::renderer::draw_footer_only_frame(
             &mut self.terminal,
             &footer,
             self.chrome.theme,
             &self.chrome.overlays(popup_scale, offers_walkable_debug),
             now,
         );
-        self.session.drew_no_office();
-        self.record_drawn(crate::tui::renderer::DrawOut::default(), popup_scale);
+        let audio = match drawn {
+            Some(frame) => frame.audio,
+            None => {
+                let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
+                self.session.no_office(scene, office_floor, now)
+            }
+        };
+        self.screen.blank();
+        self.chrome.popup.last_scale = popup_scale;
         self.rest_floor(now);
-        drawn
-    }
-
-    /// What the mouse handler hit-tests is gone from the screen, so a click
-    /// must not land on its ghost.
-    fn forget_drawn(&mut self) {
-        self.cached_layout = None;
-        self.last_hovers = Hovers::default();
-        self.last_star = None;
-        self.last_geometry = None;
+        flushed.map(|()| Frame { audio, note: None })
     }
 
     /// A refused frame steps nothing, but the door's clamp still keeps time, as
@@ -710,19 +716,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         if let Some((floor, _)) = self.session.floor_mut(self.session.nav().current()) {
             floor.ctx.recompute_door_anim_max_ms(now);
         }
-    }
-
-    /// What a floor frame leaves behind, whichever painter drew it: what the
-    /// mouse hit-tests.
-    fn record_drawn(&mut self, out: crate::tui::renderer::DrawOut, popup_scale: f32) {
-        self.last_hovers = out.hovers;
-        self.last_star = out.star;
-        self.last_geometry = out.geometry;
-        self.cached_layout = out.layout;
-        // The popup's click rect derives from the terminal bounds — NOT the
-        // office layout — so the painted scale IS the clickable one on both
-        // draw paths.
-        self.chrome.popup.last_scale = popup_scale;
     }
 }
 
@@ -744,11 +737,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         } else {
             Ok(())
         };
-        let drawn = redrawn.and_then(|()| {
-            let drawn = self.draw_frame(scene, pack, now);
-            self.feed_audio(scene, now);
-            drawn
-        });
+        let drawn = redrawn
+            .and_then(|()| self.draw_frame(scene, pack, now))
+            .map(|frame| {
+                // Composed even when disabled or muted: `AudioObserver::frame`'s
+                // contract.
+                self.chrome.audio.frame(frame.audio);
+                frame.note
+            });
         self.follow_resize();
         // Presented even when the draw failed, so nothing stays held.
         let presenting = std::time::Instant::now();
@@ -765,9 +761,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             }
         }
         if presented.is_ok() {
-            self.flash.landed();
+            self.screen.landed();
         } else {
-            self.flash.lost();
+            self.screen.lost();
         }
         let refused = std::mem::replace(&mut self.refusing, presented.is_err());
         if let Err(e) = presented {
@@ -783,7 +779,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             }
             self.redraw_owed = true;
         }
-        drawn?;
+        let note = drawn?;
         let send = self
             .cutaway
             .as_ref()
@@ -792,22 +788,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             begun.elapsed(),
             present,
             send,
-            self.session.note(),
+            note,
             std::time::Instant::now(),
         );
         Ok(())
     }
 
-    /// Feed the audio thread the frame just drawn, whichever path drew it, a
-    /// slide's and a held one's too: `AudioObserver::frame`'s every-world-frame
-    /// contract.
-    fn feed_audio(&mut self, scene: &SceneState, now: SystemTime) {
-        let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
-        let frame = self.session.audio_frame(scene, office_floor, now);
-        self.chrome.audio.frame(frame);
-    }
-
-    fn draw_frame(&mut self, scene: &SceneState, pack: &OfficeArt, now: SystemTime) -> Result<()> {
+    /// One frame of `scene`, whichever path draws it: what it feeds besides
+    /// its picture.
+    fn draw_frame(
+        &mut self,
+        scene: &SceneState,
+        pack: &OfficeArt,
+        now: SystemTime,
+    ) -> Result<Frame> {
         if self
             .chrome
             .active_pet
@@ -840,11 +834,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let term_size = self.terminal.size()?;
         let full_rect = Rect::new(0, 0, term_size.width, term_size.height);
         if crate::tui::renderer::scene_too_small(crate::tui::renderer::scene_rect(full_rect)) {
-            return self.draw_too_small(scene, now);
+            return self.draw_too_small(scene, now, None);
         }
         let (buf_w, buf_h) =
             crate::tui::renderer::scene_buf_size(full_rect.width, full_rect.height);
-        let layout = self.render_office(
+        let drawn = self.render_office(
             scene,
             pack,
             now,
@@ -853,15 +847,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.debug_walkable,
         );
         if self.session.nav().transition().is_some() {
-            return self.flush_classic_slide(scene, now);
+            return self.flush_classic_slide(scene, now).map(|()| drawn);
         }
-        let Some(layout) = layout else {
-            return self.draw_too_small(scene, now);
-        };
-        let flashes = self.session.flashes();
-        if self.flash.holds(flashes, term_size) {
-            // The terminal still shows the last frame, and its hit targets.
-            return Ok(());
+        if !matches!(self.session.picture(), Some(Picture::Floor(_))) {
+            return self.draw_too_small(scene, now, Some(drawn));
         }
         let current = self.session.nav().current();
         let floor_scene = project_floor_scene(scene, current);
@@ -878,6 +867,21 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let overlays = self
             .chrome
             .overlays(popup_scale, self.offers_walkable_debug());
+        let Some(picture) = self.session.picture() else {
+            return Ok(drawn);
+        };
+        let Picture::Floor(floor) = &picture else {
+            return Ok(drawn);
+        };
+        let (geometry, star) = crate::tui::renderer::classic_placement(term_size, floor);
+        if !self
+            .screen
+            .admit(&picture, term_size, geometry, star)
+            .written()
+        {
+            // The terminal still shows the last frame, and its hit targets.
+            return Ok(drawn);
+        }
         let frame = crate::tui::renderer::ClassicFrame {
             footer: &footer,
             overlays: &overlays,
@@ -885,13 +889,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             world: &world,
             mouse_pos,
         };
-        let Some(floor) = self.session.floor(current) else {
-            return Ok(());
-        };
-        let out = crate::tui::renderer::flush_classic(&mut self.terminal, &frame, layout, floor)?;
-        self.flash.stage(flashes, term_size);
-        self.record_drawn(out, popup_scale);
-        Ok(())
+        crate::tui::renderer::flush_classic(&mut self.terminal, &frame, floor)?;
+        // The popup's click rect derives from the terminal bounds — NOT the
+        // office layout — so the painted scale IS the clickable one on both
+        // draw paths.
+        self.chrome.popup.last_scale = popup_scale;
+        Ok(drawn)
     }
 }
 
@@ -908,27 +911,21 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         scene: &SceneState,
         pack: &OfficeArt,
         now: SystemTime,
-    ) -> Result<()> {
+    ) -> Result<Frame> {
         use crate::panels::paint_overlays;
         use crate::panels::widgets::{paint_host_text, star_area};
         use crate::tui::hit_test::SceneHit;
-        use crate::tui::renderer::{DrawOut, TooltipAt, paint_footer, scene_hit, scene_rect};
+        use crate::tui::renderer::{TooltipAt, paint_footer, scene_rect};
         use pixtuoid_scene::display::HoverTarget;
         if crate::tui::renderer::scene_too_small(fitted.scene) {
-            return self.draw_too_small(scene, now);
+            return self.draw_too_small(scene, now, None);
         }
-        let layout =
+        let drawn =
             self.render_office(scene, pack, now, fitted.look(), fitted.fit.logical(), false);
-        let sliding = self.session.nav().transition().is_some();
-        if sliding {
-            self.forget_drawn();
-            match self.session.buf() {
-                Some(composed) => {
-                    cutaway.paint_slide(fitted, composed, self.session.flashes(), now);
-                }
-                None => return self.draw_too_small(scene, now),
-            }
+        if self.session.picture().is_none() {
+            return self.draw_too_small(scene, now, Some(drawn));
         }
+        let term_size = self.terminal.size()?;
         let current = self.session.nav().current();
         let floor_scene = project_floor_scene(scene, current);
         let footer_scene = self.session.footer_scene(scene);
@@ -938,63 +935,40 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         );
         let popup_scale = self.version_popup_scale(now);
         let theme = self.chrome.theme;
+        let mouse_pos = self.tooltip_pos();
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
         let overlays = self
             .chrome
             .overlays(popup_scale, self.offers_walkable_debug());
-        /// What a frame sets over its image: the world's text, with the agent
-        /// the pointer is on, and the tooltip by the pointer.
-        struct Over<'w> {
-            text: Option<(
-                pixtuoid_scene::display::HostText<'w>,
-                Option<pixtuoid_core::AgentId>,
-            )>,
-            tooltip: Option<(u16, u16, pixtuoid_scene::tooltip::Tooltip)>,
-        }
-        let shown = if sliding {
-            None
-        } else {
-            let (Some(layout), Some(pixels)) = (layout, self.session.buf()) else {
-                return self.draw_too_small(scene, now);
-            };
-            cutaway.paint(
-                fitted,
-                current,
-                pixels,
-                self.session.dirty().clone(),
-                self.session.flashes(),
-                now,
-            );
-            let raster = self.session.floor(current).map(|floor| &floor.raster);
-            let hovers = raster.and_then(|r| r.hovers().cloned()).unwrap_or_default();
-            let geometry = fitted.geometry();
-            let text = raster.and_then(pixtuoid_scene::look::Raster::host_text);
-            let star = text.and_then(|text| star_area(text.signs, geometry.map()));
-            let mouse = self.tooltip_pos().and_then(|(mx, my)| {
-                let hit = scene_hit(&hovers, star, &layout, geometry.area_at(mx, my)?)?;
-                Some((mx, my, hit))
-            });
-            let hovered = match mouse {
-                Some((_, _, SceneHit::Figure(HoverTarget::Agent(id)))) => Some(*id),
-                _ => None,
-            };
-            let tooltip = mouse.and_then(|(mx, my, hit)| {
-                pixtuoid_scene::tooltip::for_hit(hit, &world).map(|tip| (mx, my, tip))
-            });
-            let drawn = DrawOut {
-                layout: Some(layout),
-                hovers,
-                star,
-                geometry: Some(geometry),
-            };
-            let over = Over {
-                text: text.map(|t| (t, hovered)),
-                tooltip,
-            };
-            Some((drawn, over))
+        let Some(picture) = self.session.picture() else {
+            return Ok(drawn);
         };
+        let geometry = fitted.geometry();
+        let floor = match &picture {
+            Picture::Floor(floor) => Some(floor),
+            Picture::Slide(_) => None,
+        };
+        let text = floor.and_then(|floor| floor.text);
+        let star = text.and_then(|text| star_area(text.signs, geometry.map()));
+        let admit = self.screen.admit(&picture, term_size, geometry, star);
+        cutaway.paint(fitted, &picture, admit, now);
+        if !admit.written() {
+            // The terminal still shows the last frame, and its hit targets.
+            return Ok(drawn);
+        }
+        let mouse = floor.zip(mouse_pos).and_then(|(floor, (mx, my))| {
+            let hit = floor.hits.at(geometry.area_at(mx, my)?.bounds(), star)?;
+            Some((mx, my, hit))
+        });
+        let hovered = match mouse {
+            Some((_, _, SceneHit::Figure(HoverTarget::Agent(id)))) => Some(*id),
+            _ => None,
+        };
+        let tooltip = mouse.and_then(|(mx, my, hit)| {
+            pixtuoid_scene::tooltip::for_hit(hit, &world).map(|tip| (mx, my, tip))
+        });
         cutaway.before_flush(now);
         let mut carves = Vec::new();
         self.terminal.draw(|f| {
@@ -1002,11 +976,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let scene_area = scene_rect(full);
             paint_footer(f, &footer, full, theme);
             cutaway.place(f.buffer_mut(), scene_area);
-            let over = shown.as_ref().map(|(_, over)| over);
-            if let Some((text, hovered)) = over.and_then(|o| o.text) {
-                paint_host_text(f, text, (scene_area, fitted.geometry().map()), hovered);
+            if let Some(text) = text {
+                paint_host_text(f, text, (scene_area, geometry.map()), hovered);
             }
-            if let Some((mx, my, tip)) = over.and_then(|o| o.tooltip.as_ref()) {
+            if let Some((mx, my, tip)) = &tooltip {
                 let at = TooltipAt {
                     mx: *mx,
                     my: *my,
@@ -1018,11 +991,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             carves = cutaway.carve(f.buffer_mut(), scene_area);
         })?;
         cutaway.after_flush(&carves, now);
-        match shown {
-            Some((drawn, _)) => self.record_drawn(drawn, popup_scale),
-            None => self.chrome.popup.last_scale = popup_scale,
-        }
-        Ok(())
+        self.chrome.popup.last_scale = popup_scale;
+        Ok(drawn)
     }
 }
 

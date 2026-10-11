@@ -11,20 +11,18 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use std::sync::Arc;
-
+use pixtuoid_scene::display::HoverTarget;
 use pixtuoid_scene::display::cells::CellMap;
-use pixtuoid_scene::display::{HoverTarget, Hovers};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
-use pixtuoid_scene::layout::{SceneLayout, Size};
-use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
+use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{FloorPicture, Hits, Look, Place, RenderInputs};
 
 pub(crate) use crate::panels::widgets::{TooltipAt, paint_tooltip};
 pub(super) use crate::panels::widgets::{paint_footer, paint_host_text, star_area};
 pub(crate) use crate::panels::{FOOTER_ROWS, scene_rect};
 use crate::tui::geometry::SceneGeometry;
-pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
+pub(crate) use crate::tui::hit_test::SceneHit;
 
 pub use pixtuoid_scene::pet::PetState;
 
@@ -76,19 +74,6 @@ impl<'a> DrawCtx<'a> {
             overlays: crate::panels::OverlayFrame::closed(),
         }
     }
-}
-
-/// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
-/// `Default` is a refused frame, which draws nothing new to hit-test.
-#[derive(Debug, Default)]
-pub struct DrawOut {
-    /// `None` when the frame was refused.
-    pub layout: Option<Arc<SceneLayout>>,
-    pub hovers: Hovers,
-    /// The board's star, a link the pointer finds.
-    pub(crate) star: Option<pixtuoid_scene::layout::Bounds>,
-    /// Where the frame lies under the cells; `None` when it was refused.
-    pub(crate) geometry: Option<SceneGeometry>,
 }
 
 /// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
@@ -242,7 +227,8 @@ pub(crate) fn paint_scene_tooltip(
     }
 }
 
-/// Draw one classic-look frame (scene, footer, overlays) and report what it painted for hit-testing.
+/// Draw one classic-look frame (scene, footer, overlays): what it answers a
+/// pointer with, `None` for a footer-only frame.
 ///
 /// # Errors
 ///
@@ -250,7 +236,7 @@ pub(crate) fn paint_scene_tooltip(
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
-) -> Result<DrawOut> {
+) -> Result<Option<Hits>> {
     let term_size = term.size()?;
     let full_rect = Rect {
         x: 0,
@@ -267,7 +253,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     if scene_too_small(scene_rect) {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
-        return Ok(DrawOut::default());
+        return Ok(None);
     }
 
     let (buf_w, buf_h) = scene_buf_size(full_rect.width, full_rect.height);
@@ -287,9 +273,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             dim: overlays.onboarding.dim,
         },
     );
-    let Some(Rendered { layout, .. }) = rendered else {
+    let Some(picture) = rendered.as_ref().and_then(|r| r.picture(&ctx.floor.raster)) else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
-        return Ok(DrawOut::default());
+        return Ok(None);
     };
     let frame = ClassicFrame {
         footer: &footer,
@@ -298,7 +284,21 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         world: &world,
         mouse_pos: ctx.mouse_pos,
     };
-    flush_classic(term, &frame, layout, ctx.floor)
+    flush_classic(term, &frame, &picture)?;
+    Ok(Some(picture.hits.clone()))
+}
+
+/// Where `picture`'s half-blocks lie under the cells of a terminal `size`
+/// big, and the cells of the star its host text sets there.
+pub(crate) fn classic_placement(
+    size: ratatui::layout::Size,
+    picture: &FloorPicture<'_>,
+) -> (SceneGeometry, Option<pixtuoid_scene::layout::Bounds>) {
+    let geometry = SceneGeometry::half_block(scene_rect(Rect::new(0, 0, size.width, size.height)));
+    let star = picture
+        .text
+        .and_then(|text| star_area(text.signs, geometry.map()));
+    (geometry, star)
 }
 
 /// What a classic frame flushes beside the floor's own drawing: whichever
@@ -312,8 +312,8 @@ pub(crate) struct ClassicFrame<'f> {
     pub(crate) mouse_pos: Option<(u16, u16)>,
 }
 
-/// Flush `floor`'s classic drawing of `layout` to `term` with `frame`'s
-/// footer, text and overlays, and report what it painted for hit-testing.
+/// Flush the classic `picture` to `term` with `frame`'s footer, text and
+/// overlays.
 ///
 /// # Errors
 ///
@@ -321,9 +321,8 @@ pub(crate) struct ClassicFrame<'f> {
 pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     frame: &ClassicFrame<'_>,
-    layout: Arc<SceneLayout>,
-    floor: &PerFloor,
-) -> Result<DrawOut> {
+    picture: &FloorPicture<'_>,
+) -> Result<()> {
     let &ClassicFrame {
         footer,
         overlays,
@@ -332,21 +331,10 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         mouse_pos,
     } = frame;
     let now = world.now;
-    let Some(ClassicDrawn {
-        pixels,
-        text,
-        hovers,
-    }) = floor.raster.classic_drawn()
-    else {
-        draw_footer_only_frame(term, footer, theme, overlays, now)?;
-        return Ok(DrawOut::default());
-    };
-    let size = term.size()?;
-    let scene_rect = scene_rect(Rect::new(0, 0, size.width, size.height));
-    let geometry = SceneGeometry::half_block(scene_rect);
-    let star = star_area(text.signs, geometry.map());
+    let pixels = picture.pixels;
+    let (geometry, star) = classic_placement(term.size()?, picture);
     let hit =
-        mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
+        mouse_pos.and_then(|(mx, my)| picture.hits.at(geometry.area_at(mx, my)?.bounds(), star));
     let hovered = match hit {
         Some(SceneHit::Figure(HoverTarget::Agent(id))) => Some(*id),
         _ => None,
@@ -359,7 +347,9 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
         flush_buffer_to_term(f, pixels, actual_scene);
-        paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
+        if let Some(text) = picture.text {
+            paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
+        }
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,
@@ -370,12 +360,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         }
         crate::panels::paint_overlays(f, overlays, now, actual_full, theme);
     })?;
-    Ok(DrawOut {
-        layout: Some(layout),
-        hovers: hovers.clone(),
-        star,
-        geometry: Some(geometry),
-    })
+    Ok(())
 }
 
 /// `buf`'s pixels into `scene_rect`'s cells, two rows a half-block.
@@ -420,6 +405,7 @@ mod tests {
     use super::*;
     use crate::panels::clip_widget_rect;
     use crate::tui::geometry::CellArea;
+    use std::sync::Arc;
 
     #[test]
     fn an_offscreen_still_shows_its_scenes_gateway() {

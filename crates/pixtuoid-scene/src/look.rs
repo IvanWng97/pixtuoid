@@ -42,7 +42,7 @@ pub enum Look {
 pub enum WorldText {
     /// The image, in the scene's pixel font.
     Baked,
-    /// The host, in its own font over the image ([`Raster::host_text`]).
+    /// The host, in its own font over the image ([`FloorPicture::text`]).
     Host,
 }
 
@@ -132,12 +132,25 @@ impl Dim {
 pub struct Rendered {
     /// Where it may differ from the last frame this raster showed.
     pub(crate) dirty: Dirty,
-    /// The layout the sim stepped on and the frame was drawn on.
-    pub layout: Arc<SceneLayout>,
+    /// What it answers a pointer with, the layout it was drawn on among it.
+    pub(crate) hits: Hits,
     /// Waypoints with an occupant: the appliance audio cues' feed.
     pub(crate) occupied_waypoints: HashSet<usize>,
     /// What of the frame flashes, which its session's `flashes()` reports.
-    pub(crate) flash: crate::flash::FlashPhase,
+    pub(crate) flash: crate::screen::FlashPhase,
+}
+
+impl Rendered {
+    /// This frame's picture as `raster` drew it, a one-floor office's: for a
+    /// painter driving [`render`] itself.
+    pub fn picture<'a>(&'a self, raster: &'a Raster) -> Option<FloorPicture<'a>> {
+        raster.floor_picture(0, &self.hits, self.flash, &self.dirty)
+    }
+
+    /// The layout the sim stepped on and the frame was drawn on.
+    pub fn layout(&self) -> &Arc<SceneLayout> {
+        self.hits.layout()
+    }
 }
 
 /// The frame entry's `tracing` span names, for a profiler's subscriber.
@@ -224,8 +237,11 @@ pub struct Raster {
 struct Classic {
     buf: RgbBuffer,
     caches: ClassicCaches,
-    /// What the last frame drew that a pointer finds or a badge hangs from.
-    hits: Drawn,
+    /// The last frame's badges and bubbles.
+    badges: Vec<crate::display::Badge>,
+    bubbles: Vec<crate::display::TextRun>,
+    /// What the last frame answers a pointer with.
+    hovers: Arc<Hovers>,
     /// The last frame's wall board lines and floor indicator.
     signs: Vec<crate::display::TextRun>,
     /// The dim the last frame was drawn under.
@@ -235,24 +251,139 @@ struct Classic {
 impl Classic {
     fn host_text(&self) -> crate::display::HostText<'_> {
         crate::display::HostText {
-            badges: &self.hits.badges,
-            bubbles: &self.hits.bubbles,
+            badges: &self.badges,
+            bubbles: &self.bubbles,
             signs: &self.signs,
             dim: self.dim,
         }
     }
+
+    /// Keep what `drawn` drew besides its pixels.
+    fn drew(&mut self, drawn: Drawn) {
+        let Drawn {
+            badges,
+            bubbles,
+            hovers,
+        } = drawn;
+        self.badges = badges;
+        self.bubbles = bubbles;
+        self.hovers = Arc::new(hovers);
+    }
 }
 
-/// What the last classic frame drew besides its pixels, for a painter that
-/// sets the classic's text and hit-tests it itself.
-#[derive(Debug)]
-pub struct ClassicDrawn<'a> {
+/// What a frame shows: one floor, or the two a floor slide composes.
+#[derive(Debug, Clone)]
+pub enum Picture<'a> {
+    /// One floor, laid out.
+    Floor(FloorPicture<'a>),
+    /// A slide: no one layout, so nothing a pointer finds and no host text.
+    Slide(SlidePicture<'a>),
+}
+
+/// One floor's frame.
+#[derive(Debug, Clone)]
+pub struct FloorPicture<'a> {
+    /// Which floor of the office it shows.
+    pub floor: usize,
     /// The frame.
     pub pixels: &'a RgbBuffer,
-    /// The text the painter sets over it.
-    pub text: crate::display::HostText<'a>,
-    /// What the frame answers a pointer with.
-    pub hovers: &'a Hovers,
+    /// Where it may differ from the last frame its session RENDERED; what a
+    /// screen holds is its painter's to track.
+    pub(crate) dirty: &'a Dirty,
+    /// What of it flashes.
+    pub flashes: crate::screen::Flashes,
+    /// The world text its host sets over it; `None` where the look baked it.
+    pub text: Option<crate::display::HostText<'a>>,
+    /// What it answers a pointer with.
+    pub hits: &'a Hits,
+}
+
+/// A floor slide's frame: its two floors composed.
+#[derive(Debug, Clone, Copy)]
+pub struct SlidePicture<'a> {
+    /// The two floors composed.
+    pub(crate) pixels: &'a RgbBuffer,
+    /// What of both flashes.
+    pub(crate) flashes: crate::screen::Flashes,
+}
+
+impl<'a> Picture<'a> {
+    /// Its pixels.
+    pub fn pixels(&self) -> &'a RgbBuffer {
+        match self {
+            Self::Floor(floor) => floor.pixels,
+            Self::Slide(slide) => slide.pixels,
+        }
+    }
+
+    /// What of it flashes.
+    pub fn flashes(&self) -> crate::screen::Flashes {
+        match self {
+            Self::Floor(floor) => floor.flashes,
+            Self::Slide(slide) => slide.flashes,
+        }
+    }
+
+    /// Where it may differ from the last frame its session rendered: a
+    /// slide's anywhere.
+    pub fn dirty(&self) -> &'a Dirty {
+        match self {
+            Self::Floor(floor) => floor.dirty,
+            Self::Slide(_) => &Dirty::All,
+        }
+    }
+
+    /// What it answers a pointer with; `None` for a slide.
+    pub fn hits(&self) -> Option<&'a Hits> {
+        match self {
+            Self::Floor(floor) => Some(floor.hits),
+            Self::Slide(_) => None,
+        }
+    }
+}
+
+/// What a floor's frame answers a pointer with, kept for as long as a screen
+/// shows it.
+#[derive(Debug, Clone)]
+pub struct Hits {
+    hovers: Arc<Hovers>,
+    layout: Arc<SceneLayout>,
+    /// The star the look drew; a host's text places its own.
+    star: Option<crate::layout::Bounds>,
+}
+
+impl Hits {
+    pub(crate) fn new(
+        hovers: Arc<Hovers>,
+        layout: Arc<SceneLayout>,
+        star: Option<crate::layout::Bounds>,
+    ) -> Self {
+        Self {
+            hovers,
+            layout,
+            star,
+        }
+    }
+
+    /// What the frame shows a pointer over `area`, in layout units, its
+    /// board's star at `host_star` where its host set the text.
+    pub fn at(
+        &self,
+        area: crate::layout::Bounds,
+        host_star: Option<crate::layout::Bounds>,
+    ) -> Option<crate::hit::SceneHit<'_>> {
+        crate::hit::scene_hit(&self.hovers, self.star.or(host_star), &self.layout, area)
+    }
+
+    /// The layout the frame was drawn on.
+    pub fn layout(&self) -> &Arc<SceneLayout> {
+        &self.layout
+    }
+
+    /// Its hovers, back to front.
+    pub fn hovers(&self) -> &Hovers {
+        &self.hovers
+    }
 }
 
 impl Raster {
@@ -271,28 +402,37 @@ impl Raster {
         self.classic.get_or_insert_with(|| Classic {
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
             caches: ClassicCaches::new(),
-            hits: Drawn::default(),
+            badges: Vec::new(),
+            bubbles: Vec::new(),
+            hovers: Arc::default(),
             signs: Vec::new(),
             dim: Dim::NONE,
         })
     }
 
-    /// The last frame, when the classic drew it.
-    pub fn classic_drawn(&self) -> Option<ClassicDrawn<'_>> {
-        let classic = self
-            .classic
-            .as_ref()
-            .filter(|_| self.shown == Some(Look::Classic))?;
-        Some(ClassicDrawn {
-            pixels: &classic.buf,
-            text: classic.host_text(),
-            hovers: &classic.hits.hovers,
+    /// The last frame, as floor `floor` of its office, answering a pointer
+    /// with `hits`, flashing `flash`, `dirty` where it may differ from the
+    /// one before it; `None` before the first.
+    pub(crate) fn floor_picture<'a>(
+        &'a self,
+        floor: usize,
+        hits: &'a Hits,
+        flash: crate::screen::FlashPhase,
+        dirty: &'a Dirty,
+    ) -> Option<FloorPicture<'a>> {
+        Some(FloorPicture {
+            floor,
+            pixels: self.pixels()?,
+            dirty,
+            flashes: crate::screen::Flashes::of_floor(flash),
+            text: self.host_text(),
+            hits,
         })
     }
 
     /// The world text the last frame left to its host, in either look;
     /// `None` before the first and for a cutaway that baked its own.
-    pub fn host_text(&self) -> Option<crate::display::HostText<'_>> {
+    pub(crate) fn host_text(&self) -> Option<crate::display::HostText<'_>> {
         match self.shown? {
             Look::Classic => self.classic.as_ref().map(Classic::host_text),
             Look::Cutaway { .. } => self.cutaway.as_ref()?.host_text(),
@@ -301,25 +441,11 @@ impl Raster {
 
     /// What the last frame drawn answers a pointer with, in either look;
     /// `None` before the first.
-    pub fn hovers(&self) -> Option<&Hovers> {
+    pub(crate) fn hovers(&self) -> Option<&Arc<Hovers>> {
         match self.shown? {
-            Look::Classic => self.classic.as_ref().map(|c| &c.hits.hovers),
+            Look::Classic => self.classic.as_ref().map(|c| &c.hovers),
             Look::Cutaway { .. } => self.cutaway.as_ref()?.hovers(),
         }
-    }
-
-    /// The badges the last classic frame set, in paint order; none in
-    /// another look.
-    pub(crate) fn classic_badges(&self) -> &[crate::display::Badge] {
-        self.shown_classic()
-            .map_or(&[], |classic| &classic.hits.badges)
-    }
-
-    /// The classic, when it drew the last frame.
-    fn shown_classic(&self) -> Option<&Classic> {
-        self.classic
-            .as_ref()
-            .filter(|_| self.shown == Some(Look::Classic))
     }
 
     /// The cells of the star the last frame baked, where a pointer opens the
@@ -397,7 +523,7 @@ pub fn render(
             classic
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
-            classic.hits = Drawn::default();
+            classic.drew(Drawn::default());
             classic.signs.clear();
             raster.shown = Some(look);
         }
@@ -441,7 +567,8 @@ pub fn render(
                 debug_walkable,
             );
             let flash = paint.flash(&stepped.frame);
-            classic.hits = paint_frame(&mut paint, &stepped.frame);
+            let drawn = paint_frame(&mut paint, &stepped.frame);
+            classic.drew(drawn);
             dim.apply(&mut classic.buf);
             classic.dim = dim;
             classic.signs =
@@ -480,7 +607,7 @@ pub fn render(
     };
     Some(Rendered {
         dirty,
-        layout: stepped.layout,
+        hits: Hits::new(Arc::clone(raster.hovers()?), stepped.layout, raster.star()),
         occupied_waypoints: stepped.frame.occupied_waypoints,
         flash,
     })

@@ -19,7 +19,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::dev::{DrawCtx, DrawOut, draw_scene};
+use pixtuoid::dev::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::pack::load_bundled_pack;
 use ratatui::Terminal;
@@ -325,12 +325,12 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
 }
 
 /// The centre of the pixels a pointer finds the first mascot on.
-fn mascot_centre(drawn: &DrawOut) -> Option<pixtuoid_scene::layout::Point> {
+fn mascot_centre(hits: &pixtuoid_scene::look::Hits) -> Option<pixtuoid_scene::layout::Point> {
     use pixtuoid_scene::display::HoverTarget;
     use pixtuoid_scene::layout::{Bounds, Point};
-    let layout = drawn.layout.as_deref()?;
+    let layout = hits.layout();
     let at = |(x, y)| {
-        drawn.hovers.at(Bounds {
+        hits.hovers().at(Bounds {
             x,
             y,
             width: 1,
@@ -745,7 +745,10 @@ fn main() -> Result<()> {
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
         // the renderer actually resolved, not a precomputed layout point.
-        let at = mascot_centre(&drawn).context("--crop-mascot needs a visible mascot")?;
+        let at = drawn
+            .as_ref()
+            .and_then(mascot_centre)
+            .context("--crop-mascot needs a visible mascot")?;
         Some(centered_crop(at, cols, rows))
     } else {
         compute_crop_rect(&args, &scene, &floor.ctx.history, cols, rows, now)?

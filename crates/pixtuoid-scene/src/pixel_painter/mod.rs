@@ -169,8 +169,8 @@ impl<'a> PaintCtx<'a> {
     }
 
     /// What of `frame` flashes under the sky this pass paints it in.
-    pub(crate) fn flash(&self, frame: &SimFrame) -> crate::flash::FlashPhase {
-        crate::flash::FlashPhase::of(&self.sky, frame)
+    pub(crate) fn flash(&self, frame: &SimFrame) -> crate::screen::FlashPhase {
+        crate::screen::FlashPhase::of(&self.sky, frame)
     }
 
     /// The subset of the pass a [`Drawable`] paints with.

@@ -331,7 +331,8 @@ fn onboarding_dims_the_composed_slide_on_the_transition_path() {
     bright_r.navigate_floor(1, now);
     bright_r.render(&scene, p, mid).unwrap();
     assert!(bright_r.transition().is_some(), "baseline still mid-slide");
-    let bb = bright_r.session.buf().expect("the composed slide");
+    let bright_slide = bright_r.session.picture().expect("the composed slide");
+    let bb = bright_slide.pixels();
     let bright = avg_lum(bb, 0, 0, bb.width(), bb.height());
 
     let mut dim_r = build(100, 40, vec![]);
@@ -357,7 +358,8 @@ fn onboarding_dims_the_composed_slide_on_the_transition_path() {
     );
     dim_r.render(&scene, p, mid).unwrap();
     assert!(dim_r.transition().is_some(), "dimmed still mid-slide");
-    let db = dim_r.session.buf().expect("the composed slide");
+    let dim_slide = dim_r.session.picture().expect("the composed slide");
+    let db = dim_slide.pixels();
     let dim = avg_lum(db, 0, 0, db.width(), db.height());
 
     assert!(

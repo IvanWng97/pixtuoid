@@ -73,8 +73,6 @@ pub(crate) struct FloatingApp {
     last_caps_size: Option<(u16, u16)>,
     /// Latest cursor position (physical px) — for the corner resize hit-test on click.
     cursor: PhysicalPosition<f64>,
-    /// The geometry of the frame on screen, which a press maps back through.
-    shown: Option<pixtuoid_scene::render_scale::PixelFit>,
     /// Whether the pointer is over the window, where a hover shows its tooltip.
     cursor_in: bool,
     /// Whether the pointer last hovered something, so a move off it redraws
@@ -192,7 +190,6 @@ impl FloatingApp {
             live: None,
             last_caps_size: None,
             cursor: PhysicalPosition::new(0.0, 0.0),
-            shown: None,
             cursor_in: false,
             hovered: false,
             petting: None,
@@ -251,17 +248,16 @@ impl FloatingApp {
     /// Show the cursor for what is under the pointer. A frame calls it too: a
     /// figure walks under a pointer at rest, and a carry ends on release.
     fn recursor(&mut self) {
-        let (Some(window), Some(at)) = (&self.window, self.shown) else {
+        let Some(window) = &self.window else {
             return;
         };
-        if !self.cursor_in {
+        if !self.cursor_in || self.renderer.shown_fit().is_none() {
             return;
         }
         let size = window.inner_size();
         let icon = self.renderer.cursor_icon(
             (self.cursor.x, self.cursor.y),
             (size.width, size.height),
-            at,
             &self.ui.modal(),
             self.petting.as_ref(),
             self.ui.now(),
@@ -277,11 +273,11 @@ impl FloatingApp {
     /// idle office spaces a second apart.
     fn rehover(&mut self) {
         self.recursor();
-        let hovered = self
-            .shown
-            .filter(|_| self.cursor_in)
-            .and_then(|at| self.renderer.hit_at((self.cursor.x, self.cursor.y), at))
-            .is_some();
+        let hovered = self.cursor_in
+            && self
+                .renderer
+                .hit_at((self.cursor.x, self.cursor.y))
+                .is_some();
         // A shown tooltip follows the pointer, so it redraws on every move.
         if hovered || self.hovered {
             self.hovered = hovered;
@@ -306,7 +302,7 @@ impl FloatingApp {
             &mut self.ui,
             cursor,
             (size.width, size.height),
-            self.shown,
+            self.renderer.shown_fit(),
         ) {
             ModalMouse::Office => {}
             // A panel the press did nothing in leaves the window to drag.
@@ -320,19 +316,15 @@ impl FloatingApp {
             }
         }
         let now = self.ui.now();
-        let press = match self.shown {
-            Some(at) => self.renderer.press_at(
-                cursor,
-                (size.width, size.height),
-                at,
-                super::offscreen::Pressing {
-                    scale_factor: window.scale_factor(),
-                    petting: self.petting.as_ref(),
-                    now,
-                },
-            ),
-            None => Press::Drag,
-        };
+        let press = self.renderer.press_at(
+            cursor,
+            (size.width, size.height),
+            super::offscreen::Pressing {
+                scale_factor: window.scale_factor(),
+                petting: self.petting.as_ref(),
+                now,
+            },
+        );
         match press {
             Press::Resize => {
                 let _ = window.drag_resize_window(ResizeDirection::SouthEast);
@@ -348,12 +340,9 @@ impl FloatingApp {
     /// a carried figure down, even one a panel opened over mid-carry.
     fn release(&mut self) {
         use pixtuoid_scene::hit::HitAction;
-        let Some(at) = self.shown else {
-            return;
-        };
-        let action =
-            self.renderer
-                .release_under((self.cursor.x, self.cursor.y), at, &self.ui.modal());
+        let action = self
+            .renderer
+            .release_under((self.cursor.x, self.cursor.y), &self.ui.modal());
         let now = self.ui.now();
         match action {
             Some(HitAction::Focus(id)) => {
@@ -474,7 +463,6 @@ impl FloatingApp {
             },
             (win_w, win_h),
         );
-        self.shown = Some(at);
         let Some(office) = self
             .renderer
             .buf()
@@ -501,7 +489,7 @@ impl FloatingApp {
             tooltip: self
                 .renderer
                 .tooltip_shows(self.cursor_in, &self.ui.modal())
-                .then(|| self.renderer.hit_at(cursor, at))
+                .then(|| self.renderer.drawn_hit_at(cursor, at))
                 .flatten()
                 .and_then(|hit| {
                     // The office picks each floor's pet as it renders; the
@@ -740,9 +728,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = position;
                 self.cursor_in = true;
-                let carried = self
-                    .shown
-                    .is_some_and(|at| self.renderer.pointer_moved((position.x, position.y), at));
+                let carried = self.renderer.pointer_moved((position.x, position.y));
                 if carried && let Some(window) = &self.window {
                     window.request_redraw();
                 }

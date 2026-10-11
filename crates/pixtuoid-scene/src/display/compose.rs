@@ -206,7 +206,7 @@ pub(crate) fn compose_at<'a>(
         flash: crate::display::light::Flash::of(&moment.sky),
         // [`compose`] sets the host's, from its `Showing`.
         dim: crate::look::Dim::NONE,
-        flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
+        flash_phase: crate::screen::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
         backdrop: crate::display::Backdrop::of(office.layout, theme),

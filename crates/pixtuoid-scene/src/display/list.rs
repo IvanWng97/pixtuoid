@@ -83,7 +83,7 @@ pub(crate) struct DisplayList<'a> {
     /// change repaints the whole frame.
     pub(super) dim: crate::look::Dim,
     /// What of the frame flashes, for a painter's hold.
-    pub(super) flash_phase: crate::flash::FlashPhase,
+    pub(super) flash_phase: crate::screen::FlashPhase,
     /// The figures' hovers, in `pieces`' order.
     pub(super) hovers: super::Hovers,
     /// What lies under every piece.
@@ -218,7 +218,7 @@ impl<'a> DisplayList<'a> {
         self.dim
     }
 
-    pub(crate) fn flash_phase(&self) -> crate::flash::FlashPhase {
+    pub(crate) fn flash_phase(&self) -> crate::screen::FlashPhase {
         self.flash_phase
     }
 

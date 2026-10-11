@@ -17,8 +17,9 @@ use std::time::{Instant, SystemTime};
 use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::Dirty;
-use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::Picture;
+use pixtuoid_scene::screen::Admit;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
 
@@ -95,8 +96,6 @@ pub(crate) struct TileCutaway {
     in_grid: &'static AtomicBool,
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
-    /// The flashes the terminal shows.
-    flash: FlashHold<Option<Fitted>>,
     /// This frame's written transmits, counted as shown once the frame
     /// lands ([`Self::landed`]).
     landing: Option<Landing>,
@@ -107,11 +106,9 @@ pub(crate) struct TileCutaway {
     cores: usize,
 }
 
-/// A queued write: the tiles it sends and the flashes they show, so only a
-/// write that lands can show them.
+/// A queued write: the tiles it sends.
 struct Pending {
     tiles: Vec<Changed>,
-    flashes: Flashes,
     /// Whether the protocol's cadence lets it send now.
     due: bool,
 }
@@ -167,7 +164,6 @@ impl TileCutaway {
             pending: None,
             in_grid: &crate::graphics::IN_GRID,
             sent_at: None,
-            flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             landing: None,
             last: FrameSend::default(),
             cores: pixtuoid_scene::par::cores(),
@@ -217,64 +213,52 @@ impl TileCutaway {
         self.fitted.map(|f| f.fit.logical())
     }
 
-    /// Show `floor`'s `frame`, which shows `flashes`, as `fitted`; it may
-    /// differ from that floor's last only within `dirty`. Queue the tiles it
-    /// changed once the protocol's cadence allows; until then they stay owed.
-    /// A frame the flash hold keeps back is not sent, so the terminal keeps
-    /// the last.
+    /// Show `picture` as `fitted`, as the terminal's screen `admit`ted it:
+    /// queue the tiles it changed once the protocol's cadence allows, at once
+    /// for a changed flash phase; until then they stay owed. A held picture
+    /// is not sent, so the terminal keeps the last.
     pub(crate) fn paint(
         &mut self,
         fitted: Fitted,
-        floor: usize,
-        frame: &RgbBuffer,
-        dirty: Dirty,
-        flashes: Flashes,
+        picture: &Picture<'_>,
+        admit: Admit,
         now: SystemTime,
     ) {
-        let fresh = self.shown.replace(Shown::Floor(floor)) != Some(Shown::Floor(floor));
-        let dirty = if fresh { Dirty::All } else { dirty };
-        if self.flash.holds(flashes, Some(fitted)) {
+        let image = match picture {
+            Picture::Floor(floor) => Shown::Floor(floor.floor),
+            Picture::Slide(_) => Shown::Slide,
+        };
+        // A slide's composed image is new every frame.
+        let fresh = image == Shown::Slide || self.shown != Some(image);
+        self.shown = Some(image);
+        let dirty = if fresh {
+            Dirty::All
+        } else {
+            picture.dirty().clone()
+        };
+        if admit == Admit::Held {
             self.tiles.owe(&dirty);
             self.image_behind = true;
             self.pending = None;
             return;
         }
         if dirty != Dirty::Unchanged || self.image_behind {
-            self.image.clone_from(frame);
+            self.image.clone_from(picture.pixels());
             self.image_behind = false;
         }
-        self.queue(&dirty, fresh, flashes, now, fitted.scene.as_position());
+        let changed = admit == Admit::Changed;
+        self.queue(&dirty, fresh, changed, now, fitted.scene.as_position());
     }
 
-    /// Show a slide's `composed` frame, whose two floors show `flashes`, and
-    /// queue the tiles that changed as [`Self::paint`] does.
-    pub(crate) fn paint_slide(
-        &mut self,
-        fitted: Fitted,
-        composed: &RgbBuffer,
-        flashes: Flashes,
-        now: SystemTime,
-    ) {
-        if self.flash.holds(flashes, Some(fitted)) {
-            self.tiles.owe(&Dirty::All);
-            self.image_behind = true;
-            self.pending = None;
-            return;
-        }
-        self.image.clone_from(composed);
-        self.shown = Some(Shown::Slide);
-        self.queue(&Dirty::All, true, flashes, now, fitted.scene.as_position());
-    }
-
-    /// Queue the tiles of [`Self::image`], which shows `flashes`, that differ
-    /// from what was sent, among those `dirty` reaches, once the cadence
-    /// allows: at once for a new phase, so it shows as long as it lasts.
-    /// `fresh` is reported as [`FrameSend::fresh`].
+    /// Queue the tiles of [`Self::image`] that differ from what was sent,
+    /// among those `dirty` reaches, once the cadence allows: at once for a
+    /// `new_phase`, so it shows as long as it lasts. `fresh` is reported as
+    /// [`FrameSend::fresh`].
     fn queue(
         &mut self,
         dirty: &Dirty,
         fresh: bool,
-        flashes: Flashes,
+        new_phase: bool,
         now: SystemTime,
         origin: Position,
     ) {
@@ -304,14 +288,13 @@ impl TileCutaway {
             changed = changed.len(),
             "tiles.stage"
         );
-        let due = self.flash.changes(flashes)
+        let due = new_phase
             || self.sent_at.is_none_or(|at| {
                 now.duration_since(at)
                     .map_or(true, |since| since >= self.route.protocol().cadence())
             });
         self.pending = Some(Pending {
             tiles: if due { changed } else { Vec::new() },
-            flashes,
             due,
         });
     }
@@ -339,19 +322,13 @@ impl TileCutaway {
     }
 
     /// Encode and write the queued tiles, to land with the frame. A write
-    /// the sink refuses is logged and leaves its tiles owed, and its flashes
-    /// unshown.
+    /// the sink refuses is logged and leaves its tiles owed.
     fn send(&mut self, now: SystemTime) {
-        let Some(Pending {
-            tiles: send,
-            flashes,
-            ..
-        }) = self.pending.take()
-        else {
+        let Some(Pending { tiles: send, .. }) = self.pending.take() else {
             return;
         };
         if send.is_empty() {
-            self.wrote(send, None, flashes);
+            self.wrote(send, None);
             return;
         }
         match self.route.protocol() {
@@ -387,20 +364,18 @@ impl TileCutaway {
         let flushed = wrote.and_then(|()| self.out.flush());
         self.last.sent = sent.len();
         match flushed {
-            Ok(()) => self.wrote(sent, Some(now), flashes),
+            Ok(()) => self.wrote(sent, Some(now)),
             Err(e) => tracing::warn!(error = %e, "image transmit failed"),
         }
     }
 
-    /// A write went out with the frame: its transmits and `flashes` show
-    /// once the frame lands ([`Self::landed`]).
-    fn wrote(&mut self, sent: Vec<Changed>, at: Option<SystemTime>, flashes: Flashes) {
+    /// A write went out with the frame: its transmits show once the frame
+    /// lands ([`Self::landed`]).
+    fn wrote(&mut self, sent: Vec<Changed>, at: Option<SystemTime>) {
         self.landing = Some(Landing { sent, at });
-        self.flash.stage(flashes, self.fitted);
     }
 
-    /// The frame reached the terminal: its transmits are shown, and a flash
-    /// phase's floor runs from now.
+    /// The frame reached the terminal: its transmits are shown.
     pub(crate) fn landed(&mut self) {
         if let Some(Landing { sent, at }) = self.landing.take() {
             if at.is_some() {
@@ -408,13 +383,11 @@ impl TileCutaway {
             }
             self.tiles.sent(&sent);
         }
-        self.flash.landed();
     }
 
     /// The frame never reached the terminal: nothing it wrote is shown.
     pub(crate) fn lost(&mut self) {
         self.landing = None;
-        self.flash.lost();
     }
 
     /// What encodes this frame's tiles, apart from the sink no thread shares.
@@ -439,12 +412,6 @@ impl TileCutaway {
     pub(crate) fn arming(mut self, in_grid: &'static AtomicBool) -> Self {
         self.in_grid = in_grid;
         self
-    }
-
-    /// Hold flashes on `screen` in place of the process's monotonic clock.
-    #[cfg(test)]
-    pub(crate) fn hold_on(&mut self, screen: pixtuoid_scene::flash::ScreenClock) {
-        self.flash = FlashHold::on(screen);
     }
 
     /// Split a frame's encode across `cores` whatever the machine has.
