@@ -616,7 +616,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codewhale", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: &[codewhale::UPSTREAM],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -645,7 +645,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: &[opencode::UPSTREAM],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -695,7 +695,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["copilot", "--version"]),
     home_env: Some("COPILOT_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: &[copilot::UPSTREAM],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: copilot::decode_copilot_line,

@@ -3,7 +3,7 @@
 //! when one goes. pixtuoid's `drift_watch` checks them against upstream.
 
 /// One public repository a source reads names from, which every
-/// [`Doc::path`] resolves against.
+/// [`At::Path`] and [`At::ReleaseAsset`] resolves against.
 #[derive(Debug)]
 pub struct Upstream {
     pub repo: &'static str,
@@ -14,7 +14,7 @@ pub struct Upstream {
 /// A document upstream declares names in.
 #[derive(Debug)]
 pub struct Doc {
-    pub path: &'static str,
+    pub at: At,
     /// Matches the declaration that OWNS the names, never one of them: a name
     /// as its own anchor passes vacuously, and a fetch landing on a re-export
     /// facade then reads as a rename (#793).
@@ -23,18 +23,41 @@ pub struct Doc {
     pub owns: &'static str,
 }
 
+#[derive(Debug)]
+pub enum At {
+    Path(&'static str),
+    /// `member` of the latest release's tarball `asset` (`{version}` = its
+    /// tag, `v`-stripped), admitted only when the release's `sums` file vouches
+    /// for it.
+    ReleaseAsset {
+        asset: &'static str,
+        member: &'static str,
+        sums: &'static str,
+    },
+}
+
 /// How a document yields upstream's names.
 #[derive(Debug)]
 pub enum Read {
     /// Each name must match `pattern`, where `{name}` stands for the name,
     /// regex-escaped.
     Each { pattern: &'static str },
+    /// The first group of the ONE match of `pattern`: a second declaration
+    /// (a `#[cfg(test)]` twin, a macro body) is as unreadable as none.
+    Sole { pattern: &'static str },
+    /// The string patterns of `fn name`'s match arms whose result matches `arm`.
+    RustArms {
+        name: &'static str,
+        arm: &'static str,
+    },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
     JsonUnion {
         def: &'static str,
         prop: Option<&'static str>,
     },
+    /// JSON Schema: every `properties` key, at any depth.
+    JsonKeys,
 }
 
 /// Names we READ that upstream must keep declaring.
@@ -58,11 +81,18 @@ pub struct Watch {
 /// a missed decode hides, while mere growth is not.
 #[derive(Debug)]
 pub struct Siblings {
-    /// What a sibling's name starts with.
-    pub prefix: &'static str,
+    pub family: Family,
     /// Siblings deliberately not decoded, each with its reason. A row whose
     /// name upstream dropped is reported: it would silently exempt a reuse.
     pub ignored: &'static [(&'static str, &'static str)],
+}
+
+#[derive(Debug)]
+pub enum Family {
+    /// Starts with this.
+    Prefix(&'static str),
+    /// Every name the reader yields: it reads only the family already.
+    All,
 }
 
 #[cfg(test)]
@@ -94,7 +124,8 @@ mod tests {
                     );
                 }
                 assert!(
-                    w.siblings.is_none() || !matches!(w.read, Read::Each { .. }),
+                    w.siblings.is_none()
+                        || !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
                     "{} sweeps siblings off a reader that yields none",
                     w.id
                 );

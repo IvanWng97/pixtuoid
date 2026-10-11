@@ -125,7 +125,7 @@ mod tests {
     /// The plugin forwards EXACTLY what the decoder reads. These are two lists in
     /// two languages — a TS `FORWARD` set here, `match event` arms in
     /// `pixtuoid-core` — and no compiler can see across that gap, so they are
-    /// bound through the emitted drift surface instead. Forward one the decoder
+    /// bound through core's declared watch instead. Forward one the decoder
     /// ignores and we spawn a shim per event for nothing; miss one it reads and
     /// that signal never arrives.
     #[test]
@@ -146,20 +146,13 @@ mod tests {
         forwarded.push("message.part.updated".to_string());
         forwarded.sort();
 
-        let surface: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../pixtuoid-core/drift-surface.json"),
-            )
-            .expect("the core drift surface is committed"),
-        )
-        .expect("the drift surface parses");
-        let mut decoded: Vec<String> = surface["decoded"]["opencode.hook_events"]
-            .as_array()
-            .expect("opencode.hook_events is a set")
+        let mut decoded: Vec<String> = pixtuoid_core::source::registry::REGISTRY
             .iter()
-            .map(|v| v.as_str().expect("a name").to_string())
-            .collect();
+            .flat_map(|d| d.upstream)
+            .flat_map(|up| up.watches)
+            .find(|w| w.id == "opencode.hook_events")
+            .map(|w| (w.ours)().into_iter().map(str::to_owned).collect())
+            .expect("core watches opencode's hook events");
         decoded.sort();
 
         assert_eq!(forwarded, decoded);

@@ -1,7 +1,8 @@
-//! Upstream over the network, through the platform's own `curl`, which
-//! brings no TLS stack into the lockfile.
+//! Upstream over the network, through the platform's own `curl` and `tar`,
+//! which bring no TLS stack or archive crate into the lockfile.
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use super::{Fetch, FetchError};
@@ -33,6 +34,49 @@ impl Fetch for Curl {
             out.stdout,
         )
     }
+
+    fn untar(&self, tarball: &[u8], member: &str) -> Result<Option<Vec<u8>>, FetchError> {
+        // Listed first: tar fails alike on a missing member and a broken
+        // archive, and only the first is our pin going dark.
+        let listing = tar(&["-tzf", "-"], tarball)?;
+        if !String::from_utf8_lossy(&listing)
+            .lines()
+            .any(|l| l == member)
+        {
+            return Ok(None);
+        }
+        tar(&["-xzOf", "-", member], tarball).map(Some)
+    }
+}
+
+/// `tar <args>` over `tarball` on stdin: its stdout, or why it failed.
+fn tar(args: &[&str], tarball: &[u8]) -> Result<Vec<u8>, FetchError> {
+    let mut child = Command::new("tar")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| FetchError::Transient(format!("could not run tar: {e}")))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| FetchError::Transient("tar has no stdin".to_owned()))?;
+    // Written from a thread: tar's stdout fills while it still reads, so one
+    // thread doing both deadlocks on a tarball larger than the pipes.
+    let out = std::thread::scope(|s| {
+        s.spawn(move || stdin.write_all(tarball));
+        child.wait_with_output()
+    })
+    .map_err(|e| FetchError::Transient(format!("tar failed: {e}")))?;
+    if !out.status.success() {
+        return Err(FetchError::Transient(format!(
+            "tar failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(out.stdout)
 }
 
 /// What a curl run means: `ran` is its exit, `stderr` ends in the status.
@@ -43,9 +87,12 @@ fn classify(ran: bool, stderr: &str, body: Vec<u8>) -> Result<Vec<u8>, FetchErro
         .and_then(|l| l.trim().parse().ok())
         .unwrap_or(0);
     if !ran || status == 0 {
+        // The last line is the status `--write-out` appended, not curl's say.
+        let said: Vec<&str> = stderr.trim_end().lines().collect();
+        let said = said.split_last().map_or(&said[..], |(_, rest)| rest);
         return Err(FetchError::Transient(format!(
             "curl failed: {}",
-            stderr.trim()
+            said.join(" ").trim()
         )));
     }
     match status {
@@ -79,7 +126,7 @@ mod tests {
         // A connection that never got a response: curl exits non-zero, `000`.
         assert!(matches!(
             classify(false, "curl: (6) Could not resolve host\n000", vec![]),
-            Err(FetchError::Transient(e)) if e.contains("Could not resolve host")
+            Err(FetchError::Transient(e)) if e.contains("Could not resolve host") && !e.contains("000")
         ));
         assert!(matches!(
             classify(true, "no status line", vec![]),

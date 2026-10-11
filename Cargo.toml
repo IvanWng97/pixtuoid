@@ -153,6 +153,8 @@ tempfile           = "3"
 # Dev-only: every test that sets or unsets an env var goes through it, behind
 # one process-wide lock.
 temp-env           = "0.3"
-# The drift watch's patterns (pixtuoid's `upstream` feature), already in the
-# tree through criterion.
+# The drift watch's patterns and its release-tarball check (pixtuoid's
+# `upstream` feature), each already in the tree: regex through criterion, sha2
+# through wezterm-blob-leases.
 regex              = "1"
+sha2               = "0.10"

@@ -44,14 +44,6 @@ fn surface() -> Value {
         json!([EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]),
     );
     decoded.insert(
-        "codewhale.subagent_tool",
-        json!([crate::source::codewhale::SUBAGENT_TOOL]),
-    );
-    decoded.insert(
-        "codewhale.delegating_actions",
-        json!(crate::source::codewhale::DELEGATING_ACTIONS),
-    );
-    decoded.insert(
         "grok.xai_method",
         json!([crate::source::grok::DECODED_XAI_METHOD]),
     );
@@ -80,24 +72,8 @@ fn surface() -> Value {
         json!(crate::source::omp::DECODED_HOOK_EVENTS),
     );
     decoded.insert(
-        "copilot.kinds",
-        json!(crate::source::copilot::DECODED_KINDS),
-    );
-    decoded.insert(
-        "copilot.payload_fields",
-        json!(crate::source::copilot::DECODED_FIELDS),
-    );
-    decoded.insert(
         "decoder.dispatch_names",
         json!(super::source::decoder::DECODED_DISPATCH_NAMES),
-    );
-    decoded.insert(
-        "opencode.part_statuses",
-        json!(crate::source::opencode::DECODED_PART_STATUSES),
-    );
-    decoded.insert(
-        "opencode.hook_events",
-        json!(crate::source::opencode::DECODED_EVENTS),
     );
 
     // SHIPPED, not decoded: the value rides the file the installer writes; why

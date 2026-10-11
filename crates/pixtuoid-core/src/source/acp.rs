@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{Doc, Read, Siblings, Upstream, Watch};
+use crate::source::upstream::{At, Doc, Family, Read, Siblings, Upstream, Watch};
 use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
@@ -47,12 +47,12 @@ pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
     [
         Doc {
-            path: "schema/v1/schema.json",
+            at: At::Path("schema/v1/schema.json"),
             anchor,
             owns,
         },
         Doc {
-            path: "schema/v1/schema.unstable.json",
+            at: At::Path("schema/v1/schema.unstable.json"),
             anchor,
             owns,
         },
@@ -85,7 +85,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
             },
             vanish: "every ACP-speaking source loses that half of its activity decode",
             siblings: Some(Siblings {
-                prefix: TOOL_CALL,
+                family: Family::Prefix(TOOL_CALL),
                 ignored: &[],
             }),
         },

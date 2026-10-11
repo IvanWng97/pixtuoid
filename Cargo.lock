@@ -2763,6 +2763,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "snapbox",
  "syn 3.0.6",
  "temp-env",
