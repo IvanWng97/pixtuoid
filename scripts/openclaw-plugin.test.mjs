@@ -175,7 +175,6 @@ test("forwards ONLY the allowlist plus identity, never content", { skip: !POSIX 
     type: "agent_end",
     runId: "event-run",
     sessionId: "event-session",
-    success: false,
     errored: true,
     gatewayPort: 19789,
     _pid: process.pid,
@@ -298,6 +297,7 @@ test("agent_end forwards the errored verdict, never the error string", { skip: !
   assert.equal(byRun.get("r2").errored, false, "an abort carries no error → not degraded");
   assert.equal(byRun.get("r3").errored, false, "a clean run is no failure");
   for (const row of rows) {
+    assert.ok(!("success" in row), `the ambiguous success stays in the gateway: ${JSON.stringify(row)}`);
     assert.equal(row.error, undefined, "the error STRING must never be forwarded");
     assert.ok(
       !JSON.stringify(row).includes("my secret prompt"),
@@ -328,7 +328,6 @@ test("the shim is spawned with the source-attribution flag", { skip: !POSIX }, a
   register(plugin).get("gateway_stop")({ reason: "shutdown" }, {});
   const [stop] = await recorded(outFile, 1);
   assert.equal(stop.type, "gateway_stop");
-  assert.equal(stop.reason, "shutdown");
   const argv = (await readFile(argvFile, "utf8")).trim().split("\n");
   assert.deepEqual(argv, ["--source openclaw"], "the shim must be told which source it speaks for");
 });

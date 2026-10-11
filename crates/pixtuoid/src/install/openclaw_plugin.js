@@ -37,11 +37,10 @@ import { spawn } from "node:child_process";
 
 const HOOK_PATH = "{{HOOK_PATH_JSON}}";
 
-// The ONLY fields forwarded. `messages` / `prompt` / `sessionFile` / `systemPrompt`
-// are deliberately ABSENT — the daemon fixture needs the run pairing key + ids,
-// never content. The `error` STRING riding alongside `success` is likewise NOT
-// forwarded: it can embed content.
-const ALLOW = ["runId", "sessionId", "sessionKey", "reason", "messageCount", "success"];
+// The ONLY fields forwarded: the run pairing key and ids the decoder reads, never
+// content (`messages`, `prompt`, `error`). `success` stays behind too: the verdict
+// below is the run's outcome, so nothing downstream can read the ambiguous one.
+const ALLOW = ["runId", "sessionId"];
 
 // OpenClaw's own `DEFAULT_GATEWAY_PORT`, un-importable from here (see the module
 // note). Named ONCE and emitted into the drift surface by `drift_surface.rs`,
@@ -141,10 +140,10 @@ function forward(type, ev, ctx) {
     // reads `false` too, and only a prompt error carries `error` (on the event; the
     // context never does) — its mere PRESENCE, as a bare boolean because the string
     // can embed prompt content. A provider failure is no prompt error, so its
-    // `agent_end` carries no `error` and reads like a clean end or a cancel; the
-    // run's last model call adds it.
+    // `agent_end` carries no `error` and reads like a clean end; the run's last
+    // model call adds it.
     if (type === "agent_end") {
-      const promptError = payload.success === false && !!ev && ev.error !== undefined;
+      const promptError = !!ev && ev.success === false && ev.error !== undefined;
       payload.errored = promptError || failedRuns.has(payload.runId);
       failedRuns.delete(payload.runId);
     }

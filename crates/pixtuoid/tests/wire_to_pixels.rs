@@ -536,8 +536,8 @@ fn a_gateway_we_never_saw_start_still_materializes_from_its_session_wire() {
 }
 
 /// A provider that refuses every connection, from real bytes: each retried
-/// attempt's `agent_end` reads like a cancel upstream, and only the plugin's
-/// `errored` tells the failure apart.
+/// attempt's `agent_end` carries no `error`, and only the plugin's `errored`
+/// tells the failure apart.
 #[test]
 fn a_failed_provider_degrades_the_gateway_rather_than_downing_it() {
     use pixtuoid_core::state::DaemonState;

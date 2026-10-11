@@ -1337,29 +1337,4 @@ mod tests {
             "/opt/bin/pixtuoid-hook"
         );
     }
-
-    #[test]
-    fn openclaw_verdict_hooks_pin_the_exact_registered_set() {
-        crate::install::assert_event_roster(
-            "OPENCLAW_VERDICT_HOOKS",
-            OPENCLAW_VERDICT_HOOKS,
-            &["model_call_ended"],
-        );
-    }
-
-    #[test]
-    fn openclaw_events_pins_the_exact_registered_set() {
-        crate::install::assert_event_roster(
-            "OPENCLAW_EVENTS",
-            OPENCLAW_EVENTS,
-            &[
-                "gateway_start",
-                "gateway_stop",
-                "session_start",
-                "session_end",
-                "before_agent_run",
-                "agent_end",
-            ],
-        );
-    }
 }

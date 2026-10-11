@@ -2036,9 +2036,9 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             for ev in sorted(ours.openclaw):
                 if f'"{ev}"' not in text:
                     report.add_breaking(
-                        f"OpenClaw hook `{ev}` (registered in OPENCLAW_EVENTS / the TS "
-                        f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
-                        f"the plugin registers a hook OpenClaw never fires (no presence)."
+                        f"OpenClaw hook `{ev}` (registered by the TS plugin: OPENCLAW_EVENTS "
+                        f"/ OPENCLAW_VERDICT_HOOKS) is GONE from src/plugins/hook-types.ts — "
+                        f"likely renamed; the plugin registers a hook OpenClaw never fires."
                     )
             for ty, fields in OPENCLAW_DEGRADED_FIELDS.items():
                 # `= Base & {` as well as `= {`: the model-call events extend a base.
@@ -2063,8 +2063,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         continue
                     report.add_breaking(
                         f"OpenClaw's `{ty}` {lost} (src/plugins/hook-types.ts) — "
-                        f"openclaw_plugin.js stamps `errored` from it, so a failed run "
-                        f"never degrades the mascot."
+                        f"openclaw_plugin.js stamps `errored` from it, so the Degraded "
+                        f"verdict misreads a run."
                     )
 
     if ours.openclaw_gateway_port is not None:
