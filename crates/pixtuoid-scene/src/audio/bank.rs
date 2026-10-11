@@ -170,10 +170,10 @@ impl AssetBank {
     }
 }
 
-/// One mood track's loop beds — built by [`Synthesis`] per [`TrackId`], registered (or swapped
-/// in) with the sink, then DROPPED. The five musical beds and the NIGHT texture
-/// share ONE sample count (phase-locked); the DAY texture keeps its
-/// free-running power-of-two length.
+/// One mood track's loop beds — built by [`Synthesis`] per [`TrackId`],
+/// registered (or swapped in) with the sink, then DROPPED. The five musical beds
+/// and the NIGHT texture share ONE sample count (phase-locked); the DAY texture
+/// keeps its free-running power-of-two length.
 #[derive(Debug)]
 pub struct TrackBeds {
     beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
@@ -244,11 +244,10 @@ impl Synthesis {
 
     /// Every lane of `track` at once — the native thread, which may block.
     pub fn track(&mut self, track: TrackId) -> TrackBeds {
-        let mut build = TrackBuild::new(track);
-        loop {
-            if let Some(beds) = build.step(self) {
-                return beds;
-            }
+        let score = super::compose_track(track);
+        TrackBeds {
+            beds: synth::Lane::ALL
+                .map(|lane| Arc::new(synth::render_lane(&score, lane, &mut self.rng))),
         }
     }
 }
@@ -374,21 +373,24 @@ mod tests {
         }
     }
 
-    /// The web's chunked build: one lane per step, the same beds as a whole
-    /// build, and a fresh build after it finishes rather than an index past the end.
+    /// The web's chunked build against the native whole build — two paths, one
+    /// lane order: one lane per step, the same beds, and a fresh build once it
+    /// finishes.
     #[test]
     fn a_stepped_build_matches_a_whole_one_and_restarts_clean() {
         let whole = Synthesis::new().track(TrackId::GenNight(3));
         let mut s = Synthesis::new();
         let mut build = TrackBuild::new(TrackId::GenNight(3));
-        let mut steps = 0;
-        let stepped = loop {
-            steps += 1;
-            if let Some(beds) = build.step(&mut s) {
-                break beds;
-            }
-        };
-        assert_eq!(steps, TRACK_STEMS.len(), "one lane per step");
+        let mut stepped = None;
+        for step in 1..=TRACK_STEMS.len() {
+            stepped = build.step(&mut s);
+            assert_eq!(
+                stepped.is_some(),
+                step == TRACK_STEMS.len(),
+                "one lane per step"
+            );
+        }
+        let stepped = stepped.expect("the last step finishes the build");
         for stem in TRACK_STEMS {
             assert_eq!(whole.bed_slice(stem), stepped.bed_slice(stem), "{stem:?}");
         }
