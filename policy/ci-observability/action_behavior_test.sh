@@ -825,9 +825,14 @@ assert_exempt "$f" pending "a head that moved"
 # ── The reviewer's round: the heads the review was published at before this one, plus one.
 round_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Count the review's rounds")"
 round_dir="$test_dir/round"
-mkdir -p "$round_dir/bin" "$round_dir/work/.claude-review"
+mkdir -p "$round_dir/bin" "$round_dir/diffs" "$round_dir/work/.claude-review"
 # shellcheck disable=SC2016 # The stub reads its fixture when it runs.
-printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' '[[ "$*" == *"/issues/42/comments"* ]]' 'cat "$ROUND_COMMENTS"' >"$round_dir/bin/gh"
+# The comments, and for a compare the diff fixture named for its head (none: the diff cannot be had).
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+    'case "$*" in *"/issues/42/comments"*) cat "$ROUND_COMMENTS" ;;' \
+    '*"/compare/main..."*) last="${!#}"; cat "$ROUND_DIFFS/${last##*...}" ;;' \
+    '*) exit 1 ;; esac' >"$round_dir/bin/gh"
 chmod +x "$round_dir/bin/gh"
 comment() { jq -cn --arg u "$1" --arg b "$2" '{user: {login: $u}, body: $b}'; }
 jq -cs '[.[:2], .[2:]]' <(
@@ -841,12 +846,23 @@ assert_round() {
     : >"$round_dir/work/.claude-review/review-context.md"
     (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
         GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="$review_title" HEAD_SHA="$1" \
-        bash -c "$round_script") || fail "the round count exited non-zero"
+        DEFAULT_BRANCH=main ROUND_DIFFS="$round_dir/diffs" bash -c "$round_script") || fail "the round count exited non-zero"
     grep -qx "Round: $2" "$round_dir/work/.claude-review/review-context.md" ||
         fail "the round count at head $1 wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: $2 ($3)"
 }
 assert_round c 3 "two heads of the review's, one reviewed twice, across pages"
 assert_round b 2 "a re-review of a head counts that head once"
+
+# A head whose own change against main is the previous head's spends no round:
+# a merge of main moves the context, the line numbers and the index lines only.
+own_change() { printf 'diff --git a/f b/f\nindex %s..%s 100644\n--- a/f\n+++ b/f\n@@ -%s,2 +%s,2 @@\n %s\n-old\n+new\n' "$1" "$1" "$2" "$2" "$3"; }
+own_change 1 10 ctx >"$round_dir/diffs/a"
+own_change 2 90 other >"$round_dir/diffs/b"
+printf 'diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+newer\n' >"$round_dir/diffs/c"
+assert_round c 2 "a and b carry the same own change, so c is the second round"
+assert_round b 1 "b repeats a's own change: still the first round"
+rm "$round_dir/diffs/b"
+assert_round c 3 "a head whose diff cannot be had counts, so the review posts more"
 
 # A manifest outside the lockfiles may move version strings, nothing else.
 f="$(exempt_case owner-swap)"

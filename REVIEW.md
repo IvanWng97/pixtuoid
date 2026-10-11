@@ -106,7 +106,8 @@ Never re-flag a finding that already has a thread in
 resolved or not
 ([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune));
 new findings follow [Severity](#severity). From round 3 (`Round:` in
-`.claude-review/review-context.md`), post only `issue (blocking)` and count the
+`.claude-review/review-context.md`, which a head that only merges main in
+does not advance), post only `issue (blocking)` and count the
 rest in the summary, as the
 [convergence contract](docs/CONTRIBUTING.md#convergence-contract) folds only
 those after round 2.
