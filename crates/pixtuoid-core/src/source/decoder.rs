@@ -676,9 +676,9 @@ pub const ELLIPSIS: char = '\u{2026}';
 
 /// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap
 /// at [`MAX_DECODED_FIELD_CHARS`]. For the HUMAN sinks that are NOT cell buffers —
-/// the [`super::drift`] breadcrumbs and [`DecodeError`]'s wire strings, whose
-/// `tracing` writes to raw stderr, which no cell-clipping or presenter sanitize
-/// covers. The binary's `strip_control_chars` is a COPY — keep the two in step.
+/// the [`super::drift`] breadcrumbs and [`DecodeError`]'s wire strings, which
+/// reach stderr under whatever `tracing` subscriber the host installs. The
+/// binary's `strip_control_chars` is a COPY — keep the two in step.
 pub(crate) fn display_safe(s: &str) -> String {
     let stripped: String = s
         .chars()

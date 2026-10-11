@@ -64,8 +64,8 @@ mod tests {
     use super::*;
 
     /// A wire-derived value rides a `?` field: `tracing_subscriber::fmt`'s
-    /// `EscapeGuard` covers only the `message` arm, so a `%` Display field writes
-    /// ESC/BEL/bidi bytes raw into the log file and the stderr terminal.
+    /// `EscapeGuard` covers only the `message` arm, so under its default field
+    /// formatter a `%` Display field writes ESC/BEL/bidi bytes raw.
     #[test]
     fn debug_fields_escape_control_and_bidi_chars() {
         let hostile = std::path::Path::new("/tmp/\u{1b}]0;x\u{07}\u{202e}fake.jsonl");

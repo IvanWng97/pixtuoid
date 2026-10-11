@@ -22,8 +22,8 @@
 //!
 //! Every value is untrusted wire content, `source` included (a hook envelope's
 //! `_pixtuoid_source` need not be a registry name), made display-safe HERE at
-//! emission: the non-TUI `tracing` stream writes to RAW stderr, which no cell
-//! buffer clips and no presenter sanitizes, and is on by default at `warn`.
+//! emission, whatever subscriber the host installs: the non-TUI `tracing`
+//! stream goes to stderr, and is on by default at `warn`.
 
 /// The `tracing` target every drift breadcrumb shares; consumers key on it.
 pub const TARGET: &str = "pixtuoid::drift";

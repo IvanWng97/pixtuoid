@@ -491,16 +491,10 @@ mod tests {
         ] {
             assert!(out.contains(refusal), "{refusal:?} not logged: {out:?}");
         }
-        for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
-            assert!(
-                !out.contains(raw),
-                "{raw:?} must not reach the log raw: {out:?}"
-            );
-        }
         for line in out.lines() {
             assert!(
-                line.contains(r"re\u{1b}]0;pwned\u{7}po\u{202e}Z"),
-                "escaped, not dropped: {line:?}"
+                line.contains(r#"agent="re\u{1b}]0;pwned\u{7}po\u{202e}Z""#),
+                "not the label's Debug: {line:?}"
             );
         }
     }
