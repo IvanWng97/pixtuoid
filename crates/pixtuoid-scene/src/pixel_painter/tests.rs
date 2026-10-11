@@ -1172,12 +1172,16 @@ fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
     };
     let mut v = [
         tied(Layer::Over, 3),
-        tied(Layer::Figure, 2),
+        tied(Layer::Character, 2),
+        tied(Layer::Creature, 4),
         tied(Layer::Under, 1),
     ];
     drawable::sort_drawables(&mut v);
     let layers: Vec<Layer> = v.iter().map(|d| d.layer).collect();
-    assert_eq!(layers, [Layer::Under, Layer::Figure, Layer::Over]);
+    assert_eq!(
+        layers,
+        [Layer::Under, Layer::Creature, Layer::Character, Layer::Over]
+    );
 }
 
 /// The layer only breaks a tie: a row north still paints first.
@@ -3442,7 +3446,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
         .map(|c| (c.sort_row, frame.agents[c.agent_idx].agent_id))
         .collect();
     let mut sorted = queued.clone();
-    // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
+    // Every character is a `Layer::Character`, so `sort_drawables` orders them by row alone.
     sorted.sort_by_key(|&(row, _)| row);
     assert_ne!(sorted, queued, "premise: paint order is not the queue's");
     let listed = badged_ids(&hover);
@@ -3624,6 +3628,155 @@ fn a_bubble_hangs_over_its_speakers_badge_in_both_looks() {
         find(&cutaway, TextRole::Bubble(speaker)),
         Some(bubble),
         "the same bubble"
+    );
+}
+
+/// A pet and an agent sharing a sort row paint the agent on top in both looks,
+/// so a pointer over both names the agent in both.
+#[test]
+fn a_pet_tied_with_an_agent_sorts_under_them_in_both_looks() {
+    use crate::display::{HoverTarget, PieceKind};
+    use crate::layout::{Bounds, Pivot, Point};
+    use pixtuoid_core::sprite::format::Piece as PackPiece;
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::South, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let office = crate::display::Office {
+        layout: &layout,
+        pack: &pack,
+        theme,
+        scale: crate::render_scale::RenderScale::ONE,
+    };
+    let (body, row) = crate::display::compose::tests::list_at(&frame, office, 12)
+        .pieces()
+        .iter()
+        .find_map(|p| match p.kind {
+            PieceKind::Character { body, .. } => Some((body, p.span.depth)),
+            _ => None,
+        })
+        .expect("the sitter");
+    let anim_name = PackPiece::CatWalk;
+    let h = crate::pack::densest_frame(&pack, anim_name, 0, crate::render_scale::RenderScale::ONE)
+        .logical
+        .1;
+    let x = u16::midpoint(body.x0, body.x1);
+    let pos = (0..layout.buf_h)
+        .map(|y| Point { x, y })
+        .find(|&pos| sort_row_at(Pivot::Center, pos, h) == row)
+        .expect("a pet position standing on the sitter's row");
+    let cat = crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos,
+        sort_row: row,
+        flip: false,
+        anim_name,
+        frame_idx: 0,
+        effects: crate::effects::pet_hearts(pos, 300).collect(),
+    };
+    let pet = cat.target();
+    frame.pet = Some(cat);
+    let agent = HoverTarget::Agent(frame.agents[0].agent_id);
+    let cell = Bounds {
+        x: pos.x,
+        y: pos.y,
+        width: 1,
+        height: 1,
+    };
+    let mut scene = SceneState::uniform(16);
+    for a in &frame.agents {
+        scene.agents.insert(a.agent_id, a.clone());
+    }
+    let classic = paint_drawn(
+        &OwnedSimStores::new(),
+        &scene,
+        &layout,
+        &pack,
+        SystemTime::UNIX_EPOCH,
+        &frame,
+    )
+    .hovers;
+    let cutaway = crate::display::compose::tests::list_at(&frame, office, 12);
+    for (look, hovers) in [("classic", &classic), ("cutaway", cutaway.hovers())] {
+        let listed: Vec<_> = hovers.listed().iter().map(|h| &h.target).collect();
+        assert!(
+            listed.contains(&&pet) && listed.contains(&&agent),
+            "{look}: premise: both are hoverable"
+        );
+        assert_eq!(
+            hovers.at(cell),
+            Some(&agent),
+            "{look} paints the agent last"
+        );
+    }
+    // What a creature wears sorts with it, under the person.
+    let pieces = cutaway.pieces();
+    let character = pieces
+        .iter()
+        .position(|p| matches!(p.kind, PieceKind::Character { .. }))
+        .expect("the sitter's piece");
+    let hearts: Vec<usize> = pieces
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| matches!(p.kind, PieceKind::Effect(_)) && p.span.layer == Layer::Creature)
+        .map(|(i, _)| i)
+        .collect();
+    assert!(!hearts.is_empty(), "premise: the cat wears hearts");
+    assert!(
+        hearts.iter().all(|&i| i < character),
+        "the cat's hearts sort under the sitter"
+    );
+}
+
+/// The classic's enqueue fns give the layers, so people stay over creatures
+/// whatever order the queue was built in.
+#[test]
+fn the_classic_layers_creatures_under_characters_in_any_queue_order() {
+    use crate::layout::Point;
+    use pixtuoid_core::sprite::format::Piece as PackPiece;
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::South, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let row = frame.characters[0].sort_row;
+    let pos = Point {
+        x: layout.buf_w / 2,
+        y: layout.buf_h / 2,
+    };
+    frame.pet = Some(crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos,
+        sort_row: row,
+        flip: false,
+        anim_name: PackPiece::CatWalk,
+        frame_idx: 0,
+        effects: Vec::new(),
+    });
+    frame.mascots = vec![crate::sim::MascotPlacement {
+        pos,
+        sort_row: row,
+        anim_name: PackPiece::LobsterWalk,
+        frame_idx: 0,
+        key: crate::creatures::openclaw_key("18789"),
+        degraded: false,
+        on_roster: true,
+        effects: Vec::new(),
+    }];
+    let mut queue = Vec::new();
+    enqueue_characters(&pack, theme, &frame, &mut queue);
+    enqueue_gateway_mascots(&pack, &frame.mascots, &mut queue);
+    enqueue_pet(&pack, frame.pet.as_ref().expect("the cat"), &mut queue);
+    drawable::sort_drawables(&mut queue);
+    assert_eq!(
+        queue
+            .iter()
+            .map(|d| (d.layer, matches!(d.kind, DrawableKind::Character { .. })))
+            .collect::<Vec<_>>(),
+        [
+            (Layer::Creature, false),
+            (Layer::Creature, false),
+            (Layer::Character, true)
+        ]
     );
 }
 
