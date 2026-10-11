@@ -125,15 +125,11 @@ impl Terminal {
         }
     }
 
-    /// The protocol its name alone says it draws, before any answer.
-    fn draws_by_name(self) -> Option<ImageProtocol> {
-        match self {
-            Self::Kitty | Self::Ghostty => Some(ImageProtocol::Kitty),
-            _ if self.animates().contains(&Pick::Iterm2(Iterm2Sign::Name)) => {
-                Some(ImageProtocol::Iterm2)
-            }
-            _ => None,
-        }
+    /// Whether its name alone says it draws an image the cutaway animates,
+    /// before any answer.
+    fn draws_by_name(self) -> bool {
+        matches!(self, Self::Kitty | Self::Ghostty)
+            || self.animates().contains(&Pick::Iterm2(Iterm2Sign::Name))
     }
 }
 
@@ -242,11 +238,11 @@ impl EnvHints {
         }
     }
 
-    /// [`names_a_cutaway_terminal`] for these hints.
+    /// [`names_a_cutaway_terminal`] for these hints. Never inside tmux: its
+    /// `allow-passthrough` is off unless set (tmux/tmux@95c1c3d
+    /// `options-table.c:1283-1287`), and reading it takes a subprocess.
     fn names_a_cutaway_terminal(&self) -> bool {
-        self.terminal()
-            .draws_by_name()
-            .is_some_and(|p| p.survives(self.env.tmux()))
+        !self.env.tmux() && self.terminal().draws_by_name()
     }
 }
 
@@ -280,8 +276,7 @@ fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
 }
 
 /// Whether the terminal the environment names draws the cutaway by its name
-/// alone, through tmux where this runs inside it: what a run that never asks
-/// the terminal can still say.
+/// alone: what a run that never asks the terminal can still say.
 pub(crate) fn names_a_cutaway_terminal() -> bool {
     EnvHints::read().names_a_cutaway_terminal()
 }
@@ -775,7 +770,7 @@ mod tests {
     }
 
     /// A name alone says the cutaway draws only where its row vouches for a
-    /// protocol with no answer, and only through a link that carries it.
+    /// protocol with no answer, and never inside tmux.
     #[test]
     fn a_cutaway_terminal_is_named_by_what_its_name_vouches_for() {
         let iterm2_in_tmux = EnvHints {
@@ -793,7 +788,7 @@ mod tests {
             (hints("xterm-256color", "WarpTerminal"), false),
             (hints("xterm-256color", "vscode"), false),
             (iterm2_in_tmux, false),
-            (client(hints("xterm-kitty", "")), true),
+            (client(hints("xterm-kitty", "")), false),
         ] {
             assert_eq!(named.names_a_cutaway_terminal(), draws, "{named:?}");
         }

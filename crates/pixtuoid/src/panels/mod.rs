@@ -62,8 +62,8 @@ pub struct OverlayFrame<'a> {
     pub(crate) connection: &'a crate::panels::connection::ConnectionFrame,
     /// The version popup's scale: 0.0 hidden, 1.0 whole.
     pub(crate) popup_scale: f32,
-    /// The notices the version popup lists.
-    pub(crate) notices: &'a [String],
+    /// What the version popup shows beside its release.
+    pub(crate) version: &'a ui_state::VersionBody,
     pub(crate) help_open: bool,
     /// Shortcuts the host adds to the help, after the shared ones.
     pub(crate) host_keys: &'a [widgets::Shortcut],
@@ -89,7 +89,7 @@ impl OverlayFrame<'_> {
             dashboard,
             connection,
             popup_scale,
-            notices: _,
+            version: _,
             help_open,
             host_keys: _,
             onboarding,
@@ -118,7 +118,7 @@ pub(crate) fn paint_overlays(
         dashboard,
         connection,
         popup_scale,
-        notices,
+        version,
         help_open,
         host_keys,
         onboarding,
@@ -136,7 +136,7 @@ pub(crate) fn paint_overlays(
         widgets::paint_version_popup(
             f,
             env!("CARGO_PKG_VERSION"),
-            notices,
+            version,
             bounds,
             theme,
             popup_scale,
@@ -476,6 +476,9 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
     }
 }
 
+/// The key that opens and closes the Sources panel.
+pub(crate) const SOURCES_KEY: char = 's';
+
 /// Modal precedence, highest first, is the body's early-return order.
 pub(crate) fn dispatch_key(
     code: KeyCode,
@@ -525,7 +528,7 @@ pub(crate) fn dispatch_key(
         }
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Esc, _) | (KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
+            (KeyCode::Esc, _) | (KeyCode::Char(SOURCES_KEY), _) => KeyAction::ConnectionClose,
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
             (KeyCode::Char('t'), _) => KeyAction::ConnectionToggle,
@@ -571,7 +574,7 @@ pub(crate) fn dispatch_key(
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Char('v') => KeyAction::OpenVersionPopup,
         KeyCode::Tab => KeyAction::ToggleDashboard,
-        KeyCode::Char('s') => KeyAction::ToggleConnection,
+        KeyCode::Char(SOURCES_KEY) => KeyAction::ToggleConnection,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
             if floor.current_floor + 1 < floor.n_floors && !floor.in_transition {
                 KeyAction::NavigateFloor(floor.current_floor + 1)
@@ -622,7 +625,9 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
         KeyAction::ToggleHelp => cx.ui.toggle_help(),
         KeyAction::CloseHelp => cx.ui.close_help(),
         KeyAction::DismissVersionPopup => cx.ui.dismiss_version_popup(),
-        KeyAction::OpenVersionPopup => cx.ui.open_version_popup(&cx.connected.snapshot()),
+        KeyAction::OpenVersionPopup => cx
+            .ui
+            .open_version_popup(&cx.connected.snapshot(), &crate::sources::detect()),
         KeyAction::OpenThemePicker => cx.ui.open_theme_picker(),
         KeyAction::ThemePreview(i) => {
             cx.ui.preview_theme(i);
@@ -1557,7 +1562,6 @@ mod dispatch_tests {
         let mut ui = crate::panels::ui_state::UiState::new(
             pixtuoid_scene::theme::ALL_THEMES[0],
             crate::panels::welcome::WelcomeUi::from_detected(&[]),
-            false,
             std::path::PathBuf::from("/tmp/sock"),
             None,
             crate::doctor::DriftSeen::default(),
@@ -1604,7 +1608,6 @@ mod mouse_tests {
         UiState::new(
             &pixtuoid_scene::theme::NORMAL,
             WelcomeUi::from_detected(&[]),
-            false,
             std::path::PathBuf::new(),
             None,
             crate::doctor::DriftSeen::default(),

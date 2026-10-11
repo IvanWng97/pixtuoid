@@ -147,12 +147,6 @@ pub(crate) enum ImageProtocol {
 }
 
 impl ImageProtocol {
-    /// Whether its images are drawn through tmux when `tmux`
-    /// ([`ClassicReason::TmuxNeedsKitty`] says why only kitty's are).
-    pub(crate) fn survives(self, tmux: bool) -> bool {
-        !tmux || self == Self::Kitty
-    }
-
     /// The protocol's name as a user would search for it.
     pub(crate) fn name(self) -> &'static str {
         match self {
@@ -569,7 +563,7 @@ pub(crate) fn resolve(
     let Some(fit) = cutaway_fit(cell, area, max_density) else {
         return classic(ClassicReason::CellTooSmall { cell, max_density });
     };
-    if !protocol.survives(d.tmux) {
+    if d.tmux && protocol != ImageProtocol::Kitty {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
     }
     Plan::Cutaway {

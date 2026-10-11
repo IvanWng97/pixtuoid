@@ -263,7 +263,6 @@ mod tests {
                 ui: crate::panels::ui_state::UiState::new(
                     theme,
                     crate::panels::welcome::WelcomeUi::from_detected(&[]),
-                    false,
                     tmp.path().join("sock"),
                     None,
                     crate::doctor::DriftSeen::default(),
@@ -325,11 +324,11 @@ mod tests {
         k.ui = crate::panels::ui_state::UiState::new(
             pixtuoid_scene::theme::ALL_THEMES[0],
             crate::panels::welcome::WelcomeUi::from_detected(&[]),
-            true,
             k._tmp.path().join("sock"),
             None,
             crate::doctor::DriftSeen::default(),
         );
+        k.ui.open_version_popup(&std::collections::HashSet::new(), &[]);
         assert!(k.ui.modal().version_popup);
         assert!(!k.press(KeyCode::Esc), "Esc quit");
         assert!(!k.ui.modal().version_popup, "the popup is still up");

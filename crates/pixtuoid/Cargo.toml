@@ -60,8 +60,6 @@ which              = "8"
 chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
 semver             = "1"
-# `VariantArray`: the version notices, listed by their one declaration.
-strum              = { workspace = true }
 # The version popup's notices, wrapped by display width. No line-break or
 # optimal-fit tables: first-fit at spaces is all a short notice needs.
 textwrap           = { version = "0.16", default-features = false, features = ["std", "unicode-width"] }

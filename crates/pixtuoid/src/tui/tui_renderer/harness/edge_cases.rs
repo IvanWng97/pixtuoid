@@ -202,7 +202,7 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
         "the hit-box scale must equal the scale the painter used"
     );
     assert!(
-        frame_text(r.frame_buffer()).contains("Updated to"),
+        frame_text(r.frame_buffer()).contains("Enter to close"),
         "the popup must actually paint on the footer-only frame"
     );
 }

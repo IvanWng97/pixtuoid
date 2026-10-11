@@ -170,7 +170,7 @@ impl FloatingApp {
             log,
             drift: boot.drift.clone(),
             connected: &boot.connected.snapshot(),
-            cutaway: crate::version::Cutaway::default(),
+            cutaway: crate::version::CutawayTip::default(),
         });
         let connected = boot.connected.clone();
         Self {

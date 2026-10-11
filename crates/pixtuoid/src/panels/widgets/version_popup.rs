@@ -64,6 +64,10 @@ const HANG: &str = "  ";
 /// The blank between the notices and the release, there only with a notice.
 const NOTICE_GAP: u16 = 1;
 
+/// What the last row of cut notices ends with; the space parts it from a
+/// period the row may end on.
+const CUT_MARK: &str = " \u{2026}";
+
 /// The notices as painted: wrapped to the settled panel, and cut to the rows
 /// its height leaves beside [`FRAME_ROWS`] and [`NOTICE_GAP`], so the link
 /// always survives. Laid out at full scale, so the entrance animation
@@ -91,10 +95,25 @@ fn notice_rows(bounds: Rect, notices: &[String]) -> Vec<String> {
     if rows.len() > budget {
         rows.truncate(budget);
         if let Some(last) = rows.last_mut() {
-            *last = truncate(&format!("{last}\u{2026}"), width);
+            *last = cut(last, width);
         }
     }
     rows
+}
+
+/// `row` ending in [`CUT_MARK`] within `width` columns, measured by display
+/// width as the wrap is.
+fn cut(row: &str, width: usize) -> String {
+    let room = width.saturating_sub(textwrap::core::display_width(CUT_MARK));
+    let mut used = 0;
+    let kept: String = row
+        .chars()
+        .take_while(|c| {
+            used += textwrap::core::display_width(c.encode_utf8(&mut [0; 4]));
+            used <= room
+        })
+        .collect();
+    format!("{}{CUT_MARK}", kept.trim_end())
 }
 
 /// The content rows with `notice_rows` rows of notices painted.
@@ -131,26 +150,27 @@ fn version_geometry(bounds: Rect, scale: f32, notice_rows: usize) -> Option<Pane
 /// outranks the prose: the title is the ONLY place the modal says how to close
 /// itself, so a narrow panel drops "Updated to" first rather than cutting
 /// mid-word and leaving a key-swallowing overlay with no exit instruction.
-fn version_title(version: &str, inner_w: usize) -> String {
-    let full = format!("Updated to v{version} \u{2014} Enter to close");
+fn version_title(version: &str, upgraded: bool, inner_w: usize) -> String {
+    let named = if upgraded { "Updated to" } else { "pixtuoid" };
+    let full = format!("{named} v{version} \u{2014} Enter to close");
     if full.chars().count() <= inner_w {
         return full;
     }
     truncate(&format!("v{version} \u{2014} Enter to close"), inner_w)
 }
 
-/// The popup for `version`, with `notices` (each one paragraph) above its
-/// release.
+/// The popup for `version`, with `body`'s notices (each one paragraph) above
+/// its release.
 pub(crate) fn paint_version_popup(
     f: &mut ratatui::Frame<'_>,
     version: &str,
-    notices: &[String],
+    body: &crate::panels::ui_state::VersionBody,
     bounds: Rect,
     theme: &pixtuoid_scene::theme::Theme,
     scale: f32,
 ) {
     let scale = scale.clamp(0.0, 1.0);
-    let rows = notice_rows(bounds, notices);
+    let rows = notice_rows(bounds, &body.notices);
     let Some(geom) = version_geometry(bounds, scale, rows.len()) else {
         return;
     };
@@ -188,7 +208,7 @@ pub(crate) fn paint_version_popup(
         ]),
     ]);
 
-    let title = version_title(version, inner_w as usize);
+    let title = version_title(version, body.upgraded, inner_w as usize);
     // `borderless_panel(outer)` returns the SAME rect `geom.inner()` and
     // `cell_rect` derive from, so paint and click agree.
     let inner = borderless_panel(f, outer, Some(&title), theme);
@@ -323,23 +343,34 @@ mod tests {
     #[test]
     fn a_narrow_title_keeps_the_dismiss_hint() {
         let inner_w = inner_width(Rect::new(0, 0, 32, 31));
-        let title = version_title("0.16.0", inner_w);
-        assert!(
-            title.chars().count() <= inner_w,
-            "the title must fit its row: {title:?} in {inner_w}"
-        );
-        assert!(
-            title.contains("Enter to close"),
-            "the dismiss hint outranks the prose: {title:?}"
-        );
-        let wide_title = version_title("0.16.0", 60);
+        for upgraded in [true, false] {
+            let title = version_title("0.16.0", upgraded, inner_w);
+            assert!(
+                title.chars().count() <= inner_w,
+                "the title must fit its row: {title:?} in {inner_w}"
+            );
+            assert!(
+                title.contains("Enter to close"),
+                "the dismiss hint outranks the prose: {title:?}"
+            );
+        }
+        let wide_title = version_title("0.16.0", true, 60);
         assert_eq!(wide_title, "Updated to v0.16.0 \u{2014} Enter to close");
+    }
+
+    /// Reopened on a run no upgrade booted, the popup claims no update.
+    #[test]
+    fn a_popup_no_upgrade_opened_names_the_version_alone() {
+        assert_eq!(
+            version_title("0.16.0", false, 60),
+            "pixtuoid v0.16.0 \u{2014} Enter to close"
+        );
     }
 
     fn notices() -> Vec<String> {
         vec![
-            "This upgrade disconnected Claude Code, Codex and Reasonix. \
-             Reconnect what you use in Sources (s)."
+            "pixtuoid now runs as a plugin in Claude Code, Codex and Reasonix: \
+             reconnect each one you use in Sources (s)."
                 .to_string(),
             "This terminal can draw the cutaway office: try \
              `pixtuoid run --graphics auto`, or set graphics = \"auto\" in the config."
@@ -356,7 +387,10 @@ mod tests {
             paint_version_popup(
                 f,
                 "1.2.3",
-                notices,
+                &crate::panels::ui_state::VersionBody {
+                    upgraded: true,
+                    notices: notices.into(),
+                },
                 bounds,
                 &pixtuoid_scene::theme::NORMAL,
                 1.0,
@@ -409,7 +443,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{needle:?} is painted: {screen:#?}"))
         };
         let link = row_of(LINK_LABEL);
-        assert!(row_of("This upgrade disconnected") < row_of("releases/tag/v1.2.3"));
+        assert!(row_of("pixtuoid now runs as a plugin") < row_of("releases/tag/v1.2.3"));
         let rect = version_popup_url_rect(bounds, &notices(), 1.0).expect("clickable");
         assert_eq!(usize::from(rect.y), link);
         let col = screen[link]
@@ -428,11 +462,30 @@ mod tests {
         let whole = notice_rows(wide(), &notices()).len();
         assert!(!rows.is_empty() && rows.len() < whole, "{rows:?}");
         assert!(
-            rows.last().is_some_and(|r| r.ends_with('\u{2026}')),
+            rows.last().is_some_and(|r| r.ends_with(CUT_MARK)),
             "{rows:?}"
         );
         let rect = version_popup_url_rect(bounds, &notices(), 1.0).expect("the link survives");
         assert!(painted(bounds, &notices())[usize::from(rect.y)].contains(LINK_LABEL));
+    }
+
+    /// The cut row is measured as the wrap is, by display width, so a row of
+    /// wide glyphs keeps its mark inside the panel instead of losing it to the
+    /// clip.
+    #[test]
+    fn a_cut_row_of_wide_glyphs_keeps_its_mark_inside_the_panel() {
+        let wide_glyphs = vec!["升级后请在来源面板中重新连接你使用的每一个代理工具".repeat(4)];
+        for (w, h) in [(20, 12), (33, 12), (60, 10)] {
+            let bounds = Rect::new(0, 0, w, h);
+            let rows = notice_rows(bounds, &wide_glyphs);
+            let last = rows.last().expect("some rows fit");
+            assert!(last.ends_with(CUT_MARK), "{rows:?}");
+            let width = inner_width(bounds) - INDENT.len();
+            assert!(
+                textwrap::core::display_width(last) <= width,
+                "{last:?} overruns {width} cols at {w}x{h}"
+            );
+        }
     }
 
     #[test]
@@ -444,7 +497,7 @@ mod tests {
             paint_version_popup(
                 f,
                 "1.2.3",
-                &[],
+                &crate::panels::ui_state::VersionBody::default(),
                 Rect::new(0, 0, 80, 30),
                 &pixtuoid_scene::theme::NORMAL,
                 0.0,

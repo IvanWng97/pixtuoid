@@ -537,7 +537,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
         log,
         drift,
         connected: &connected.snapshot(),
-        cutaway: crate::version::Cutaway {
+        cutaway: crate::version::CutawayTip {
             off: plan.graphics_off(),
             drawable: crate::graphics::names_a_cutaway_terminal(),
         },
@@ -1173,7 +1173,6 @@ mod apply_key_action_tests {
                 ui: super::ui_state::UiState::new(
                     &theme::NORMAL,
                     crate::panels::welcome::WelcomeUi::from_detected(&[]),
-                    false,
                     tmp.path().join("sock"),
                     None,
                     crate::doctor::DriftSeen::default(),
@@ -1250,7 +1249,6 @@ mod apply_key_action_tests {
             h.ui = super::ui_state::UiState::new(
                 &theme::NORMAL,
                 crate::panels::welcome::WelcomeUi::from_detected(detected),
-                false,
                 h._tmp.path().join("sock"),
                 None,
                 crate::doctor::DriftSeen::default(),

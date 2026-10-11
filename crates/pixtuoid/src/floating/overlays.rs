@@ -175,7 +175,6 @@ pub fn panel_preview(
     let mut ui = crate::panels::ui_state::UiState::new(
         theme,
         crate::panels::welcome::WelcomeUi::from_detected(&[]),
-        false,
         std::path::PathBuf::new(),
         None,
         crate::doctor::DriftSeen::default(),
@@ -505,7 +504,6 @@ mod tests {
         let mut ui = crate::panels::ui_state::UiState::new(
             theme,
             crate::panels::welcome::WelcomeUi::from_detected(&[]),
-            false,
             tmp.path().join("sock"),
             None,
             crate::doctor::DriftSeen::default(),
@@ -593,14 +591,17 @@ mod tests {
             Zoom::default(),
         ));
         let boot = |popup: bool| {
-            crate::panels::ui_state::UiState::new(
+            let mut ui = crate::panels::ui_state::UiState::new(
                 pixtuoid_scene::theme::ALL_THEMES[0],
                 crate::panels::welcome::WelcomeUi::from_detected(&[]),
-                popup,
                 std::path::PathBuf::new(),
                 None,
                 crate::doctor::DriftSeen::default(),
-            )
+            );
+            if popup {
+                ui.open_version_popup(&std::collections::HashSet::new(), &[]);
+            }
+            ui
         };
         let corner = (1.0, 1.0);
         let mut ui = boot(false);
