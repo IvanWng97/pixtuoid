@@ -2,7 +2,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-pub(crate) type ExtraArtifactsFn = fn(hook_path: &Path) -> Result<Vec<(PathBuf, String)>>;
+/// Every file a target owns whole, each with its absolute path, `hook_cmd` baked in.
+/// `primary` is the path the target is keyed on (its default or a caller's override);
+/// a target whose files sit beside it derives them from it, others from the CLI's own
+/// state resolver, which a test must redirect too or it writes the developer's real plugin.
+pub(crate) type RenderOwned = fn(primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryStrategy {
@@ -23,7 +27,7 @@ pub struct MergeOutcome {
     pub changed: bool,
 }
 
-/// A single install destination (one CLI's config file). `const` data, not
+/// A single install destination (one CLI's primary file). `const` data, not
 /// `static`: `&CONST` in `const TARGETS` is legal via rvalue static promotion.
 #[derive(Debug)]
 pub struct Target {
@@ -35,49 +39,79 @@ pub struct Target {
     /// The Sources panel joins its rows to targets on this via `by_source`.
     pub core_source: &'static str,
     pub display_name: &'static str,
-    /// Default config path (reads $HOME, hence a fn not a const). Errs when no
-    /// home dir resolves — a CWD fallback would "succeed" with a file the CLI
-    /// never reads.
+    /// The file the target is keyed on ([`Primary`] says whose; reads $HOME, hence a
+    /// fn not a const). Errs when no home dir resolves — a CWD fallback would
+    /// "succeed" with a file the CLI never reads.
     pub default_config_path: fn() -> Result<PathBuf>,
     /// Build the command string written into config from the resolved binary.
     /// `explicit` (the user set
     /// [`HOOK_OVERRIDE_ENV`](crate::install::io::HOOK_OVERRIDE_ENV)) always wins
     /// over a bare PATH-resolved name. Usually this IS the verbatim command written for every
-    /// event, but a target's `merge_install` MAY append a per-entry suffix —
+    /// event, but a Config target's `merge_install` MAY append a per-entry suffix —
     /// CodeWhale bakes ` --event <name>` onto each entry, so its `hook_command`
     /// returns a per-source BASE that `merge_install` extends.
     pub hook_command: fn(resolved: &Path, explicit: bool) -> Result<String>,
-    /// Parse `content`, inject managed hook entries, reserialize. MUST treat
-    /// empty/whitespace-only content as the empty document — never error on empty.
-    pub merge_install: fn(content: &str, hook_cmd: &str) -> Result<MergeOutcome>,
-    /// Remove only managed entries. Same empty rule.
-    pub merge_uninstall: fn(content: &str) -> Result<MergeOutcome>,
-    /// Verify the installed config is structurally sound — PURE over the config
-    /// content, extracting the shim path for `install::verify_target` to stat.
-    /// Per-source format knowledge stays here, like the merge fns.
-    pub verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
+    pub primary: Primary,
     pub binary_strategy: BinaryStrategy,
     /// Presence probe overriding the default config-file-exists check. Needed
     /// when the file we WRITE is not a file the CLI CREATES — checking it would
     /// mean auto-detection can never fire for such a target.
     pub presence_probe: Option<fn() -> bool>,
-    /// Extra wholly-owned artifacts written verbatim on install (absolute path +
-    /// content) BEYOND the merged `config_path`, taking the resolved shim path to
-    /// bake in. Left in place on uninstall (the config un-merge disables loading).
-    /// **Rewritten verbatim on every (re)install**, even when the config merge is
-    /// a semantic no-op — the deliberate refresh that repairs a tampered or stale
-    /// plugin file. The returned dir comes from the CLI's OWN state resolver, not
-    /// the `config` override a test isolates itself with, so a test must
-    /// redirect that resolver too or it writes the developer's real plugin.
-    pub extra_artifacts: Option<ExtraArtifactsFn>,
-
     /// A one-line note the presenters append after a SUCCESSFUL connect, when
     /// installing is not the last step the user must take. `None` for every target
     /// whose hooks take effect on the CLI's next run.
     pub post_install_hint: Option<&'static str>,
-    /// Set when the CLI loads our hooks through its own plugin system: the merged
-    /// config is then the plugin's hooks file, which this registers with the CLI.
+    /// Set when the CLI loads our hooks through its own plugin system: the owned
+    /// primary is then the plugin's hooks file, which this registers with the CLI.
     pub host: Option<&'static HostRegistration>,
+}
+
+/// Whose the primary file is: the user's, with pixtuoid's entries merged in, or
+/// pixtuoid's whole. Exactly one per target, so no target is both or neither.
+#[derive(Debug)]
+pub enum Primary {
+    Config {
+        /// Parse `content`, inject managed hook entries, reserialize. MUST treat
+        /// empty/whitespace-only content as the empty document — never error on empty.
+        merge_install: fn(content: &str, hook_cmd: &str) -> Result<MergeOutcome>,
+        /// Remove only managed entries. Same empty rule.
+        merge_uninstall: fn(content: &str) -> Result<MergeOutcome>,
+        /// Verify the installed config is structurally sound — PURE over the config
+        /// content, extracting the shim path for `install::verify_target` to stat.
+        /// Per-source format knowledge stays here, like the merge fns.
+        verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
+        /// Files pixtuoid owns beside the config. Left in place on uninstall (the
+        /// config un-merge disables loading).
+        beside: Option<RenderOwned>,
+    },
+    Owned {
+        /// The primary first, then any file that ships with it.
+        render: RenderOwned,
+        /// The primary as a disconnect leaves it; `changed` iff it was ours. Same
+        /// empty rule as `merge_uninstall`.
+        disconnect: fn(content: &str) -> Result<MergeOutcome>,
+        /// `verify_schema`'s contract, over the owned primary.
+        verify: fn(content: &str) -> crate::install::verify::SchemaParse,
+    },
+}
+
+impl Primary {
+    /// What an uninstall does to the primary's content, and the dry run `has_hooks` reads.
+    pub(crate) fn uninstall(&self) -> fn(&str) -> Result<MergeOutcome> {
+        match self {
+            Primary::Config {
+                merge_uninstall, ..
+            } => *merge_uninstall,
+            Primary::Owned { disconnect, .. } => *disconnect,
+        }
+    }
+
+    pub(crate) fn verify(&self) -> fn(&str) -> crate::install::verify::SchemaParse {
+        match self {
+            Primary::Config { verify_schema, .. } => *verify_schema,
+            Primary::Owned { verify, .. } => *verify,
+        }
+    }
 }
 
 /// A CLI-side plugin registration, run through the CLI's own commands so the CLI
@@ -116,9 +150,11 @@ pub(crate) const CLAUDE: Target = Target {
     display_name: "Claude Code",
     default_config_path: crate::install::claude::default_config_path,
     hook_command: crate::install::claude::hook_command,
-    merge_install: crate::install::claude::merge_install,
-    merge_uninstall: crate::install::claude::merge_uninstall,
-    verify_schema: crate::install::claude::verify_schema,
+    primary: Primary::Owned {
+        render: crate::install::claude::render_owned,
+        disconnect: crate::install::claude::disconnect,
+        verify: crate::install::claude::verify_schema,
+    },
     // Windows: the exec form embeds the absolute path, and a hook spawned without
     // a shell can't PATH-search, so an unresolvable binary is fatal there.
     binary_strategy: if cfg!(windows) {
@@ -127,7 +163,6 @@ pub(crate) const CLAUDE: Target = Target {
         BinaryStrategy::BareNameOnPath
     },
     presence_probe: Some(crate::install::claude::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: Some(&crate::install::claude::HOST),
 };
@@ -138,12 +173,14 @@ pub(crate) const CODEX: Target = Target {
     display_name: "Codex",
     default_config_path: crate::install::codex::default_config_path,
     hook_command: crate::install::codex::hook_command,
-    merge_install: crate::install::codex::merge_install,
-    merge_uninstall: crate::install::codex::merge_uninstall,
-    verify_schema: crate::install::codex::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::codex::merge_install,
+        merge_uninstall: crate::install::codex::merge_uninstall,
+        verify_schema: crate::install::codex::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -154,12 +191,14 @@ pub(crate) const REASONIX: Target = Target {
     display_name: "Reasonix",
     default_config_path: crate::install::reasonix::default_config_path,
     hook_command: crate::install::reasonix::hook_command,
-    merge_install: crate::install::reasonix::merge_install,
-    merge_uninstall: crate::install::reasonix::merge_uninstall,
-    verify_schema: crate::install::reasonix::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::reasonix::merge_install,
+        merge_uninstall: crate::install::reasonix::merge_uninstall,
+        verify_schema: crate::install::reasonix::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::reasonix::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -170,12 +209,14 @@ pub(crate) const CODEWHALE: Target = Target {
     display_name: "CodeWhale",
     default_config_path: crate::install::codewhale::default_config_path,
     hook_command: crate::install::codewhale::hook_command,
-    merge_install: crate::install::codewhale::merge_install,
-    merge_uninstall: crate::install::codewhale::merge_uninstall,
-    verify_schema: crate::install::codewhale::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::codewhale::merge_install,
+        merge_uninstall: crate::install::codewhale::merge_uninstall,
+        verify_schema: crate::install::codewhale::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::codewhale::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -186,14 +227,15 @@ pub(crate) const OPENCODE: Target = Target {
     display_name: "opencode",
     default_config_path: crate::install::opencode::default_config_path,
     hook_command: crate::install::opencode::hook_command,
-    merge_install: crate::install::opencode::merge_install,
-    merge_uninstall: crate::install::opencode::merge_uninstall,
-    verify_schema: crate::install::opencode::verify_schema,
+    primary: Primary::Owned {
+        render: crate::install::opencode::render_owned,
+        disconnect: crate::install::opencode::disconnect,
+        verify: crate::install::opencode::verify_schema,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on opencode's own dirs
     // rather than our plugin file.
     presence_probe: Some(crate::install::opencode::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -204,12 +246,14 @@ pub(crate) const GROK: Target = Target {
     display_name: "Grok Build",
     default_config_path: crate::install::grok::default_config_path,
     hook_command: crate::install::grok::hook_command,
-    merge_install: crate::install::grok::merge_install,
-    merge_uninstall: crate::install::grok::merge_uninstall,
-    verify_schema: crate::install::grok::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::grok::merge_install,
+        merge_uninstall: crate::install::grok::merge_uninstall,
+        verify_schema: crate::install::grok::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::grok::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -220,12 +264,14 @@ pub(crate) const CURSOR: Target = Target {
     display_name: "Cursor CLI",
     default_config_path: crate::install::cursor::default_config_path,
     hook_command: crate::install::cursor::hook_command,
-    merge_install: crate::install::cursor::merge_install,
-    merge_uninstall: crate::install::cursor::merge_uninstall,
-    verify_schema: crate::install::cursor::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::cursor::merge_install,
+        merge_uninstall: crate::install::cursor::merge_uninstall,
+        verify_schema: crate::install::cursor::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::cursor::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -236,13 +282,15 @@ pub(crate) const HERMES: Target = Target {
     display_name: "Hermes Agent",
     default_config_path: crate::install::hermes::default_config_path,
     hook_command: crate::install::hermes::hook_command,
-    merge_install: crate::install::hermes::merge_install,
-    merge_uninstall: crate::install::hermes::merge_uninstall,
-    verify_schema: crate::install::hermes::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::hermes::merge_install,
+        merge_uninstall: crate::install::hermes::merge_uninstall,
+        verify_schema: crate::install::hermes::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // Hermes OWNS config.yaml (model/provider), so probe the home dir instead.
     presence_probe: Some(crate::install::hermes::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -251,22 +299,22 @@ pub(crate) const OPENCLAW: Target = Target {
     name: "openclaw",
     core_source: pixtuoid_core::source::openclaw::SOURCE_NAME,
     display_name: "OpenClaw",
-    // A two-ownership split: we merge openclaw.json's plugin keys AND write the
-    // plugin dir as an extra artifact.
     default_config_path: crate::install::openclaw::default_config_path,
     hook_command: crate::install::openclaw::hook_command,
-    merge_install: crate::install::openclaw::merge_install,
-    merge_uninstall: crate::install::openclaw::merge_uninstall,
+    primary: Primary::Config {
+        merge_install: crate::install::openclaw::merge_install,
+        merge_uninstall: crate::install::openclaw::merge_uninstall,
+        verify_schema: crate::install::openclaw::verify_schema,
+        beside: Some(crate::install::openclaw::plugin_artifacts),
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // openclaw.json is created by OpenClaw itself; probe its own dir so
     // auto-detect fires whether or not we've installed.
     presence_probe: Some(crate::install::openclaw::detect_installed),
-    extra_artifacts: Some(crate::install::openclaw::plugin_artifacts),
     // `plugins.load` is `kind: "restart"` upstream, so a RUNNING gateway does not
     // hot-load the plugin — the lobster appears on its next restart.
     post_install_hint: Some("restart the gateway to load it (openclaw gateway restart)"),
     host: None,
-    verify_schema: crate::install::openclaw::verify_schema,
 };
 
 pub(crate) const KIMI: Target = Target {
@@ -275,14 +323,16 @@ pub(crate) const KIMI: Target = Target {
     display_name: "Kimi Code CLI",
     default_config_path: crate::install::kimi::default_config_path,
     hook_command: crate::install::kimi::hook_command,
-    merge_install: crate::install::kimi::merge_install,
-    merge_uninstall: crate::install::kimi::merge_uninstall,
-    verify_schema: crate::install::kimi::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::kimi::merge_install,
+        merge_uninstall: crate::install::kimi::merge_uninstall,
+        verify_schema: crate::install::kimi::verify_schema,
+        beside: None,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // Kimi may not create config.toml until a provider is configured, so probe the
     // data root rather than the file we write.
     presence_probe: Some(crate::install::kimi::detect_installed),
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -293,13 +343,15 @@ pub(crate) const DSH: Target = Target {
     display_name: "DeepSeek Harness",
     default_config_path: crate::install::dsh::default_config_path,
     hook_command: crate::install::dsh::hook_command,
-    merge_install: crate::install::dsh::merge_install,
-    merge_uninstall: crate::install::dsh::merge_uninstall,
-    verify_schema: crate::install::dsh::verify_schema,
+    primary: Primary::Config {
+        merge_install: crate::install::dsh::merge_install,
+        merge_uninstall: crate::install::dsh::merge_uninstall,
+        verify_schema: crate::install::dsh::verify_schema,
+        beside: Some(crate::install::dsh::plugin_artifacts),
+    },
     // The plugin spawns the shim under Node by embedded path — no PATH.
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: Some(crate::install::dsh::detect_installed),
-    extra_artifacts: Some(crate::install::dsh::plugin_artifacts),
     // Profiles other than `web` compose patches once at boot (`web` watches
     // and hot-reloads both user patch files).
     post_install_hint: Some(
@@ -314,14 +366,15 @@ pub(crate) const OMP: Target = Target {
     display_name: "Oh My Pi",
     default_config_path: crate::install::omp::default_config_path,
     hook_command: crate::install::omp::hook_command,
-    merge_install: crate::install::omp::merge_install,
-    merge_uninstall: crate::install::omp::merge_uninstall,
-    verify_schema: crate::install::omp::verify_schema,
+    primary: Primary::Owned {
+        render: crate::install::omp::render_owned,
+        disconnect: crate::install::omp::disconnect,
+        verify: crate::install::omp::verify_schema,
+    },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on omp's own agent dir
     // rather than our file.
     presence_probe: Some(crate::install::omp::detect_installed),
-    extra_artifacts: None,
     // Extensions load once at startup (`discoverAndLoadExtensions`).
     post_install_hint: Some("already-running omp sessions must restart to load the bridge"),
     host: None,
@@ -403,22 +456,24 @@ mod tests {
             display_name: "NoHome",
             default_config_path: || Err(anyhow::anyhow!("cannot resolve the home directory")),
             hook_command: |_, _| Ok("x".into()),
-            merge_install: |c, _| {
-                Ok(MergeOutcome {
-                    content: c.to_string(),
-                    changed: false,
-                })
+            primary: Primary::Config {
+                merge_install: |c, _| {
+                    Ok(MergeOutcome {
+                        content: c.to_string(),
+                        changed: false,
+                    })
+                },
+                merge_uninstall: |c| {
+                    Ok(MergeOutcome {
+                        content: c.to_string(),
+                        changed: false,
+                    })
+                },
+                verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+                beside: None,
             },
-            merge_uninstall: |c| {
-                Ok(MergeOutcome {
-                    content: c.to_string(),
-                    changed: false,
-                })
-            },
-            verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
             binary_strategy: BinaryStrategy::EmbedAbsolute,
             presence_probe: None,
-            extra_artifacts: None,
             post_install_hint: None,
             host: None,
         };

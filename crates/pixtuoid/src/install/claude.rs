@@ -378,22 +378,21 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     }
 }
 
-/// The plugin's hooks file is ours whole, so install writes the full document and
-/// replaces whatever was there.
-pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
+pub(crate) fn render_owned(primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>> {
+    Ok(vec![(primary.to_path_buf(), render_hooks(hook_cmd)?)])
+}
+
+fn render_hooks(hook_cmd: &str) -> Result<String> {
     let want = json!({
         "hooks": EVENTS
             .iter()
             .map(|ev| ((*ev).to_string(), json!([managed_entry(hook_cmd)])))
             .collect::<serde_json::Map<_, _>>()
     });
-    Ok(MergeOutcome {
-        changed: serde_json::from_str::<Value>(content).ok().as_ref() != Some(&want),
-        content: serde_json::to_string_pretty(&want)?,
-    })
+    Ok(serde_json::to_string_pretty(&want)?)
 }
 
-pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn disconnect(content: &str) -> Result<MergeOutcome> {
     let had_hooks = serde_json::from_str::<Value>(content)
         .ok()
         .and_then(|doc| doc.get("hooks")?.as_object().map(|h| !h.is_empty()))
@@ -525,10 +524,9 @@ mod tests {
     }
 
     #[test]
-    fn install_writes_every_event_and_is_idempotent() {
-        let first = merge_install("", "/usr/local/bin/pixtuoid-hook").unwrap();
-        assert!(first.changed);
-        let doc: Value = serde_json::from_str(&first.content).unwrap();
+    fn install_writes_every_event() {
+        let first = render_hooks("/usr/local/bin/pixtuoid-hook").unwrap();
+        let doc: Value = serde_json::from_str(&first).unwrap();
         let hooks = doc["hooks"].as_object().unwrap();
         assert_eq!(hooks.len(), EVENTS.len());
         for ev in EVENTS {
@@ -541,30 +539,15 @@ mod tests {
                 "Claude Code rejects unknown keys in a plugin's hooks.json"
             );
         }
-        assert!(
-            !merge_install(&first.content, "/usr/local/bin/pixtuoid-hook")
-                .unwrap()
-                .changed
-        );
-    }
-
-    #[test]
-    fn install_replaces_whatever_the_owned_file_held() {
-        for prior in ["{not json", "[1, 2]", r#"{"hooks":{"Stop":[]}}"#] {
-            let out = merge_install(prior, "pixtuoid-hook").unwrap();
-            assert!(out.changed, "{prior}");
-            let doc: Value = serde_json::from_str(&out.content).unwrap();
-            assert!(doc["hooks"].get("Stop").is_none(), "{prior}");
-        }
     }
 
     #[test]
     fn uninstall_empties_the_file_and_reports_a_change_only_with_hooks() {
-        let installed = merge_install("", "pixtuoid-hook").unwrap().content;
-        let out = merge_uninstall(&installed).unwrap();
+        let installed = render_hooks("pixtuoid-hook").unwrap();
+        let out = disconnect(&installed).unwrap();
         assert!(out.changed);
-        assert!(!merge_uninstall(&out.content).unwrap().changed);
-        assert!(!merge_uninstall("").unwrap().changed);
+        assert!(!disconnect(&out.content).unwrap().changed);
+        assert!(!disconnect("").unwrap().changed);
     }
 
     #[cfg(unix)]
@@ -708,17 +691,19 @@ mod tests {
         for ev in old_events {
             old["hooks"][ev] = json!([managed_entry("pixtuoid-hook")]);
         }
-        let out = merge_install(&old.to_string(), "pixtuoid-hook").unwrap();
-        assert!(out.changed, "adding the Subagent events is a real change");
-        let v: Value = serde_json::from_str(&out.content).unwrap();
+        let out = render_hooks("pixtuoid-hook").unwrap();
+        assert_ne!(
+            out,
+            old.to_string(),
+            "adding the Subagent events is a real change"
+        );
+        let v: Value = serde_json::from_str(&out).unwrap();
         for ev in EVENTS {
             assert!(
                 v["hooks"][*ev][0]["hooks"][0]["command"].is_string(),
                 "event {ev} must be installed after the upgrade re-run"
             );
         }
-        let again = merge_install(&out.content, "pixtuoid-hook").unwrap();
-        assert!(!again.changed, "second re-run is a semantic no-op");
     }
 
     #[test]

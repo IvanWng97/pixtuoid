@@ -751,22 +751,24 @@ mod tests {
         display_name: "RollbackTest",
         default_config_path: || Err(anyhow::anyhow!("forced install failure")),
         hook_command: |_, _| Ok(String::new()),
-        merge_install: |c, _| {
-            Ok(crate::install::target::MergeOutcome {
-                content: c.to_string(),
-                changed: false,
-            })
+        primary: crate::install::target::Primary::Config {
+            merge_install: |c, _| {
+                Ok(crate::install::target::MergeOutcome {
+                    content: c.to_string(),
+                    changed: false,
+                })
+            },
+            merge_uninstall: |c| {
+                Ok(crate::install::target::MergeOutcome {
+                    content: c.to_string(),
+                    changed: false,
+                })
+            },
+            verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+            beside: None,
         },
-        merge_uninstall: |c| {
-            Ok(crate::install::target::MergeOutcome {
-                content: c.to_string(),
-                changed: false,
-            })
-        },
-        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
         binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
         presence_probe: None,
-        extra_artifacts: None,
         post_install_hint: None,
         host: None,
     };

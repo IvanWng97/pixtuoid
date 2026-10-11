@@ -7,8 +7,8 @@
 //! `pixtuoid-hook` shim on stdin; the shim's absolute path is baked in
 //! (JSON-escaped) at install time from the `opencode_plugin.ts` template.
 //!
-//! The plugin FILE is wholly owned by pixtuoid, so `merge_install` renders the
-//! whole file and `merge_uninstall` replaces it with a sentinel-free no-op stub.
+//! The plugin FILE is the target's owned primary, so install renders the whole
+//! file and a disconnect replaces it with a sentinel-free no-op stub.
 //! ACCEPTED residual: uninstall leaves that stub rather than deleting the file —
 //! the orchestrator's `write_atomic` can't delete, and the stub is a harmless
 //! empty module.
@@ -76,18 +76,13 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
-/// `changed` is a content diff: a same-path re-install is a no-op.
-pub(crate) fn merge_install(content: &str, hook_path: &str) -> Result<MergeOutcome> {
-    let baked = render_plugin(hook_path)?;
-    Ok(MergeOutcome {
-        changed: content != baked,
-        content: baked,
-    })
+pub(crate) fn render_owned(primary: &Path, hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
+    Ok(vec![(primary.to_path_buf(), render_plugin(hook_path)?)])
 }
 
 /// `changed` only when the content is actually ours (carries the sentinel) — a
 /// foreign file, an already-removed stub, or empty content is left untouched.
-pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn disconnect(content: &str) -> Result<MergeOutcome> {
     let ours = content.contains(SENTINEL);
     Ok(MergeOutcome {
         changed: ours,
@@ -226,7 +221,7 @@ mod tests {
     fn verify_schema_reports_the_baked_shim_and_every_way_the_plugin_can_be_dead() {
         use crate::install::verify::ShimRef;
 
-        let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap().content;
+        let installed = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
         let sound = verify_schema(&installed);
         assert!(
             sound.issues.is_empty(),
@@ -271,19 +266,18 @@ mod tests {
 
     #[test]
     fn install_bakes_the_hook_path_and_carries_the_sentinel() {
-        let out = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
-        assert!(out.changed);
+        let out = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
         assert!(
-            out.content.contains(SENTINEL),
+            out.contains(SENTINEL),
             "rendered plugin must carry the sentinel"
         );
-        assert!(out.content.contains("\"/opt/bin/pixtuoid-hook\""));
+        assert!(out.contains("\"/opt/bin/pixtuoid-hook\""));
         assert!(
-            !out.content.contains(HOOK_PLACEHOLDER),
+            !out.contains(HOOK_PLACEHOLDER),
             "placeholder must be replaced"
         );
         assert!(
-            out.content.contains("--source"),
+            out.contains("--source"),
             "spawns the shim with --source opencode"
         );
     }
@@ -310,30 +304,23 @@ mod tests {
     }
 
     #[test]
-    fn install_is_idempotent_for_the_same_path() {
-        let a = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
-        let b = merge_install(&a.content, "/opt/bin/pixtuoid-hook").unwrap();
-        assert!(!b.changed, "same-path re-install is a content no-op");
-    }
-
-    #[test]
     fn install_re_renders_on_a_path_change() {
-        let a = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
-        let b = merge_install(&a.content, "/usr/local/bin/pixtuoid-hook").unwrap();
-        assert!(b.changed);
-        assert!(b.content.contains("\"/usr/local/bin/pixtuoid-hook\""));
+        let a = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
+        let b = render_plugin("/usr/local/bin/pixtuoid-hook").unwrap();
+        assert_ne!(a, b);
+        assert!(b.contains("\"/usr/local/bin/pixtuoid-hook\""));
     }
 
     #[test]
     fn a_path_with_special_chars_bakes_as_a_valid_escaped_literal() {
-        let out = merge_install("", r#"/weird/pi"x\hook"#).unwrap();
-        assert!(out.content.contains(r#""/weird/pi\"x\\hook""#));
+        let out = render_plugin(r#"/weird/pi"x\hook"#).unwrap();
+        assert!(out.contains(r#""/weird/pi\"x\\hook""#));
     }
 
     #[test]
     fn uninstall_replaces_our_plugin_with_a_sentinel_free_stub() {
-        let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
-        let removed = merge_uninstall(&installed.content).unwrap();
+        let installed = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
+        let removed = disconnect(&installed).unwrap();
         assert!(removed.changed);
         assert!(
             !removed.content.contains(SENTINEL),
@@ -348,16 +335,16 @@ mod tests {
     #[test]
     fn uninstall_of_a_foreign_or_removed_file_is_a_no_op() {
         let foreign = "export const myPlugin = async () => ({})\n";
-        assert!(!merge_uninstall(foreign).unwrap().changed);
-        assert!(!merge_uninstall(REMOVED_STUB).unwrap().changed);
-        assert!(!merge_uninstall("").unwrap().changed);
+        assert!(!disconnect(foreign).unwrap().changed);
+        assert!(!disconnect(REMOVED_STUB).unwrap().changed);
+        assert!(!disconnect("").unwrap().changed);
     }
 
     #[test]
     fn install_then_uninstall_round_trips_the_content_sentinel() {
-        let installed = merge_install("", "/opt/bin/pixtuoid-hook").unwrap();
-        assert!(installed.content.contains(SENTINEL));
-        let removed = merge_uninstall(&installed.content).unwrap();
+        let installed = render_plugin("/opt/bin/pixtuoid-hook").unwrap();
+        assert!(installed.contains(SENTINEL));
+        let removed = disconnect(&installed).unwrap();
         assert!(!removed.content.contains(SENTINEL));
     }
 
