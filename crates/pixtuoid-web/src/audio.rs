@@ -318,6 +318,38 @@ mod tests {
     use pixtuoid_scene::audio::{PlayCmd, bank};
 
     #[test]
+    fn warmup_draws_in_the_synthesis_order() {
+        let mut d = WebAudioDriver::new(TrackId::GenDay(0));
+        while d.warmup_step() > 0 {}
+        assert!(d.is_ready());
+
+        let mut want = bank::Synthesis::new();
+        let assets = want.assets();
+        let rain = want.rain();
+        let beds = want.track(TrackId::GenDay(0));
+
+        for pool in OneShotPool::ALL {
+            let mut index = 0;
+            while let Some(buf) = assets.get(pool, index) {
+                assert_eq!(
+                    d.oneshot_buffer(pool, index),
+                    buf.as_slice(),
+                    "{pool:?} {index}"
+                );
+                index += 1;
+            }
+        }
+        for (idx, stem) in LoopStem::ALL.into_iter().enumerate() {
+            let want = if stem == LoopStem::Rain {
+                rain.as_slice()
+            } else {
+                beds.bed_slice(stem)
+            };
+            assert_eq!(d.loop_buffer(idx), want, "{stem:?}");
+        }
+    }
+
+    #[test]
     fn every_oneshot_pool_has_a_finite_end_the_js_discovery_loop_can_find() {
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}

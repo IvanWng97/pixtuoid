@@ -32,11 +32,6 @@ pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
 use crate::tally::StateCounts;
 
-/// The build-time noise seed, in ONE place because both painters MUST seed
-/// identically — a per-crate copy silently desyncs the two soundtracks on the
-/// next edit.
-#[doc(hidden)]
-pub(crate) const BUILD_SEED: u64 = 0xC0FF_EE01;
 // `AudioEngine::new`'s seeds for the per-tick keystroke / rain-drop schedulers
 // and their picker.
 pub(crate) const TYPING_SEED: u64 = 0xBEEF;

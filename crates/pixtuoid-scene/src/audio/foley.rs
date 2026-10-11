@@ -12,9 +12,9 @@ const SR: f32 = SAMPLE_RATE as f32;
 /// the FFT domain, which is circular, so the block loops click-free.
 const RAIN_LOOP_SAMPLES: usize = 1 << 19;
 
-// Copies of synth's helpers: the music synth leaves for `pixtuoid-lofi` while
-// foley stays, and publishing five one-line helpers would make them lofi's
-// semver surface for one consumer. Each copy shapes only its own crate's sounds.
+// Copied, not shared: synth's music voices are bound for `pixtuoid-lofi`, and
+// exporting five small helpers for one consumer would make them its semver
+// surface. Each copy shapes only its own module's sounds.
 fn n_samples(dur_s: f32) -> usize {
     (dur_s * SR).round() as usize
 }
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn rain_bed_is_one_power_of_two_loop() {
+    fn rain_bed_is_one_rain_loop() {
         assert_eq!(rain_bed(&mut NoiseStream::new(1)).len(), RAIN_LOOP_SAMPLES);
     }
 

@@ -94,7 +94,7 @@ fn bar_s() -> f32 {
     score::beat_s() * score::BEATS_PER_BAR
 }
 
-/// The lofi master chain, applied per MUSICAL stem (texture/rain skip it — they
+/// The lofi master chain, applied per MUSICAL stem (texture skips it — they
 /// ARE the medium). No hiss here: per-stem hiss STACKS across the musical
 /// stems, so the medium noise is `texture_bed`'s job, exactly once.
 fn lofi_post(buf: &[f32], drive: f32) -> Vec<f32> {
@@ -750,9 +750,7 @@ fn lane_recipe(mood: Mood, lane: Lane) -> (f32, f32, f32) {
     }
 }
 
-/// One lane of a generated take — the chunked build unit the wasm driver
-/// spreads across ticks, because a full six-lane build in one rAF tick hitches
-/// the page.
+/// Render one lane of a generated take.
 pub fn render_lane(score: &Score, lane: Lane, rng: &mut NoiseStream) -> Vec<f32> {
     let loop_s = score.loop_secs();
     let (r0, r1, r2) = lane_recipe(score.mood, lane);
@@ -808,20 +806,12 @@ mod tests {
     }
 
     #[test]
-    fn a_day_take_renders_each_lane_in_its_shape() {
+    fn a_day_lead_sits_above_its_pad() {
         use crate::audio::compose::compose;
         let score = compose(Mood::Day, 0);
-        let mut rng = NoiseStream::new(crate::audio::BUILD_SEED);
-        let [pad, sparkle, keys, drums, texture, bass] =
-            Lane::ALL.map(|lane| render_lane(&score, lane, &mut rng));
-        assert_eq!(
-            texture.len(),
-            1 << 19,
-            "day texture = the free-running noise-bed loop"
-        );
-        for bed in [&sparkle, &keys, &drums, &bass] {
-            assert_eq!(bed.len(), pad.len(), "musical beds phase-lock");
-        }
+        let mut rng = NoiseStream::new(0);
+        let pad = render_lane(&score, Lane::Pad, &mut rng);
+        let sparkle = render_lane(&score, Lane::Sparkle, &mut rng);
         assert!(
             centroid_hz(&sparkle) > centroid_hz(&pad) * 1.5,
             "the lead must sit clearly above the pad: {:.0} vs {:.0}",
@@ -1142,29 +1132,43 @@ mod tests {
                 let mut rng = NoiseStream::new(9);
                 let beds = Lane::ALL.map(|l| render_lane(&score, l, &mut rng));
                 let n = n_samples(score.loop_secs());
-                for (i, bed) in beds.iter().enumerate() {
+                let [pad, sparkle, keys, drums, texture, bass] = &beds;
+                for (name, bed) in [
+                    ("pad", pad),
+                    ("sparkle", sparkle),
+                    ("keys", keys),
+                    ("drums", drums),
+                    ("texture", texture),
+                    ("bass", bass),
+                ] {
                     assert!(
                         bed.iter().all(|v| v.is_finite() && v.abs() <= 1.0),
-                        "{mood:?} seed {seed} bed {i}: NaN/over-peak"
+                        "{mood:?} seed {seed} {name}: NaN/over-peak"
                     );
                 }
-                // every musical lane phase-locks; only texture (4) runs free by day
-                for i in [0usize, 1, 2, 3, 5] {
-                    assert_eq!(beds[i].len(), n, "{mood:?} seed {seed} bed {i} length");
+                // every musical lane phase-locks; only texture runs free by day
+                for (name, bed) in [
+                    ("pad", pad),
+                    ("sparkle", sparkle),
+                    ("keys", keys),
+                    ("drums", drums),
+                    ("bass", bass),
+                ] {
+                    assert_eq!(bed.len(), n, "{mood:?} seed {seed} {name} length");
                 }
                 match mood {
-                    Mood::Day => assert_eq!(beds[4].len(), BED_LOOP_SAMPLES),
-                    Mood::Night => assert_eq!(beds[4].len(), n),
+                    Mood::Day => assert_eq!(texture.len(), BED_LOOP_SAMPLES),
+                    Mood::Night => assert_eq!(texture.len(), n),
                 }
-                let low = band_energy_share(&beds[3], 62.5, 125.0);
-                let mid = band_energy_share(&beds[3], 125.0, 250.0);
+                let low = band_energy_share(drums, 62.5, 125.0);
+                let mid = band_energy_share(drums, 125.0, 250.0);
                 assert!(
                     low > 0.2 && low > mid * 0.8,
                     "{mood:?} seed {seed}: drums lost the kick floor ({low:.3}/{mid:.3})"
                 );
-                let sub = band_energy_share(&beds[5], 31.0, 125.0);
+                let sub = band_energy_share(bass, 31.0, 125.0);
                 assert!(
-                    sub > 0.35 && sub > band_energy_share(&beds[5], 250.0, 1000.0),
+                    sub > 0.35 && sub > band_energy_share(bass, 250.0, 1000.0),
                     "{mood:?} seed {seed}: the bass lane must own the sub ({sub:.3})"
                 );
             }

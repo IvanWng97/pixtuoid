@@ -17,7 +17,7 @@
 use super::dsp::NoiseStream;
 use super::score::DrumKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mood {
     Day,
     Night,

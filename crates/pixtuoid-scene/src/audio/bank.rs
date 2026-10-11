@@ -180,8 +180,8 @@ pub struct TrackBeds {
 }
 
 impl TrackBeds {
-    /// Assemble from beds already built lane-by-lane (the wasm driver's chunked
-    /// rebuild) — `TRACK_STEMS` order.
+    /// Assemble from beds built elsewhere (the wasm worker's handoff) —
+    /// `TRACK_STEMS` order.
     pub fn from_arcs(beds: [Arc<Vec<f32>>; TRACK_STEMS.len()]) -> Self {
         Self { beds }
     }
@@ -204,6 +204,10 @@ impl TrackBeds {
     }
 }
 
+/// Seeds [`Synthesis`]'s one stream: the ratified renders were drawn from it,
+/// so a new value is a new sound.
+const BUILD_SEED: u64 = 0xC0FF_EE01;
+
 /// The office's synthesis in its one ratified order: the one-shot pools, then
 /// rain, then each track's lanes as tracks are needed — one rng stream, so the
 /// order is the sound. Every painter builds through here.
@@ -221,7 +225,7 @@ impl Default for Synthesis {
 impl Synthesis {
     pub fn new() -> Self {
         Self {
-            rng: dsp::NoiseStream::new(super::BUILD_SEED),
+            rng: dsp::NoiseStream::new(BUILD_SEED),
         }
     }
 
@@ -306,9 +310,6 @@ mod tests {
                 LoopStem::Bass,
             ]
         );
-        for (lane, stem) in synth::Lane::ALL.into_iter().zip(TRACK_STEMS) {
-            assert_eq!(stem_of(lane), stem);
-        }
     }
 
     #[test]
@@ -326,7 +327,7 @@ mod tests {
         let day = s.track(TrackId::GenDay(0));
         let night = s.track(TrackId::GenNight(0));
 
-        let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
+        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
         let want_assets = AssetBank::build(&mut rng);
         let want_rain = foley::rain_bed(&mut rng);
         let mut lanes = |track| {

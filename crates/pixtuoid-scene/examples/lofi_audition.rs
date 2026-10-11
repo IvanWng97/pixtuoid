@@ -16,7 +16,7 @@ use pixtuoid_scene::audio::compose::{Mood, compose};
 use pixtuoid_scene::audio::dsp::{NoiseStream, SAMPLE_RATE};
 use pixtuoid_scene::audio::synth::{Lane, render_lane};
 
-/// Audition mix gains per mood, in `TRACK_STEMS` order
+/// Audition mix gains per mood, in [`Lane::ALL`] order
 /// (pad, sparkle, keys, drums, texture, bass).
 const DAY_MIX: [f32; 6] = [0.70, 0.60, 0.55, 0.45, 0.84, 0.62];
 const NIGHT_MIX: [f32; 6] = [0.75, 0.55, 0.50, 0.30, 0.84, 0.68];
