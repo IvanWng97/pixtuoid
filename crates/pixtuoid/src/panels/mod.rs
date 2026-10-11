@@ -481,8 +481,7 @@ pub(crate) fn dispatch_key(
     }
     if modal.version_popup {
         return match (code, mods) {
-            (KeyCode::Enter, _) => KeyAction::DismissVersionPopup,
-            (KeyCode::Esc, _) => KeyAction::Quit,
+            (KeyCode::Enter, _) | (KeyCode::Esc, _) => KeyAction::DismissVersionPopup,
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             _ => KeyAction::None,
         };
@@ -989,16 +988,17 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn version_popup_enter_dismisses_esc_quits() {
+    fn version_popup_enter_and_esc_dismiss() {
         let c = ModalState {
             version_popup: true,
             ..modal()
         };
-        assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, c, nav()),
-            KeyAction::DismissVersionPopup
-        );
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, c, nav()), KeyAction::Quit);
+        for dismiss in [KeyCode::Enter, KeyCode::Esc] {
+            assert_eq!(
+                dispatch_key(dismiss, NONE, c, nav()),
+                KeyAction::DismissVersionPopup
+            );
+        }
         assert_eq!(
             dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
             KeyAction::Quit
