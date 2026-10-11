@@ -71,7 +71,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
-pub(crate) fn plugin_artifacts(_config: &Path, hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
+pub(crate) fn plugin_artifacts(hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
     let rendered =
         crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "dsh")?;
     Ok(vec![(plugin_path()?, rendered)])
@@ -652,7 +652,7 @@ mod tests {
     fn plugin_artifacts_bake_the_hook_path_and_carry_the_sentinel() {
         let home = tempfile::tempdir().unwrap();
         temp_env::with_var("DSH_HOME", Some(home.path()), || {
-            let arts = plugin_artifacts(Path::new(""), "/opt/bin/pixtuoid-hook").unwrap();
+            let arts = plugin_artifacts("/opt/bin/pixtuoid-hook").unwrap();
             assert_eq!(arts.len(), 1);
             let (path, content) = &arts[0];
             assert!(path.starts_with(home.path()));

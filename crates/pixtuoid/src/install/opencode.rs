@@ -76,10 +76,6 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
-pub(crate) fn render_owned(primary: &Path, hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
-    Ok(vec![(primary.to_path_buf(), render_plugin(hook_path)?)])
-}
-
 /// `changed` only when the content is actually ours (carries the sentinel) — a
 /// foreign file, an already-removed stub, or empty content is left untouched.
 pub(crate) fn disconnect(content: &str) -> Result<MergeOutcome> {
@@ -118,7 +114,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     }
 }
 
-fn render_plugin(hook_path: &str) -> Result<String> {
+pub(crate) fn render_plugin(hook_path: &str) -> Result<String> {
     crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "opencode")
 }
 

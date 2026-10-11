@@ -2,21 +2,55 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-/// Each owned file at its absolute path with `hook_cmd` baked in, the one carrying it
-/// first. `primary` is the path the target is keyed on (its default or a caller's
-/// override); a file not at it comes from the CLI's own state resolver, which a test
-/// must redirect too or it writes the developer's real plugin.
-pub(crate) type RenderOwned = fn(primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
+/// Each file pixtuoid owns beside a config, at its absolute path with `hook_cmd` baked
+/// in, the one that bakes the shim first. The paths come from the CLI's OWN state
+/// resolver, not the config path a test isolates itself with, so a test must redirect
+/// that resolver too or it writes the developer's real plugin.
+pub(crate) type RenderBeside = fn(hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
 
 /// [`Target::hook_command`]'s shape.
 pub(crate) type HookCommand = fn(resolved: &Path, explicit: bool) -> Result<String>;
 
-/// The files a target owns whole.
+/// Where the shim a rendered plugin file bakes lives, read back from its content.
+pub(crate) type InstalledShim = fn(content: &str) -> crate::install::verify::ShimRef;
+
+/// The files a target owns beside its config.
 #[derive(Debug, Clone, Copy)]
-pub struct OwnedFiles {
-    pub render: RenderOwned,
-    /// Where the shim the first file bakes lives, read back from its content.
-    pub installed_shim: fn(content: &str) -> crate::install::verify::ShimRef,
+pub struct Beside {
+    pub render: RenderBeside,
+    /// Reads the first file.
+    pub installed_shim: InstalledShim,
+}
+
+/// A target's owned files, whichever kind of primary keys them: all `install::converge`
+/// is handed, so it cannot reach a config merge or a host registration.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum OwnedFiles {
+    Primary {
+        render: fn(hook_cmd: &str) -> Result<String>,
+        installed_shim: InstalledShim,
+    },
+    Beside(Beside),
+}
+
+impl OwnedFiles {
+    /// Each file at its absolute path with `hook_cmd` baked in, the one that bakes the
+    /// shim first; an owned primary sits at `primary`.
+    pub(crate) fn render(self, primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>> {
+        match self {
+            OwnedFiles::Primary { render, .. } => {
+                Ok(vec![(primary.to_path_buf(), render(hook_cmd)?)])
+            }
+            OwnedFiles::Beside(b) => (b.render)(hook_cmd),
+        }
+    }
+
+    pub(crate) fn installed_shim(self, content: &str) -> crate::install::verify::ShimRef {
+        match self {
+            OwnedFiles::Primary { installed_shim, .. } => installed_shim(content),
+            OwnedFiles::Beside(b) => (b.installed_shim)(content),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,13 +125,14 @@ pub enum Primary {
         /// content, extracting the shim path for `install::verify_target` to stat.
         /// Per-source format knowledge stays here, like the merge fns.
         verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
-        /// Files pixtuoid owns beside the config. Left in place on uninstall (the
-        /// config un-merge disables loading).
-        beside: Option<OwnedFiles>,
+        /// Files pixtuoid owns beside the config, where [`RenderBeside`] says they
+        /// live. Left in place on uninstall (the config un-merge disables loading).
+        beside: Option<Beside>,
     },
     Owned {
-        /// The primary first, then any file that ships with it.
-        files: OwnedFiles,
+        /// The primary's whole content, `hook_cmd` baked in.
+        render: fn(hook_cmd: &str) -> Result<String>,
+        installed_shim: InstalledShim,
         /// The primary as a disconnect leaves it; `changed` iff it was ours. Same
         /// empty rule as `merge_uninstall`.
         disconnect: fn(content: &str) -> Result<MergeOutcome>,
@@ -124,11 +159,17 @@ impl Primary {
         }
     }
 
-    /// The files pixtuoid owns whole, whichever kind of primary keys them.
     pub(crate) fn owned(&self) -> Option<OwnedFiles> {
-        match self {
-            Primary::Config { beside, .. } => *beside,
-            Primary::Owned { files, .. } => Some(*files),
+        match *self {
+            Primary::Config { beside, .. } => beside.map(OwnedFiles::Beside),
+            Primary::Owned {
+                render,
+                installed_shim,
+                ..
+            } => Some(OwnedFiles::Primary {
+                render,
+                installed_shim,
+            }),
         }
     }
 }
@@ -170,10 +211,8 @@ pub(crate) const CLAUDE: Target = Target {
     default_config_path: crate::install::claude::default_config_path,
     hook_command: crate::install::claude::hook_command,
     primary: Primary::Owned {
-        files: OwnedFiles {
-            render: crate::install::claude::render_owned,
-            installed_shim: crate::install::claude::installed_shim,
-        },
+        render: crate::install::claude::render_hooks,
+        installed_shim: crate::install::claude::installed_shim,
         disconnect: crate::install::claude::disconnect,
         verify: crate::install::claude::verify_schema,
     },
@@ -250,10 +289,8 @@ pub(crate) const OPENCODE: Target = Target {
     default_config_path: crate::install::opencode::default_config_path,
     hook_command: crate::install::opencode::hook_command,
     primary: Primary::Owned {
-        files: OwnedFiles {
-            render: crate::install::opencode::render_owned,
-            installed_shim: crate::install::verify::baked_shim,
-        },
+        render: crate::install::opencode::render_plugin,
+        installed_shim: crate::install::verify::baked_shim,
         disconnect: crate::install::opencode::disconnect,
         verify: crate::install::opencode::verify_schema,
     },
@@ -330,7 +367,7 @@ pub(crate) const OPENCLAW: Target = Target {
         merge_install: crate::install::openclaw::merge_install,
         merge_uninstall: crate::install::openclaw::merge_uninstall,
         verify_schema: crate::install::openclaw::verify_schema,
-        beside: Some(OwnedFiles {
+        beside: Some(Beside {
             render: crate::install::openclaw::plugin_artifacts,
             installed_shim: crate::install::verify::baked_shim,
         }),
@@ -375,7 +412,7 @@ pub(crate) const DSH: Target = Target {
         merge_install: crate::install::dsh::merge_install,
         merge_uninstall: crate::install::dsh::merge_uninstall,
         verify_schema: crate::install::dsh::verify_schema,
-        beside: Some(OwnedFiles {
+        beside: Some(Beside {
             render: crate::install::dsh::plugin_artifacts,
             installed_shim: crate::install::verify::baked_shim,
         }),
@@ -398,10 +435,8 @@ pub(crate) const OMP: Target = Target {
     default_config_path: crate::install::omp::default_config_path,
     hook_command: crate::install::omp::hook_command,
     primary: Primary::Owned {
-        files: OwnedFiles {
-            render: crate::install::omp::render_owned,
-            installed_shim: crate::install::verify::baked_shim,
-        },
+        render: crate::install::omp::render_extension,
+        installed_shim: crate::install::verify::baked_shim,
         disconnect: crate::install::omp::disconnect,
         verify: crate::install::omp::verify_schema,
     },

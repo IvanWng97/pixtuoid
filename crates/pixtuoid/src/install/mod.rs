@@ -119,11 +119,11 @@ pub(crate) fn verify_target(
         }
     }
     if let Primary::Config {
-        beside: Some(files),
+        beside: Some(beside),
         ..
     } = t.primary
     {
-        verify_beside(files, &path, &mut issues, &mut notes);
+        verify_beside(beside.render, &mut issues, &mut notes);
     }
     if let Some(files) = t.primary.owned() {
         verify_owned_drift(t, files, &path, &mut issues, &mut notes);
@@ -149,15 +149,10 @@ pub(crate) fn verify_target(
 /// (#387): a NEW code-shipping path in `install_target` MUST gain a check here, UNLESS the
 /// file IS that target's owned primary — its `verify` covers it instead (the opencode
 /// plugin and the omp bridge extension are that shape).
-fn verify_beside(
-    files: target::OwnedFiles,
-    config: &std::path::Path,
-    issues: &mut Vec<String>,
-    notes: &mut Vec<String>,
-) {
+fn verify_beside(render: target::RenderBeside, issues: &mut Vec<String>, notes: &mut Vec<String>) {
     // A placeholder hook arg yields the real install locations WITHOUT resolving the
     // binary: a read-only check must not hard-error just because it isn't locatable.
-    let arts = match (files.render)(config, io::HOOK_BIN) {
+    let arts = match render(io::HOOK_BIN) {
         Ok(arts) => arts,
         Err(e) => {
             notes.push(format!("could not resolve plugin artifact paths: {e}"));
@@ -253,15 +248,16 @@ pub(crate) fn owned_state(
     hook_command: target::HookCommand,
     primary: &std::path::Path,
 ) -> Result<OwnedState> {
-    let located = (files.render)(primary, io::HOOK_BIN)?;
+    let located = files.render(primary, io::HOOK_BIN)?;
     let Some((entry, _)) = located.first() else {
         return Ok(OwnedState::Unknown);
     };
-    let shim = (files.installed_shim)(&io::read_config(entry)?);
+    let shim = files.installed_shim(&io::read_config(entry)?);
     let Some(hook) = rehook(hook_command, &shim).transpose()? else {
         return Ok(OwnedState::Unknown);
     };
-    let differs: Vec<_> = (files.render)(primary, &hook)?
+    let differs: Vec<_> = files
+        .render(primary, &hook)?
         .into_iter()
         .filter(|(p, want)| io::read_config(p).map_or(true, |on_disk| on_disk != *want))
         .collect();
@@ -495,22 +491,20 @@ fn install_target_from(
             // nowhere (partial install).
             let outcome = merge_install(&content, &hook_cmd)
                 .with_context(|| format!("processing {}", path.display()))?;
-            let files = beside.map(|b| (b.render)(&path, &hook_cmd)).transpose()?;
+            let files = beside.map(|b| (b.render)(&hook_cmd)).transpose()?;
             (outcome, files.unwrap_or_default())
         }
-        Primary::Owned { files, .. } => {
-            let mut files = (files.render)(&path, &hook_cmd)?.into_iter();
-            let (_, rendered) = files
-                .next()
-                .with_context(|| format!("{} rendered no primary", t.name))?;
+        Primary::Owned { render, .. } => {
+            let rendered =
+                render(&hook_cmd).with_context(|| format!("processing {}", path.display()))?;
             let outcome = target::MergeOutcome {
                 changed: content != rendered,
                 content: rendered,
             };
-            (outcome, files.collect())
+            (outcome, Vec::new())
         }
     };
-    write_owned(&beside)?;
+    write_beside(&beside)?;
     // Independent of whether the content changed — a no-op re-install on a box without
     // pixtuoid-hook on PATH would otherwise warn nothing. Skipped for an embedded path.
     let path_warning = t.binary_strategy == BinaryStrategy::BareNameOnPath
@@ -576,10 +570,10 @@ fn strip_managed(
 
 /// Write each of `files` that differs on disk. Called before the primary's
 /// WRITE so a re-install refreshes them even when the merge is a no-op, which heals a
-/// deleted plugin file. Each file is its own lock target, disjoint from the primary's
+/// deleted or tampered plugin file. Each file is its own lock target, disjoint from the primary's
 /// lock the caller holds and taken in a consistent primary→file order, so no
 /// self-deadlock.
-fn write_owned(files: &[(PathBuf, String)]) -> Result<()> {
+fn write_beside(files: &[(PathBuf, String)]) -> Result<()> {
     for (p, c) in files {
         // A real write here would be invisible: CI has no such dir, and the shim exits
         // 0 by invariant #5, so nothing downstream would report it.
