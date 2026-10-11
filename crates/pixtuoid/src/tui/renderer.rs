@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use pixtuoid_scene::display::cells::CellMap;
 use pixtuoid_scene::display::{HoverTarget, Hovers};
-use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
@@ -45,9 +44,6 @@ pub struct DrawCtx<'a> {
     pub footer: FooterContext<'a>,
     /// The panels open over the frame.
     pub overlays: crate::panels::OverlayFrame<'a>,
-    /// The flashes the terminal shows, for a live painter; a still has none
-    /// to hold.
-    pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -78,22 +74,20 @@ impl<'a> DrawCtx<'a> {
             theme,
             footer: crate::panels::widgets::footer_context(scene, None, false, None, None),
             overlays: crate::panels::OverlayFrame::closed(),
-            flash: None,
         }
     }
 }
 
 /// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
-/// `Default` is a frame refused or held by the flash hold, which draws nothing
-/// new to hit-test.
+/// `Default` is a refused frame, which draws nothing new to hit-test.
 #[derive(Debug, Default)]
 pub struct DrawOut {
-    /// `None` when the frame was refused or held.
+    /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
     pub hovers: Hovers,
     /// The board's star, a link the pointer finds.
     pub(crate) star: Option<pixtuoid_scene::layout::Bounds>,
-    /// Where the frame lies under the cells; `None` when it was refused or held.
+    /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
 }
 
@@ -292,18 +286,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             debug_walkable: ctx.debug_walkable,
         },
     );
-    let Some(Rendered { layout, flash, .. }) = rendered else {
+    let Some(Rendered { layout, .. }) = rendered else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
-    let flashes = [flash; 2];
-    if ctx
-        .flash
-        .as_ref()
-        .is_some_and(|f| f.holds(flashes, term_size))
-    {
-        return Ok(DrawOut::default());
-    }
     let frame = ClassicFrame {
         footer: &footer,
         overlays: &overlays,
@@ -311,11 +297,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         world: &world,
         mouse_pos: ctx.mouse_pos,
     };
-    let out = flush_classic(term, &frame, layout, ctx.floor)?;
-    if let Some(flash) = ctx.flash.as_deref_mut() {
-        flash.shown(flashes, term_size);
-    }
-    Ok(out)
+    flush_classic(term, &frame, layout, ctx.floor)
 }
 
 /// What a classic frame flushes beside the floor's own drawing: whichever

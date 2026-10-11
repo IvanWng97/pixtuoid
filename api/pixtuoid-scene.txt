@@ -86,7 +86,7 @@ pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_cor
 pub fn pixtuoid_scene::floor::FloorSession::badges(&self) -> &[crate::display::Badge]
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::neon_sign::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
-pub fn pixtuoid_scene::floor::FloorSession::flash(&self) -> crate::flash::FlashPhase
+pub fn pixtuoid_scene::floor::FloorSession::flashes(&self) -> crate::flash::Flashes
 pub fn pixtuoid_scene::floor::FloorSession::floor(&self) -> &pixtuoid_scene::floor::PerFloor
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_scene::pack::OfficeArt>) -> Self
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
@@ -907,7 +907,6 @@ impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 pub struct pixtuoid_scene::look::Rendered
-pub pixtuoid_scene::look::Rendered::flash: crate::flash::FlashPhase
 pub pixtuoid_scene::look::Rendered::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 impl core::fmt::Debug for pixtuoid_scene::look::Rendered
 pub fn pixtuoid_scene::look::Rendered::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
