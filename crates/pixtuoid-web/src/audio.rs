@@ -8,22 +8,22 @@
 
 use std::sync::Arc;
 
-use pixtuoid_scene::audio::bank::{AssetBank, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS, TrackBeds};
-use pixtuoid_scene::audio::compose::Score;
-use pixtuoid_scene::audio::dsp::NoiseStream;
+use pixtuoid_scene::audio::bank::{
+    AssetBank, DROP_POOL, KEYSTROKE_POOL, Synthesis, TRACK_STEMS, TrackBeds, TrackBuild,
+};
 use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
-    AudioEngine, AudioFrame, BUILD_SEED, MAX_DT_S, OneShotPool, TickCommands, TrackId, synth,
+    AudioEngine, AudioFrame, MAX_DT_S, OneShotPool, TickCommands, TrackId,
 };
 
 #[derive(Debug)]
 pub(crate) struct WebAudioDriver {
-    rng: NoiseStream,
+    synthesis: Synthesis,
     bank: Option<AssetBank>,
     rain: Option<Arc<Vec<f32>>>,
     beds: Option<TrackBeds>,
     stage: u8,
-    warm: Option<LaneBuild>,
+    warm: Option<TrackBuild>,
     /// An in-flight CHUNKED rebuild, one bed per tick: synthesizing every
     /// track bed in one rAF tick hitched the page at every switch.
     pending: Option<PendingBuild>,
@@ -38,7 +38,7 @@ impl WebAudioDriver {
     /// AudioContext, so the mixer always runs unmuted.
     pub(crate) fn new(initial_track: TrackId) -> Self {
         Self {
-            rng: NoiseStream::new(BUILD_SEED),
+            synthesis: Synthesis::new(),
             bank: None,
             rain: None,
             beds: None,
@@ -52,7 +52,7 @@ impl WebAudioDriver {
     }
 
     /// A driver assembled from worker-synthesized pieces, ready immediately.
-    /// The rng starts at position 0 where a locally-warmed driver sits
+    /// The synthesis stream starts at position 0 where a locally-warmed driver sits
     /// post-warmup: only FUTURE swap-bed noise textures differ (the score
     /// itself is seed-deterministic), and nothing compares those cross-path.
     pub(crate) fn adopted(
@@ -64,7 +64,7 @@ impl WebAudioDriver {
         let mut engine = AudioEngine::new(1.0);
         engine.init_track(track);
         Self {
-            rng: NoiseStream::new(BUILD_SEED),
+            synthesis: Synthesis::new(),
             bank: Some(bank),
             rain: Some(rain),
             beds: Some(TrackBeds::from_arcs(beds)),
@@ -77,25 +77,25 @@ impl WebAudioDriver {
         }
     }
 
-    /// Build ONE synthesis piece (bank → rain → beds, the native rng order),
+    /// Build ONE synthesis piece (bank → rain → beds, the [`Synthesis`] order),
     /// returning the pieces REMAINING. JS pumps this off `setTimeout(0)` so the
     /// main thread never blocks on the multi-second synthesis.
     pub(crate) fn warmup_step(&mut self) -> u32 {
         match self.stage {
             0 => {
-                self.bank = Some(AssetBank::build(&mut self.rng));
+                self.bank = Some(self.synthesis.assets());
                 self.stage = 1;
             }
             1 => {
-                self.rain = Some(Arc::new(synth::rain_bed(&mut self.rng)));
+                self.rain = Some(self.synthesis.rain());
                 self.stage = 2;
             }
             // The range derives from WARMUP_STAGES: a hardcoded 2..=6 would
             // silently strand is_ready() if TRACK_STEMS ever resized.
             s if (2..WARMUP_STAGES).contains(&s) => {
-                let build = self.warm.get_or_insert_with(|| LaneBuild::new(self.track));
-                if let Some(beds) = build.step(&mut self.rng) {
-                    self.beds = Some(TrackBeds::from_arcs(beds));
+                let build = self.warm.get_or_insert_with(|| TrackBuild::new(self.track));
+                if let Some(beds) = build.step(&mut self.synthesis) {
+                    self.beds = Some(beds);
                     self.warm = None;
                     self.engine.init_track(self.track);
                 }
@@ -131,17 +131,17 @@ impl WebAudioDriver {
         if let Some(to) = cmds.swap.take() {
             self.pending = Some(PendingBuild {
                 to,
-                build: LaneBuild::new(to),
+                build: TrackBuild::new(to),
             });
         }
         let finished = match self.pending.as_mut() {
-            Some(p) => p.build.step(&mut self.rng),
+            Some(p) => p.build.step(&mut self.synthesis),
             None => None,
         };
         if let Some(beds) = finished
             && let Some(p) = self.pending.take()
         {
-            self.beds = Some(TrackBeds::from_arcs(beds));
+            self.beds = Some(beds);
             self.track = p.to;
             cmds.swap = Some(p.to);
         }
@@ -175,38 +175,9 @@ impl WebAudioDriver {
 const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
 
 #[derive(Debug)]
-struct LaneBuild {
-    score: Score,
-    beds: Vec<Arc<Vec<f32>>>,
-}
-
-impl LaneBuild {
-    fn new(track: TrackId) -> Self {
-        Self {
-            score: pixtuoid_scene::audio::compose_track(track),
-            beds: Vec::new(),
-        }
-    }
-
-    fn step(&mut self, rng: &mut NoiseStream) -> Option<[Arc<Vec<f32>>; TRACK_STEMS.len()]> {
-        let lane = self.beds.len();
-        self.beds.push(Arc::new(synth::render_lane(
-            &self.score,
-            synth::Lane::ALL[lane],
-            rng,
-        )));
-        if self.beds.len() == TRACK_STEMS.len() {
-            <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(std::mem::take(&mut self.beds)).ok()
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
 struct PendingBuild {
     to: TrackId,
-    build: LaneBuild,
+    build: TrackBuild,
 }
 
 /// The worker-prewarm handoff: buffers synthesized in a Web Worker's OWN wasm

@@ -110,7 +110,7 @@ pub struct AssetBank {
 }
 
 impl AssetBank {
-    pub fn build(rng: &mut dsp::NoiseStream) -> Self {
+    pub(crate) fn build(rng: &mut dsp::NoiseStream) -> Self {
         Self {
             keystrokes: (0..KEYSTROKE_POOL)
                 .map(|_| Arc::new(synth::keystroke(rng)))
@@ -180,15 +180,6 @@ pub struct TrackBeds {
 }
 
 impl TrackBeds {
-    /// Compose the id's take (the seed is the track-epoch block) and render it
-    /// through the SAME cores the owner-ratified takes were built on.
-    pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
-        let score = super::compose_track(track);
-        Self {
-            beds: synth::Lane::ALL.map(|lane| Arc::new(synth::render_lane(&score, lane, rng))),
-        }
-    }
-
     /// Assemble from beds already built lane-by-lane (the wasm driver's chunked
     /// rebuild) — `TRACK_STEMS` order.
     pub fn from_arcs(beds: [Arc<Vec<f32>>; TRACK_STEMS.len()]) -> Self {

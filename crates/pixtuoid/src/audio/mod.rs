@@ -5,8 +5,6 @@
 #[cfg(feature = "audio")]
 pub(crate) mod sink;
 
-#[cfg(feature = "audio")]
-use std::sync::Arc;
 use std::sync::mpsc;
 #[cfg(feature = "audio")]
 use std::time::Instant;
@@ -15,14 +13,14 @@ use pixtuoid_scene::audio::AudioFrame;
 #[cfg(feature = "audio")]
 use pixtuoid_scene::audio::mixer::LoopStem;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::{AudioEngine, BUILD_SEED, MAX_DT_S, dsp, synth};
+use pixtuoid_scene::audio::{AudioEngine, MAX_DT_S};
 #[cfg(all(feature = "audio", test))]
 use pixtuoid_scene::audio::{OneShot, TrackId};
 #[cfg(feature = "audio")]
 use sink::AudioSink;
 
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::bank::{AssetBank, TRACK_STEMS, TrackBeds};
+use pixtuoid_scene::audio::bank::{Synthesis, TRACK_STEMS};
 
 /// The +/- keys' volume increment.
 pub(crate) const VOLUME_STEP: f32 = 0.05;
@@ -894,7 +892,7 @@ mod utility_tests {
     }
 }
 
-/// After the first-frame `TrackBeds::build` the channel holds a backlog. Adopt
+/// After the first frame's track build the channel holds a backlog. Adopt
 /// its freshest LEVELS (they re-send every render frame) but drop its event
 /// backlog — a replayed stack of chimes is a clank pile — while KEEPING the
 /// first frame's own events, which haven't played yet.
@@ -929,11 +927,11 @@ fn run_loop(
     use std::sync::atomic::Ordering::Relaxed;
 
     let built_at = Instant::now();
-    let mut rng = dsp::NoiseStream::new(BUILD_SEED);
-    let bank = AssetBank::build(&mut rng);
+    let mut synthesis = Synthesis::new();
+    let bank = synthesis.assets();
     // Rain is weather — track-independent, registered once. The TRACK beds wait for the FIRST
     // frame: booting Day at night would synthesize a track just to crossfade it away.
-    device.start_loop(LoopStem::Rain, Arc::new(synth::rain_bed(&mut rng)));
+    device.start_loop(LoopStem::Rain, synthesis.rain());
     tracing::debug!(
         ms = built_at.elapsed().as_millis(),
         "audio: one-shots + rain synthesized; track beds await the first frame"
@@ -957,7 +955,7 @@ fn run_loop(
                 if !inited {
                     // The first frame's synth stalls the thread: drop the backlog it queued
                     // and re-anchor the clock, so the build's seconds ramp nothing.
-                    let beds = TrackBeds::build(&mut rng, frame.track);
+                    let beds = synthesis.track(frame.track);
                     for stem in TRACK_STEMS {
                         device.start_loop(stem, beds.bed(stem));
                     }
@@ -980,7 +978,7 @@ fn run_loop(
             device.set_loop_gain(stem, gain);
         }
         if let Some(to) = cmds.swap {
-            let beds = TrackBeds::build(&mut rng, to);
+            let beds = synthesis.track(to);
             for stem in TRACK_STEMS {
                 device.swap_loop(stem, beds.bed(stem));
             }
@@ -997,6 +995,7 @@ fn run_loop(
 mod tests {
     use super::*;
     use pixtuoid_scene::audio::StemLevels;
+    use std::sync::Arc;
 
     #[test]
     fn run_loop_registers_beds_plays_events_and_exits_on_disconnect() {
@@ -1117,8 +1116,10 @@ mod tests {
 #[cfg(all(test, feature = "audio"))]
 mod listen_gate {
     use super::*;
-    use pixtuoid_scene::audio::StemLevels;
+    use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds};
+    use pixtuoid_scene::audio::{SAMPLE_RATE, StemLevels};
     use std::io::Write;
+    use std::sync::Arc;
 
     /// Sample-accurate mixdown of loops and one-shots into one master buffer.
     struct OfflineSink {
@@ -1131,7 +1132,7 @@ mod listen_gate {
     impl OfflineSink {
         fn new(secs: f32) -> Self {
             Self {
-                master: vec![0.0; (secs * dsp::SAMPLE_RATE as f32) as usize],
+                master: vec![0.0; (secs * SAMPLE_RATE as f32) as usize],
                 loops: Vec::new(),
                 loop_ids: Vec::new(),
                 write_pos_samples: 0,
@@ -1185,8 +1186,8 @@ mod listen_gate {
         bytes.extend_from_slice(&16u32.to_le_bytes());
         bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
         bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
-        bytes.extend_from_slice(&dsp::SAMPLE_RATE.to_le_bytes());
-        bytes.extend_from_slice(&(dsp::SAMPLE_RATE * 2).to_le_bytes());
+        bytes.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+        bytes.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
         bytes.extend_from_slice(&2u16.to_le_bytes());
         bytes.extend_from_slice(&16u16.to_le_bytes());
         bytes.extend_from_slice(b"data");
@@ -1220,7 +1221,7 @@ mod listen_gate {
         let mut engine = AudioEngine::new(1.0);
         engine.init_track(track);
         let step_s = 0.05f32;
-        let step_n = (step_s * dsp::SAMPLE_RATE as f32) as usize;
+        let step_n = (step_s * SAMPLE_RATE as f32) as usize;
         let mut fired = vec![false; events_at.len()];
         let mut now_s = 0.0f64;
         while now_s < f64::from(secs) {
@@ -1257,11 +1258,11 @@ mod listen_gate {
     /// loop of epoch 0's day and night tracks once the gains have ramped.
     #[test]
     fn the_loudest_mix_stays_under_full_scale() {
-        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
-        let bank = AssetBank::build(&mut rng);
-        let rain = Arc::new(synth::rain_bed(&mut rng));
-        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
-        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
+        let mut synthesis = Synthesis::new();
+        let bank = synthesis.assets();
+        let rain = synthesis.rain();
+        let day = synthesis.track(TrackId::GenDay(0));
+        let night = synthesis.track(TrackId::GenNight(0));
         // The busy tier saturates, so no count is louder.
         let busiest = pixtuoid_scene::tally::StateCounts {
             active: usize::MAX,
@@ -1283,7 +1284,8 @@ mod listen_gate {
             })
             .collect();
         for (beds, track) in [(&day, TrackId::GenDay(0)), (&night, TrackId::GenNight(0))] {
-            let secs = pixtuoid_scene::audio::compose_track(track).loop_secs()
+            // One loop of the track: its phase-locked pad bed's length.
+            let secs = beds.bed_slice(LoopStem::Pad).len() as f32 / SAMPLE_RATE as f32
                 + 1.0 / pixtuoid_scene::audio::mixer::RAMP_PER_S;
             let buf = render_tier(&bank, beds, &rain, track, stems, &volley, secs);
             let peak = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
@@ -1296,11 +1298,11 @@ mod listen_gate {
     fn render_listen_gate_wavs() {
         let out = std::env::temp_dir().join("pixtuoid-audio-audition");
         std::fs::create_dir_all(&out).unwrap();
-        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
-        let bank = AssetBank::build(&mut rng);
-        let rain = Arc::new(synth::rain_bed(&mut rng));
-        let beds = TrackBeds::build(&mut rng, TrackId::GenDay(0));
-        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
+        let mut synthesis = Synthesis::new();
+        let bank = synthesis.assets();
+        let rain = synthesis.rain();
+        let beds = synthesis.track(TrackId::GenDay(0));
+        let night = synthesis.track(TrackId::GenNight(0));
         // Tier levels come from the PRODUCTION mapping, not hand-rolled
         // literals — the wavs must audition what the app will mix.
         let counts = |active: usize| pixtuoid_scene::tally::StateCounts {
