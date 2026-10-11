@@ -72,7 +72,6 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// The flashes the half-blocks show; the cutaway holds its own.
     flash: pixtuoid_scene::flash::FlashHold<ratatui::layout::Size>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
-    #[cfg(feature = "graphics")]
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
 }
 
@@ -227,13 +226,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 motion: pixtuoid_scene::anim::Motion::Full,
             },
             flash: pixtuoid_scene::flash::FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            #[cfg(feature = "graphics")]
             cutaway: None,
         }
     }
 
     /// Paint `cutaway` from the next frame on.
-    #[cfg(feature = "graphics")]
     pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
         self.cutaway = Some(cutaway);
     }
@@ -265,10 +262,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
         let (buf_w, buf_h) = crate::tui::renderer::scene_buf_size(size.width, size.height);
         let classic = (Look::Classic, Size { w: buf_w, h: buf_h });
-        #[cfg(feature = "graphics")]
         let look = self.cutaway_look(scene_area).unwrap_or(classic);
-        #[cfg(not(feature = "graphics"))]
-        let look = classic;
         self.session.office_mut().raster.warm();
         let _ = self.render_office(scene, pack, now, look.0, look.1, false);
     }
@@ -305,7 +299,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// The cutaway's look and office extent over `scene_area`, as its next
     /// frame fits them; `None` while classic paints.
-    #[cfg(feature = "graphics")]
     fn cutaway_look(&mut self, scene_area: Rect) -> Option<(Look, Size)> {
         let window = self
             .terminal
@@ -347,7 +340,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// Paint and send the next frame whole, for the pacing bench's worst case.
-    #[cfg(feature = "graphics")]
     pub(crate) fn forget_frame(&mut self) {
         for floor in self.session.floors_mut() {
             floor.raster.forget_shown();
@@ -359,7 +351,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// Clear the terminal and repaint every cell and every image.
     pub(crate) fn redraw(&mut self) -> Result<()> {
-        #[cfg(feature = "graphics")]
         if let Some(cutaway) = &mut self.cutaway {
             cutaway.forget();
         }
@@ -370,7 +361,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// The logical extent the current floor last laid out on: what a resize
     /// changes, and a slide does not.
     fn office_extent(&self) -> (u16, u16) {
-        #[cfg(feature = "graphics")]
         if let Some(office) = self.cutaway.as_ref().and_then(|c| c.office()) {
             return (office.w, office.h);
         }
@@ -790,7 +780,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .as_ref()
             .map_or(Ok(()), crate::tui::FrameOut::present);
         let present = presenting.elapsed();
-        #[cfg(feature = "graphics")]
         if let Some(cutaway) = &mut self.cutaway {
             if presented.is_ok() {
                 cutaway.landed();
@@ -818,13 +807,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.redraw_owed = true;
         }
         drawn?;
-        #[cfg(feature = "graphics")]
         let send = self
             .cutaway
             .as_ref()
             .map(crate::tui::cutaway::TileCutaway::last_send);
-        #[cfg(not(feature = "graphics"))]
-        let send = None;
         let note = self
             .session
             .floor(self.session.nav().current())
@@ -849,7 +835,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.active_pet = None;
         }
 
-        #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
             cutaway.begin_frame();
             let size = self.terminal.size()?;
@@ -928,7 +913,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 }
 
-#[cfg(feature = "graphics")]
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// [`Self::render`] under the cutaway: the session's frame (the floor
     /// showing, or a slide's two floors composed with their text baked) as

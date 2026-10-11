@@ -99,7 +99,9 @@ pub(crate) struct Answer {
     pub(crate) cell: Option<CellSize>,
 }
 
-/// Where the [`Reader`] is in an escape sequence (ECMA-48 §5.4).
+/// Where the [`Reader`] is in an escape sequence: the DEC parser's states
+/// (vt100.net/emu/dec_ansi_parser), except that an APC's text is kept, since
+/// kitty answers in one.
 #[cfg(unix)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {

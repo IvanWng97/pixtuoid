@@ -21,22 +21,17 @@ use ratatui::layout::Size as TermSize;
 /// String Terminator: ends any APC or DCS a cut-short write left open.
 pub(crate) const ST: &[u8] = b"\x1b\\";
 
-#[cfg(feature = "graphics")]
 pub(crate) mod iterm2;
-#[cfg(feature = "graphics")]
 pub(crate) mod kitty;
-#[cfg(all(feature = "graphics", unix))]
+#[cfg(unix)]
 mod probe;
-#[cfg(all(feature = "graphics", unix))]
+#[cfg(unix)]
 pub(crate) mod shm;
-#[cfg(feature = "graphics")]
 pub(crate) mod sixel;
-#[cfg(feature = "graphics")]
 pub(crate) mod tiles;
-#[cfg(feature = "graphics")]
 mod wire;
 
-#[cfg(all(feature = "graphics", unix))]
+#[cfg(unix)]
 pub(crate) use probe::probe;
 
 /// [`ImageProtocol::image_budget`]'s for kitty: what Ghostty, re-scanning
@@ -61,7 +56,7 @@ pub(crate) struct TileShape {
 /// (a hidden tmux pane refusing passthrough), which is why it can outlast
 /// [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has no such
 /// terminator.
-#[cfg(all(feature = "graphics", unix))]
+#[cfg(unix)]
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How a kitty image's pixels reach the terminal.
@@ -208,7 +203,6 @@ pub(crate) struct CellSize {
 
 impl CellSize {
     /// The cell of a `window`, `None` where it reports no pixels.
-    #[cfg(feature = "graphics")]
     pub(crate) fn of_window(window: ratatui::backend::WindowSize) -> Option<Self> {
         let (cells, px) = (window.columns_rows, window.pixels);
         if cells.width == 0 || cells.height == 0 || px.width == 0 || px.height == 0 {
@@ -466,7 +460,7 @@ pub(crate) enum Probe {
     /// environment alone where the reply never completed but the environment
     /// names a protocol, as ratatui-image falls back (see [`probe()`]).
     #[cfg_attr(
-        all(not(all(feature = "graphics", unix)), not(test)),
+        all(not(unix), not(test)),
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     Answered(Detected),
@@ -476,23 +470,20 @@ pub(crate) enum Probe {
     /// The terminal was asked, its reply never completed, and the environment
     /// names no protocol to fall back on.
     #[cfg_attr(
-        all(not(all(feature = "graphics", unix)), not(test)),
+        all(not(unix), not(test)),
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     NoAnswer,
     /// Inside tmux with `allow-passthrough` off, so nothing was asked.
     #[cfg_attr(
-        all(not(all(feature = "graphics", unix)), not(test)),
+        all(not(unix), not(test)),
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     TmuxPassthroughOff,
     /// This build cannot ask ([`probe()`]).
     #[cfg_attr(
-        all(feature = "graphics", unix, not(test)),
-        expect(
-            dead_code,
-            reason = "only the graphics-less or non-Unix probe returns it"
-        )
+        all(unix, not(test)),
+        expect(dead_code, reason = "only the non-Unix probe returns it")
     )]
     Unsupported,
 }
@@ -596,9 +587,9 @@ impl ClassicReason {
     pub(crate) fn describe(self) -> String {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
-            Self::Unsupported => "this build cannot ask the terminal for graphics (not on Unix, \
-                 or built without `graphics`)"
-                .to_string(),
+            Self::Unsupported => {
+                "this build cannot ask the terminal for graphics (not on Unix)".to_string()
+            }
             Self::NotQueried => "the terminal was not asked (stdout is not a terminal, there \
                  is no controlling terminal, or $TERM is dumb) — run in an interactive \
                  terminal to see what it supports"
@@ -678,9 +669,9 @@ pub(crate) fn terminal_cells() -> TermSize {
         .unwrap_or_default()
 }
 
-/// Without the `graphics` feature, or off Unix, where
-/// [`crate::term::query_tty`] has no counterpart, nothing asks.
-#[cfg(not(all(feature = "graphics", unix)))]
+/// Off Unix, where `term::query_tty` (termios) has no counterpart, nothing
+/// asks.
+#[cfg(not(unix))]
 pub(crate) fn probe(_ask: bool) -> Probe {
     Probe::Unsupported
 }
@@ -772,20 +763,16 @@ impl Plan {
 /// What the terminal unwind writes before it leaves the alt screen: our
 /// images' delete, once any reached the terminal.
 pub(crate) fn unwind_prelude() -> Vec<u8> {
-    #[cfg(feature = "graphics")]
-    return [
+    [
         kitty::unwind(),
         grid_unwind(IN_GRID.load(std::sync::atomic::Ordering::Relaxed)),
     ]
-    .concat();
-    #[cfg(not(feature = "graphics"))]
-    Vec::new()
+    .concat()
 }
 
 /// Whether this process has drawn SIXEL or iTerm2 pixels, which sit in the
 /// text grid rather than in an image store kitty-style deletes reach: read by
 /// an unwind that may run from the panic hook.
-#[cfg(feature = "graphics")]
 pub(crate) static IN_GRID: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
@@ -794,7 +781,6 @@ pub(crate) static IN_GRID: std::sync::atomic::AtomicBool =
 /// ED 2. 1049 clears the alternate screen on the way IN (ctlseqs, "Use
 /// Alternate Screen Buffer ... clearing it first"), so nothing promises its
 /// pixels go on the way out.
-#[cfg(feature = "graphics")]
 pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
     if drew {
         [ST, b"\x1b[2J"].concat()
@@ -807,7 +793,6 @@ pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "graphics")]
     #[test]
     fn the_grid_unwind_ends_any_image_then_erases_the_display() {
         assert_eq!(grid_unwind(false), b"");
@@ -1182,7 +1167,7 @@ mod tests {
     /// feature, it never asks.
     #[test]
     fn the_platform_probe_asks_only_where_run_can() {
-        let can_ask = cfg!(all(feature = "graphics", unix));
+        let can_ask = cfg!(unix);
         let unasked = if can_ask {
             Probe::NotQueried
         } else {
@@ -1418,8 +1403,7 @@ mod tests {
                 GraphicsMode::Auto,
                 Probe::Unsupported,
                 BUNDLED,
-                "this build cannot ask the terminal for graphics (not on Unix, or built without \
-                 `graphics`)",
+                "this build cannot ask the terminal for graphics (not on Unix)",
             ),
             (
                 GraphicsMode::Auto,
