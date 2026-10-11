@@ -378,6 +378,64 @@ pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
     lock_config(path)?.write_atomic(contents)
 }
 
+/// A plugin host's own CLI, through which pixtuoid registers and removes its plugin.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HostCli {
+    pub(crate) command: &'static str,
+    pub(crate) display_name: &'static str,
+}
+
+impl HostCli {
+    /// `which` applies PATHEXT, so an npm install's `<command>.cmd` resolves on
+    /// Windows. `None` when it is not on PATH: an uninstall then can't deregister.
+    pub(crate) fn locate(self) -> Option<PathBuf> {
+        which::which(self.command).ok()
+    }
+
+    /// Run it with `args` and return its stdout; a non-zero exit is the error.
+    pub(crate) fn run(self, args: &[&std::ffi::OsStr]) -> Result<String> {
+        let Self {
+            command,
+            display_name,
+        } = self;
+        let cli = self.locate().with_context(|| {
+            format!(
+                "{display_name}'s `{command}` command is not on PATH; pixtuoid installs its \
+                 hooks as a {display_name} plugin through it — put it on PATH and reconnect"
+            )
+        })?;
+        // The real CLI would register and remove plugins in the developer's own
+        // CLI — a test run once did.
+        #[cfg(test)]
+        assert!(
+            cli.starts_with(std::env::temp_dir()),
+            "a test is about to run the real {} — put a fake `{command}` first on PATH",
+            cli.display()
+        );
+        let out = std::process::Command::new(&cli)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .with_context(|| format!("running {}", cli.display()))?;
+        if !out.status.success() {
+            return Err(anyhow!(
+                "`{command} {}` failed: {}",
+                args.iter()
+                    .map(|a| a.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                String::from_utf8_lossy(if out.stderr.is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                })
+                .trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+}
+
 /// Whether the bare `pixtuoid-hook` name resolves on PATH: a bare-name target's
 /// hook config stores the name for portability and the CLI spawns hooks via PATH,
 /// so if this is false the installed hooks silently never fire.

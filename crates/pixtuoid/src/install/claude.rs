@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
@@ -114,20 +114,20 @@ fn register(config: &Path) -> Result<()> {
     }
     // Both are idempotent: a repeat add reports the marketplace already on disk,
     // a repeat install that the plugin already loads in place.
-    run_claude(&[
+    CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
         "add".as_ref(),
         root.as_os_str(),
     ])?;
-    run_claude(&["plugin".as_ref(), "install".as_ref(), plugin_id().as_ref()])?;
+    CLI.run(&["plugin".as_ref(), "install".as_ref(), plugin_id().as_ref()])?;
     Ok(())
 }
 
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
 fn unregister(config: &Path) -> Result<Unregistered> {
-    if claude_cli().is_none() {
+    if CLI.locate().is_none() {
         // Disabled is still installed: its marketplace must outlive it.
         if plugin_entry()?.is_some() {
             tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
@@ -136,7 +136,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
         remove_marketplace(config)?;
         return Ok(Unregistered::Absent);
     }
-    let listed = run_claude(&[
+    let listed = CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
         "list".as_ref(),
@@ -144,7 +144,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     ])?;
     let found = marketplace_listed(&listed)?;
     if found {
-        run_claude(&[
+        CLI.run(&[
             "plugin".as_ref(),
             "marketplace".as_ref(),
             "remove".as_ref(),
@@ -204,46 +204,11 @@ fn marketplace_listed(json_out: &str) -> Result<bool> {
         .any(|r| r.get("name").and_then(Value::as_str) == Some(PLUGIN_NAME)))
 }
 
-/// `which` applies PATHEXT, so an npm install's `claude.cmd` resolves on Windows.
-/// `None` when no `claude` is on PATH: an uninstall then can't deregister.
-fn claude_cli() -> Option<PathBuf> {
-    which::which("claude").ok()
-}
-
-fn run_claude(args: &[&std::ffi::OsStr]) -> Result<String> {
-    let cli = claude_cli().context(
-        "Claude Code's `claude` command is not on PATH; pixtuoid installs its hooks as a Claude Code plugin through it — put it on PATH and reconnect",
-    )?;
-    // The real CLI would register and remove plugins in the developer's own Claude
-    // Code — a test run once did.
-    #[cfg(test)]
-    assert!(
-        cli.starts_with(std::env::temp_dir()),
-        "a test is about to run the real {} — put a fake `claude` first on PATH",
-        cli.display()
-    );
-    let out = std::process::Command::new(&cli)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .with_context(|| format!("running {}", cli.display()))?;
-    if !out.status.success() {
-        bail!(
-            "`claude {}` failed: {}",
-            args.iter()
-                .map(|a| a.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(" "),
-            String::from_utf8_lossy(if out.stderr.is_empty() {
-                &out.stdout
-            } else {
-                &out.stderr
-            })
-            .trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
+/// The CLI that registers the plugin, named in every error it raises.
+const CLI: io::HostCli = io::HostCli {
+    command: "claude",
+    display_name: "Claude Code",
+};
 
 /// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
 /// carries, so CC PATH-resolves it and a binary upgrade applies without a
