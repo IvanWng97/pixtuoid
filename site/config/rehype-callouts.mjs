@@ -3,20 +3,19 @@
 // "~ warning" when the quote OPENS with an imperative-warning strong.
 // The red dot reuses global.css's .terminal__dot--r — no second red literal.
 import { toText } from 'hast-util-to-text';
-import { SKIP, visit } from 'unist-util-visit';
+import { EXIT, SKIP, visit } from 'unist-util-visit';
 
 const WARN_RE = /^(don'?t|never|warning|danger|caution)\b/i;
 
 // The FIRST <strong> in document order — the docs' "**Don't …**" idiom
 // puts the imperative there; a plain editorial quote has none → note.
 function firstStrongText(node) {
-  if (node.type === 'element' && node.tagName === 'strong') return toText(node);
-  for (const c of node.children || []) {
-    if (c.type !== 'element') continue;
-    const t = firstStrongText(c);
-    if (t) return t;
-  }
-  return '';
+  let text = '';
+  visit(node, { type: 'element', tagName: 'strong' }, (strong) => {
+    text = toText(strong);
+    return text ? EXIT : SKIP;
+  });
+  return text;
 }
 
 function calloutFor(blockquote) {
