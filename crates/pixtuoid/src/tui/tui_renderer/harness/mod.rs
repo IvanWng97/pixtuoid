@@ -167,7 +167,7 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
 }
 
 /// A backend that forwards every call to `inner`, its [`Tap`] seeing each
-/// draw's cells and each flush, and answering the window's pixel size.
+/// draw's cells, and answering the window's pixel size.
 /// `append_lines` is forwarded too: ratatui defaults it to a no-op.
 pub(super) struct Tapped<B, T> {
     pub(super) inner: B,
@@ -179,8 +179,6 @@ pub(super) struct Tapped<B, T> {
 pub(super) trait Tap<B: Backend> {
     /// Sees each draw's cells before `inner` does.
     fn on_draw(&mut self, _cells: &[(u16, u16, &ratatui::buffer::Cell)]) {}
-    /// Runs before `inner` flushes.
-    fn on_flush(&mut self) {}
     fn window_size(&mut self, inner: &mut B) -> Result<ratatui::backend::WindowSize, B::Error> {
         inner.window_size()
     }
@@ -227,7 +225,6 @@ impl<B: Backend, T: Tap<B>> Backend for Tapped<B, T> {
         self.tap.window_size(&mut self.inner)
     }
     fn flush(&mut self) -> Result<(), Self::Error> {
-        self.tap.on_flush();
         self.inner.flush()
     }
 }

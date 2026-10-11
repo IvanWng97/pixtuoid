@@ -3,7 +3,7 @@
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
 
-use pixtuoid_scene::flash::{FlashHold, Flashes};
+use pixtuoid_scene::flash::FlashHold;
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
@@ -23,9 +23,6 @@ pub struct OfficeRenderer {
     audio: crate::audio::AudioHandle,
     /// The flashes the window shows.
     flash: FlashHold<(u32, u32)>,
-    /// The flashes the last [`render_live`](Self::render_live) handed out,
-    /// and the window it was for.
-    rendered: (Flashes, (u32, u32)),
     /// The walkable debug layer, the TUI's `w`; not persisted.
     pub(super) debug_walkable: bool,
 }
@@ -39,7 +36,6 @@ impl OfficeRenderer {
             pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            rendered: (Flashes::default(), (0, 0)),
             debug_walkable: false,
         }
     }
@@ -131,7 +127,7 @@ impl OfficeRenderer {
         if self.flash.holds(flashes, window) {
             return false;
         }
-        self.rendered = (flashes, window);
+        self.flash.stage(flashes, window);
         true
     }
 
@@ -143,7 +139,7 @@ impl OfficeRenderer {
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
     pub(crate) fn presented(&mut self) {
-        self.flash.shown(self.rendered.0, self.rendered.1);
+        self.flash.landed();
     }
 
     /// A left press at `cursor` (physical px) in a `window`-sized window

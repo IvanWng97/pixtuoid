@@ -64,6 +64,9 @@ pub fn monotonic() -> ScreenClock {
 /// hold, so its write goes out whatever it shows.
 pub struct FlashHold<S> {
     shown: Option<(Flashes, S, Duration)>,
+    /// A write under way, what it shows and on what shape: shown only once
+    /// it [`landed`](Self::landed).
+    staged: Option<(Flashes, S)>,
     clock: ScreenClock,
 }
 
@@ -71,6 +74,7 @@ impl<S: std::fmt::Debug> std::fmt::Debug for FlashHold<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlashHold")
             .field("shown", &self.shown)
+            .field("staged", &self.staged)
             .finish_non_exhaustive()
     }
 }
@@ -78,7 +82,11 @@ impl<S: std::fmt::Debug> std::fmt::Debug for FlashHold<S> {
 impl<S: Copy + PartialEq> FlashHold<S> {
     /// A hold on `clock`.
     pub fn on(clock: ScreenClock) -> Self {
-        Self { shown: None, clock }
+        Self {
+            shown: None,
+            staged: None,
+            clock,
+        }
     }
 
     /// Whether a write showing `phases` to a screen shaped `shape` waits, now.
@@ -100,9 +108,26 @@ impl<S: Copy + PartialEq> FlashHold<S> {
         self.shown.is_none_or(|(on, ..)| on != phases)
     }
 
+    /// A write showing `phases` to a screen shaped `shape` is under way.
+    pub fn stage(&mut self, phases: Flashes, shape: S) {
+        self.staged = Some((phases, shape));
+    }
+
+    /// The staged write finished reaching the screen just now.
+    pub fn landed(&mut self) {
+        if let Some((phases, shape)) = self.staged.take() {
+            self.shown(phases, shape);
+        }
+    }
+
+    /// The staged write never reached the screen: it shows nothing.
+    pub fn lost(&mut self) {
+        self.staged = None;
+    }
+
     /// A write showing `phases` finished reaching a screen shaped `shape` just
     /// now.
-    pub fn shown(&mut self, phases: Flashes, shape: S) {
+    fn shown(&mut self, phases: Flashes, shape: S) {
         match &mut self.shown {
             Some((on, on_shape, _)) if *on == phases => *on_shape = shape,
             _ => self.shown = Some((phases, shape, (self.clock)())),
@@ -194,6 +219,27 @@ mod tests {
         assert!(!hold.holds(two, SHAPE));
         screen.at(at(0) - Duration::from_millis(1));
         assert!(!hold.holds(two, SHAPE), "a clock run backward");
+    }
+
+    /// A staged write counts from when it lands, and a lost one never counts.
+    #[test]
+    fn a_write_counts_from_when_it_lands_and_a_lost_one_never() {
+        let [one, two] = two_pictures();
+        let screen = ManualClock::default();
+        let mut hold = FlashHold::on(screen.clock());
+        screen.at(at(0));
+        hold.stage(one, SHAPE);
+        hold.lost();
+        hold.landed();
+        assert!(hold.changes(one), "a lost write shows nothing");
+        hold.stage(one, SHAPE);
+        screen.at(at(50));
+        hold.landed();
+        let floor = FLOOR.as_millis() as u64;
+        screen.at(at(floor));
+        assert!(hold.holds(two, SHAPE), "timed from the landing");
+        screen.at(at(50 + floor));
+        assert!(!hold.holds(two, SHAPE));
     }
 
     /// A screen of a new shape (a resize, a font zoom) shows nothing to hold:

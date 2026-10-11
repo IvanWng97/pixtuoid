@@ -239,9 +239,10 @@ impl Office {
         if self.flash.holds(flashes, shape) {
             return;
         }
+        self.flash.stage(flashes, shape);
         self.expand_rgba();
         // The page draws what `step` leaves in the same task, straight after.
-        self.flash.shown(flashes, shape);
+        self.flash.landed();
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).

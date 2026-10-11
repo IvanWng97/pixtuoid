@@ -116,11 +116,10 @@ struct Pending {
     due: bool,
 }
 
-/// Transmits written into the frame, and the flashes they show; the cadence
-/// restarts from `at` when there were any.
+/// Transmits written into the frame; the cadence restarts from `at` when
+/// there were any.
 struct Landing {
     sent: Vec<Changed>,
-    flashes: Flashes,
     at: Option<SystemTime>,
 }
 
@@ -354,9 +353,9 @@ impl TileCutaway {
         if send.is_empty() {
             self.landing = Some(Landing {
                 sent: send,
-                flashes,
                 at: None,
             });
+            self.flash.stage(flashes, self.fitted);
             return;
         }
         match self.route.protocol() {
@@ -395,9 +394,9 @@ impl TileCutaway {
             Ok(()) => {
                 self.landing = Some(Landing {
                     sent,
-                    flashes,
                     at: Some(now),
                 });
+                self.flash.stage(flashes, self.fitted);
             }
             Err(e) => tracing::warn!(error = %e, "image transmit failed"),
         }
@@ -406,18 +405,19 @@ impl TileCutaway {
     /// The frame reached the terminal: its transmits are shown, and a flash
     /// phase's floor runs from now.
     pub(crate) fn landed(&mut self) {
-        if let Some(Landing { sent, flashes, at }) = self.landing.take() {
+        if let Some(Landing { sent, at }) = self.landing.take() {
             if at.is_some() {
                 self.sent_at = at;
             }
             self.tiles.sent(&sent);
-            self.flash.shown(flashes, self.fitted);
         }
+        self.flash.landed();
     }
 
     /// The frame never reached the terminal: nothing it wrote is shown.
     pub(crate) fn lost(&mut self) {
         self.landing = None;
+        self.flash.lost();
     }
 
     /// What encodes this frame's tiles, apart from the sink no thread shares.
