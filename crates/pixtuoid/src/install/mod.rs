@@ -214,7 +214,7 @@ fn check_artifact_content(
 /// never flags an install stale. The marker is anchored with `starts_with`, as
 /// `verify::baked_hook_path` anchors, so a code line that merely mentions it still
 /// compares. A trailing `//` and a `/* */` (openclaw_plugin.js has both) still count as
-/// code, so editing one flags every install: no template may keep its behavior there.
+/// code, so editing one flags every install.
 fn plugin_code(content: &str) -> String {
     content
         .lines()

@@ -11,7 +11,7 @@
 //!   below; 1.0.x mirrors every key in CC's snake_case too
 //!   (`grok/tool-run-recorded`), which this decoder still does not read. Hooks
 //!   dispatch SEQUENTIALLY inline on the session actor, so the shim's
-//!   `transport::WRITE_TIMEOUT` bound matters here.
+//!   `WRITE_TIMEOUT` bound matters here.
 //! - **Keying**: `sessionId` is consistent across every event of a session, ==
 //!   the transcript's parent-DIR name, == a subagent's `subagentId`. Hook and
 //!   watcher keys therefore coalesce, and a child's tool hooks carry the
