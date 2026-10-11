@@ -267,10 +267,10 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
     if let Some(pet) = &frame.pet {
-        enqueue_pet(ctx, pet, &mut drawables);
+        enqueue_pet(ctx.pack, pet, &mut drawables);
     }
     enqueue_gateway_mascots(ctx.pack, &frame.mascots, &mut drawables);
-    enqueue_characters(ctx, frame, &mut drawables);
+    enqueue_characters(ctx.pack, ctx.theme, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
     let mut drawn = Drawn::default();
@@ -328,20 +328,21 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
 /// drawables. The ONLY paint-side work is presentation — resolving the
 /// theme-free [`CharacterGlow`](crate::sim::CharacterGlow) to a `Theme` color.
 fn enqueue_characters<'a>(
-    ctx: &PaintCtx<'_>,
+    pack: &OfficeArt,
+    theme: &crate::theme::Theme,
     frame: &'a SimFrame,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     for p in &frame.characters {
         let agent = &frame.agents[p.agent_idx];
-        let pose = crate::character::SpritePose::of(p, agent, ctx.theme);
+        let pose = crate::character::SpritePose::of(p, agent, theme);
         drawables.push(Drawable {
             sort_row: p.sort_row,
-            layer: Layer::Figure,
+            layer: Layer::Character,
             hover: Some(Hover::figure(
                 Pivot::TopLeft,
                 p.top_left,
-                pack_frame_size(ctx.pack, pose.anim_name, pose.frame_idx),
+                pack_frame_size(pack, pose.anim_name, pose.frame_idx),
                 HoverTarget::Agent(agent.agent_id),
             )),
             kind: DrawableKind::Character {
@@ -357,15 +358,15 @@ fn enqueue_characters<'a>(
 
 /// The office pet, sorted on its [`sort_row`](crate::sim::PetPlacement::sort_row).
 fn enqueue_pet<'a>(
-    ctx: &PaintCtx<'_>,
+    pack: &OfficeArt,
     pet: &'a crate::sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     let pos = pet.pos;
-    let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
+    let size = pack_frame_size(pack, pet.anim_name, pet.frame_idx);
     drawables.push(Drawable {
         sort_row: pet.sort_row,
-        layer: Layer::Figure,
+        layer: Layer::Creature,
         hover: Some(Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
             pos,
@@ -385,7 +386,7 @@ fn enqueue_gateway_mascots<'a>(
     for m in mascots {
         drawables.push(Drawable {
             sort_row: m.sort_row,
-            layer: Layer::Figure,
+            layer: Layer::Creature,
             hover: m.target().map(|target| {
                 Hover::figure(
                     Pivot::Center,

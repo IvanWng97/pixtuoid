@@ -281,7 +281,6 @@ impl Office {
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
             self.theme = t;
-            self.session.reset_frame_cache();
         }
     }
 
