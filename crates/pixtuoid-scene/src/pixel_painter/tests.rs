@@ -3672,7 +3672,7 @@ fn a_pet_tied_with_an_agent_sorts_under_them_in_both_looks() {
         flip: false,
         anim_name,
         frame_idx: 0,
-        effects: Vec::new(),
+        effects: crate::effects::pet_hearts(pos, 300).collect(),
     };
     let pet = cat.target();
     frame.pet = Some(cat);
@@ -3709,6 +3709,68 @@ fn a_pet_tied_with_an_agent_sorts_under_them_in_both_looks() {
             "{look} paints the agent last"
         );
     }
+    // What a creature wears sorts with it, under the person.
+    let pieces = cutaway.pieces();
+    let character = pieces
+        .iter()
+        .position(|p| matches!(p.kind, PieceKind::Character { .. }))
+        .expect("the sitter's piece");
+    let hearts: Vec<usize> = pieces
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| matches!(p.kind, PieceKind::Effect(_)) && p.span.layer == Layer::Creature)
+        .map(|(i, _)| i)
+        .collect();
+    assert!(!hearts.is_empty(), "premise: the cat wears hearts");
+    assert!(
+        hearts.iter().all(|&i| i < character),
+        "the cat's hearts sort under the sitter"
+    );
+}
+
+/// The classic's enqueue fns give the layers, so people stay over creatures
+/// whatever order the queue was built in.
+#[test]
+fn the_classic_layers_creatures_under_characters_in_any_queue_order() {
+    use crate::layout::Point;
+    use pixtuoid_core::sprite::format::Piece as PackPiece;
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::South, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut frame = frames.last().expect("a seated frame").clone();
+    let row = frame.characters[0].sort_row;
+    let pos = Point {
+        x: layout.buf_w / 2,
+        y: layout.buf_h / 2,
+    };
+    frame.pet = Some(crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos,
+        sort_row: row,
+        flip: false,
+        anim_name: PackPiece::CatWalk,
+        frame_idx: 0,
+        effects: Vec::new(),
+    });
+    frame.mascots = vec![crate::sim::MascotPlacement {
+        pos,
+        sort_row: row,
+        anim_name: PackPiece::LobsterWalk,
+        frame_idx: 0,
+        key: crate::creatures::openclaw_key("18789"),
+        degraded: false,
+        on_roster: true,
+        effects: Vec::new(),
+    }];
+    let mut queue = Vec::new();
+    enqueue_characters(&pack, theme, &frame, &mut queue);
+    enqueue_gateway_mascots(&pack, &frame.mascots, &mut queue);
+    enqueue_pet(&pack, frame.pet.as_ref().expect("the cat"), &mut queue);
+    drawable::sort_drawables(&mut queue);
+    assert_eq!(
+        queue.iter().map(|d| d.layer).collect::<Vec<_>>(),
+        [Layer::Creature, Layer::Creature, Layer::Character]
+    );
 }
 
 /// Two gateways of one source are two hovers, each naming its own instance,
