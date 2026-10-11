@@ -26,8 +26,7 @@ tokio              = { workspace = true, features = ["rt-multi-thread", "macros"
 ratatui            = { workspace = true }
 # The base64 of kitty's transmits and of the probe's queries.
 base64-simd        = "0.8"
-# iTerm2's PNG: `image`'s own copy (a dev-dependency here and in
-# pixtuoid-web), so no second crate.
+# iTerm2's PNG.
 png                = "0.18"
 # SIXEL's per-tile palette map, hot in its encode.
 foldhash           = { workspace = true }

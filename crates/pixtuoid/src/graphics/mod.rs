@@ -281,10 +281,9 @@ pub(crate) enum ClassicReason {
     NoCellSize,
     /// Inside tmux, with a protocol other than kitty.
     ///
-    /// SIXEL and iTerm2 reach the terminal from inside tmux only through
-    /// tmux's passthrough (tmux(1), `allow-passthrough`), which bypasses tmux: tmux
-    /// never holds the image, so a pane or window switch redraws the pane
-    /// without it. kitty's Unicode placeholders are ordinary cells tmux stores
+    /// A SIXEL or iTerm2 image sent through tmux's passthrough bypasses tmux
+    /// (tmux(1), `allow-passthrough`): tmux never holds it, so a pane or window
+    /// switch redraws the pane without it. kitty's Unicode placeholders are ordinary cells tmux stores
     /// and redraws.
     TmuxNeedsKitty(ImageProtocol),
     /// The terminal has a protocol, but its cell has no [`cutaway_fit`].

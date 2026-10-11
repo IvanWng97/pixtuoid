@@ -400,7 +400,7 @@ mod tests {
     /// other than `0` ends nothing.
     #[test]
     fn only_a_primary_attributes_reply_lists_sixel_and_only_status_ok_ends() {
-        assert!(!read(31, b"\x1b[>4;1c\x1b[0n").0.sixel);
+        assert!(!read(31, b"\x1b[>1;4;0c\x1b[0n").0.sixel);
         assert!(!read(31, b"\x1b[3n").1);
     }
 

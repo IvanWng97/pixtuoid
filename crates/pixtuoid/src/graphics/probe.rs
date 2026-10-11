@@ -396,7 +396,8 @@ mod tests {
     #[test]
     fn kitty_is_taken_over_sixel_with_the_answered_cell() {
         let cell = Some(CellSize { w: 17, h: 41 });
-        let d = detected(&Answer { cell, ..BOTH }, &EnvHints::default(), None);
+        let window = Some(CellSize { w: 9, h: 18 });
+        let d = detected(&Answer { cell, ..BOTH }, &EnvHints::default(), window);
         assert_eq!(d.protocol, Some(ImageProtocol::Kitty), "kitty over SIXEL");
         assert_eq!(d.cell, cell);
     }
