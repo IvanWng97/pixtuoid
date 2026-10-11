@@ -55,7 +55,7 @@ impl CellMap {
     /// cell lies over logical point `p`: the one under that cell's centre.
     /// World text is laid out on the classic's grid, and a cell holding a
     /// fraction of a unit either way rounds it by its middle, never its edge.
-    pub fn cell_of(self, p: crate::layout::Point) -> (u16, u16) {
+    pub(crate) fn cell_of(self, p: crate::layout::Point) -> (u16, u16) {
         let rows = crate::layout::CELL_ROWS;
         // Doubled, so the centre, half a column in and half a cell row down,
         // stays whole; u32, as a far point's pixel offset passes `u16::MAX`.
@@ -195,7 +195,7 @@ impl CellGrid {
     }
 
     /// Fill every cell with `bg`.
-    pub fn fill(&mut self, bg: Rgb) {
+    pub(crate) fn fill(&mut self, bg: Rgb) {
         for cell in &mut self.cells {
             cell.bg = Some(bg);
         }

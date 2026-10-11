@@ -77,6 +77,31 @@ jobs:
           targets: x86_64-unknown-freebsd
       - run: just check-other-unix
 
+  # Full tier only: a hawk build on every PR push would lengthen every PR's
+  # wait for the shared runners (AGENTS.md's open-PR cap).
+  hawk:
+    name: hawk
+    if: ${{ inputs.full }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      - uses: ./.github/actions/setup-just
+      # Before rust-cache, which keys on every installed toolchain, so a
+      # HAWK_RUST bump starts a new cache instead of hitting the old one.
+      - run: just _hawk-toolchain
+      # hawk's own target dir, deps only. Saved from main alone, so a queue
+      # batch restores it and no draft PR spends the 10 GB quota on a copy.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-rust
+          workspaces: ". -> target/hawk"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: just hawk
+
   packaging-linux:
     name: packaging-build (ubuntu-latest)
     if: ${{ inputs.full }}
@@ -111,7 +136,7 @@ jobs:
     # Keep the protected gate's membership explicit; GitHub otherwise reports
     # a reusable workflow successful even after an unreferenced job is removed.
     if: ${{ always() }}
-    needs: [wasm-check, hack, windows-check, other-unix-check, packaging-linux, packaging-macos]
+    needs: [wasm-check, hack, windows-check, other-unix-check, hawk, packaging-linux, packaging-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
