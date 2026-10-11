@@ -2,37 +2,25 @@
 //! documents that declare those names, how to read them, and what a user loses
 //! when one goes. pixtuoid's `drift_watch` checks them against upstream.
 
-/// One upstream project a source reads names from.
+/// One public repository a source reads names from, which every
+/// [`Doc::path`] resolves against.
 #[derive(Debug)]
 pub struct Upstream {
-    pub project: Project,
+    pub repo: &'static str,
+    pub branch: &'static str,
     pub watches: &'static [Watch],
-}
-
-#[derive(Debug)]
-pub enum Project {
-    /// A public repository, which every [`At::Path`] resolves against.
-    Repo {
-        repo: &'static str,
-        branch: &'static str,
-    },
 }
 
 /// A document upstream declares names in.
 #[derive(Debug)]
 pub struct Doc {
-    pub at: At,
+    pub path: &'static str,
     /// Matches the declaration that OWNS the names, never one of them: a name
     /// as its own anchor passes vacuously, and a fetch landing on a re-export
     /// facade then reads as a rename (#793).
     pub anchor: &'static str,
     /// What `anchor` matches, as the report names it.
     pub owns: &'static str,
-}
-
-#[derive(Debug)]
-pub enum At {
-    Path(&'static str),
 }
 
 /// How a document yields upstream's names.
@@ -49,13 +37,6 @@ pub enum Read {
     },
 }
 
-/// A finding and how hard it lands.
-#[derive(Debug)]
-pub enum Finding {
-    /// Users are broken now: the decoder needs fixing.
-    Breaking(&'static str),
-}
-
 /// Names we READ that upstream must keep declaring.
 #[derive(Debug)]
 pub struct Watch {
@@ -66,8 +47,9 @@ pub struct Watch {
     /// must fetch, or none is checked.
     pub docs: &'static [Doc],
     pub read: Read,
-    /// What a user loses when upstream stops declaring one of `ours`.
-    pub vanish: Finding,
+    /// What a user loses when upstream stops declaring one of `ours`: a
+    /// vanish is breaking, since users are broken now.
+    pub vanish: &'static str,
     pub siblings: Option<Siblings>,
 }
 
@@ -76,16 +58,11 @@ pub struct Watch {
 /// a missed decode hides, while mere growth is not.
 #[derive(Debug)]
 pub struct Siblings {
-    pub family: Family,
+    /// What a sibling's name starts with.
+    pub prefix: &'static str,
     /// Siblings deliberately not decoded, each with its reason. A row whose
     /// name upstream dropped is reported: it would silently exempt a reuse.
     pub ignored: &'static [(&'static str, &'static str)],
-}
-
-#[derive(Debug)]
-pub enum Family {
-    /// Starts with this.
-    Prefix(&'static str),
 }
 
 #[cfg(test)]

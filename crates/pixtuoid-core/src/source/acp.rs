@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Finding, Project, Read, Siblings, Upstream, Watch};
+use crate::source::upstream::{Doc, Read, Siblings, Upstream, Watch};
 use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
@@ -47,12 +47,12 @@ pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
     [
         Doc {
-            at: At::Path("schema/v1/schema.json"),
+            path: "schema/v1/schema.json",
             anchor,
             owns,
         },
         Doc {
-            at: At::Path("schema/v1/schema.unstable.json"),
+            path: "schema/v1/schema.unstable.json",
             anchor,
             owns,
         },
@@ -61,10 +61,8 @@ const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
 
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
-    project: Project::Repo {
-        repo: "agentclientprotocol/agent-client-protocol",
-        branch: "main",
-    },
+    repo: "agentclientprotocol/agent-client-protocol",
+    branch: "main",
     watches: &[
         Watch {
             id: "acp.method",
@@ -73,10 +71,8 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
             read: Read::Each {
                 pattern: r#""x-method"\s*:\s*"{name}""#,
             },
-            vanish: Finding::Breaking(
-                "a source gates the ACP decode on this method, so every ACP-standard \
+            vanish: "a source gates the ACP decode on this method, so every ACP-standard \
                  activity event is lost with no breadcrumb",
-            ),
             siblings: None,
         },
         Watch {
@@ -87,11 +83,9 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
                 def: "SessionUpdate",
                 prop: Some("sessionUpdate"),
             },
-            vanish: Finding::Breaking(
-                "every ACP-speaking source loses that half of its activity decode",
-            ),
+            vanish: "every ACP-speaking source loses that half of its activity decode",
             siblings: Some(Siblings {
-                family: Family::Prefix(TOOL_CALL),
+                prefix: TOOL_CALL,
                 ignored: &[],
             }),
         },
@@ -103,10 +97,8 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
                 def: "ToolCallStatus",
                 prop: None,
             },
-            vanish: Finding::Breaking(
-                "the `tool_call_update` arm falls through to `_ => vec![]`, so every \
+            vanish: "the `tool_call_update` arm falls through to `_ => vec![]`, so every \
                  ACP tool call stays Active forever",
-            ),
             siblings: None,
         },
     ],

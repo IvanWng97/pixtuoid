@@ -400,9 +400,10 @@ mod tests {
     }
 
     /// Every wire literal a decoder equality-compares is carried by the drift
-    /// surface or exempted below with its adjudicated reason (#943's gate).
+    /// surface or a declared watch, or exempted below with its adjudicated
+    /// reason (#943's gate).
     ///
-    /// Three accepted loosenesses, adjudicated on #943: fragment membership is
+    /// Three accepted loosenesses, adjudicated on #943: membership is
     /// global across sets, so a cross-source spelling collision passes; a
     /// literal behind a non-exported const escapes the scan; and the scan is
     /// `==`/`!=`-shaped only — a MATCH ARM pattern, a `.starts_with` prefix

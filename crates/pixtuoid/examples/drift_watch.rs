@@ -5,7 +5,7 @@
 use std::io::Write;
 use std::process::ExitCode;
 
-use pixtuoid::dev::{Report, run, run_legacy};
+use pixtuoid::dev::drift::{Report, run, run_legacy};
 
 fn main() -> ExitCode {
     let mut report = Report::default();

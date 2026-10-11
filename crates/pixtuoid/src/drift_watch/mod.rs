@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use pixtuoid_core::source::registry::REGISTRY;
-use pixtuoid_core::source::upstream::{At, Doc, Family, Finding, Project, Read, Siblings, Watch};
+use pixtuoid_core::source::upstream::{Doc, Read, Siblings, Upstream, Watch};
 use regex::Regex;
 
 use net::Curl;
@@ -169,9 +169,8 @@ impl Report {
 }
 
 /// Where one declared document is fetched from, and how the report names it.
-fn locate(project: &Project, at: &At) -> (String, String) {
-    let Project::Repo { repo, branch } = project;
-    let At::Path(path) = *at;
+fn locate(up: &Upstream, path: &str) -> (String, String) {
+    let Upstream { repo, branch, .. } = up;
     (
         format!("{RAW_URL}/{repo}/{branch}/{path}"),
         format!("{repo}@{branch}:{path}"),
@@ -264,18 +263,12 @@ impl<'f> Fetched<'f> {
     }
 }
 
-fn check_watch(
-    source: &str,
-    project: &Project,
-    w: &Watch,
-    fetched: &mut Fetched,
-    report: &mut Report,
-) {
+fn check_watch(source: &str, up: &Upstream, w: &Watch, fetched: &mut Fetched, report: &mut Report) {
     let located: Vec<_> = w
         .docs
         .iter()
         .map(|doc| {
-            let (url, label) = locate(project, &doc.at);
+            let (url, label) = locate(up, doc.path);
             (url, label, doc)
         })
         .collect();
@@ -305,7 +298,12 @@ fn check_watch(
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        report.add_blind(&format!("`{}`'s pattern ({e})", w.id), source, "", true);
+                        report.add_blind(
+                            &format!("`{}`'s pattern ({e})", w.id),
+                            source,
+                            &format!("`{}` was SKIPPED.", w.id),
+                            true,
+                        );
                         return;
                     }
                 }
@@ -350,7 +348,7 @@ fn check_watch(
             upstream
         }
     };
-    let Finding::Breaking(says) = w.vanish;
+    let says = w.vanish;
     for name in ours.iter().filter(|n| !upstream.contains(**n)) {
         report.add_breaking(format!(
             "`{name}` ({source}: `{}`) is no longer declared in {at} — {says}.",
@@ -374,8 +372,7 @@ fn check_siblings(
 ) {
     let ignored: BTreeSet<&str> = sib.ignored.iter().map(|(name, _why)| *name).collect();
     for name in upstream.iter().map(String::as_str) {
-        let Family::Prefix(p) = sib.family;
-        let in_family = name.starts_with(p);
+        let in_family = name.starts_with(sib.prefix);
         if in_family && !ours.contains(name) && !ignored.contains(name) {
             report.add_review(format!(
                 "{at} declares `{}` beside the names `{id}` reads, and nothing decodes it. \
@@ -412,7 +409,7 @@ fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     for d in REGISTRY {
         for up in d.upstream {
             for w in up.watches {
-                check_watch(d.name, &up.project, w, &mut fetched, report);
+                check_watch(d.name, up, w, &mut fetched, report);
             }
         }
     }

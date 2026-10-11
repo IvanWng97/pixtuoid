@@ -10,6 +10,10 @@ use super::{Fetch, FetchError};
 /// probe health, never transient. Every other failure may pass on a retry.
 const PERMANENT_HTTP_STATUS: [u16; 3] = [404, 410, 451];
 
+/// The status rides stderr's last line, so the body stays whole on stdout
+/// and a curl error message lands above it; [`classify`] reads it there.
+const WRITE_OUT: &str = "%{stderr}\n%{http_code}";
+
 #[derive(Debug)]
 pub(super) struct Curl;
 
@@ -19,9 +23,7 @@ impl Fetch for Curl {
             .args(["--silent", "--show-error", "--location", "--max-time"])
             .arg(timeout.as_secs().to_string())
             .args(["--user-agent", "pixtuoid-drift-watch"])
-            // The status rides stderr's last line, so the body stays whole on
-            // stdout and a curl error message lands above it.
-            .args(["--write-out", "%{stderr}\n%{http_code}"])
+            .args(["--write-out", WRITE_OUT])
             .arg(url)
             .output()
             .map_err(|e| FetchError::Transient(format!("could not run curl: {e}")))?;
@@ -96,6 +98,27 @@ mod tests {
         assert!(matches!(
             classify(true, "\n300", vec![]),
             Err(FetchError::Transient(_))
+        ));
+    }
+
+    /// What `--write-out` makes curl print is what `classify` reads: curl
+    /// expands `%{stderr}` to a switch of stream and `%{http_code}` to the
+    /// status (curl.se/docs/manpage.html#-w).
+    #[test]
+    fn classify_reads_the_status_where_write_out_puts_it() {
+        let curl_stderr = |err: &str, code: &str| {
+            let (_, after) = WRITE_OUT
+                .split_once("%{stderr}")
+                .expect("the status goes to stderr");
+            format!("{err}{}", after.replace("%{http_code}", code))
+        };
+        assert_eq!(
+            classify(true, &curl_stderr("", "404"), vec![]),
+            Err(FetchError::Gone { status: 404 })
+        );
+        assert!(matches!(
+            classify(false, &curl_stderr("curl: (6) Could not resolve host", "000"), vec![]),
+            Err(FetchError::Transient(e)) if e.contains("Could not resolve host")
         ));
     }
 

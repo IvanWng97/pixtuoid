@@ -39,9 +39,10 @@ impl Fetch for Served {
     }
 }
 
-const REPO: Project = Project::Repo {
+const REPO: Upstream = Upstream {
     repo: "o/r",
     branch: "main",
+    watches: &[],
 };
 
 fn raw(path: &str) -> String {
@@ -52,7 +53,7 @@ const ANCHORED: &str = r"(?m)^enum Events \{";
 
 const fn doc(path: &'static str) -> Doc {
     Doc {
-        at: At::Path(path),
+        path,
         anchor: ANCHORED,
         owns: "`Events`",
     }
@@ -64,7 +65,7 @@ const fn each(docs: &'static [Doc], pattern: &'static str) -> Watch {
         ours: || vec!["a.b", "c"],
         docs,
         read: Read::Each { pattern },
-        vanish: Finding::Breaking("no sprite"),
+        vanish: "no sprite",
         siblings: None,
     }
 }
@@ -148,7 +149,7 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
         id: "t.union",
         ours: || vec!["c"],
         docs: &[Doc {
-            at: At::Path("s.json"),
+            path: "s.json",
             anchor: r#""Events""#,
             owns: "`Events`",
         }],
@@ -156,7 +157,7 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
             def: "Events",
             prop: None,
         },
-        vanish: Finding::Breaking("x"),
+        vanish: "x",
         siblings: None,
     };
     // Anchored, and the union moved out from under the reader.
@@ -171,7 +172,7 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
 #[test]
 fn one_unreadable_document_skips_the_whole_union() {
     const UNION: Doc = Doc {
-        at: At::Path("a.json"),
+        path: "a.json",
         anchor: r#""Events""#,
         owns: "`Events`",
     };
@@ -181,7 +182,7 @@ fn one_unreadable_document_skips_the_whole_union() {
         docs: &[
             UNION,
             Doc {
-                at: At::Path("b.json"),
+                path: "b.json",
                 ..UNION
             },
         ],
@@ -189,7 +190,7 @@ fn one_unreadable_document_skips_the_whole_union() {
             def: "Events",
             prop: None,
         },
-        vanish: Finding::Breaking("x"),
+        vanish: "x",
         siblings: None,
     };
     let served = Served::default()
@@ -214,6 +215,7 @@ fn a_broken_pattern_of_ours_blames_ours() {
     let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), &W);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
     assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
+    assert!(r.blind[0].contains("`t.each` was SKIPPED"), "{r:?}");
 }
 
 /// A failed fetch is upstream's answer for the run too: re-asking per watch
@@ -247,7 +249,7 @@ fn a_failed_document_is_fetched_and_filed_once() {
 fn the_floor_skips_a_degraded_parse() {
     const SCHEMA: &str = r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#;
     const DOC: Doc = Doc {
-        at: At::Path("s.json"),
+        path: "s.json",
         anchor: r#""Events""#,
         owns: "`Events`",
     };
@@ -259,7 +261,7 @@ fn the_floor_skips_a_degraded_parse() {
             def: "Events",
             prop: None,
         },
-        vanish: Finding::Breaking("x"),
+        vanish: "x",
         siblings: None,
     };
     // One name back where we read two: the reader degraded, nothing is renamed.
@@ -279,7 +281,7 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
         id: "t.sib",
         ours: || vec!["tool_call", "tool_call_update"],
         docs: &[Doc {
-            at: At::Path("s.json"),
+            path: "s.json",
             anchor: r#""Events""#,
             owns: "`Events`",
         }],
@@ -287,9 +289,9 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
             def: "Events",
             prop: None,
         },
-        vanish: Finding::Breaking("x"),
+        vanish: "x",
         siblings: Some(Siblings {
-            family: Family::Prefix("tool_call"),
+            prefix: "tool_call",
             ignored: &[
                 ("tool_call_deferred", "decided"),
                 ("tool_call_progress", "gone upstream"),
@@ -415,7 +417,7 @@ fn every_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
             for w in up.watches {
                 let serve = |text: &str| {
                     w.docs.iter().fold(Served::default(), |s, doc| {
-                        let (url, _) = locate(&up.project, &doc.at);
+                        let (url, _) = locate(up, doc.path);
                         s.with(&url, text)
                     })
                 };
@@ -423,7 +425,7 @@ fn every_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
                     let served = serve(text);
                     let mut report = Report::default();
                     let mut fetched = Fetched::new(&served);
-                    check_watch(d.name, &up.project, w, &mut fetched, &mut report);
+                    check_watch(d.name, up, w, &mut fetched, &mut report);
                     report
                 };
                 let ours = (w.ours)();
