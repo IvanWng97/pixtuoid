@@ -90,13 +90,12 @@ pub enum WeatherPolicy {
 }
 
 impl WeatherPolicy {
-    /// The policy a CLI or page names: one of
-    /// [`weather_names`], case-insensitive,
+    /// The policy a CLI or page names: a [`Weather`]'s name, case-insensitive,
     /// or `None` for the clock.
     ///
     /// # Errors
     ///
-    /// If `name` is `Some` but none of [`weather_names`]; the `Err` carries them.
+    /// If `name` is `Some` but no [`Weather`]'s name; the `Err` carries them all.
     pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
         match name {
             None => Ok(Self::Clock),
@@ -478,7 +477,7 @@ pub(crate) fn is_day_at(now: SystemTime) -> bool {
 }
 
 /// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
-pub fn weather_names() -> Vec<&'static str> {
+pub(crate) fn weather_names() -> Vec<&'static str> {
     Weather::ALL.iter().map(|w| w.name()).collect()
 }
 

@@ -12,18 +12,24 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 
-use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position};
+use crate::physics::{
+    PROGRESS_SCALE, WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position,
+};
 use crate::walk::{
     LegPlan, Lifted, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
     advance_wander, snapshot_leg_profile,
 };
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
+pub(crate) use pure::Pose;
+pub(crate) use pure::{
+    ENTRY_ANIMATION_MS, STALE_RESUME_GAP_BASE_MS, WANDER_DWELL_EST_MS, derive, derive_state_only,
+    dwell_ms, stale_resume_gap_ms,
+};
+#[cfg(test)]
+pub(crate) use pure::{aimless_wander_seed, pick_aimless_dest};
 pub use pure::{
-    ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
-    THINKING_WINDOW_SECS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive,
-    derive_state_only, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for,
-    pick_aimless_dest, seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
+    est_wander_cycle_ms, is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
@@ -36,7 +42,7 @@ use crate::pathfind::Router;
 /// character anchoring, hit-testing and label placement. `now`/`layout` stay
 /// separate args — frame inputs, not engine state.
 #[derive(Debug)]
-pub struct RouteCtx<'a> {
+pub(crate) struct RouteCtx<'a> {
     /// The A* router for this frame.
     pub router: &'a mut dyn Router,
     /// Live occupancy overlay (shared, read-only here).
@@ -95,12 +101,12 @@ impl PoseHistory {
         Self::default()
     }
     /// Record where an agent was visually placed this frame.
-    pub fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
+    pub(crate) fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
         self.last.insert(agent_id, (anchor, now));
     }
     /// Drop entries for agents no longer in `scene`. Without this, every AgentId
     /// ever rendered leaks an entry for the process lifetime, per floor.
-    pub fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
+    pub(crate) fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
         self.last.retain(|id, _| scene.agents.contains_key(id));
     }
     /// Whether an entry exists for `agent_id`.
@@ -229,7 +235,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 /// later frames compute `t_x1000` against that frozen profile.
 /// [`RouteCtx::history`] is consulted on state transitions so an agent whose
 /// pose flipped mid-wander walks back to the desk instead of teleporting.
-pub fn derive_with_routing(
+pub(crate) fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
     layout: &SceneLayout,
@@ -736,10 +742,11 @@ impl Leg {
         for w in path.windows(2) {
             let leg = octile_distance(w[0], w[1]);
             if acc + leg >= travelled {
-                let t_x1000 = ((travelled - acc) * 1000)
+                let scale = u32::from(PROGRESS_SCALE);
+                let t_x1000 = ((travelled - acc) * scale)
                     .checked_div(leg)
-                    .map(|t| t.min(1000) as u16)
-                    .unwrap_or(1000);
+                    .map(|t| t.min(scale) as u16)
+                    .unwrap_or(PROGRESS_SCALE);
                 return Leg {
                     from: w[0],
                     to: w[1],
@@ -753,7 +760,7 @@ impl Leg {
         Leg {
             from: path[last.saturating_sub(1)],
             to: path[last],
-            t_x1000: 1000,
+            t_x1000: PROGRESS_SCALE,
             travelled: acc,
         }
     }

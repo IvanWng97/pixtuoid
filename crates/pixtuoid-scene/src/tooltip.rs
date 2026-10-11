@@ -1,7 +1,6 @@
-//! What a hovered thing's tooltip says, for every painter: tone-tagged rows a
-//! painter lays out and colours through [`TipTone::rgb`], as the footer's
-//! [`FooterModel`](crate::footer::FooterModel) is. A painter owns only the
-//! box, its placement and how a tone draws.
+//! What a hovered thing's tooltip says, for every painter: tone-tagged rows
+//! that [`Tooltip::card`] lays out and colours into one cell grid. A painter
+//! owns only placing and drawing it.
 
 use std::time::SystemTime;
 
@@ -40,8 +39,8 @@ pub enum TipTone {
 }
 
 impl TipTone {
-    /// This tone's theme colour, the one authority every tooltip painter
-    /// reads; `None` for [`Self::Plain`].
+    /// This tone's theme colour, the one authority [`Tooltip::card`] colours
+    /// through; `None` for [`Self::Plain`].
     pub fn rgb(self, theme: &Theme) -> Option<Rgb> {
         Some(match self {
             Self::Title => theme.ui.tooltip_title,
@@ -57,9 +56,9 @@ impl TipTone {
 
 /// One tone-tagged text run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TipSpan {
-    pub text: String,
-    pub tone: TipTone,
+pub(crate) struct TipSpan {
+    pub(crate) text: String,
+    pub(crate) tone: TipTone,
 }
 
 impl TipSpan {
@@ -73,7 +72,7 @@ impl TipSpan {
 
 /// One row of a tooltip.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TipRow {
+pub(crate) enum TipRow {
     /// Runs laid left to right.
     Spans(Vec<TipSpan>),
     /// `left`, then `right` flush to the box's right edge.
@@ -94,7 +93,7 @@ pub enum TipAnchor {
 /// A tooltip: its rows, top to bottom, and where it opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tooltip {
-    pub rows: Vec<TipRow>,
+    pub(crate) rows: Vec<TipRow>,
     pub anchor: TipAnchor,
 }
 
@@ -171,12 +170,12 @@ const CARD_PAD: u16 = 1;
 /// The fewest cells between a heading's two runs.
 const HEADING_GAP: u16 = 2;
 /// The narrowest an agent's card is, in cells.
-pub const MIN_CARD_W: u16 = 20;
+pub(crate) const MIN_CARD_W: u16 = 20;
 /// The line a [`TipRow::Rule`] draws, a cell at a time.
 const RULE: &str = "\u{2500}";
 
 /// Where a card of `card` cells opens by the pointer at `pointer` inside
-/// `area`, all in cells: an agent's card (at least [`MIN_CARD_W`] wide) below
+/// `area`, all in cells: an agent's card (at least `MIN_CARD_W` wide) below
 /// the pointer, flipping above when it would cross the bottom; a label
 /// above, flipping below when it would cross the top; either just right of
 /// the pointer, flipping left when it would cross the right edge. The card

@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 /// Duration (ms) the pet stays frozen in place after being petted.
-pub const PET_DURATION_MS: u64 = 2000;
+pub(crate) const PET_DURATION_MS: u64 = 2000;
 
 /// State for the "pet the animal" interaction — render-side only, not a data
 /// model concern.
@@ -25,7 +25,7 @@ impl PetState {
     }
 
     /// Milliseconds since the pet was clicked, saturating to 0 on a backward clock.
-    pub fn elapsed_ms(&self, now: SystemTime) -> u64 {
+    pub(crate) fn elapsed_ms(&self, now: SystemTime) -> u64 {
         // `is_active` above deliberately does NOT use this helper: its
         // backward-clock fallback is `PET_DURATION_MS+1` (treat-as-expired),
         // not saturate-to-0.
@@ -92,7 +92,7 @@ impl PetKind {
     }
 
     /// Whether this kind curls up to sleep near idle agents (cat yes, dog no).
-    pub fn sleeps_near_idle(self) -> bool {
+    pub(crate) fn sleeps_near_idle(self) -> bool {
         match self {
             PetKind::Cat => true,
             PetKind::Dog => false,
@@ -127,7 +127,7 @@ impl Pet {
     clippy::cast_possible_truncation,
     reason = "a hash picks through `crate::spread`, alike on every target"
 )]
-pub fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
+pub(crate) fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
     pets.get(crate::spread(floor_seed, pets.len()))
 }
 

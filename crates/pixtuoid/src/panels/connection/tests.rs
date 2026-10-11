@@ -86,6 +86,9 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     ]);
     assert_eq!(rows[0].state, ConnState::Connected);
     assert_eq!(rows[1].state, ConnState::Disconnected);
+    // Without the carried bit a connected-but-absent NoCli would be
+    // indistinguishable from a never-connected one, and un-disconnectable via
+    // the panel — its hooks live in the config, not the missing binary.
     assert_eq!(rows[2].state, ConnState::NoCli { connected: true });
     assert_eq!(rows[3].state, ConnState::Connected);
     assert_eq!(rows[4].state, ConnState::Disconnected);
@@ -94,17 +97,6 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     assert_eq!(rows[3].display_name, "Antigravity");
     assert!(rows[3].target.is_none());
     assert!(rows[3].config_path.is_none());
-    // Without the carried bit a connected-but-absent NoCli would be
-    // indistinguishable from a never-connected one, and un-disconnectable via
-    // the panel — its hooks live in the config, not the missing binary.
-    assert!(
-        rows[2].state.connected(),
-        "a connected-but-absent NoCli must keep its connected bit"
-    );
-    assert!(rows[0].state.connected());
-    assert!(!rows[1].state.connected());
-    assert!(rows[3].state.connected());
-    assert!(!rows[4].state.connected());
 }
 
 #[test]
@@ -257,6 +249,37 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
     let scene = SceneState::uniform(8);
     let live = live_view(SystemTime::UNIX_EPOCH, &rows, &scene, &[]);
     assert_eq!(live.len(), rows.len());
+}
+
+/// A disconnected Claude Code row still names the hooks an older pixtuoid
+/// left firing: they run whatever the row says.
+#[test]
+fn a_disconnected_row_names_hooks_that_still_fire() {
+    let cfg = tempfile::tempdir().unwrap();
+    std::fs::write(
+        cfg.path().join("settings.json"),
+        r#"{"hooks":{"Stop":[{"_pixtuoid":true,"matcher":".*","hooks":[]}]}}"#,
+    )
+    .unwrap();
+    // Codex drift a connected row would report.
+    let log = format!(
+        "ts  WARN {}: source=codex kind=unknown_event name=OtherHook",
+        pixtuoid_core::source::drift::TARGET
+    );
+    let rows = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(cfg.path()), || {
+        build_rows(&HashSet::new(), &log)
+    });
+    let cc = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
+    assert_ne!(cc.state, ConnState::Connected);
+    assert!(
+        cc.health
+            .as_deref()
+            .is_some_and(|h| h.contains("pixtuoid doctor")),
+        "{:?}",
+        cc.health
+    );
+    let cx = rows.iter().find(|r| r.source_id == "codex").unwrap();
+    assert_eq!(cx.health, None, "a disconnected row shows nothing else");
 }
 
 #[test]

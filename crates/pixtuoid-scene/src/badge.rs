@@ -33,7 +33,7 @@ impl BadgeTone {
     /// This tone's theme color role — the SINGLE authority every label painter
     /// shares. The `hovered` near-white highlight is deliberately NOT a
     /// `BadgeTone`; it stays a per-painter surface choice.
-    pub fn rgb(self, theme: &Theme) -> Rgb {
+    pub(crate) fn rgb(self, theme: &Theme) -> Rgb {
         match self {
             BadgeTone::Exiting => theme.ui.label_exiting,
             BadgeTone::Active => theme.ui.label_active,
@@ -46,7 +46,7 @@ impl BadgeTone {
 /// The source's badge hue for a name-badge label, or `None` when the label has
 /// no `LABEL_SEP` prefix (a bare-prefix / cwd-less label like `cx`) or the
 /// prefix is unregistered.
-pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
+pub(crate) fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
     text.split_once(LABEL_SEP)
         .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }

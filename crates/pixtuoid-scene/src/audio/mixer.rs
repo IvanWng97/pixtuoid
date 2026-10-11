@@ -67,7 +67,7 @@ const BUS_TRIM: f32 = 0.35;
 /// Per-stem gain ramps chasing the scene's target levels. Mute ramps to
 /// silence through the same slew (no click).
 #[derive(Debug)]
-pub struct Mixer {
+pub(crate) struct Mixer {
     current: [f32; LoopStem::ALL.len()],
     target: StemLevels,
     muted: bool,
@@ -75,7 +75,7 @@ pub struct Mixer {
 }
 
 impl Mixer {
-    pub fn new(master: f32) -> Self {
+    pub(crate) fn new(master: f32) -> Self {
         Self {
             current: [0.0; LoopStem::ALL.len()],
             target: StemLevels::default(),
@@ -84,17 +84,17 @@ impl Mixer {
         }
     }
 
-    pub fn set_target(&mut self, stems: StemLevels) {
+    pub(crate) fn set_target(&mut self, stems: StemLevels) {
         self.target = stems;
     }
 
     /// Live master-volume update (the +/- keys) — targets rescale next
     /// step, riding the same slew as any level change (no zipper).
-    pub fn set_master(&mut self, master: f32) {
+    pub(crate) fn set_master(&mut self, master: f32) {
         self.master = master.clamp(0.0, 1.0);
     }
 
-    pub fn set_muted(&mut self, muted: bool) {
+    pub(crate) fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
     }
 
@@ -107,13 +107,13 @@ impl Mixer {
 
     /// The scalar every one-shot's gain multiplies through — mute silences them
     /// instantly (one-shots are transient; no ramp needed).
-    pub fn one_shot_gain(&self) -> f32 {
+    pub(crate) fn one_shot_gain(&self) -> f32 {
         if self.muted { 0.0 } else { self.master_amp() }
     }
 
     /// Advance every gain toward its target; returns `(stem, gain)` pairs
     /// for the sink. Never overshoots.
-    pub fn step(&mut self, dt_s: f32) -> [(LoopStem, f32); LoopStem::ALL.len()] {
+    pub(crate) fn step(&mut self, dt_s: f32) -> [(LoopStem, f32); LoopStem::ALL.len()] {
         let max_delta = RAMP_PER_S * dt_s;
         let mut out = [(LoopStem::Pad, 0.0f32); LoopStem::ALL.len()];
         for (i, stem) in LoopStem::ALL.into_iter().enumerate() {
@@ -140,7 +140,7 @@ impl Mixer {
 /// Typing-burst scheduler driven by the scene's `typing` level: 0 = silence,
 /// higher = more bursts.
 #[derive(Debug)]
-pub struct TypingScheduler {
+pub(crate) struct TypingScheduler {
     rng: NoiseStream,
     burst_left: u32,
     next_at_s: f64,
@@ -149,7 +149,7 @@ pub struct TypingScheduler {
 const BURSTS_PER_MIN_AT_FULL: f64 = 28.0;
 
 impl TypingScheduler {
-    pub fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self {
             rng: NoiseStream::new(seed),
             burst_left: 0,
@@ -158,7 +158,7 @@ impl TypingScheduler {
     }
 
     /// Advance to `now_s`; returns how many keystrokes fire this tick.
-    pub fn tick(&mut self, now_s: f64, level: f32) -> u32 {
+    pub(crate) fn tick(&mut self, now_s: f64, level: f32) -> u32 {
         if level <= 0.0 {
             self.burst_left = 0;
             // hold the clock so a later level>0 doesn't replay a backlog
@@ -188,7 +188,7 @@ impl TypingScheduler {
 
 /// Runtime raindrop scatter — the bed loops, the drops never repeat.
 #[derive(Debug)]
-pub struct DropScheduler {
+pub(crate) struct DropScheduler {
     rng: NoiseStream,
     next_at_s: f64,
 }
@@ -196,7 +196,7 @@ pub struct DropScheduler {
 const DROPS_PER_S: f64 = 0.9;
 
 impl DropScheduler {
-    pub fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self {
             rng: NoiseStream::new(seed),
             next_at_s: 0.0,
@@ -204,7 +204,7 @@ impl DropScheduler {
     }
 
     /// Returns how many drops fire this tick (0 while dry).
-    pub fn tick(&mut self, now_s: f64, rain_level: f32) -> u32 {
+    pub(crate) fn tick(&mut self, now_s: f64, rain_level: f32) -> u32 {
         if rain_level <= 0.0 {
             self.next_at_s = now_s;
             return 0;

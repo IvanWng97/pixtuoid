@@ -34,7 +34,7 @@ impl From<Density> for RenderScale {
 
 impl RenderScale {
     /// The classic path — one layout unit per buffer pixel.
-    pub const ONE: Self = Self(NonZeroU16::MIN);
+    pub(crate) const ONE: Self = Self(NonZeroU16::MIN);
 
     /// A scale of `n` buffer pixels per layout unit, or `None` for zero
     /// (a zero scale would divide the office away).
@@ -62,7 +62,7 @@ impl RenderScale {
     ///
     /// A density of 1 — a pack with no variants — makes every scale a
     /// multiple, so this is exactly [`RenderScale::new`] there.
-    pub fn fit(natural: u16, density: Density) -> Option<Self> {
+    pub(crate) fn fit(natural: u16, density: Density) -> Option<Self> {
         let nearest = Self::nearest_multiple(natural, density);
         // u64: a square of a u16-range value times the bound overflows u32.
         let (n, m) = (u64::from(natural), u64::from(nearest.get()));
@@ -103,7 +103,7 @@ impl RenderScale {
     /// the DAG, so it cannot name `RenderScale`; it takes the bare non-zero
     /// factor, which this module and the density-variant picker make. Core gets
     /// "repeat each pixel N times", the layout↔buffer meaning stays here.
-    pub fn factor(self) -> NonZeroU16 {
+    pub(crate) fn factor(self) -> NonZeroU16 {
         self.0
     }
 

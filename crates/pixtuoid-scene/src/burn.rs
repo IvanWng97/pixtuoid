@@ -51,7 +51,7 @@ pub(crate) fn burn_tier(model: Option<&str>, effort_fresh: Option<&str>) -> Burn
 /// The slot's effort observation, IF still fresh — the ONE freshness rule
 /// shared by the tier judgment and the dossier's `· effort` suffix, so the
 /// tooltip can't show an effort the flame already decayed past.
-pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
+pub(crate) fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
     slot.effort.as_ref().and_then(|obs| {
         // The CC decoder's exit sentinel exists ONLY to kill the flame via
         // last-seen-wins — it is not an effort; the dossier must never show it.
@@ -69,7 +69,7 @@ pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
 
 /// The slot-level judgment the sim and the recolor call: freshness-filter,
 /// then `burn_tier`.
-pub fn slot_burn_tier(slot: &AgentSlot, now: SystemTime) -> BurnTier {
+pub(crate) fn slot_burn_tier(slot: &AgentSlot, now: SystemTime) -> BurnTier {
     burn_tier(slot.model.as_deref(), fresh_effort(slot, now))
 }
 

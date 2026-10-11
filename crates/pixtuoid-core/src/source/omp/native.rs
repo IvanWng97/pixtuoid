@@ -15,7 +15,7 @@ use crate::source::{Source, TaggedSender};
 
 /// The profile-roots lister [`OmpSource::run`] re-invokes on its rescan tick,
 /// injectable so tests can grow the set without touching process env.
-pub type OmpProfileEnumerate = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
+pub(crate) type OmpProfileEnumerate = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
 /// omp appends a `custom` entry `customType:"session_exit"` on every clean
 /// teardown, so a transcript that already ended carries that marker — the
@@ -35,7 +35,7 @@ fn omp_session_ended(tail: &[u8]) -> bool {
 /// its own sessions tree and a session under any of them is a sprite.
 pub struct OmpSource {
     /// The watched primary omp `sessions` root.
-    pub sessions_root: PathBuf,
+    pub(crate) sessions_root: PathBuf,
     /// The OTHER profiles' sessions roots, one watcher each. Filled by
     /// [`Self::default_paths`]' enumeration.
     pub profile_sessions_roots: Vec<PathBuf>,

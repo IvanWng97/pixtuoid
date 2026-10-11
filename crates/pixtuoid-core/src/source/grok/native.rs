@@ -31,7 +31,7 @@ const MAX_SESSION_REGISTRY_BYTES: u64 = 1024 * 1024;
 /// "nothing alive" observation. An unreadable or unparseable file is `None` —
 /// the enumeration itself failed, so the watcher changes nothing.
 #[cfg(unix)]
-pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
+pub(crate) fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
     let path = grok_root.join("active_sessions.json");
     let bytes = match crate::source::read_bounded_bytes(&path, MAX_SESSION_REGISTRY_BYTES) {
         Ok(b) => b,
@@ -73,7 +73,7 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
 /// Non-Unix stub — the probe needs pid-liveness plus a kernel-start recycle
 /// check, so off Unix grok liveness degrades to pure mtime gating.
 #[cfg(not(unix))]
-pub fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
+pub(crate) fn live_grok_session_ids(_grok_root: &Path) -> Option<ProbeSnapshot> {
     None
 }
 

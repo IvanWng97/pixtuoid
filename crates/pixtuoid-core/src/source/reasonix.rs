@@ -53,7 +53,7 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 /// # Errors
 ///
 /// If the payload is not an object, lacks `event` or a non-empty `cwd`, or names an unregistered event.
-pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+pub(crate) fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
         .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;

@@ -65,8 +65,10 @@ The components that handle untrusted or privileged input, and how they're bounde
    rewritten config keeps every other setting, though not its comments or
    formatting.
    Installs are idempotent and reversible (*disconnect* removes the plugin or the
-   hook entries). pixtuoid never writes another tool's config except on an
-   explicit connect/disconnect.
+   hook entries), except the hook entries a release before the plugin wrote into
+   Claude Code's `settings.json`, which `pixtuoid doctor` names for removal by
+   hand. pixtuoid never writes another tool's config except on an explicit
+   connect/disconnect.
 
 If you find a way to cross one of these boundaries (e.g. a transcript or hook
 payload that escapes the terminal, a non-owner socket connect, an install path

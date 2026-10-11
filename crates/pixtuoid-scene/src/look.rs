@@ -73,15 +73,13 @@ pub struct RenderInputs<'a> {
 
 /// One frame from [`render`].
 #[derive(Debug)]
-pub struct Rendered<'r> {
-    /// The whole frame.
-    pub pixels: &'r RgbBuffer,
+pub struct Rendered {
     /// Where it may differ from the last frame this raster showed.
-    pub dirty: Dirty,
+    pub(crate) dirty: Dirty,
     /// The layout the sim stepped on and the frame was drawn on.
     pub layout: Arc<SceneLayout>,
     /// Waypoints with an occupant: the appliance audio cues' feed.
-    pub occupied_waypoints: HashSet<usize>,
+    pub(crate) occupied_waypoints: HashSet<usize>,
     /// What of the frame flashes, for a painter's hold.
     pub flash: crate::flash::FlashPhase,
 }
@@ -274,7 +272,7 @@ impl Raster {
     /// The cells of the star the last frame baked, where a pointer opens the
     /// repo; `None` before the first, when it drew none, or where its host
     /// sets it ([`Self::host_text`]), which then places it.
-    pub fn star(&self) -> Option<crate::layout::Bounds> {
+    pub(crate) fn star(&self) -> Option<crate::layout::Bounds> {
         match self.shown? {
             Look::Classic => None,
             Look::Cutaway { .. } => self.cutaway.as_ref()?.star(),
@@ -321,12 +319,12 @@ impl Raster {
 /// Step `floor` one frame and draw it in `look` on its raster: the one frame
 /// entry every painter calls. `None` when `inputs.size` can't lay out, or when
 /// `world.pack` is not the one `floor` was made with.
-pub fn render<'r>(
-    floor: &'r mut PerFloor,
+pub fn render(
+    floor: &mut PerFloor,
     office: OfficeStores<'_>,
     look: Look,
     inputs: RenderInputs<'_>,
-) -> Option<Rendered<'r>> {
+) -> Option<Rendered> {
     let PerFloor { ctx, raster } = floor;
     let RenderInputs {
         world,
@@ -376,7 +374,7 @@ pub fn render<'r>(
         },
         strike: sky.strike().is_some(),
     });
-    let (pixels, dirty, flash) = match look {
+    let (dirty, flash) = match look {
         Look::Classic => {
             let classic = raster.classic();
             classic
@@ -395,14 +393,13 @@ pub fn render<'r>(
             classic.hits = paint_frame(&mut paint, &stepped.frame);
             classic.signs =
                 crate::display::TextRun::signs(&board, stepped.layout.door, world.floor, theme);
-            (&classic.buf, Dirty::All, flash)
+            (Dirty::All, flash)
         }
         Look::Cutaway { scale, text } => {
             let canvas = raster
                 .cutaway
                 .get_or_insert_with(|| CutawayCanvas::new(Arc::clone(&raster.pack)));
             let CanvasFrame {
-                buf,
                 dirty,
                 flash,
                 repaint,
@@ -424,11 +421,10 @@ pub fn render<'r>(
                     ..Default::default()
                 }));
             }
-            (buf, if switched { Dirty::All } else { dirty }, flash)
+            (if switched { Dirty::All } else { dirty }, flash)
         }
     };
     Some(Rendered {
-        pixels,
         dirty,
         layout: stepped.layout,
         occupied_waypoints: stepped.frame.occupied_waypoints,

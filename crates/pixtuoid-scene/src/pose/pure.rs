@@ -10,6 +10,7 @@ use crate::layout::{
     Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def,
 };
+use crate::physics::PROGRESS_SCALE;
 use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::Sprite;
@@ -18,22 +19,22 @@ use pixtuoid_core::state::{ActivityState, AgentSlot};
 /// How long after the last event an Idle agent stays in the "thinking" pose
 /// (seated, awake, no z's) before entering the wander/sleep cycle — sized to
 /// cover typical CC thinking pauses between tool bursts.
-pub const THINKING_WINDOW_SECS: u64 = 20;
+pub(crate) const THINKING_WINDOW_SECS: u64 = 20;
 
 /// Base of the stale-resume / off-screen-gap sentinel in
 /// `walk::advance_wander` — above on-screen frame cadence, below a
 /// floor-switch-away gap. NOT the wander dwell; see `dwell_ms` for that.
-pub const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
+pub(crate) const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
 /// Maximum extra time added per agent — jitter range is `[0, RANGE)`.
-pub const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
+pub(crate) const STALE_RESUME_GAP_RANGE_MS: u64 = 6_000;
 
 /// Stateless-overlay estimate of one wander walk leg. Exact coherence with the
 /// routed timeline is impossible (core has no router, and walk legs are
 /// physics-timed only on the routed path), and `idle_pose` only needs an
 /// approximate timeline to place the occupancy overlay.
-pub const WANDER_WALK_EST_MS: u64 = 3_500;
+pub(crate) const WANDER_WALK_EST_MS: u64 = 3_500;
 /// Companion estimate: the at-waypoint dwell beat (paired with `WANDER_WALK_EST_MS`).
-pub const WANDER_DWELL_EST_MS: u64 = 18_000;
+pub(crate) const WANDER_DWELL_EST_MS: u64 = 18_000;
 
 /// The frame of typing loop `anim` for `slot` on `beat`: the art's own loop,
 /// phased by when it began typing so neighbours key out of step; the first
@@ -59,7 +60,7 @@ pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, stride: NonZeroU16) -> u
 /// The distance `t_x1000` along a leg `length` long is, both in
 /// [`travelled`](Pose::Walking::travelled)'s unit.
 pub(crate) fn distance_at(t_x1000: u16, length: u32) -> u32 {
-    u32::from(t_x1000) * length / u32::from(crate::physics::PROGRESS_SCALE)
+    u32::from(t_x1000) * length / u32::from(PROGRESS_SCALE)
 }
 
 /// How far `t_x1000` along the straight leg `from`→`to` is.
@@ -72,13 +73,13 @@ pub(crate) fn travelled_on(from: Point, to: Point, t_x1000: u16) -> u32 {
 /// attempt an entry walk and (via `FloorCtx::door_anim_max_ms`) drive door-open
 /// cosmetics. NOT the walk duration — the walk completes when
 /// `physics::walk_arrived` returns true.
-pub const ENTRY_ANIMATION_MS: u64 = 4000;
+pub(crate) const ENTRY_ANIMATION_MS: u64 = 4000;
 
 /// Per-agent stale-resume gap (ms): above this `now - last_advanced_at`,
 /// `walk::advance_wander` treats the floor as off-screen/paused and
 /// re-bootstraps analytically instead of replaying the backlog one transition
 /// per frame. Jittered per agent so floors don't re-bootstrap in lockstep.
-pub fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
+pub(crate) fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
     STALE_RESUME_GAP_BASE_MS + (agent_id.raw() >> 16) % STALE_RESUME_GAP_RANGE_MS
 }
 
@@ -96,7 +97,7 @@ fn jittered_dwell(window: DwellWindow, agent_id: AgentId, tag: u64) -> u64 {
 /// Absolute dwell (ms) an agent lingers at a waypoint, per spot kind, with
 /// per-agent jitter. A sofa / meeting seat is a long lounge; a vending grab
 /// is quick.
-pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
+pub(crate) fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
     jittered_dwell(furniture_def(kind.furniture()).dwell, agent_id, PHI3_GAMMA)
 }
 
@@ -114,7 +115,7 @@ pub fn est_wander_cycle_ms(agent_id: AgentId) -> u64 {
 
 /// Per-agent wander personality derived from the agent's id hash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Personality {
+pub(crate) struct Personality {
     /// Probability (in percent) that this agent takes a trip on a given cycle.
     pub trip_chance_pct: u8,
     /// Probability (in percent) that a trip is aimless wander rather than a
@@ -126,7 +127,7 @@ const TRIP_CHANCE_SPAN_PCT: u64 = 36;
 const AIMLESS_PREF_SPAN_PCT: u64 = 51;
 
 /// Derives an agent's wander `Personality` from its id hash.
-pub fn personality_for(agent_id: AgentId) -> Personality {
+pub(crate) fn personality_for(agent_id: AgentId) -> Personality {
     let h = agent_id.raw();
     Personality {
         trip_chance_pct: (25 + (h % TRIP_CHANCE_SPAN_PCT)) as u8,
@@ -162,7 +163,7 @@ pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: 
 
 /// The pose an agent renders this frame — the output of pose derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pose {
+pub(crate) enum Pose {
     /// Seated at the desk, idle.
     SeatedIdle,
     /// Seated at desk, awake but not typing — the agent recently finished a
@@ -184,7 +185,7 @@ pub enum Pose {
         from: Point,
         /// Leg end point (layout pixels).
         to: Point,
-        /// Progress along the leg, 0..=1000 (thousandths).
+        /// Progress along the leg, `0..=PROGRESS_SCALE`.
         t_x1000: u16,
         /// How far into the whole leg the walker is, in octile units: the
         /// tenths of a layout pixel A* measures by.
@@ -222,7 +223,7 @@ impl Pose {
 /// Priority, first match wins: exit override (walk to the door, then `None`
 /// once the window passes) → entry override (door → desk, regardless of state
 /// changes) → the state-driven pose.
-pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
+pub(crate) fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
     // The target is `door_threshold` (the on-floor point below the door), not
@@ -267,7 +268,8 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 /// distinct from the routed path's kinematic profiles — the overlay/snapshot
 /// path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
-    let t = (since_ms * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
+    let scale = u64::from(PROGRESS_SCALE);
+    let t = (since_ms * scale / ENTRY_ANIMATION_MS).min(scale) as u16;
     Pose::walking(from, to, t, false)
 }
 
@@ -304,7 +306,11 @@ fn state_driven_pose(
 /// entry walk.
 ///
 /// Returns `None` when `slot.desk_index` is out of range for `layout`.
-pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option<Pose> {
+pub(crate) fn derive_state_only(
+    slot: &AgentSlot,
+    now: SystemTime,
+    layout: &SceneLayout,
+) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
     state_driven_pose(slot, desk, layout, now)
 }
@@ -312,7 +318,7 @@ pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout
 /// Per-(agent, cycle) seed for `pick_aimless_dest`, shared by the stateless
 /// `idle_pose` and the routed `pick_wander_dest` so the two can't drift to
 /// different aimless destinations.
-pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
+pub(crate) fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
     agent_id.raw() ^ cycle_n.wrapping_mul(PHI3_GAMMA)
 }
 
@@ -324,7 +330,7 @@ pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
 ///
 /// `home_desk` is the same Point on both callers, so the result stays
 /// deterministic in `(layout, seed)` across them.
-pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> Point {
+pub(crate) fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> Point {
     let window_strip = Bounds {
         x: layout.cubicle_band.x,
         y: layout.top_margin + 1,
@@ -543,7 +549,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         Pose::SeatedIdle
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
-        let t = ((phase_t - seated_end) * 1000 / span) as u16;
+        let t = ((phase_t - seated_end) * u64::from(PROGRESS_SCALE) / span) as u16;
         Pose::walking(desk, dest, t, false)
     } else if phase_t < at_wp_end {
         at_dest_pose
@@ -552,7 +558,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         // estimate-constant change that zeroed it can't divide by zero here.
         let span = cycle_ms - at_wp_end;
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
-        let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
+        let t = ((phase_t - at_wp_end) * u64::from(PROGRESS_SCALE) / span) as u16;
         Pose::walking(dest, desk, t, target.kind.carries_coffee())
     }
 }

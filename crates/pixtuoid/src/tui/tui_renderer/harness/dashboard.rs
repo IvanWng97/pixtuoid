@@ -162,6 +162,56 @@ fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
 }
 
 #[test]
+fn connection_panel_frames_a_disconnected_rows_leftover_hooks_whole() {
+    use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
+    let health = crate::doctor::SourceDiagnostics {
+        leftover_hooks: Some(String::new()),
+        ..Default::default()
+    }
+    .summary()
+    .expect("leftover hooks have a health line");
+    let mut r = build(120, 44, vec![]);
+    let scene = scene_with(vec![], 16);
+    let rows = vec![ConnectionRow {
+        source_id: "claude-code",
+        label_prefix: "cc",
+        display_name: "Claude Code",
+        state: ConnState::Disconnected,
+        config_path: None,
+        target: None,
+        health: Some(health.clone()),
+    }];
+    r.set_frames(
+        RenderFrames {
+            connection: ConnectionFrame {
+                open: true,
+                rows,
+                live: vec![LiveInfo::default()],
+                socket_line: "socket  /tmp/p.sock".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        t0(),
+    );
+    r.render(&scene, pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    let row = text
+        .lines()
+        .find(|l| l.contains("Claude Code"))
+        .unwrap_or_else(|| panic!("the row renders:\n{text}"));
+    assert!(row.contains("disconnected"), "{row}");
+    assert!(
+        row.contains('\u{26a0}'),
+        "the row carries the health flag: {row}"
+    );
+    assert!(
+        text.contains(&health),
+        "the detail line holds it whole:\n{text}"
+    );
+}
+
+#[test]
 fn connection_panel_armed_shows_confirm_prompt() {
     use crate::panels::connection::{ConnState, ConnectionRow, LiveInfo};
     let mut r = build(120, 44, vec![]);

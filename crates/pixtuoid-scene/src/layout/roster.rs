@@ -231,7 +231,7 @@ pub enum FixtureKind {
 
 impl FixtureKind {
     /// What hovering it says, or `None` where a tooltip would be noise.
-    pub fn hover_label(self) -> Option<&'static str> {
+    pub(crate) fn hover_label(self) -> Option<&'static str> {
         Some(match self {
             FixtureKind::Desk(_) => "Desk",
             FixtureKind::FilingCabinet(_) => "Filing Cabinet",

@@ -19,29 +19,33 @@ mod windows;
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
-pub use compute::{PANTRY_COUNTER_LARGE_W, min_layout_size};
+pub(crate) use compute::PANTRY_COUNTER_LARGE_W;
+pub use compute::min_layout_size;
+pub(crate) use decor::{
+    DwellWindow, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, desk_furniture_def, desk_walk_anchor_facing,
+    seated_foot_cell,
+};
 pub use decor::{
-    ApproachSides, DESK_APPROACH, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
-    PodDecor, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, WallDecor, WaypointKind, desk_furniture_def,
-    desk_walk_anchor_facing, furniture_def, seated_foot_cell,
+    Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind, furniture_def,
 };
 pub(crate) use decor::{repels_plants, seated_sort_row};
-pub use placement::{Pivot, anchored_top_left, sort_row_at};
-pub use reach::ReachSet;
+pub(crate) use placement::{Pivot, anchored_top_left, sort_row_at};
+pub(crate) use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
 pub(crate) use rooms::pantry::{
     COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
 };
-pub(crate) use rooms::walls::WallPiece;
-pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
+pub(crate) use rooms::walls::Doorway;
+pub(crate) use rooms::walls::{WALL_THICK_H, WALL_THICK_V, WallPiece};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
+pub use roster::Station;
 pub(crate) use roster::{
     CLOCK, Depth, Fixture, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_fixtures,
     desk_chair_sort_row, desk_chair_top_left, desk_fixtures, pod_decor_fixtures,
 };
 pub use roster::{
     FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
-    NEON_PANEL_W, Station,
+    NEON_PANEL_W,
 };
 #[cfg(test)]
 pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols, desk_has_cabinet};
@@ -280,7 +284,7 @@ pub struct SceneLayout {
     /// [`Self::home_desk`]).
     pub home_desks: Vec<Point>,
     /// Facing per home desk, parallel to [`Self::home_desks`].
-    pub desk_facings: Vec<Facing>,
+    pub(crate) desk_facings: Vec<Facing>,
     /// Named stops (lounge seats, appliances, meeting slots) agents walk to.
     pub waypoints: Vec<Waypoint>,
     /// Placed potted plants.
@@ -289,9 +293,7 @@ pub struct SceneLayout {
     pub wall_decor: Vec<WallDecorItem>,
     /// Decor items placed in the aisles between 2×2 desk pods.
     pub pod_decor: Vec<PodDecorItem>,
-    /// The lounge vignette as ONE unit — `None` when it doesn't fit. Read the
-    /// individual pieces via the accessors ([`Self::couch_sprite_center`],
-    /// [`Self::floor_lamp`], …).
+    /// The lounge vignette as ONE unit — `None` when it doesn't fit.
     pub lounge: Option<Lounge>,
     /// The office entry door's top-left cell, in the window wall's last slot.
     pub door: Point,
@@ -308,7 +310,7 @@ pub struct SceneLayout {
     /// The openings the wall resolver cut into `room_walls` — the painter
     /// draws door frames from these instead of re-inferring gaps from
     /// segment adjacency.
-    pub doorways: Vec<Doorway>,
+    pub(crate) doorways: Vec<Doorway>,
     /// `room_walls` as the mask stamps them and the painters draw them, their
     /// doorways framed: built once, here.
     pub(crate) wall_pieces: Vec<WallPiece>,
@@ -317,14 +319,14 @@ pub struct SceneLayout {
     pub top_margin: u16,
     /// The full-width horizontal corridor below the desk pods — the A\* router's
     /// preferred zone and the pet/mascot path; `None` when it doesn't fit.
-    pub corridor: Option<Bounds>,
+    pub(crate) corridor: Option<Bounds>,
     /// Per-pixel walkability mask — the ground footprint every obstacle stamps,
     /// the surface routing runs over.
     pub walkable: WalkableMask,
     /// Coarse-cell reachable component (the walkable area an agent can A\*-route
     /// to) — consumed by `approach_point` to prefer a *reachable* approach side
     /// over a merely-walkable-but-walled-off one.
-    pub reachable: ReachSet,
+    pub(crate) reachable: ReachSet,
 }
 
 /// Integer percentage of `v`, floor semantics. Computed in u32: a bare
@@ -335,7 +337,7 @@ pub(crate) const fn pct(v: u16, n: u16) -> u16 {
 
 /// Padding (px) around every obstacle in the walkable mask, so characters
 /// route AROUND furniture rather than scraping along its edge.
-pub const OBSTACLE_PAD_PX: u16 = 2;
+pub(crate) const OBSTACLE_PAD_PX: u16 = 2;
 
 /// The SMALLER mask pad the waypoint (seat/appliance) stamp uses — a walkable
 /// seat sits IN the open floor and needs no routing buffer. THE single source,
@@ -348,19 +350,19 @@ pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
 /// mask blocks only down to the band bottom. The renderer derives
 /// `top_wall_h = top_margin - this`, so the mask and the visual MUST read this
 /// one source or they drift.
-pub const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
+pub(crate) const WALL_BAND_TO_TOP_MARGIN: u16 = 4;
 
 /// How many pixels of the pantry counter actually sit on the floor: only the
 /// southern base contacts the ground, the receding cabinet tops + backsplash
 /// are overhang (invariant #6), so a character routed behind the counter is
 /// occluded by its own y-sorted sprite.
-pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
+pub(crate) const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 
 /// The desk BODY size in SLOT units — the grid-pitch pricing. SLOT ≠ GROUND:
 /// the desk's blocked GROUND is the full sprite width (`decor::DESK_GROUND_W`,
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
-pub const DESK_W: u16 = 10;
+pub(crate) const DESK_W: u16 = 10;
 /// Glass columns offset from the desk sprite's left edge.
 pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 /// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
@@ -370,7 +372,7 @@ pub(crate) const DESK_LEG_ROWS: u16 = 2;
 
 /// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
 /// only `DESK_FOOT_H` deep.
-pub const DESK_H: u16 = 6;
+pub(crate) const DESK_H: u16 = 6;
 
 const _: () = assert!(
     DESK_H + 2 == DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS,
@@ -403,7 +405,7 @@ pub const CELL_ROWS: u16 = 2;
 
 /// The rows over a door whose top row is `door_y` that the terminal's floor
 /// indicator writes its text across: the whole cell above the door's.
-pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
+pub(crate) fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
     let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
     top..top + CELL_ROWS
 }
@@ -438,35 +440,37 @@ pub(crate) fn exit_sign_pos(door: Point) -> Option<Point> {
 pub const CLASSIC_OFFICE_DESKS: usize = 16;
 /// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the named default
 /// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`.
-pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
+#[cfg(test)]
+pub(crate) const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
 /// The desk-grid vertical gap unit (px) — the lounge-waypoint bound in the layout
 /// tests reads it; the pod grid itself prices its own spacing.
-pub const DESK_GAP_Y: u16 = 14;
+#[cfg(test)]
+pub(crate) const DESK_GAP_Y: u16 = 14;
 /// Floor (px) for the layout's `top_margin` — `compute::top_margin`'s
 /// percent-of-buffer derivation never shrinks the north wall band below this.
-pub const MIN_TOP_MARGIN: u16 = 20;
+pub(crate) const MIN_TOP_MARGIN: u16 = 20;
 const MIN_DUAL_MEETING_H: u16 = 80;
 
 /// Number of desks per side in a pod (`POD_SIDE * POD_SIDE` total).
-pub const POD_SIDE: u16 = 2;
+pub(crate) const POD_SIDE: u16 = 2;
 /// Gap between two desks inside the same pod — big enough that each desk
 /// reads as its own workstation, not a merged blob.
-pub const INTRA_POD_GAP_X: u16 = 12;
+pub(crate) const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
 /// [`INTRA_POD_GAP_X`]); sets the pod's inner height. Rows step by
 /// `DESK_H + this`, and that STEP must stay EVEN or the pod's two rows land on
 /// different half-block parities — so retuning either side needs both checked.
-pub const INTRA_POD_GAP_Y: u16 = 6;
+pub(crate) const INTRA_POD_GAP_Y: u16 = 6;
 const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct. Deliberately > the N-S gap: screens are
 /// landscape, so spread wider horizontally and pack tighter vertically.
-pub const INTER_POD_AISLE_X: u16 = 20;
+pub(crate) const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
 /// `every_home_desk_has_a_reachable_approach_on_its_own_far_side`: the seat's
 /// far-side approach cell collides with the desk in the row above.
-pub const INTER_POD_AISLE_Y: u16 = 18;
+pub(crate) const INTER_POD_AISLE_Y: u16 = 18;
 
 impl SceneLayout {
     /// Returns `None` if the buffer is too small for even one cubicle plus the
@@ -550,7 +554,7 @@ impl SceneLayout {
     }
 
     /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).
-    pub fn desk_facing_at(&self, pos: Point) -> Facing {
+    pub(crate) fn desk_facing_at(&self, pos: Point) -> Facing {
         self.home_desks
             .iter()
             .position(|&d| d == pos)
@@ -571,7 +575,7 @@ impl SceneLayout {
     /// The visible top window-wall band height in px (`compute` names the same
     /// quantity `top_wall_h`). Post-construction render sites read it here so
     /// the derivation lives once.
-    pub fn wall_band_h(&self) -> u16 {
+    pub(crate) fn wall_band_h(&self) -> u16 {
         self.top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN)
     }
 
@@ -583,37 +587,40 @@ impl SceneLayout {
 
     /// Couch sprite centre (middle of the 3 seats) — `Some` iff the lounge
     /// vignette fits.
-    pub fn couch_sprite_center(&self) -> Option<Point> {
+    #[cfg(test)]
+    pub(crate) fn couch_sprite_center(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.couch_center)
     }
 
     /// The lounge floor lamp — `Some` iff the vignette fits.
-    pub fn floor_lamp(&self) -> Option<Point> {
+    pub(crate) fn floor_lamp(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.floor_lamp)
     }
 
     /// The lounge side table — `Some` iff the vignette fits.
-    pub fn lounge_side_table(&self) -> Option<Point> {
+    #[cfg(test)]
+    pub(crate) fn lounge_side_table(&self) -> Option<Point> {
         self.lounge.as_ref().map(|l| l.side_table)
     }
 
     /// The aquarium centre — `Some` only when the vignette fits AND the
     /// east-clearance gate against the elevator door passes.
-    pub fn fish_tank(&self) -> Option<Point> {
+    #[cfg(test)]
+    pub(crate) fn fish_tank(&self) -> Option<Point> {
         self.lounge.as_ref().and_then(|l| l.fish_tank)
     }
 
     /// The pantry counter's size, or the `COMPACT_COUNTER` fallback
     /// when no pantry exists — `approach_point`'s signature needs SOME
     /// size even on pantry-less floors, where it is never consulted.
-    pub fn pantry_counter_size(&self) -> Size {
+    pub(crate) fn pantry_counter_size(&self) -> Size {
         self.pantry.map_or(COMPACT_COUNTER, |p| p.counter_size)
     }
 
     /// Where an agent's sprite RENDERS when it visits furniture `kind` at `pos`
     /// (the walk goal for an obstacle, the seat cell for a seat), on the side
     /// nearest `origin` facing `facing`.
-    pub fn stand_point(
+    pub(crate) fn stand_point(
         &self,
         kind: WaypointKind,
         pos: Point,
@@ -634,7 +641,7 @@ impl SceneLayout {
     /// A\*'s goal cell when an agent at `origin` visits furniture `kind` at
     /// `pos` facing `facing`. Callers MUST honor its `== pos` "no valid
     /// approach" sentinel — skip the furniture this cycle rather than route to it.
-    pub fn approach_point(
+    pub(crate) fn approach_point(
         &self,
         kind: Furniture,
         pos: Point,

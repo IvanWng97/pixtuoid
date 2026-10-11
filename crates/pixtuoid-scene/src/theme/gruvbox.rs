@@ -4,7 +4,7 @@ use super::*;
 
 /// Gruvbox Dark — retro warm amber on dark brown.
 /// Based on <https://github.com/morhetz/gruvbox>
-pub static GRUVBOX: Theme = Theme {
+pub(crate) static GRUVBOX: Theme = Theme {
     name: "gruvbox",
     kind: ThemeKind::Dark,
     surface: SurfaceColors {

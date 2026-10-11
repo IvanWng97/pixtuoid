@@ -3,7 +3,7 @@
 //! A recolored frame is stable for as long as its palette inputs are: hair/skin
 //! are `agent_id`-seeded (fixed for the agent's lifetime), and the OUTFIT is
 //! keyed on the agent's cwd — mutable mid-lifetime via a cwd backfill, which
-//! [`FrameCache::note_outfit_seed`] detects. With that one invalidation, caching
+//! `FrameCache::note_outfit_seed` detects. With that one invalidation, caching
 //! is safe.
 
 use std::collections::HashMap;
@@ -50,7 +50,7 @@ impl FrameCache {
     /// already-cached poses keep the stale outfit for the agent's lifetime while
     /// new poses render the healed one. Callers pass the exact seed the palette
     /// derives (`sim::outfit_seed_for`).
-    pub fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
+    pub(crate) fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
         match self.outfit_seeds.entry(id) {
             Entry::Occupied(mut e) => {
                 if *e.get() != seed {
@@ -74,14 +74,12 @@ impl FrameCache {
     /// Test-only inspection seam; `#[doc(hidden)]` because the cache is opaque
     /// to consumers.
     #[doc(hidden)]
+    #[expect(
+        clippy::len_without_is_empty,
+        reason = "an inspection seam, not a collection"
+    )]
     pub fn len(&self) -> usize {
         self.entries.len()
-    }
-
-    /// Paired with `len` so clippy's `len_without_is_empty` is satisfied.
-    #[doc(hidden)]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -112,11 +110,9 @@ mod tests {
     #[test]
     fn new_cache_is_empty_then_populated_after_get_or_make() {
         let mut cache = FrameCache::new();
-        assert!(cache.is_empty(), "fresh cache must be empty");
         assert_eq!(cache.len(), 0);
 
         let _ = cache.get_or_make(key(), dummy_frame);
-        assert!(!cache.is_empty(), "cache must be non-empty after a make");
         assert_eq!(cache.len(), 1);
 
         let mut computed_again = false;
