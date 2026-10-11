@@ -894,14 +894,22 @@ const F = [\"a\"];
         "a change confined to a code line MENTIONING the marker must still read as stale"
     );
 
-    // The limit: a trailing comment and a one-line block comment still count as code.
-    for edit in [
-        installed.replace("[\"a\"];", "[\"a\"]; // reworded"),
-        installed.replace("[\"a\"];", "[\"a\"]; /* reworded */"),
+    // The limit: a trailing `//` and a `/* */`, trailing or leading a line, still count as
+    // code. Each pair differs ONLY in the comment's text, so a normalizer that strips any
+    // of those forms reads the pair as equal and fails here.
+    for (one, two) in [
+        ("[\"a\"]; // one", "[\"a\"]; // two"),
+        ("[\"a\"]; /* one */", "[\"a\"]; /* two */"),
+        (
+            "/* one */ const F = [\"a\"];",
+            "/* two */ const F = [\"a\"];",
+        ),
     ] {
+        let edit = |comment: &str| installed.replace("const F = [\"a\"];", comment);
+        let (one, two) = (edit(one), edit(two));
         assert!(
-            plugin_code_differs(&edit, rendered),
-            "{edit:?}: only a whole-line `//` comment is ignored"
+            plugin_code_differs(&one, &two),
+            "{one:?} vs {two:?}: only a whole-line `//` comment is ignored"
         );
     }
 }

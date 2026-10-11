@@ -173,7 +173,7 @@ fn verify_extra_artifacts(t: &Target, issues: &mut Vec<String>, notes: &mut Vec<
 
 /// Compare one installed artifact against what this binary would render now, then stat the
 /// shim path it bakes. A config-shaped target names the EVENTS an old install is missing;
-/// a code artifact has no per-event config, so the equivalent is the whole file — nothing
+/// a code artifact has no per-event config, so the equivalent is its code — nothing
 /// re-installs on a pixtuoid upgrade, so without this an upgrader runs the plugin they
 /// connected with forever and doctor says fine.
 fn check_artifact_content(
@@ -211,9 +211,9 @@ fn check_artifact_content(
 /// `const HOOK_PATH` line (the only line that legitimately differs between what is
 /// installed, a real shim path, and what this binary would render, a placeholder),
 /// without whole-line `//` comments and without blank lines, so a comment-only edit
-/// never flags an install stale. The marker is anchored with `starts_with`, exactly as
-/// `verify::baked_hook_path` anchors: `contains` also stripped opencode's comment ABOVE
-/// the binding. A trailing `//` and a `/* */` (openclaw_plugin.js has both) still count as
+/// never flags an install stale. The marker is anchored with `starts_with`, as
+/// `verify::baked_hook_path` anchors, so a code line that merely mentions it still
+/// compares. A trailing `//` and a `/* */` (openclaw_plugin.js has both) still count as
 /// code, so editing one flags every install: no template may keep its behavior there.
 fn plugin_code(content: &str) -> String {
     content
