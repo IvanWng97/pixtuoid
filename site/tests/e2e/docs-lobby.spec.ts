@@ -98,15 +98,14 @@ test('pantry FAQ: an indented answer stays inside the chat column', async ({ pag
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto('./');
-    const overhang = await page.evaluate(() => {
+    const overhangs = await page.evaluate(() => {
       const column = document.querySelector('.pantry__chat')!.getBoundingClientRect().right;
-      return Math.max(
-        ...[...document.querySelectorAll('.pantry__bubble')].map(
-          (b) => b.getBoundingClientRect().right - column
-        )
+      return [...document.querySelectorAll('.pantry__bubble')].map(
+        (b) => b.getBoundingClientRect().right - column
       );
     });
-    expect(overhang, `${width}px`).toBeLessThanOrEqual(0);
+    expect(overhangs.length, `${width}px: no bubble rendered`).toBeGreaterThan(0);
+    expect(Math.max(...overhangs), `${width}px`).toBeLessThanOrEqual(0);
   }
 });
 

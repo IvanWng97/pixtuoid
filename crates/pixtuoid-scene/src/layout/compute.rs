@@ -69,27 +69,23 @@ pub(super) const fn band_h(buf_h: u16) -> u16 {
     usable.saturating_sub(cubicle_aisle_h(usable))
 }
 
+/// `n` percent of `v`, never under `min`.
+const fn pct_at_least(v: u16, n: u16, min: u16) -> u16 {
+    let share = pct(v, n);
+    if share > min { share } else { min }
+}
+
 const TOP_MARGIN_PCT: u16 = 30;
 
 /// The north wall band's depth — [`TOP_MARGIN_PCT`] percent of the buffer, never
 /// under [`MIN_TOP_MARGIN`].
 pub(super) const fn top_margin(buf_h: u16) -> u16 {
-    let share = pct(buf_h, TOP_MARGIN_PCT);
-    if share > MIN_TOP_MARGIN {
-        share
-    } else {
-        MIN_TOP_MARGIN
-    }
+    pct_at_least(buf_h, TOP_MARGIN_PCT, MIN_TOP_MARGIN)
 }
 
 const fn cubicle_aisle_h(usable_h: u16) -> u16 {
     const CUBICLE_AISLE_PCT: u16 = 10;
-    let share = pct(usable_h, CUBICLE_AISLE_PCT);
-    if share > MIN_CUBICLE_AISLE_H {
-        share
-    } else {
-        MIN_CUBICLE_AISLE_H
-    }
+    pct_at_least(usable_h, CUBICLE_AISLE_PCT, MIN_CUBICLE_AISLE_H)
 }
 
 /// The appliance aisle south of the pods never shrinks below this.
@@ -443,7 +439,6 @@ pub(super) fn compute_with_seed(
         &home_desks,
     );
 
-    /// How far inside the desk band's west and east edges the corridor plants stand.
     const BAND_INSET: u16 = 4;
     // NOT the pantry (a plant + pad blocks the only bridge to the cubicle area), NOT the
     // cubicle top strip (the narrow wall-to-couch gap), NOT a meeting interior (seals the
@@ -744,27 +739,27 @@ fn place_wall_decor(
         ..
     } = *plan;
     let meeting_room = plan.first_meeting_room();
-    let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
-    let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
+    let bookshelf = furniture_def(WallDecor::Bookshelf.furniture()).visual;
+    let screen = furniture_def(WallDecor::MeetingScreen.furniture()).visual;
     // A room narrower than the screen would hang it ACROSS the east wall — dropping it
     // is the same degradation as the bare meeting room.
     let meeting_screen_x = meeting_room.and_then(|mr| {
         let sx = mr.bounds.x + 1;
-        (sx + screen_w < mr.bounds.x + mr.bounds.width).then_some(sx)
+        (sx + screen.w < mr.bounds.x + mr.bounds.width).then_some(sx)
     });
-    let bookshelf_x = bookshelf_x(buf_w, screen_w, bookshelf_w, meeting_screen_x, meeting_room);
+    let bookshelf_x = bookshelf_x(buf_w, screen.w, bookshelf.w, meeting_screen_x, meeting_room);
     // WEST of the vertical divider too: on narrow trio rooms the drain clamp can push it
     // onto the wall's top segment, where it pierces the glass. Dropping reopens the apron.
     let bookshelf_east_limit = meeting_room
         .map_or(u16::MAX, |mr| mr.bounds.x + mr.bounds.width)
         .min(door.x);
     let mut wall_decor = Vec::new();
-    if bookshelf_x + bookshelf_w < bookshelf_east_limit {
+    if bookshelf_x + bookshelf.w < bookshelf_east_limit {
         wall_decor.push(WallDecorItem {
             kind: WallDecor::Bookshelf,
             pos: Point {
                 x: bookshelf_x,
-                y: top_margin.saturating_sub(furniture_def(Furniture::Bookshelf).visual.h),
+                y: top_margin.saturating_sub(bookshelf.h),
             },
         });
     }
@@ -827,7 +822,7 @@ fn place_wall_decor(
             kind: WallDecor::MeetingScreen,
             pos: Point {
                 x: sx,
-                y: top_margin.saturating_sub(furniture_def(Furniture::MeetingScreen).visual.h),
+                y: top_margin.saturating_sub(screen.h),
             },
         });
     }
@@ -863,10 +858,9 @@ fn bookshelf_x(
             // The drain term applies only where room 0 HOSTS its trio: with no sofa,
             // pushing the shelf east hangs it over a desk pod's pad, sealing the gap.
             if let Some(sofa_pad_east) = mr.sofa_east_drain_edge() {
-                /// Past the sofa's drain edge by the shelf's OWN ground pad
-                /// ([`WALL_DECOR_STAMP_PAD_PX`], NOT `OBSTACLE_PAD_PX`) + a
-                /// ≥2-px walkable channel + slack.
-                const BOOKSHELF_DRAIN_GAP: u16 = 5;
+                /// Past the sofa's drain edge by the shelf's OWN ground pad (NOT
+                /// `OBSTACLE_PAD_PX`), then a ≥2-px walkable channel plus slack.
+                const BOOKSHELF_DRAIN_GAP: u16 = WALL_DECOR_STAMP_PAD_PX + 4;
                 let spread = x.max(flush_east).max(sofa_pad_east + BOOKSHELF_DRAIN_GAP);
                 if spread + bookshelf_w < mr.bounds.x + mr.bounds.width {
                     spread
@@ -949,12 +943,11 @@ fn place_lounge(couch: Point, door: Point) -> Lounge {
     };
     let side_table = Point {
         x: flanks.side_table_x,
-        // On the couch's own base row.
         y: super::placement::centre_y_standing_on(
             super::placement::sort_row_at(
                 Pivot::Center,
                 couch,
-                furniture_def(Furniture::Couch).visual.h,
+                furniture_def(Furniture::MeetingSofaBody).visual.h,
             ),
             furniture_def(Furniture::LoungeSideTable).visual.h,
         ),

@@ -44,8 +44,9 @@ The components that handle untrusted or privileged input, and how they're bounde
    same squat-and-intercept vector on the machine-global pipe namespace (#495).
    It is a *local IPC* — there is no network
    listener. The shim is hardened to **never block the agent**: it always exits
-   `0`, within its hard watchdog bound (`WRITE_TIMEOUT`), on any error. It does
-   not execute or shell out to anything in the payload.
+   `0` on any error, and a hard watchdog bounds its send (pixtuoid-hook's
+   `transport::WRITE_TIMEOUT`). It does not execute or shell out to anything in
+   the payload.
 
 2. **The office's socket listener** binds that owner-only socket with a flock'd,
    `O_NOFOLLOW`, atomic-rename bind — only the local user can connect. The CLI's

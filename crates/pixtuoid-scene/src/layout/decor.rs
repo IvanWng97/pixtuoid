@@ -627,9 +627,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::MeetingSofaBody => {
             const VISUAL: Size = Size { w: 20, h: 7 };
             FurnitureDef {
-                // Narrower than the sprite ON PURPOSE: a full-width footprint plus pad
-                // disconnects the narrowest meeting room.
                 footprint: Some(Size {
+                    // Narrower than the sprite ON PURPOSE: a full-width footprint plus
+                    // pad disconnects the narrowest meeting room.
                     w: VISUAL.w - 2 * OBSTACLE_PAD_PX,
                     h: VISUAL.h - 2 * OBSTACLE_PAD_PX,
                 }),
