@@ -38,7 +38,7 @@ use serde_json::Value;
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Read, Upstream, Watch};
+use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
@@ -129,6 +129,7 @@ const EVENT_INVENTORY: &[Doc] = &[
 const fn inventory(path: &'static str) -> Doc {
     Doc {
         at: At::Path {
+            repo: "anomalyco/opencode",
             path,
             branch: "dev",
         },
@@ -138,34 +139,37 @@ const fn inventory(path: &'static str) -> Doc {
 }
 
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const UPSTREAM: Upstream = Upstream {
-    repo: "anomalyco/opencode",
-    watches: &[
-        Watch {
-            id: "opencode.hook_events",
-            ours: || DECODED_EVENTS.to_vec(),
-            docs: EVENT_INVENTORY,
-            read: Read::Each {
-                pattern: r#""{name}""#,
-            },
-            vanish: "the plugin subscribes to an event opencode never fires (no sprite)",
-            siblings: None,
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "opencode.hook_events",
+        ours: || DECODED_EVENTS.to_vec(),
+        docs: EVENT_INVENTORY,
+        read: Read::Each {
+            pattern: r#""{name}""#,
         },
-        Watch {
-            id: "opencode.part_statuses",
-            ours: || DECODED_PART_STATUSES.to_vec(),
-            docs: EVENT_INVENTORY,
-            // The declaration form: a bare `"error"` also matches unrelated
-            // `Omit<…, "error">` sites, which would mask a rename.
-            read: Read::Each {
-                pattern: r#"Schema\.Literal\("{name}"\)"#,
-            },
-            vanish: "tool activity decodes to nothing: sprites never go Active, or never \
-                 come back",
-            siblings: None,
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the plugin subscribes to an event opencode never fires (no sprite)",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "opencode.part_statuses",
+        ours: || DECODED_PART_STATUSES.to_vec(),
+        docs: EVENT_INVENTORY,
+        // The declaration form: a bare `"error"` also matches unrelated
+        // `Omit<…, "error">` sites, which would mask a rename.
+        read: Read::Each {
+            pattern: r#"Schema\.Literal\("{name}"\)"#,
         },
-    ],
-};
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "tool activity decodes to nothing: sprites never go Active, or never \
+             come back",
+        ),
+        siblings: None,
+    },
+];
 
 /// `session.created` / `session.deleted` → `{sessionID, info: SessionInfo}`,
 /// where `info.id` is the stable `ses_*` key, `info.directory` the cwd, and

@@ -130,33 +130,17 @@ mod tests {
     /// The extension registers EXACTLY what the decoder reads. Two lists in
     /// two languages — a TS `FORWARD` set here, `match ty` arms in
     /// `pixtuoid-core` — and no compiler can see across that gap, so they are
-    /// bound through the emitted drift surface instead. Register one the
-    /// decoder ignores and we spawn a shim per event for nothing; miss one it
-    /// reads and that signal never arrives.
+    /// bound through core's declared watch instead. Register one the decoder
+    /// ignores and we spawn a shim per event for nothing; miss one it reads and
+    /// that signal never arrives.
     #[test]
     fn the_extension_forwards_exactly_what_the_decoder_reads() {
-        let forwarded: Vec<String> = extension_forward_set()
-            .into_iter()
-            .map(str::to_string)
-            .collect();
+        let decoded: std::collections::BTreeSet<&str> =
+            pixtuoid_core::source::registry::declared_watch("omp.hook_events")
+                .map(|w| (w.ours)().into_iter().collect())
+                .expect("core watches omp's hook events");
 
-        let surface: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../pixtuoid-core/drift-surface.json"),
-            )
-            .expect("the core drift surface is committed"),
-        )
-        .expect("the drift surface parses");
-        let mut decoded: Vec<String> = surface["decoded"]["omp.hook_events"]
-            .as_array()
-            .expect("omp.hook_events is a set")
-            .iter()
-            .map(|v| v.as_str().expect("a name").to_string())
-            .collect();
-        decoded.sort();
-
-        assert_eq!(forwarded, decoded);
+        assert_eq!(extension_forward_set(), decoded);
     }
 
     /// The registered set is a TS `Set`, not a Rust const, so the `*_EVENTS`

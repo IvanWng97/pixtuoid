@@ -2,11 +2,12 @@
 //! the values our shipped artifacts bake in, emitted as data for
 //! `check_upstream_drift.py`.
 //!
-//! `pixtuoid-core` emits what the decoders READ.
-//! `every_registered_*_event_decodes` binds registered→decoded; the reverse is
-//! unbound and is the costly direction — a decode arm with no `*_EVENTS` row
-//! rendered a permission-parked CC session as WORKING. Mechanising it needs the
-//! decoded fragment to mark HOOK names; most is transcript vocabulary.
+//! What the decoders read is declared beside them (`source/upstream.rs`,
+//! `registry::declared_watch`). `every_registered_*_event_decodes` binds
+//! registered→decoded; the reverse is unbound and is the costly direction — a
+//! decode arm with no `*_EVENTS` row rendered a permission-parked CC session as
+//! WORKING. Mechanising it needs the decoded sets to mark HOOK names; most is
+//! transcript vocabulary.
 
 use std::collections::BTreeMap;
 
@@ -277,10 +278,10 @@ mod tests {
         }
     }
 
-    /// Byte-stability across feature unification — the WHY is on
-    /// `pixtuoid_core`'s twin of this test, which this deliberately duplicates
-    /// rather than share: a small walker is under the extract-a-helper bar,
-    /// and each crate's fragment has to be gated where it is emitted.
+    /// Byte-stability across feature unification: serde_json's `preserve_order`,
+    /// which `pixtuoid` asks for, keeps a `json!` literal's insertion order
+    /// under a whole-workspace build and sorts it under `-p pixtuoid`, so the
+    /// committed fragment would pass one way and fail the other.
     #[test]
     fn every_emitted_object_has_sorted_keys() {
         fn walk(v: &Value, path: &str) {

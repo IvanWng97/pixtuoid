@@ -135,13 +135,10 @@ mod tests {
         assert!(PLUGIN_TEMPLATE.contains(r#"t === "message.part.updated""#));
         forwarded.insert("message.part.updated");
 
-        let decoded: std::collections::BTreeSet<&str> = pixtuoid_core::source::registry::REGISTRY
-            .iter()
-            .flat_map(|d| d.upstream)
-            .flat_map(|up| up.watches)
-            .find(|w| w.id == "opencode.hook_events")
-            .map(|w| (w.ours)().into_iter().collect())
-            .expect("core watches opencode's hook events");
+        let decoded: std::collections::BTreeSet<&str> =
+            pixtuoid_core::source::registry::declared_watch("opencode.hook_events")
+                .map(|w| (w.ours)().into_iter().collect())
+                .expect("core watches opencode's hook events");
 
         assert_eq!(forwarded, decoded);
     }
