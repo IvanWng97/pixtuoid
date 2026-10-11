@@ -64,8 +64,6 @@ pub(crate) struct AppConfig {
 /// minimum is the pack's (`floating::geometry::min_window`).
 pub const FLOATING_DEFAULT_W: u32 = 480;
 pub const FLOATING_DEFAULT_H: u32 = 320;
-/// Below this the window is too transparent to read.
-pub(crate) const FLOATING_MIN_OPACITY: f32 = 0.2;
 
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FloatingConfigRaw {
@@ -77,8 +75,6 @@ pub(crate) struct FloatingConfigRaw {
     pub x: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f32>,
     /// Wider than the zoom it holds: a hand-edited value past it clamps
     /// instead of failing the whole file's parse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,7 +87,6 @@ pub(crate) struct FloatingConfig {
     pub height: u32,
     /// `None` lets the OS place the window.
     pub position: Option<(i32, i32)>,
-    pub opacity: f32,
     pub zoom: Zoom,
 }
 
@@ -114,7 +109,6 @@ pub(crate) fn resolve_floating(config: &AppConfig) -> FloatingConfig {
         width: raw.width.unwrap_or(FLOATING_DEFAULT_W),
         height: raw.height.unwrap_or(FLOATING_DEFAULT_H),
         position: raw.x.zip(raw.y),
-        opacity: raw.opacity.unwrap_or(1.0).clamp(FLOATING_MIN_OPACITY, 1.0),
         zoom: Zoom::new(
             raw.zoom
                 .map_or(0, |z| z.clamp(i64::from(i8::MIN), i64::from(i8::MAX)) as i8),

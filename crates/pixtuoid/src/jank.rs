@@ -177,6 +177,13 @@ impl Jank {
         self.due = Some(at);
     }
 
+    /// The frame the schedule asked for ended without being recorded (nothing
+    /// to show, or nothing changed): its due is spent, so the next redraw, one
+    /// no schedule asked for, does not count as it.
+    pub(crate) fn skipped(&mut self) {
+        self.due = None;
+    }
+
     /// Name what draws the frames from now on.
     pub(crate) fn painted_by(&mut self, painter: Painter) {
         self.painter = painter;
@@ -385,6 +392,28 @@ mod tests {
             line.contains(&format!("interval_ms={interval:?}")),
             "{line}"
         );
+    }
+
+    /// A scheduled frame that ends unrecorded spends its due: the redraw after
+    /// it, which no schedule asked for, counts neither as scheduled nor as late.
+    #[test]
+    fn a_skipped_frame_spends_its_due() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = Jank::new();
+            jank.scheduled_every(ms(33));
+            jank.due_at(t0);
+            jank.skipped();
+            jank.record(ms(1), Duration::ZERO, None, None, t0 + ms(900));
+            jank.finish(t0);
+        });
+        let line = logged
+            .lines()
+            .find(|l| l.contains("frame pacing"))
+            .unwrap_or_default();
+        assert!(line.contains("scheduled=0 "), "{line}");
+        assert!(line.contains("hitch_ms=0.0 "), "{line}");
     }
 
     /// A window that closes reports its frames' spread and janks, then starts

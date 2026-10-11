@@ -143,7 +143,6 @@ pub(crate) fn paint_overlays(
 pub(crate) trait Host {
     fn set_theme(&mut self, theme: &'static theme::Theme);
     fn navigate_floor(&mut self, floor: usize, now: SystemTime);
-    fn toggle_walkable_debug(&mut self);
     /// Repaint the whole surface.
     fn redraw(&mut self) -> anyhow::Result<()>;
 }
@@ -273,14 +272,6 @@ pub(crate) enum KeyAction {
     ToggleAudioMute,
     /// `true` = up.
     AdjustVolume(bool),
-    #[cfg_attr(
-        all(not(debug_assertions), not(test)),
-        expect(
-            dead_code,
-            reason = "only the debug-build `w` dispatch arm builds it; the apply arm stays unconditional for exhaustiveness"
-        )
-    )]
-    ToggleWalkableDebug,
     ToggleDashboard,
     DashboardUp,
     DashboardDown,
@@ -544,8 +535,6 @@ pub(crate) fn dispatch_key(
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
         KeyCode::Char('s') => KeyAction::ToggleConnection,
-        #[cfg(debug_assertions)]
-        KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
             if floor.current_floor + 1 < floor.n_floors && !floor.in_transition {
                 KeyAction::NavigateFloor(floor.current_floor + 1)
@@ -630,9 +619,6 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
                 Instant::now(),
                 cx.respawn,
             );
-        }
-        KeyAction::ToggleWalkableDebug => {
-            cx.host.toggle_walkable_debug();
         }
         KeyAction::ToggleDashboard => cx.ui.toggle_dashboard(cx.snapshot),
         KeyAction::DashboardClose => cx.ui.close_dashboard(),
@@ -847,10 +833,11 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('?'), NONE, modal(), nav()),
             KeyAction::ToggleHelp
         );
-        #[cfg(debug_assertions)]
+        // The classic's walkable debug layer is the terminal's alone: the
+        // shared dispatch, the window's too, never reads its key.
         assert_eq!(
             dispatch_key(KeyCode::Char('w'), NONE, modal(), nav()),
-            KeyAction::ToggleWalkableDebug
+            KeyAction::None
         );
         assert_eq!(
             dispatch_key(KeyCode::Char('x'), NONE, modal(), nav()),

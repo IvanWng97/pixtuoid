@@ -29,8 +29,6 @@ pub struct OfficeRenderer {
     /// The flash the last [`render_live`](Self::render_live) handed out, and
     /// the window it was for.
     rendered: (FlashPhase, (u32, u32)),
-    /// The walkable debug layer, the TUI's `w`; not persisted.
-    pub(super) debug_walkable: bool,
 }
 
 impl OfficeRenderer {
@@ -43,13 +41,7 @@ impl OfficeRenderer {
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             rendered: (FlashPhase::default(), (0, 0)),
-            debug_walkable: false,
         }
-    }
-
-    /// Show or hide the walkable debug layer.
-    pub(crate) fn toggle_walkable_debug(&mut self) {
-        self.debug_walkable = !self.debug_walkable;
     }
 
     /// The pets each floor picks its own from.
@@ -108,7 +100,7 @@ impl OfficeRenderer {
                 theme,
                 size: at.logical(),
                 place,
-                debug_walkable: self.debug_walkable,
+                debug_walkable: false,
             },
             &self.pets,
             gap,

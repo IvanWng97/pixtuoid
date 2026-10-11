@@ -414,6 +414,9 @@ impl FloatingApp {
     /// The cursor reads the frame just painted, as a press and the tooltip do.
     fn redraw(&mut self) {
         self.paint();
+        // Every early return of `paint` skips `record`, which is what spends a
+        // scheduled frame's due.
+        self.jank.skipped();
         self.recursor();
     }
 
@@ -656,8 +659,6 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.zoom,
             ));
         }
-        // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
-        // per-window opacity, and the surface composites opaque.
         self.screen = super::compose::Screen::of_window(
             winit::raw_window_handle::HasWindowHandle::window_handle(&*window)
                 .ok()

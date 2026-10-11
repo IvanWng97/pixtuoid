@@ -19,8 +19,6 @@ const SHORTCUTS: &[Shortcut] = &[
     ("t", "themes"),
     ("Tab", "agent dashboard"),
     ("s", "sources (connect / health)"),
-    #[cfg(debug_assertions)]
-    ("w", "walkable / approach / route debug"),
     ("?", "toggle this overlay"),
     ("\u{2191} \u{2193} j k", "switch floor"),
     ("PgUp / PgDn", "switch floor"),
@@ -134,6 +132,15 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    /// The walkable debug layer is the terminal's alone: the help the window
+    /// draws (shared rows only) never lists its key, and the terminal's own rows do.
+    #[test]
+    fn the_walkable_key_is_listed_only_by_the_terminal() {
+        assert!(!frame_text(140, 40, &[]).contains("walkable"));
+        let terminal = frame_text(140, 40, crate::tui::SHORTCUTS);
+        assert_eq!(terminal.contains("walkable"), cfg!(debug_assertions));
     }
 
     #[test]

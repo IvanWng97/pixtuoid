@@ -118,10 +118,10 @@ impl PopupState {
 }
 
 impl Chrome {
-    /// The panels open over a frame at `popup_scale`; the terminal's help
-    /// lists no shortcuts of its own.
+    /// The panels open over a frame at `popup_scale`, the help listing the
+    /// terminal's own shortcuts.
     fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
-        self.frames.overlays(popup_scale, &[])
+        self.frames.overlays(popup_scale, crate::tui::SHORTCUTS)
     }
 
     /// Floor `floor` of `session`'s office in `scene`, whose projection is

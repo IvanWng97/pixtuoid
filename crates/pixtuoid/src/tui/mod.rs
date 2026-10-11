@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind, MouseButton,
-    MouseEventKind,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+    MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -25,7 +25,9 @@ use tokio::time::MissedTickBehavior;
 
 use tui_renderer::TuiRenderer;
 
-use crate::panels::{FloorNav, KeyCtx, apply_key_action, dispatch_key, ui_state};
+use crate::panels::{
+    FloorNav, KeyAction, KeyCtx, ModalState, apply_key_action, dispatch_key, ui_state,
+};
 use crate::runtime::{QuitArms, QuitSignal, SceneRx};
 use pixtuoid_scene::hit::HitAction;
 use pixtuoid_scene::{pet, theme};
@@ -35,6 +37,30 @@ use pixtuoid_scene::{pet, theme};
 /// is why a local green run is no evidence. Pinned by `only_press_events_dispatch`.
 fn should_dispatch_key(kind: KeyEventKind) -> bool {
     kind == KeyEventKind::Press
+}
+
+/// What the terminal's help lists beside the shared shortcuts.
+#[cfg(debug_assertions)]
+pub(crate) const SHORTCUTS: &[crate::panels::widgets::Shortcut] =
+    &[("w", "walkable / approach / route debug")];
+#[cfg(not(debug_assertions))]
+pub(crate) const SHORTCUTS: &[crate::panels::widgets::Shortcut] = &[];
+
+/// Whether `code` was `w`, which flips the half-block painter's walkable
+/// debug layer when no panel owns input. Only the half-blocks draw that layer,
+/// so the terminal's loop reads the key itself, and the window's cutaway never
+/// sees it.
+fn read_walkable_debug_key<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    renderer: &mut TuiRenderer<B>,
+    code: KeyCode,
+    modal: &ModalState,
+) -> bool {
+    let toggles = cfg!(debug_assertions) && code == KeyCode::Char('w') && !modal.any_open();
+    if toggles {
+        let on = renderer.debug_walkable();
+        renderer.set_debug_walkable(!on);
+    }
+    toggles
 }
 
 /// The per-floor desk-capacity sweep, memoized on its own inputs.
@@ -91,11 +117,6 @@ impl<B: ratatui::backend::Backend<Error: Send + Sync + 'static>> crate::panels::
 
     fn navigate_floor(&mut self, floor: usize, now: SystemTime) {
         TuiRenderer::navigate_floor(self, floor, now);
-    }
-
-    fn toggle_walkable_debug(&mut self) {
-        let on = self.debug_walkable();
-        self.set_debug_walkable(!on);
     }
 
     fn redraw(&mut self) -> anyhow::Result<()> {
@@ -531,7 +552,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
                             current_floor: renderer.current_floor(),
                             in_transition: renderer.transition().is_some(),
                         };
-                        let action = dispatch_key(k.code, k.modifiers, ui.modal(), floor);
+                        let action = if read_walkable_debug_key(&mut renderer, k.code, &ui.modal()) {
+                            KeyAction::None
+                        } else {
+                            dispatch_key(k.code, k.modifiers, ui.modal(), floor)
+                        };
                         let quit = apply_key_action(
                             action,
                             &mut KeyCtx {
@@ -1140,7 +1165,6 @@ mod apply_key_action_tests {
             KeyAction::CloseHelp,
             KeyAction::DismissVersionPopup,
             KeyAction::OpenThemePicker,
-            KeyAction::ToggleWalkableDebug,
             KeyAction::ToggleDashboard,
             KeyAction::DashboardClose,
             KeyAction::ConnectionClose,
@@ -1182,19 +1206,48 @@ mod apply_key_action_tests {
     }
 
     /// Pins the `!` the mutation run flagged: dropping it makes the toggle a
-    /// no-op that always writes the value already there.
+    /// no-op that always writes the value already there. A panel that owns
+    /// input, and any other key, leave the layer alone.
+    #[cfg(debug_assertions)]
     #[test]
-    fn toggle_walkable_debug_flips_rather_than_sets() {
+    fn the_w_key_flips_the_walkable_layer_only_with_no_panel_open() {
+        use crate::panels::ModalState;
+        use crossterm::event::KeyCode;
+        let modal = |help_open| ModalState {
+            onboarding_open: false,
+            help_open,
+            version_popup: false,
+            theme_picker: None,
+            dashboard_open: false,
+            connection_open: false,
+            connection_confirm: false,
+            n_themes: 1,
+        };
         let mut h = Harness::new();
         let before = h.renderer.debug_walkable();
-        h.apply(KeyAction::ToggleWalkableDebug);
-        assert_eq!(
-            h.renderer.debug_walkable(),
-            !before,
-            "w must FLIP the overlay, not assign a constant"
-        );
-        h.apply(KeyAction::ToggleWalkableDebug);
+        assert!(super::read_walkable_debug_key(
+            &mut h.renderer,
+            KeyCode::Char('w'),
+            &modal(false)
+        ));
+        assert_eq!(h.renderer.debug_walkable(), !before, "w must FLIP");
+        assert!(super::read_walkable_debug_key(
+            &mut h.renderer,
+            KeyCode::Char('w'),
+            &modal(false)
+        ));
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
+        for (code, modal) in [
+            (KeyCode::Char('w'), modal(true)),
+            (KeyCode::Char('x'), modal(false)),
+        ] {
+            assert!(!super::read_walkable_debug_key(
+                &mut h.renderer,
+                code,
+                &modal
+            ));
+            assert_eq!(h.renderer.debug_walkable(), before);
+        }
     }
 
     /// `delete -` on either `-1` makes Up behave as Down. The panels are
