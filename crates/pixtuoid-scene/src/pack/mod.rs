@@ -51,7 +51,7 @@ impl Desk {
     }
 
     /// Its art.
-    pub fn piece(self) -> Piece {
+    pub(crate) fn piece(self) -> Piece {
         match self {
             Desk::South => Piece::Desk,
             Desk::North => Piece::DeskNorth,
@@ -86,7 +86,7 @@ pub enum DeskProp {
 
 impl DeskProp {
     /// The `@mark` a desk's first frame names it by.
-    pub fn mark(self) -> &'static str {
+    pub(crate) fn mark(self) -> &'static str {
         match self {
             DeskProp::Cup => "cup",
             DeskProp::Tower => "tower",
@@ -212,7 +212,7 @@ impl OfficeArt {
     ///
     /// If a desk leaves a prop or its bulb out, the clock its face, or an
     /// icon its art.
-    pub fn parse(pack: Pack) -> Result<Self, ArtError> {
+    pub(crate) fn parse(pack: Pack) -> Result<Self, ArtError> {
         let desks = EnumMap::try_from_fn(|desk: Desk| {
             Densities::of(&pack, desk.piece(), |sprite, density| {
                 read_desk(desk, sprite, density)

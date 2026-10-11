@@ -690,7 +690,7 @@ fn agent_matching(pred: impl Fn(AgentId) -> bool) -> AgentId {
 }
 
 /// Build an Idle slot whose SeatedThinking gate releases `hold_ms` into the
-/// Idle period: `last_event_at = state_started_at - (THINKING_WINDOW - hold)`.
+/// Idle period.
 fn thinking_slot(id: AgentId, hold_ms: u64) -> AgentSlot {
     let (mut s, _) = slot(ActivityState::Idle, 0);
     s.agent_id = id;

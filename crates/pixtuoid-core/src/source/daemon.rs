@@ -52,13 +52,14 @@ pub enum DaemonPresenceUpdate {
         /// Correlates this turn with its later `RunEnded`/`RunFailed`.
         run_key: String,
     },
-    /// `agent_end` with `success: true` — a turn completed OK.
+    /// A turn ended without a backend failure — completed, or cancelled by the
+    /// user.
     RunEnded {
         /// The completed turn's correlation key (matches its `RunStarted`).
         run_key: String,
     },
-    /// `agent_end` with `success: false` — a turn FAILED (the model backend is
-    /// broken: auth revoked, provider down). Drives `Degraded`.
+    /// A turn failed on the daemon's model backend (auth revoked, provider down).
+    /// Drives `Degraded`.
     RunFailed {
         /// The failed turn's correlation key (matches its `RunStarted`).
         run_key: String,
@@ -137,19 +138,19 @@ pub struct DecodedPresence {
 pub struct PresenceTtl {
     /// Grace before busy → idle when no `before_agent_run`/`agent_end` arrives
     /// (a dropped `agent_end` must self-heal, never strand perpetual busy).
-    pub busy_decay_ms: u64,
+    pub(crate) busy_decay_ms: u64,
     /// With no activity for this long the daemon is presumed DOWN (covers
     /// SIGTERM, where neither `session_end` nor `gateway_stop` fires).
-    pub presence_ttl_ms: u64,
+    pub(crate) presence_ttl_ms: u64,
     /// How long a `Down` presence lingers (drawn walking out) before it is
     /// REMOVED — generously past the renderer's elevator walk-out, so the leave
     /// animation always completes first.
-    pub down_remove_ms: u64,
+    pub(crate) down_remove_ms: u64,
 }
 
 impl PresenceTtl {
     /// The default decay profile (OpenClaw's).
-    pub const DEFAULT: PresenceTtl = PresenceTtl {
+    pub(crate) const DEFAULT: PresenceTtl = PresenceTtl {
         busy_decay_ms: 30_000,
         presence_ttl_ms: 5 * 60 * 1_000,
         down_remove_ms: 5_000,
@@ -567,7 +568,7 @@ mod tests {
             assert_eq!(
                 st(&s, src),
                 DaemonState::Degraded,
-                "agent_end.success:false ⇒ degraded"
+                "a failed run ⇒ degraded"
             );
             assert!(
                 p(&s, src).in_flight_runs.is_empty(),

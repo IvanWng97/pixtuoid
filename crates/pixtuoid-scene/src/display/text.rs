@@ -164,7 +164,7 @@ pub enum Content {
 
 impl Content {
     /// It as a terminal writes it: an icon as its glyph.
-    pub fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         match self {
             Self::Text(text) => text,
             Self::Icon(icon) => icon.terminal(),
@@ -206,7 +206,7 @@ impl Badge {
             at: anchor,
             marker: ink.marker,
             name: TextSpan::new(text, ink.name),
-            plate: crate::badge::badge_plate(theme),
+            plate: crate::badge::badge_plate_colour(theme),
         }
     }
 
@@ -331,7 +331,7 @@ impl TextRun {
                     content,
                 })
                 .collect(),
-            plate: Some(crate::badge::badge_plate(theme)),
+            plate: Some(crate::badge::badge_plate_colour(theme)),
             strip: None,
             role: TextRole::Indicator,
         }

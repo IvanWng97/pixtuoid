@@ -15,7 +15,7 @@ use crate::pet::{PetKind, PetState};
 pub const REPO_URL: &str = env!("CARGO_PKG_REPOSITORY");
 
 /// Where the coffee machine links.
-pub const COFFEE_URL: &str = "https://buymeacoffee.com/IvanWng97";
+pub(crate) const COFFEE_URL: &str = "https://buymeacoffee.com/IvanWng97";
 
 /// What an area shows the pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

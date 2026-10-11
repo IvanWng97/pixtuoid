@@ -139,7 +139,8 @@ fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
             inputs(&scene, &pack, t0 + Duration::from_millis(ms)),
         )
         .expect("lays out");
-        (r.dirty, (r.pixels.width(), r.pixels.height()))
+        let px = floor.raster.pixels().expect("drawn");
+        (r.dirty, (px.width(), px.height()))
     };
     let classic_size = (SIZE.w, SIZE.h);
     let cutaway_size = (scale.to_buffer(SIZE.w), scale.to_buffer(SIZE.h));
@@ -164,35 +165,6 @@ fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
         canvas,
         "switching back rebuilt the cutaway's canvas"
     );
-}
-
-#[test]
-fn reset_sprite_cache_clears_cached_sprites() {
-    use crate::frame_cache::FrameKey;
-    use pixtuoid_core::sprite::Frame;
-
-    let mut raster = Raster::new(Arc::new(crate::pack::test_office()));
-    // Prime the cache, so the assertion below distinguishes a real reset from a
-    // no-op on an already-empty cache.
-    raster.classic().caches.sprites.get_or_make(
-        FrameKey {
-            agent_id: AgentId::from_parts("test", "agent"),
-            anim_name: pixtuoid_core::sprite::format::Piece::Seated,
-            frame_idx: 0,
-            flip_x: false,
-            glow_tint: None,
-            burn: crate::burn::BurnTier::Normal,
-            density: pixtuoid_core::sprite::format::Density::ONE,
-        },
-        Frame::default,
-    );
-    assert_eq!(
-        raster.classic().caches.sprites.len(),
-        1,
-        "priming populates it"
-    );
-    raster.reset_sprite_cache();
-    assert_eq!(raster.classic().caches.sprites.len(), 0, "reset clears it");
 }
 
 /// A refused frame shows the bare floor, so nothing hover named on the last
@@ -250,10 +222,8 @@ fn a_cutaway_leaving_its_text_to_the_host_hands_over_the_classics() {
             scale: RenderScale::new(4).expect("nonzero"),
             text,
         };
-        let pixels = render(&mut floor, office.stores(), look, inputs(&scene, &pack, t0))
-            .expect("lays out")
-            .pixels
-            .clone();
+        render(&mut floor, office.stores(), look, inputs(&scene, &pack, t0)).expect("lays out");
+        let pixels = floor.raster.pixels().expect("drawn").clone();
         (floor, pixels)
     };
     let (baked, baked_px) = frame(WorldText::Baked);

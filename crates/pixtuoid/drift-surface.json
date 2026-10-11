@@ -78,7 +78,8 @@
       "session_start",
       "session_end",
       "before_agent_run",
-      "agent_end"
+      "agent_end",
+      "model_call_ended"
     ],
     "reasonix": [
       "SessionStart",

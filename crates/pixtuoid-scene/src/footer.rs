@@ -232,11 +232,6 @@ impl<'a> FooterInputs<'a> {
             context,
         }
     }
-
-    /// The drawn floor's [`StateCounts`].
-    pub fn counts(&self) -> StateCounts {
-        self.counts
-    }
 }
 
 /// Every footer input the drawn floor's scene can't supply; `per_floor` and
@@ -248,16 +243,16 @@ pub struct FooterContext<'a> {
     pub floor: Option<FooterFloor>,
     /// "You would hear sound right now": audio live AND not effectively muted
     /// (m-state OR pause).
-    pub audio_audible: bool,
+    pub(crate) audio_audible: bool,
     /// Transient +/- readout: `Some(percent)` just after a volume nudge —
     /// renders as `♩ N%`.
-    pub volume_flash: Option<u8>,
+    pub(crate) volume_flash: Option<u8>,
     /// Pre-merged one-line death>drift warning; `None` while healthy.
-    pub source_warning: Option<&'a str>,
+    pub(crate) source_warning: Option<&'a str>,
     /// The stats-tier right keybind tail.
-    pub keys_stats: &'a str,
+    pub(crate) keys_stats: &'a str,
     /// The alert-tier right keybind tail.
-    pub keys_alert: &'a str,
+    pub(crate) keys_alert: &'a str,
 }
 
 impl<'a> FooterContext<'a> {

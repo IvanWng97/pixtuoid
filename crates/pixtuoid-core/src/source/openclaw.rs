@@ -111,22 +111,14 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
             run_key: run_key(obj),
         }],
         "agent_end" => {
-            // `success` alone is NOT enough for Degraded: upstream builds it as
-            // `!aborted && !promptError`, so a user CANCELLING a turn produces the
-            // same `false` as a provider outage — and Degraded is sticky (no TTL
-            // heals it), which would latch the mascot into "model error" until the
-            // next run. The plugin's `errored` (the mere PRESENCE of upstream's
-            // `error`, as a bare boolean because the string can embed prompt content)
-            // separates the two. Both defaults favour an older plugin forwarding
-            // neither field: never false-degrade a healthy gateway, never make one
-            // un-degradable.
-            let ok = obj.get("success").and_then(|s| s.as_bool()).unwrap_or(true);
-            let errored = obj.get("errored").and_then(|v| v.as_bool()).unwrap_or(true);
+            // The plugin's `errored` is the run's verdict. Degraded is sticky (no TTL
+            // heals it), so a missing field is no evidence of an error.
+            let failed = obj.get("errored").and_then(Value::as_bool) == Some(true);
             let run_key = run_key(obj);
-            vec![if ok || !errored {
-                DaemonPresenceUpdate::RunEnded { run_key }
-            } else {
+            vec![if failed {
                 DaemonPresenceUpdate::RunFailed { run_key }
+            } else {
+                DaemonPresenceUpdate::RunEnded { run_key }
             }]
         }
         // An unmapped forwarded hook is a benign skip, but it breadcrumbs at `warn`:
@@ -251,39 +243,36 @@ mod tests {
         );
     }
 
+    /// `success` says nothing of a provider failure; the plugin's `errored` does.
     #[test]
-    fn agent_end_success_false_decodes_to_run_failed() {
-        assert_eq!(
-            decode(
-                json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1",
-                          "success": false, "errored": true})
-            ),
-            vec![DaemonPresenceUpdate::RunFailed {
-                run_key: "run_1".into()
-            }]
-        );
-        assert_eq!(
-            decode(
-                json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1", "success": false})
-            ),
-            vec![DaemonPresenceUpdate::RunFailed {
-                run_key: "run_1".into()
-            }]
-        );
+    fn errored_alone_decides_a_failed_run() {
+        for success in [true, false] {
+            assert_eq!(
+                decode(json!({"type": "agent_end", "runId": "r", "sessionId": "s",
+                              "success": success, "errored": true})),
+                vec![DaemonPresenceUpdate::RunFailed {
+                    run_key: "r".into()
+                }],
+                "success: {success}"
+            );
+        }
     }
 
     #[test]
     fn a_cancelled_turn_ends_the_run_without_degrading_the_gateway() {
-        assert_eq!(
-            decode(
-                json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1",
-                          "success": false, "errored": false})
-            ),
-            vec![DaemonPresenceUpdate::RunEnded {
-                run_key: "run_1".into()
-            }],
-            "an abort is an ordinary end, not a degradation"
-        );
+        for v in [
+            json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1",
+                      "success": false, "errored": false}),
+            json!({"type": "agent_end", "runId": "run_1", "sessionId": "s1", "success": false}),
+        ] {
+            assert_eq!(
+                decode(v.clone()),
+                vec![DaemonPresenceUpdate::RunEnded {
+                    run_key: "run_1".into()
+                }],
+                "an abort is an ordinary end, not a degradation: {v}"
+            );
+        }
     }
 
     #[test]
@@ -312,7 +301,8 @@ mod tests {
             ]
         );
         assert_eq!(
-            decode(json!({"type": "agent_end", "runId": "r", "_pid": 8888, "success": false})),
+            decode(json!({"type": "agent_end", "runId": "r", "_pid": 8888,
+                          "success": false, "errored": true})),
             vec![
                 DaemonPresenceUpdate::PidSeen { pid: 8888 },
                 DaemonPresenceUpdate::RunFailed {

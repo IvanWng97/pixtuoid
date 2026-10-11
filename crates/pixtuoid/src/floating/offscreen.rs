@@ -1,12 +1,9 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
-//!
-//! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
 
-use pixtuoid_scene::flash::{FlashHold, FlashPhase};
+use pixtuoid_scene::flash::FlashHold;
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
@@ -24,11 +21,8 @@ pub struct OfficeRenderer {
     pointer: Pointer,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// The flash the window shows.
-    flash: FlashHold<FlashPhase, (u32, u32)>,
-    /// The flash the last [`render_live`](Self::render_live) handed out, and
-    /// the window it was for.
-    rendered: (FlashPhase, (u32, u32)),
+    /// The flashes the window shows.
+    flash: FlashHold<(u32, u32)>,
     /// The walkable debug layer, the TUI's `w`; not persisted.
     pub(super) debug_walkable: bool,
 }
@@ -42,7 +36,6 @@ impl OfficeRenderer {
             pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            rendered: (FlashPhase::default(), (0, 0)),
             debug_walkable: false,
         }
     }
@@ -123,18 +116,18 @@ impl OfficeRenderer {
     /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
     /// when the flash hold keeps it back, so the window keeps the last. A
     /// frame shown is [`presented`](Self::presented) once it shows.
-    pub fn render_live(
+    pub(crate) fn render_live(
         &mut self,
         at: PixelFit,
         frame: WindowFrame<'_>,
         window: (u32, u32),
     ) -> bool {
         self.render(at, frame);
-        let flash = self.session.flash();
-        if self.flash.holds(flash, window) {
+        let flashes = self.session.flashes();
+        if self.flash.holds(flashes, window) {
             return false;
         }
-        self.rendered = (flash, window);
+        self.flash.stage(flashes, window);
         true
     }
 
@@ -145,8 +138,8 @@ impl OfficeRenderer {
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
-    pub fn presented(&mut self) {
-        self.flash.shown(self.rendered.0, self.rendered.1);
+    pub(crate) fn presented(&mut self) {
+        self.flash.landed();
     }
 
     /// A left press at `cursor` (physical px) in a `window`-sized window
@@ -161,13 +154,12 @@ impl OfficeRenderer {
         at: PixelFit,
         pressing: Pressing<'_>,
     ) -> Press {
-        if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+        let Under::Office(hit) = under(&self.session, cursor, window, at) else {
             // As any press does: a carry whose release never came ends here.
             self.cancel_pointer();
             return Press::Resize;
-        }
+        };
         let unit = unit_at(cursor, at);
-        let hit = self.session.hit_at(unit_bounds(unit));
         // The slop in this window's units, at least one.
         let slop_px = DRAG_SLOP_DIP * pressing.scale_factor;
         let units = (slop_px / f64::from(at.scale().get().max(1)))
@@ -183,6 +175,28 @@ impl OfficeRenderer {
         match down.pressed {
             Pressed::Something => Press::Pointer,
             Pressed::Bare => Press::Drag,
+        }
+    }
+
+    /// The pointer's shape at `cursor` in a `window`-sized window drawn at
+    /// `at`, under the panels `modal`: a closed hand while it carries a
+    /// figure, else the arrow under a panel, which takes every press, else
+    /// what a press there does ([`cursor_for`]).
+    pub(crate) fn cursor_icon(
+        &self,
+        cursor: (f64, f64),
+        window: (u32, u32),
+        at: PixelFit,
+        modal: &crate::panels::ModalState,
+        petting: Option<&pixtuoid_scene::pet::PetState>,
+        now: std::time::SystemTime,
+    ) -> winit::window::CursorIcon {
+        if self.carrying() {
+            winit::window::CursorIcon::Grabbing
+        } else if modal.any_open() {
+            winit::window::CursorIcon::Default
+        } else {
+            cursor_for(under(&self.session, cursor, window, at), petting, now)
         }
     }
 
@@ -251,7 +265,7 @@ impl OfficeRenderer {
         cursor: (f64, f64),
         at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
-        self.session.hit_at(unit_bounds(unit_at(cursor, at)))
+        hit_in(&self.session, cursor, at)
     }
 
     /// Where the last frame may differ from the one on screen before it.
@@ -282,6 +296,59 @@ impl OfficeRenderer {
             ),
         );
         build_footer(&inputs, budget)
+    }
+}
+
+/// What a press at a window point lands on: the resize corner, else what the
+/// frame on screen shows there. A press and the cursor both read it, so the
+/// cursor shows what a press would do.
+#[derive(Debug, Clone, Copy)]
+enum Under<'a> {
+    Corner,
+    Office(Option<pixtuoid_scene::hit::SceneHit<'a>>),
+}
+
+/// What `cursor` (physical px) is over in a `window`-sized window showing
+/// `session`'s last frame at `at`.
+fn under<'a>(
+    session: &'a OfficeSession,
+    cursor: (f64, f64),
+    window: (u32, u32),
+    at: PixelFit,
+) -> Under<'a> {
+    if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
+        Under::Corner
+    } else {
+        Under::Office(hit_in(session, cursor, at))
+    }
+}
+
+fn hit_in(
+    session: &OfficeSession,
+    cursor: (f64, f64),
+    at: PixelFit,
+) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
+    session.hit_at(unit_bounds(unit_at(cursor, at)))
+}
+
+/// What a press on `under` affords, as its cursor, in CSS UI 3's names
+/// (<https://www.w3.org/TR/css-ui-3/#cursor>, which winit's `CursorIcon`
+/// takes): a hand where a click acts, an open hand on a figure a press only
+/// lifts, the resize arrow, else the arrow where a press drags the window.
+fn cursor_for(
+    under: Under<'_>,
+    petting: Option<&pixtuoid_scene::pet::PetState>,
+    now: std::time::SystemTime,
+) -> winit::window::CursorIcon {
+    use pixtuoid_scene::interact::Affordance;
+    use winit::window::CursorIcon;
+    match under {
+        Under::Corner => CursorIcon::NwseResize,
+        Under::Office(hit) => match Affordance::of(hit, petting, now) {
+            Affordance { click: Some(_), .. } => CursorIcon::Pointer,
+            Affordance { lift: Some(_), .. } => CursorIcon::Grab,
+            Affordance { .. } => CursorIcon::Default,
+        },
     }
 }
 
@@ -439,6 +506,15 @@ mod tests {
             }
         }
 
+        /// [`Self::new`], with a busy floor above the empty one to slide to.
+        fn with_a_floor_above(weather: pixtuoid_scene::sky::WeatherPolicy) -> Self {
+            let cap = 8;
+            Self {
+                scene: scene_with(vec![active_on("/p/upstairs.jsonl", 1, cap)], cap),
+                ..Self::new(weather)
+            }
+        }
+
         /// What the window shows after its redraw at `now`, as `window.rs`
         /// presents it.
         fn present(&mut self, now: SystemTime) -> RgbBuffer {
@@ -492,8 +568,7 @@ mod tests {
     /// to pass on the screen clock, though its frame's own clock says it has.
     #[test]
     fn a_slow_presents_phase_holds_the_floor_from_when_it_lands() {
-        use crate::test_flash::storm_strike;
-        const SLOW: Duration = Duration::from_millis(60);
+        use crate::test_flash::{SLOW, storm_strike};
         let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
         let strike = storm_strike();
         let [first, second] = [strike.changes[0], strike.changes[1]];
@@ -585,8 +660,131 @@ mod tests {
                 shown = presented;
             }
             let at = format!("a frame each {frame:?} from +{offset:?}");
-            assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+            assert_each_phase_holds_the_floor(&changed, stutter.changes.len(), &at);
         }
+    }
+
+    /// When a slide starts, against the frames
+    /// [`assert_a_slide_holds_the_floor`] names.
+    #[derive(Debug, Clone, Copy)]
+    enum Slide {
+        /// At `late`, after its frame: `held` is the slide's first.
+        Starting,
+        /// At the frame before `late`.
+        Under,
+        /// So it lands on `held`.
+        Ending,
+    }
+
+    /// How long a floor slide takes, whichever floors it joins.
+    fn slide_length() -> Duration {
+        let mut probe = OfficeRenderer::new(crate::test_flash::pack_arc());
+        probe.navigate(1, SystemTime::UNIX_EPOCH);
+        let slide = probe.nav().transition().expect("a slide");
+        Duration::from_millis(slide.duration_ms)
+    }
+
+    /// In `window` sliding to floor `to` as `slide` says, the phase from
+    /// `changes[0]` holds the floor from `late`, its first frame a quarter
+    /// floor before `changes[1]`: `held`, the next phase's first frame,
+    /// waits, and the first frame the floor after `late` shows.
+    fn assert_a_slide_holds_the_floor(
+        window: &mut Window,
+        changes: [SystemTime; 2],
+        slide: Slide,
+        to: usize,
+    ) {
+        let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+        // A phase apart: a starved tube catches only across a step no longer
+        // than its shortest catch.
+        let [before, late] = changes.map(|change| change - floor / 4);
+        let held = changes[1];
+        let from = window.renderer.nav().current();
+        // Where the window is, and the floor it slides to.
+        let (starts, nav) = match slide {
+            Slide::Starting => (late, [(from, None), (from, Some(to))]),
+            Slide::Under => (before, [(from, Some(to)); 2]),
+            Slide::Ending => (held - slide_length(), [(from, Some(to)), (to, None)]),
+        };
+        let [_, at_late, at_held, at_after] = [before, late, held, late + floor].map(|now| {
+            if starts < now {
+                window.renderer.navigate(to, starts);
+            }
+            let shown = window.present(now);
+            let nav = window.renderer.nav();
+            (
+                shown,
+                (nav.current(), nav.transition().map(|tr| tr.to_floor)),
+            )
+        });
+        assert_eq!(
+            [at_late.1, at_held.1],
+            nav,
+            "{slide:?}: where the window is"
+        );
+        assert!(
+            at_held.0.as_slice() == at_late.0.as_slice(),
+            "{slide:?}: held under the floor"
+        );
+        assert!(
+            at_after.0.as_slice() != at_late.0.as_slice(),
+            "{slide:?}: shown once it has"
+        );
+    }
+
+    /// A strike lights both floors of a slide, so a phase holds the floor on
+    /// a slide's first frame, under way, and on the first frame after.
+    #[test]
+    fn a_strike_phase_holds_the_floor_across_a_floor_slide() {
+        let strike = crate::test_flash::storm_strike();
+        for slide in [Slide::Starting, Slide::Under, Slide::Ending] {
+            let mut window = Window::with_a_floor_above(strike.weather);
+            assert_a_slide_holds_the_floor(
+                &mut window,
+                [strike.changes[0], strike.changes[1]],
+                slide,
+                1,
+            );
+        }
+    }
+
+    /// A starved neon's catch holds the floor as a slide leaves its floor,
+    /// which is off screen by the slide's end.
+    #[test]
+    fn a_stutter_phase_holds_the_floor_as_a_slide_leaves_it() {
+        let stutter = crate::test_flash::starved_stutter();
+        for slide in [Slide::Starting, Slide::Under] {
+            let mut window = Window::with_a_floor_above(stutter.weather);
+            for at in stutter.setup {
+                window.present(at);
+            }
+            assert_a_slide_holds_the_floor(
+                &mut window,
+                [stutter.changes[0], stutter.changes[1]],
+                slide,
+                1,
+            );
+        }
+    }
+
+    /// A starved neon's catch holds the floor as a slide arrives at its
+    /// floor, on the first frame after the slide, which shows that floor
+    /// whole.
+    #[test]
+    fn a_stutter_phase_holds_the_floor_as_a_slide_arrives_at_it() {
+        let stutter = crate::test_flash::starved_stutter();
+        let mut window = Window::with_a_floor_above(stutter.weather);
+        let [emptied, starved] = stutter.setup;
+        // The ground floor empties, and starves while the window is upstairs.
+        window.present(emptied);
+        window.renderer.navigate(1, emptied);
+        window.present(starved);
+        assert_a_slide_holds_the_floor(
+            &mut window,
+            [stutter.changes[0], stutter.changes[1]],
+            Slide::Ending,
+            0,
+        );
     }
 
     /// A press acts on what the frame on screen shows under it: an agent's
@@ -595,36 +793,8 @@ mod tests {
     #[test]
     fn a_press_hits_what_the_frame_shows_there() {
         use pixtuoid_scene::hit::{HitAction, SceneHit};
-        let pack = std::sync::Arc::new(
-            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
-        );
-        let agent = active_on("/p/a.jsonl", 0, 0);
-        let id = agent.agent_id;
-        let scene = scene_with(vec![agent], 16);
-        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let window = PhysicalSize::new(960u32, 640u32);
-        let at = window_geometry(window, pack.max_density_variant(), Zoom::default());
-        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
-        renderer
-            .render(
-                at,
-                WindowFrame {
-                    world: FloorInputs {
-                        scene: &scene,
-                        pack: &pack,
-                        now,
-                        floor: FloorMeta::ground(),
-                        pets: PetInputs::default(),
-                    },
-                    theme,
-                    place: pixtuoid_scene::look::Place::default(),
-                },
-            )
-            .expect("a frame");
-        let centre =
-            |u: u16| f64::from(u) * f64::from(at.scale().get()) + f64::from(at.scale().get()) / 2.0;
-        let size = (window.width, window.height);
+        let (mut renderer, at, size, now, id) = one_agent_office();
+        let centre = |u: u16| unit_centre(u, at);
         let (mut hit_agent, mut dragged, mut fixture_drags, mut on_agent) =
             (false, false, false, None);
         for y in 0..at.logical().h {
@@ -672,10 +842,7 @@ mod tests {
         assert!(hit_agent, "no click found the agent the frame drew");
         assert!(dragged, "no bare unit to drag the window by");
         assert!(fixture_drags, "the frame drew no labelled fixture");
-        let corner = (
-            f64::from(window.width) - 1.0,
-            f64::from(window.height) - 1.0,
-        );
+        let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
         assert_eq!(
             renderer.press_at(
                 corner,
@@ -1046,6 +1213,180 @@ mod tests {
             on_floor.contains(&pixtuoid_scene::audio::OneShot::DoorChime),
             "a ground-floor walk-in must chime the floating window: {on_floor:?}"
         );
+    }
+
+    /// The pointer shows what a press there does, in CSS UI 3's names: a
+    /// hand where a click acts, an open hand on a figure a press only lifts,
+    /// the resize arrow in the corner, and the arrow where a press drags the
+    /// window.
+    #[test]
+    fn the_cursor_shows_what_a_press_there_does() {
+        use pixtuoid_core::source::daemon::DaemonInstanceKey;
+        use pixtuoid_core::state::DaemonInstanceId;
+        use pixtuoid_scene::display::{HoverTarget, PetHover};
+        use pixtuoid_scene::hit::SceneHit;
+        use pixtuoid_scene::pet::{PetKind, PetState};
+        use winit::window::CursorIcon;
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let agent = HoverTarget::Agent(pixtuoid_core::AgentId::from_transcript_path("/p/a.jsonl"));
+        let mascot = HoverTarget::Mascot(DaemonInstanceKey::new(
+            "openclaw",
+            DaemonInstanceId::new("18789").expect("non-empty"),
+        ));
+        let pet = HoverTarget::Pet(PetHover {
+            kind: PetKind::Cat,
+            centre: pixtuoid_scene::layout::Point { x: 0, y: 0 },
+            anim: pixtuoid_core::sprite::format::Piece::CatSit,
+        });
+        let playing = PetState {
+            petted_at: now,
+            kind: PetKind::Cat,
+            floor_idx: 0,
+        };
+        for (under, petting, want) in [
+            (Under::Corner, None, CursorIcon::NwseResize),
+            (
+                Under::Office(Some(SceneHit::Figure(&agent))),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Star)),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Coffee)),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&pet))),
+                None,
+                CursorIcon::Pointer,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&pet))),
+                Some(&playing),
+                CursorIcon::Grab,
+            ),
+            (
+                Under::Office(Some(SceneHit::Figure(&mascot))),
+                None,
+                CursorIcon::Grab,
+            ),
+            (
+                Under::Office(Some(SceneHit::Furniture("plant"))),
+                None,
+                CursorIcon::Default,
+            ),
+            (Under::Office(None), None, CursorIcon::Default),
+        ] {
+            assert_eq!(
+                cursor_for(under, petting, now),
+                want,
+                "{under:?}, petting {}",
+                petting.is_some()
+            );
+        }
+    }
+
+    /// Over the office drawn, the cursor reads what the frame shows: the hand
+    /// on its agent, the resize arrow in the corner, a closed hand while a
+    /// figure is carried, even under a panel, and the arrow under a panel.
+    #[test]
+    fn the_cursor_reads_the_frame_on_screen() {
+        use winit::window::CursorIcon;
+        let (mut renderer, at, size, now, _) = one_agent_office();
+        let closed = closed_modal();
+        let open = crate::panels::ModalState {
+            help_open: true,
+            ..closed_modal()
+        };
+        let icon = |r: &OfficeRenderer, cursor, modal: &crate::panels::ModalState| {
+            r.cursor_icon(cursor, size, at, modal, None, now)
+        };
+        let on_agent = agent_point(&renderer, at, now);
+        assert_eq!(icon(&renderer, on_agent, &closed), CursorIcon::Pointer);
+        assert_eq!(icon(&renderer, on_agent, &open), CursorIcon::Default);
+        let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
+        assert_eq!(icon(&renderer, corner, &closed), CursorIcon::NwseResize);
+        renderer.press_at(
+            on_agent,
+            size,
+            at,
+            Pressing {
+                scale_factor: 1.0,
+                petting: None,
+                now,
+            },
+        );
+        let away = (on_agent.0 + 10.0 * f64::from(at.scale().get()), on_agent.1);
+        assert!(renderer.pointer_moved(away, at), "the move lifts it");
+        assert_eq!(icon(&renderer, away, &closed), CursorIcon::Grabbing);
+        assert_eq!(icon(&renderer, away, &open), CursorIcon::Grabbing);
+    }
+
+    /// One agent's office drawn in a 960×640 window: the renderer, the fit
+    /// it drew at, the window, the instant, and the agent.
+    fn one_agent_office() -> (
+        OfficeRenderer,
+        PixelFit,
+        (u32, u32),
+        SystemTime,
+        pixtuoid_core::AgentId,
+    ) {
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        let scene = scene_with(vec![agent], 16);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let window = PhysicalSize::new(960u32, 640u32);
+        let at = window_geometry(window, pack.max_density_variant(), Zoom::default());
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        renderer
+            .render(
+                at,
+                WindowFrame {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    place: pixtuoid_scene::look::Place::default(),
+                },
+            )
+            .expect("a frame");
+        (renderer, at, (window.width, window.height), now, id)
+    }
+
+    /// The window px at the centre of layout unit `u` drawn at `at`.
+    fn unit_centre(u: u16, at: PixelFit) -> f64 {
+        f64::from(u) * f64::from(at.scale().get()) + f64::from(at.scale().get()) / 2.0
+    }
+
+    /// A window point on the agent the frame drew.
+    fn agent_point(renderer: &OfficeRenderer, at: PixelFit, now: SystemTime) -> (f64, f64) {
+        use pixtuoid_scene::hit::HitAction;
+        (0..at.logical().h)
+            .flat_map(|y| {
+                (0..at.logical().w).map(move |x| (unit_centre(x, at), unit_centre(y, at)))
+            })
+            .find(|&cursor| {
+                matches!(
+                    renderer
+                        .hit_at(cursor, at)
+                        .and_then(|hit| hit.action(None, now)),
+                    Some(HitAction::Focus(_))
+                )
+            })
+            .expect("the frame drew the agent")
     }
 
     fn closed_modal() -> crate::panels::ModalState {
