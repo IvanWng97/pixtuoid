@@ -360,14 +360,16 @@ before re-litigating.
   After that a fold takes only what [the merge gate](#the-merge-gate)
   confirms blocks the merge, plus, in at most one fold,
   [in-place](#dispositions) fixes that are a comment or doc change, or a
-  refactor the existing tests cover (its commit names the hand mutation that
-  turns one red); any other non-blocking finding is a FOLLOW-UP: a
+  refactor the existing tests cover (its commit names, for each branch it
+  rewrites, a mutation that turns one of them red; `just mutants` lists a
+  Rust diff's); any other non-blocking finding is a FOLLOW-UP: a
   review moves on once only non-blocking suggestions remain
   ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
   issue confirmed in a fold STOPS the loop: revert the fold and re-land
   smaller, or re-scope.
-- **A fold's behavior change**, a user-visible string included, ships a test
-  that fails without it; the rest of a fold is a revert, a deletion, a
+- **A fold's behavior change**, a user-visible string included (a doc
+  comment clap renders as `--help` is one), ships a test that fails without
+  it; the rest of a fold is a revert, a deletion, a
   comment or doc change, or a refactor the existing tests cover. Anything
   else reverts the fold.
 - **A fix round adds no new gate** — a wanted check is its own PR, asserting
