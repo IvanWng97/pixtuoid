@@ -616,7 +616,7 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
             assert_eq!(from, door, "first segment starts at door, got {from:?}");
             assert_eq!(to, mid, "first segment ends at mid, got {to:?}");
             assert!(
-                (Progress::ZERO..=Progress::of(1, 2)).contains(&progress),
+                (..=SegmentProgress::of(1, 2)).contains(&progress),
                 "expected first-segment seg_t in [0,half], got progress={progress:?}"
             );
             assert!(rig.history.recent(slot.agent_id, 1_000, now).is_some());
@@ -2260,7 +2260,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         LegPose {
             from,
             to,
-            progress: Progress::of(1, 2),
+            progress: LegProgress::of(1, 2),
             carrying_coffee: false,
         },
         Settle::None,
@@ -2270,7 +2270,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         Pose::Walking { segment, .. } => {
             assert_eq!(
                 segment,
-                Segment::straight(from, to, Progress::of(1, 2)),
+                Segment::straight(from, to, LegProgress::of(1, 2)),
                 "straight leg keeps original endpoints and passes progress through"
             );
         }
@@ -2288,7 +2288,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         .expect("history");
     assert_eq!(
         recorded,
-        walking_position(from, to, Progress::of(1, 2)),
+        walking_position(from, to, LegProgress::of(1, 2).straight()),
         "straight leg records the lerped position"
     );
 }
@@ -2306,7 +2306,7 @@ fn route_walking_pose_draws_a_coincident_route_straight() {
     let leg = LegPose {
         from: p,
         to: p,
-        progress: Progress::of(1, 2),
+        progress: LegProgress::of(1, 2),
         carrying_coffee: false,
     };
     let out = route_walking_pose(&slot, now, &l, &mut rig.rctx(), leg, Settle::None);
@@ -2370,7 +2370,7 @@ fn route_walking_pose_measures_travelled_along_the_whole_route() {
     let c = Point { x: 30, y: 30 };
     let total = octile_path_len(&[a, b, c]);
     let mut rig = RouteRig::new(StubRouter::corners(vec![a, b, c]));
-    for t in (0..=4).map(|q| Progress::of(q, 4)) {
+    for t in (0..=4).map(|q| LegProgress::of(q, 4)) {
         let out = route_walking_pose(
             &slot,
             now,
@@ -2409,7 +2409,7 @@ fn segment_along_past_the_route_snaps_to_the_final_segment() {
         Segment {
             from: b,
             to: c,
-            progress: Progress::DONE,
+            progress: SegmentProgress::DONE,
             travelled: total,
         },
     );
@@ -2422,14 +2422,14 @@ fn on_route_starts_and_ends_where_the_leg_does() {
     let c = Point { x: 30, y: 30 };
     let path = [a, b, c];
 
-    let start = Segment::on_route(&path, Progress::ZERO);
+    let start = Segment::on_route(&path, LegProgress::ZERO);
     assert_eq!((start.at(), start.travelled), (a, 0));
     assert_eq!(
-        Segment::on_route(&path, Progress::DONE),
+        Segment::on_route(&path, LegProgress::DONE),
         Segment {
             from: b,
             to: c,
-            progress: Progress::DONE,
+            progress: SegmentProgress::DONE,
             travelled: octile_path_len(&path),
         },
     );
@@ -2445,7 +2445,7 @@ fn on_route_never_walks_back() {
     ];
     let mut last = (0, 0);
     for q in 0..=64 {
-        let segment = Segment::on_route(&path, Progress::of(q, 64));
+        let segment = Segment::on_route(&path, LegProgress::of(q, 64));
         let index = path
             .iter()
             .position(|&p| p == segment.from)

@@ -190,32 +190,46 @@ pub(crate) fn walk_profile_for(path_len_octile: u32, gait: Gait) -> WalkProfile 
     }
 }
 
-pub(crate) use progress::{Progress, distance_at, segment_pixels, walking_position};
+pub(crate) use progress::{
+    LegProgress, SegmentProgress, distance_at, segment_pixels, walking_position,
+};
 
-/// Walk-leg progress and the pixels and distances it maps to: the one place
-/// that knows its scale.
+/// Walk progress and the pixels and distances it maps to: the one place that
+/// knows its scale.
 mod progress {
     use crate::layout::Point;
 
-    /// Steps per leg.
+    /// Steps from one end of a leg, or of a segment, to the other.
     const SCALE: u16 = 1000;
 
-    /// How far along a walk leg, from [`Progress::ZERO`] to [`Progress::DONE`].
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub(crate) struct Progress(u16);
+    /// `done` of `total` in steps, rounded down; all of them from
+    /// `done >= total` on, a zero `total` included.
+    fn steps(done: u64, total: u64) -> u16 {
+        if done >= total {
+            return SCALE;
+        }
+        // Below SCALE, as done < total.
+        (u128::from(done) * u128::from(SCALE) / u128::from(total)) as u16
+    }
 
-    impl Progress {
+    /// How far along a walk leg, from [`LegProgress::ZERO`] to
+    /// [`LegProgress::DONE`]: the whole walk one profile times.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub(crate) struct LegProgress(u16);
+
+    /// How far along one straight segment of a drawn walk: what
+    /// [`walking_position`] lerps by.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub(crate) struct SegmentProgress(u16);
+
+    impl LegProgress {
         pub(crate) const ZERO: Self = Self(0);
         pub(crate) const DONE: Self = Self(SCALE);
 
-        /// `done` of `total`, rounded down; [`Progress::DONE`] from
+        /// `done` of `total`, rounded down; [`LegProgress::DONE`] from
         /// `done >= total` on, a zero `total` included.
         pub(crate) fn of(done: u64, total: u64) -> Self {
-            if done >= total {
-                return Self::DONE;
-            }
-            // Below SCALE, as done < total.
-            Self((u128::from(done) * u128::from(SCALE) / u128::from(total)) as u16)
+            Self(steps(done, total))
         }
 
         /// `done` of `total` to the nearest step; a ratio out of range or not
@@ -223,10 +237,26 @@ mod progress {
         pub(crate) fn nearest(done: f32, total: f32) -> Self {
             Self(((f32::from(SCALE) * done / total).round() as u16).min(SCALE))
         }
+
+        /// The same progress on a leg drawn as the one segment between its own
+        /// ends.
+        pub(crate) fn straight(self) -> SegmentProgress {
+            SegmentProgress(self.0)
+        }
+    }
+
+    impl SegmentProgress {
+        pub(crate) const DONE: Self = Self(SCALE);
+
+        /// `done` of `total`, rounded down; [`SegmentProgress::DONE`] from
+        /// `done >= total` on, a zero `total` included.
+        pub(crate) fn of(done: u64, total: u64) -> Self {
+            Self(steps(done, total))
+        }
     }
 
     #[cfg(test)]
-    impl Progress {
+    impl LegProgress {
         pub(crate) const SCALE: u16 = SCALE;
 
         pub(crate) fn get(self) -> u16 {
@@ -235,7 +265,7 @@ mod progress {
     }
 
     /// Pure linear interpolation along the walk segment `from → to` at `t`.
-    pub(crate) fn walking_position(from: Point, to: Point, t: Progress) -> Point {
+    pub(crate) fn walking_position(from: Point, to: Point, t: SegmentProgress) -> Point {
         let (t, scale) = (i32::from(t.0), i32::from(SCALE));
         let dx = i32::from(to.x) - i32::from(from.x);
         let dy = i32::from(to.y) - i32::from(from.y);
@@ -252,11 +282,11 @@ mod progress {
         let steps = |a: u16, b: u16| {
             let d = u32::from(a.abs_diff(b));
             (1..=d)
-                .map(move |k| Progress((k * scale).div_ceil(d) as u16))
+                .map(move |k| SegmentProgress((k * scale).div_ceil(d) as u16))
                 .peekable()
         };
         let (mut xs, mut ys) = (steps(from.x, to.x), steps(from.y, to.y));
-        let mut next = Some(Progress::ZERO);
+        let mut next = Some(SegmentProgress(0));
         std::iter::from_fn(move || {
             let t = next?;
             while xs.next_if(|&s| s <= t).is_some() {}
@@ -273,7 +303,7 @@ mod progress {
 
     /// The distance `t` along a leg `length` long is, both in
     /// [`travelled`](crate::pose::Segment::travelled)'s unit.
-    pub(crate) fn distance_at(t: Progress, length: u32) -> u32 {
+    pub(crate) fn distance_at(t: LegProgress, length: u32) -> u32 {
         // At most `length`, as t <= DONE.
         (u64::from(t.0) * u64::from(length) / u64::from(SCALE)) as u32
     }
@@ -285,20 +315,24 @@ mod progress {
 
         #[test]
         fn of_rounds_down() {
-            assert_eq!(Progress::of(1, 3), Progress(333));
-            assert_eq!(Progress::of(2, 3), Progress(666));
+            assert_eq!(LegProgress::of(1, 3), LegProgress(333));
+            assert_eq!(LegProgress::of(2, 3), LegProgress(666));
         }
 
         #[test]
         fn of_is_done_from_the_total_on() {
             for (done, total) in [(3, 3), (5, 3), (0, 0)] {
-                assert_eq!(Progress::of(done, total), Progress::DONE, "{done}/{total}");
+                assert_eq!(
+                    LegProgress::of(done, total),
+                    LegProgress::DONE,
+                    "{done}/{total}"
+                );
             }
         }
 
         #[test]
         fn of_survives_a_total_the_scale_would_overflow() {
-            assert!(Progress::of(u64::MAX - 1, u64::MAX) < Progress::DONE);
+            assert!(LegProgress::of(u64::MAX - 1, u64::MAX) < LegProgress::DONE);
         }
 
         #[test]
@@ -311,7 +345,7 @@ mod progress {
             ];
             for (a, b) in legs {
                 let mut walked: Vec<Point> = (0..=SCALE)
-                    .map(|t| walking_position(a, b, Progress(t)))
+                    .map(|t| walking_position(a, b, SegmentProgress(t)))
                     .collect();
                 walked.dedup();
                 assert_eq!(
@@ -327,12 +361,20 @@ mod progress {
             fn of_floors_below_the_total(done in 0u64..u64::MAX, total in 1u64..u64::MAX) {
                 prop_assume!(done < total);
                 let want = u128::from(done) * u128::from(SCALE) / u128::from(total);
-                prop_assert_eq!(u128::from(Progress::of(done, total).get()), want);
+                prop_assert_eq!(u128::from(LegProgress::of(done, total).get()), want);
+            }
+
+            #[test]
+            fn straight_keeps_the_fraction(done in 0u64..10_000, total in 0u64..10_000) {
+                prop_assert_eq!(
+                    LegProgress::of(done, total).straight(),
+                    SegmentProgress::of(done, total)
+                );
             }
 
             #[test]
             fn nearest_is_total(done in prop::num::f32::ANY, total in prop::num::f32::ANY) {
-                prop_assert!(Progress::nearest(done, total) <= Progress::DONE);
+                prop_assert!(LegProgress::nearest(done, total) <= LegProgress::DONE);
             }
 
             #[test]
@@ -342,7 +384,7 @@ mod progress {
             ) {
                 let done = total * frac;
                 let want = (f32::from(SCALE) * done / total).round() as u16;
-                prop_assert_eq!(Progress::nearest(done, total).get(), want);
+                prop_assert_eq!(LegProgress::nearest(done, total).get(), want);
             }
 
             #[test]
@@ -354,7 +396,7 @@ mod progress {
                 let p = walking_position(
                     Point { x: fx, y: fy },
                     Point { x: tx, y: ty },
-                    Progress(t),
+                    SegmentProgress(t),
                 );
                 prop_assert!(p.x >= fx.min(tx) && p.x <= fx.max(tx));
                 prop_assert!(p.y >= fy.min(ty) && p.y <= fy.max(ty));
@@ -363,14 +405,14 @@ mod progress {
     }
 }
 
-/// Render progress as the nearest [`Progress`] to `s(elapsed_ms) / L`.
+/// Render progress as the nearest [`LegProgress`] to `s(elapsed_ms) / L`.
 ///
 /// - `elapsed_ms < duration_ms`: physics kinematics (accel/cruise/decel).
-/// - `elapsed_ms >= duration_ms`: [`Progress::DONE`] (also covers pause window).
-/// - Zero-length profile: always [`Progress::DONE`].
-pub(crate) fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> Progress {
+/// - `elapsed_ms >= duration_ms`: [`LegProgress::DONE`] (also covers pause window).
+/// - Zero-length profile: always [`LegProgress::DONE`].
+pub(crate) fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> LegProgress {
     if p.path_len_octile == 0 || elapsed_ms >= p.duration_ms {
-        return Progress::DONE;
+        return LegProgress::DONE;
     }
 
     let l = p.path_len_octile as f32;
@@ -403,7 +445,7 @@ pub(crate) fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> Progress {
 
     // The early return above prevents reaching here at t ≥ t_total, but f32
     // rounding can still nudge s slightly outside [0, L] at phase boundaries.
-    Progress::nearest(s, l)
+    LegProgress::nearest(s, l)
 }
 
 /// Returns `true` when the full walk **and** its arrival pause have elapsed —
@@ -616,7 +658,10 @@ mod tests {
     fn progress_at_duration_is_done() {
         let profile = walk_profile(1000, WalkIntent::Entry, id(0));
         let p = walk_progress(&profile, profile.duration_ms).get();
-        assert!(p >= Progress::SCALE - EPS, "p(T) should be ≈DONE, got {p}");
+        assert!(
+            p >= LegProgress::SCALE - EPS,
+            "p(T) should be ≈DONE, got {p}"
+        );
     }
 
     #[test]
@@ -629,7 +674,7 @@ mod tests {
         let half = profile.duration_ms / 2;
         let p = walk_progress(&profile, half);
         assert!(
-            Progress::of(1, 2).get().abs_diff(p.get()) <= EPS + 10,
+            LegProgress::of(1, 2).get().abs_diff(p.get()) <= EPS + 10,
             "triangular p(T/2) should be ≈half, got {p:?}"
         );
     }
@@ -645,7 +690,7 @@ mod tests {
         let t75 = profile.duration_ms * 3 / 4;
         let p75 = walk_progress(&profile, t75);
         assert!(
-            (Progress::of(1, 2)..Progress::DONE).contains(&p75),
+            (LegProgress::of(1, 2)..LegProgress::DONE).contains(&p75),
             "triangular decel p(0.75T) should be in (half,DONE), got {p75:?}"
         );
 
@@ -664,7 +709,7 @@ mod tests {
         let half = profile.duration_ms / 2;
         let p = walk_progress(&profile, half);
         assert!(
-            (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&p),
+            (LegProgress::of(2, 5)..=LegProgress::of(3, 5)).contains(&p),
             "trapezoidal p(T/2) should be in 2/5..=3/5, got {p:?}"
         );
     }
@@ -705,13 +750,13 @@ mod tests {
     fn progress_saturates() {
         let profile = walk_profile(500, WalkIntent::Entry, id(1));
         let p = walk_progress(&profile, profile.duration_ms * 3);
-        assert_eq!(p, Progress::DONE, "progress must saturate");
+        assert_eq!(p, LegProgress::DONE, "progress must saturate");
     }
 
     #[test]
     fn progress_is_monotone() {
         let profile = walk_profile(800, WalkIntent::WanderOut, id(2));
-        let samples: Vec<Progress> = (0..=20)
+        let samples: Vec<LegProgress> = (0..=20)
             .map(|i| walk_progress(&profile, i * profile.duration_ms / 20))
             .collect();
         for w in samples.windows(2) {
@@ -764,7 +809,7 @@ mod tests {
         let p = walk_progress(&profile, during_pause);
         assert_eq!(
             p,
-            Progress::DONE,
+            LegProgress::DONE,
             "progress during pause window must be DONE, got {p:?}"
         );
     }
@@ -775,7 +820,7 @@ mod tests {
         let p = walk_progress(&profile, 0);
         assert_eq!(
             p,
-            Progress::DONE,
+            LegProgress::DONE,
             "zero-length walk should report full progress at t=0"
         );
         assert!(
@@ -851,7 +896,7 @@ mod prop {
     }
 
     /// Sweep one profile's whole timeline: progress is non-decreasing, exactly
-    /// [`Progress::DONE`] at/after duration_ms, and never panics.
+    /// [`LegProgress::DONE`] at/after duration_ms, and never panics.
     fn assert_progress_invariants(p: &WalkProfile) -> Result<(), TestCaseError> {
         let mut prev = walk_progress(p, 0);
         // 32 in-flight samples + 4 past-duration ones (saturation).
@@ -871,7 +916,7 @@ mod prop {
         }
         prop_assert_eq!(
             walk_progress(p, p.duration_ms),
-            Progress::DONE,
+            LegProgress::DONE,
             "p(duration) must saturate"
         );
         Ok(())

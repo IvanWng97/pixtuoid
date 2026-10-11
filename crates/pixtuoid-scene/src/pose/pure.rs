@@ -10,7 +10,7 @@ use crate::layout::{
     Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def,
 };
-use crate::physics::Progress;
+use crate::physics::LegProgress;
 use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::Sprite;
@@ -191,7 +191,7 @@ pub(crate) enum Pose {
 pub(crate) struct LegPose {
     pub(crate) from: Point,
     pub(crate) to: Point,
-    pub(crate) progress: Progress,
+    pub(crate) progress: LegProgress,
     /// Whether the agent renders holding a coffee on this leg.
     pub(crate) carrying_coffee: bool,
 }
@@ -259,7 +259,7 @@ fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
     LegPose {
         from,
         to,
-        progress: Progress::of(since_ms, ENTRY_ANIMATION_MS),
+        progress: LegProgress::of(since_ms, ENTRY_ANIMATION_MS),
         carrying_coffee: false,
     }
     .straight()
@@ -541,7 +541,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         Pose::SeatedIdle
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
-        let t = Progress::of(phase_t - seated_end, span);
+        let t = LegProgress::of(phase_t - seated_end, span);
         LegPose {
             from: desk,
             to: dest,
@@ -553,7 +553,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         at_dest_pose
     } else {
         let span = cycle_ms - at_wp_end;
-        let t = Progress::of(phase_t - at_wp_end, span);
+        let t = LegProgress::of(phase_t - at_wp_end, span);
         LegPose {
             from: dest,
             to: desk,

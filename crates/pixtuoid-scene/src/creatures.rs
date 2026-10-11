@@ -765,7 +765,7 @@ mod tests {
         let rounding = 2
             * u64::from(l.walkable.width() + l.walkable.height())
             * u64::from(OCTILE_STRAIGHT_COST)
-            / u64::from(crate::physics::Progress::SCALE)
+            / u64::from(crate::physics::LegProgress::SCALE)
             + 1;
         for (walk, roam, ticks) in roams(&pack) {
             let anim = walk.piece().name();

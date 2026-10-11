@@ -11,7 +11,7 @@ use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::{Point, Size, sort_row_at};
 use crate::pack::desk_art_top;
-use crate::physics::Progress;
+use crate::physics::LegProgress;
 use crate::pose;
 use crate::sim::anchors::{
     back_couch_top_left, compute_door_frame_idx, seated_top_left, walking_top_left,
@@ -5417,7 +5417,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
         crate::pose::LegPose {
             from: mid,
             to: mid,
-            progress: Progress::ZERO,
+            progress: LegProgress::ZERO,
             carrying_coffee: false,
         }
         .straight(),

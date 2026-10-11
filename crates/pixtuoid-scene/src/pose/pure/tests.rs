@@ -1,5 +1,5 @@
 use super::*;
-use crate::physics::distance_at;
+use crate::physics::{SegmentProgress, distance_at};
 use crate::pose::Segment;
 use pixtuoid_core::sprite::format::{Piece, Walk};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
@@ -135,7 +135,7 @@ fn idle_phase_1_is_walking_out() {
             ..
         } => {
             assert!(
-                (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
+                (SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress),
                 "progress={progress:?}"
             );
             assert!(travelled > 0, "halfway down the leg, it has walked");
@@ -173,7 +173,7 @@ fn idle_phase_3_is_walking_back() {
             segment: Segment { progress, .. },
             ..
         } => {
-            assert!((Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress));
+            assert!((SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress));
         }
         other => panic!("expected Walking, got {other:?}"),
     }
@@ -397,7 +397,7 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
         } => {
             // 1500/4000 = 0.375
             assert!(
-                (Progress::of(3, 10)..=Progress::of(9, 20)).contains(&progress),
+                (SegmentProgress::of(3, 10)..=SegmentProgress::of(9, 20)).contains(&progress),
                 "progress={progress:?}"
             );
         }
@@ -767,7 +767,7 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
         } => {
             assert_eq!(from, desk, "cycle-0 walk-out starts from the desk");
             assert!(
-                (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
+                (SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress),
                 "progress={progress:?}"
             );
         }
@@ -794,7 +794,7 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
         } => {
             assert_eq!(from, desk, "cycle-1 walk-out starts from the desk");
             assert!(
-                (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
+                (SegmentProgress::of(2, 5)..=SegmentProgress::of(3, 5)).contains(&progress),
                 "progress={progress:?}"
             );
         }

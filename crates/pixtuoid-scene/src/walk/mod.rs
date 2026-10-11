@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use crate::physics::{Progress, WalkIntent, WalkProfile, walk_arrived, walk_profile};
+use crate::physics::{LegProgress, WalkIntent, WalkProfile, walk_arrived, walk_profile};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -51,8 +51,8 @@ pub(crate) struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
     pub phase: WanderPhase,
     /// Physics walk progress, meaningful ONLY in `WalkingOut`/`WalkingBack`
-    /// ([`Progress::ZERO`] otherwise).
-    pub progress: Progress,
+    /// ([`LegProgress::ZERO`] otherwise).
+    pub progress: LegProgress,
     /// The current trip's destination cell (the walk `to` / waypoint `dest`).
     pub dest: Point,
     /// The current trip's kind — the seat cell + waypoint identity the walk /
@@ -368,7 +368,7 @@ pub(crate) fn advance_wander(
                         .unwrap_or(now);
                 }
             }
-            (walk.wander.phase, Progress::ZERO)
+            (walk.wander.phase, LegProgress::ZERO)
         }
 
         WanderPhase::WalkingOut(profile) => {
@@ -380,7 +380,7 @@ pub(crate) fn advance_wander(
                     let back = snapshot_back_profile(slot, walk, layout, router, overlay);
                     walk.wander.phase = WanderPhase::AtWaypoint(back);
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::AtWaypoint(back), Progress::ZERO)
+                    (WanderPhase::AtWaypoint(back), LegProgress::ZERO)
                 }
             }
         }
@@ -394,7 +394,7 @@ pub(crate) fn advance_wander(
                     .checked_add(Duration::from_millis(dwell_dur))
                     .unwrap_or(now);
             }
-            (walk.wander.phase, Progress::ZERO)
+            (walk.wander.phase, LegProgress::ZERO)
         }
 
         WanderPhase::WalkingBack(profile) => {
@@ -407,7 +407,7 @@ pub(crate) fn advance_wander(
                     walk.wander.target.kind = WanderKind::Aimless;
                     walk.wander.phase = WanderPhase::Seated;
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::Seated, Progress::ZERO)
+                    (WanderPhase::Seated, LegProgress::ZERO)
                 }
             }
         }
@@ -430,7 +430,7 @@ pub(crate) fn advance_wander(
 
 enum WalkLegStatus {
     /// Still walking: the physics progress.
-    InFlight(Progress),
+    InFlight(LegProgress),
     /// The walk and its pause have completed; `walk_total` = `duration_ms +
     /// pause_ms`.
     Arrived { walk_total: u64 },
@@ -551,7 +551,7 @@ pub(crate) struct LegPlan {
 
 /// Freeze one walk leg's timing profile. Measuring the ROUTED (not raw)
 /// polyline is load-bearing: the duration must cover the whole path or `t`
-/// reaches [`Progress::DONE`] before the sprite
+/// reaches [`LegProgress::DONE`] before the sprite
 /// arrives and it pops.
 pub(crate) fn snapshot_leg_profile(
     router: &mut dyn Router,

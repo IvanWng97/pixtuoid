@@ -13,7 +13,8 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 
 use crate::physics::{
-    Progress, WalkIntent, WalkProfile, distance_at, walk_arrived, walk_progress, walking_position,
+    LegProgress, SegmentProgress, WalkIntent, WalkProfile, distance_at, walk_arrived,
+    walk_progress, walking_position,
 };
 use crate::walk::{
     LegPlan, Lifted, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
@@ -751,7 +752,7 @@ pub(crate) struct Segment {
     /// Segment end point (layout pixels).
     pub(crate) to: Point,
     /// Progress along the segment.
-    pub(crate) progress: Progress,
+    pub(crate) progress: SegmentProgress,
     /// How far into the whole leg the walker is, in octile units: the
     /// tenths of a layout pixel A* measures by.
     pub(crate) travelled: u32,
@@ -759,17 +760,17 @@ pub(crate) struct Segment {
 
 impl Segment {
     /// The segment a leg is drawn on when no route bends it: the one between its own ends.
-    pub(crate) fn straight(from: Point, to: Point, progress: Progress) -> Self {
+    pub(crate) fn straight(from: Point, to: Point, progress: LegProgress) -> Self {
         Segment {
             from,
             to,
-            progress,
+            progress: progress.straight(),
             travelled: distance_at(progress, octile_distance(from, to)),
         }
     }
 
     /// `progress` of the whole leg along `path` (two or more points).
-    pub(crate) fn on_route(path: &[Point], progress: Progress) -> Self {
+    pub(crate) fn on_route(path: &[Point], progress: LegProgress) -> Self {
         Self::along(
             path,
             distance_at(progress, crate::walk::octile_path_len(path)),
@@ -786,7 +787,7 @@ impl Segment {
                 return Segment {
                     from: w[0],
                     to: w[1],
-                    progress: Progress::of(u64::from(travelled - acc), u64::from(leg)),
+                    progress: SegmentProgress::of(u64::from(travelled - acc), u64::from(leg)),
                     travelled,
                 };
             }
@@ -796,7 +797,7 @@ impl Segment {
         Segment {
             from: path[last.saturating_sub(1)],
             to: path[last],
-            progress: Progress::DONE,
+            progress: SegmentProgress::DONE,
             travelled: acc,
         }
     }
