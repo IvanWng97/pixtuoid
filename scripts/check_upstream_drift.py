@@ -1037,7 +1037,7 @@ def _enum_body(text: str, enum_name: str) -> str | None:
 
 def _braced_body(text: str, opener: str) -> str | None:
     """The brace-balanced body after `opener`, which ends at its `{`, with
-    comments stripped — `_enum_body`'s reasons hold for a fn too."""
+    comments stripped."""
     text = strip_rust_comments(text)
     m = re.search(opener, text)
     if not m:

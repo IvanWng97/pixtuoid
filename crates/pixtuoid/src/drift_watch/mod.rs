@@ -29,8 +29,8 @@ const API_URL: &str = "https://api.github.com/repos";
 /// Why a fetch returned nothing. Neither is ever a vanish.
 #[derive(Debug, PartialEq, Eq)]
 enum FetchError {
-    /// Our pin is gone, so the watch is dark for that document: `why` is
-    /// upstream's answer.
+    /// Our pin is gone, so the watch is dark for that document: `why` says
+    /// what is missing.
     Gone { why: String },
     /// May pass on a retry.
     Transient(String),
