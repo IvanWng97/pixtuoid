@@ -1459,19 +1459,49 @@ fn a_floor_clamped_into_view_repaints_whole() {
     );
 }
 
-/// The cutaway never draws the walkable layer, so `w` is neither listed nor
-/// read: the flag stays off however often it is pressed.
+/// `w` follows the look the last frame drew: not listed or read under the
+/// cutaway, which never draws the walkable layer, and listed, read and drawn
+/// while a cell too small for the art falls back to the half-blocks.
 #[cfg(debug_assertions)]
 #[test]
-fn the_cutaway_neither_lists_nor_reads_w() {
+fn w_follows_the_look_the_frame_drew() {
     use crossterm::event::KeyCode;
-    let (mut r, _) = kitty(100, 40);
-    assert!(!r.offers_walkable_debug());
-    assert!(r.chrome.overlays(0.0).host_keys.is_empty());
-    assert!(!crate::tui::read_walkable_debug_key(
-        &mut r,
-        KeyCode::Char('w'),
-        &overlays::no_panel()
-    ));
-    assert!(!r.debug_walkable());
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, _wire) = kitty(cols, rows);
+    let scene = office();
+    let cadence = ImageProtocol::Kitty.cadence();
+    let w = |r: &mut TuiRenderer<Window>| {
+        crate::tui::read_walkable_debug_key(r, KeyCode::Char('w'), &super::overlays::no_panel())
+    };
+    let lists_w = |r: &TuiRenderer<Window>| {
+        r.chrome
+            .overlays(0.0)
+            .host_keys
+            .iter()
+            .any(|(k, _)| *k == "w")
+    };
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(!r.offers_walkable_debug() && !lists_w(&r), "the cutaway");
+    assert!(!w(&mut r) && !r.debug_walkable());
+
+    r.terminal.backend_mut().zoom(CellSize {
+        w: CELL.w / 2,
+        h: CELL.h / 2,
+    });
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    assert!(r.offers_walkable_debug() && lists_w(&r), "the fallback");
+    let before = r.buf().expect("a frame").clone();
+    assert!(w(&mut r));
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    let after = r.buf().expect("a frame");
+    assert!(
+        region_diff(&before, after, 0, 0, before.width(), before.height()) > 1_000,
+        "the fallback's half-blocks show the layer"
+    );
+
+    r.terminal.backend_mut().zoom(CELL);
+    r.render(&scene, pack(), t0() + cadence * 3)
+        .expect("render");
+    assert!(!r.offers_walkable_debug(), "the cutaway is back");
 }

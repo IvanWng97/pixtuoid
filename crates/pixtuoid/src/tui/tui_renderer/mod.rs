@@ -93,9 +93,9 @@ struct Chrome {
     volume_flash: Option<u8>,
     weather: pixtuoid_scene::sky::WeatherPolicy,
     motion: pixtuoid_scene::anim::Motion,
-    /// Whether the look painting draws the walkable debug layer, which the
-    /// half-blocks do and the cutaway never does: `w` is listed and read only
-    /// then.
+    /// Whether the last frame was the half-blocks, which draw the walkable
+    /// debug layer where the cutaway never does: `w` is listed and read only
+    /// then, including while a cutaway too big for the cell falls back to them.
     offers_walkable_debug: bool,
 }
 
@@ -237,7 +237,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     #[cfg(feature = "graphics")]
     pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
         self.cutaway = Some(cutaway);
-        self.chrome.offers_walkable_debug = false;
     }
 
     /// Whether `w` flips a layer the next frame draws.
@@ -849,9 +848,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 .window_size()
                 .ok()
                 .and_then(crate::graphics::CellSize::of_window);
-            let drawn = cutaway
-                .fit_to(scene_area, window)
-                .map(|fitted| self.render_cutaway(&mut cutaway, fitted, scene, pack, now));
+            let fitted = cutaway.fit_to(scene_area, window);
+            self.chrome.offers_walkable_debug = fitted.is_none();
+            let drawn =
+                fitted.map(|fitted| self.render_cutaway(&mut cutaway, fitted, scene, pack, now));
             self.cutaway = Some(cutaway);
             if let Some(drawn) = drawn {
                 return drawn;
