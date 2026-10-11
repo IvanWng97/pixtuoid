@@ -352,22 +352,24 @@ before re-litigating.
   change that both adds and deletes at scale is two PRs.
 - **Deletion census** — before deleting N members of a class, the full list
   and its criterion land in the first commit or the PR body (#943).
-- **Fixes are never put off; severity ends the loop.** Rounds 1 and 2 each
-  fold every accepted finding, whatever code it names, into ONE commit: a
+- **Fixes are never put off; severity ends the loop.** The folds answering
+  rounds 1 and 2 (the review's [`Round:`](../REVIEW.md#re-review)) each take
+  every accepted finding, whatever code it names, into ONE commit: a
   defect this change introduced is FIXED in it, since a clean-up left for
   later rarely lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
-  After round 2 a fold takes only what [the merge gate](#the-merge-gate)
-  confirms blocks the merge, plus, in at most one fold, fixes that change no
-  behavior in code this change already touches (a comment, a doc, a
-  user-visible string, or a refactor its existing tests cover); any other
-  non-blocking finding is a FOLLOW-UP: a
+  After that a fold takes only what [the merge gate](#the-merge-gate)
+  confirms blocks the merge, plus, in at most one fold,
+  [in-place](#dispositions) fixes that are a comment or doc change, or a
+  refactor the existing tests cover (its commit names the hand mutation that
+  turns one red); any other non-blocking finding is a FOLLOW-UP: a
   review moves on once only non-blocking suggestions remain
   ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
   issue confirmed in a fold STOPS the loop: revert the fold and re-land
   smaller, or re-scope.
-- **A fold's behavior change** ships a test that fails without it; the rest
-  of a fold is a revert, a deletion, a comment or doc change, or a refactor
-  the existing tests cover. Anything else reverts the fold.
+- **A fold's behavior change**, a user-visible string included, ships a test
+  that fails without it; the rest of a fold is a revert, a deletion, a
+  comment or doc change, or a refactor the existing tests cover. Anything
+  else reverts the fold.
 - **A fix round adds no new gate** — a wanted check is its own PR, asserting
   facts in its own layer (a Rust fact from Rust, never a Python regex over
   `.rs`).
