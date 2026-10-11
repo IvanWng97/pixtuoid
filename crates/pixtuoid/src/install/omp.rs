@@ -68,7 +68,7 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 
 /// `changed` only when the content is actually ours (carries the sentinel) — a
 /// foreign file, an already-removed stub, or empty content is left untouched.
-pub(crate) fn disconnect(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
     let ours = content.contains(SENTINEL);
     Ok(MergeOutcome {
         changed: ours,
@@ -318,14 +318,6 @@ mod tests {
     }
 
     #[test]
-    fn install_re_renders_on_a_path_change() {
-        let a = render_extension("/opt/bin/pixtuoid-hook").unwrap();
-        let c = render_extension("/usr/local/bin/pixtuoid-hook").unwrap();
-        assert_ne!(a, c);
-        assert!(c.contains("\"/usr/local/bin/pixtuoid-hook\""));
-    }
-
-    #[test]
     fn a_path_with_special_chars_bakes_as_a_valid_escaped_literal() {
         let out = render_extension(r#"/weird/pi"x\hook"#).unwrap();
         assert!(out.contains(r#""/weird/pi\"x\\hook""#));
@@ -334,7 +326,7 @@ mod tests {
     #[test]
     fn uninstall_replaces_our_extension_with_a_sentinel_free_stub() {
         let installed = render_extension("/opt/bin/pixtuoid-hook").unwrap();
-        let removed = disconnect(&installed).unwrap();
+        let removed = uninstall(&installed).unwrap();
         assert!(removed.changed);
         assert!(
             !removed.content.contains(SENTINEL),
@@ -349,9 +341,9 @@ mod tests {
     #[test]
     fn uninstall_of_a_foreign_or_removed_file_is_a_no_op() {
         let foreign = "export default function (pi) {}\n";
-        assert!(!disconnect(foreign).unwrap().changed);
-        assert!(!disconnect(REMOVED_STUB).unwrap().changed);
-        assert!(!disconnect("").unwrap().changed);
+        assert!(!uninstall(foreign).unwrap().changed);
+        assert!(!uninstall(REMOVED_STUB).unwrap().changed);
+        assert!(!uninstall("").unwrap().changed);
     }
 
     /// The one string deciding whether omp ever LOADS what install writes;

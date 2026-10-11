@@ -1042,8 +1042,8 @@ fn reinstall_heals_a_deleted_beside_file_even_on_a_config_no_op() {
                     "{}: config already current — the heal must fire despite the no-op",
                     t.name
                 );
-                // `write_beside` runs before the primary's `changed` gate; moving it
-                // after would leave the deleted file gone.
+                // `write_beside` is not gated on the primary's `changed`; gating it would
+                // leave a deleted file gone on a no-op re-install.
                 assert!(
                     victim.exists(),
                     "{}: a no-op re-install must re-create the deleted plugin file",
@@ -1834,4 +1834,32 @@ fn reinstall_adds_newly_registered_events_to_an_older_claude_hooks_file() {
             "event {ev} must be installed after the upgrade re-run"
         );
     }
+}
+
+/// A moved shim is re-baked into every owned primary: its re-install compares the
+/// file with this binary's render at the new path, never a sentinel.
+#[test]
+fn reinstall_re_bakes_a_moved_shim_into_every_owned_primary() {
+    with_fake_claude(|_| {
+        let mut covered = 0;
+        for &t in target::TARGETS {
+            let Primary::Owned { render, .. } = t.primary else {
+                continue;
+            };
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = plugin_hooks_path(tmp.path());
+            let moved = abs_fixture("/opt/b/pixtuoid-hook", r"C:\b\pixtuoid-hook.exe");
+            let first = abs_fixture("/opt/a/pixtuoid-hook", r"C:\a\pixtuoid-hook.exe");
+            install_target_from(t, Some(cfg.clone()), Some(first)).unwrap();
+            let r = install_target_from(t, Some(cfg.clone()), Some(moved.clone())).unwrap();
+            assert!(matches!(r.outcome, InstallOutcome::Installed), "{}", t.name);
+            let want = render(&(t.hook_command)(&moved, true).unwrap()).unwrap();
+            assert_eq!(io::read_config(&cfg).unwrap(), want, "{}", t.name);
+            covered += 1;
+        }
+        assert!(
+            covered > 0,
+            "no target owns its primary — did the registry change?"
+        );
+    });
 }

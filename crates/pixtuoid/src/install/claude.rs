@@ -395,7 +395,7 @@ pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {
     Ok(serde_json::to_string_pretty(&want)?)
 }
 
-pub(crate) fn disconnect(content: &str) -> Result<MergeOutcome> {
+pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
     let had_hooks = serde_json::from_str::<Value>(content)
         .ok()
         .and_then(|doc| doc.get("hooks")?.as_object().map(|h| !h.is_empty()))
@@ -547,10 +547,10 @@ mod tests {
     #[test]
     fn uninstall_empties_the_file_and_reports_a_change_only_with_hooks() {
         let installed = render_hooks("pixtuoid-hook").unwrap();
-        let out = disconnect(&installed).unwrap();
+        let out = uninstall(&installed).unwrap();
         assert!(out.changed);
-        assert!(!disconnect(&out.content).unwrap().changed);
-        assert!(!disconnect("").unwrap().changed);
+        assert!(!uninstall(&out.content).unwrap().changed);
+        assert!(!uninstall("").unwrap().changed);
     }
 
     #[cfg(unix)]
