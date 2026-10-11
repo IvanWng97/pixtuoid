@@ -353,8 +353,7 @@ impl Raster {
     }
 
     /// What the last frame drawn was drawn under, `None` before the first.
-    #[doc(hidden)]
-    pub fn note(&self) -> Option<FrameNote> {
+    pub(crate) fn note(&self) -> Option<FrameNote> {
         self.note
     }
 

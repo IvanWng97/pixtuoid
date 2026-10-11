@@ -722,7 +722,6 @@ impl Router for NoZoneRouter {
     ) -> Vec<Point> {
         vec![from, to]
     }
-    fn invalidate(&mut self) {}
     // set_preferred_zone intentionally NOT overridden.
 }
 
@@ -745,28 +744,6 @@ fn router_default_set_preferred_zone_is_a_noop() {
         ),
         vec![Point { x: 0, y: 0 }, Point { x: 10, y: 0 }]
     );
-}
-
-#[test]
-fn astar_is_empty_then_invalidate_clears_cache() {
-    let mask = WalkableMask::new_open(80, 80);
-    let overlay = OccupancyOverlay::new();
-    let mut router = AStarRouter::new();
-    assert!(router.is_empty(), "fresh router cache must be empty");
-    assert_eq!(router.len(), 0);
-
-    let _ = router.route(
-        &mask,
-        &overlay,
-        Point { x: 4, y: 4 },
-        Point { x: 60, y: 60 },
-    );
-    assert!(!router.is_empty(), "cache must be non-empty after a route");
-    assert_ne!(router.len(), 0);
-
-    router.invalidate();
-    assert!(router.is_empty(), "invalidate must clear the cache");
-    assert_eq!(router.len(), 0);
 }
 
 #[test]

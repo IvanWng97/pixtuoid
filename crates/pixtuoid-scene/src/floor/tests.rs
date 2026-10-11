@@ -34,27 +34,43 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     );
 }
 
-/// A new layout drops the router's cached paths: `route` revalidates a cached
-/// path against the overlay alone, never the mask, so a stale one would walk
-/// through the new layout's walls.
+/// A new layout drops the router's cached paths, a height-only resize's too:
+/// `route` revalidates a cached path against the overlay alone, never the
+/// mask, so a stale one would walk through the new layout's walls.
 #[test]
 fn a_new_layout_drops_the_routers_cached_paths() {
     use crate::pathfind::Router;
     use pixtuoid_core::walkable::OccupancyOverlay;
+    let cache_a_route = |ctx: &mut FloorCtx, l: &crate::layout::SceneLayout| {
+        let mut walkable = (0..l.buf_h)
+            .flat_map(|y| (0..l.buf_w).map(move |x| crate::layout::Point { x, y }))
+            .filter(|p| l.is_walkable(p.x, p.y));
+        let from = walkable.next().expect("a walkable cell");
+        let to = walkable.next_back().expect("another walkable cell");
+        ctx.router
+            .route(&l.walkable, &OccupancyOverlay::new(), from, to);
+        assert!(!ctx.router.is_empty(), "the route was cached");
+    };
     let mut ctx = FloorCtx::new();
     let l = ctx.frame_layout(192, 156, 0).unwrap();
-    let mut walkable = (0..l.buf_h)
-        .flat_map(|y| (0..l.buf_w).map(move |x| crate::layout::Point { x, y }))
-        .filter(|p| l.is_walkable(p.x, p.y));
-    let from = walkable.next().expect("a walkable cell");
-    let to = walkable.next_back().expect("another walkable cell");
-    ctx.router
-        .route(&l.walkable, &OccupancyOverlay::new(), from, to);
-    assert!(!ctx.router.is_empty(), "the route was cached");
+    cache_a_route(&mut ctx, &l);
     ctx.frame_layout(192, 156, 0).unwrap();
     assert!(!ctx.router.is_empty(), "the same layout keeps its paths");
     ctx.frame_layout(120, 100, 0).unwrap();
     assert!(ctx.router.is_empty(), "a new layout drops its paths");
+    for h in 40..=240 {
+        let Some(l) = ctx.frame_layout(192, h, 0) else {
+            continue;
+        };
+        cache_a_route(&mut ctx, &l);
+        if ctx.frame_layout(192, h + 1, 0).is_some() {
+            assert!(
+                ctx.router.is_empty(),
+                "192x{h} to 192x{} kept its paths",
+                h + 1
+            );
+        }
+    }
 }
 
 #[test]
