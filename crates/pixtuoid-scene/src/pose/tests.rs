@@ -734,12 +734,12 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     match p {
         Some(Pose::Walking { segment, .. }) => {
             let travelled = segment.travelled();
-            let linear = Segment::straight(
-                segment.from(),
-                segment.to(),
-                LegProgress::of(dur_ms / 4, dur_ms),
-            )
-            .travelled();
+            let route = &rig.walks[&slot_q.agent_id]
+                .walk_path
+                .as_ref()
+                .expect("the chair settle corners the route, so it is frozen")
+                .path;
+            let linear = Segment::on_route(route, LegProgress::of(dur_ms / 4, dur_ms)).travelled();
             assert!(
                 travelled < linear,
                 "physics ease-in: expected behind a linear walk at 25% of duration, got {travelled} of {path_len}, linear {linear}"

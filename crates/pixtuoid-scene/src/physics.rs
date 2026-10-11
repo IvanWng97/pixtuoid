@@ -310,13 +310,13 @@ mod progress {
     }
 
     /// Octile-distance step costs, integer so A* needs no floats — a diagonal
-    /// about √2 straights. Shared by [`octile_distance`] and A*'s
-    /// `pathfind::heuristic`, so they can't drift.
+    /// about √2 straights. Shared by [`octile_distance`] and
+    /// [A*](crate::pathfind::find_path), so they can't drift.
     pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
     pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
 
-    /// The octile distance for deltas `(dx, dy)` — THE formula shared by A*'s
-    /// `pathfind::heuristic` (coarse cells) and [`octile_distance`] (pixel Points).
+    /// The octile distance for deltas `(dx, dy)` — THE formula shared by the heuristic of
+    /// [A*](crate::pathfind::find_path) (coarse cells) and [`octile_distance`] (pixel Points).
     pub(crate) fn octile_cost(dx: u32, dy: u32) -> u32 {
         OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
     }
