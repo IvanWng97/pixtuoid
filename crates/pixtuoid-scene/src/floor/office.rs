@@ -291,8 +291,9 @@ pub struct OfficeSession {
     n_floors: usize,
     office: PerOffice,
     nav: FloorNav,
-    /// The last frame's slide, while one is under way.
-    slide: Option<RgbBuffer>,
+    /// The last frame's slide, while one is under way: its composed pixels,
+    /// and what they flash.
+    slide: Option<(RgbBuffer, crate::flash::Flashes)>,
     /// The floor (or slide) the frame before showed, and whether the last
     /// frame showed another: a floor's own dirt is against ITS last frame,
     /// not the one on screen.
@@ -401,7 +402,7 @@ impl OfficeSession {
     }
 
     /// Every floor grown so far, for what reaches all of them at once (a
-    /// theme's sprite cache, a resize's routes).
+    /// resize's routes).
     pub fn floors_mut(&mut self) -> impl Iterator<Item = &mut PerFloor> {
         self.views.iter_mut().map(|view| &mut view.floor)
     }
@@ -472,11 +473,13 @@ impl OfficeSession {
         let (from, to, t) = (tr.from_floor, tr.to_floor, tr.t(now));
         draw(&mut self.views, &mut self.office, from, look);
         draw(&mut self.views, &mut self.office, to, look);
-        let slide = self
+        let (slide, flashes) = self
             .slide
-            .get_or_insert_with(|| RgbBuffer::filled(0, 0, gap));
+            .get_or_insert_with(|| (RgbBuffer::filled(0, 0, gap), Default::default()));
         if let (Some(leaving), Some(arriving)) = (self.views[from].buf(), self.views[to].buf()) {
             compose_slide(slide, (leaving, arriving), t, to > from, gap);
+            *flashes =
+                crate::flash::Flashes::of_slide(self.views[from].flash(), self.views[to].flash());
         }
         None
     }
@@ -484,7 +487,7 @@ impl OfficeSession {
     /// The last frame's pixels: the slide's, or the floor showing's.
     pub fn buf(&self) -> Option<&RgbBuffer> {
         match &self.slide {
-            Some(slide) => Some(slide),
+            Some((slide, _)) => Some(slide),
             None => self.views.get(self.nav.current())?.buf(),
         }
     }
@@ -496,19 +499,6 @@ impl OfficeSession {
         match (&self.slide, self.views.get(self.nav.current())) {
             (None, Some(view)) if !self.shown_changed => &view.last_dirty,
             _ => ALL,
-        }
-    }
-
-    /// What of the last frame flashes: the floor showing's; nothing in a
-    /// slide.
-    pub fn flash(&self) -> crate::flash::FlashPhase {
-        match self.slide {
-            Some(_) => crate::flash::FlashPhase::default(),
-            None => self
-                .views
-                .get(self.nav.current())
-                .map(FloorView::flash)
-                .unwrap_or_default(),
         }
     }
 
@@ -527,25 +517,24 @@ impl OfficeSession {
         &self.views[self.nav.current()].last_occupied
     }
 
-    /// What each of the last frame's two sides flashes: a slide's leaving and
-    /// arriving floors, else the floor showing's twice.
+    /// What the last frame flashes: a slide's leaving and arriving floors',
+    /// else the floor showing's.
     pub fn flashes(&self) -> crate::flash::Flashes {
-        let of = |floor: usize| {
-            self.views
-                .get(floor)
-                .map(FloorView::flash)
-                .unwrap_or_default()
-        };
-        match (&self.slide, self.nav.transition()) {
-            (Some(_), Some(tr)) => [of(tr.from_floor), of(tr.to_floor)],
-            _ => [of(self.nav.current()); 2],
+        match &self.slide {
+            Some((_, flashes)) => *flashes,
+            None => crate::flash::Flashes::of_floor(
+                self.views
+                    .get(self.nav.current())
+                    .map(FloorView::flash)
+                    .unwrap_or_default(),
+            ),
         }
     }
 
     /// The last slide's composed frame, for a painter's own pass over it (a
     /// modal's dim); `None` outside a slide.
     pub fn slide_mut(&mut self) -> Option<&mut RgbBuffer> {
-        self.slide.as_mut()
+        self.slide.as_mut().map(|(slide, _)| slide)
     }
 
     /// What the last frame shows a pointer over `area`, in layout units; none

@@ -12,7 +12,7 @@ use crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS;
 /// What of a floor's frame flashes: which of a strike's levels lights it, and
 /// whether a starved neon tube is catching. Two frames flash alike iff equal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct FlashPhase {
+pub(crate) struct FlashPhase {
     // The sky's flash level's bits: a strike's levels are exact constants.
     strike: u32,
     stutter: bool,
@@ -28,9 +28,23 @@ impl FlashPhase {
     }
 }
 
-/// The phases a picture shows: a floor slide's two floors', the leaving one's
-/// first, or one floor's twice.
-pub type Flashes = [FlashPhase; 2];
+/// The phases a picture shows: a floor slide's two floors', or one floor's.
+/// Only a session makes one that flashes, of the picture it last drew, so no
+/// painter's hold can key on half a slide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Flashes([FlashPhase; 2]);
+
+impl Flashes {
+    /// One floor's picture.
+    pub(crate) fn of_floor(phase: FlashPhase) -> Self {
+        Self([phase; 2])
+    }
+
+    /// A slide's picture, `leaving` composed with `arriving`.
+    pub(crate) fn of_slide(leaving: FlashPhase, arriving: FlashPhase) -> Self {
+        Self([leaving, arriving])
+    }
+}
 
 /// A painter's screen clock: monotonic time since an origin of its own.
 pub type ScreenClock = Arc<dyn Fn() -> Duration + Send + Sync>;
@@ -42,34 +56,42 @@ pub fn monotonic() -> ScreenClock {
     Arc::new(move || origin.elapsed())
 }
 
-/// The phases a painter's screen shows, `P`, on a screen of shape `S`, and when
+/// The [`Flashes`] a painter's screen shows, on a screen of shape `S`, and when
 /// they finished reaching it on the painter's [`ScreenClock`]: a write showing
 /// others goes out the moment its frame is painted, but not before those on
 /// screen have shown [`PHOTOSENSITIVE_PHASE_MIN_MS`]. A held frame is still
 /// painted; only its write waits. A screen of a new shape shows nothing to
 /// hold, so its write goes out whatever it shows.
-pub struct FlashHold<P, S> {
-    shown: Option<(P, S, Duration)>,
+pub struct FlashHold<S> {
+    shown: Option<(Flashes, S, Duration)>,
+    /// A write under way, what it shows and on what shape: shown only once
+    /// it [`landed`](Self::landed).
+    staged: Option<(Flashes, S)>,
     clock: ScreenClock,
 }
 
-impl<P: std::fmt::Debug, S: std::fmt::Debug> std::fmt::Debug for FlashHold<P, S> {
+impl<S: std::fmt::Debug> std::fmt::Debug for FlashHold<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlashHold")
             .field("shown", &self.shown)
+            .field("staged", &self.staged)
             .finish_non_exhaustive()
     }
 }
 
-impl<P: Copy + PartialEq, S: Copy + PartialEq> FlashHold<P, S> {
+impl<S: Copy + PartialEq> FlashHold<S> {
     /// A hold on `clock`.
     pub fn on(clock: ScreenClock) -> Self {
-        Self { shown: None, clock }
+        Self {
+            shown: None,
+            staged: None,
+            clock,
+        }
     }
 
     /// Whether a write showing `phases` to a screen shaped `shape` waits, now.
     /// A clock run backward reads as elapsed, so the screen never freezes.
-    pub fn holds(&self, phases: P, shape: S) -> bool {
+    pub fn holds(&self, phases: Flashes, shape: S) -> bool {
         let now = (self.clock)();
         self.shown.is_some_and(|(on, on_shape, since)| {
             on != phases
@@ -82,13 +104,30 @@ impl<P: Copy + PartialEq, S: Copy + PartialEq> FlashHold<P, S> {
 
     /// Whether a write showing `phases` changes the screen's: it goes out at
     /// once, whatever the painter's cadence.
-    pub fn changes(&self, phases: P) -> bool {
+    pub fn changes(&self, phases: Flashes) -> bool {
         self.shown.is_none_or(|(on, ..)| on != phases)
+    }
+
+    /// A write showing `phases` to a screen shaped `shape` is under way.
+    pub fn stage(&mut self, phases: Flashes, shape: S) {
+        self.staged = Some((phases, shape));
+    }
+
+    /// The staged write finished reaching the screen just now.
+    pub fn landed(&mut self) {
+        if let Some((phases, shape)) = self.staged.take() {
+            self.shown(phases, shape);
+        }
+    }
+
+    /// The staged write never reached the screen: it shows nothing.
+    pub fn lost(&mut self) {
+        self.staged = None;
     }
 
     /// A write showing `phases` finished reaching a screen shaped `shape` just
     /// now.
-    pub fn shown(&mut self, phases: P, shape: S) {
+    fn shown(&mut self, phases: Flashes, shape: S) {
         match &mut self.shown {
             Some((on, on_shape, _)) if *on == phases => *on_shape = shape,
             _ => self.shown = Some((phases, shape, (self.clock)())),
@@ -147,28 +186,60 @@ mod tests {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_millis(ms)
     }
 
+    /// Two pictures that flash apart.
+    fn two_pictures() -> [Flashes; 2] {
+        [1, 2].map(|strike| {
+            Flashes::of_floor(FlashPhase {
+                strike,
+                stutter: false,
+            })
+        })
+    }
+
     /// A change waits out the floor on the hold's own clock from the instant
     /// the phases on screen showed, on both sides of it; the same phases never
     /// wait.
     #[test]
     fn a_hold_keeps_a_phase_the_floor_on_its_own_clock() {
+        let [one, two] = two_pictures();
         let screen = ManualClock::default();
         let mut hold = FlashHold::on(screen.clock());
         screen.at(at(0));
-        assert!(!hold.holds(1, SHAPE), "an empty screen holds nothing");
-        assert!(hold.changes(1));
-        hold.shown(1, SHAPE);
+        assert!(!hold.holds(one, SHAPE), "an empty screen holds nothing");
+        assert!(hold.changes(one));
+        hold.shown(one, SHAPE);
         screen.at(at(50));
-        hold.shown(1, SHAPE);
+        hold.shown(one, SHAPE);
         let floor = FLOOR.as_millis() as u64;
         screen.at(at(floor - 1));
-        assert!(hold.holds(2, SHAPE), "timed from the first showing");
-        assert!(!hold.holds(1, SHAPE), "the phases on screen never wait");
-        assert!(!hold.changes(1) && hold.changes(2));
+        assert!(hold.holds(two, SHAPE), "timed from the first showing");
+        assert!(!hold.holds(one, SHAPE), "the phases on screen never wait");
+        assert!(!hold.changes(one) && hold.changes(two));
         screen.at(at(floor));
-        assert!(!hold.holds(2, SHAPE));
+        assert!(!hold.holds(two, SHAPE));
         screen.at(at(0) - Duration::from_millis(1));
-        assert!(!hold.holds(2, SHAPE), "a clock run backward");
+        assert!(!hold.holds(two, SHAPE), "a clock run backward");
+    }
+
+    /// A staged write counts from when it lands, and a lost one never counts.
+    #[test]
+    fn a_write_counts_from_when_it_lands_and_a_lost_one_never() {
+        let [one, two] = two_pictures();
+        let screen = ManualClock::default();
+        let mut hold = FlashHold::on(screen.clock());
+        screen.at(at(0));
+        hold.stage(one, SHAPE);
+        hold.lost();
+        hold.landed();
+        assert!(hold.changes(one), "a lost write shows nothing");
+        hold.stage(one, SHAPE);
+        screen.at(at(50));
+        hold.landed();
+        let floor = FLOOR.as_millis() as u64;
+        screen.at(at(floor));
+        assert!(hold.holds(two, SHAPE), "timed from the landing");
+        screen.at(at(50 + floor));
+        assert!(!hold.holds(two, SHAPE));
     }
 
     /// A screen of a new shape (a resize, a font zoom) shows nothing to hold:
@@ -176,20 +247,21 @@ mod tests {
     /// first showing, on whatever shape.
     #[test]
     fn a_reshaped_screen_is_never_held() {
+        let [one, two] = two_pictures();
         let screen = ManualClock::default();
         let mut hold = FlashHold::on(screen.clock());
         screen.at(at(0));
-        hold.shown(1, SHAPE);
+        hold.shown(one, SHAPE);
         screen.at(at(10));
-        assert!(!hold.holds(2, (SHAPE.0 + 1, SHAPE.1)), "resized");
-        hold.shown(1, (SHAPE.0 + 1, SHAPE.1));
+        assert!(!hold.holds(two, (SHAPE.0 + 1, SHAPE.1)), "resized");
+        hold.shown(one, (SHAPE.0 + 1, SHAPE.1));
         assert!(
-            hold.holds(2, (SHAPE.0 + 1, SHAPE.1)),
+            hold.holds(two, (SHAPE.0 + 1, SHAPE.1)),
             "the new shape holds once shown"
         );
         screen.at(at(FLOOR.as_millis() as u64));
         assert!(
-            !hold.holds(2, (SHAPE.0 + 1, SHAPE.1)),
+            !hold.holds(two, (SHAPE.0 + 1, SHAPE.1)),
             "timed from the phase's first showing, not the reshape"
         );
     }

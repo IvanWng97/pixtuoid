@@ -17,7 +17,7 @@ use std::time::{Instant, SystemTime};
 use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::Dirty;
-use pixtuoid_scene::flash::{FlashHold, FlashPhase, Flashes};
+use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::layout::Size;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
@@ -87,7 +87,7 @@ pub(crate) struct TileCutaway {
     /// The image's top-left cell.
     origin: Position,
     out: Sink,
-    /// This frame's write, once staged; its tiles carved around the frame's
+    /// This frame's write, once queued; its tiles carved around the frame's
     /// text once that is drawn.
     pending: Option<Pending>,
     /// Set once SIXEL or iTerm2 pixels are written, for the unwind
@@ -96,7 +96,7 @@ pub(crate) struct TileCutaway {
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
     /// The flashes the terminal shows.
-    flash: FlashHold<Flashes, Option<Fitted>>,
+    flash: FlashHold<Option<Fitted>>,
     /// This frame's written transmits, counted as shown once the frame
     /// lands ([`Self::landed`]).
     landing: Option<Landing>,
@@ -107,7 +107,7 @@ pub(crate) struct TileCutaway {
     cores: usize,
 }
 
-/// A staged write: the tiles it sends and the flashes they show, so only a
+/// A queued write: the tiles it sends and the flashes they show, so only a
 /// write that lands can show them.
 struct Pending {
     tiles: Vec<Changed>,
@@ -116,11 +116,10 @@ struct Pending {
     due: bool,
 }
 
-/// Transmits written into the frame, and the flashes they show; the cadence
-/// restarts from `at` when there were any.
+/// Transmits written into the frame; the cadence restarts from `at` when
+/// there were any.
 struct Landing {
     sent: Vec<Changed>,
-    flashes: Flashes,
     at: Option<SystemTime>,
 }
 
@@ -218,7 +217,7 @@ impl TileCutaway {
         self.fitted.map(|f| f.fit.logical())
     }
 
-    /// Show `floor`'s `frame`, which flashes `flash`, as `fitted`; it may
+    /// Show `floor`'s `frame`, which shows `flashes`, as `fitted`; it may
     /// differ from that floor's last only within `dirty`. Queue the tiles it
     /// changed once the protocol's cadence allows; until then they stay owed.
     /// A frame the flash hold keeps back is not sent, so the terminal keeps
@@ -229,12 +228,11 @@ impl TileCutaway {
         floor: usize,
         frame: &RgbBuffer,
         dirty: Dirty,
-        flash: FlashPhase,
+        flashes: Flashes,
         now: SystemTime,
     ) {
         let fresh = self.shown.replace(Shown::Floor(floor)) != Some(Shown::Floor(floor));
         let dirty = if fresh { Dirty::All } else { dirty };
-        let flashes = [flash; 2];
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&dirty);
             self.image_behind = true;
@@ -245,7 +243,7 @@ impl TileCutaway {
             self.image.clone_from(frame);
             self.image_behind = false;
         }
-        self.stage(&dirty, fresh, flashes, now, fitted.scene.as_position());
+        self.queue(&dirty, fresh, flashes, now, fitted.scene.as_position());
     }
 
     /// Show a slide's `composed` frame, whose two floors show `flashes`, and
@@ -265,14 +263,14 @@ impl TileCutaway {
         }
         self.image.clone_from(composed);
         self.shown = Some(Shown::Slide);
-        self.stage(&Dirty::All, true, flashes, now, fitted.scene.as_position());
+        self.queue(&Dirty::All, true, flashes, now, fitted.scene.as_position());
     }
 
     /// Queue the tiles of [`Self::image`], which shows `flashes`, that differ
     /// from what was sent, among those `dirty` reaches, once the cadence
     /// allows: at once for a new phase, so it shows as long as it lasts.
     /// `fresh` is reported as [`FrameSend::fresh`].
-    fn stage(
+    fn queue(
         &mut self,
         dirty: &Dirty,
         fresh: bool,
@@ -353,11 +351,7 @@ impl TileCutaway {
             return;
         };
         if send.is_empty() {
-            self.landing = Some(Landing {
-                sent: send,
-                flashes,
-                at: None,
-            });
+            self.wrote(send, None, flashes);
             return;
         }
         match self.route.protocol() {
@@ -393,32 +387,34 @@ impl TileCutaway {
         let flushed = wrote.and_then(|()| self.out.flush());
         self.last.sent = sent.len();
         match flushed {
-            Ok(()) => {
-                self.landing = Some(Landing {
-                    sent,
-                    flashes,
-                    at: Some(now),
-                });
-            }
+            Ok(()) => self.wrote(sent, Some(now), flashes),
             Err(e) => tracing::warn!(error = %e, "image transmit failed"),
         }
+    }
+
+    /// A write went out with the frame: its transmits and `flashes` show
+    /// once the frame lands ([`Self::landed`]).
+    fn wrote(&mut self, sent: Vec<Changed>, at: Option<SystemTime>, flashes: Flashes) {
+        self.landing = Some(Landing { sent, at });
+        self.flash.stage(flashes, self.fitted);
     }
 
     /// The frame reached the terminal: its transmits are shown, and a flash
     /// phase's floor runs from now.
     pub(crate) fn landed(&mut self) {
-        if let Some(Landing { sent, flashes, at }) = self.landing.take() {
+        if let Some(Landing { sent, at }) = self.landing.take() {
             if at.is_some() {
                 self.sent_at = at;
             }
             self.tiles.sent(&sent);
-            self.flash.shown(flashes, self.fitted);
         }
+        self.flash.landed();
     }
 
     /// The frame never reached the terminal: nothing it wrote is shown.
     pub(crate) fn lost(&mut self) {
         self.landing = None;
+        self.flash.lost();
     }
 
     /// What encodes this frame's tiles, apart from the sink no thread shares.

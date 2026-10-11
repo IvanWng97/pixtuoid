@@ -23,26 +23,26 @@ fn theme_switch_recolors_floor() {
     );
 }
 
+/// A typing sitter's glow is the one theme input to its cached sprite
+/// ([`FrameKey::glow_tint`](pixtuoid_scene::frame_cache::FrameKey)), so a
+/// renderer that rendered under the old theme paints the new one
+/// pixel-for-pixel as a fresh one would, with no flush on a switch.
 #[test]
-fn set_theme_with_same_theme_is_a_noop() {
-    let scene = scene_with(vec![idle("/t/same.jsonl", 0, t0())], 16);
-    let mut r = build(100, 40, vec![]); // built with normal_theme()
+fn theme_switch_paints_as_a_fresh_renderer_would() {
+    let started = t0() - Duration::from_secs(300);
+    let scene = scene_with(vec![active("/t/fresh.jsonl", 0, "Edit x", started)], 16);
     let now = t0();
-    r.render(&scene, pack(), now).unwrap();
-    let before = r.buf().expect("a frame").clone();
-    r.set_theme(normal_theme());
-    r.render(&scene, pack(), now).unwrap();
-    let d = region_diff(
-        &before,
-        r.buf().expect("a frame"),
-        0,
-        0,
-        before.width(),
-        before.height(),
-    );
+    let mut switched = build(100, 40, vec![]);
+    switched.render(&scene, pack(), now).unwrap();
+    switched.set_theme(dark_theme());
+    switched.render(&scene, pack(), now).unwrap();
+    let mut fresh = build(100, 40, vec![]);
+    fresh.set_theme(dark_theme());
+    fresh.render(&scene, pack(), now).unwrap();
     assert_eq!(
-        d, 0,
-        "re-setting the identical theme must not recolor (cache not flushed), diff={d}"
+        switched.buf().expect("a frame").as_slice(),
+        fresh.buf().expect("a frame").as_slice(),
+        "a stale cached sprite survived the theme switch"
     );
 }
 
@@ -76,7 +76,7 @@ fn each_strike_phase_holds_the_floor_on_screen_in_half_blocks() {
     let tick = crate::tui::frame_tick();
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let (mut r, screen) = half_blocks_on_screen(cols, rows);
+        let (mut r, screen, _) = half_blocks_on_screen(cols, rows);
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
@@ -113,7 +113,7 @@ fn a_held_frame_leaves_the_terminal_and_its_hit_targets_alone() {
     let [dark, late, held, shown] = held_frames(&strike);
     for sliding in [false, true] {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let (mut r, screen) = half_blocks_on_screen(cols, rows);
+        let (mut r, screen, _) = half_blocks_on_screen(cols, rows);
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         let scene = two_floor_scene();
@@ -146,7 +146,7 @@ fn a_resized_terminal_is_never_held_in_half_blocks() {
     let [dark, late, held, _] = held_frames(&strike);
     for sliding in [false, true] {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let (mut r, screen) = half_blocks_on_screen(cols, rows);
+        let (mut r, screen, _) = half_blocks_on_screen(cols, rows);
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         let scene = two_floor_scene();
@@ -160,7 +160,6 @@ fn a_resized_terminal_is_never_held_in_half_blocks() {
         let resized = ratatui::layout::Rect::new(0, 0, cols + 8, rows + 4);
         r.terminal
             .backend_mut()
-            .inner
             .resize(resized.width, resized.height);
         let mut stale = r.frame_buffer().clone();
         stale.resize(resized);
@@ -181,20 +180,20 @@ fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     let strike = storm_strike();
     let [first, second] = [strike.changes[0], strike.changes[1]];
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
-    let (mut r, screen) = half_blocks_on_screen(cols, rows);
+    let (mut r, screen, wire) = half_blocks_on_screen(cols, rows);
     r.set_weather(strike.weather);
     r.set_motion(pixtuoid_scene::anim::Motion::Full);
     let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
     screen.at(first - 2 * floor);
     r.render(&scene, pack(), first - 2 * floor).expect("render");
-    r.terminal.backend_mut().tap = Some(Latency {
+    *wire.slow.lock().expect("lock") = Some(Latency {
         screen: screen.clone(),
         by: SLOW,
     });
     screen.at(first);
     r.render(&scene, pack(), first).expect("render");
     let landed = screen.now();
-    r.terminal.backend_mut().tap = None;
+    *wire.slow.lock().expect("lock") = None;
     let before = r.frame_buffer().clone();
     assert!(
         second.duration_since(first).expect("in order") >= floor,
@@ -213,6 +212,76 @@ fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
     assert_ne!(*r.frame_buffer(), before, "shown once it has");
 }
 
+/// A frame the terminal refuses (a full one's `WouldBlock`) never showed, so
+/// its phase holds the floor from the first frame of it that lands.
+#[test]
+fn a_refused_frames_phase_holds_the_floor_from_the_frame_that_lands() {
+    use crate::test_flash::storm_strike;
+    use std::sync::atomic::Ordering;
+    let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+    let strike = storm_strike();
+    let [first, second] = [strike.changes[0], strike.changes[1]];
+    let lands = second - floor * 3 / 4;
+    assert!(
+        lands > first,
+        "a frame of the phase lands after the refused one"
+    );
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, screen, wire) = half_blocks_on_screen(cols, rows);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
+    let render = |r: &mut TuiRenderer<TestBackend>, at| {
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+    };
+    render(&mut r, first - 2 * floor);
+    wire.fail.store(true, Ordering::Relaxed);
+    render(&mut r, first);
+    wire.fail.store(false, Ordering::Relaxed);
+    render(&mut r, lands);
+    let landed = r.frame_buffer().clone();
+    render(&mut r, second);
+    assert_eq!(*r.frame_buffer(), landed, "held from the frame that landed");
+    render(&mut r, lands + floor);
+    assert_ne!(*r.frame_buffer(), landed, "shown once it has");
+}
+
+/// A slide cancelled before the next frame (a resize lands it) still reports
+/// what its last frame flashes, which its pixels still show: a starved tube's
+/// catch on the floor it leaves.
+#[test]
+fn a_cancelled_slide_reports_what_its_last_frame_flashes() {
+    use crate::test_flash::starved_stutter;
+    let stutter = starved_stutter();
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, screen, _) = half_blocks_on_screen(cols, rows);
+    r.set_weather(stutter.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let cap = 16;
+    let upstairs = slot(AgentId::from_transcript_path("/c/1.jsonl"), 1, cap, t0());
+    let scene = scene_with(vec![upstairs], cap);
+    let catch = stutter.changes[0];
+    // A tick before: a starved tube catches only across a step no longer than
+    // its shortest catch.
+    let before = catch - Duration::from_millis(pixtuoid_scene::anim::FULL_TICK_MS);
+    for at in stutter.setup.into_iter().chain([before]) {
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+    }
+    r.navigate_floor(1, before);
+    screen.at(catch);
+    r.render(&scene, pack(), catch).expect("render");
+    let flashes = r.session.flashes();
+    assert_ne!(
+        flashes,
+        pixtuoid_scene::flash::Flashes::default(),
+        "the slide's frame catches"
+    );
+    r.cancel_transition();
+    assert_eq!(r.session.flashes(), flashes);
+}
+
 /// A pause freezes the frame clock inside a hold; the screen clock runs on,
 /// so the hold runs out and the paused frame, with a theme change, is flushed.
 #[test]
@@ -222,7 +291,7 @@ fn a_pause_inside_a_hold_never_wedges_the_half_blocks() {
     let strike = storm_strike();
     let [dark, late, paused, _] = held_frames(&strike);
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
-    let (mut r, screen) = half_blocks_on_screen(cols, rows);
+    let (mut r, screen, _) = half_blocks_on_screen(cols, rows);
     r.set_weather(strike.weather);
     r.set_motion(pixtuoid_scene::anim::Motion::Full);
     let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
@@ -258,7 +327,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
     let scene = scene_with(vec![], 16);
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let (mut r, screen) = half_blocks_on_screen(cols, rows);
+        let (mut r, screen, _) = half_blocks_on_screen(cols, rows);
         r.set_weather(stutter.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         for at in stutter.setup {
@@ -270,7 +339,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
             .positions()
             .filter(|p| neon_tube(p.x - cells.x, 2 * (p.y - cells.y)))
             .collect();
-        let snapshot = |r: &TuiRenderer<Slow>| -> Vec<ratatui::buffer::Cell> {
+        let snapshot = |r: &TuiRenderer<TestBackend>| -> Vec<ratatui::buffer::Cell> {
             tube.iter().map(|&p| r.frame_buffer()[p].clone()).collect()
         };
         let now = stutter.start - lead(frame) + offset;
@@ -288,7 +357,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
             shown = shot;
         }
         let at = format!("a frame each {frame:?} from +{offset:?}");
-        assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+        assert_each_phase_holds_the_floor(&changed, stutter.changes.len(), &at);
     }
 }
 

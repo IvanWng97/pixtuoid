@@ -30,6 +30,11 @@ test('a plain blockquote becomes a ~ note terminal window', () => {
   assert.ok(!JSON.stringify(bar).includes('terminal__dot--r'));
 });
 
+test('an empty strong is passed over for the first one with text', () => {
+  const tree = run([quote(p(el('strong'), txt(' '), strong("Don't skip hooks")))]);
+  assert.deepEqual(tree.children[0].properties.className, ['callout', 'callout--warn']);
+});
+
 test("a **Don't …** opener becomes the red-dot ~ warning window", () => {
   const tree = run([quote(p(strong("Don't chain `cargo clippy && cargo test`"), txt(' — …')))]);
   const wrap = tree.children[0];

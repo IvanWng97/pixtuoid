@@ -86,11 +86,10 @@ pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_cor
 pub fn pixtuoid_scene::floor::FloorSession::badges(&self) -> &[crate::display::Badge]
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::neon_sign::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
-pub fn pixtuoid_scene::floor::FloorSession::flash(&self) -> crate::flash::FlashPhase
+pub fn pixtuoid_scene::floor::FloorSession::flashes(&self) -> crate::flash::Flashes
 pub fn pixtuoid_scene::floor::FloorSession::floor(&self) -> &pixtuoid_scene::floor::PerFloor
 pub fn pixtuoid_scene::floor::FloorSession::new(alloc::sync::Arc<pixtuoid_scene::pack::OfficeArt>) -> Self
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
-pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
 pub fn pixtuoid_scene::floor::FloorSession::step(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 impl core::fmt::Debug for pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -880,7 +879,7 @@ pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::O
 pub fn pixtuoid_scene::look::Raster::host_text(&self) -> core::option::Option<crate::display::HostText<'_>>
 pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
-pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
+pub fn pixtuoid_scene::look::Raster::shown(&self) -> core::option::Option<pixtuoid_scene::look::Look>
 impl core::fmt::Debug for pixtuoid_scene::look::Raster
 pub fn pixtuoid_scene::look::Raster::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::look::Raster
@@ -909,7 +908,6 @@ impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::RenderInputs<'a>
 pub struct pixtuoid_scene::look::Rendered
-pub pixtuoid_scene::look::Rendered::flash: crate::flash::FlashPhase
 pub pixtuoid_scene::look::Rendered::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 impl core::fmt::Debug for pixtuoid_scene::look::Rendered
 pub fn pixtuoid_scene::look::Rendered::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result

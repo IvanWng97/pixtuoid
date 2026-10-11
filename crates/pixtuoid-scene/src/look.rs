@@ -80,8 +80,8 @@ pub struct Rendered {
     pub layout: Arc<SceneLayout>,
     /// Waypoints with an occupant: the appliance audio cues' feed.
     pub(crate) occupied_waypoints: HashSet<usize>,
-    /// What of the frame flashes, for a painter's hold.
-    pub flash: crate::flash::FlashPhase,
+    /// What of the frame flashes, which its session's `flashes()` reports.
+    pub(crate) flash: crate::flash::FlashPhase,
 }
 
 /// The frame entry's `tracing` span names, for a profiler's subscriber.
@@ -286,19 +286,17 @@ impl Raster {
         }
     }
 
-    /// Flush the classic's recolored sprites, after a theme change.
-    pub fn reset_sprite_cache(&mut self) {
-        if let Some(classic) = &mut self.classic {
-            classic.caches.sprites = crate::frame_cache::FrameCache::new();
-        }
-    }
-
     /// Paint the next cutaway frame whole: the frame-pacing bench's worst case.
     #[doc(hidden)]
     pub fn forget_shown(&mut self) {
         if let Some(cutaway) = &mut self.cutaway {
             cutaway.forget();
         }
+    }
+
+    /// The look of the last frame drawn, `None` before the first.
+    pub fn shown(&self) -> Option<Look> {
+        self.shown
     }
 
     /// What the last frame drawn was drawn under, `None` before the first.
