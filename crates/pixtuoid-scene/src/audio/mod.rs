@@ -38,8 +38,8 @@ pub(crate) const TYPING_SEED: u64 = 0xBEEF;
 pub(crate) const DROP_SEED: u64 = 0xFACE;
 pub(crate) const PICK_SEED: u64 = 0xDEAD;
 
-/// The rate every synthesized buffer plays at — what a sink opens its device or
-/// context at.
+/// The rate every synthesized buffer is tagged with; each sink resamples to its
+/// device's or AudioContext's own rate.
 pub const SAMPLE_RATE: u32 = dsp::SAMPLE_RATE;
 
 /// Active-agent count at which the office reads BUSY (full band + dense

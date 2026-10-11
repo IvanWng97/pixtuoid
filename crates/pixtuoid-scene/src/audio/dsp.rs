@@ -1,8 +1,9 @@
 //! Minimal DSP kernel for the procedural synth — a real-input FFT, brickwall
 //! band filters, spectral-envelope noise shaping, and a deterministic noise
 //! stream. Everything runs ONCE per track to pre-render sample buffers
-//! (`synth.rs`), never per audio frame. Dependency-free on purpose: the site's
-//! wasm ships this module, and an FFT crate is a download every visitor pays.
+//! (`synth.rs`, `foley.rs`), never per audio frame. Dependency-free on purpose:
+//! the site's wasm ships this module, and an FFT crate is a download every
+//! visitor pays.
 
 /// The one sample rate every buffer in this module uses (CD-standard mono).
 pub const SAMPLE_RATE: u32 = 44_100;

@@ -45,6 +45,7 @@ fn midi_freq(m: f32) -> f32 {
 /// lowpass pads to one, and only an unpadded block filters circularly, so the
 /// bed loops click-free.
 const BED_LOOP_SAMPLES: usize = 1 << 19;
+const _: () = assert!(BED_LOOP_SAMPLES.is_power_of_two());
 
 /// Vinyl-crackle pop density shared by BOTH room-tone beds — one knob, so the
 /// day and night textures age identically.
