@@ -193,9 +193,9 @@ enum Located {
 
 /// Where one declared document is read from, and how the report names it.
 fn locate(up: &Upstream, at: &At) -> (Located, String) {
-    let Upstream { repo, branch, .. } = *up;
+    let repo = up.repo;
     match *at {
-        At::Path(path) => (
+        At::Path { path, branch } => (
             Located::Raw {
                 url: format!("{RAW_URL}/{repo}/{branch}/{path}"),
             },
@@ -383,7 +383,7 @@ fn check_watch(source: &str, up: &Upstream, w: &Watch, fetched: &mut Fetched, re
         .zip(&texts)
         .map(|((_, label, doc), text)| {
             let path = match doc.at {
-                At::Path(p) => p,
+                At::Path { path, .. } => path,
                 At::ReleaseAsset { member, .. } => member,
             };
             (label.as_str(), path, text.as_str())
@@ -460,7 +460,7 @@ fn check_watch(source: &str, up: &Upstream, w: &Watch, fetched: &mut Fetched, re
 /// Readers that yield only the family we read: a shrink there is the finding
 /// itself, so the floor that catches a degraded parse does not apply.
 fn yields_only_the_family(read: &Read) -> bool {
-    matches!(read, Read::Sole { .. } | Read::RustArms { .. })
+    matches!(read, Read::RustArms { .. })
 }
 
 /// Upstream's names off every `(label, path, text)` document of `w`, each

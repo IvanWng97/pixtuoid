@@ -2,12 +2,11 @@
 //! documents that declare those names, how to read them, and what a user loses
 //! when one goes. pixtuoid's `drift_watch` checks them against upstream.
 
-/// One public repository a source reads names from, which every
-/// [`At::Path`] and [`At::ReleaseAsset`] resolves against.
+/// One public repository a source reads names from, which every [`At`]
+/// resolves against.
 #[derive(Debug)]
 pub struct Upstream {
     pub repo: &'static str,
-    pub branch: &'static str,
     pub watches: &'static [Watch],
 }
 
@@ -23,9 +22,14 @@ pub struct Doc {
     pub owns: &'static str,
 }
 
+/// Where a [`Doc`] is fetched from.
 #[derive(Debug)]
 pub enum At {
-    Path(&'static str),
+    /// A file of the tree at `branch`.
+    Path {
+        path: &'static str,
+        branch: &'static str,
+    },
     /// `member` of the latest release's tarball `asset` (`{version}` = its
     /// tag, `v`-stripped), admitted only when the release's `sums` file vouches
     /// for it.
@@ -87,6 +91,7 @@ pub struct Siblings {
     pub ignored: &'static [(&'static str, &'static str)],
 }
 
+/// Which of upstream's names are siblings of ours.
 #[derive(Debug)]
 pub enum Family {
     /// Starts with this.
@@ -101,8 +106,9 @@ mod tests {
     use crate::source::registry::REGISTRY;
 
     /// Every watch is one a checker can run: a blank name, or an `Each` pattern
-    /// without `{name}`, matches whatever upstream says, and a sibling sweep
-    /// needs a reader that yields upstream's names rather than testing ours.
+    /// without `{name}`, matches whatever upstream says, a `Sole` read yields
+    /// one name, and a sibling sweep needs a reader that yields upstream's
+    /// names rather than testing ours.
     #[test]
     fn every_watch_is_one_a_checker_can_run() {
         let mut ids = std::collections::BTreeSet::new();
@@ -123,6 +129,12 @@ mod tests {
                         w.id
                     );
                 }
+                assert!(
+                    !matches!(w.read, Read::Sole { .. }) || ours.len() == 1,
+                    "{} reads one name off upstream but watches {}",
+                    w.id,
+                    ours.len()
+                );
                 assert!(
                     w.siblings.is_none()
                         || !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),

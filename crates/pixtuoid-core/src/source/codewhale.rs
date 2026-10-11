@@ -62,20 +62,22 @@ pub(crate) const DELEGATING_ACTIONS: &[&str] =
     &["start", "spawn", "run", "wait", "join", "await", "block"];
 
 #[cfg(any(test, feature = "upstream"))]
-const SUBAGENT_MODULE: &str = "crates/tui/src/tools/subagent/mod.rs";
+const SUBAGENT_MODULE: At = At::Path {
+    path: "crates/tui/src/tools/subagent/mod.rs",
+    branch: "main",
+};
 
 /// Only the delegation is watched here; the hooks CodeWhale fires are watched
 /// with the set the installer registers.
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
     repo: "Hmbown/CodeWhale",
-    branch: "main",
     watches: &[
         Watch {
             id: "codewhale.subagent_tool",
             ours: || vec![SUBAGENT_TOOL],
             docs: &[Doc {
-                at: At::Path(SUBAGENT_MODULE),
+                at: SUBAGENT_MODULE,
                 anchor: r"impl\s+ToolSpec\s+for\s+AgentTool\b",
                 owns: "`AgentTool`'s `ToolSpec` impl",
             }],
@@ -89,7 +91,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
             id: "codewhale.delegating_actions",
             ours: || DELEGATING_ACTIONS.to_vec(),
             docs: &[Doc {
-                at: At::Path(SUBAGENT_MODULE),
+                at: SUBAGENT_MODULE,
                 anchor: r"fn parse_agent_tool_action\b",
                 owns: "`parse_agent_tool_action`",
             }],

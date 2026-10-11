@@ -81,18 +81,18 @@ fn tar(args: &[&str], tarball: &[u8]) -> Result<Vec<u8>, FetchError> {
 
 /// What a curl run means: `ran` is its exit, `stderr` ends in the status.
 fn classify(ran: bool, stderr: &str, body: Vec<u8>) -> Result<Vec<u8>, FetchError> {
-    let status: u16 = stderr
-        .lines()
-        .last()
-        .and_then(|l| l.trim().parse().ok())
-        .unwrap_or(0);
+    let stderr = stderr.trim_end();
+    let (above, last) = stderr.rsplit_once('\n').unwrap_or(("", stderr));
+    // A curl killed before `--write-out` ran left no status line: then all
+    // of stderr is curl's say.
+    let (said, status) = match last.trim().parse::<u16>() {
+        Ok(s) => (above, s),
+        Err(_) => (stderr, 0),
+    };
     if !ran || status == 0 {
-        // The last line is the status `--write-out` appended, not curl's say.
-        let said: Vec<&str> = stderr.trim_end().lines().collect();
-        let said = said.split_last().map_or(&said[..], |(_, rest)| rest);
         return Err(FetchError::Transient(format!(
             "curl failed: {}",
-            said.join(" ").trim()
+            said.lines().collect::<Vec<_>>().join(" ").trim()
         )));
     }
     match status {
@@ -130,7 +130,7 @@ mod tests {
         ));
         assert!(matches!(
             classify(true, "no status line", vec![]),
-            Err(FetchError::Transient(_))
+            Err(FetchError::Transient(e)) if e.contains("no status line")
         ));
         // A body cut off after a 200 line (`--max-time` mid-transfer) is no document.
         assert!(matches!(
@@ -144,6 +144,36 @@ mod tests {
         assert_eq!(classify(true, "\n299", vec![]), Ok(vec![]));
         assert!(matches!(
             classify(true, "\n300", vec![]),
+            Err(FetchError::Transient(_))
+        ));
+    }
+
+    /// The listing tells our pin going dark (`None`) from an archive tar
+    /// cannot read, and a tarball larger than the pipes extracts whole.
+    #[cfg(unix)]
+    #[test]
+    fn untar_tells_a_missing_member_from_a_broken_archive() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        // Incompressible, so the tarball itself outgrows a pipe's buffer.
+        let mut x = 1u32;
+        let big: Vec<u8> = (0..1 << 20)
+            .map(|_| {
+                x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                x.to_be_bytes()[0]
+            })
+            .collect();
+        std::fs::create_dir(dir.path().join("pkg")).expect("mkdir");
+        std::fs::write(dir.path().join("pkg/schema.json"), &big).expect("write");
+        let at = dir.path().to_str().expect("a UTF-8 tempdir");
+        let tarball = tar(&["-czf", "-", "-C", at, "pkg"], &[]).expect("tar packs");
+
+        assert!(matches!(
+            Curl.untar(&tarball, "pkg/schema.json"),
+            Ok(Some(b)) if b == big
+        ));
+        assert_eq!(Curl.untar(&tarball, "pkg/gone.json"), Ok(None));
+        assert!(matches!(
+            Curl.untar(b"not a tarball", "pkg/schema.json"),
             Err(FetchError::Transient(_))
         ));
     }

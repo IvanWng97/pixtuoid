@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The upstream drift watches not yet declared beside their source in Rust.
 
-pixtuoid's `drift_watch` example runs this with `--json` and files its buckets
-into the one report, so each watch has one checker until it moves."""
+pixtuoid's `drift_watch` example runs this and files the buckets it prints, as
+JSON, into the one report, so each watch has one checker until it moves."""
 
 from __future__ import annotations
 

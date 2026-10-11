@@ -166,10 +166,10 @@ mod tests {
     /// Every dispatch arm in `file` names a CONST, and those consts are exactly
     /// the ones `export` declares.
     ///
-    /// The fragment binds a RENAME — change a const's value and the committed
-    /// file goes stale. It cannot bind an ADDITION: an arm written as a bare
-    /// literal decodes a name the surface never mentions, and every other gate
-    /// stays green — so a bare literal is rejected outright.
+    /// A drift watch carries the const — a surface row or a source's
+    /// `UPSTREAM` — so it follows a RENAME. It cannot see an ADDITION: an arm
+    /// written as a bare literal decodes a name no watch carries, and every
+    /// other gate stays green — so a bare literal is rejected outright.
     ///
     /// Reading our own source here is not what this crate stopped doing: that
     /// was a FOREIGN program regex-parsing us, where a miss narrowed the watch
@@ -197,12 +197,12 @@ mod tests {
             };
             // ANY `"` in the head, not just a leading or `(`-prefixed one: the
             // shape that escaped was a guard, `g if g == "wire_name" =>`, which
-            // dispatches on a name the surface never carries while `armed` stays
+            // dispatches on a name no watch carries while `armed` stays
             // equal to the export because the token is not SCREAMING_SNAKE.
             assert!(
                 !head.contains('"'),
                 "{file}: arm `{}` in {export}'s dispatch reads a bare wire literal — \
-                 name it as a const so the drift surface can carry it",
+                 name it as a const so a drift watch can carry it",
                 head.trim(),
             );
         }

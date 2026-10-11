@@ -162,7 +162,6 @@ const SESSION_EVENTS_SCHEMA: &[Doc] = &[Doc {
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
     repo: "github/copilot-cli",
-    branch: "main",
     watches: &[
         Watch {
             id: "copilot.kinds",

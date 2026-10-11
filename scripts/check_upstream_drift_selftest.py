@@ -1132,10 +1132,10 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
-    """A document is either anchored or deliberately exempt — never neither. The
-    anchor gate is #793's fix: a pin that 200s as a facade reads as mass drift
-    without it. A new sweep declaring neither would skip that gate silently — hence
-    a classification test over every `*_URL`, not a floor on ANCHORS."""
+    """Every swept document declares an anchor. The anchor gate is #793's fix: a
+    pin that 200s as a facade reads as mass drift without it. A new sweep declaring
+    none would skip that gate silently — hence a census over every `*_URL`, not a
+    floor on ANCHORS."""
     import re as _re
 
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
@@ -1149,8 +1149,8 @@ def test_every_swept_url_declares_an_anchor() -> None:
                 unclassified.append(name)
     check(
         not unclassified,
-        f"{unclassified} declare neither an anchor nor structural parsing, so the "
-        f"#793 stale-pin gate does not cover them.",
+        f"{unclassified} declare no anchor, so the #793 stale-pin gate does not "
+        f"cover them.",
     )
 
 
@@ -1236,8 +1236,8 @@ def test_codex_enum_reader_drops_field_types_and_keeps_renames() -> None:
           f"a field TYPE is not a variant: {sorted(got)}")
 
 
-def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
-    """Each parser, against a hand-made document of the shape it reads. They fail
+def test_the_cc_hook_table_parser_extracts_from_a_snippet() -> None:
+    """The parser, against a hand-made document of the shape it reads. It fails
     SAFE (an empty parse becomes probe health, not a ⛔), but a regex-parser
     regression is a silent monitor death."""
     cc = d.upstream_cc_hook_events(

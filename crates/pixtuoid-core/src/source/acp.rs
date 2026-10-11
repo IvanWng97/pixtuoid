@@ -45,14 +45,21 @@ pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 /// unstable; v2 is a separate line grok does not speak.
 #[cfg(any(test, feature = "upstream"))]
 const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
+    const BRANCH: &str = "main";
     [
         Doc {
-            at: At::Path("schema/v1/schema.json"),
+            at: At::Path {
+                path: "schema/v1/schema.json",
+                branch: BRANCH,
+            },
             anchor,
             owns,
         },
         Doc {
-            at: At::Path("schema/v1/schema.unstable.json"),
+            at: At::Path {
+                path: "schema/v1/schema.unstable.json",
+                branch: BRANCH,
+            },
             anchor,
             owns,
         },
@@ -62,7 +69,6 @@ const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
     repo: "agentclientprotocol/agent-client-protocol",
-    branch: "main",
     watches: &[
         Watch {
             id: "acp.method",

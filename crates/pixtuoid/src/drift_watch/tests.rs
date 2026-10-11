@@ -64,7 +64,6 @@ impl Fetch for Served {
 
 const REPO: Upstream = Upstream {
     repo: "o/r",
-    branch: "main",
     watches: &[],
 };
 
@@ -76,7 +75,10 @@ const ANCHORED: &str = r"(?m)^enum Events \{";
 
 const fn doc(path: &'static str) -> Doc {
     Doc {
-        at: At::Path(path),
+        at: At::Path {
+            path,
+            branch: "main",
+        },
         anchor: ANCHORED,
         owns: "`Events`",
     }
@@ -176,7 +178,10 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
         id: "t.union",
         ours: || vec!["c"],
         docs: &[Doc {
-            at: At::Path("s.json"),
+            at: At::Path {
+                path: "s.json",
+                branch: "main",
+            },
             anchor: r#""Events""#,
             owns: "`Events`",
         }],
@@ -199,7 +204,10 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
 #[test]
 fn one_unreadable_document_skips_the_whole_union() {
     const UNION: Doc = Doc {
-        at: At::Path("a.json"),
+        at: At::Path {
+            path: "a.json",
+            branch: "main",
+        },
         anchor: r#""Events""#,
         owns: "`Events`",
     };
@@ -209,7 +217,10 @@ fn one_unreadable_document_skips_the_whole_union() {
         docs: &[
             UNION,
             Doc {
-                at: At::Path("b.json"),
+                at: At::Path {
+                    path: "b.json",
+                    branch: "main",
+                },
                 ..UNION
             },
         ],
@@ -297,7 +308,10 @@ fn a_sole_read_names_what_upstream_declares_now() {
 fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
     const SCHEMA: &str = r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#;
     const DOC: Doc = Doc {
-        at: At::Path("s.json"),
+        at: At::Path {
+            path: "s.json",
+            branch: "main",
+        },
         anchor: r#""Events""#,
         owns: "`Events`",
     };
@@ -349,7 +363,10 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
         id: "t.sib",
         ours: || vec!["tool_call", "tool_call_update"],
         docs: &[Doc {
-            at: At::Path("s.json"),
+            at: At::Path {
+                path: "s.json",
+                branch: "main",
+            },
             anchor: r#""Events""#,
             owns: "`Events`",
         }],

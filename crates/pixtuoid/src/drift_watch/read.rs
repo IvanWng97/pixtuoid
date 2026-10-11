@@ -10,8 +10,8 @@ use serde_json::Value;
 
 pub(super) type Names = BTreeSet<String>;
 
-/// The first group of the ONE match of `pattern`; a Rust document is read with
-/// its comments stripped, so a commented-out declaration is not one.
+/// A Rust document is read with its comments stripped, so a commented-out
+/// declaration is not one.
 pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Option<Names>, regex::Error> {
     let src = if path.ends_with(".rs") {
         strip_rust_comments(text)
@@ -26,7 +26,8 @@ pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Option<Names
     })
 }
 
-/// The string patterns of `fn name`'s match arms whose result matches `arm`.
+/// Off the brace-balanced, comment-stripped body of `fn name`; `None` when no
+/// such fn or arm is there.
 pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Option<Names>, regex::Error> {
     let opener = Regex::new(&format!(r"fn\s+{}\b[^{{]*\{{", regex::escape(name)))?;
     let heads = Regex::new(&format!(r#"((?:"[^"]*"\s*\|\s*)*"[^"]*")\s*=>\s*{arm}"#))?;
@@ -256,6 +257,8 @@ mod tests {
         let schema = r#"{"properties": {"a": {}, "data": {"properties": {"b": {}}}},
                          "definitions": {"X": {"anyOf": [{"properties": {"c": {}}}]}}}"#;
         assert_eq!(json_keys(schema), set(&["a", "b", "c", "data"]));
+        assert_eq!(json_keys(r#"{"type": "object"}"#), None);
+        assert_eq!(json_keys("not json"), None);
     }
 
     #[test]

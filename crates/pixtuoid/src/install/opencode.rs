@@ -130,30 +130,18 @@ mod tests {
     /// that signal never arrives.
     #[test]
     fn the_plugin_forwards_exactly_what_the_decoder_reads() {
-        let mut forwarded: Vec<String> = PLUGIN_TEMPLATE
-            .split_once("const FORWARD = new Set<string>([")
-            .and_then(|(_, rest)| rest.split_once("])"))
-            .map(|(body, _)| {
-                body.split('"')
-                    .skip(1)
-                    .step_by(2)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .expect("the plugin declares a FORWARD set");
+        let mut forwarded = plugin_forward_set();
         // Handled outside FORWARD because it is deduped on status change.
         assert!(PLUGIN_TEMPLATE.contains(r#"t === "message.part.updated""#));
-        forwarded.push("message.part.updated".to_string());
-        forwarded.sort();
+        forwarded.insert("message.part.updated");
 
-        let mut decoded: Vec<String> = pixtuoid_core::source::registry::REGISTRY
+        let decoded: std::collections::BTreeSet<&str> = pixtuoid_core::source::registry::REGISTRY
             .iter()
             .flat_map(|d| d.upstream)
             .flat_map(|up| up.watches)
             .find(|w| w.id == "opencode.hook_events")
-            .map(|w| (w.ours)().into_iter().map(str::to_owned).collect())
+            .map(|w| (w.ours)().into_iter().collect())
             .expect("core watches opencode's hook events");
-        decoded.sort();
 
         assert_eq!(forwarded, decoded);
     }
@@ -346,31 +334,6 @@ mod tests {
             .map(|s| s.trim().trim_matches('"'))
             .filter(|s| !s.is_empty())
             .collect()
-    }
-
-    /// opencode's registered set is a TS `Set`, not a Rust `*_EVENTS` const, so the
-    /// `*_EVENTS` membership pins could not reach it. Deleting `permission.v2.asked` from the plugin shipped GREEN —
-    /// the same hole `PermissionRequest` and `pre_approval_request` shipped
-    /// through. openclaw's plugin already had this bridge; opencode did not.
-    #[test]
-    fn opencode_plugin_forward_set_is_pinned() {
-        use std::collections::BTreeSet;
-        assert_eq!(
-            plugin_forward_set(),
-            BTreeSet::from([
-                "permission.asked",
-                "permission.v2.asked",
-                "session.created",
-                "session.deleted",
-            ]),
-            "opencode_plugin.ts FORWARD changed — an event dropped here never reaches \
-             the shim, and no other test can see it."
-        );
-        assert!(
-            PLUGIN_TEMPLATE.contains(r#"t === "message.part.updated""#),
-            "the tool-activity gate is the fifth forwarded event and carries no \
-             FORWARD entry; losing it silently ends all opencode tool activity"
-        );
     }
 
     /// Every event the PLUGIN forwards must decode — driven off the template's own

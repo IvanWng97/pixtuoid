@@ -93,8 +93,8 @@ const STATUS_RUNNING: &str = "running";
 const STATUS_COMPLETED: &str = "completed";
 const STATUS_ERROR: &str = "error";
 
-/// The part-state statuses that drive activity. Pinned by the tool-part decode
-/// tests.
+/// The part-state statuses that drive activity. Pinned to the `match status`
+/// arms by `every_exported_set_is_exactly_its_dispatch_arms`.
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_PART_STATUSES: &[&str] = &[STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR];
 
@@ -120,27 +120,26 @@ pub(crate) const DECODED_EVENTS: &[&str] = &[
 /// `the_plugin_forwards_exactly_what_the_decoder_reads`).
 #[cfg(any(test, feature = "upstream"))]
 const EVENT_INVENTORY: &[Doc] = &[
-    Doc {
-        at: At::Path("packages/schema/src/v1/session.ts"),
-        anchor: r"(?m)^export const Event = \{",
-        owns: "the `Event` inventory",
-    },
-    Doc {
-        at: At::Path("packages/schema/src/v1/permission.ts"),
-        anchor: r"(?m)^export const Event = \{",
-        owns: "the `Event` inventory",
-    },
-    Doc {
-        at: At::Path("packages/schema/src/permission.ts"),
-        anchor: r"(?m)^export const Event = \{",
-        owns: "the `Event` inventory",
-    },
+    inventory("packages/schema/src/v1/session.ts"),
+    inventory("packages/schema/src/v1/permission.ts"),
+    inventory("packages/schema/src/permission.ts"),
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+const fn inventory(path: &'static str) -> Doc {
+    Doc {
+        at: At::Path {
+            path,
+            branch: "dev",
+        },
+        anchor: r"(?m)^export const Event = \{",
+        owns: "the `Event` inventory",
+    }
+}
 
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
     repo: "anomalyco/opencode",
-    branch: "dev",
     watches: &[
         Watch {
             id: "opencode.hook_events",
