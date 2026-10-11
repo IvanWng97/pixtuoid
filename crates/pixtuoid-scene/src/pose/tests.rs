@@ -1,8 +1,6 @@
 use super::*;
 use crate::anim::PAINT_FRAME_MS;
-use crate::physics::{
-    LegProgress, SegmentProgress, octile_distance, octile_path_len, walk_profile,
-};
+use crate::physics::{LegProgress, octile_distance, octile_path_len, walk_profile};
 use crate::walk::settle_len;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
@@ -605,12 +603,12 @@ fn multi_segment_path_maps_progress_to_segment_via_octile_distance() {
         Some(Pose::Walking { segment, .. }) => {
             let from = segment.from();
             let to = segment.to();
-            let progress = segment.progress();
             assert_eq!(from, door, "first segment starts at door, got {from:?}");
             assert_eq!(to, mid, "first segment ends at mid, got {to:?}");
             assert!(
-                (..=SegmentProgress::fraction(1, 2)).contains(&progress),
-                "expected first-segment progress in [0,half], got progress={progress:?}"
+                segment.travelled()
+                    <= Segment::straight(door, mid, LegProgress::of(1, 2)).travelled(),
+                "expected first-segment progress in [0,half], got {segment:?}"
             );
             assert!(rig.history.recent(slot.agent_id, 1_000, now).is_some());
         }
@@ -736,7 +734,12 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     match p {
         Some(Pose::Walking { segment, .. }) => {
             let travelled = segment.travelled();
-            let linear = LegProgress::of(dur_ms / 4, dur_ms).distance(path_len);
+            let linear = Segment::straight(
+                segment.from(),
+                segment.to(),
+                LegProgress::of(dur_ms / 4, dur_ms),
+            )
+            .travelled();
             assert!(
                 travelled < linear,
                 "physics ease-in: expected behind a linear walk at 25% of duration, got {travelled} of {path_len}, linear {linear}"
@@ -2334,7 +2337,6 @@ fn route_walking_pose_measures_travelled_along_the_whole_route() {
     let a = Point { x: 10, y: 10 };
     let b = Point { x: 30, y: 10 };
     let c = Point { x: 30, y: 30 };
-    let total = octile_path_len(&[a, b, c]);
     let mut rig = RouteRig::new(StubRouter::corners(vec![a, b, c]));
     for t in (0..=4).map(|q| LegProgress::of(q, 4)) {
         let out = route_walking_pose(
@@ -2353,7 +2355,7 @@ fn route_walking_pose_measures_travelled_along_the_whole_route() {
         let Pose::Walking { segment, .. } = out else {
             panic!("a walk at {t:?}, got {out:?}");
         };
-        assert_eq!(segment.travelled(), t.distance(total), "at {t:?}");
+        assert_eq!(segment, Segment::on_route(&[a, b, c], t), "at {t:?}");
     }
 }
 
@@ -2368,8 +2370,8 @@ fn on_route_starts_and_ends_where_the_leg_does() {
     assert_eq!((start.at(), start.travelled()), (a, 0));
     let end = Segment::on_route(&path, LegProgress::DONE);
     assert_eq!(
-        (end.from(), end.to(), end.progress(), end.travelled()),
-        (b, c, SegmentProgress::FULL, octile_path_len(&path)),
+        (end.from(), end.to(), end.at(), end.travelled()),
+        (b, c, c, octile_path_len(&path)),
     );
 }
 

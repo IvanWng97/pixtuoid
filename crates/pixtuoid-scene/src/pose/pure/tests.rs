@@ -1,9 +1,18 @@
 use super::*;
-use crate::physics::SegmentProgress;
+use crate::physics::{LegProgress, Segment};
 use pixtuoid_core::sprite::format::{Piece, Walk};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
 use std::time::Duration;
+
+/// Is `segment`'s `travelled` between a straight walk of its own ends `lo` and
+/// `hi` fifths through?
+fn within_fifths(segment: Segment, lo: u64, hi: u64) -> bool {
+    let at = |fifths| {
+        Segment::straight(segment.from(), segment.to(), LegProgress::of(fifths, 5)).travelled()
+    };
+    (at(lo)..=at(hi)).contains(&segment.travelled())
+}
 
 fn slot(state: ActivityState, age_ms: u64) -> (AgentSlot, SystemTime) {
     let id = AgentId::from_transcript_path("/p/a.jsonl");
@@ -125,12 +134,10 @@ fn idle_phase_1_is_walking_out() {
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking { segment, .. } => {
-            let progress = segment.progress();
             let travelled = segment.travelled();
             assert!(
-                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
-                    .contains(&progress),
-                "progress={progress:?}"
+                within_fifths(segment, 2, 3),
+                "travelled={travelled} of {segment:?}"
             );
             assert!(travelled > 0, "halfway down the leg, it has walked");
         }
@@ -164,11 +171,7 @@ fn idle_phase_3_is_walking_back() {
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking { segment, .. } => {
-            let progress = segment.progress();
-            assert!(
-                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
-                    .contains(&progress)
-            );
+            assert!(within_fifths(segment, 2, 3), "{segment:?}");
         }
         other => panic!("expected Walking, got {other:?}"),
     }
@@ -353,7 +356,7 @@ fn idle_cycle_loops_after_one_cycle() {
 }
 
 #[test]
-fn entry_animation_overrides_normal_pose_for_first_4s() {
+fn entry_animation_overrides_normal_pose_while_it_runs() {
     let id = AgentId::from_transcript_path("/p/entry.jsonl");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     // created_at == now0, so since_spawn is the probe offset
@@ -385,7 +388,10 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
     let l = layout();
     match derive(&s, probe, &l).expect("pose") {
         Pose::Walking { segment, .. } => {
-            assert_eq!(segment.progress(), SegmentProgress::fraction(3, 8));
+            assert_eq!(
+                segment,
+                Segment::straight(segment.from(), segment.to(), LegProgress::of(3, 8))
+            );
         }
         other => panic!("expected Walking entry, got {other:?}"),
     }
@@ -748,13 +754,8 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking { segment, .. } => {
             let from = segment.from();
-            let progress = segment.progress();
             assert_eq!(from, desk, "cycle-0 walk-out starts from the desk");
-            assert!(
-                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
-                    .contains(&progress),
-                "progress={progress:?}"
-            );
+            assert!(within_fifths(segment, 2, 3), "{segment:?}");
         }
         other => panic!("expected the cycle-0 walk-out, got {other:?}"),
     }
@@ -775,13 +776,8 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking { segment, .. } => {
             let from = segment.from();
-            let progress = segment.progress();
             assert_eq!(from, desk, "cycle-1 walk-out starts from the desk");
-            assert!(
-                (SegmentProgress::fraction(2, 5)..=SegmentProgress::fraction(3, 5))
-                    .contains(&progress),
-                "progress={progress:?}"
-            );
+            assert!(within_fifths(segment, 2, 3), "{segment:?}");
         }
         other => panic!("expected the cycle-1 walk-out, got {other:?}"),
     }
@@ -911,7 +907,15 @@ fn a_walking_person_never_slides() {
     ] {
         let profile = walk_profile(length, intent, fastest);
         let turns = steps(profile.duration_ms, &|ms| {
-            walk_progress(&profile, ms).distance(length)
+            Segment::straight(
+                Point { x: 0, y: 0 },
+                Point {
+                    x: (length / crate::physics::OCTILE_STRAIGHT_COST) as u16,
+                    y: 0,
+                },
+                walk_progress(&profile, ms),
+            )
+            .travelled()
         });
         judge(
             &format!("{intent:?}"),

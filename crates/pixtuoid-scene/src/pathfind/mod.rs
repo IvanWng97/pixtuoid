@@ -175,6 +175,7 @@ impl PartialOrd for Node {
     }
 }
 
+/// Ignores the preferred-zone discount, so a zone-biased route is not guaranteed shortest.
 fn heuristic(a: (u16, u16), b: (u16, u16)) -> u32 {
     let dx = (i32::from(a.0) - i32::from(b.0)).unsigned_abs();
     let dy = (i32::from(a.1) - i32::from(b.1)).unsigned_abs();

@@ -706,16 +706,12 @@ fn route_walking_pose(
             }
         }
     };
-    if path.len() <= 2 {
-        // Record the interpolated position for the next frame's snap-back lookup.
-        let segment = Segment::straight(from, to, progress);
-        history.record(slot.agent_id, segment.at(), now);
-        return Pose::Walking {
-            segment,
-            carrying_coffee,
-        };
-    }
-    let segment = Segment::on_route(&path, progress);
+    let segment = if path.len() <= 2 {
+        Segment::straight(from, to, progress)
+    } else {
+        Segment::on_route(&path, progress)
+    };
+    // Record the interpolated position for the next frame's snap-back lookup.
     history.record(slot.agent_id, segment.at(), now);
     Pose::Walking {
         segment,
