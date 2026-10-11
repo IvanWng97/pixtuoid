@@ -104,10 +104,10 @@ fn vertical_wall_is_impassable_except_through_the_door() {
     let to = Point { x: wall_x + 12, y };
     let path = find_path(&l.walkable, &overlay, None, from, to)
         .expect("rooms stay connected through the door gap");
-    let direct = crate::pose::octile_distance(from, to);
+    let direct = crate::physics::octile_distance(from, to);
     let routed: u32 = path
         .windows(2)
-        .map(|w| crate::pose::octile_distance(w[0], w[1]))
+        .map(|w| crate::physics::octile_distance(w[0], w[1]))
         .sum();
     assert!(
         routed > direct * 2,
@@ -834,7 +834,7 @@ fn find_path_none_when_two_regions_split_by_a_full_wall() {
 
 #[test]
 fn octile_cost_is_the_shared_diag_straight_formula() {
-    // The ONE formula the A* heuristic and `pose::octile_distance` both call.
+    // The ONE formula the A* heuristic and `physics::octile_distance` both call.
     assert_eq!(
         octile_cost(3, 5),
         OCTILE_DIAGONAL_COST * 3 + OCTILE_STRAIGHT_COST * 2
@@ -848,7 +848,7 @@ fn octile_cost_is_the_shared_diag_straight_formula() {
     assert_eq!(octile_cost(4, 4), OCTILE_DIAGONAL_COST * 4, "pure diagonal");
     let a = crate::layout::Point { x: 2, y: 7 };
     let b = crate::layout::Point { x: 9, y: 3 };
-    assert_eq!(crate::pose::octile_distance(a, b), octile_cost(7, 4));
+    assert_eq!(crate::physics::octile_distance(a, b), octile_cost(7, 4));
 }
 
 #[test]
@@ -907,7 +907,7 @@ fn a_route_turns_on_the_open_pixel_nearest_a_blocked_centre() {
 }
 
 /// At 127x45 the anchors of two half-open cells beside a door's wall stub
-/// share a column the stub stands in, so neither the straight leg nor an L
+/// share a column the stub stands in, so neither the straight segment nor an L
 /// clears it; the route steps through the one-pixel gap instead.
 #[test]
 fn a_route_through_a_one_pixel_gap_stays_on_open_floor() {
@@ -916,7 +916,7 @@ fn a_route_through_a_one_pixel_gap_stays_on_open_floor() {
     let path = find_path(&l.walkable, &OccupancyOverlay::new(), None, from, to).expect("routable");
     let off: Vec<Point> = path
         .windows(2)
-        .flat_map(|leg| crate::physics::leg_pixels(leg[0], leg[1]))
+        .flat_map(|segment| crate::physics::segment_pixels(segment[0], segment[1]))
         .filter(|p| !l.walkable.is_walkable(p.x, p.y))
         .collect();
     assert_eq!(off, [], "{path:?}");

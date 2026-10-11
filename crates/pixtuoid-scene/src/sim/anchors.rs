@@ -163,9 +163,7 @@ pub(crate) fn character_top_left(
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_top_left(w)
         }
         Pose::AimlessAt { dest: at } | Pose::Held { at } => waypoint_top_left(at, w),
-        Pose::Walking {
-            from, to, t_x1000, ..
-        } => walking_top_left(crate::physics::walking_position(from, to, t_x1000), w),
+        Pose::Walking { segment, .. } => walking_top_left(segment.at(), w),
     };
     Some(on_canvas(
         layout,

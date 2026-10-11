@@ -23,7 +23,6 @@ pub(crate) mod graphics;
 pub(crate) use graphics::GraphicsMode;
 pub(crate) mod install;
 pub(crate) mod jank;
-#[cfg(feature = "graphics")]
 pub(crate) mod pacing;
 pub(crate) mod panels;
 pub(crate) mod run_log;
@@ -46,7 +45,6 @@ pub mod dev {
     pub use crate::floating::geometry::{Zoom, window_geometry};
     pub use crate::floating::offscreen::{OfficeRenderer, Pressing, WindowFrame};
     pub use crate::floating::overlays::{OverlayLayers, Overlays, footer_budget, panel_preview};
-    #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
     pub use crate::panels::OverlayFrame;
     pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
@@ -64,17 +62,16 @@ pub mod dev {
 /// reposition the cursor or inject escapes, or reorder the text shown. One
 /// chokepoint, so the policy can't drift across its call sites.
 ///
-/// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
-/// emits its own SGR for level coloring, so a sink-side filter could not tell
-/// our escapes from an injected one. Its untrusted values are stripped where
-/// they ENTER a record instead — here by this fn's callers, and in the core
-/// crate by `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of
-/// this predicate pinned to it by
+/// The core crate strips with `pixtuoid_core::source::decoder::display_safe`, a
+/// per-crate copy of this predicate pinned to it by
 /// `the_bidi_table_matches_pixtuoid_cores_display_safe`.
 pub(crate) fn strip_control_chars(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control() && !is_bidi_control(*c))
-        .collect()
+    s.chars().filter(|c| !is_terminal_unsafe(*c)).collect()
+}
+
+/// A character that can drive a terminal or reorder the text it shows.
+pub(crate) fn is_terminal_unsafe(c: char) -> bool {
+    c.is_control() || is_bidi_control(c)
 }
 
 /// `s` stripped line by line, the lines rejoined with `sep`, so a multi-line
@@ -245,12 +242,24 @@ pub(crate) mod test_capture {
     /// file (no ANSI), so an assertion is validated against the REAL format, not
     /// an assumed one.
     pub(crate) fn capture(f: impl FnOnce()) -> String {
+        capture_with(crate::app::logging::fmt_layer().with_ansi(false), f)
+    }
+
+    /// What `layer` writes of what `f` logs.
+    pub(crate) fn capture_with<N, E>(
+        layer: tracing_subscriber::fmt::Layer<tracing_subscriber::Registry, N, E>,
+        f: impl FnOnce(),
+    ) -> String
+    where
+        N: for<'w> tracing_subscriber::fmt::FormatFields<'w> + Send + Sync + 'static,
+        E: tracing_subscriber::fmt::FormatEvent<tracing_subscriber::Registry, N>
+            + Send
+            + Sync
+            + 'static,
+    {
+        use tracing_subscriber::layer::SubscriberExt;
         let buf = Buf::default();
-        let sub = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_max_level(tracing::Level::TRACE)
-            .with_writer(buf.clone())
-            .finish();
+        let sub = tracing_subscriber::registry().with(layer.with_writer(buf.clone()));
         tracing::subscriber::with_default(sub, f);
         let bytes = buf.0.lock().unwrap().clone();
         String::from_utf8(bytes).unwrap()

@@ -18,13 +18,13 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 
 use crate::anim::{FULL_TICK_MS, Timing, elapsed_ms};
 use crate::layout::{Point, SceneLayout};
-use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable, snap_point_where};
+use crate::pathfind::{Router, snap_point_to_walkable, snap_point_where};
 use crate::pet::PetKind;
 use crate::physics::{
-    Gait, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
+    Gait, OCTILE_STRAIGHT_COST, Segment, WALK_ACCEL, WalkProfile, octile_path_len, walk_arrived,
+    walk_profile_for, walk_progress,
 };
-use crate::pose::{Leg, STALE_RESUME_GAP_BASE_MS, distance_at};
-use crate::walk::octile_path_len;
+use crate::pose::STALE_RESUME_GAP_BASE_MS;
 
 /// How close a resting spot must be to an idle agent's desk to count as "napping
 /// beside them" — sized to the desk's footprint plus a creature's width, so it
@@ -209,12 +209,10 @@ impl Walk {
     }
 
     /// Where on its path it is at `now`; `None` once it has arrived.
-    fn leg(&self, now: SystemTime) -> Option<Leg> {
+    fn segment(&self, now: SystemTime) -> Option<Segment> {
         let elapsed = elapsed_ms(now, self.started_at);
-        (!walk_arrived(&self.profile, elapsed)).then(|| {
-            let t = walk_progress(&self.profile, elapsed);
-            Leg::along(&self.path, distance_at(t, self.profile.path_len_octile))
-        })
+        (!walk_arrived(&self.profile, elapsed))
+            .then(|| Segment::on_route(&self.path, walk_progress(&self.profile, elapsed)))
     }
 }
 
@@ -239,11 +237,11 @@ enum Phase {
     Gone,
 }
 
-/// Where a creature is this frame, and its leg while it walks.
+/// Where a creature is this frame, and the segment it is on while it walks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Stance {
     pub(crate) at: Point,
-    pub(crate) walking: Option<Leg>,
+    pub(crate) walking: Option<Segment>,
 }
 
 /// One creature on the people's walker: resting somewhere, or on a leg.
@@ -291,7 +289,7 @@ impl CreatureWalk {
         let mut walk = Self::at_home(ground.layout, seed, now);
         if let Phase::Resting { at: home, .. } = walk.phase
             && let Some(w) = Walk::plan(from, home, roam.gait, ground, started_at)
-            && w.leg(now).is_some()
+            && w.segment(now).is_some()
         {
             walk.phase = Phase::Walking(w);
         }
@@ -391,10 +389,10 @@ impl CreatureWalk {
             Phase::Walking(w) | Phase::Leaving(w) => w,
             Phase::Gone => return None,
         };
-        Some(match walk.leg(now) {
-            Some(leg) => Stance {
-                at: leg.at(),
-                walking: Some(leg),
+        Some(match walk.segment(now) {
+            Some(segment) => Stance {
+                at: segment.at(),
+                walking: Some(segment),
             },
             None => Stance {
                 at: walk.to,
@@ -435,14 +433,14 @@ impl CreatureWalk {
         }
         self.advanced_at = now;
         match &self.phase {
-            Phase::Walking(w) if w.leg(now).is_none() => {
+            Phase::Walking(w) if w.segment(now).is_none() => {
                 self.phase = Phase::Resting {
                     at: w.to,
                     since: w.started_at,
                     walked_ms: w.profile.duration_ms,
                 };
             }
-            Phase::Leaving(w) if w.leg(now).is_none() => self.phase = Phase::Gone,
+            Phase::Leaving(w) if w.segment(now).is_none() => self.phase = Phase::Gone,
             _ => {}
         }
         if let Phase::Resting {
@@ -762,12 +760,12 @@ mod tests {
         const PAINTS: usize = (1_000 / PAINT_MS) as usize;
         let pack = test_pack();
         let l = layout(192, 80);
-        // the travel `t_x1000` rounds at each end of a span, on a path about
+        // the travel progress rounds at each end of a span, on a path about
         // the floor's width and height long
         let rounding = 2
             * u64::from(l.walkable.width() + l.walkable.height())
             * u64::from(OCTILE_STRAIGHT_COST)
-            / u64::from(crate::physics::PROGRESS_SCALE)
+            / u64::from(crate::physics::LegProgress::SCALE)
             + 1;
         for (walk, roam, ticks) in roams(&pack) {
             let anim = walk.piece().name();
@@ -783,26 +781,26 @@ mod tests {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
                 let stances = drive(&mut walk, roam, &l, Motion::Full, (0, 90_000));
                 for run in stances.split(|s| s.is_none_or(|s| s.walking.is_none())) {
-                    let legs: Vec<Leg> = run
+                    let segments: Vec<Segment> = run
                         .iter()
                         .filter_map(|s| s.and_then(|s| s.walking))
                         .collect();
-                    for pair in legs.windows(2) {
-                        let step = pair[1].travelled.saturating_sub(pair[0].travelled);
+                    for pair in segments.windows(2) {
+                        let step = pair[1].travelled().saturating_sub(pair[0].travelled());
                         assert!(
                             step <= stride / 2,
                             "{anim} seed {seed}: {step} in one paint of a {stride} stride"
                         );
                     }
-                    for span in legs.windows(PAINTS + 1) {
+                    for span in segments.windows(PAINTS + 1) {
                         let (first, last) = (span[0], span[PAINTS]);
-                        let covered = u64::from(last.travelled.saturating_sub(first.travelled));
+                        let covered = u64::from(last.travelled().saturating_sub(first.travelled()));
                         assert!(
                             covered <= cadence + rounding,
                             "{anim} seed {seed}: {covered} in a second, its cadence allows {cadence}"
                         );
                     }
-                    walked += legs.len();
+                    walked += segments.len();
                 }
             }
             assert!(walked > 0, "{anim} must walk in the sample");

@@ -655,7 +655,7 @@ fn wall_at(l: &SceneLayout, p: Point) -> Option<WallPiece> {
 /// that wall.
 fn route_through_wall(l: &SceneLayout, path: &[Point]) -> Option<(Point, WallPiece)> {
     path.windows(2)
-        .flat_map(|leg| crate::physics::leg_pixels(leg[0], leg[1]))
+        .flat_map(|segment| crate::physics::segment_pixels(segment[0], segment[1]))
         .find_map(|p| wall_at(l, p).map(|w| (p, w)))
 }
 

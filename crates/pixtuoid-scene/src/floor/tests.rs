@@ -2331,9 +2331,10 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
     session.floor_mut().grip(&Gesture::Carry(at));
     session.floor_mut().grip(&Gesture::Drop(at));
     let dropped = step(&mut session, t0 + Duration::from_millis(200));
-    let Some(Pose::Walking { from, .. }) = dropped.frame.poses[&id] else {
+    let Some(Pose::Walking { segment, .. }) = dropped.frame.poses[&id] else {
         panic!("set down, it walks home: {:?}", dropped.frame.poses[&id]);
     };
+    let from = segment.from();
     assert!(
         from.x.abs_diff(at.x) <= 8 && from.y.abs_diff(at.y) <= 8,
         "from the floor near the drop: {from:?}"
@@ -2356,7 +2357,9 @@ fn a_lifted_agent_hangs_from_the_pointer_and_walks_home_when_set_down() {
         .expect("a desk");
     let home = crate::pose::desk_leg_endpoint(desk, &landed.layout).0;
     match landed.frame.poses[&id] {
-        Some(Pose::Walking { from, .. }) => assert_eq!(from, home, "it walks from home"),
+        Some(Pose::Walking { segment, .. }) => {
+            assert_eq!(segment.from(), home, "it walks from home");
+        }
         Some(Pose::Held { .. }) | None => panic!("not landed: {:?}", landed.frame.poses[&id]),
         Some(_) => {}
     }

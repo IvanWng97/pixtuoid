@@ -4,7 +4,7 @@
 //! (<https://doc.rust-lang.org/book/ch12-03-improving-error-handling-and-modularity.html>).
 
 mod crash;
-mod logging;
+pub(crate) mod logging;
 mod sources_cli;
 
 use std::io::Write;
