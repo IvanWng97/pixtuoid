@@ -3,10 +3,9 @@
 
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
-    Furniture, LOUNGE_STAMP_PAD_PX, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, Pivot,
-    PlantItem, PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_DECOR_STAMP_PAD_PX,
-    WALL_THICK_V, WAYPOINT_STAMP_PAD_PX, WallDecorItem, Waypoint, WaypointKind, anchored_top_left,
-    furniture_def,
+    Furniture, MeetingRoom, PANTRY_FOOTPRINT_DEPTH, Pivot, PlantItem, PodDecorItem, Point, Size,
+    WALL_BAND_TO_TOP_MARGIN, WALL_THICK_V, WallDecorItem, Waypoint, WaypointKind,
+    anchored_top_left, furniture_def,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -15,19 +14,42 @@ use pixtuoid_core::walkable::WalkableMask;
 /// (the SAME origin the renderer blits from, so blocked ground and painted
 /// sprite can't drift); the footprint is offset inside it by the row's
 /// [`GroundAlign`] per axis. A footprint-less piece (wall-hung decor) stamps
-/// nothing; runtime-footprint pieces build their rect and call `mark_blocked`
-/// directly.
-fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, pivot: Pivot, pos: Point, pad: u16) {
-    if let Some((tl, sz)) = def.ground_rect(pivot, pos) {
-        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
+/// nothing; runtime-footprint pieces stamp their own rect through [`stamp_rect`].
+/// The pad is the row's [`FurnitureDef::pad`].
+fn stamp_ground(mask: &mut WalkableMask, def: &FurnitureDef, pivot: Pivot, pos: Point) {
+    if let Some(rect) = def.padded_ground_rect(pivot, pos) {
+        stamp_rect(mask, rect);
     }
+}
+
+/// Block an already-[`padded`] rect.
+fn stamp_rect(mask: &mut WalkableMask, (tl, sz): (Point, Size)) {
+    mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
+}
+
+/// `rect` grown by `pad` on every side, saturating at the buffer's west and north
+/// edge exactly as [`WalkableMask::mark_blocked`] does — so a gate reading the east
+/// edge of this rect reads the first column the stamp leaves walkable.
+pub(super) fn padded((tl, sz): (Point, Size), pad: u16) -> (Point, Size) {
+    let left = tl.x.saturating_sub(pad);
+    let top = tl.y.saturating_sub(pad);
+    let right = tl.x.saturating_add(sz.w).saturating_add(pad);
+    let bottom = tl.y.saturating_add(sz.h).saturating_add(pad);
+    (
+        Point { x: left, y: top },
+        Size {
+            w: right - left,
+            h: bottom - top,
+        },
+    )
 }
 
 /// The ONE ground-geometry formula: the blocked rect (top-left + size) of a
 /// piece's footprint, declared relative to its VISUAL box. Shared by the mask
 /// AND the placement sweep's containment/overlap invariants, so the sweep can't
-/// grow a second copy of the offset math. The per-call-site `pad` is
-/// deliberately NOT part of the rect: pad is routing slack, not the object.
+/// grow a second copy of the offset math. The pad is deliberately NOT part of the
+/// rect: it is routing slack, not the object; [`FurnitureDef::padded_ground_rect`]
+/// adds it.
 pub(super) fn ground_rect(
     pivot: Pivot,
     pos: Point,
@@ -95,6 +117,41 @@ pub(super) struct MaskObstacles<'a> {
     pub(super) pantry_counter_size: Size,
 }
 
+#[cfg(test)]
+impl MaskObstacles<'_> {
+    /// An empty floor: a test names only the pieces it stamps, via `..bare(..)`.
+    pub(super) fn bare(buf_w: u16, buf_h: u16) -> Self {
+        Self {
+            buf_w,
+            buf_h,
+            top_margin: 0,
+            home_desks: &[],
+            meeting_rooms: &[],
+            kitchen_island: None,
+            waypoints: &[],
+            plants: &[],
+            floor_lamp: None,
+            lounge_side_table: None,
+            fish_tank: None,
+            wall_decor: &[],
+            pod_decor: &[],
+            wall_pieces: &[],
+            pantry_counter_size: Size { w: 0, h: 0 },
+        }
+    }
+}
+
+/// The first column east of `from` on row `y` that the mask leaves walkable,
+/// scanning from a blocked `from`.
+#[cfg(test)]
+pub(super) fn first_walkable_east(mask: &WalkableMask, from: u16, y: u16) -> u16 {
+    (from..mask.width())
+        .take_while(|&x| !mask.is_walkable(x, y))
+        .last()
+        .expect("the piece blocks its own column")
+        + 1
+}
+
 pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     let &MaskObstacles {
         buf_w,
@@ -155,7 +212,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // the monitor overhangs NORTH and a walker behind it is occluded by the desk's
         // own y-sorted sprite. Stamped TOP-LEFT — the desk pos IS its NW corner.
         let desk_def = super::decor::desk_furniture_def();
-        stamp_ground(&mut mask, &desk_def, Pivot::TopLeft, *desk, OBSTACLE_PAD_PX);
+        stamp_ground(&mut mask, &desk_def, Pivot::TopLeft, *desk);
     }
 
     for trio in meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
@@ -163,22 +220,16 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         // `furniture_def` row.
         let sofa_def = furniture_def(Furniture::MeetingSofaBody);
         for sofa in trio.sofas {
-            stamp_ground(&mut mask, &sofa_def, Pivot::Center, sofa, OBSTACLE_PAD_PX);
+            stamp_ground(&mut mask, &sofa_def, Pivot::Center, sofa);
         }
         let table_def = furniture_def(Furniture::MeetingTable);
-        stamp_ground(
-            &mut mask,
-            &table_def,
-            Pivot::Center,
-            trio.table,
-            OBSTACLE_PAD_PX,
-        );
+        stamp_ground(&mut mask, &table_def, Pivot::Center, trio.table);
     }
 
     if let Some(island) = kitchen_island {
         // South-anchored base only; the countertop rows overhang (walk-behind).
         let def = furniture_def(Furniture::KitchenIsland);
-        stamp_ground(&mut mask, &def, Pivot::Center, island, OBSTACLE_PAD_PX);
+        stamp_ground(&mut mask, &def, Pivot::Center, island);
     }
 
     for wp in waypoints {
@@ -188,57 +239,56 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         else {
             continue;
         };
-        // WAYPOINT_STAMP_PAD_PX, not OBSTACLE_PAD_PX: waypoint furniture paints after
-        // the characters, so a visitor is occluded and needs no clearance band.
+        // Waypoint furniture paints after the characters, so a visitor is occluded and
+        // the rows' `TIGHT_PAD_PX` leaves no clearance band.
         if matches!(wp.kind, WaypointKind::Pantry) {
             // Only the SOUTH base sits on the floor; cabinet tops and backsplash are
             // overhang (invariant #6). `stand_point` uses the FULL visual instead, so
             // the USER parks clear of the whole counter rather than inside it.
             let (tl, sz) = pantry_ground_rect(wp.pos, Size { w, h });
-            mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, WAYPOINT_STAMP_PAD_PX);
+            stamp_rect(
+                &mut mask,
+                padded((tl, sz), furniture_def(Furniture::Pantry).pad),
+            );
             continue;
         }
         let def = furniture_def(wp.kind.furniture());
-        let (tl, sz) = def.ground_rect_of(Pivot::Center, wp.pos, Size { w, h });
-        mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, WAYPOINT_STAMP_PAD_PX);
+        stamp_rect(
+            &mut mask,
+            def.padded_ground_rect_of(Pivot::Center, wp.pos, Size { w, h }),
+        );
     }
 
     for &PlantItem { kind, pos } in plants {
         let def = furniture_def(kind.furniture());
-        stamp_ground(&mut mask, &def, Pivot::Center, pos, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, pos);
     }
 
     if let Some(lamp) = floor_lamp {
         let def = furniture_def(Furniture::FloorLamp);
-        stamp_ground(&mut mask, &def, Pivot::Center, lamp, LOUNGE_STAMP_PAD_PX);
+        stamp_ground(&mut mask, &def, Pivot::Center, lamp);
     }
 
     if let Some(t) = lounge_side_table {
         let def = furniture_def(Furniture::LoungeSideTable);
-        stamp_ground(&mut mask, &def, Pivot::Center, t, LOUNGE_STAMP_PAD_PX);
+        stamp_ground(&mut mask, &def, Pivot::Center, t);
     }
 
     if let Some(t) = fish_tank {
         let def = furniture_def(Furniture::FishTank);
-        stamp_ground(&mut mask, &def, Pivot::Center, t, LOUNGE_STAMP_PAD_PX);
+        stamp_ground(&mut mask, &def, Pivot::Center, t);
     }
 
     for &WallDecorItem { kind, pos } in wall_decor {
         let def = furniture_def(kind.furniture());
-        stamp_ground(
-            &mut mask,
-            &def,
-            Pivot::TopLeft,
-            pos,
-            WALL_DECOR_STAMP_PAD_PX,
-        );
+        stamp_ground(&mut mask, &def, Pivot::TopLeft, pos);
     }
 
     // PhoneBooth + StandingDesk double-block as waypoints too; `mark_blocked` is
-    // idempotent. pad=1 because an extra pixel each side disconnects tight aisles.
+    // idempotent.
     for &PodDecorItem { kind, pos } in pod_decor {
         let def = furniture_def(kind.furniture());
-        stamp_ground(&mut mask, &def, Pivot::Center, pos, 1);
+        stamp_ground(&mut mask, &def, Pivot::Center, pos);
     }
 
     mask
@@ -248,6 +298,25 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 mod tests {
     use super::*;
     use crate::layout::{WALL_THICK_V, sort_row_at};
+
+    #[test]
+    fn a_padded_rect_blocks_what_mark_blocked_pads() {
+        let rect = |x, y, w, h| (Point { x, y }, Size { w, h });
+        // Interior, west/north-saturating, and past-the-buffer rects.
+        for (r, pad) in [
+            (rect(10, 10, 4, 3), 2),
+            (rect(1, 0, 4, 3), 2),
+            (rect(0, 1, 3, 3), 1),
+            (rect(28, 18, 6, 6), 2),
+        ] {
+            let (tl, sz) = r;
+            let mut direct = WalkableMask::new_open(30, 20);
+            direct.mark_blocked(tl.x, tl.y, sz.w, sz.h, pad);
+            let mut via = WalkableMask::new_open(30, 20);
+            stamp_rect(&mut via, padded(r, pad));
+            assert_eq!(direct.as_slice(), via.as_slice(), "{r:?} pad {pad}");
+        }
+    }
 
     #[test]
     fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {

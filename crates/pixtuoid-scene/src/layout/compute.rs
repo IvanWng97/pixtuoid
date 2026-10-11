@@ -410,18 +410,10 @@ pub(super) fn compute_with_seed(
         x: couch_x,
         y: couch_y,
     } = couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
-    // Below this WEST-side fit the whole vignette degrades away: the vignette's blocked
-    // span, OBSTACLE_PAD_PX each side, and walk clearance.
-    const LOUNGE_MIN_BAND_W: u16 = 30;
-    // EAST-side twin (#566): the east seat's padded ground must stay at-or-west of the
-    // threshold column. WAYPOINT_STAMP_PAD_PX is the SEAT stamp's pad, NOT OBSTACLE_PAD_PX.
-    let couch_east_ground = couch_x
-        + SEAT_DX[SEAT_DX.len() - 1] as u16
-        + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2
-        + WAYPOINT_STAMP_PAD_PX;
+    // #566: every lounge piece's padded ground ends west of the threshold column.
     let flanks = LoungeFlanks::of(couch_x);
-    let couch_clears_door = couch_east_ground.max(flanks.east_ground()) <= door_threshold.x;
-    let lounge_fits = plan.pod_grid.band.width >= LOUNGE_MIN_BAND_W && couch_clears_door;
+    let lounge_fits =
+        couch_east_ground(couch_x, couch_y).max(flanks.east_ground()) <= door_threshold.x;
     let lounge = lounge_fits.then(|| {
         place_lounge(
             Point {
@@ -854,13 +846,16 @@ fn bookshelf_x(
         (Some(sx), Some(mr)) => {
             // The ONE flush slot: screen east edge + both grounds' wall-decor pads, so the two
             // pads merge with no strandable apron cell. Every arm below derives from it.
-            let flush_east = sx + screen_w + 2 * WALL_DECOR_STAMP_PAD_PX;
+            let flush_east = sx
+                + screen_w
+                + furniture_def(Furniture::MeetingScreen).pad
+                + furniture_def(Furniture::Bookshelf).pad;
             // The drain term applies only where room 0 HOSTS its trio: with no sofa,
             // pushing the shelf east hangs it over a desk pod's pad, sealing the gap.
             if let Some(sofa_pad_east) = mr.sofa_east_drain_edge() {
                 /// Past the sofa's drain edge by the shelf's OWN ground pad (NOT
                 /// `OBSTACLE_PAD_PX`), then a ≥2-px walkable channel plus slack.
-                const BOOKSHELF_DRAIN_GAP: u16 = WALL_DECOR_STAMP_PAD_PX + 4;
+                const BOOKSHELF_DRAIN_GAP: u16 = furniture_def(Furniture::Bookshelf).pad + 4;
                 let spread = x.max(flush_east).max(sofa_pad_east + BOOKSHELF_DRAIN_GAP);
                 if spread + bookshelf_w < mr.bounds.x + mr.bounds.width {
                     spread
@@ -875,6 +870,17 @@ fn bookshelf_x(
         }
         _ => x,
     }
+}
+
+/// The column past the couch's east seat's padded ground.
+fn couch_east_ground(couch_x: u16, couch_y: u16) -> u16 {
+    furniture_def(Furniture::Couch).east_of_padded_ground(
+        Pivot::Center,
+        Point {
+            x: couch_x + SEAT_DX[SEAT_DX.len() - 1] as u16,
+            y: couch_y,
+        },
+    )
 }
 
 /// Clear columns between the lounge couch's drawn box and each flank.
@@ -915,12 +921,12 @@ impl LoungeFlanks {
 
     /// The column past the floor lamp's padded ground.
     fn east_ground(&self) -> u16 {
-        self.lamp_x
-            + furniture_def(Furniture::FloorLamp)
-                .footprint
-                .map_or(0, |f| f.w)
-                / 2
-            + LOUNGE_STAMP_PAD_PX
+        // The east edge doesn't depend on y.
+        let lamp = Point {
+            x: self.lamp_x,
+            y: 0,
+        };
+        furniture_def(Furniture::FloorLamp).east_of_padded_ground(Pivot::Center, lamp)
     }
 }
 
@@ -1829,40 +1835,56 @@ mod tests {
 
     /// The couch↔door gate reads the column past the lamp's ground AS THE MASK
     /// STAMPS IT, so it drops the lounge exactly when the lamp would block the
-    /// threshold, not a column early.
+    /// threshold.
     #[test]
     fn the_lamps_east_ground_is_the_column_past_its_stamped_ground() {
         use super::LoungeFlanks;
-        use crate::layout::Size;
-        use crate::layout::mask::{MaskObstacles, build_walkable_mask};
-        let (buf_w, buf_h) = (160, 96);
+        use crate::layout::mask::{MaskObstacles, build_walkable_mask, first_walkable_east};
         let flanks = LoungeFlanks::of(60);
         let lamp = crate::layout::Point {
             x: flanks.lamp_x,
             y: 50,
         };
         let mask = build_walkable_mask(&MaskObstacles {
-            buf_w,
-            buf_h,
             top_margin: 20,
-            home_desks: &[],
-            meeting_rooms: &[],
-            kitchen_island: None,
-            waypoints: &[],
-            plants: &[],
             floor_lamp: Some(lamp),
-            lounge_side_table: None,
-            fish_tank: None,
-            wall_decor: &[],
-            pod_decor: &[],
-            wall_pieces: &[],
-            pantry_counter_size: Size { w: 20, h: 8 },
+            ..MaskObstacles::bare(160, 96)
         });
-        let last_blocked = (lamp.x..buf_w)
-            .take_while(|&x| !mask.is_walkable(x, lamp.y))
-            .last()
-            .expect("the lamp blocks its own column");
-        assert_eq!(flanks.east_ground(), last_blocked + 1);
+        assert_eq!(
+            flanks.east_ground(),
+            first_walkable_east(&mask, lamp.x, lamp.y)
+        );
+    }
+
+    /// The same pin for the east seat: the gate's column is the first one the
+    /// mask leaves walkable past the couch's seats.
+    #[test]
+    fn the_couchs_east_ground_is_the_column_past_its_stamped_seats() {
+        use super::{SEAT_DX, couch_east_ground};
+        use crate::layout::mask::{MaskObstacles, build_walkable_mask, first_walkable_east};
+        use crate::layout::{Facing, Point, Waypoint, WaypointKind};
+        let (couch_x, couch_y) = (60u16, 50u16);
+        let seats: Vec<Waypoint> = SEAT_DX
+            .into_iter()
+            .map(|dx| Waypoint {
+                pos: Point {
+                    x: couch_x.saturating_add_signed(dx),
+                    y: couch_y,
+                },
+                kind: WaypointKind::Couch,
+                facing: Facing::North,
+                room_id: None,
+            })
+            .collect();
+        let mask = build_walkable_mask(&MaskObstacles {
+            top_margin: 20,
+            waypoints: &seats,
+            ..MaskObstacles::bare(160, 96)
+        });
+        assert_eq!(
+            couch_east_ground(couch_x, couch_y),
+            first_walkable_east(&mask, seats[seats.len() - 1].pos.x, couch_y)
+        );
     }
 
     /// An aisle too short or too narrow for a vending machine has none, so the

@@ -1197,23 +1197,22 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
         width: 40,
         height: 60,
     };
-    let sofa_fp_w = crate::layout::furniture_def(crate::layout::Furniture::MeetingSofaBody)
-        .footprint
-        .map_or(0, |s| s.w);
     let trio = MeetingRoom::place_trio(bounds, false);
     let room = MeetingRoom {
         bounds,
         trio: Some(trio),
     };
+    let mask = mask::build_walkable_mask(&mask::MaskObstacles {
+        meeting_rooms: &[room],
+        ..mask::MaskObstacles::bare(80, 100)
+    });
     assert_eq!(
         room.sofa_east_drain_edge(),
-        Some(trio.sofas[0].x + sofa_fp_w / 2 + crate::layout::OBSTACLE_PAD_PX)
-    );
-    // place_trio centres the sofa on cx, so the placed-sofa reading and the
-    // bounds-only reconstruction must agree exactly.
-    assert_eq!(
-        room.sofa_east_drain_edge(),
-        Some(bounds.x + bounds.width / 2 + sofa_fp_w / 2 + crate::layout::OBSTACLE_PAD_PX)
+        Some(mask::first_walkable_east(
+            &mask,
+            trio.sofas[0].x,
+            trio.sofas[0].y
+        ))
     );
 
     let bare = MeetingRoom { bounds, trio: None };

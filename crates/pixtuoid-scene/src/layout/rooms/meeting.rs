@@ -1,9 +1,7 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
 use super::walls::WALL_H;
-use crate::layout::{
-    Bounds, Furniture, OBSTACLE_PAD_PX, Pivot, Point, anchored_top_left, furniture_def, pct,
-};
+use crate::layout::{Bounds, Furniture, Pivot, Point, anchored_top_left, furniture_def, pct};
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
 /// invariant that a fitted room produces exactly 2 sofas + 1 table.
@@ -182,10 +180,8 @@ impl MeetingRoom {
     /// Center-anchored sofa stamp. `None` for a bare room.
     pub(crate) fn sofa_east_drain_edge(&self) -> Option<u16> {
         self.trio.map(|t| {
-            let sofa_fp_w = furniture_def(Furniture::MeetingSofaBody)
-                .footprint
-                .map_or(0, |s| s.w);
-            t.sofas[0].x + sofa_fp_w / 2 + OBSTACLE_PAD_PX
+            furniture_def(Furniture::MeetingSofaBody)
+                .east_of_padded_ground(Pivot::Center, t.sofas[0])
         })
     }
 }
