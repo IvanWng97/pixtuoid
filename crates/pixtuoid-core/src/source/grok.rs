@@ -28,6 +28,8 @@
 //!   handle, unlike Codex's for-lifetime rollout fd.
 
 use crate::source::decoder::{DecodeError, DecodeResult as Result};
+#[cfg(any(test, feature = "upstream"))]
+use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -57,11 +59,11 @@ const XAI_TURN_COMPLETED: &str = "turn_completed";
 const XAI_HOOK_EXECUTION: &str = "hook_execution";
 
 /// The xAI extension tags this decoder turns into events. Listed for the
-/// drift surface: the arm below ends `_ => Ok(vec![])`, so a renamed tag decodes
+/// drift watch: the arm below ends `_ => Ok(vec![])`, so a renamed tag decodes
 /// to nothing with no breadcrumb to say so, and the upstream watch is the only
 /// signal. Pinned to the arms by
 /// `the_exported_xai_tag_set_is_exactly_what_the_arms_match`.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_SUBAGENT_SPAWNED,
     XAI_SUBAGENT_FINISHED,
@@ -71,10 +73,86 @@ pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_HOOK_EXECUTION,
 ];
 
-/// The method namespace itself, listed for the same reason: it gates the whole
-/// xAI block, so its rename silences every tag at once.
-#[cfg(test)]
-pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
+#[cfg(any(test, feature = "upstream"))]
+const fn grok_shell(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
+    Doc {
+        at: At::Path {
+            repo: "xai-org/grok-build",
+            branch: "main",
+            path,
+        },
+        anchor,
+        owns,
+    }
+}
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "grok.xai_method",
+        ours: || vec![XAI_SESSION_UPDATE_METHOD],
+        // The module that WRITES the method into updates.jsonl owns it; the
+        // notification module only mentions it in a `///`.
+        docs: &[grok_shell(
+            "crates/codegen/xai-grok-shell/src/session/storage/mod.rs",
+            r"const XAI_SESSION_UPDATE_METHOD\s*:",
+            "`XAI_SESSION_UPDATE_METHOD`",
+        )],
+        read: Read::Sole {
+            pattern: r#"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the whole xAI block is gated on it, so every subagent link, model change and \
+             end marker is lost",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "grok.xai_tags",
+        ours: || DECODED_XAI_TAGS.to_vec(),
+        docs: &[grok_shell(
+            "crates/codegen/xai-grok-shell/src/extensions/notification.rs",
+            r"pub enum SessionUpdate\b",
+            "the xAI `SessionUpdate`",
+        )],
+        read: Read::RustEnum {
+            name: "SessionUpdate",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the line decodes to nothing: no subagent link, no model info, no end marker",
+        ),
+        siblings: Some(Siblings {
+            family: Family::FirstWord,
+            ignored: &[
+                (
+                    "hook_annotation",
+                    "TUI scrollback text; carries no state we render",
+                ),
+                (
+                    "subagent_progress",
+                    "cumulative per-child totals (turns, tool calls): summing a running \
+                     total into the delta-accumulating reducer double-counts (codex's \
+                     `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
+                ),
+                (
+                    "turn_usage",
+                    "declared but nothing constructs it, so it never reaches \
+                     updates.jsonl; a prompt's usage rides `turn_completed.usage`",
+                ),
+                (
+                    "hook_run_started",
+                    "never in the transcript: upstream emits it through \
+                     `send_xai_notification_transient` \
+                     (session/acp_session_impl/hook_dispatch.rs), which only forwards to \
+                     the live client; a pager spinner phase whose end `hook_execution` \
+                     decodes to nothing but session_end",
+                ),
+            ],
+        }),
+    },
+];
 
 /// Decode one grok hook payload (already identified by
 /// `_pixtuoid_source == "grok"`), keyed on `sessionId`.
@@ -1285,7 +1363,6 @@ mod tests {
             !reaches("checkpoint_saved"),
             "an unread tag reaches neither"
         );
-        assert_eq!(DECODED_XAI_METHOD, XAI_SESSION_UPDATE_METHOD);
 
         // The auto-switch arm reads `new_model_id`, not `model_changed`'s
         // `model_id` — a payload carrying only the WRONG field must not emit.

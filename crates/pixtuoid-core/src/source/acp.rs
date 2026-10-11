@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Read, Siblings, Upstream, Watch};
+use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
@@ -45,10 +45,12 @@ pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 /// unstable; v2 is a separate line grok does not speak.
 #[cfg(any(test, feature = "upstream"))]
 const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
+    const REPO: &str = "agentclientprotocol/agent-client-protocol";
     const BRANCH: &str = "main";
     [
         Doc {
             at: At::Path {
+                repo: REPO,
                 path: "schema/v1/schema.json",
                 branch: BRANCH,
             },
@@ -57,6 +59,7 @@ const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
         },
         Doc {
             at: At::Path {
+                repo: REPO,
                 path: "schema/v1/schema.unstable.json",
                 branch: BRANCH,
             },
@@ -67,48 +70,54 @@ const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
 }
 
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const UPSTREAM: Upstream = Upstream {
-    repo: "agentclientprotocol/agent-client-protocol",
-    watches: &[
-        Watch {
-            id: "acp.method",
-            ours: || vec![SESSION_UPDATE_METHOD],
-            docs: &v1_schemas(r#""x-method"\s*:"#, "the schema's method declarations"),
-            read: Read::Each {
-                pattern: r#""x-method"\s*:\s*"{name}""#,
-            },
-            vanish: "a source gates the ACP decode on this method, so every ACP-standard \
-                 activity event is lost with no breadcrumb",
-            siblings: None,
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "acp.method",
+        ours: || vec![SESSION_UPDATE_METHOD],
+        docs: &v1_schemas(r#""x-method"\s*:"#, "the schema's method declarations"),
+        read: Read::Each {
+            pattern: r#""x-method"\s*:\s*"{name}""#,
         },
-        Watch {
-            id: "acp.session_update_tags",
-            ours: || DECODED_TAGS.to_vec(),
-            docs: &v1_schemas(r#""SessionUpdate"\s*:"#, "the `SessionUpdate` union"),
-            read: Read::JsonUnion {
-                def: "SessionUpdate",
-                prop: Some("sessionUpdate"),
-            },
-            vanish: "every ACP-speaking source loses that half of its activity decode",
-            siblings: Some(Siblings {
-                family: Family::Prefix(TOOL_CALL),
-                ignored: &[],
-            }),
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "a source gates the ACP decode on this method, so every ACP-standard \
+             activity event is lost with no breadcrumb",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "acp.session_update_tags",
+        ours: || DECODED_TAGS.to_vec(),
+        docs: &v1_schemas(r#""SessionUpdate"\s*:"#, "the `SessionUpdate` union"),
+        read: Read::JsonUnion {
+            def: "SessionUpdate",
+            prop: Some("sessionUpdate"),
         },
-        Watch {
-            id: "acp.terminal_statuses",
-            ours: || DECODED_TERMINAL_STATUSES.to_vec(),
-            docs: &v1_schemas(r#""ToolCallStatus"\s*:"#, "the `ToolCallStatus` union"),
-            read: Read::JsonUnion {
-                def: "ToolCallStatus",
-                prop: None,
-            },
-            vanish: "the `tool_call_update` arm falls through to `_ => vec![]`, so every \
-                 ACP tool call stays Active forever",
-            siblings: None,
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "every ACP-speaking source loses that half of its activity decode",
+        ),
+        siblings: Some(Siblings {
+            family: Family::Prefix(TOOL_CALL),
+            ignored: &[],
+        }),
+    },
+    Watch {
+        id: "acp.terminal_statuses",
+        ours: || DECODED_TERMINAL_STATUSES.to_vec(),
+        docs: &v1_schemas(r#""ToolCallStatus"\s*:"#, "the `ToolCallStatus` union"),
+        read: Read::JsonUnion {
+            def: "ToolCallStatus",
+            prop: None,
         },
-    ],
-};
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the `tool_call_update` arm falls through to `_ => vec![]`, so every \
+             ACP tool call stays Active forever",
+        ),
+        siblings: None,
+    },
+];
 
 /// Decode one ACP `session/update` notification's `update` object into activity
 /// events; the caller injects `agent_id` and its own `tool_detail` (invariant #3).

@@ -17,6 +17,8 @@ use serde_json::Value;
 
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+#[cfg(any(test, feature = "upstream"))]
+use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
@@ -163,7 +165,6 @@ fn resolve_profile(env: &OmpEnv) -> Option<String> {
     }
 }
 
-/// `getProfileConfigRoot` — `<home>/<PI_CONFIG_DIR|.omp>[/profiles/<profile>]`.
 /// The fixed path segments of a profile's tree, named once — `dirs.ts` joins
 /// these literals, and a silent rename upstream is the drift class
 /// `EXTENSIONS_SUBDIR` already guards its own segment against.
@@ -171,6 +172,7 @@ const PROFILES_SUBDIR: &str = "profiles";
 /// The agent-dir segment under a config root (flattened away by the XDG arm).
 const AGENT_SUBDIR: &str = "agent";
 
+/// `getProfileConfigRoot` — `<home>/<PI_CONFIG_DIR|.omp>[/profiles/<profile>]`.
 fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
     let name = env
         .config_dir_name
@@ -507,10 +509,10 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
-/// The session-entry `type` values this decoder maps — this module's row in the
-/// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so this
+/// The session-entry `type` values this decoder maps — this module's
+/// watch below. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so this
 /// watch is the ONLY signal an entry type rename gives us.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
     SESSION,
     MESSAGE,
@@ -523,7 +525,7 @@ pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
 /// The title payload key read by both first-sight and live carriers. It happens
 /// to match the `title` entry type today; keep the authorities separate so one
 /// upstream rename cannot silently rewrite both surfaces.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_TITLE_FIELDS: &[&str] = &[TITLE_FIELD];
 
 /// The header entry (line 2; line 1 is a fixed-width 256-byte `title` slot that omp
@@ -553,9 +555,9 @@ const TITLE: &str = "title";
 const TITLE_CHANGE: &str = "title_change";
 const TITLE_FIELD: &str = "title";
 
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 /// The `customType` marking a clean teardown — the ONLY structural end omp writes.
-/// Listed for the drift surface because the guard below falls through to
+/// Watched because the guard below falls through to
 /// `_ => vec![]`: rename it upstream and no omp TRANSCRIPT ever ends cleanly,
 /// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
 pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
@@ -589,7 +591,7 @@ const BLOCK_TOOL_CALL: &str = "toolCall";
 /// Wait forever.
 const TOOL_ASK: &str = "ask";
 
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 /// The message-level wire vocabulary this decoder keys on. Listed because each is
 /// an equality guard falling through to a silent path: a rename decodes the turn to
 /// nothing, or strands a Wait forever. Pinned by
@@ -828,11 +830,11 @@ const HOOK_APPROVAL_REQUESTED: &str = "tool_approval_requested";
 const HOOK_APPROVAL_RESOLVED: &str = "tool_approval_resolved";
 
 /// The hook event types this decoder turns into events — this module's
-/// hook row in the drift surface, pinned to the dispatch arms by the
+/// hook watch below, pinned to the dispatch arms by the
 /// drift-surface census (`every_exported_set_is_exactly_its_dispatch_arms`)
 /// and to the TS extension's registration list by the install-side
 /// two-language pin.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
     HOOK_SESSION_START,
     HOOK_SESSION_SWITCH,
@@ -840,6 +842,151 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
     HOOK_SESSION_SHUTDOWN,
     HOOK_APPROVAL_REQUESTED,
     HOOK_APPROVAL_RESOLVED,
+];
+
+#[cfg(any(test, feature = "upstream"))]
+const fn omp_doc(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
+    Doc {
+        at: At::Path {
+            repo: "can1357/oh-my-pi",
+            branch: "main",
+            path,
+        },
+        anchor,
+        owns,
+    }
+}
+
+#[cfg(any(test, feature = "upstream"))]
+const SESSION_ENTRIES: &str = "packages/coding-agent/src/session/session-entries.ts";
+
+/// A carrier of the `title` key the decoder reads. A third same-named field on
+/// `SessionHeader` would mask both carriers' renames if the whole document were
+/// read.
+#[cfg(any(test, feature = "upstream"))]
+const fn title_watch(id: &'static str, docs: &'static [Doc], carrier: &'static str) -> Watch {
+    Watch {
+        id,
+        ours: || DECODED_TITLE_FIELDS.to_vec(),
+        docs,
+        read: Read::TsFields { name: carrier },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "first sight or live updates lose the only human-readable root label and fall \
+             back to cwd",
+        ),
+        siblings: None,
+    }
+}
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "omp.entry_types",
+        ours: || DECODED_ENTRY_TYPES.to_vec(),
+        docs: &[omp_doc(
+            SESSION_ENTRIES,
+            r"export type SessionEntry\b",
+            "the session-entry union",
+        )],
+        // Quoted: the entry types are common words that prose keeps using.
+        read: Read::Each {
+            pattern: r#""{name}""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the transcript still flows but decodes to nothing (no sprite, no activity)",
+        ),
+        siblings: None,
+    },
+    title_watch(
+        "omp.title_fields.slot",
+        &[omp_doc(
+            SESSION_ENTRIES,
+            r"export interface SessionTitleSlotEntry\b",
+            "`SessionTitleSlotEntry`",
+        )],
+        "SessionTitleSlotEntry",
+    ),
+    title_watch(
+        "omp.title_fields.change",
+        &[omp_doc(
+            SESSION_ENTRIES,
+            r"export interface TitleChangeEntry\b",
+            "`TitleChangeEntry`",
+        )],
+        "TitleChangeEntry",
+    ),
+    Watch {
+        id: "omp.exit_marker",
+        ours: || vec![DECODED_EXIT_MARKER],
+        docs: &[omp_doc(
+            "packages/coding-agent/src/session/exit-diagnostics.ts",
+            "SESSION_EXIT_CUSTOM_TYPE",
+            "`SESSION_EXIT_CUSTOM_TYPE`",
+        )],
+        read: Read::Each {
+            pattern: r#""{name}""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "no omp session ever ends cleanly again: each lingers to a stale sweep with no \
+             breadcrumb",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.message_vocab",
+        ours: || DECODED_MESSAGE_VOCAB.to_vec(),
+        // Split upstream: the roles and block type are the shared LLM types',
+        // `ask` its tool module's.
+        docs: &[
+            omp_doc(
+                "packages/ai/src/types.ts",
+                r"(?m)^export type Message\s*=",
+                "the `Message` union",
+            ),
+            omp_doc(
+                "packages/coding-agent/src/tools/ask.ts",
+                r"export class AskTool\b",
+                "the `AskTool` class",
+            ),
+        ],
+        read: Read::Each {
+            pattern: r#""{name}""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the turn decodes to nothing, or an `ask` round strands its Waiting gate forever",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.hook_events",
+        ours: || DECODED_HOOK_EVENTS.to_vec(),
+        docs: &[
+            omp_doc(
+                "packages/coding-agent/src/extensibility/shared-events.ts",
+                r"SessionShutdownEvent\b",
+                "`SessionShutdownEvent`",
+            ),
+            omp_doc(
+                "packages/coding-agent/src/extensibility/extensions/types.ts",
+                r"ToolApprovalRequestedEvent\b",
+                "`ToolApprovalRequestedEvent`",
+            ),
+        ],
+        // The declaration form: the bare quoted names also live in prose.
+        read: Read::Each {
+            pattern: r#"type: "{name}""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the bridge subscribes to an event omp never fires: approval waits or lifecycle \
+             silently stop arriving",
+        ),
+        siblings: None,
+    },
 ];
 
 /// Decode one bridge-extension payload (already routed here by

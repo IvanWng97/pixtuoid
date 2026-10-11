@@ -38,7 +38,7 @@ use serde_json::Value;
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Read, Siblings, Upstream, Watch};
+use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 /// The CodeWhale CLI source's registry name (its `SourceDescriptor.name`).
@@ -63,6 +63,7 @@ pub(crate) const DELEGATING_ACTIONS: &[&str] =
 
 #[cfg(any(test, feature = "upstream"))]
 const SUBAGENT_MODULE: At = At::Path {
+    repo: "Hmbown/CodeWhale",
     path: "crates/tui/src/tools/subagent/mod.rs",
     branch: "main",
 };
@@ -70,44 +71,45 @@ const SUBAGENT_MODULE: At = At::Path {
 /// Only the delegation is watched here; the hooks CodeWhale fires are watched
 /// with the set the installer registers.
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const UPSTREAM: Upstream = Upstream {
-    repo: "Hmbown/CodeWhale",
-    watches: &[
-        Watch {
-            id: "codewhale.subagent_tool",
-            ours: || vec![SUBAGENT_TOOL],
-            docs: &[Doc {
-                at: SUBAGENT_MODULE,
-                anchor: r"impl\s+ToolSpec\s+for\s+AgentTool\b",
-                owns: "`AgentTool`'s `ToolSpec` impl",
-            }],
-            read: Read::Sole {
-                pattern: r#"impl\s+ToolSpec\s+for\s+AgentTool\s*\{\s*fn\s+name\(&self\)\s*->\s*&'static\s+str\s*\{\s*"([^"]+)""#,
-            },
-            vanish: "no call reads as a delegation",
-            siblings: None,
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "codewhale.subagent_tool",
+        ours: || vec![SUBAGENT_TOOL],
+        docs: &[Doc {
+            at: SUBAGENT_MODULE,
+            anchor: r"impl\s+ToolSpec\s+for\s+AgentTool\b",
+            owns: "`AgentTool`'s `ToolSpec` impl",
+        }],
+        read: Read::Sole {
+            pattern: r#"impl\s+ToolSpec\s+for\s+AgentTool\s*\{\s*fn\s+name\(&self\)\s*->\s*&'static\s+str\s*\{\s*"([^"]+)""#,
         },
-        Watch {
-            id: "codewhale.delegating_actions",
-            ours: || DELEGATING_ACTIONS.to_vec(),
-            docs: &[Doc {
-                at: SUBAGENT_MODULE,
-                anchor: r"fn parse_agent_tool_action\b",
-                owns: "`parse_agent_tool_action`",
-            }],
-            read: Read::RustArms {
-                name: "parse_agent_tool_action",
-                arm: r"Ok\(\s*AgentToolAction::(?:Start|Wait)\s*\)",
-            },
-            vanish: "the action no longer starts or waits on a sub-agent upstream, so the \
-                 parent reads Delegating wrongly",
-            siblings: Some(Siblings {
-                family: Family::All,
-                ignored: &[],
-            }),
+        when: When::Vanishes,
+        finding: Finding::Breaking("no call reads as a delegation"),
+        siblings: None,
+    },
+    Watch {
+        id: "codewhale.delegating_actions",
+        ours: || DELEGATING_ACTIONS.to_vec(),
+        docs: &[Doc {
+            at: SUBAGENT_MODULE,
+            anchor: r"fn parse_agent_tool_action\b",
+            owns: "`parse_agent_tool_action`",
+        }],
+        read: Read::RustArms {
+            name: "parse_agent_tool_action",
+            arm: r"Ok\(\s*AgentToolAction::(?:Start|Wait)\s*\)",
         },
-    ],
-};
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the action no longer starts or waits on a sub-agent upstream, so the \
+             parent reads Delegating wrongly",
+        ),
+        siblings: Some(Siblings {
+            family: Family::All,
+            ignored: &[],
+        }),
+    },
+];
 
 /// Whether an [`SUBAGENT_TOOL`] call is one of the [`DELEGATING_ACTIONS`].
 /// Mirrors upstream's resolver: the first non-null, non-blank `action`/`op`,

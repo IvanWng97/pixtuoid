@@ -1,4 +1,4 @@
-//! This crate's half of the **drift surface** — the names our decoders read,
+//! This crate's half of the **drift surface** — the names its installers ship,
 //! emitted as data for `check_upstream_drift.py`, the watches not yet
 //! declared beside their source (`source/upstream.rs`).
 //!
@@ -7,87 +7,30 @@
 //! const and the parser returns a smaller set, so the watch narrows with
 //! nothing to show for it. Emitting makes it a test failure HERE.
 //!
-//! `crates/pixtuoid` emits the other half — what we REGISTER — because a
-//! decode arm with no registration row is a real failure class, not an
-//! organisational split.
+//! `crates/pixtuoid` emits the other half — the hook sets it REGISTERS and the
+//! values its install templates ship — because it owns those tables.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::source::codex::{
-    EM_RESUME, EM_SEARCH, EM_TOKENS, EM_TURN_END, EM_TURN_START, EVENT_MSG, RESPONSE_ITEM,
-    RI_RESUME, RI_SEARCH, RI_TOOL_START, TURN_CONTEXT,
-};
-
 /// The committed fragment, by absolute path so a worktree writes its own.
 const FRAGMENT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/drift-surface.json");
 
 fn surface() -> Value {
-    // A BTreeMap so the emitted order is the key order, not a hash order — the
-    // committed file has to be byte-stable or the gate flaps.
-    let mut decoded: BTreeMap<&str, Value> = BTreeMap::new();
-    decoded.insert(
-        "codex.event_msg",
-        json!([EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat()),
-    );
-    decoded.insert(
-        "codex.response_item",
-        json!([RI_TOOL_START, RI_RESUME, RI_SEARCH].concat()),
-    );
-    decoded.insert(
-        "codex.escalation",
-        json!(crate::source::codex::DECODED_ESCALATION),
-    );
-    decoded.insert(
-        "codex.rollout_outers",
-        json!([EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]),
-    );
-    decoded.insert(
-        "grok.xai_method",
-        json!([crate::source::grok::DECODED_XAI_METHOD]),
-    );
-    decoded.insert(
-        "grok.xai_tags",
-        json!(crate::source::grok::DECODED_XAI_TAGS),
-    );
-    decoded.insert(
-        "omp.message_vocab",
-        json!(crate::source::omp::DECODED_MESSAGE_VOCAB),
-    );
-    decoded.insert(
-        "omp.exit_marker",
-        json!([crate::source::omp::DECODED_EXIT_MARKER]),
-    );
-    decoded.insert(
-        "omp.entry_types",
-        json!(crate::source::omp::DECODED_ENTRY_TYPES),
-    );
-    decoded.insert(
-        "omp.title_fields",
-        json!(crate::source::omp::DECODED_TITLE_FIELDS),
-    );
-    decoded.insert(
-        "omp.hook_events",
-        json!(crate::source::omp::DECODED_HOOK_EVENTS),
-    );
-    decoded.insert(
-        "decoder.dispatch_names",
-        json!(super::source::decoder::DECODED_DISPATCH_NAMES),
-    );
-
-    // SHIPPED, not decoded: the value rides the file the installer writes; why
-    // this one is watched is on `omp::EXTENSIONS_SUBDIR`.
     let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
+    // The value rides the file the installer writes; why it is watched is on
+    // `omp::EXTENSIONS_SUBDIR`.
     shipped.insert(
         "omp.extension_subdir",
         json!([crate::source::omp::EXTENSIONS_SUBDIR]),
     );
 
-    // Through a BTreeMap, never a `json!` object literal — see
-    // `every_emitted_object_has_sorted_keys` for why that distinction is a gate.
+    // Through a BTreeMap, never a `json!` object literal: the workspace's
+    // serde_json `preserve_order` keeps a literal's insertion order under a
+    // whole-workspace build and sorts it under `-p pixtuoid-core`, so the
+    // committed file would pass one way and fail the other.
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
-    root.insert("decoded", json!(decoded));
     root.insert("shipped", json!(shipped));
     json!(root)
 }
@@ -96,14 +39,14 @@ fn surface() -> Value {
 mod tests {
     use super::*;
 
-    /// The committed fragment IS what the decoders read. Regenerate with
+    /// The committed fragment IS what the installers ship. Regenerate with
     /// `just gen-drift-surface`.
     ///
     /// This is the gate, and it is a TEST rather than a CI-only job so it runs
     /// on every platform in `just test` — a stale fragment is a narrowed watch,
     /// which is precisely the failure that cannot announce itself.
     #[test]
-    fn the_committed_fragment_matches_what_the_decoders_read() {
+    fn the_committed_fragment_matches_what_the_installers_ship() {
         let want = serde_json::to_string_pretty(&surface()).expect("surface serializes") + "\n";
         let committed = snapbox::Data::read_from(
             std::path::Path::new(FRAGMENT),
@@ -141,33 +84,11 @@ mod tests {
         }
     }
 
-    /// Byte-stability across feature unification. The workspace enables
-    /// serde_json's `preserve_order` (`pixtuoid` asks for it), and feature
-    /// unification hands it to every crate — so an object built by `json!({…})`
-    /// is sorted under `just test -p pixtuoid-core` and insertion-ordered under
-    /// a whole-workspace `just test`. That difference reached the committed
-    /// file once and made the gate above pass one way and fail the other.
-    #[test]
-    fn every_emitted_object_has_sorted_keys() {
-        fn walk(v: &Value, path: &str) {
-            if let Some(o) = v.as_object() {
-                let keys: Vec<&str> = o.keys().map(String::as_str).collect();
-                let mut sorted = keys.clone();
-                sorted.sort_unstable();
-                assert_eq!(keys, sorted, "{path} emits keys in insertion order");
-                for (k, x) in o {
-                    walk(x, &format!("{path}.{k}"));
-                }
-            }
-        }
-        walk(&surface(), "<root>");
-    }
-
     /// Every dispatch arm in `file` names a CONST, and those consts are exactly
     /// the ones `export` declares.
     ///
-    /// A drift watch carries the const — a surface row or a source's
-    /// `UPSTREAM` — so it follows a RENAME. It cannot see an ADDITION: an arm
+    /// A drift watch carries the const in its source's `UPSTREAM`, so it
+    /// follows a RENAME. It cannot see an ADDITION: an arm
     /// written as a bare literal decodes a name no watch carries, and every
     /// other gate stays green — so a bare literal is rejected outright.
     ///
@@ -263,6 +184,11 @@ mod tests {
             ("opencode.rs", "match event {", "DECODED_EVENTS"),
             ("opencode.rs", "match status {", "DECODED_PART_STATUSES"),
             ("omp.rs", "match ty {", "DECODED_HOOK_EVENTS"),
+            (
+                "claude_code.rs",
+                ".and_then(|t| t.as_str())?\n    {",
+                "DECODED_EFFORT_ATTACHMENTS",
+            ),
         ];
         for (file, dispatch, export) in rows {
             assert_arms_match_export(file, dispatch, export);
@@ -305,10 +231,6 @@ mod tests {
             // scanner above cannot reach them.
             (
                 "DECODED_XAI_TAGS",
-                "the_exported_xai_tag_set_is_exactly_what_the_arms_match",
-            ),
-            (
-                "DECODED_XAI_METHOD",
                 "the_exported_xai_tag_set_is_exactly_what_the_arms_match",
             ),
         ];
@@ -443,7 +365,7 @@ mod tests {
                 "claude_code",
                 "attachment",
                 "undocumented transcript surface; its marker KINDS are \
-                 appearance-watched via CC_LIFECYCLE_SURFACE_MARKERS",
+                 appearance-watched by `claude_code.effort_attachments`",
             ),
             (
                 "copilot",
@@ -509,9 +431,15 @@ mod tests {
             }
             walk(&frag, &mut carried);
         }
-        // The declared watches' names are carried too, read off the registry.
+        // The vanish watches' names are carried too, read off the registry. An
+        // appearance watch fires only when a name lands, so it cannot see one
+        // renamed: its names are not carried.
         for d in crate::source::registry::REGISTRY {
-            for w in d.upstream.iter().flat_map(|up| up.watches) {
+            for w in d
+                .upstream
+                .watches()
+                .filter(|w| matches!(w.when, crate::source::upstream::When::Vanishes))
+            {
                 carried.extend((w.ours)().into_iter().map(str::to_owned));
             }
         }
