@@ -270,9 +270,8 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// The patch file carries the MOUNT, not the shim (that is baked inside the
-/// plugin file) — so `shim` stays `Unknown` here; a missing plugin file is
-/// `verify_beside`'s existence check and a stale one `owned_state`'s. The schema's own,
-/// stat-free half is the row-vs-home path match below.
+/// plugin file) — so `shim` stays `Unknown` here. The schema's own, stat-free half
+/// is the row-vs-home path match below.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let rows = match parse_rows(content) {
         Ok(rows) => rows,

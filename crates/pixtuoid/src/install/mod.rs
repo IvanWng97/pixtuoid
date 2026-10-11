@@ -123,9 +123,9 @@ pub(crate) fn verify_target(
         ..
     } = t.primary
     {
-        verify_beside(beside.render, &mut issues, &mut notes);
+        verify_beside(beside.render, t.display_name, &mut issues, &mut notes);
     }
-    if let Some(files) = t.primary.owned() {
+    if let Some(files) = t.primary.owned_files() {
         verify_owned_drift(t, files, &path, &mut issues, &mut notes);
     }
     if let Some(host) = t.host {
@@ -149,7 +149,12 @@ pub(crate) fn verify_target(
 /// (#387): a NEW code-shipping path in `install_target` MUST gain a check here, UNLESS the
 /// file IS that target's owned primary — its `verify` covers it instead (the opencode
 /// plugin and the omp bridge extension are that shape).
-fn verify_beside(render: target::RenderBeside, issues: &mut Vec<String>, notes: &mut Vec<String>) {
+fn verify_beside(
+    render: target::RenderBeside,
+    display_name: &str,
+    issues: &mut Vec<String>,
+    notes: &mut Vec<String>,
+) {
     // A placeholder hook arg yields the real install locations WITHOUT resolving the
     // binary: a read-only check must not hard-error just because it isn't locatable.
     let arts = match render(io::HOOK_BIN) {
@@ -170,7 +175,7 @@ fn verify_beside(render: target::RenderBeside, issues: &mut Vec<String>, notes: 
             notes.push(format!("could not read {}", crate::display_path(&p)));
             continue;
         };
-        check_beside_shim(&p, &installed, &intended, issues, notes);
+        check_beside_shim(&p, &installed, &intended, display_name, issues);
     }
     issues.extend(missing_artifact_issue(&missing));
 }
@@ -181,16 +186,18 @@ fn check_beside_shim(
     p: &std::path::Path,
     installed: &str,
     intended: &str,
+    display_name: &str,
     issues: &mut Vec<String>,
-    notes: &mut Vec<String>,
 ) {
     if !intended.contains(verify::BAKED_HOOK_MARKER) {
         return;
     }
+    // HARD, as an owned primary's unreadable `HOOK_PATH` is: no shim reads back, so
+    // a launch cannot re-render it and the plugin forwards nothing.
     match verify::baked_hook_path(installed) {
         Some(baked) => check_shim_binary(&baked, issues),
-        None => notes.push(format!(
-            "could not read the baked shim path from {}",
+        None => issues.push(format!(
+            "could not read the baked shim path from {} — reconnect {display_name}",
             crate::display_path(p)
         )),
     }
@@ -215,10 +222,9 @@ fn verify_owned_drift(
                 .collect();
             if !present.is_empty() {
                 issues.push(format!(
-                    "{} differs from the plugin this pixtuoid ships; pixtuoid rewrites it \
-                     at launch, so if this persists, reconnect {}",
-                    present.join(", "),
-                    t.display_name
+                    "{} differs from the plugin this pixtuoid ships (a launch rewrites it; \
+                     the log names a rewrite that failed)",
+                    present.join(", ")
                 ));
             }
         }
@@ -280,7 +286,7 @@ pub(crate) struct Converged {
 /// else: a config merge or a host registration is a consent only `connect` asks for,
 /// so [`converge_files`] is never handed either.
 pub(crate) fn converge(t: &Target, config: Option<PathBuf>) -> Result<Converged> {
-    let Some(files) = t.primary.owned() else {
+    let Some(files) = t.primary.owned_files() else {
         return Ok(Converged::default());
     };
     let primary = config

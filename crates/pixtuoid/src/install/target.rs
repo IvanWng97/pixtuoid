@@ -20,7 +20,7 @@ pub struct Beside {
     pub installed_shim: InstalledShim,
 }
 
-/// A target's owned files, whichever kind of primary keys them: all `install::converge`
+/// A target's owned files, whichever kind of primary keys them: all `install::converge_files`
 /// is handed, so it cannot reach a config merge or a host registration.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum OwnedFiles {
@@ -158,7 +158,7 @@ impl Primary {
         }
     }
 
-    pub(crate) fn owned(&self) -> Option<OwnedFiles> {
+    pub(crate) fn owned_files(&self) -> Option<OwnedFiles> {
         match *self {
             Primary::Config { beside, .. } => beside.map(OwnedFiles::Beside),
             Primary::Owned {

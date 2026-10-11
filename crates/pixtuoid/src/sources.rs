@@ -580,15 +580,24 @@ mod tests {
 
     #[test]
     fn converge_owned_reaches_only_connected_targets_and_survives_a_failure() {
+        // TARGETS order: claude fails first, so a stop-at-first-error loop would never
+        // reach opencode; omp only fails files, so it rewrote nothing to announce.
         let seen = std::cell::RefCell::new(Vec::new());
         let refreshed = converge_owned_with(&set(&["opencode", "omp", "claude-code"]), |t| {
             seen.borrow_mut().push(t.name);
             match t.name {
+                "claude" => Err(anyhow::anyhow!("no home")),
                 "opencode" => Ok(install::Converged {
                     rewritten: vec![PathBuf::from("/x/pixtuoid.ts")],
-                    failed: vec![(PathBuf::from("/x/other"), anyhow::anyhow!("could not lock"))],
+                    failed: Vec::new(),
                 }),
-                "omp" => Err(anyhow::anyhow!("no home")),
+                "omp" => Ok(install::Converged {
+                    rewritten: Vec::new(),
+                    failed: vec![(
+                        PathBuf::from("/x/pixtuoid.ts"),
+                        anyhow::anyhow!("could not lock"),
+                    )],
+                }),
                 _ => Ok(install::Converged::default()),
             }
         });
@@ -596,9 +605,7 @@ mod tests {
             refreshed.iter().map(|t| t.name).collect::<Vec<_>>(),
             ["opencode"]
         );
-        let mut seen = seen.into_inner();
-        seen.sort_unstable();
-        assert_eq!(seen, ["claude", "omp", "opencode"]);
+        assert_eq!(seen.into_inner(), ["claude", "opencode", "omp"]);
     }
 
     #[test]

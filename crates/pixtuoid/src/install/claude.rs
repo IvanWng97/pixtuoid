@@ -378,11 +378,8 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     }
 }
 
-/// Every event carries the same command, so the first one's is the install's.
 pub(crate) fn installed_shim(content: &str) -> crate::install::verify::ShimRef {
-    serde_json::from_str::<Value>(content).map_or(crate::install::verify::ShimRef::Unknown, |doc| {
-        claude_shim_ref(&doc["hooks"][EVENTS[0]][0])
-    })
+    verify_schema(content).shim
 }
 
 pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {

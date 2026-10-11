@@ -830,7 +830,7 @@ fn verify_target_flags_any_byte_drift_in_every_owned_file() {
         with_fake_claude(|_| {
             let mut covered = 0;
             for &t in target::TARGETS {
-                let Some(files) = t.primary.owned() else {
+                let Some(files) = t.primary.owned_files() else {
                     continue;
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
@@ -854,7 +854,7 @@ fn verify_target_flags_any_byte_drift_in_every_owned_file() {
                     assert!(
                         v.issues.iter().any(|i| i
                             .contains("differs from the plugin this pixtuoid ships")
-                            && i.contains("rewrites it at launch")),
+                            && i.contains("a launch rewrites it")),
                         "{}: a drifted {} must be a HARD verify issue — got {:?}",
                         t.name,
                         p.display(),
@@ -1612,7 +1612,7 @@ fn every_owned_set_re_renders_byte_identical_from_the_shim_its_first_file_bakes(
         let primary = std::env::temp_dir().join("primary");
         let mut covered = 0;
         for t in target::TARGETS {
-            let Some(files) = t.primary.owned() else {
+            let Some(files) = t.primary.owned_files() else {
                 continue;
             };
             for explicit in [true, false] {
@@ -1645,7 +1645,7 @@ fn owned_state_is_current_after_install_and_differs_after_any_byte_edit() {
     with_owned_homes(|| {
         with_fake_claude(|_| {
             for t in target::TARGETS {
-                let Some(files) = t.primary.owned() else {
+                let Some(files) = t.primary.owned_files() else {
                     continue;
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
@@ -1707,7 +1707,7 @@ fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
     with_owned_homes(|| {
         with_fake_claude(|_| {
             for t in target::TARGETS {
-                let Some(files) = t.primary.owned() else {
+                let Some(files) = t.primary.owned_files() else {
                     continue;
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
@@ -1775,7 +1775,7 @@ fn converge_never_re_enables_an_openclaw_plugin_the_user_disabled() {
             .unwrap()
             .replace("\"enabled\": true", "\"enabled\": false");
         std::fs::write(&cfg, &disabled).unwrap();
-        let files = OPENCLAW.primary.owned().unwrap();
+        let files = OPENCLAW.primary.owned_files().unwrap();
         let entry = files.render(&cfg, io::HOOK_BIN).unwrap().remove(0).0;
         std::fs::write(
             &entry,
@@ -1805,7 +1805,7 @@ fn converge_skips_a_locked_file_and_still_reports_the_rest() {
             Some(PathBuf::from("/fake/pixtuoid-hook")),
         )
         .unwrap();
-        let files = (OPENCLAW.primary.owned().unwrap())
+        let files = (OPENCLAW.primary.owned_files().unwrap())
             .render(&cfg, io::HOOK_BIN)
             .unwrap();
         let (entry, locked) = (files[0].0.clone(), files[2].0.clone());
@@ -1923,7 +1923,7 @@ fn converge_heals_a_missing_sibling_but_not_a_missing_entry() {
             Some(PathBuf::from("/fake/pixtuoid-hook")),
         )
         .unwrap();
-        let files = (OPENCLAW.primary.owned().unwrap())
+        let files = (OPENCLAW.primary.owned_files().unwrap())
             .render(&cfg, io::HOOK_BIN)
             .unwrap();
         let (entry, sibling) = (&files[0].0, &files[1].0);
@@ -1969,4 +1969,84 @@ fn converge_stamps_a_pre_stamp_claude_hooks_file() {
         io::read_config(&cfg).unwrap(),
         crate::install::claude::render_hooks(&stamped).unwrap()
     );
+}
+
+/// A beside entry that no longer gives back a shim (truncated, hand-edited) is HARD:
+/// a launch cannot re-render it, so only a reconnect brings the plugin back.
+#[test]
+fn verify_target_hard_flags_a_beside_entry_with_no_readable_shim() {
+    with_owned_homes(|| {
+        let mut covered = 0;
+        for &t in target::TARGETS {
+            let Primary::Config {
+                beside: Some(beside),
+                ..
+            } = t.primary
+            else {
+                continue;
+            };
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("config");
+            install_target_from(
+                t,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap();
+            let entry = (beside.render)(io::HOOK_BIN).unwrap().remove(0).0;
+            std::fs::write(&entry, "").unwrap();
+            let v = verify_target(t, Some(cfg));
+            assert!(
+                v.issues
+                    .iter()
+                    .any(|i| i.contains("could not read the baked shim path")),
+                "{}: {:?}",
+                t.name,
+                v.issues
+            );
+            covered += 1;
+        }
+        assert!(
+            covered > 0,
+            "no target has beside files — did the registry change?"
+        );
+    });
+}
+
+/// A deleted sibling is a missing artifact, not drift: the launch writes it back,
+/// so doctor must not also call it a file that "differs".
+#[test]
+fn verify_target_reports_a_deleted_sibling_as_missing_not_as_drift() {
+    with_owned_homes(|| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target_from(
+            &OPENCLAW,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let sibling = OPENCLAW
+            .primary
+            .owned_files()
+            .unwrap()
+            .render(&cfg, io::HOOK_BIN)
+            .unwrap()
+            .remove(1)
+            .0;
+        std::fs::remove_file(&sibling).unwrap();
+        let v = verify_target(&OPENCLAW, Some(cfg));
+        assert!(
+            v.issues.iter().any(|i| i.contains("missing")),
+            "{:?}",
+            v.issues
+        );
+        assert!(
+            !v.issues
+                .iter()
+                .any(|i| i.contains("differs from the plugin")),
+            "{:?}",
+            v.issues
+        );
+    });
 }
