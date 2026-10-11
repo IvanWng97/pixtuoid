@@ -40,7 +40,8 @@ pub const SOURCE_NAME: &str = "copilot";
 ///
 /// Whitespace-only, `--config-dir` and XDG are the deliberate divergences: this
 /// mirrors copilot's own resolver, not a generic union of the CLIs' axes.
-pub fn copilot_home() -> PathBuf {
+#[cfg(feature = "native")]
+pub(crate) fn copilot_home() -> PathBuf {
     match crate::platform::path_env("COPILOT_HOME") {
         Some(v) => crate::platform::warn_if_relative_override("COPILOT_HOME", v),
         None => crate::platform::user_home().join(".copilot"),
@@ -1022,6 +1023,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native")]
     #[test]
     fn copilot_home_honors_non_empty_env_override() {
         temp_env::with_var("COPILOT_HOME", Some("/custom/cp"), || {

@@ -31,18 +31,16 @@ pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
 use crate::tally::StateCounts;
 
-/// Fixed RNG seeds for the four ambient-synth voices, in ONE place because both
-/// painters MUST seed identically — a per-crate copy silently desyncs the two
-/// soundtracks on the next edit. `BUILD_SEED` seeds the build-time noise; the
-/// rest seed the per-tick keystroke / rain-drop schedulers and their picker.
+/// The build-time noise seed, in ONE place because both painters MUST seed
+/// identically — a per-crate copy silently desyncs the two soundtracks on the
+/// next edit.
 #[doc(hidden)]
 pub const BUILD_SEED: u64 = 0xC0FF_EE01;
-#[doc(hidden)]
-pub const TYPING_SEED: u64 = 0xBEEF;
-#[doc(hidden)]
-pub const DROP_SEED: u64 = 0xFACE;
-#[doc(hidden)]
-pub const PICK_SEED: u64 = 0xDEAD;
+// `AudioEngine::new`'s seeds for the per-tick keystroke / rain-drop schedulers
+// and their picker.
+pub(crate) const TYPING_SEED: u64 = 0xBEEF;
+pub(crate) const DROP_SEED: u64 = 0xFACE;
+pub(crate) const PICK_SEED: u64 = 0xDEAD;
 
 /// Active-agent count at which the office reads BUSY (full band + dense
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
@@ -104,12 +102,12 @@ const TYPING_GAIN: TierGain = TierGain::new([0.0, 0.50, 0.80]);
 /// how much typing the office holds.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct StemLevels {
-    pub pad: f32,
-    pub sparkle: f32,
-    pub keys: f32,
-    pub drums: f32,
-    pub texture: f32,
-    pub bass: f32,
+    pub(crate) pad: f32,
+    pub(crate) sparkle: f32,
+    pub(crate) keys: f32,
+    pub(crate) drums: f32,
+    pub(crate) texture: f32,
+    pub(crate) bass: f32,
     pub rain: f32,
     pub typing: f32,
 }
@@ -132,9 +130,9 @@ pub struct AudioFrame {
     pub track: TrackId,
 }
 
-/// The soundtrack ids — ALL-GENERATIVE: every [`TRACK_EPOCH_SECS`] block
-/// COMPOSES a fresh take. The payload is the compose seed (the [`track_epoch`]
-/// block), so the id changing IS the song change and the [`TrackSwitch`]
+/// The soundtrack ids — ALL-GENERATIVE: every `TRACK_EPOCH_SECS` block
+/// COMPOSES a fresh take. The payload is the compose seed (the `track_epoch`
+/// block), so the id changing IS the song change and the `TrackSwitch`
 /// crossfade machinery needs no new state. Deterministic everywhere: the same
 /// block renders the same song on native, wasm, and in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -155,12 +153,12 @@ impl Default for TrackId {
 /// usually SHORT, and an hourly rotation meant most sessions never heard the
 /// song change. The weather's matching re-roll cadence is `crate::sky`'s — a
 /// separate domain, deliberately not shared.
-pub const TRACK_EPOCH_SECS: u64 = 600;
+pub(crate) const TRACK_EPOCH_SECS: u64 = 600;
 
 /// The soundtrack epoch (blocks since UNIX epoch) — the compose-seed input,
 /// derived ONCE here so the native observer and the wasm painter can't drift.
 /// Pre-epoch clocks read as block 0.
-pub fn track_epoch(now: std::time::SystemTime) -> u64 {
+pub(crate) fn track_epoch(now: std::time::SystemTime) -> u64 {
     now.duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() / TRACK_EPOCH_SECS)
 }
@@ -169,7 +167,7 @@ pub fn track_epoch(now: std::time::SystemTime) -> u64 {
 /// and the [`track_epoch`] block is the compose seed. Pure in its inputs so wasm
 /// can feed its parametric clock and tests need none; within a block the pick is
 /// stable, so the crossfade fires at most once per [`TRACK_EPOCH_SECS`].
-pub fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -> TrackId {
+pub(crate) fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -> TrackId {
     if !is_day || precipitation > 0.0 {
         TrackId::GenNight(track_epoch)
     } else {
@@ -211,25 +209,25 @@ impl StemLevels {
 /// synths) → while `is_holding`, the caller silences the track stems → once they
 /// reach silence, `try_swap` hands back the new track and releases the hold.
 #[derive(Debug, Default)]
-pub struct TrackSwitch {
+pub(crate) struct TrackSwitch {
     current: Option<TrackId>,
     pending: Option<TrackId>,
 }
 
 impl TrackSwitch {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// The registered track, or `None` before the first `init`.
-    pub fn current(&self) -> Option<TrackId> {
+    pub(crate) fn current(&self) -> Option<TrackId> {
         self.current
     }
 
     /// First frame ONLY: adopt `track` as current and return `Some(track)` to
     /// build + register its beds. `None` once initialized — use
     /// [`TrackSwitch::request`] thereafter.
-    pub fn init(&mut self, track: TrackId) -> Option<TrackId> {
+    pub(crate) fn init(&mut self, track: TrackId) -> Option<TrackId> {
         if self.current.is_none() {
             self.current = Some(track);
             Some(track)
@@ -240,7 +238,7 @@ impl TrackSwitch {
 
     /// Record a requested switch — ignored while unchanged or while a switch
     /// is already in flight (the settling latch). No-op before `init`.
-    pub fn request(&mut self, track: TrackId) {
+    pub(crate) fn request(&mut self, track: TrackId) {
         if let Some(cur) = self.current
             && track != cur
             && self.pending.is_none()
@@ -250,13 +248,13 @@ impl TrackSwitch {
     }
 
     /// Whether a switch is in flight (the caller holds the track stems silent).
-    pub fn is_holding(&self) -> bool {
+    pub(crate) fn is_holding(&self) -> bool {
         self.pending.is_some()
     }
 
     /// Once the held track stems have reached silence, commit the pending
     /// switch and return `Some(to)` to build + swap in. `None` until then.
-    pub fn try_swap(&mut self, track_silent: bool) -> Option<TrackId> {
+    pub(crate) fn try_swap(&mut self, track_silent: bool) -> Option<TrackId> {
         if let Some(to) = self.pending
             && track_silent
         {
@@ -272,14 +270,14 @@ impl TrackSwitch {
 /// emits each [`OneShot`] exactly once on the EDGE. The FIRST observe only
 /// primes — attaching to a full office must not fire a door-chime volley.
 #[derive(Debug, Default)]
-pub struct AudioCueTracker {
+pub(crate) struct AudioCueTracker {
     primed: bool,
     seen_agents: std::collections::HashSet<pixtuoid_core::AgentId>,
     occupied: std::collections::HashSet<usize>,
 }
 
 impl AudioCueTracker {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -288,7 +286,7 @@ impl AudioCueTracker {
     /// kind so the tracker never holds a `SceneLayout` borrow and tests need no
     /// layout at all. Purely EDGE-triggered — it takes no clock, so a caller
     /// can't read it as time-dependent.
-    pub fn observe<'a>(
+    pub(crate) fn observe<'a>(
         &mut self,
         agent_ids: impl IntoIterator<Item = &'a pixtuoid_core::AgentId>,
         occupied_waypoints: &std::collections::HashSet<usize>,

@@ -13,7 +13,7 @@ use ratatui_image::picker::cap_parser::Parser;
 use super::Medium;
 use super::tiles::{Tile, TileImage};
 
-const PLACEHOLDER: char = '\u{10EEEE}';
+pub(crate) const PLACEHOLDER: char = '\u{10EEEE}';
 
 /// The numbers 0.. as row/column diacritics: all of kitty's
 /// `gen/rowcolumn-diacritics.txt` (kovidgoyal/kitty@24f7369bb638), so a tile

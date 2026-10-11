@@ -30,7 +30,7 @@ pub(super) fn frame() -> Duration {
 
 /// How long after `wall` an empty office next paints: just past the turn of
 /// `motion`'s beat, which all it shows steps on while its floor reports
-/// nothing [moving off the beat](pixtuoid_scene::floor::FloorSession::moves_off_beat),
+/// nothing [moving off the beat](pixtuoid_scene::floor::OfficeSession::moves_off_beat),
 /// so every beat is shown and no frame between two repeats one —
 /// rendering on demand, as Unity's `OnDemandRendering` does
 /// (docs.unity3d.com/ScriptReference/Rendering.OnDemandRendering.html). At

@@ -1,7 +1,7 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
 //! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
+//! `pixtuoid_scene::floor::OfficeSession` across frames so walks stay continuous.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
@@ -123,7 +123,7 @@ impl OfficeRenderer {
     /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
     /// when the flash hold keeps it back, so the window keeps the last. A
     /// frame shown is [`presented`](Self::presented) once it shows.
-    pub fn render_live(
+    pub(crate) fn render_live(
         &mut self,
         at: PixelFit,
         frame: WindowFrame<'_>,
@@ -145,7 +145,7 @@ impl OfficeRenderer {
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
-    pub fn presented(&mut self) {
+    pub(crate) fn presented(&mut self) {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 

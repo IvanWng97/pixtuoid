@@ -25,6 +25,8 @@ pub(super) const PLANT_OBSTACLE_CLEARANCE_PX: u16 = 3;
 pub(super) const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
 
 fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point {
+    const COUCH_X_PCT: u16 = 35;
+    const COUCH_BELOW_TOP_MARGIN: u16 = 3;
     // `west_clear_x` is the divider wall's east edge — the westmost seat's ground must
     // stay east of it (== band start with no wall, so the clamp is a no-op).
     let seat_reach =
@@ -32,8 +34,9 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
     // Its side table stands west of it ([`LoungeFlanks`]).
     let couch_west_reach = seat_reach.max(LoungeFlanks::west_reach());
     Point {
-        x: (cubicle_band.x + pct(cubicle_band.width, 35)).max(west_clear_x + couch_west_reach),
-        y: top_margin + 3,
+        x: (cubicle_band.x + pct(cubicle_band.width, COUCH_X_PCT))
+            .max(west_clear_x + couch_west_reach),
+        y: top_margin + COUCH_BELOW_TOP_MARGIN,
     }
 }
 
@@ -43,7 +46,7 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
 pub(super) const DESK_BAND_MIN_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
 
 /// The Y twin. The y-clamp adds a third term, `couch_to_desk_extra`, which is 0
-/// everywhere below `COUCH_GAP_GROWTH_BASE_H` — pinned by the `const` assert there.
+/// everywhere below `COUCH_GAP_GROWTH_BASE_H` — pinned by the const assert there.
 pub(super) const DESK_BAND_MIN_H: u16 = INTER_POD_AISLE_Y / 2 + DESK_GROUND_H;
 
 /// The 1px column between the left rooms and the cubicle band — `right_x` steps
@@ -66,11 +69,14 @@ pub(super) const fn band_h(buf_h: u16) -> u16 {
     usable.saturating_sub(cubicle_aisle_h(usable))
 }
 
-/// The north wall band's depth — 30% of the buffer, never under `MIN_TOP_MARGIN`.
+const TOP_MARGIN_PCT: u16 = 30;
+
+/// The north wall band's depth — [`TOP_MARGIN_PCT`] percent of the buffer, never
+/// under [`MIN_TOP_MARGIN`].
 pub(super) const fn top_margin(buf_h: u16) -> u16 {
-    let pct30 = pct(buf_h, 30);
-    if pct30 > MIN_TOP_MARGIN {
-        pct30
+    let share = pct(buf_h, TOP_MARGIN_PCT);
+    if share > MIN_TOP_MARGIN {
+        share
     } else {
         MIN_TOP_MARGIN
     }
@@ -834,7 +840,8 @@ fn bookshelf_x(
     meeting_screen_x: Option<u16>,
     meeting_room: Option<&MeetingRoom>,
 ) -> u16 {
-    let x = pct(buf_w, 18);
+    const BOOKSHELF_X_PCT: u16 = 18;
+    let x = pct(buf_w, BOOKSHELF_X_PCT);
     match (meeting_screen_x, meeting_room) {
         (Some(sx), Some(mr)) => {
             // The ONE flush slot: screen east edge + a 2-px gap, so the two grounds'
@@ -851,7 +858,7 @@ fn bookshelf_x(
                 if spread + bookshelf_w < mr.bounds.x + mr.bounds.width {
                     spread
                 } else {
-                    // Falls back to FLUSH, NOT the pct-18 anchor, which at these widths
+                    // Falls back to FLUSH, NOT the `BOOKSHELF_X_PCT` anchor, which at these widths
                     // opens a strandable gap OVER the sofa pad.
                     flush_east
                 }
