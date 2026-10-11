@@ -236,20 +236,69 @@ CC_PLUGIN_COMPONENTS_URL = "https://code.claude.com/docs/en/plugins/components.m
 CC_PLUGIN_INSTALL_URL = "https://code.claude.com/docs/en/plugins/install.md"
 CC_PLUGIN_LOADING_URL = "https://code.claude.com/docs/en/plugins/loading.md"
 
-# The plugin contract install/claude.rs registers our hooks through; a marker
-# VANISHING is review-class drift: the docs reshaped what the installer relies on.
-CC_PLUGIN_DOC_MARKERS = {
-    CC_PLUGIN_COMPONENTS_URL: {
+CODEX_PLUGIN_CMD_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/cli/src/plugin_cmd.rs"
+)
+CODEX_MARKETPLACE_CMD_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/cli/src/marketplace_cmd.rs"
+)
+CODEX_MARKETPLACE_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core-plugins/src/marketplace.rs"
+)
+CODEX_PLUGIN_EDIT_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/config/src/plugin_edit.rs"
+)
+REASONIX_PLUGIN_DOC_URL = (
+    "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/studio/docs/PLUGIN_PACKAGES.md"
+)
+
+
+class PluginHost(typing.NamedTuple):
+    """One document of the plugin contract a host's installer registers our hooks
+    through. A marker VANISHING is review-class drift: upstream reshaped what the
+    installer relies on."""
+
+    cli: str
+    installer: str
+    markers: dict[str, str]
+
+
+PLUGIN_HOST_MARKERS: dict[str, PluginHost] = {
+    CC_PLUGIN_COMPONENTS_URL: PluginHost("CC", "install/claude.rs", {
         "same shape as the `hooks` object in `settings.json`": "hooks/hooks.json's shape",
-    },
-    CC_PLUGIN_INSTALL_URL: {
+    }),
+    CC_PLUGIN_INSTALL_URL: PluginHost("CC", "install/claude.rs", {
         "The entry goes in `enabledPlugins` in `~/.claude/settings.json`.": "where a user-scope install is recorded (is_registered)",
         "Run `claude plugin install` in your shell to install a plugin without starting a Claude Code session": "the shell install command (register)",
         "When you remove a marketplace, Claude Code uninstalls every plugin you installed from it": "unregister by marketplace removal",
-    },
-    CC_PLUGIN_LOADING_URL: {
+    }),
+    CC_PLUGIN_LOADING_URL: PluginHost("CC", "install/claude.rs", {
         "the plugin loads in place from its path inside the marketplace folder": "a local-path marketplace's in-place load (no reinstall on update)",
-    },
+    }),
+    CODEX_PLUGIN_CMD_URL: PluginHost("Codex", "install/codex.rs", {
+        'bin_name = "codex plugin add"': "the install command (register, reload)",
+        'bin_name = "codex plugin remove"': "the uninstall command (unregister)",
+    }),
+    CODEX_MARKETPLACE_CMD_URL: PluginHost("Codex", "install/codex.rs", {
+        'bin_name = "codex plugin marketplace add"': "the marketplace add command (register)",
+        'bin_name = "codex plugin marketplace remove"': "the marketplace remove command (unregister)",
+    }),
+    CODEX_MARKETPLACE_URL: PluginHost("Codex", "install/codex.rs", {
+        '".agents/plugins/marketplace.json"': "where register writes the marketplace manifest",
+    }),
+    CODEX_PLUGIN_EDIT_URL: PluginHost("Codex", "install/codex.rs", {
+        'root.get_mut("plugins")': "the config.toml table an install is recorded in (is_registered)",
+        'plugin["enabled"]': "the key that records it enabled (is_registered)",
+    }),
+    REASONIX_PLUGIN_DOC_URL: PluginHost("Reasonix", "install/reasonix.rs", {
+        "`--link` links a local plugin directory instead of copying it": "the in-place install (register; no reload)",
+        "`--yes` is required for any install that writes files.": "register's --yes",
+        "`--replace` allows the source to replace an installed plugin with the same": "a repeat connect re-links (register)",
+        "`remove` also accepts `uninstall` as an alias. It requires `--yes` because it": "the uninstall command (unregister)",
+        "~/.reasonix/plugin-packages.json": "where an install is recorded (is_registered)",
+        "Native `reasonix-plugin.json` manifests must declare the exact": "the manifest render_manifest writes",
+        'When `args` is present, including `"args": []`, the hook uses **exec form**.': "the exec form the hooks rely on",
+    }),
 }
 
 # Documented hooks.md surfaces the burn-tier decoder DEPENDS on: a string
@@ -395,6 +444,13 @@ ANCHORS: dict[str, Anchor] = {
     CC_PLUGIN_COMPONENTS_URL: Anchor(r"(?m)^# Add components to a plugin", "the plugin-components page"),
     CC_PLUGIN_INSTALL_URL: Anchor(r"(?m)^# Install and manage plugins", "the plugin-install page"),
     CC_PLUGIN_LOADING_URL: Anchor(r"(?m)^# Plugin loading reference", "the plugin-loading page"),
+    CODEX_PLUGIN_CMD_URL: Anchor(r"pub enum PluginSubcommand\b", "`PluginSubcommand`"),
+    CODEX_MARKETPLACE_CMD_URL: Anchor(r"enum MarketplaceSubcommand\b", "`MarketplaceSubcommand`"),
+    CODEX_MARKETPLACE_URL: Anchor(
+        r"const MARKETPLACE_MANIFEST_RELATIVE_PATHS\b", "`MARKETPLACE_MANIFEST_RELATIVE_PATHS`"
+    ),
+    CODEX_PLUGIN_EDIT_URL: Anchor(r"fn set_plugin_enabled\b", "`set_plugin_enabled`"),
+    REASONIX_PLUGIN_DOC_URL: Anchor(r"(?m)^## CLI Mode", "the plugin-packages CLI section"),
     CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
     KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
     REASONIX_HOOK_URL: Anchor(r"Event\s*=\s*\"", "the Event consts"),
@@ -815,12 +871,13 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
     return names or None
 
 
-def cc_plugin_marker_findings(url: str, doc: str) -> list[str]:
-    """The markers of CC_PLUGIN_DOC_MARKERS[url] that `doc` no longer carries."""
+def plugin_marker_findings(url: str, doc: str) -> list[str]:
+    """The markers of PLUGIN_HOST_MARKERS[url] that `doc` no longer carries."""
+    host = PLUGIN_HOST_MARKERS[url]
     return [
-        f"CC {url.rsplit('/', 1)[-1]} no longer says `{marker}` — {what} may have "
-        f"changed; re-verify install/claude.rs's plugin registration."
-        for marker, what in sorted(CC_PLUGIN_DOC_MARKERS[url].items())
+        f"{host.cli} {url.rsplit('/', 1)[-1]} no longer says `{marker}` — {what} may "
+        f"have changed; re-verify {host.installer}'s plugin registration."
+        for marker, what in sorted(host.markers.items())
         if marker not in doc
     ]
 
@@ -1597,12 +1654,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
 
-    if ours.cc is not None:
-        for url in CC_PLUGIN_DOC_MARKERS:
-            doc = fetch_anchored(url, "CC plugin doc", report)
-            if doc is not None:
-                for finding in cc_plugin_marker_findings(url, doc):
-                    report.add_review(finding)
+    registered = {"CC": ours.cc, "Codex": ours.codex, "Reasonix": ours.reasonix}
+    for url, host in PLUGIN_HOST_MARKERS.items():
+        if registered[host.cli] is None:
+            continue
+        doc = fetch_anchored(url, f"{host.cli} plugin contract", report)
+        if doc is not None:
+            for finding in plugin_marker_findings(url, doc):
+                report.add_review(finding)
 
 
     if ours.reasonix is not None:

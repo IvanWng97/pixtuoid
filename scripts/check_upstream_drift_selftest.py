@@ -90,13 +90,16 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
-def test_cc_plugin_markers_fire_on_vanish() -> None:
-    for url, markers in d.CC_PLUGIN_DOC_MARKERS.items():
-        full = "\n".join(markers)
-        check(d.cc_plugin_marker_findings(url, full) == [], f"{url}: quiet doc -> none")
-        first = sorted(markers)[0]
-        got = d.cc_plugin_marker_findings(url, "\n".join(m for m in markers if m != first))
-        check(len(got) == 1 and first in got[0], f"{url}: vanish fires: {got!r}")
+def test_plugin_host_markers_fire_on_vanish() -> None:
+    for url, host in d.PLUGIN_HOST_MARKERS.items():
+        full = "\n".join(host.markers)
+        check(d.plugin_marker_findings(url, full) == [], f"{url}: quiet doc -> none")
+        first = sorted(host.markers)[0]
+        got = d.plugin_marker_findings(url, "\n".join(m for m in host.markers if m != first))
+        check(
+            len(got) == 1 and first in got[0] and host.installer in got[0],
+            f"{url}: vanish fires: {got!r}",
+        )
 
 
 # One snippet per anchored document; a new ANCHORS entry with no sample here
@@ -105,6 +108,11 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CC_PLUGIN_COMPONENTS_URL: "# Add components to a plugin\n",
     d.CC_PLUGIN_INSTALL_URL: "# Install and manage plugins\n",
     d.CC_PLUGIN_LOADING_URL: "# Plugin loading reference\n",
+    d.CODEX_PLUGIN_CMD_URL: "pub enum PluginSubcommand {\n    Add(AddPluginArgs),\n}\n",
+    d.CODEX_MARKETPLACE_CMD_URL: "enum MarketplaceSubcommand {\n    Add(AddMarketplaceArgs),\n}\n",
+    d.CODEX_MARKETPLACE_URL: "const MARKETPLACE_MANIFEST_RELATIVE_PATHS: &[&str] = &[];\n",
+    d.CODEX_PLUGIN_EDIT_URL: "fn set_plugin_enabled(doc: &mut DocumentMut) -> bool {\n}\n",
+    d.REASONIX_PLUGIN_DOC_URL: "\n## CLI Mode\n",
     d.CURSOR_HOOKS_URL: "\n### Hook events\n\n#### preToolUse\n",
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
     d.CC_TOOLS_URL: "\n# Tools reference\n",
