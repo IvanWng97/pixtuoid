@@ -291,7 +291,7 @@ const PERSONA_CALM: &[Persona] = &[
     Persona::Says("quiet... too quiet"),
     Persona::Says("coffee break?"),
 ];
-// `board_line` picks from a pool modulo its length.
+// `board_persona_segments` picks from a pool modulo its length.
 const _: () = assert!(
     !PERSONA_ALERT_ONE.is_empty()
         && !PERSONA_ALERT_MANY.is_empty()

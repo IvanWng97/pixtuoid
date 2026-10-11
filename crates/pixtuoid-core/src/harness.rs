@@ -56,11 +56,11 @@ pub enum Reach {
 #[derive(Clone, Debug)]
 pub struct LineFailure {
     /// 1-based index among the non-blank lines driven.
-    pub line: usize,
+    pub(crate) line: usize,
     /// `type="…" keys=[…]` — structure only.
-    pub shape: String,
+    pub(crate) shape: String,
     /// The decoder's own error; `None` for a panic.
-    pub message: Option<String>,
+    pub(crate) message: Option<String>,
 }
 
 impl std::fmt::Display for LineFailure {
@@ -83,7 +83,7 @@ pub struct Driven {
     /// How many leading `events` are the first-sight SEED, not the wire's own
     /// output (0 or 1). A census must report [`Self::wire_events`] instead — the
     /// seed registers a slot unconditionally, so counting it scores garbage 1/1.
-    pub seed_events: usize,
+    pub(crate) seed_events: usize,
     /// Non-blank lines driven (blank lines are skipped, not counted).
     pub lines: usize,
     /// Lines that were not valid JSON — a torn write, outside the decoder

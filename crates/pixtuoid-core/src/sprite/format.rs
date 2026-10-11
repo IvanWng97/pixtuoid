@@ -496,18 +496,23 @@ mod tests {
                 b: 80,
             },
         );
-        let out = seated.recolorable(0).expect("frame 0").recolored(&[
+        let overrides = [
             ('B', Some(red)),
             ('H', Some(blond)),
             ('.', Some(red)),
             ('Q', None),
-        ]);
+        ];
+        let out = seated.recolorable_at(0).recolored(&overrides);
         let shirt = pack.palette().get('B').flatten();
         assert_eq!(
             out.as_slice(),
             &[Some(red), shirt, Some(blond.ramp(-1)), None][..]
         );
-        assert!(seated.recolorable(1).is_none());
+        assert_eq!(
+            seated.recolorable_at(1).recolored(&overrides).as_slice(),
+            out.as_slice(),
+            "an index past the last frame wraps to the first"
+        );
         assert_eq!(
             seated.frames()[0].as_slice(),
             &[shirt, shirt, Some(HAIR.ramp(-1)), None][..],
@@ -1429,7 +1434,7 @@ fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)
 }
 
 /// The file a pack directory's manifest is read from.
-pub const PACK_MANIFEST: &str = "pack.toml";
+pub(crate) const PACK_MANIFEST: &str = "pack.toml";
 
 /// A `Pack` from in-memory strings: its manifest and each frame file it names.
 ///
@@ -1441,8 +1446,7 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
 }
 
 /// The one-frame sprite [`fill_pack_manifest`] draws every piece it adds in.
-#[doc(hidden)]
-pub const FILLER_SPRITE: (&str, &str) = ("filler.sprite", "@frame 0\n~");
+pub(crate) const FILLER_SPRITE: (&str, &str) = ("filler.sprite", "@frame 0\n~");
 
 /// The palette keys [`fill_pack_manifest`] adds: the filler's, then one per
 /// [`Material`] and the character outline's.
@@ -1455,8 +1459,7 @@ const FILLER_KEYS: [char; 9] = ['~', '^', '`', '|', '{', '}', '<', '>', '='];
 /// # Errors
 ///
 /// If `pack_toml` is not TOML.
-#[doc(hidden)]
-pub fn fill_pack_manifest(pack_toml: &str) -> Result<String> {
+pub(crate) fn fill_pack_manifest(pack_toml: &str) -> Result<String> {
     use toml::{Table, Value};
     let mut manifest: Table = pack_toml
         .parse()

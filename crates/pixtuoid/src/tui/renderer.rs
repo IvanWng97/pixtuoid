@@ -79,14 +79,14 @@ impl<'a> DrawCtx<'a> {
 }
 
 /// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
-/// `Default` is a refused frame, which leaves nothing to hit-test.
+/// `Default` is a refused frame, which draws nothing new to hit-test.
 #[derive(Debug, Default)]
 pub struct DrawOut {
     /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
     pub hovers: Hovers,
     /// The board's star, a link the pointer finds.
-    pub star: Option<pixtuoid_scene::layout::Bounds>,
+    pub(crate) star: Option<pixtuoid_scene::layout::Bounds>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
 }

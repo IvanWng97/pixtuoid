@@ -120,7 +120,7 @@ impl OfficeRenderer {
     /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
     /// when the flash hold keeps it back, so the window keeps the last. A
     /// frame shown is [`presented`](Self::presented) once it shows.
-    pub fn render_live(
+    pub(crate) fn render_live(
         &mut self,
         at: PixelFit,
         frame: WindowFrame<'_>,
@@ -142,7 +142,7 @@ impl OfficeRenderer {
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
-    pub fn presented(&mut self) {
+    pub(crate) fn presented(&mut self) {
         self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
@@ -680,6 +680,14 @@ mod tests {
         Ending,
     }
 
+    /// How long a floor slide takes, whichever floors it joins.
+    fn slide_length() -> Duration {
+        let mut probe = OfficeRenderer::new(crate::test_flash::pack_arc());
+        probe.navigate(1, SystemTime::UNIX_EPOCH);
+        let slide = probe.nav().transition().expect("a slide");
+        Duration::from_millis(slide.duration_ms)
+    }
+
     /// In `window` sliding to floor `to` as `slide` says, the phase from
     /// `changes[0]` holds the floor from `late`, its first frame a quarter
     /// floor before `changes[1]`: `held`, the next phase's first frame,
@@ -696,24 +704,27 @@ mod tests {
         let [before, late] = changes.map(|change| change - floor / 4);
         let held = changes[1];
         let from = window.renderer.nav().current();
-        let length = Duration::from_millis(
-            pixtuoid_scene::floor::FloorTransition::new(from, to, held).duration_ms,
-        );
-        let (starts, showing) = match slide {
-            Slide::Starting => (late, [Some(from), None]),
-            Slide::Under => (before, [None, None]),
-            Slide::Ending => (held - length, [None, Some(to)]),
+        // Where the window is, and the floor it slides to.
+        let (starts, nav) = match slide {
+            Slide::Starting => (late, [(from, None), (from, Some(to))]),
+            Slide::Under => (before, [(from, Some(to)); 2]),
+            Slide::Ending => (held - slide_length(), [(from, Some(to)), (to, None)]),
         };
         let [_, at_late, at_held, at_after] = [before, late, held, late + floor].map(|now| {
             if starts < now {
                 window.renderer.navigate(to, starts);
             }
-            (window.present(now), window.renderer.nav().showing())
+            let shown = window.present(now);
+            let nav = window.renderer.nav();
+            (
+                shown,
+                (nav.current(), nav.transition().map(|tr| tr.to_floor)),
+            )
         });
         assert_eq!(
             [at_late.1, at_held.1],
-            showing,
-            "{slide:?}: the floors shown"
+            nav,
+            "{slide:?}: where the window is"
         );
         assert!(
             at_held.0.as_slice() == at_late.0.as_slice(),
