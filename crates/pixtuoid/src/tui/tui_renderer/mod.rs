@@ -699,7 +699,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         );
         if !stepped {
             let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
-            let audio = self.session.no_office(scene, office_floor, now);
+            let audio = self.session.drew_no_office(scene, office_floor, now);
             self.chrome.audio.frame(audio);
         }
         self.screen.blank(self.terminal.size()?);
@@ -839,9 +839,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         if self.session.nav().transition().is_some() {
             return self.flush_classic_slide(scene, now).map(|()| drawn);
         }
-        if !matches!(self.session.picture(), Some(Picture::Floor(_))) {
+        let Some(picture) = self.session.picture() else {
             return self.draw_too_small(scene, now, true);
-        }
+        };
+        let Picture::Floor(floor) = &picture else {
+            return self.draw_too_small(scene, now, true);
+        };
         let current = self.session.nav().current();
         let floor_scene = project_floor_scene(scene, current);
         let footer_scene = self.session.footer_scene(scene);
@@ -857,12 +860,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let overlays = self
             .chrome
             .overlays(popup_scale, self.offers_walkable_debug());
-        let Some(picture) = self.session.picture() else {
-            return Ok(drawn);
-        };
-        let Picture::Floor(floor) = &picture else {
-            return Ok(drawn);
-        };
         let (geometry, star) = crate::tui::renderer::classic_placement(term_size, floor);
         if !self
             .screen
@@ -912,9 +909,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
         let drawn =
             self.render_office(scene, pack, now, fitted.look(), fitted.fit.logical(), false);
-        if self.session.picture().is_none() {
+        let Some(picture) = self.session.picture() else {
             return self.draw_too_small(scene, now, true);
-        }
+        };
         let term_size = self.terminal.size()?;
         let current = self.session.nav().current();
         let floor_scene = project_floor_scene(scene, current);
@@ -932,9 +929,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let overlays = self
             .chrome
             .overlays(popup_scale, self.offers_walkable_debug());
-        let Some(picture) = self.session.picture() else {
-            return Ok(drawn);
-        };
         let geometry = fitted.geometry();
         let floor = match &picture {
             Picture::Floor(floor) => Some(floor),

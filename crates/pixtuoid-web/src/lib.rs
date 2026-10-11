@@ -249,6 +249,9 @@ impl Office {
             self.screen.landed();
             return;
         };
+        let badges = picture
+            .text
+            .map_or_else(Vec::new, |text| text.badges.to_vec());
         let picture = pixtuoid_scene::look::Picture::Floor(picture);
         if !self
             .screen
@@ -258,13 +261,7 @@ impl Office {
             return;
         }
         expand_rgba(&mut self.rgba, picture.pixels());
-        self.shown_badges = picture
-            .hits()
-            .and(match &picture {
-                pixtuoid_scene::look::Picture::Floor(floor) => floor.text,
-                pixtuoid_scene::look::Picture::Slide(_) => None,
-            })
-            .map_or_else(Vec::new, |text| text.badges.to_vec());
+        self.shown_badges = badges;
         // The page draws what `step` leaves in the same task, straight after.
         self.screen.landed();
     }

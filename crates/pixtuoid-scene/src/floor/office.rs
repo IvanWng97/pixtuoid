@@ -525,8 +525,10 @@ impl OfficeSession {
     }
 
     /// A frame drew no office (a painter's too-small screen): the floor
-    /// showing keeps nothing of its last, so its audio hears an empty floor.
-    pub fn no_office(
+    /// showing keeps nothing of its last. Its audio, the empty floor's, is
+    /// the caller's to feed.
+    #[must_use]
+    pub fn drew_no_office(
         &mut self,
         scene: &SceneState,
         office_floor: FloorMeta,

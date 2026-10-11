@@ -2276,7 +2276,7 @@ fn a_frame_without_the_office_forgets_the_last() {
             .unwrap_or_default(),
         "the frame drawn shows its agents"
     );
-    let _ = office.no_office(&scene, FloorMeta::ground(), now0);
+    let _ = office.drew_no_office(&scene, FloorMeta::ground(), now0);
     assert!(office.picture().is_none(), "a pointer hits nothing");
     assert!(office.heard_occupied().is_empty());
 }

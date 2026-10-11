@@ -1423,6 +1423,37 @@ mod tests {
         }
     }
 
+    /// Before a frame shows, a press anywhere drags the frameless window, the
+    /// corner included, and a move or release acts on nothing: a frame
+    /// rendered but not yet presented shows nothing either.
+    #[test]
+    fn before_a_frame_shows_a_press_drags_the_window() {
+        let (rendered, at, size, now, _) = one_agent_office();
+        let fresh = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let mut unpresented = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let scene = scene_with(vec![active_on("/p/a.jsonl", 0, 0)], 16);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
+        assert!(unpresented.render_live(
+            at,
+            frame(&scene, crate::test_flash::pack(), theme, now),
+            size
+        ));
+        let on_agent = agent_point(&rendered, at, now);
+        let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
+        for mut renderer in [fresh, unpresented] {
+            for cursor in [on_agent, corner] {
+                let pressing = Pressing {
+                    scale_factor: 1.0,
+                    petting: None,
+                    now,
+                };
+                assert_eq!(renderer.press_at(cursor, size, pressing), Press::Drag);
+            }
+            assert!(!renderer.pointer_moved(corner));
+            assert_eq!(renderer.release(corner), None);
+        }
+    }
+
     /// Over the office drawn, the cursor reads what the frame shows: the hand
     /// on its agent, the resize arrow in the corner, a closed hand while a
     /// figure is carried, even under a panel, and the arrow under a panel.

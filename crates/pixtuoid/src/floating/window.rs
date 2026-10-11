@@ -570,7 +570,8 @@ impl super::lifecycle::Redraw for FloatingApp {
         FloatingApp::paint(self);
     }
 
-    /// The cursor reads the frame just painted, as a press and the tooltip do.
+    /// The cursor reads the frame on screen, as a press does; the tooltip
+    /// reads the frame just rendered.
     fn recursor(&mut self) {
         FloatingApp::recursor(self);
     }
