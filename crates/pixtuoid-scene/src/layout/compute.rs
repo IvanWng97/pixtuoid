@@ -1849,39 +1849,47 @@ mod tests {
     fn the_lounge_is_kept_iff_its_east_ground_reaches_no_further_than_the_threshold() {
         use super::{FloorPlan, couch_pos, lounge_east_ground};
         use crate::layout::SceneLayout;
-        use crate::layout::placement_sweep::NARROW_BAND;
-        let (h, seed) = (160, 1);
-        let scan: Vec<(u16, bool, Option<u16>, u16)> = NARROW_BAND
-            .map(|w| {
-                let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
-                let plan = FloorPlan::new(w, h, seed);
-                let couch = couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
-                (
-                    w,
-                    l.lounge.is_some(),
-                    lounge_east_ground(couch),
-                    l.door_threshold.x,
-                )
-            })
-            .collect();
-        for &(w, kept, east, threshold) in &scan {
-            assert_eq!(
-                kept,
-                east.is_none_or(|e| e <= threshold),
-                "{w}x{h} seed {seed}: kept {kept}, east ground {east:?}, threshold {threshold}"
-            );
+        use crate::layout::placement_sweep::{NARROW_BAND, SWEEP_SEEDS};
+        let h = 160;
+        let mut exact_fits = 0;
+        for seed in SWEEP_SEEDS {
+            let scan: Vec<(u16, bool, Option<u16>, u16)> = NARROW_BAND
+                .map(|w| {
+                    let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
+                    let plan = FloorPlan::new(w, h, seed);
+                    let couch =
+                        couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
+                    (
+                        w,
+                        l.lounge.is_some(),
+                        lounge_east_ground(couch),
+                        l.door_threshold.x,
+                    )
+                })
+                .collect();
+            for &(w, kept, east, threshold) in &scan {
+                assert_eq!(
+                    kept,
+                    east.is_none_or(|e| e <= threshold),
+                    "{w}x{h} seed {seed}: kept {kept}, east ground {east:?}, threshold {threshold}"
+                );
+            }
+            let exact = scan
+                .iter()
+                .find(|&&(_, kept, east, threshold)| kept && east == Some(threshold));
+            let below = exact.and_then(|e| scan.iter().find(|&&(w, ..)| w + 1 == e.0));
+            if let Some(below) = below {
+                exact_fits += 1;
+                assert!(
+                    !below.1 && below.2.is_some_and(|e| e > below.3),
+                    "seed {seed}: the width below the exact fit must drop the lounge for \
+                     crossing the threshold: {below:?}"
+                );
+            }
         }
-        let exact = scan
-            .iter()
-            .find(|&&(_, kept, east, threshold)| kept && east == Some(threshold))
-            .expect("a width keeps the lounge with its ground meeting the threshold exactly");
-        let below = scan
-            .iter()
-            .find(|&&(w, ..)| w + 1 == exact.0)
-            .expect("the width below is in the band");
         assert!(
-            !below.1 && below.2.is_some_and(|e| e > below.3),
-            "the width below the exact fit must drop the lounge for crossing the threshold: {below:?}"
+            exact_fits > 0,
+            "no seed puts an exact fit with the width below it inside the band"
         );
     }
 

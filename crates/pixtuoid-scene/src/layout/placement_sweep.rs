@@ -53,7 +53,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
 
 /// Seeds swept per size. 0..12 reaches every `FloorVariant` through its
 /// hash, pinned by `the_sweep_reaches_every_floor_variant`.
-const SWEEP_SEEDS: std::ops::Range<u64> = 0..12;
+pub(super) const SWEEP_SEEDS: std::ops::Range<u64> = 0..12;
 
 /// Run `f` over `SWEEP_SIZES` × `seeds` at production fill (`max_desks: None`,
 /// the densest desk grid — the strictest placement case). A `None` layout is
