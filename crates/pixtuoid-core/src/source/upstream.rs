@@ -89,6 +89,14 @@ pub enum Read {
     JsonKeys,
 }
 
+impl Read {
+    /// Whether it yields only the family a watch reads, never the rest of
+    /// upstream's declaration beside it.
+    pub const fn confined_to_family(&self) -> bool {
+        matches!(self, Self::RustArms { .. })
+    }
+}
+
 /// Names we read, or wait on, whose vanishing or appearing upstream is a
 /// finding.
 #[derive(Debug)]
@@ -115,7 +123,8 @@ pub enum When {
     Appears,
 }
 
-/// How hard a finding lands, with what it costs a user.
+/// How hard a finding lands, with what it costs a user or what a maintainer
+/// re-verifies.
 #[derive(Debug)]
 pub enum Finding {
     /// Users are broken now.
@@ -210,8 +219,7 @@ mod tests {
                         w.id
                     );
                     assert!(
-                        !matches!(sib.family, Family::All)
-                            || matches!(w.read, Read::RustArms { .. }),
+                        !matches!(sib.family, Family::All) || w.read.confined_to_family(),
                         "{}: `Family::All` off a reader that yields more than the family",
                         w.id
                     );

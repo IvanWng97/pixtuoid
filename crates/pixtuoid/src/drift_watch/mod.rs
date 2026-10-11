@@ -457,7 +457,9 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
 /// the ones of ours it finds and a family reader just the family, so their
 /// shrink is the finding, and a shrunk parse cannot invent an appearance.
 fn floored(w: &Watch) -> bool {
-    matches!(w.when, When::Vanishes) && !matches!(w.read, Read::Each { .. } | Read::RustArms { .. })
+    matches!(w.when, When::Vanishes)
+        && !matches!(w.read, Read::Each { .. })
+        && !w.read.confined_to_family()
 }
 
 /// Upstream's names off every `(label, path, text)` document of `w`; `None`
