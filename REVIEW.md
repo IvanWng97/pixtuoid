@@ -108,9 +108,9 @@ resolved or not
 new findings follow [Severity](#severity). From round 3 (`Round:` in
 `.claude-review/review-context.md`, which a head that only merges main in
 does not advance), post only `issue (blocking)` and count the
-rest in the summary, as the
-[convergence contract](docs/CONTRIBUTING.md#convergence-contract) folds only
-those after round 2.
+rest in the summary, since a re-review can always find another nit; the
+[convergence contract](docs/CONTRIBUTING.md#convergence-contract) says what
+still folds.
 
 ## Unit
 

@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # One whole OpenClaw gateway lifecycle for `just capture-fixture openclaw <scenario>`.
 #
-# The DOOR matters more than the flags here. OpenClaw's plugin registers six
-# hooks; `openclaw agent` fires only the gateway pair, because the four session
-# hooks come from the gateway's get-reply path, which `agent` never enters — a
-# capture through that door reads like upstream drift and is not. `openclaw tui`
-# is the path that opens a session. `--deliver` stays off, so nothing reaches a
+# The turn goes through `openclaw tui`. A gateway-backed `openclaw agent` turn
+# fires the session hooks too (checked live at 2026.7.1 and 2026.10.1), so either
+# door records the whole lifecycle. `--deliver` stays off, so nothing reaches a
 # real chat channel.
 #
 # `session_start` additionally needs a FRESH session key: a reused one RESUMES
