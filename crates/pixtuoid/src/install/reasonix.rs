@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::install::SENTINEL_KEY;
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
@@ -52,7 +51,7 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     copy: None,
     legacy: Some(LegacyConfig {
         path: settings_path,
-        strip: merge_uninstall,
+        strip: merge::flat_json_uninstall,
     }),
 };
 
@@ -275,16 +274,10 @@ fn plugin_entry() -> Result<Option<Value>> {
         .cloned())
 }
 
-/// Strips what a pixtuoid from before the plugin merged into `settings.json`.
-pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_uninstall(content, |doc| {
-        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::install::SENTINEL_KEY;
 
     fn json_merge_uninstall(doc: Value) -> Value {
         merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
@@ -436,7 +429,7 @@ mod tests {
     #[test]
     fn merge_uninstall_no_pixtuoid_hooks_reports_unchanged() {
         let user = r#"{ "hooks": { "Stop": [ { "command": "notify-send done" } ] } }"#;
-        let out = merge_uninstall(user).unwrap();
+        let out = merge::flat_json_uninstall(user).unwrap();
         assert!(!out.changed, "no managed entries → semantic no-op");
     }
 

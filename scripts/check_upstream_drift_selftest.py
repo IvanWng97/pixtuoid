@@ -90,14 +90,15 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
-def test_plugin_host_markers_fire_on_vanish() -> None:
-    for url, host in d.PLUGIN_HOST_MARKERS.items():
-        full = "\n".join(host.markers)
+def test_plugin_doc_markers_fire_on_vanish() -> None:
+    for url, entry in d.PLUGIN_DOC_MARKERS.items():
+        full = "\n".join(entry.markers)
         check(d.plugin_marker_findings(url, full) == [], f"{url}: quiet doc -> none")
-        first = sorted(host.markers)[0]
-        got = d.plugin_marker_findings(url, "\n".join(m for m in host.markers if m != first))
+        first = sorted(entry.markers)[0]
+        got = d.plugin_marker_findings(url, "\n".join(m for m in entry.markers if m != first))
+        installer = d.PLUGIN_HOST_INSTALLERS[entry.cli]
         check(
-            len(got) == 1 and first in got[0] and host.installer in got[0],
+            len(got) == 1 and first in got[0] and installer in got[0],
             f"{url}: vanish fires: {got!r}",
         )
 

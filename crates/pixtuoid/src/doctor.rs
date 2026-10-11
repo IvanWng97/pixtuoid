@@ -483,7 +483,8 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         version
     );
     // Each of `issues` is stripped where it is minted (a target's
-    // `verify_schema`, or `install::verify_target`), so it prints as is.
+    // `verify_schema`, or `install::verify_target`), so it prints as is; `notes`
+    // carry error chains that quote another CLI's files, so they are stripped here.
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
@@ -493,7 +494,7 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         } else if !s.notes.is_empty() {
             out.push_str(&format!(
                 "\n{CONT_INDENT}\u{21b3} note: {}",
-                s.notes.join("; ")
+                crate::strip_control_chars(&s.notes.join("; "))
             ));
         }
     }
@@ -1650,7 +1651,12 @@ mod tests {
             issues,
             notes: vec![],
         });
-        let mut r = summary_report(vec![row]);
+        let mut noted = summary_row("cx", "codex");
+        noted.diag.install = Some(crate::install::verify::SchemaVerifyResult {
+            issues: vec![],
+            notes: vec![evil()],
+        });
+        let mut r = summary_report(vec![row, noted]);
         r.log_path = ShownPath::new(evil());
         r.config_path = ShownPath::new(evil());
         r.config_warnings = vec![evil()];

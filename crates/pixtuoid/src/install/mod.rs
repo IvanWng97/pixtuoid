@@ -537,9 +537,10 @@ fn install_target_from(
         lock.write_atomic(&outcome.content)?;
     }
     // After the hooks file is written, so the plugin never registers empty, and
-    // still under its lock, so a failed registration puts back exactly what this
-    // call changed: the hooks ARE the connected fact (`has_hooks`), and a plugin
-    // that never registered fires none of the new ones.
+    // still under its lock, so a failed registration puts back the hooks file this
+    // call wrote: the hooks ARE the connected fact (`has_hooks`), and a plugin that
+    // never registered fires none of the new ones. Legacy hooks `connect_host`
+    // already stripped stay stripped.
     if let Some(host) = t.host
         && let Err(e) = connect_host(host, &path)
     {

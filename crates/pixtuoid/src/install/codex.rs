@@ -363,7 +363,7 @@ _pixtuoid = true
         assert_eq!(
             doc.as_object().unwrap().keys().collect::<Vec<_>>(),
             ["hooks"],
-            "Codex denies unknown top-level keys in a plugin's hooks file"
+            "Codex's `HooksFile` is `deny_unknown_fields` (`codex-rs/config/src/hook_config.rs` @ rust-v0.162.1)"
         );
         let v = verify_schema(&render_hooks(cmd).unwrap());
         assert!(v.issues.is_empty(), "{:?}", v.issues);

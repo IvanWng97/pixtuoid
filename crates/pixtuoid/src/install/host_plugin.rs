@@ -140,6 +140,13 @@ pub(crate) fn verify_hooks(
                 .map_or(ShimRef::Unknown, shim_of);
         }
     }
+    // `assemble`'s own wording names a sentinel no plugin file carries.
+    if !any {
+        return SchemaParse::broken(
+            "the plugin file holds no pixtuoid hooks (hand-edited, or emptied by a \
+             disconnect) — reconnect via the Sources panel",
+        );
+    }
     assemble(&missing, any, shim, vec![])
 }
 

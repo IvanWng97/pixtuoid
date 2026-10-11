@@ -1440,6 +1440,40 @@ fn claude_install_registers_the_plugin() {
     });
 }
 
+/// A 0.19.0 install merged a sentinel group per event into Claude Code's own
+/// settings.json; left beside the plugin, every event would fire twice.
+#[test]
+fn claude_connect_strips_the_hooks_an_older_pixtuoid_merged_into_its_settings() {
+    with_fake_hosts(|_| {
+        let user = serde_json::json!({
+            "matcher": "",
+            "hooks": [{ "type": "command", "command": "notify-send done" }],
+        });
+        let legacy = serde_json::json!({
+            SENTINEL_KEY: true,
+            "matcher": ".*",
+            "hooks": [{ "type": "command", "command": "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'" }],
+        });
+        std::fs::write(
+            cc_settings(),
+            serde_json::json!({ "theme": "dark", "hooks": { "Stop": [user, legacy] } }).to_string(),
+        )
+        .unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        install_target_from(
+            &CLAUDE,
+            Some(hooks),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let settings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(cc_settings()).unwrap()).unwrap();
+        assert_eq!(settings["hooks"]["Stop"], serde_json::json!([user]));
+        assert_eq!(settings["theme"], "dark");
+    });
+}
+
 #[test]
 fn claude_verify_flags_an_unregistered_plugin() {
     with_fake_hosts(|_| {
@@ -2183,33 +2217,43 @@ fn with_owned_homes<R>(f: impl FnOnce() -> R) -> R {
 #[test]
 fn every_owned_set_re_renders_byte_identical_from_the_shim_its_first_file_bakes() {
     with_owned_homes(|| {
-        let shim = abs_fixture("/opt/a dir/pixtuoid-hook", r"C:\a dir\pixtuoid-hook.exe");
+        let shims = [
+            abs_fixture("/opt/a dir/pixtuoid-hook", r"C:\a dir\pixtuoid-hook.exe"),
+            abs_fixture("/opt/bin/pixtuoid-hook", r"C:\bin\pixtuoid-hook.exe"),
+        ];
         let primary = std::env::temp_dir().join("primary");
         let mut covered = 0;
         for t in target::TARGETS {
             let Some(files) = t.primary.owned_files() else {
                 continue;
             };
-            for explicit in [true, false] {
-                let hook = match (t.hook_command)(&shim, explicit) {
-                    Ok(hook) => hook,
-                    // A command cmd.exe runs refuses a spaced path at connect, so it
-                    // is never written.
-                    Err(_) if cfg!(windows) => continue,
-                    Err(e) => panic!("{}: {e:#}", t.name),
-                };
-                let rendered = files.render(&primary, &hook).unwrap();
-                let back = files.installed_shim(&rendered[0].1);
-                let rehooked = rehook(t.hook_command, &back)
-                    .unwrap()
-                    .expect("a rendered file gives back its shim");
-                assert_eq!(
-                    files.render(&primary, &rehooked).unwrap(),
-                    rendered,
-                    "{} (explicit: {explicit})",
-                    t.name
-                );
+            let mut asserted = 0;
+            for shim in &shims {
+                for explicit in [true, false] {
+                    let hook = match (t.hook_command)(shim, explicit) {
+                        Ok(hook) => hook,
+                        // A command cmd.exe runs refuses a spaced path at connect,
+                        // so it is never written.
+                        Err(e) if cfg!(windows) && format!("{e:#}").contains("cmd.exe") => {
+                            continue;
+                        }
+                        Err(e) => panic!("{}: {e:#}", t.name),
+                    };
+                    let rendered = files.render(&primary, &hook).unwrap();
+                    let back = files.installed_shim(&rendered[0].1);
+                    let rehooked = rehook(t.hook_command, &back)
+                        .unwrap()
+                        .expect("a rendered file gives back its shim");
+                    assert_eq!(
+                        files.render(&primary, &rehooked).unwrap(),
+                        rendered,
+                        "{} ({shim:?}, explicit: {explicit})",
+                        t.name
+                    );
+                    asserted += 1;
+                }
             }
+            assert!(asserted > 0, "{}: no hook shape round-tripped", t.name);
             covered += 1;
         }
         assert!(

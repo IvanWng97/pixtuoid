@@ -253,44 +253,50 @@ REASONIX_PLUGIN_DOC_URL = (
 )
 
 
-class PluginHost(typing.NamedTuple):
-    """One document of the plugin contract a host's installer registers our hooks
-    through. A marker VANISHING is review-class drift: upstream reshaped what the
-    installer relies on."""
+# The installer that registers our hooks through each host's plugin contract.
+PLUGIN_HOST_INSTALLERS = {
+    "CC": "install/claude.rs",
+    "Codex": "install/codex.rs",
+    "Reasonix": "install/reasonix.rs",
+}
+
+
+class PluginDoc(typing.NamedTuple):
+    """One document of a host's plugin contract. A marker VANISHING is review-class
+    drift: upstream reshaped what the host's installer relies on."""
 
     cli: str
-    installer: str
     markers: dict[str, str]
 
 
-PLUGIN_HOST_MARKERS: dict[str, PluginHost] = {
-    CC_PLUGIN_COMPONENTS_URL: PluginHost("CC", "install/claude.rs", {
+PLUGIN_DOC_MARKERS: dict[str, PluginDoc] = {
+    CC_PLUGIN_COMPONENTS_URL: PluginDoc("CC", {
         "same shape as the `hooks` object in `settings.json`": "hooks/hooks.json's shape",
     }),
-    CC_PLUGIN_INSTALL_URL: PluginHost("CC", "install/claude.rs", {
+    CC_PLUGIN_INSTALL_URL: PluginDoc("CC", {
         "The entry goes in `enabledPlugins` in `~/.claude/settings.json`.": "where a user-scope install is recorded (is_registered)",
         "Run `claude plugin install` in your shell to install a plugin without starting a Claude Code session": "the shell install command (register)",
         "When you remove a marketplace, Claude Code uninstalls every plugin you installed from it": "unregister by marketplace removal",
     }),
-    CC_PLUGIN_LOADING_URL: PluginHost("CC", "install/claude.rs", {
+    CC_PLUGIN_LOADING_URL: PluginDoc("CC", {
         "the plugin loads in place from its path inside the marketplace folder": "a local-path marketplace's in-place load (no reinstall on update)",
     }),
-    CODEX_PLUGIN_CMD_URL: PluginHost("Codex", "install/codex.rs", {
+    CODEX_PLUGIN_CMD_URL: PluginDoc("Codex", {
         'bin_name = "codex plugin add"': "the install command (register, reload)",
         'bin_name = "codex plugin remove"': "the uninstall command (unregister)",
     }),
-    CODEX_MARKETPLACE_CMD_URL: PluginHost("Codex", "install/codex.rs", {
+    CODEX_MARKETPLACE_CMD_URL: PluginDoc("Codex", {
         'bin_name = "codex plugin marketplace add"': "the marketplace add command (register)",
         'bin_name = "codex plugin marketplace remove"': "the marketplace remove command (unregister)",
     }),
-    CODEX_MARKETPLACE_URL: PluginHost("Codex", "install/codex.rs", {
+    CODEX_MARKETPLACE_URL: PluginDoc("Codex", {
         '".agents/plugins/marketplace.json"': "where register writes the marketplace manifest",
     }),
-    CODEX_PLUGIN_EDIT_URL: PluginHost("Codex", "install/codex.rs", {
+    CODEX_PLUGIN_EDIT_URL: PluginDoc("Codex", {
         'root.get_mut("plugins")': "the config.toml table an install is recorded in (is_registered)",
         'plugin["enabled"]': "the key that records it enabled (is_registered)",
     }),
-    REASONIX_PLUGIN_DOC_URL: PluginHost("Reasonix", "install/reasonix.rs", {
+    REASONIX_PLUGIN_DOC_URL: PluginDoc("Reasonix", {
         "`--link` links a local plugin directory instead of copying it": "the in-place install (register; no reload)",
         "`--yes` is required for any install that writes files.": "register's --yes",
         "`--replace` allows the source to replace an installed plugin with the same": "a repeat connect re-links (register)",
@@ -872,12 +878,12 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
 
 
 def plugin_marker_findings(url: str, doc: str) -> list[str]:
-    """The markers of PLUGIN_HOST_MARKERS[url] that `doc` no longer carries."""
-    host = PLUGIN_HOST_MARKERS[url]
+    """The markers of PLUGIN_DOC_MARKERS[url] that `doc` no longer carries."""
+    entry = PLUGIN_DOC_MARKERS[url]
     return [
-        f"{host.cli} {url.rsplit('/', 1)[-1]} no longer says `{marker}` — {what} may "
-        f"have changed; re-verify {host.installer}'s plugin registration."
-        for marker, what in sorted(host.markers.items())
+        f"{entry.cli} {url.rsplit('/', 1)[-1]} no longer says `{marker}` — {what} may "
+        f"have changed; re-verify {PLUGIN_HOST_INSTALLERS[entry.cli]}'s plugin registration."
+        for marker, what in sorted(entry.markers.items())
         if marker not in doc
     ]
 
@@ -1655,10 +1661,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             report.add_review(finding)
 
     registered = {"CC": ours.cc, "Codex": ours.codex, "Reasonix": ours.reasonix}
-    for url, host in PLUGIN_HOST_MARKERS.items():
-        if registered[host.cli] is None:
+    for url, entry in PLUGIN_DOC_MARKERS.items():
+        if registered[entry.cli] is None:
             continue
-        doc = fetch_anchored(url, f"{host.cli} plugin contract", report)
+        doc = fetch_anchored(url, f"{entry.cli} plugin contract", report)
         if doc is not None:
             for finding in plugin_marker_findings(url, doc):
                 report.add_review(finding)
