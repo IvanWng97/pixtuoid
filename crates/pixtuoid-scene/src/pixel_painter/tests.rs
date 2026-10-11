@@ -3260,7 +3260,7 @@ fn sim_step_advances_walks_without_painting() {
     let mut stores = owned.stores();
 
     let walk_t = |f: &SimFrame| match f.poses.get(&id) {
-        Some(Some(Pose::Walking { progress, .. })) => *progress,
+        Some(Some(Pose::Walking { travelled, .. })) => *travelled,
         other => panic!("expected an entry walk pose, got {other:?}"),
     };
     let f1 = sim_step(

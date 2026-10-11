@@ -710,6 +710,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         .expect("snap_back profile stored")
         .profile;
     let dur_ms = profile.duration_ms;
+    let path_len = profile.path_len_octile;
     assert!(
         dur_ms > 0,
         "profile duration must be > 0 for a non-trivial distance"
@@ -728,10 +729,10 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let p = derive_with_routing(&slot_q, quarter_now, &l, &mut rig.rctx());
 
     match p {
-        Some(Pose::Walking { progress, .. }) => {
+        Some(Pose::Walking { travelled, .. }) => {
             assert!(
-                progress < Progress::of(1, 4),
-                "physics ease-in: expected progress < 1/4 at 25% of duration, got {progress:?}"
+                u64::from(travelled) * 4 < u64::from(path_len),
+                "physics ease-in: expected under 1/4 of the route at 25% of duration, got {travelled} of {path_len}"
             );
         }
         other => panic!("expected Walking pose at 25% of snap-back duration, got {other:?}"),
@@ -1052,10 +1053,18 @@ fn exit_far_completes_before_grace_window_no_vanish() {
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
         // Walking at the end of the path, or already arrived (None, GC
         // imminent) — either way NOT stuck mid-corridor.
-        Some(Pose::Walking { progress, .. }) => assert!(
-            progress >= Progress::of(19, 20),
-            "far exit must reach the door by the grace window (no mid-corridor vanish), got progress={progress:?}"
-        ),
+        Some(Pose::Walking { travelled, .. }) => {
+            let route_len = rig.walks[&slot.agent_id]
+                .exit
+                .as_ref()
+                .expect("exit profile snapshotted")
+                .profile
+                .path_len_octile;
+            assert!(
+                u64::from(travelled) * 20 >= 19 * u64::from(route_len),
+                "far exit must reach the door by the grace window (no mid-corridor vanish), got {travelled} of {route_len}"
+            );
+        }
         None => {}
         other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
     }
