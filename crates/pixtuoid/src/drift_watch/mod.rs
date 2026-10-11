@@ -55,7 +55,7 @@ trait Fetch {
 }
 
 /// One bucket per DISPOSITION, because each calls for a different action:
-/// `breaking` fix the decoder, `review` adopt or ignore, `blind` repin by hand,
+/// `breaking` fix the decoder, `review` adopt, ignore or re-verify, `blind` repin by hand,
 /// `errors` transient. Collapsing `blind` into `breaking` is what made #793
 /// report five phantom renames.
 #[derive(Debug, Default)]
@@ -107,7 +107,7 @@ impl Report {
         if !self.breaking.is_empty() {
             "Upstream CLI wire-format drift detected"
         } else if !self.review.is_empty() {
-            "New upstream events to review"
+            "Upstream changes to review"
         } else if !self.blind.is_empty() {
             "Upstream drift watch could not verify — repin needed"
         } else {
@@ -138,7 +138,7 @@ impl Report {
             ),
             &self.breaking,
         );
-        section("## 🔎 New upstream events to review", None, &self.review);
+        section("## 🔎 Upstream changes to review", None, &self.review);
         section(
             "## 🩺 Probe could NOT verify — this is not evidence of upstream change",
             Some(

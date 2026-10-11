@@ -1,6 +1,7 @@
 //! What a source depends on UPSTREAM, declared beside the names it reads: the
-//! documents that declare those names, how to read them, and what a user loses
-//! when one goes. pixtuoid's `drift_watch` checks them against upstream.
+//! documents that declare those names, how to read them, and which change to
+//! one is a finding, with what it costs a user or what a maintainer
+//! re-verifies. pixtuoid's `drift_watch` checks them against upstream.
 
 /// Whether a source is watched upstream, and through what.
 #[derive(Debug)]
@@ -88,7 +89,8 @@ pub enum Read {
     JsonKeys,
 }
 
-/// Names we READ whose vanishing, or appearing, upstream is a finding.
+/// Names we read, or wait on, whose vanishing or appearing upstream is a
+/// finding.
 #[derive(Debug)]
 pub struct Watch {
     /// The report's key for this watch; unique across sources.
@@ -150,6 +152,20 @@ pub enum Family {
 mod tests {
     use super::*;
     use crate::source::registry::REGISTRY;
+
+    /// A closed source says why, since nothing upstream will.
+    #[test]
+    fn every_closed_source_says_why() {
+        for d in REGISTRY {
+            if let Upstream::Closed { why } = d.upstream {
+                assert!(
+                    !why.trim().is_empty(),
+                    "{} is closed with no reason",
+                    d.name
+                );
+            }
+        }
+    }
 
     /// Every watch is one a checker can run: a blank name, or an `Each` pattern
     /// without `{name}`, matches whatever upstream says; a `Sole` read yields

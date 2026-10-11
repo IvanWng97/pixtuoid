@@ -662,8 +662,8 @@ mod tests {
 
     #[test]
     fn escalated_function_call_is_waiting() {
-        // Built FROM the exported pair, so the drift row and the arm cannot
-        // drift apart: the check is a boolean with no breadcrumb to lean on.
+        // Built FROM the exported pair, so the `codex.escalation` watch and the
+        // arm cannot drift apart: the check is a boolean with no breadcrumb.
         assert_eq!(
             DECODED_ESCALATION,
             [REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD]

@@ -364,6 +364,22 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
     assert!(r.blind[0].contains("floor 2"), "{r:?}");
 
+    // An enum read is floored alike: one variant back where we read two.
+    const ENUM: Watch = Watch {
+        id: "t.enum",
+        ours: || vec!["a_b", "c"],
+        docs: &[doc("e.rs")],
+        read: Read::RustEnum { name: "Item" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let one_variant =
+        "enum Events {}\n#[serde(rename_all = \"snake_case\")]\nenum Item {\n    C,\n}\n";
+    let r = check(&Served::default().with(&raw("e.rs"), one_variant), &ENUM);
+    assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
+    assert!(r.blind[0].contains("floor 2"), "{r:?}");
+
     // A family reader yields exactly the family, so its shrink is the finding.
     const ARMS: Watch = Watch {
         id: "t.arms",
@@ -678,37 +694,102 @@ fn pascal(snake: &str) -> String {
         .collect()
 }
 
+/// `name` where `w`'s reader must not find it: another item of the reader's
+/// kind, or a commented-out declaration. An `Each` pattern's strictness cannot
+/// be read off the pattern under test, so
+/// `a_declaration_form_is_not_satisfied_by_prose` pins it per watch, and a
+/// JSON reader reads its whole document by design.
+fn near_miss(w: &Watch, name: &str) -> String {
+    let in_rust = w.docs.iter().all(|doc| match doc.at {
+        At::Path { path, .. } => path.ends_with(".rs"),
+        At::ReleaseAsset { member, .. } => member.ends_with(".rs"),
+        At::Url(url) => url.ends_with(".rs"),
+    });
+    match w.read {
+        Read::Sole { pattern } if in_rust => format!("// {}", render(pattern, name)),
+        Read::RustArms { arm, .. } => format!(
+            "fn pxd_other() {{ match a {{ \"{name}\" => {}, _ => Err(()) }} }}",
+            render(arm, "")
+        ),
+        Read::RustEnum { .. } => format!(
+            "#[serde(rename_all = \"snake_case\")]\nenum PxdOther {{\n    {},\n}}",
+            pascal(name)
+        ),
+        Read::TsFields { .. } => format!("export interface PxdOther {{\n  {name}: string;\n}}"),
+        Read::Each { .. } | Read::Sole { .. } | Read::JsonUnion { .. } | Read::JsonKeys => {
+            String::new()
+        }
+    }
+}
+
+/// `text` as every document `w` reads.
+fn serve(w: &Watch, text: &str) -> Served {
+    w.docs
+        .iter()
+        .fold(Served::default(), |s, doc| match locate(&doc.at).0 {
+            Located::Raw { url } => s.with(&url, text),
+            Located::Release {
+                repo,
+                asset,
+                member,
+                sums,
+            } => s.release(repo, asset, member, sums, text),
+        })
+}
+
+/// A watch read in its declaration form must not take the name's mention
+/// elsewhere for it: each prose shape here is the one its declaration's
+/// comment warns of.
+#[test]
+fn a_declaration_form_is_not_satisfied_by_prose() {
+    for (id, prose) in [
+        ("omp.hook_events", r#"/** Emitted as "{name}". */"#),
+        (
+            "opencode.part_statuses",
+            r#"type Done = Omit<ToolPart, "{name}">"#,
+        ),
+        ("omp.entry_types", "// a {name} entry, written once"),
+    ] {
+        let w = pixtuoid_core::source::registry::declared_watch(id)
+            .unwrap_or_else(|| panic!("{id} is declared"));
+        let ours = (w.ours)();
+        let victim = ours[0];
+        let text = format!(
+            "{}\n{}\n",
+            page(w, &ours[1..]),
+            prose.replace("{name}", victim)
+        );
+        let mut report = Report::default();
+        check_watch("src", w, &mut Fetched::new(&serve(w, &text)), &mut report);
+        assert!(
+            report
+                .breaking
+                .iter()
+                .any(|l| l.contains(&format!("`{victim}`"))),
+            "{id}: prose kept `{victim}` alive: {report:?}"
+        );
+    }
+}
+
 /// #941's gate, generic: every watch fires on its change and stays silent
-/// otherwise. A vanished name leaves a decoy in its own shape, so a pattern
-/// loose enough to match the decoy (a bare substring where the declaration is
-/// quoted) cannot pass.
+/// otherwise. A vanished name leaves a decoy in its own shape and stays in
+/// [`near_miss`]'s positions, so a pattern or reader loose enough to find
+/// either cannot pass.
 #[test]
 fn every_watch_fires_on_its_change_and_stays_silent_otherwise() {
     let mut proven = 0;
     for d in REGISTRY {
         for w in d.upstream.watches() {
-            let serve = |text: &str| {
-                w.docs
-                    .iter()
-                    .fold(Served::default(), |s, doc| match locate(&doc.at).0 {
-                        Located::Raw { url } => s.with(&url, text),
-                        Located::Release {
-                            repo,
-                            asset,
-                            member,
-                            sums,
-                        } => s.release(repo, asset, member, sums, text),
-                    })
-            };
-            let run_on = |names: &[&str]| {
-                let served = serve(&page(w, names));
+            let ours = (w.ours)();
+            let victim = ours[0];
+            let run_on = |names: &[&str], absent: Option<&str>| {
+                let miss = absent.map(|n| near_miss(w, n)).unwrap_or_default();
+                let served = serve(w, &format!("{}\n{miss}\n", page(w, names)));
                 let mut report = Report::default();
                 let mut fetched = Fetched::new(&served);
                 check_watch(d.name, w, &mut fetched, &mut report);
                 report
             };
-            let ours = (w.ours)();
-            let victim = ours[0];
             let fired = |r: &Report| {
                 let filed = match w.finding {
                     Finding::Breaking(_) => &r.breaking,
@@ -721,9 +802,9 @@ fn every_watch_fires_on_its_change_and_stays_silent_otherwise() {
                 When::Vanishes => {
                     let mut kept: Vec<&str> = ours[1..].to_vec();
                     kept.push(&decoy);
-                    (run_on(&ours), run_on(&kept))
+                    (run_on(&ours, None), run_on(&kept, Some(victim)))
                 }
-                When::Appears => (run_on(&[]), run_on(&[victim])),
+                When::Appears => (run_on(&[], Some(victim)), run_on(&[victim], None)),
             };
             assert!(
                 quiet.breaking.is_empty() && quiet.blind.is_empty() && !fired(&quiet),
@@ -763,7 +844,7 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
         "a dark watch is actionable (#454)"
     );
     r.add_review("R".to_owned());
-    assert_eq!(r.title(), "New upstream events to review");
+    assert_eq!(r.title(), "Upstream changes to review");
     r.add_breaking("B".to_owned());
     assert_eq!(r.title(), "Upstream CLI wire-format drift detected");
     let out = r.render();

@@ -1054,32 +1054,18 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
         def omp_extension_docs(reads: list[str]) -> dict[str, str]:
-            """The three extension-API docs, shaped like upstream: constant
-            interface names (the anchors) whose field lines exist only for the
-            names still in the mutated set — exactly an upstream rename's
-            silhouette."""
-            lifecycle = {
-                "session_start": "SessionStartEvent",
-                "session_switch": "SessionSwitchEvent",
-                "session_branch": "SessionBranchEvent",
-                "session_shutdown": "SessionShutdownEvent",
-            }
-            shared = ""
-            for name, iface in lifecycle.items():
-                tag = f'\ttype: "{name}";\n'
-                prev = (
-                    "\tpreviousSessionFile: string | undefined;\n"
-                    if iface == "SessionSwitchEvent" and "previousSessionFile" in reads
-                    else ""
-                )
-                # Prose ALWAYS quotes the name, whether or not the declaration
-                # survives — the only shape that distinguishes the `type: "…"`
-                # matcher from a bare `"…"` one ("bare quoted names also live in
-                # prose", the matcher's own comment).
-                shared += (
-                    f'/** Emitted as "{name}". */\n'
-                    f"export interface {iface} {{\n{tag}{prev}}}\n"
-                )
+            """The three extension-API docs, shaped like upstream: the anchors'
+            interfaces, whose field lines exist only for the names still in the
+            mutated set — exactly an upstream rename's silhouette."""
+            prev = (
+                "\tpreviousSessionFile: string | undefined;\n"
+                if "previousSessionFile" in reads
+                else ""
+            )
+            shared = (
+                "export interface SessionShutdownEvent {\n}\n"
+                f"export interface SessionSwitchEvent {{\n{prev}}}\n"
+            )
             approval_fields = {
                 "toolCallId": "string",
                 "toolName": "string",
@@ -1087,18 +1073,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 "approved": "boolean",
             }
             ext = ""
-            for name, iface in (
-                ("tool_approval_requested", "ToolApprovalRequestedEvent"),
-                ("tool_approval_resolved", "ToolApprovalResolvedEvent"),
-            ):
-                tag = f'\ttype: "{name}";\n'
+            for iface in ("ToolApprovalRequestedEvent", "ToolApprovalResolvedEvent"):
                 body = "".join(
                     f"\t{f}: {t};\n" for f, t in approval_fields.items() if f in reads
                 )
-                ext += (
-                    f'/** Emitted as "{name}". */\n'
-                    f"export interface {iface} {{\n{tag}{body}}}\n"
-                )
+                ext += f"export interface {iface} {{\n{body}}}\n"
             cwd = '\tcwd: string;\n' if "cwd" in reads else ""
             ext += (
                 "export interface ExtensionContext {\n"
@@ -1116,8 +1095,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.OMP_SESSION_MANAGER_URL: sm,
             }
 
-        # Two fields sharing one URL each render the OTHER's set in full, so a case
-        # proves its own arm rather than riding its neighbour's blind.
         cases = [
             ("reasonix", str, lambda ns: {
                 d.REASONIX_HOOK_URL:

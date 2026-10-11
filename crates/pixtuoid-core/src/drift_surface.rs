@@ -29,8 +29,10 @@ fn surface() -> Value {
         json!([crate::source::omp::EXTENSIONS_SUBDIR]),
     );
 
-    // Through a BTreeMap, never a `json!` object literal — see
-    // `every_emitted_object_has_sorted_keys` for why that distinction is a gate.
+    // Through a BTreeMap, never a `json!` object literal: the workspace's
+    // serde_json `preserve_order` keeps a literal's insertion order under a
+    // whole-workspace build and sorts it under `-p pixtuoid-core`, so the
+    // committed file would pass one way and fail the other.
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("shipped", json!(shipped));
     json!(root)
@@ -47,7 +49,7 @@ mod tests {
     /// on every platform in `just test` — a stale fragment is a narrowed watch,
     /// which is precisely the failure that cannot announce itself.
     #[test]
-    fn the_committed_fragment_matches_what_the_decoders_read() {
+    fn the_committed_fragment_matches_what_the_installers_ship() {
         let want = serde_json::to_string_pretty(&surface()).expect("surface serializes") + "\n";
         let committed = snapbox::Data::read_from(
             std::path::Path::new(FRAGMENT),
@@ -85,33 +87,11 @@ mod tests {
         }
     }
 
-    /// Byte-stability across feature unification. The workspace enables
-    /// serde_json's `preserve_order` (`pixtuoid` asks for it), and feature
-    /// unification hands it to every crate — so an object built by `json!({…})`
-    /// is sorted under `just test -p pixtuoid-core` and insertion-ordered under
-    /// a whole-workspace `just test`. That difference reached the committed
-    /// file once and made the gate above pass one way and fail the other.
-    #[test]
-    fn every_emitted_object_has_sorted_keys() {
-        fn walk(v: &Value, path: &str) {
-            if let Some(o) = v.as_object() {
-                let keys: Vec<&str> = o.keys().map(String::as_str).collect();
-                let mut sorted = keys.clone();
-                sorted.sort_unstable();
-                assert_eq!(keys, sorted, "{path} emits keys in insertion order");
-                for (k, x) in o {
-                    walk(x, &format!("{path}.{k}"));
-                }
-            }
-        }
-        walk(&surface(), "<root>");
-    }
-
     /// Every dispatch arm in `file` names a CONST, and those consts are exactly
     /// the ones `export` declares.
     ///
-    /// A drift watch carries the const — a surface row or a source's
-    /// `UPSTREAM` — so it follows a RENAME. It cannot see an ADDITION: an arm
+    /// A drift watch carries the const in its source's `UPSTREAM`, so it
+    /// follows a RENAME. It cannot see an ADDITION: an arm
     /// written as a bare literal decodes a name no watch carries, and every
     /// other gate stays green — so a bare literal is rejected outright.
     ///
@@ -388,7 +368,7 @@ mod tests {
                 "claude_code",
                 "attachment",
                 "undocumented transcript surface; its marker KINDS are \
-                 appearance-watched via CC_LIFECYCLE_SURFACE_MARKERS",
+                 appearance-watched by `claude_code.effort_attachments`",
             ),
             (
                 "copilot",
@@ -454,9 +434,14 @@ mod tests {
             }
             walk(&frag, &mut carried);
         }
-        // The declared watches' names are carried too, read off the registry.
+        // The vanish watches' names are carried too, read off the registry; an
+        // appearance watch's are names we wait on, which no decoder reads.
         for d in crate::source::registry::REGISTRY {
-            for w in d.upstream.watches() {
+            for w in d
+                .upstream
+                .watches()
+                .filter(|w| matches!(w.when, crate::source::upstream::When::Vanishes))
+            {
                 carried.extend((w.ours)().into_iter().map(str::to_owned));
             }
         }

@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn ts_fields_read_the_one_interface() {
-        let src = "export interface Entry extends Base {\n  readonly type: \"x\";\n  title?: string;\n  \"quoted-key\": number;\n  nested: {\n    inner: string;\n  };\n}\nexport interface Other {\n  title: string;\n}\n";
+        let src = "export interface Entry extends Base {\n  readonly type: \"x\";\n  title?: string;\n  \"quoted-key\": number;\n  nested: {\n    inner: string;\n  };\n}\nexport interface Other {\n  title: string;\n  only_other: string;\n}\n";
         assert_eq!(
             found(ts_fields(src, "Entry")),
             names(&["inner", "nested", "quoted-key", "title", "type"])

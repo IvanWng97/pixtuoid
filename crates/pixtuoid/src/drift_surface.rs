@@ -2,11 +2,12 @@
 //! the values our shipped artifacts bake in, emitted as data for
 //! `check_upstream_drift.py`.
 //!
-//! `pixtuoid-core` emits what the decoders READ.
-//! `every_registered_*_event_decodes` binds registered→decoded; the reverse is
-//! unbound and is the costly direction — a decode arm with no `*_EVENTS` row
-//! rendered a permission-parked CC session as WORKING. Mechanising it needs the
-//! decoded fragment to mark HOOK names; most is transcript vocabulary.
+//! What the decoders read is declared beside them (`source/upstream.rs`,
+//! `registry::declared_watch`). `every_registered_*_event_decodes` binds
+//! registered→decoded; the reverse is unbound and is the costly direction — a
+//! decode arm with no `*_EVENTS` row rendered a permission-parked CC session as
+//! WORKING. Mechanising it needs the decoded sets to mark HOOK names; most is
+//! transcript vocabulary.
 
 use std::collections::BTreeMap;
 
