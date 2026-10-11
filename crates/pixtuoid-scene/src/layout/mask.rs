@@ -239,8 +239,6 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         else {
             continue;
         };
-        // Waypoint furniture paints after the characters, so a visitor is occluded and
-        // the rows' `TIGHT_PAD_PX` leaves no clearance band.
         if matches!(wp.kind, WaypointKind::Pantry) {
             // Only the SOUTH base sits on the floor; cabinet tops and backsplash are
             // overhang (invariant #6). `stand_point` uses the FULL visual instead, so

@@ -136,10 +136,8 @@ pub(crate) const DESK_APPROACH: ApproachSides = ApproachSides {
 /// hitbox and render depth baseline all DERIVE from these fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FurnitureDef {
-    /// Mask pad (px) around the blocked ground, every side: [`OBSTACLE_PAD_PX`] for
-    /// the solid pieces characters route around, [`TIGHT_PAD_PX`] for the rest. Read
-    /// by the stamp AND, through [`Self::padded_ground_rect`], by every gate that
-    /// measures the ground the mask blocks.
+    /// Mask pad (px) around the blocked ground, every side. Whatever measures that
+    /// ground reads this row's pad, never a sibling's.
     pub(crate) pad: u16,
     /// Ground footprint `(w, h)` the walkable mask stamps (top-down z=0 rect), or
     /// `None` for slots that add no obstacle of their own (MeetingSofa/MeetingChair
@@ -221,11 +219,11 @@ impl FurnitureDef {
             .map(|fp| self.padded_ground_rect_of(pivot, pos, fp))
     }
 
-    /// The first column east of [`Self::padded_ground_rect`], or 0 for a piece with
-    /// no table footprint: the drain edge and door gates compare against it.
-    pub(super) fn east_of_padded_ground(&self, pivot: Pivot, pos: Point) -> u16 {
+    /// The first column east of [`Self::padded_ground_rect`], or `None` for a piece
+    /// with no table footprint, which the mask doesn't block.
+    pub(super) fn east_of_padded_ground(&self, pivot: Pivot, pos: Point) -> Option<u16> {
         self.padded_ground_rect(pivot, pos)
-            .map_or(0, |(tl, sz)| tl.x + sz.w)
+            .map(|(tl, sz)| tl.x + sz.w)
     }
 }
 
@@ -665,15 +663,16 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         },
         Furniture::MeetingSofaBody => {
             const VISUAL: Size = Size { w: 20, h: 7 };
+            const PAD: u16 = OBSTACLE_PAD_PX;
             FurnitureDef {
                 footprint: Some(Size {
                     // Narrower than the sprite ON PURPOSE: a full-width footprint plus
                     // pad disconnects the narrowest meeting room.
-                    w: VISUAL.w - 2 * OBSTACLE_PAD_PX,
-                    h: VISUAL.h - 2 * OBSTACLE_PAD_PX,
+                    w: VISUAL.w - 2 * PAD,
+                    h: VISUAL.h - 2 * PAD,
                 }),
                 visual: VISUAL,
-                pad: OBSTACLE_PAD_PX,
+                pad: PAD,
                 ground_y: GroundAlign::Center,
                 ..DECOR
             }

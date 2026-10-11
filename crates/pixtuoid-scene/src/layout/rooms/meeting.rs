@@ -179,7 +179,7 @@ impl MeetingRoom {
     /// from `bounds`, so a sofa resize can't desync it from `mask`'s
     /// Center-anchored sofa stamp. `None` for a bare room.
     pub(crate) fn sofa_east_drain_edge(&self) -> Option<u16> {
-        self.trio.map(|t| {
+        self.trio.and_then(|t| {
             furniture_def(Furniture::MeetingSofaBody)
                 .east_of_padded_ground(Pivot::Center, t.sofas[0])
         })

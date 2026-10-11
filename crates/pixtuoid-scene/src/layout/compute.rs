@@ -412,8 +412,9 @@ pub(super) fn compute_with_seed(
     } = couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
     // #566: every lounge piece's padded ground ends west of the threshold column.
     let flanks = LoungeFlanks::of(couch_x);
-    let lounge_fits =
-        couch_east_ground(couch_x, couch_y).max(flanks.east_ground()) <= door_threshold.x;
+    let lounge_fits = couch_east_ground(couch_x, couch_y)
+        .max(flanks.east_ground())
+        .is_none_or(|east| east <= door_threshold.x);
     let lounge = lounge_fits.then(|| {
         place_lounge(
             Point {
@@ -853,8 +854,8 @@ fn bookshelf_x(
             // The drain term applies only where room 0 HOSTS its trio: with no sofa,
             // pushing the shelf east hangs it over a desk pod's pad, sealing the gap.
             if let Some(sofa_pad_east) = mr.sofa_east_drain_edge() {
-                /// Past the sofa's drain edge by the shelf's OWN ground pad (NOT
-                /// `OBSTACLE_PAD_PX`), then a ≥2-px walkable channel plus slack.
+                /// Past the sofa's drain edge by the shelf's own ground pad, then a ≥2-px
+                /// walkable channel plus slack.
                 const BOOKSHELF_DRAIN_GAP: u16 = furniture_def(Furniture::Bookshelf).pad + 4;
                 let spread = x.max(flush_east).max(sofa_pad_east + BOOKSHELF_DRAIN_GAP);
                 if spread + bookshelf_w < mr.bounds.x + mr.bounds.width {
@@ -873,7 +874,7 @@ fn bookshelf_x(
 }
 
 /// The column past the couch's east seat's padded ground.
-fn couch_east_ground(couch_x: u16, couch_y: u16) -> u16 {
+fn couch_east_ground(couch_x: u16, couch_y: u16) -> Option<u16> {
     furniture_def(Furniture::Couch).east_of_padded_ground(
         Pivot::Center,
         Point {
@@ -920,7 +921,7 @@ impl LoungeFlanks {
     }
 
     /// The column past the floor lamp's padded ground.
-    fn east_ground(&self) -> u16 {
+    fn east_ground(&self) -> Option<u16> {
         // The east edge doesn't depend on y.
         let lamp = Point {
             x: self.lamp_x,
@@ -1852,7 +1853,7 @@ mod tests {
         });
         assert_eq!(
             flanks.east_ground(),
-            first_walkable_east(&mask, lamp.x, lamp.y)
+            Some(first_walkable_east(&mask, lamp.x, lamp.y))
         );
     }
 
@@ -1883,7 +1884,11 @@ mod tests {
         });
         assert_eq!(
             couch_east_ground(couch_x, couch_y),
-            first_walkable_east(&mask, seats[seats.len() - 1].pos.x, couch_y)
+            Some(first_walkable_east(
+                &mask,
+                seats[seats.len() - 1].pos.x,
+                couch_y
+            ))
         );
     }
 
