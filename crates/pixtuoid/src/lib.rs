@@ -23,7 +23,6 @@ pub(crate) mod graphics;
 pub(crate) use graphics::GraphicsMode;
 pub(crate) mod install;
 pub(crate) mod jank;
-#[cfg(feature = "graphics")]
 pub(crate) mod pacing;
 pub(crate) mod panels;
 pub(crate) mod run_log;
@@ -46,7 +45,6 @@ pub mod dev {
     pub use crate::floating::geometry::{Zoom, window_geometry};
     pub use crate::floating::offscreen::{OfficeRenderer, Pressing, WindowFrame};
     pub use crate::floating::overlays::{OverlayLayers, Overlays, footer_budget, panel_preview};
-    #[cfg(feature = "graphics")]
     pub use crate::pacing::{Protocol, cutaway_office, forget_frame, renderer, warm};
     pub use crate::panels::OverlayFrame;
     pub use crate::panels::connection::{ConnectionFrame, DaemonRollup, LiveFacet, LiveInfo};
