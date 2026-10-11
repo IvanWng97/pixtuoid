@@ -293,10 +293,8 @@ mod tests {
     use super::*;
 
     /// Every profile `walk_profile` freezes over a sweep of lengths, intents
-    /// and agents, folded to one digest: a refactor of the kinematics leaves
-    /// the people's walks as they were.
-    #[test]
-    fn the_people_s_walk_profiles_are_pinned() {
+    /// and agents.
+    fn pinned_profiles() -> impl Iterator<Item = WalkProfile> {
         let intents = [
             WalkIntent::Entry,
             WalkIntent::Exit,
@@ -304,17 +302,23 @@ mod tests {
             WalkIntent::WanderBack,
             WalkIntent::SnapBack,
         ];
-        let words = [0u32, 1, 7, 10, 99, 100, 1_000, 4_321, 20_000]
+        [0u32, 1, 7, 10, 99, 100, 1_000, 4_321, 20_000]
             .into_iter()
-            .flat_map(|len| {
+            .flat_map(move |len| {
                 intents.into_iter().flat_map(move |intent| {
                     (0..32).map(move |i| {
                         let agent = AgentId::from_transcript_path(&format!("/p/pin{i}.jsonl"));
                         walk_profile(len, intent, agent)
                     })
                 })
-            });
-        let digest = pixtuoid_core::id::fnv1a(words.flat_map(|p| {
+            })
+    }
+
+    /// The pinned profiles, folded to one digest: a refactor of the kinematics
+    /// leaves the people's walks as they were.
+    #[test]
+    fn the_people_s_walk_profiles_are_pinned() {
+        let digest = pixtuoid_core::id::fnv1a(pinned_profiles().flat_map(|p| {
             [
                 p.duration_ms,
                 p.pause_ms,
@@ -327,6 +331,20 @@ mod tests {
     }
 
     const WALK_PROFILE_DIGEST: u64 = 0xd201_4d4b_4be1_5652;
+
+    /// The progress each pinned profile reaches across its walk, one step past
+    /// the end included, folded to one digest: a one-step rounding shift in a
+    /// walk position is invisible to the bounds and monotonicity proptests.
+    #[test]
+    fn the_people_s_walk_progress_is_pinned() {
+        const STEPS: u64 = 8;
+        let digest = pixtuoid_core::id::fnv1a(pinned_profiles().flat_map(|p| {
+            (0..=STEPS + 1).map(move |k| u64::from(walk_progress(&p, p.duration_ms * k / STEPS)))
+        }));
+        assert_eq!(digest, WALK_PROGRESS_DIGEST, "{digest:#018x}");
+    }
+
+    const WALK_PROGRESS_DIGEST: u64 = 0;
 
     #[test]
     fn leg_pixels_are_every_position_a_walk_lands_on() {
