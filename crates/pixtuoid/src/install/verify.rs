@@ -22,10 +22,9 @@ pub enum ShimRef {
 /// Pull the baked shim path back out of a RENDERED code artifact's
 /// `const HOOK_PATH … = "<json string>"` line.
 pub(crate) fn baked_hook_path(content: &str) -> Option<PathBuf> {
-    // Anchor on the DECLARATION, not a mention: the opencode template documents
-    // `const HOOK_PATH` in a comment above the binding, which would otherwise
-    // match first, yield no JSON literal, and downgrade the moved-shim HARD check
-    // to a soft "could not read" note.
+    // Anchor on the DECLARATION, not a mention: a line that merely contains
+    // `const HOOK_PATH` would otherwise match first, yield no JSON literal, and
+    // downgrade the moved-shim HARD check to a soft "could not read" note.
     let line = content
         .lines()
         .find(|l| l.trim_start().starts_with(BAKED_HOOK_MARKER))?;
